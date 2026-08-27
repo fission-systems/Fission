@@ -144,11 +144,13 @@ impl<'a> PreviewBuilder<'a> {
             block_idx,
             op_idx: op_idx_b,
         };
-        let Some(high_a) = high_variable_at_output(&self.scalar_ssa, site_a, &VarnodeKey::from(output_a))
+        let Some(high_a) =
+            high_variable_at_output(&self.scalar_ssa, site_a, &VarnodeKey::from(output_a))
         else {
             return false;
         };
-        let Some(high_b) = high_variable_at_output(&self.scalar_ssa, site_b, &VarnodeKey::from(output_b))
+        let Some(high_b) =
+            high_variable_at_output(&self.scalar_ssa, site_b, &VarnodeKey::from(output_b))
         else {
             return false;
         };

@@ -7,7 +7,7 @@
 
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
-use fission_static::analysis::xref_index::{build_xref_index, XrefIndex};
+use fission_static::analysis::xref_index::{XrefIndex, build_xref_index};
 use std::{
     collections::HashMap,
     sync::{
@@ -17,20 +17,20 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::RwLock;
-use tracing::{info, debug};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 // ── Session data ─────────────────────────────────────────────────────────────
 
 pub struct SessionData {
-    binary:          RwLock<Arc<LoadedBinary>>,
+    binary: RwLock<Arc<LoadedBinary>>,
     pub binary_name: String,
     /// `true` while CFG-based function discovery is still running on this
     /// session's binary in the background. The upload handler returns as
     /// soon as loader-only parsing is done and spawns discovery separately
     /// -- on a large binary it can take far longer than parsing, and
     /// nothing about it needs to hold the HTTP response open.
-    analyzing:       AtomicBool,
+    analyzing: AtomicBool,
     /// Lazily built, cached on first use, invalidated (`None`) whenever
     /// `set_binary` changes what the binary's function set looks like.
     /// `FactStore::from_binary` isn't cheap -- it walks every function and
@@ -47,7 +47,7 @@ pub struct SessionData {
     /// cost -- same check-then-release-then-compute race as the global
     /// `control_flow_facts_for` cache had -- now the second just awaits
     /// the first's in-flight build instead of redoing it.
-    facts:           tokio::sync::Mutex<Option<Arc<FactStore>>>,
+    facts: tokio::sync::Mutex<Option<Arc<FactStore>>>,
     /// Lazily built, cached on first use, same shape and rationale as
     /// `facts` above. `build_xref_index(.., true)` disassembles every
     /// executable section to find call/jump/data cross-references -- the
@@ -60,19 +60,19 @@ pub struct SessionData {
     /// GUI in line with that. Caching matters here for the same reason it
     /// did for `facts`: uncached, every single Xrefs-tab view of any
     /// function would redo the whole-binary disassembly sweep.
-    xref_index:      tokio::sync::Mutex<Option<Arc<XrefIndex>>>,
-    last_used:       RwLock<Instant>,
+    xref_index: tokio::sync::Mutex<Option<Arc<XrefIndex>>>,
+    last_used: RwLock<Instant>,
 }
 
 impl SessionData {
     pub fn new(binary: LoadedBinary, binary_name: String, analyzing: bool) -> Self {
         Self {
-            binary:      RwLock::new(Arc::new(binary)),
+            binary: RwLock::new(Arc::new(binary)),
             binary_name,
-            analyzing:   AtomicBool::new(analyzing),
-            facts:       tokio::sync::Mutex::new(None),
-            xref_index:  tokio::sync::Mutex::new(None),
-            last_used:   RwLock::new(Instant::now()),
+            analyzing: AtomicBool::new(analyzing),
+            facts: tokio::sync::Mutex::new(None),
+            xref_index: tokio::sync::Mutex::new(None),
+            last_used: RwLock::new(Instant::now()),
         }
     }
 
@@ -170,17 +170,17 @@ impl SessionData {
 // ── Session store ─────────────────────────────────────────────────────────────
 
 pub struct SessionStore {
-    sessions:     RwLock<HashMap<Uuid, Arc<SessionData>>>,
+    sessions: RwLock<HashMap<Uuid, Arc<SessionData>>>,
     pub max_sessions: usize,
-    ttl:          Duration,
+    ttl: Duration,
 }
 
 impl SessionStore {
     pub fn new(max_sessions: usize, ttl_secs: u64) -> Self {
         Self {
-            sessions:     RwLock::new(HashMap::new()),
+            sessions: RwLock::new(HashMap::new()),
             max_sessions,
-            ttl:          Duration::from_secs(ttl_secs),
+            ttl: Duration::from_secs(ttl_secs),
         }
     }
 
@@ -197,7 +197,10 @@ impl SessionStore {
             return Err("server at capacity — try again later");
         }
         let id = Uuid::new_v4();
-        map.insert(id, Arc::new(SessionData::new(binary, binary_name, analyzing)));
+        map.insert(
+            id,
+            Arc::new(SessionData::new(binary, binary_name, analyzing)),
+        );
         info!("session created: {id}  (total: {})", map.len());
         Ok(id)
     }
@@ -239,7 +242,9 @@ impl SessionStore {
         let before = map.len();
         map.retain(|id, sess| {
             // We can't call async fn inside retain; use try_read instead.
-            let idle = sess.last_used.try_read()
+            let idle = sess
+                .last_used
+                .try_read()
                 .map(|t| t.elapsed())
                 .unwrap_or(Duration::ZERO);
             let keep = idle < self.ttl;
@@ -250,7 +255,10 @@ impl SessionStore {
         });
         let evicted = before.saturating_sub(map.len());
         if evicted > 0 {
-            info!("TTL sweep: evicted {evicted} session(s)  (active: {})", map.len());
+            info!(
+                "TTL sweep: evicted {evicted} session(s)  (active: {})",
+                map.len()
+            );
         }
     }
 }

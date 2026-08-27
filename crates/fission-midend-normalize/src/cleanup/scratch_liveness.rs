@@ -32,8 +32,8 @@
 //!
 //! The pass is fail-closed: a statement form it does not model aborts the whole
 //! function rather than deleting dataflow across semantics it cannot read.
-use crate::prelude::*;
 use crate::analysis::defuse::collect_expr_vars;
+use crate::prelude::*;
 use crate::{HashMap, HashSet};
 
 /// Remove scratch assignments outside the observable dependency closure.
@@ -432,7 +432,10 @@ mod tests {
     fn keeps_scratch_reaching_a_return() {
         let mut f = func(
             vec![temp("xVar1")],
-            vec![set("xVar1", konst(3)), PreHirStmt::Return(Some(var("xVar1")))],
+            vec![
+                set("xVar1", konst(3)),
+                PreHirStmt::Return(Some(var("xVar1"))),
+            ],
         );
         assert!(!prune_unobservable_scratch(&mut f));
         assert_eq!(names(&f), vec!["xVar1"]);
@@ -544,7 +547,15 @@ mod tests {
         for ok in ["xVar0", "uVar12", "iVar7", "bVar100"] {
             assert!(is_builder_minted_temp(ok), "{ok} should be scratch");
         }
-        for no in ["result_sink", "local_4", "xVar", "xVarA", "param_1", "home_0", ""] {
+        for no in [
+            "result_sink",
+            "local_4",
+            "xVar",
+            "xVarA",
+            "param_1",
+            "home_0",
+            "",
+        ] {
             assert!(!is_builder_minted_temp(no), "{no} must not be scratch");
         }
     }

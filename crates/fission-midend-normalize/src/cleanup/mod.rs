@@ -38,12 +38,12 @@ pub use loops_conds::{
 };
 pub use temp_var::{
     canonicalize_orphaned_stack_slot_names, coerce_ptr_typed_bitop_vars,
-    collapse_adjacent_pure_copy_into_if,
-    collapse_temp_self_square_assigns, collapse_trivial_assign_returns,
-    elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
-    eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
-    hoist_param_alias_copies_before_first_use, inline_single_use_temps,
-    prune_unused_dead_local_bindings, prune_unused_temp_bindings, rescue_undeclared_bindings,
+    collapse_adjacent_pure_copy_into_if, collapse_temp_self_square_assigns,
+    collapse_trivial_assign_returns, elide_unused_popcount_assigns,
+    eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
+    eliminate_redundant_var_assigns, hoist_param_alias_copies_before_first_use,
+    inline_single_use_temps, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    rescue_undeclared_bindings,
 };
 
 // Re-export utility functions used by other modules outside cleanup.
@@ -51,8 +51,8 @@ pub use byte_sum_index::apply_byte_sum_index_trunc;
 pub use condexe::{apply_condexe_folding_pass, apply_iblock_phi_elimination};
 pub use deindirect::apply_deindirect_pass;
 pub use expand_load::apply_expand_load_pass;
-pub use run_copy_prop::propagate_copies_in_runs;
 pub use overwritten_assign::eliminate_overwritten_assigns;
+pub use run_copy_prop::propagate_copies_in_runs;
 pub use scratch_liveness::prune_unobservable_scratch;
 pub use select_cast_hoist::hoist_shared_select_casts;
 pub use subvar_trim::apply_subvar_trim_pass;

@@ -288,7 +288,7 @@ impl<'a> TraceDag<'a> {
         // Re-read Ghidra compareFinal:
         // "return true if this is LESS likely to be the bad edge than op2"
         // siblingedge: bigger sibling → LESS likely bad
-        // terminal: smaller terminal → LESS likely bad  
+        // terminal: smaller terminal → LESS likely bad
         // distance: smaller distance → LESS likely bad
         // depth: smaller depth → LESS likely bad
         //
@@ -301,8 +301,16 @@ impl<'a> TraceDag<'a> {
             if a.terminal != b.terminal {
                 return a.terminal.cmp(&b.terminal); // non-terminal first
             }
-            let da = if a.distance < 0 { i32::MAX / 4 } else { a.distance };
-            let db = if b.distance < 0 { i32::MAX / 4 } else { b.distance };
+            let da = if a.distance < 0 {
+                i32::MAX / 4
+            } else {
+                a.distance
+            };
+            let db = if b.distance < 0 {
+                i32::MAX / 4
+            } else {
+                b.distance
+            };
             if da != db {
                 return da.cmp(&db); // smaller distance first (less likely)
             }
@@ -361,7 +369,8 @@ impl<'a> TraceDag<'a> {
             }
 
             self.active_list_scratch.clear();
-            self.active_list_scratch.extend(self.active_traces.iter().copied());
+            self.active_list_scratch
+                .extend(self.active_traces.iter().copied());
             let mut progress = false;
 
             for i in 0..self.active_list_scratch.len() {
@@ -422,10 +431,7 @@ impl<'a> TraceDag<'a> {
     }
 
     /// Follow-block discovery at multi-out `start_idx`.
-    pub fn find_follow_block(
-        &mut self,
-        start_idx: usize,
-    ) -> Result<Option<usize>, TraceDagError> {
+    pub fn find_follow_block(&mut self, start_idx: usize) -> Result<Option<usize>, TraceDagError> {
         let succs = self.successors.get(start_idx).map(|s| s.len()).unwrap_or(0);
         if succs < 2 {
             return Ok(None);
@@ -445,9 +451,9 @@ impl<'a> TraceDag<'a> {
         already_virtual: &HashSet<(usize, usize)>,
     ) -> Option<(usize, usize)> {
         // Prefer starting at a multi-out node inside the range.
-        let start = (entry..exit.min(self.successors.len())).find(|&i| {
-            self.forward_successors(i).len() >= 2
-        }).unwrap_or(entry);
+        let start = (entry..exit.min(self.successors.len()))
+            .find(|&i| self.forward_successors(i).len() >= 2)
+            .unwrap_or(entry);
 
         if start >= self.successors.len() {
             return None;

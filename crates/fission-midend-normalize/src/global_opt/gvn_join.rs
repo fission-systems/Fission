@@ -9,8 +9,8 @@
 use super::super::analysis::expr_key::pure_expr_key;
 use super::super::analysis::preservation::preserved_binding_origin;
 use super::super::cleanup::expr_has_side_effects;
-use fission_midend_core::wave_stats;
 use crate::prelude::*;
+use fission_midend_core::wave_stats;
 use fission_midend_prehir::util::expr_type;
 
 /// Hoist duplicate pure RHS on the first statement of both `if` arms when LHS
@@ -80,7 +80,7 @@ fn hoist_stmts(
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn int(bits: u32) -> NirType {
         NirType::Int {
@@ -108,7 +108,8 @@ mod tests {
                         rhs: Box::new(PreHirExpr::Var("b".to_string())),
                         ty: int(32),
                     },
-                }].into(),
+                }]
+                .into(),
                 else_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("y".to_string()),
                     rhs: PreHirExpr::Binary {
@@ -117,7 +118,8 @@ mod tests {
                         rhs: Box::new(PreHirExpr::Var("b".to_string())),
                         ty: int(32),
                     },
-                }].into(),
+                }]
+                .into(),
             }],
             ..Default::default()
         };
@@ -142,11 +144,26 @@ fn hoist_stmt_deep(
             else_body,
             ..
         } => {
-            changed |= hoist_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), locals, params, ctr);
-            changed |= hoist_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), locals, params, ctr);
+            changed |= hoist_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                locals,
+                params,
+                ctr,
+            );
+            changed |= hoist_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                locals,
+                params,
+                ctr,
+            );
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= hoist_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals, params, ctr);
+            changed |= hoist_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                locals,
+                params,
+                ctr,
+            );
         }
         PreHirStmt::For {
             init, body, update, ..
@@ -154,19 +171,39 @@ fn hoist_stmt_deep(
             if let Some(i) = init {
                 changed |= hoist_stmt_deep(i, locals, params, ctr);
             }
-            changed |= hoist_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals, params, ctr);
+            changed |= hoist_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                locals,
+                params,
+                ctr,
+            );
             if let Some(u) = update {
                 changed |= hoist_stmt_deep(u, locals, params, ctr);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
-                changed |= hoist_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), locals, params, ctr);
+                changed |= hoist_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    locals,
+                    params,
+                    ctr,
+                );
             }
-            changed |= hoist_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), locals, params, ctr);
+            changed |= hoist_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                locals,
+                params,
+                ctr,
+            );
         }
         PreHirStmt::Block(body) => {
-            changed |= hoist_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals, params, ctr);
+            changed |= hoist_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                locals,
+                params,
+                ctr,
+            );
         }
         _ => {}
     }

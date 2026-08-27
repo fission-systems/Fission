@@ -1,8 +1,8 @@
 //! DFS edge classification (tree / back / forward / cross).
 
 use super::dom::DomTree;
-use fission_midend_core::fast_hash::FastMap as HashMap;
 use crate::HashSet;
+use fission_midend_core::fast_hash::FastMap as HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EdgeClass {

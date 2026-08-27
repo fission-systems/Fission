@@ -22,7 +22,7 @@
 //! narrower scope than "any PE personality routine", matching only the one
 //! this session has a real fixture for.
 
-use crate::loader::gcc_lsda::{parse_lsda, LsdaInfo};
+use crate::loader::gcc_lsda::{LsdaInfo, parse_lsda};
 use crate::loader::types::LoadedBinary;
 use std::collections::HashMap;
 

@@ -1,15 +1,14 @@
 //! Suffix-window pure/unit tests (moved from fission-pcode).
 #![cfg(test)]
 
-
 #[cfg(test)]
 mod tests {
+    use super::super::*;
+    use crate::cleanup::*;
     use crate::guarded_tail::pure_hir;
     use crate::guarded_tail::types::*;
-    use crate::cleanup::*;
     use fission_midend_core::ir::*;
     use fission_midend_prehir::ir::*;
-    use super::super::*;
 
     fn test_if_goto(label: &str) -> PreHirStmt {
         PreHirStmt::If {
@@ -136,12 +135,8 @@ mod tests {
         terminal_label_idx: usize,
         expected: Option<(ExternalEntryRefKind, usize)>,
     ) {
-        let classified = pure_hir::classify_external_entry_ref_kind(
-            body,
-            label,
-            anchor_idx,
-            terminal_label_idx,
-        );
+        let classified =
+            pure_hir::classify_external_entry_ref_kind(body, label, anchor_idx, terminal_label_idx);
         assert_eq!(classified, expected);
     }
 
@@ -159,8 +154,7 @@ mod tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed =
-            pure_hir::find_earliest_owned_join_label(&body, 0, 6, &referenced, false);
+        let narrowed = pure_hir::find_earliest_owned_join_label(&body, 0, 6, &referenced, false);
 
         assert_eq!(narrowed, Some(("join0".to_string(), 2)));
     }
@@ -178,8 +172,7 @@ mod tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed =
-            pure_hir::find_earliest_owned_join_label(&body, 0, 5, &referenced, false);
+        let narrowed = pure_hir::find_earliest_owned_join_label(&body, 0, 5, &referenced, false);
 
         assert_eq!(narrowed, Some(("join0".to_string(), 2)));
     }
@@ -200,8 +193,7 @@ mod tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed =
-            pure_hir::find_earliest_owned_join_label(&body, 0, 8, &referenced, false);
+        let narrowed = pure_hir::find_earliest_owned_join_label(&body, 0, 8, &referenced, false);
 
         assert_eq!(narrowed, Some(("join0".to_string(), 2)));
     }
@@ -219,8 +211,7 @@ mod tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed =
-            pure_hir::find_earliest_owned_join_label(&body, 0, 5, &referenced, false);
+        let narrowed = pure_hir::find_earliest_owned_join_label(&body, 0, 5, &referenced, false);
 
         assert_eq!(narrowed, None);
     }
@@ -238,8 +229,7 @@ mod tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed =
-            pure_hir::find_earliest_owned_join_label(&body, 1, 5, &referenced, false);
+        let narrowed = pure_hir::find_earliest_owned_join_label(&body, 1, 5, &referenced, false);
 
         assert_eq!(narrowed, None);
     }
@@ -260,8 +250,7 @@ mod tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed =
-            pure_hir::find_earliest_owned_join_label(&body, 0, 4, &referenced, false);
+        let narrowed = pure_hir::find_earliest_owned_join_label(&body, 0, 4, &referenced, false);
 
         assert_eq!(narrowed, None);
     }
@@ -276,8 +265,7 @@ mod tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed =
-            pure_hir::find_earliest_owned_join_label(&body, 0, 2, &referenced, false);
+        let narrowed = pure_hir::find_earliest_owned_join_label(&body, 0, 2, &referenced, false);
 
         assert_eq!(narrowed, None);
     }
@@ -870,7 +858,8 @@ mod tests {
                         ty: NirType::Unknown,
                     }),
                     PreHirStmt::Goto("terminal".to_string()),
-                ].into(),
+                ]
+                .into(),
                 else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::If {
@@ -1737,14 +1726,8 @@ mod tests {
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
         ];
         let referenced = collect_referenced_label_counts(&body);
-        let result = pure_hir::candidate_window_can_shrink_to_label(
-            &body,
-            0,
-            "join0",
-            1,
-            1,
-            &referenced,
-        );
+        let result =
+            pure_hir::candidate_window_can_shrink_to_label(&body, 0, "join0", 1, 1, &referenced);
         assert_eq!(
             result,
             Err(SuffixTailRejection::SuffixHasLabelCrossing {
@@ -1764,14 +1747,8 @@ mod tests {
             PreHirStmt::Label("terminal".to_string()),
         ];
         let referenced = collect_referenced_label_counts(&body);
-        let result = pure_hir::candidate_window_can_shrink_to_label(
-            &body,
-            1,
-            "join0",
-            2,
-            4,
-            &referenced,
-        );
+        let result =
+            pure_hir::candidate_window_can_shrink_to_label(&body, 1, "join0", 2, 4, &referenced);
         assert_eq!(
             result,
             Err(SuffixTailRejection::SuffixHasExternalEntry {

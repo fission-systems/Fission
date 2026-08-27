@@ -101,8 +101,8 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::loader::dwarf::DwarfAnalyzer;
     use crate::loader::LoadedBinary;
+    use crate::loader::dwarf::DwarfAnalyzer;
 
     #[test]
     fn analyze_lines_returns_empty_without_debug_info() {

@@ -3,6 +3,8 @@
 //! Owns collapse-rule dispatch, the tier-1/2 collapse loop, final reconstruction,
 //! and candidate consideration helpers. Residual host hooks cover CFG/lowering.
 
+use crate::HashMap;
+use crate::HashSet;
 use crate::cfg_analysis::compute_follow_blocks;
 use crate::collapse_loop::{collapse_loop_admission_enabled, try_virtualize_one_bad_edge};
 use crate::conditionals::{
@@ -22,10 +24,8 @@ use crate::loops::{
 };
 use crate::regions::{RegionKind, RegionProof};
 use crate::switch::try_lower_switch;
-use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_prehir::{PreHirStmt};
-use crate::HashMap;
-use crate::HashSet;
+use fission_midend_core::ir::MlilPreviewError;
+use fission_midend_prehir::PreHirStmt;
 
 /// Collapse rule tags (Ghidra ActionStructureTransform analog).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,7 +132,11 @@ pub struct CollapseCandidate {
 }
 
 /// Build a structured-region proof from a recovered statement shape.
-pub fn build_region_proof(start_idx: usize, skip_to: usize, stmt: &PreHirStmt) -> Option<RegionProof> {
+pub fn build_region_proof(
+    start_idx: usize,
+    skip_to: usize,
+    stmt: &PreHirStmt,
+) -> Option<RegionProof> {
     let kind = region_kind_for_stmt(stmt)?;
     Some(RegionProof::structured(
         kind,
@@ -207,11 +211,13 @@ fn rotated_loop_membership(
         || !members.iter().any(|member| *member < loop_body.head)
         || loop_body.head < entry
         || loop_body.head >= exit
-        || members.iter().any(|member| *member < entry || *member >= exit)
+        || members
+            .iter()
+            .any(|member| *member < entry || *member >= exit)
         || allowed_members.is_some_and(|allowed| !members.is_subset(allowed))
-        || active_child_map.values().any(|(_, _, proof)| {
-            proof.members.iter().any(|member| members.contains(member))
-        })
+        || active_child_map
+            .values()
+            .any(|(_, _, proof)| proof.members.iter().any(|member| members.contains(member)))
     {
         return None;
     }
@@ -226,12 +232,9 @@ fn rotated_loop_nonfallthrough_entry(
     members: &HashSet<usize>,
     head: usize,
 ) -> Option<usize> {
-    let Some(entry_pred) = rotated_loop_entry_predecessor(
-        host.predecessors(),
-        host.successors(),
-        members,
-        head,
-    ) else {
+    let Some(entry_pred) =
+        rotated_loop_entry_predecessor(host.predecessors(), host.successors(), members, head)
+    else {
         return None;
     };
     (host.fallthrough_index(entry_pred) != Some(head)).then_some(entry_pred)
@@ -249,7 +252,8 @@ fn rotated_loop_entry_predecessor(
     if !(first_member..=head).all(|member| members.contains(&member)) {
         return None;
     }
-    let outside_predecessors: Vec<usize> = predecessors.get(head)?
+    let outside_predecessors: Vec<usize> = predecessors
+        .get(head)?
         .iter()
         .copied()
         .filter(|pred| !members.contains(pred))
@@ -258,8 +262,10 @@ fn rotated_loop_entry_predecessor(
         return None;
     };
     (entry_pred.checked_add(1) == Some(first_member)
-        && successors.get(*entry_pred).is_some_and(|succs| succs.as_slice() == [head]))
-        .then_some(*entry_pred)
+        && successors
+            .get(*entry_pred)
+            .is_some_and(|succs| succs.as_slice() == [head]))
+    .then_some(*entry_pred)
 }
 
 /// Tier-1 / tier-2 collapse loop + virtualize, then final reconstruction.
@@ -494,21 +500,20 @@ fn build_sese_region_body_impl(
                         rule.name()
                     );
                 }
-                let res = if matches!(rule, CollapseRule::Conditional)
-                    && virtual_exit_plan.is_some()
-                {
-                    let mut cond = try_lower_short_circuit_if(host, idx);
-                    if cond.is_err() || matches!(cond, Ok(None)) {
-                        cond = try_reduce_if_else_with_follow(host, idx, follow);
-                    }
-                    if cond.is_err() || matches!(cond, Ok(None)) {
-                        cond = try_lower_if_else(host, idx);
-                    }
-                    // The deferred complex candidate precedes plain-if/goto.
-                    cond
-                } else {
-                    apply_collapse_rule(host, rule, idx, follow)
-                };
+                let res =
+                    if matches!(rule, CollapseRule::Conditional) && virtual_exit_plan.is_some() {
+                        let mut cond = try_lower_short_circuit_if(host, idx);
+                        if cond.is_err() || matches!(cond, Ok(None)) {
+                            cond = try_reduce_if_else_with_follow(host, idx, follow);
+                        }
+                        if cond.is_err() || matches!(cond, Ok(None)) {
+                            cond = try_lower_if_else(host, idx);
+                        }
+                        // The deferred complex candidate precedes plain-if/goto.
+                        cond
+                    } else {
+                        apply_collapse_rule(host, rule, idx, follow)
+                    };
                 if let Some(started) = rule_started {
                     eprintln!(
                         "[DIAG] structuring rule finish: rule={} block={idx} elapsed_ms={:.3} outcome={}",
@@ -646,7 +651,9 @@ fn build_sese_region_body_impl(
                         continue;
                     };
                     proof.members.extend(plan.first_arm.members.iter().copied());
-                    proof.members.extend(plan.second_arm.members.iter().copied());
+                    proof
+                        .members
+                        .extend(plan.second_arm.members.iter().copied());
                     proof.members.push(idx);
                     proof.members.sort_unstable();
                     proof.members.dedup();
@@ -802,15 +809,7 @@ pub fn reconstruct_sese_final_body(
     targeted: &HashSet<u64>,
     diag: bool,
 ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
-    reconstruct_sese_final_body_impl(
-        host,
-        entry,
-        exit,
-        active_child_map,
-        targeted,
-        diag,
-        None,
-    )
+    reconstruct_sese_final_body_impl(host, entry, exit, active_child_map, targeted, diag, None)
 }
 
 /// Reconstruct the currently admitted graph for an exact member set without
@@ -867,43 +866,43 @@ fn reconstruct_sese_final_body_impl(
     }
     let mut previous_node_id = None;
 
-        let mut idx = entry;
-        while idx < exit {
-            if allowed_members.is_some_and(|members| !members.contains(&idx)) {
-                idx += 1;
-                continue;
+    let mut idx = entry;
+    while idx < exit {
+        if allowed_members.is_some_and(|members| !members.contains(&idx)) {
+            idx += 1;
+            continue;
+        }
+        let block_key = host.block_target_key(idx);
+        let has_same_start_peer = host.has_same_start_address_peer(idx);
+        let is_orphan_unreachable = idx != 0
+            && host.predecessors()[idx].is_empty()
+            && !targeted.contains(&block_key)
+            && !has_same_start_peer;
+        if is_orphan_unreachable {
+            idx += 1;
+            continue;
+        }
+
+        if let Some((child_body, child_exit, child_proof)) = active_child_map.get(&idx) {
+            let mut node_statements = child_body.clone();
+            let header_label = block_label(block_key);
+            if (idx == 0 || targeted.contains(&block_key))
+                && emitted_labels.insert(block_key)
+                && !child_body_has_entry_label(child_body, &header_label)
+                && !structure_defined_labels.contains(&header_label)
+            {
+                node_statements.insert(0, PreHirStmt::Label(header_label.clone()));
+                structure_defined_labels.insert(header_label);
             }
-            let block_key = host.block_target_key(idx);
-            let has_same_start_peer = host.has_same_start_address_peer(idx);
-            let is_orphan_unreachable = idx != 0
-                && host.predecessors()[idx].is_empty()
-                && !targeted.contains(&block_key)
-                && !has_same_start_peer;
-            if is_orphan_unreachable {
-                idx += 1;
-                continue;
-            }
 
-            if let Some((child_body, child_exit, child_proof)) = active_child_map.get(&idx) {
-                let mut node_statements = child_body.clone();
-                let header_label = block_label(block_key);
-                if (idx == 0 || targeted.contains(&block_key))
-                    && emitted_labels.insert(block_key)
-                    && !child_body_has_entry_label(child_body, &header_label)
-                    && !structure_defined_labels.contains(&header_label)
-                {
-                    node_statements.insert(0, PreHirStmt::Label(header_label.clone()));
-                    structure_defined_labels.insert(header_label);
-                }
+            let node = StructureNode::region_body(
+                graph.next_node_id(),
+                node_statements,
+                *child_exit,
+                child_proof.clone(),
+            );
 
-                let node = StructureNode::region_body(
-                    graph.next_node_id(),
-                    node_statements,
-                    *child_exit,
-                    child_proof.clone(),
-                );
-
-                let node_id = graph.push(node).map_err(|conflict| {
+            let node_id = graph.push(node).map_err(|conflict| {
                     if diag {
                         eprintln!(
                             "[DIAG] final reconstruction: duplicate block ownership block={} existing_node={} attempted_node={}",
@@ -912,159 +911,155 @@ fn reconstruct_sese_final_body_impl(
                     }
                     MlilPreviewError::UnsupportedCfgRegionShape
                 })?;
-                if let Some(prev) = previous_node_id {
-                    graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
-                }
-                previous_node_id = Some(node_id);
-                let next_idx = *child_exit;
-                if next_idx <= idx {
-                    if diag {
-                        eprintln!(
-                            "[DIAG] final reconstruction SESE scan: non-advancing child_exit: {} <= {}",
-                            next_idx, idx
-                        );
-                    }
-                    idx += 1;
-                    continue;
-                }
-                idx = next_idx;
-                continue;
+            if let Some(prev) = previous_node_id {
+                graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
             }
-
-            // Graph residual only: never re-emit a block body owned by a proven
-            // structured region. A label inside a child is not sufficient
-            // ownership evidence; the residual statements may still be unique.
-            let residual_label = block_label(block_key);
-            if structured_region_owns_block(idx, &structured_ownership) {
+            previous_node_id = Some(node_id);
+            let next_idx = *child_exit;
+            if next_idx <= idx {
                 if diag {
                     eprintln!(
-                        "[DIAG] final reconstruction: skip range-owned residual block idx={} key=0x{:x} label={}",
-                        idx, block_key, residual_label
+                        "[DIAG] final reconstruction SESE scan: non-advancing child_exit: {} <= {}",
+                        next_idx, idx
                     );
                 }
                 idx += 1;
                 continue;
             }
+            idx = next_idx;
+            continue;
+        }
 
-            let mut node_body = Vec::new();
-            let mut explicit_edge_surface = false;
-            if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                node_body.push(PreHirStmt::Label(residual_label.clone()));
-                structure_defined_labels.insert(residual_label);
+        // Graph residual only: never re-emit a block body owned by a proven
+        // structured region. A label inside a child is not sufficient
+        // ownership evidence; the residual statements may still be unique.
+        let residual_label = block_label(block_key);
+        if structured_region_owns_block(idx, &structured_ownership) {
+            if diag {
+                eprintln!(
+                    "[DIAG] final reconstruction: skip range-owned residual block idx={} key=0x{:x} label={}",
+                    idx, block_key, residual_label
+                );
             }
-            node_body.extend(host.lower_block_stmts(idx)?);
-            match host.lower_block_terminator(idx)? {
-                LoweredTerminator::Return(expr) => node_body.push(PreHirStmt::Return(expr)),
-                LoweredTerminator::Goto(target) => {
-                    if let Some(target_idx) = host.find_block_index_by_address(target) {
-                        if let Some(expr) =
-                            host.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                        {
-                            node_body.push(PreHirStmt::Return(Some(expr)));
-                            explicit_edge_surface = true;
-                        } else if host.next_block_address(idx) != Some(target) {
-                            node_body.push(PreHirStmt::Goto(block_label(target)));
-                            explicit_edge_surface = true;
-                        }
+            idx += 1;
+            continue;
+        }
+
+        let mut node_body = Vec::new();
+        let mut explicit_edge_surface = false;
+        if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
+            node_body.push(PreHirStmt::Label(residual_label.clone()));
+            structure_defined_labels.insert(residual_label);
+        }
+        node_body.extend(host.lower_block_stmts(idx)?);
+        match host.lower_block_terminator(idx)? {
+            LoweredTerminator::Return(expr) => node_body.push(PreHirStmt::Return(expr)),
+            LoweredTerminator::Goto(target) => {
+                if let Some(target_idx) = host.find_block_index_by_address(target) {
+                    if let Some(expr) =
+                        host.lower_return_join_expr_for_predecessor(idx, target_idx)?
+                    {
+                        node_body.push(PreHirStmt::Return(Some(expr)));
+                        explicit_edge_surface = true;
                     } else if host.next_block_address(idx) != Some(target) {
                         node_body.push(PreHirStmt::Goto(block_label(target)));
                         explicit_edge_surface = true;
                     }
-                }
-                LoweredTerminator::Fallthrough(Some(target)) => {
-                    if let Some(target_idx) = host.find_block_index_by_address(target) {
-                        if let Some(expr) =
-                            host.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                        {
-                            node_body.push(PreHirStmt::Return(Some(expr)));
-                            explicit_edge_surface = true;
-                        }
-                    }
-                }
-                LoweredTerminator::Cond {
-                    cond,
-                    true_target,
-                    false_target,
-                } => {
-                    let next_addr = host.next_block_address(idx);
-                    let true_idx = host.find_block_index_by_address(true_target);
-                    let false_idx =
-                        false_target.and_then(|target| host.find_block_index_by_address(target));
-                    let true_virtual =
-                        true_idx.is_some_and(|ti| crate::collapse_loop::is_virtual_goto_edge(host, idx, ti));
-                    let false_virtual =
-                        false_idx.is_some_and(|fi| crate::collapse_loop::is_virtual_goto_edge(host, idx, fi));
-                    let mut then_body = if true_virtual || next_addr != Some(true_target) {
-                        vec![PreHirStmt::Goto(block_label(true_target))]
-                    } else {
-                        Vec::new()
-                    };
-                    if let Some(true_idx) = true_idx {
-                        if let Some(expr) =
-                            host.lower_return_join_expr_for_predecessor(idx, true_idx)?
-                        {
-                            then_body = vec![PreHirStmt::Return(Some(expr))];
-                        }
-                    }
-                    let else_body = match false_target {
-                        Some(false_target) => {
-                            let mut else_body = if false_virtual || Some(false_target) != next_addr
-                            {
-                                vec![PreHirStmt::Goto(block_label(false_target))]
-                            } else {
-                                Vec::new()
-                            };
-                            if let Some(false_idx) = false_idx {
-                                if let Some(expr) =
-                                    host.lower_return_join_expr_for_predecessor(idx, false_idx)?
-                                {
-                                    else_body = vec![PreHirStmt::Return(Some(expr))];
-                                }
-                            }
-                            else_body
-                        }
-                        _ => Vec::new(),
-                    };
-                    node_body.push(PreHirStmt::If {
-                        cond,
-                        then_body: std::rc::Rc::new(then_body),
-                        else_body: std::rc::Rc::new(else_body),
-                    });
+                } else if host.next_block_address(idx) != Some(target) {
+                    node_body.push(PreHirStmt::Goto(block_label(target)));
                     explicit_edge_surface = true;
                 }
-                LoweredTerminator::Fallthrough(None) => {}
-                LoweredTerminator::Unsupported {
-                    evidence,
-                    target_expr,
-                } => {
-                    node_body.push(host.emit_unsupported_control_surface(evidence, target_expr));
-                    explicit_edge_surface = true;
+            }
+            LoweredTerminator::Fallthrough(Some(target)) => {
+                if let Some(target_idx) = host.find_block_index_by_address(target) {
+                    if let Some(expr) =
+                        host.lower_return_join_expr_for_predecessor(idx, target_idx)?
+                    {
+                        node_body.push(PreHirStmt::Return(Some(expr)));
+                        explicit_edge_surface = true;
+                    }
                 }
-                LoweredTerminator::Switch {
-                    expr,
-                    targets,
-                    default_target,
-                    min_val,
-                    proof,
-                } => {
-                    let cases: Vec<PreHirSwitchCase> = if let Some(proof) = proof.as_ref() {
-                        if EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready {
-                            proof
-                                .recovered_cases
-                                .iter()
-                                .filter(|(_, target)| Some(*target) != default_target)
-                                .map(|(value, target)| PreHirSwitchCase {
-                                    values: vec![*value],
-                                    body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(*target))]),
-                                })
-                                .collect()
+            }
+            LoweredTerminator::Cond {
+                cond,
+                true_target,
+                false_target,
+            } => {
+                let next_addr = host.next_block_address(idx);
+                let true_idx = host.find_block_index_by_address(true_target);
+                let false_idx =
+                    false_target.and_then(|target| host.find_block_index_by_address(target));
+                let true_virtual = true_idx
+                    .is_some_and(|ti| crate::collapse_loop::is_virtual_goto_edge(host, idx, ti));
+                let false_virtual = false_idx
+                    .is_some_and(|fi| crate::collapse_loop::is_virtual_goto_edge(host, idx, fi));
+                let mut then_body = if true_virtual || next_addr != Some(true_target) {
+                    vec![PreHirStmt::Goto(block_label(true_target))]
+                } else {
+                    Vec::new()
+                };
+                if let Some(true_idx) = true_idx {
+                    if let Some(expr) =
+                        host.lower_return_join_expr_for_predecessor(idx, true_idx)?
+                    {
+                        then_body = vec![PreHirStmt::Return(Some(expr))];
+                    }
+                }
+                let else_body = match false_target {
+                    Some(false_target) => {
+                        let mut else_body = if false_virtual || Some(false_target) != next_addr {
+                            vec![PreHirStmt::Goto(block_label(false_target))]
                         } else {
-                            recovered_switch_case_values(
-                                &targets,
-                                default_target,
-                                min_val,
-                                Some(proof),
-                            )
+                            Vec::new()
+                        };
+                        if let Some(false_idx) = false_idx {
+                            if let Some(expr) =
+                                host.lower_return_join_expr_for_predecessor(idx, false_idx)?
+                            {
+                                else_body = vec![PreHirStmt::Return(Some(expr))];
+                            }
+                        }
+                        else_body
+                    }
+                    _ => Vec::new(),
+                };
+                node_body.push(PreHirStmt::If {
+                    cond,
+                    then_body: std::rc::Rc::new(then_body),
+                    else_body: std::rc::Rc::new(else_body),
+                });
+                explicit_edge_surface = true;
+            }
+            LoweredTerminator::Fallthrough(None) => {}
+            LoweredTerminator::Unsupported {
+                evidence,
+                target_expr,
+            } => {
+                node_body.push(host.emit_unsupported_control_surface(evidence, target_expr));
+                explicit_edge_surface = true;
+            }
+            LoweredTerminator::Switch {
+                expr,
+                targets,
+                default_target,
+                min_val,
+                proof,
+            } => {
+                let cases: Vec<PreHirSwitchCase> = if let Some(proof) = proof.as_ref() {
+                    if EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready {
+                        proof
+                            .recovered_cases
+                            .iter()
+                            .filter(|(_, target)| Some(*target) != default_target)
+                            .map(|(value, target)| PreHirSwitchCase {
+                                values: vec![*value],
+                                body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(
+                                    *target,
+                                ))]),
+                            })
+                            .collect()
+                    } else {
+                        recovered_switch_case_values(&targets, default_target, min_val, Some(proof))
                             .0
                             .into_iter()
                             .map(|(value, target)| PreHirSwitchCase {
@@ -1072,69 +1067,70 @@ fn reconstruct_sese_final_body_impl(
                                 body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(target))]),
                             })
                             .collect()
-                        }
-                    } else if let Some(parsed) = crate::switch::parse_switch_chain(host, idx).ok().flatten() {
-                        parsed
-                            .cases
+                    }
+                } else if let Some(parsed) =
+                    crate::switch::parse_switch_chain(host, idx).ok().flatten()
+                {
+                    parsed
+                        .cases
+                        .into_iter()
+                        .filter(|(_, block_idx)| {
+                            let target = host.block_target_key(*block_idx);
+                            Some(target) != default_target
+                        })
+                        .map(|(value, block_idx)| PreHirSwitchCase {
+                            values: vec![value],
+                            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(
+                                host.block_target_key(block_idx),
+                            ))]),
+                        })
+                        .collect()
+                } else {
+                    targets
+                        .into_iter()
+                        .filter(|target| Some(*target) != default_target)
+                        .enumerate()
+                        .map(|(i, t)| PreHirSwitchCase {
+                            values: vec![min_val + i as i64],
+                            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(t))]),
+                        })
+                        .collect()
+                };
+                node_body.push(PreHirStmt::Switch {
+                    expr,
+                    cases,
+                    default: std::rc::Rc::new(
+                        default_target
+                            .map(block_label)
+                            .map(PreHirStmt::Goto)
                             .into_iter()
-                            .filter(|(_, block_idx)| {
-                                let target = host.block_target_key(*block_idx);
-                                Some(target) != default_target
-                            })
-                            .map(|(value, block_idx)| PreHirSwitchCase {
-                                values: vec![value],
-                                body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(
-                                    host.block_target_key(block_idx),
-                                ))]),
-                            })
-                            .collect()
-                    } else {
-                        targets
-                            .into_iter()
-                            .filter(|target| Some(*target) != default_target)
-                            .enumerate()
-                            .map(|(i, t)| PreHirSwitchCase {
-                                values: vec![min_val + i as i64],
-                                body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(t))]),
-                            })
-                            .collect()
-                    };
-                    node_body.push(PreHirStmt::Switch {
-                        expr,
-                        cases,
-                        default: std::rc::Rc::new(
-                            default_target
-                                .map(block_label)
-                                .map(PreHirStmt::Goto)
-                                .into_iter()
-                                .collect(),
-                        ),
-                    });
-                    explicit_edge_surface = true;
-                }
+                            .collect(),
+                    ),
+                });
+                explicit_edge_surface = true;
             }
-            if explicit_edge_surface {
-                let node_id = graph.next_node_id();
-                let node_id = graph
-                    .push(StructureNode::unstructured(node_id, node_body, idx))
-                    .map_err(|_| MlilPreviewError::UnsupportedCfgRegionShape)?;
-                if let Some(prev) = previous_node_id {
-                    graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
-                }
-                previous_node_id = Some(node_id);
-            } else {
-                let node_id = graph.next_node_id();
-                let node_id = graph
-                    .push(StructureNode::basic(node_id, node_body, idx))
-                    .map_err(|_| MlilPreviewError::UnsupportedCfgRegionShape)?;
-                if let Some(prev) = previous_node_id {
-                    graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
-                }
-                previous_node_id = Some(node_id);
-            }
-            idx += 1;
         }
-
+        if explicit_edge_surface {
+            let node_id = graph.next_node_id();
+            let node_id = graph
+                .push(StructureNode::unstructured(node_id, node_body, idx))
+                .map_err(|_| MlilPreviewError::UnsupportedCfgRegionShape)?;
+            if let Some(prev) = previous_node_id {
+                graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
+            }
+            previous_node_id = Some(node_id);
+        } else {
+            let node_id = graph.next_node_id();
+            let node_id = graph
+                .push(StructureNode::basic(node_id, node_body, idx))
+                .map_err(|_| MlilPreviewError::UnsupportedCfgRegionShape)?;
+            if let Some(prev) = previous_node_id {
+                graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
+            }
+            previous_node_id = Some(node_id);
+        }
+        idx += 1;
+    }
 
     let mut body = surface_structure_graph(graph);
     crate::guarded_tail::promote_guarded_tail_regions_until_stable(host, &mut body);
@@ -1231,9 +1227,7 @@ mod tests {
     #[test]
     fn rotated_loop_membership_rejects_non_rotated_layout() {
         let loop_body = loop_body(1, &[1, 2, 3], 4);
-        assert!(
-            rotated_loop_membership(&loop_body, 0, 5, None, &HashMap::default()).is_none()
-        );
+        assert!(rotated_loop_membership(&loop_body, 0, 5, None, &HashMap::default()).is_none());
     }
 
     #[test]

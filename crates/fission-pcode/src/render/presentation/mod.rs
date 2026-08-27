@@ -2329,7 +2329,9 @@ fn recover_switch_from_lowered_if_chain_in_stmt(stmt: &mut HirStmt) -> bool {
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             recover_switch_from_lowered_if_chain(body)
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             let mut changed = recover_switch_from_lowered_if_chain(body);
             if let Some(i) = init {
                 changed |= recover_switch_from_lowered_if_chain_in_stmt(i);
@@ -2398,11 +2400,13 @@ fn try_build_switch_from_if_chain(stmt: &HirStmt) -> Option<HirStmt> {
     let mut seen_values: HashSet<i64> = [first_value].into_iter().collect();
     let mut tail: &Vec<HirStmt> = else_body;
     loop {
-        let [HirStmt::If {
-            cond: next_cond,
-            then_body: next_then,
-            else_body: next_else,
-        }] = tail.as_slice()
+        let [
+            HirStmt::If {
+                cond: next_cond,
+                then_body: next_then,
+                else_body: next_else,
+            },
+        ] = tail.as_slice()
         else {
             break;
         };
@@ -2657,9 +2661,7 @@ fn classify_direct_split(cond: &HirExpr, switch_var: &HirExpr) -> Option<DirectS
             (bias_expr.as_ref(), rhs.as_ref())
     {
         let range = match op {
-            HirBinaryOp::Gt => bias
-                .checked_add(*bound)
-                .map(|hi| (*bias, hi, false)),
+            HirBinaryOp::Gt => bias.checked_add(*bound).map(|hi| (*bias, hi, false)),
             HirBinaryOp::Ge => bias
                 .checked_add(*bound)
                 .and_then(|hi| hi.checked_sub(1))
@@ -2668,9 +2670,7 @@ fn classify_direct_split(cond: &HirExpr, switch_var: &HirExpr) -> Option<DirectS
                 .checked_add(*bound)
                 .and_then(|hi| hi.checked_sub(1))
                 .map(|hi| (*bias, hi, true)),
-            HirBinaryOp::Le => bias
-                .checked_add(*bound)
-                .map(|hi| (*bias, hi, true)),
+            HirBinaryOp::Le => bias.checked_add(*bound).map(|hi| (*bias, hi, true)),
             _ => unreachable!(),
         };
         if let Some((range_lo, range_hi, in_range_is_then)) = range
@@ -3780,16 +3780,20 @@ fn prune_unreachable_after_total_return(
 fn stmt_contains_targeted_label(stmt: &HirStmt, targets: &HashSet<String>) -> bool {
     match stmt {
         HirStmt::Label(label) => targets.contains(label),
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => body
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => body
             .iter()
             .any(|stmt| stmt_contains_targeted_label(stmt, targets)),
-        HirStmt::If { then_body, else_body, .. } => then_body
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => then_body
             .iter()
             .chain(else_body.iter())
             .any(|stmt| stmt_contains_targeted_label(stmt, targets)),
-        HirStmt::For { init, update, body, .. } => init
+        HirStmt::For {
+            init, update, body, ..
+        } => init
             .iter()
             .chain(update.iter())
             .map(|stmt| stmt.as_ref())
@@ -4237,7 +4241,7 @@ mod tests {
                         op: fission_midend_core::ir::HirBinaryOp::Add,
                         lhs: Box::new(HirExpr::Var("cursor".into())),
                         rhs: Box::new(HirExpr::Const(1, int_ty(32, true))),
-                    ty: int_ty(32, true),
+                        ty: int_ty(32, true),
                     },
                 }],
                 cond: HirExpr::Binary {

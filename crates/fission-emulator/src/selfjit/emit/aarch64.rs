@@ -174,23 +174,28 @@ impl<'a> Asm<'a> {
     }
 
     pub fn add_reg(&mut self, rd: u32, rn: u32, rm: u32) {
-        self.buf.emit_u32_le(0x8B000000 | (rm << 16) | (rn << 5) | rd);
+        self.buf
+            .emit_u32_le(0x8B000000 | (rm << 16) | (rn << 5) | rd);
     }
 
     pub fn sub_reg(&mut self, rd: u32, rn: u32, rm: u32) {
-        self.buf.emit_u32_le(0xCB000000 | (rm << 16) | (rn << 5) | rd);
+        self.buf
+            .emit_u32_le(0xCB000000 | (rm << 16) | (rn << 5) | rd);
     }
 
     pub fn and_reg(&mut self, rd: u32, rn: u32, rm: u32) {
-        self.buf.emit_u32_le(0x8A000000 | (rm << 16) | (rn << 5) | rd);
+        self.buf
+            .emit_u32_le(0x8A000000 | (rm << 16) | (rn << 5) | rd);
     }
 
     pub fn orr_reg(&mut self, rd: u32, rn: u32, rm: u32) {
-        self.buf.emit_u32_le(0xAA000000 | (rm << 16) | (rn << 5) | rd);
+        self.buf
+            .emit_u32_le(0xAA000000 | (rm << 16) | (rn << 5) | rd);
     }
 
     pub fn eor_reg(&mut self, rd: u32, rn: u32, rm: u32) {
-        self.buf.emit_u32_le(0xCA000000 | (rm << 16) | (rn << 5) | rd);
+        self.buf
+            .emit_u32_le(0xCA000000 | (rm << 16) | (rn << 5) | rd);
     }
 
     /// `mul xd, xn, xm` (alias for `madd xd, xn, xm, xzr`).
@@ -249,13 +254,15 @@ impl<'a> Asm<'a> {
     /// `sub xd, xn, #imm12` (imm12 unsigned, 0..=4095, unscaled).
     pub fn sub_imm(&mut self, rd: u32, rn: u32, imm12: u32) {
         debug_assert!(imm12 <= 0xFFF);
-        self.buf.emit_u32_le(0xD1000000 | (imm12 << 10) | (rn << 5) | rd);
+        self.buf
+            .emit_u32_le(0xD1000000 | (imm12 << 10) | (rn << 5) | rd);
     }
 
     /// `add xd, xn, #imm12` (imm12 unsigned, 0..=4095, unscaled).
     pub fn add_imm(&mut self, rd: u32, rn: u32, imm12: u32) {
         debug_assert!(imm12 <= 0xFFF);
-        self.buf.emit_u32_le(0x91000000 | (imm12 << 10) | (rn << 5) | rd);
+        self.buf
+            .emit_u32_le(0x91000000 | (imm12 << 10) | (rn << 5) | rd);
     }
 
     /// `cmp xn, xm` (alias for `subs xzr, xn, xm`) -- sets NZCV for a
@@ -327,7 +334,8 @@ impl<'a> Asm<'a> {
 
     pub fn patch_b(&mut self, label: Label, target: usize) {
         let imm26 = Self::pc_rel_imm26(label.0, target);
-        self.buf.patch_u32_le(label.0, 0x14000000 | (imm26 & 0x3FFFFFF));
+        self.buf
+            .patch_u32_le(label.0, 0x14000000 | (imm26 & 0x3FFFFFF));
     }
 
     fn pc_rel_imm19(at: usize, target: usize) -> u32 {

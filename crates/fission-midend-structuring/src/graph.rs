@@ -84,7 +84,12 @@ pub struct StructureNode {
 }
 
 impl StructureNode {
-    pub fn region(id: StructureNodeId, stmt: PreHirStmt, skip_to: usize, proof: RegionProof) -> Self {
+    pub fn region(
+        id: StructureNodeId,
+        stmt: PreHirStmt,
+        skip_to: usize,
+        proof: RegionProof,
+    ) -> Self {
         let ownership = BlockOwnership::from_members(proof.members.iter().copied());
         Self {
             id,

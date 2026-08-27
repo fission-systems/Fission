@@ -31,7 +31,11 @@ fn main() {
 
     let (mut raw, mut packed, mut ok, mut failed) = (0u64, 0u64, 0usize, Vec::new());
     for path in &entries {
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
         let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         let db = match parse_fidbf(path) {
             Ok(db) => db,

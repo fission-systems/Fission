@@ -65,7 +65,11 @@ pub enum DeliverResult {
     /// No pending deliverable signal.
     None,
     /// Delivered to a user handler; PC was rewritten.
-    Handler { signo: i32, handler: u64, old_pc: u64 },
+    Handler {
+        signo: i32,
+        handler: u64,
+        old_pc: u64,
+    },
     /// Default disposition is process termination.
     Terminate { signo: i32 },
     /// Default disposition is stop (we treat as no-op resume for single-thread).

@@ -2,19 +2,18 @@
 
 use std::path::PathBuf;
 
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::sym::state::SimState;
 use fission_emulator::sym::SimulationManager;
-use fission_emulator::MachineState;
+use fission_emulator::sym::state::SimState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use fission_solver::SymExpr;
 
 fn mini_emu() -> Emulator {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
     let binary = LoadedBinary::from_file(&path).expect("load");
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");
@@ -66,10 +65,7 @@ fn path_sat_contradiction_via_manager() {
 
     // Also: true constraint is sat
     let good = SymExpr::Const { val: 1, size: 1 };
-    let ok2 = mgr
-        .emu
-        .solver
-        .satisfiable_with_oracle(&[good], Some(&ms));
+    let ok2 = mgr.emu.solver.satisfiable_with_oracle(&[good], Some(&ms));
     assert!(ok2, "Const 1 constraint must be sat");
 }
 
@@ -138,7 +134,10 @@ fn path_sat_eq_var_const_sat() {
     let five = SymExpr::new_const(5, 8);
     let eq = SymExpr::new_eq(x, five);
     // Must not fold to a const (x is symbolic).
-    assert!(matches!(eq, SymExpr::Eq(_, _)), "expected symbolic Eq, got {eq:?}");
+    assert!(
+        matches!(eq, SymExpr::Eq(_, _)),
+        "expected symbolic Eq, got {eq:?}"
+    );
     assert!(
         emu.solver.satisfiable(&[eq.clone()]),
         "Eq(x, 5) must be SAT"
@@ -218,8 +217,5 @@ fn path_sat_eq_var_two_consts_contradiction() {
     let x = SymExpr::new_var("path_y", 8);
     let c1 = SymExpr::new_eq(x.clone(), SymExpr::new_const(5, 8));
     let c2 = SymExpr::new_eq(x, SymExpr::new_const(6, 8));
-    assert!(
-        !aig_and_sat(&[c1, c2]),
-        "Eq(x,5) ∧ Eq(x,6) must be UNSAT"
-    );
+    assert!(!aig_and_sat(&[c1, c2]), "Eq(x,5) ∧ Eq(x,6) must be UNSAT");
 }

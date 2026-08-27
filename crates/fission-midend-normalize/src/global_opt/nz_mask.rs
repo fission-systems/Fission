@@ -1,6 +1,6 @@
+use crate::HashMap;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
-use crate::HashMap;
 
 pub fn type_mask(ty: &NirType) -> u64 {
     match ty {
@@ -355,8 +355,14 @@ fn simplify_stmt(
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list, nz_masks, type_map);
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), nz_masks, type_map);
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                nz_masks,
+                type_map,
+            );
         }
         PreHirStmt::For {
             init,
@@ -373,7 +379,11 @@ fn simplify_stmt(
             if let Some(u) = update {
                 changed |= simplify_stmt(u, nz_masks, type_map);
             }
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), nz_masks, type_map);
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                nz_masks,
+                type_map,
+            );
         }
         PreHirStmt::If {
             cond,
@@ -381,8 +391,16 @@ fn simplify_stmt(
             else_body,
         } => {
             changed |= simplify_expr(cond, nz_masks, type_map);
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), nz_masks, type_map);
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), nz_masks, type_map);
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                nz_masks,
+                type_map,
+            );
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                nz_masks,
+                type_map,
+            );
         }
         PreHirStmt::Switch {
             expr,
@@ -391,9 +409,17 @@ fn simplify_stmt(
         } => {
             changed |= simplify_expr(expr, nz_masks, type_map);
             for case in cases {
-                changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), nz_masks, type_map);
+                changed |= simplify_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    nz_masks,
+                    type_map,
+                );
             }
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), nz_masks, type_map);
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                nz_masks,
+                type_map,
+            );
         }
         _ => {}
     }

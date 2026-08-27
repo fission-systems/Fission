@@ -51,7 +51,11 @@ impl CallingConvention {
             CallingConvention::Mips64 => Some(0xe8),
             CallingConvention::AArch64 => Some(0x08),
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
-                if is_64bit { Some(0x20) } else { Some(0x10) }
+                if is_64bit {
+                    Some(0x20)
+                } else {
+                    Some(0x10)
+                }
             }
             CallingConvention::X86_32 => Some(0x10),
         }

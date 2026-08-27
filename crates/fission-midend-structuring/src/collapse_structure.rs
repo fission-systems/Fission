@@ -9,12 +9,12 @@
 //! Does not copy Ghidra C++; reimplements the invariant that collapse virtualizes
 //! *one* unstructured edge at a time rather than multi-emitting residual blocks.
 
-use crate::cfg_analysis::{DomTree, TraceDag};
-use crate::loop_analysis::LoopBody;
-use crate::cfg_analysis::CfgAnalysis;
 use crate::HashSet;
-use crate::host::StructuringHost;
+use crate::cfg_analysis::CfgAnalysis;
+use crate::cfg_analysis::{DomTree, TraceDag};
 use crate::collapse_loop::apply_virtual_goto_edge;
+use crate::host::StructuringHost;
+use crate::loop_analysis::LoopBody;
 use fission_midend_core::ir::MlilPreviewError;
 
 /// Ghidra `LoopBody::emitLikelyEdges`: exit edges (priority) then preferred back edge.
@@ -38,12 +38,7 @@ pub fn emit_likely_edges_for_loop(
             if body_set.contains(&succ) {
                 if succ == loop_body.head && loop_body.tails.contains(&bl) {
                     // Prefer first ordered tail's back edge (tails[0] preferred).
-                    if back.is_none()
-                        || loop_body
-                            .tails
-                            .first()
-                            .is_some_and(|&t| t == bl)
-                    {
+                    if back.is_none() || loop_body.tails.first().is_some_and(|&t| t == bl) {
                         back = Some((bl, succ));
                     }
                 }
@@ -84,7 +79,8 @@ pub fn collect_likely_gotos(
 
     for lb in &ordered {
         for edge in emit_likely_edges_for_loop(lb, successors) {
-            if !already_virtual.contains(&edge) && successors.get(edge.0).is_some_and(|s| s.contains(&edge.1))
+            if !already_virtual.contains(&edge)
+                && successors.get(edge.0).is_some_and(|s| s.contains(&edge.1))
             {
                 likely.push(edge);
             }

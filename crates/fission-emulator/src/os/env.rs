@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::core::Emulator;
 use crate::pcode::state::MachineState;
+use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 
 /// Result of a single HLE dispatch.
@@ -30,11 +30,7 @@ pub trait OsEnvironment: Send + Sync {
     /// - PE: overwrites IAT entries with magic trampolines
     /// - ELF: overwrites GOT slots for PLT entries
     /// - Bare-metal: registers MMIO ranges
-    fn patch_imports(
-        &self,
-        state: &mut MachineState,
-        binary: &LoadedBinary,
-    ) -> Result<()>;
+    fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()>;
 
     /// Resolve `magic_addr` to a function name, or `None` if the address is
     /// not a known stub (the emulator should treat this as a fatal error).
@@ -65,7 +61,10 @@ pub trait OsEnvironment: Send + Sync {
         _input_vals: &[u64],
         _output_size: u32,
     ) -> Result<HleResult> {
-        tracing::warn!("Unimplemented USEROP: '{}'. Treating as no-op (returns 0).", userop_name);
+        tracing::warn!(
+            "Unimplemented USEROP: '{}'. Treating as no-op (returns 0).",
+            userop_name
+        );
         Ok(HleResult::Continue)
     }
 }

@@ -156,9 +156,7 @@ fn fold_to_single_node(
                 // edge so the next round sees a different graph rather than
                 // rediscovering the same unlowerable region forever.
                 concessions += 1;
-                if concessions > MAX_CONCESSIONS
-                    || !concede_one_edge(&mut graph, Some(&shape))
-                {
+                if concessions > MAX_CONCESSIONS || !concede_one_edge(&mut graph, Some(&shape)) {
                     return Ok(None);
                 }
                 continue;
@@ -318,7 +316,10 @@ pub(crate) fn blocks_reachable_from_entry(successors: &[Vec<usize>]) -> Vec<usiz
 ///
 /// Unreachable blocks are excluded deliberately: they contribute no behaviour,
 /// and requiring them would decline folds that are entirely correct.
-pub(crate) fn covers_every_reachable_block(node: &crate::collapse_graph::CollapseNode, reachable: &[usize]) -> bool {
+pub(crate) fn covers_every_reachable_block(
+    node: &crate::collapse_graph::CollapseNode,
+    reachable: &[usize],
+) -> bool {
     node.entry_block == 0 && reachable.iter().all(|&b| node.members.contains(b))
 }
 
@@ -421,7 +422,12 @@ pub(crate) fn node_statements(
 }
 
 /// Whether `id` is the node entered at `address`.
-fn node_is_at(graph: &CollapseGraph, host: &impl StructuringHost, id: NodeId, address: u64) -> bool {
+fn node_is_at(
+    graph: &CollapseGraph,
+    host: &impl StructuringHost,
+    id: NodeId,
+    address: u64,
+) -> bool {
     graph
         .node(id)
         .is_some_and(|n| host.block_target_key(n.entry_block) == address)

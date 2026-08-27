@@ -1,8 +1,8 @@
-use anyhow::{Result, bail};
-use serde::{Serialize, Deserialize};
-use std::sync::Arc;
 use crate::pcode::page_map::PageMap;
 use crate::pcode::spaces::SpaceLayout;
+use anyhow::{Result, bail};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum MemoryPage {
@@ -16,9 +16,7 @@ pub enum MemoryPage {
     },
     /// A full fallback to SMT Array theory when a symbolic pointer is written.
     /// `array_id` is the SymNodeId of the current ArrayStore AST node.
-    ArrayTheory {
-        array_id: u32,
-    },
+    ArrayTheory { array_id: u32 },
 }
 
 impl MemoryPage {
@@ -81,7 +79,7 @@ impl AddressSpace {
                 Some(MemoryPage::Concrete(data)) => data[offset],
                 Some(MemoryPage::Symbolic { concrete, .. }) => concrete[offset],
                 Some(MemoryPage::ArrayTheory { .. }) => 0, // Fallback for pure concrete read
-                None => 0, // Uninitialized memory reads as 0
+                None => 0,                                 // Uninitialized memory reads as 0
             };
             result.push(byte);
         }
@@ -123,10 +121,10 @@ impl AddressSpace {
         let current_addr = addr;
         let offset = (current_addr & (self.page_size - 1)) as usize;
         let page = self.get_page_mut(current_addr);
-        
+
         // Ensure the page is symbolic
         page.make_symbolic();
-        
+
         if let MemoryPage::Symbolic { shadow, .. } = page {
             let shadow_mut = Arc::make_mut(shadow);
             let old = shadow_mut[offset];
@@ -136,7 +134,7 @@ impl AddressSpace {
             None
         }
     }
-    
+
     pub fn clear_shadow(&mut self, addr: u64) -> Option<u32> {
         let current_addr = addr;
         let offset = (current_addr & (self.page_size - 1)) as usize;
@@ -195,7 +193,7 @@ pub struct MachineState {
     #[serde(skip)]
     pub trace_mem_reads: Vec<(u64, Vec<u8>)>,
     #[serde(skip)]
-    pub trace_mem_writes: Vec<(u64, Vec<u8>, Vec<u8>)>,  // (addr, old_bytes, new_bytes)
+    pub trace_mem_writes: Vec<(u64, Vec<u8>, Vec<u8>)>, // (addr, old_bytes, new_bytes)
 
     /// Shadow register mapping: (register_offset) -> SymNodeId.
     /// We can treat register space as just another address space, but usually
@@ -226,7 +224,9 @@ pub const HOST_REG_FILE_SIZE: usize = 0x2000;
 
 impl fission_solver::solver::MemoryOracle for MachineState {
     fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8> {
-        self.read_space_readonly(space_id, addr, 1).ok().map(|v| v[0])
+        self.read_space_readonly(space_id, addr, 1)
+            .ok()
+            .map(|v| v[0])
     }
 }
 
@@ -308,7 +308,8 @@ impl MachineState {
 
     pub fn set_theory_array_id(&mut self, space_id: u64, id: u32) {
         if !self.spaces.contains_key(&space_id) {
-            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+            self.spaces
+                .insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
         }
         let space = self.spaces.get_mut(&space_id).unwrap();
         space.theory_array_id = Some(id);
@@ -351,7 +352,8 @@ impl MachineState {
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
         if !self.spaces.contains_key(&space_id) {
-            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+            self.spaces
+                .insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
         }
         let space = self.spaces.get_mut(&space_id).unwrap();
         let data = space.read(addr, size)?;
@@ -366,11 +368,11 @@ impl MachineState {
                 self.reg_cache.insert(addr, val);
             }
         }
-        
+
         if self.tracing_memory && space_id == self.spaces_layout.ram {
             self.trace_mem_reads.push((addr, data.clone()));
         }
-        
+
         Ok(data)
     }
 
@@ -396,11 +398,13 @@ impl MachineState {
                 .check_range(addr, data.len(), AccessKind::Write)
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-        
+
         if self.tracing_memory && space_id == self.spaces_layout.ram {
             // Read the old value before overwriting so TTD can reconstruct undo deltas.
             let old = if let Some(space) = self.spaces.get(&space_id) {
-                space.read(addr, data.len()).unwrap_or_else(|_| vec![0; data.len()])
+                space
+                    .read(addr, data.len())
+                    .unwrap_or_else(|_| vec![0; data.len()])
             } else {
                 vec![0; data.len()]
             };
@@ -408,7 +412,8 @@ impl MachineState {
         }
 
         if !self.spaces.contains_key(&space_id) {
-            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+            self.spaces
+                .insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
         }
         let is_reg = space_id == self.spaces_layout.register;
         let host_ok = is_reg && self.host_reg_in_range(addr, data.len());
@@ -455,12 +460,14 @@ impl MachineState {
 
     pub fn set_shadow_memory(&mut self, space_id: u64, addr: u64, node: u32) {
         if !self.spaces.contains_key(&space_id) {
-            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+            self.spaces
+                .insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
         }
         let space = self.spaces.get_mut(&space_id).unwrap();
         let old_node = space.set_shadow(addr, node);
         if self.tracing_memory {
-            self.trace_shadow_writes.push((space_id, addr, old_node, Some(node)));
+            self.trace_shadow_writes
+                .push((space_id, addr, old_node, Some(node)));
         }
     }
 
@@ -472,7 +479,8 @@ impl MachineState {
         if let Some(space) = self.spaces.get_mut(&space_id) {
             let old_node = space.clear_shadow(addr);
             if self.tracing_memory && old_node.is_some() {
-                self.trace_shadow_writes.push((space_id, addr, old_node, None));
+                self.trace_shadow_writes
+                    .push((space_id, addr, old_node, None));
             }
         }
     }
@@ -491,7 +499,9 @@ mod tests {
         assert_eq!(data, vec![0, 0, 0, 0]);
 
         // Write concrete
-        state.write_space(ram, 0x1000, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+        state
+            .write_space(ram, 0x1000, &[0xDE, 0xAD, 0xBE, 0xEF])
+            .unwrap();
         let data = state.read_space(ram, 0x1000, 4).unwrap();
         assert_eq!(data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
 
@@ -515,7 +525,7 @@ mod tests {
         assert_eq!(state.get_shadow_memory(ram, 0x1000), Some(42)); // Unaffected
         assert_eq!(state.get_shadow_memory(ram, 0x1001), None); // Cleared
         assert_eq!(state.get_shadow_memory(ram, 0x1002), None); // Cleared
-        
+
         let data = state.read_space(ram, 0x1000, 4).unwrap();
         assert_eq!(data, vec![0xDE, 0xCC, 0xDD, 0xEF]);
     }

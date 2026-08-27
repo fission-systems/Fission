@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use crate::HashMap;
+use crate::prelude::*;
 
 /// Optimizes redundant bit-widths, casts, and bitmasks in HIR expressions.
 /// Drawn from Ghidra's `subflow.cc` active bit analysis and bitstream pruning.
@@ -185,8 +185,14 @@ fn optimize_stmt(
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= optimize_expr(va_list, type_map, nz_masks);
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, nz_masks);
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
+            changed |= optimize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                type_map,
+                nz_masks,
+            );
         }
         PreHirStmt::For {
             init,
@@ -203,7 +209,11 @@ fn optimize_stmt(
             if let Some(u) = update {
                 changed |= optimize_stmt(u.as_mut(), type_map, nz_masks);
             }
-            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, nz_masks);
+            changed |= optimize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                type_map,
+                nz_masks,
+            );
         }
         PreHirStmt::If {
             cond,
@@ -211,8 +221,16 @@ fn optimize_stmt(
             else_body,
         } => {
             changed |= optimize_expr(cond, type_map, nz_masks);
-            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), type_map, nz_masks);
-            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), type_map, nz_masks);
+            changed |= optimize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                type_map,
+                nz_masks,
+            );
+            changed |= optimize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                type_map,
+                nz_masks,
+            );
         }
         PreHirStmt::Switch {
             expr,
@@ -221,9 +239,17 @@ fn optimize_stmt(
         } => {
             changed |= optimize_expr(expr, type_map, nz_masks);
             for case in cases {
-                changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), type_map, nz_masks);
+                changed |= optimize_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    type_map,
+                    nz_masks,
+                );
             }
-            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), type_map, nz_masks);
+            changed |= optimize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                type_map,
+                nz_masks,
+            );
         }
         PreHirStmt::Return(None)
         | PreHirStmt::Label(_)
@@ -375,7 +401,7 @@ fn optimize_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn u8_ty() -> NirType {
         NirType::Int {

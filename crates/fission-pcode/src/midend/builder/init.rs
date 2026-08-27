@@ -94,19 +94,20 @@ impl<'a> PreviewBuilder<'a> {
         for (block_idx, block) in pcode.blocks.iter().enumerate() {
             let mut block_def_map: HashMap<VarnodeKey, Vec<usize>> = HashMap::default();
             for (op_idx, op) in block.ops.iter().enumerate() {
-                let record = |key: VarnodeKey,
-                                  block_def_map: &mut HashMap<VarnodeKey, Vec<usize>>,
-                                  def_sites: &mut HashMap<VarnodeKey, Vec<DefSite<'a>>>,
-                                  defs: &mut HashMap<VarnodeKey, DefSite<'a>>| {
-                    let site = DefSite {
-                        block_idx,
-                        op_idx,
-                        _marker: std::marker::PhantomData,
+                let record =
+                    |key: VarnodeKey,
+                     block_def_map: &mut HashMap<VarnodeKey, Vec<usize>>,
+                     def_sites: &mut HashMap<VarnodeKey, Vec<DefSite<'a>>>,
+                     defs: &mut HashMap<VarnodeKey, DefSite<'a>>| {
+                        let site = DefSite {
+                            block_idx,
+                            op_idx,
+                            _marker: std::marker::PhantomData,
+                        };
+                        block_def_map.entry(key.clone()).or_default().push(op_idx);
+                        def_sites.entry(key.clone()).or_default().push(site);
+                        defs.insert(key, site);
                     };
-                    block_def_map.entry(key.clone()).or_default().push(op_idx);
-                    def_sites.entry(key.clone()).or_default().push(site);
-                    defs.insert(key, site);
-                };
                 if let Some(output) = &op.output {
                     record(
                         VarnodeKey::from(output),

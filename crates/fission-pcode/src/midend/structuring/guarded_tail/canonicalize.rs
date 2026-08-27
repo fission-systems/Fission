@@ -297,7 +297,8 @@ mod tests {
                         then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
                         else_body: Vec::new().into(),
                     },
-                ].into(),
+                ]
+                .into(),
             },
             PreHirStmt::Return(None),
         ];

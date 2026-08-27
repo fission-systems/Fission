@@ -33,7 +33,9 @@ pub fn prehir_stmt_to_hir_stmt(stmt: PreHirStmt) -> HirStmt {
             va_list: prehir_expr_to_hir_expr(va_list),
             last_named_param,
         },
-        PreHirStmt::Block(stmts) => HirStmt::Block(prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(stmts))),
+        PreHirStmt::Block(stmts) => HirStmt::Block(prehir_stmts_to_hir_stmts(
+            std::rc::Rc::unwrap_or_clone(stmts),
+        )),
         PreHirStmt::Switch {
             expr,
             cases,
@@ -240,7 +242,9 @@ pub fn hir_stmt_to_prehir_stmt(stmt: HirStmt) -> PreHirStmt {
             va_list: hir_expr_to_prehir_expr(va_list),
             last_named_param,
         },
-        HirStmt::Block(stmts) => PreHirStmt::Block(std::rc::Rc::new(hir_stmts_to_prehir_stmts(stmts))),
+        HirStmt::Block(stmts) => {
+            PreHirStmt::Block(std::rc::Rc::new(hir_stmts_to_prehir_stmts(stmts)))
+        }
         HirStmt::Switch {
             expr,
             cases,

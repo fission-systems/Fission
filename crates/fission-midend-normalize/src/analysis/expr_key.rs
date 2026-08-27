@@ -4,8 +4,8 @@
 //! **Not** used for `Load`/`Call`/`Index` leaves — those return `None` from
 //! `pure_expr_key` (same contract as the original CSE-only `expr_key`).
 
-use crate::prelude::*;
 use crate::HashMap;
+use crate::prelude::*;
 
 pub type PureExprMap = HashMap<PureExprKey, String>;
 pub type PureExprKey = String;

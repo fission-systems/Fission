@@ -6,8 +6,8 @@
 //! override it.
 
 use super::super::{HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt};
-use super::util::as_var;
 use super::Candidate;
+use super::util::as_var;
 
 pub(super) const PRIORITY: u32 = 10;
 
@@ -101,10 +101,7 @@ fn counter_from_update(update: &HirStmt) -> Option<String> {
     else {
         return None;
     };
-    if !matches!(
-        op,
-        HirBinaryOp::Add | HirBinaryOp::Sub
-    ) {
+    if !matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub) {
         return None;
     }
     let self_ref = as_var(lhs) == Some(name.as_str()) || as_var(rhs) == Some(name.as_str());
@@ -143,7 +140,5 @@ fn counter_from_cond(cond: &HirExpr) -> Option<String> {
     ) {
         return None;
     }
-    as_var(lhs)
-        .or_else(|| as_var(rhs))
-        .map(ToOwned::to_owned)
+    as_var(lhs).or_else(|| as_var(rhs)).map(ToOwned::to_owned)
 }

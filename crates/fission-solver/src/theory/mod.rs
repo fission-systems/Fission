@@ -1,5 +1,5 @@
-pub mod bitvector;
 pub mod array;
+pub mod bitvector;
 
 use crate::cnf::Lit;
 
@@ -18,7 +18,7 @@ pub enum TheoryStatus {
     /// The theory is satisfied (or has nothing to say).
     Satisfied,
     /// The theory discovered new constraints (lemmas) that must hold.
-    /// Each inner Vec<Lit> is a clause. 
+    /// Each inner Vec<Lit> is a clause.
     /// E.g. an unsat core `vec![!A, !B]` is returned as `Lemmas(vec![vec![!A, !B]])`.
     Lemmas(Vec<Vec<Lit>>),
 }

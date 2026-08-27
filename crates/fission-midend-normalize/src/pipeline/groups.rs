@@ -1,54 +1,52 @@
 //! Ghidra-ordered normalize action groups and pipeline driver.
 
-use fission_midend_core::wave_stats;
-use super::stages::{
-    body_contains_popcount_call_admitted, cleanup_after_branch_prefix_hoist,
-    cleanup_after_callee_save_prologue_epilogue, cleanup_after_conditional_const,
-    cleanup_after_constant_folding_init, cleanup_after_constant_ptr_recovery,
-    cleanup_after_entry_param_promotion, cleanup_after_entry_stack_scaffold,
-    cleanup_after_entry_stack_scaffold_late, cleanup_after_flag_recovery,
-    cleanup_after_gvn_join_hoist, cleanup_after_loop_condition_temps,
-    cleanup_after_sccp, cleanup_after_single_pred_label_inline, cleanup_after_split_flow,
-    cleanup_after_subvar_flow, cleanup_after_subvar_trim, cleanup_elim_8, cleanup_prune_9,
-    cleanup_prune_10, cleanup_standalone_15, constant_folding_body_pass,
-    defuse_after_branch_hoist_and_prune, defuse_after_cse_and_prune, defuse_after_gvn_and_prune,
-    defuse_after_licm_and_prune, prune_after_elide_popcount, run_stage_cast_elision,
-    run_stage_cleanup, run_stage_heritage_value_recovery, run_stage_memory_recovery,
-    run_stage_merge, run_stage_proto_recovery_head, run_stage_type_early, sccp_is_admitted,
-    wide_dead_assignment_and_prune,
-};
 use super::super::analysis::defuse::{
     apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
 };
-use super::super::cleanup::{
-    apply_deindirect_pass, apply_expand_load_pass, apply_subvar_trim_pass,
-    apply_switch_norm_pass, cast_elision_pass, elide_unused_popcount_assigns,
-    inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
-    single_pred_label_inline,
-};
 use super::super::arith::apply_conditional_move_pass;
+use super::super::cleanup::{
+    apply_deindirect_pass, apply_expand_load_pass, apply_subvar_trim_pass, apply_switch_norm_pass,
+    cast_elision_pass, elide_unused_popcount_assigns, inline_loop_condition_trailing_temps,
+    normalize_dowhile_decrement_condition, single_pred_label_inline,
+};
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_conditional_const_pass, apply_cse_pass,
-    apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
-    apply_sccp_pass,
+    apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass, apply_sccp_pass,
 };
 use super::super::idioms::{
     apply_branch_prefix_hoist_pass, apply_split_flow_pass, apply_subflow_pruning,
     remove_callee_save_prologue_epilogue, remove_dead_callee_saved_param_loads,
     remove_entry_register_spills, remove_entry_stack_scaffold_stores,
 };
-use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::memory::{apply_constant_ptr_recovery_pass, apply_ptr_arith_recovery_pass};
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_iv_recovery_pass,
     copy_propagation_pass, join_coalescing_pass,
 };
+use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::apply_entry_param_promotion_pass;
+use super::stages::{
+    body_contains_popcount_call_admitted, cleanup_after_branch_prefix_hoist,
+    cleanup_after_callee_save_prologue_epilogue, cleanup_after_conditional_const,
+    cleanup_after_constant_folding_init, cleanup_after_constant_ptr_recovery,
+    cleanup_after_entry_param_promotion, cleanup_after_entry_stack_scaffold,
+    cleanup_after_entry_stack_scaffold_late, cleanup_after_flag_recovery,
+    cleanup_after_gvn_join_hoist, cleanup_after_loop_condition_temps, cleanup_after_sccp,
+    cleanup_after_single_pred_label_inline, cleanup_after_split_flow, cleanup_after_subvar_flow,
+    cleanup_after_subvar_trim, cleanup_elim_8, cleanup_prune_9, cleanup_prune_10,
+    cleanup_standalone_15, constant_folding_body_pass, defuse_after_branch_hoist_and_prune,
+    defuse_after_cse_and_prune, defuse_after_gvn_and_prune, defuse_after_licm_and_prune,
+    prune_after_elide_popcount, run_stage_cast_elision, run_stage_cleanup,
+    run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,
+    run_stage_proto_recovery_head, run_stage_type_early, sccp_is_admitted,
+    wide_dead_assignment_and_prune,
+};
+use fission_midend_core::wave_stats;
+use fission_midend_prehir::PreHirFunction;
 use fission_midend_prehir::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
     fn_pass, gated_followup, group,
 };
-use fission_midend_prehir::PreHirFunction;
 use std::time::Instant;
 
 struct CanonicalStagePass {
@@ -191,11 +189,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                     )],
                 ))
                 .pass(gated_followup(
-                    fn_pass(
-                        "conditional_const",
-                        concept,
-                        apply_conditional_const_pass,
-                    ),
+                    fn_pass("conditional_const", concept, apply_conditional_const_pass),
                     vec![cleanup_pass(
                         "cleanup_conditional_const",
                         concept,
@@ -229,11 +223,9 @@ pub fn build_normalize_pipeline() -> Pipeline {
                         vec![
                             fn_pass("cleanup_sccp", concept, cleanup_after_sccp),
                             gated_followup(
-                                fn_pass(
-                                    "constant_folding_after_sccp",
-                                    concept,
-                                    |f| constant_folding_pass(&mut f.body),
-                                ),
+                                fn_pass("constant_folding_after_sccp", concept, |f| {
+                                    constant_folding_pass(&mut f.body)
+                                }),
                                 vec![cleanup_pass("cleanup_elim_8", concept, cleanup_elim_8)],
                             ),
                             fn_pass(
@@ -252,11 +244,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                     fn_pass("cse", concept, apply_cse_pass),
                     vec![
                         gated_followup(
-                            fn_pass(
-                                "copy_propagation_after_cse",
-                                concept,
-                                copy_propagation_pass,
-                            ),
+                            fn_pass("copy_propagation_after_cse", concept, copy_propagation_pass),
                             vec![fn_pass(
                                 "defuse_dead_assignment_after_cse_copy",
                                 concept,
@@ -310,11 +298,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                 // Join-variable coalescing: unify parallel temporaries
                 // assigned in both branches of an if-else (SSA out-of-SSA
                 // for 2-way joins).
-                .pass(fn_pass(
-                    "join_coalescing",
-                    concept,
-                    join_coalescing_pass,
-                ))
+                .pass(fn_pass("join_coalescing", concept, join_coalescing_pass))
                 // If-else common pure-prefix hoisting: move identical
                 // leading assignments out of both branches (partial
                 // redundancy elimination for branches).
@@ -357,11 +341,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                 // GVN-lite at 2-way joins: duplicate pure RHS, different LHS
                 // → hoist temp.
                 .pass(gated_followup(
-                    fn_pass(
-                        "gvn_join_hoist",
-                        concept,
-                        apply_gvn_join_hoist_pass,
-                    ),
+                    fn_pass("gvn_join_hoist", concept, apply_gvn_join_hoist_pass),
                     vec![
                         fn_pass(
                             "cleanup_gvn_join_hoist",
@@ -369,11 +349,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                             cleanup_after_gvn_join_hoist,
                         ),
                         gated_followup(
-                            fn_pass(
-                                "copy_propagation_after_gvn",
-                                concept,
-                                copy_propagation_pass,
-                            ),
+                            fn_pass("copy_propagation_after_gvn", concept, copy_propagation_pass),
                             vec![fn_pass(
                                 "defuse_dead_assignment_after_gvn_copy",
                                 concept,
@@ -435,11 +411,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                 // Cast elision: kept as one stage_pass step (needs
                 // diag/perf forwarded to its own internal
                 // apply_type_signature_fixed_point call). See stages.rs.
-                .pass(stage_pass(
-                    "cast_elision",
-                    concept,
-                    run_stage_cast_elision,
-                ))
+                .pass(stage_pass("cast_elision", concept, run_stage_cast_elision))
                 // Sub-word data flow cast trimming: eliminate redundant
                 // casts of sub-word data flow variables.
                 .pass(gated_followup(
@@ -491,11 +463,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                     ],
                 ))
                 .pass(gated_followup(
-                    fn_pass(
-                        "conditional_move",
-                        concept,
-                        apply_conditional_move_pass,
-                    ),
+                    fn_pass("conditional_move", concept, apply_conditional_move_pass),
                     vec![cleanup_pass(
                         "cleanup_conditional_move",
                         concept,
@@ -545,22 +513,18 @@ pub fn build_normalize_pipeline() -> Pipeline {
         .group(
             group("block_structure_1", block)
                 .pass(gated_followup(
-                    fn_pass(
-                        "single_pred_label_inline",
-                        block,
-                        |f| single_pred_label_inline(&mut f.body),
-                    ),
+                    fn_pass("single_pred_label_inline", block, |f| {
+                        single_pred_label_inline(&mut f.body)
+                    }),
                     vec![fn_pass(
                         "cleanup_single_pred_label_inline",
                         block,
                         cleanup_after_single_pred_label_inline,
                     )],
                 ))
-                .pass(fn_pass(
-                    "dowhile_decrement_condition_norm",
-                    block,
-                    |f| normalize_dowhile_decrement_condition(&mut f.body),
-                ))
+                .pass(fn_pass("dowhile_decrement_condition_norm", block, |f| {
+                    normalize_dowhile_decrement_condition(&mut f.body)
+                }))
                 // Runs after label inlining so the loop body is maximally
                 // simplified before trailing-temp inlining looks at loop
                 // conditions.
@@ -593,11 +557,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                 // Goto-to-exit-label patterns inside loops with explicit
                 // break/continue statements.
                 .pass(gated_followup(
-                    fn_pass(
-                        "break_continue_recovery",
-                        block,
-                        apply_break_continue_pass,
-                    ),
+                    fn_pass("break_continue_recovery", block, apply_break_continue_pass),
                     vec![cleanup_pass("cleanup_prune_10", block, cleanup_prune_10)],
                 ))
                 // Loop Invariant Code Motion: hoist pure loop-invariant
@@ -682,7 +642,7 @@ pub fn run_normalize_pipeline(func: &mut PreHirFunction, diag: bool, perf: bool)
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     #[test]
     fn normalize_pipeline_has_ghidra_ordered_groups() {

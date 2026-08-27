@@ -4,15 +4,13 @@
 //! `PreviewBuilder` in `fission-pcode`. Core `lower_linear_body` still lives
 //! on the host until the full linear pipeline is extracted.
 
+use crate::HashSet;
 use crate::cleanup::cleanup_redundant_labels;
 use crate::helpers::block_label;
 use crate::host::StructuringHost;
-use crate::linear_types::{
-    LinearBodyLoweringOutcome, LinearExit, structuring_diag_enabled,
-};
-use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_prehir::{PreHirStmt};
-use crate::HashSet;
+use crate::linear_types::{LinearBodyLoweringOutcome, LinearExit, structuring_diag_enabled};
+use fission_midend_core::ir::MlilPreviewError;
+use fission_midend_prehir::PreHirStmt;
 
 /// Soft SESE region proof budget, in `sese_region_proof_budget_exceeded()`
 /// calls since the structuring attempt began. Deliberately a call count, not

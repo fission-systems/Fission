@@ -364,7 +364,8 @@ fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch()
                         bits: 32,
                         signed: false,
                     },
-                )))].into(),
+                )))]
+                .into(),
                 else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Const(
@@ -455,7 +456,8 @@ fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
                         ),
                     },
                     PreHirStmt::Expr(PreHirExpr::Var("tmp_1".to_string())),
-                ].into(),
+                ]
+                .into(),
                 else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("reg".to_string()))),
@@ -496,10 +498,12 @@ fn normalize_fuses_boundary_segment_with_nested_if() {
                     PreHirStmt::Expr(PreHirExpr::Var("pre".to_string())),
                     PreHirStmt::If {
                         cond: PreHirExpr::Var("flag".to_string()),
-                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))].into(),
+                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))]
+                            .into(),
                         else_body: Vec::new().into(),
                     },
-                ].into(),
+                ]
+                .into(),
                 else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("reg".to_string()))),

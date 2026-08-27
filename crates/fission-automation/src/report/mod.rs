@@ -3,11 +3,11 @@
 mod baseline_io;
 mod delta;
 mod insights;
+mod policy;
 mod quality;
 mod render;
 mod snapshot;
 mod summary_build;
-mod policy;
 
 pub use baseline_io::{load_baseline, load_baseline_candidates, update_latest};
 pub use delta::{SummaryDelta, compute_delta};

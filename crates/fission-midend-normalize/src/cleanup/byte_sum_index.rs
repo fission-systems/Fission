@@ -5,8 +5,8 @@
 //! materialized as `w = v` after `v = a + b`, downstream indexing can use the
 //! unbounded sum. This pass restores the bit-vector operation as `w = v & 0xff`.
 
-use crate::prelude::*;
 use crate::HashMap;
+use crate::prelude::*;
 
 /// Apply byte-sum index truncation recovery. Returns true if any rewrite ran.
 pub fn apply_byte_sum_index_trunc(func: &mut PreHirFunction) -> bool {
@@ -98,7 +98,9 @@ fn rewrite_stmt(
             byte_sum_names.insert(name.clone(), is_sum);
             last_def.insert(name.clone(), rhs.clone());
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
@@ -179,12 +181,26 @@ fn rewrite_stmt(
                 let mut d = last_def.clone();
                 let mut b = byte_ranged.clone();
                 let mut s = byte_sum_names.clone();
-                rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), type_map, &mut d, &mut b, &mut s, changed);
+                rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    type_map,
+                    &mut d,
+                    &mut b,
+                    &mut s,
+                    changed,
+                );
             }
             let mut d = last_def.clone();
             let mut b = byte_ranged.clone();
             let mut s = byte_sum_names.clone();
-            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), type_map, &mut d, &mut b, &mut s, changed);
+            rewrite_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                type_map,
+                &mut d,
+                &mut b,
+                &mut s,
+                changed,
+            );
         }
         _ => {}
     }
@@ -299,7 +315,7 @@ fn expr_is_byte_ranged(
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn u32_ty() -> NirType {
         NirType::Int {

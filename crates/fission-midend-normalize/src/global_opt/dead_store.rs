@@ -88,7 +88,8 @@ impl<'a> DeadStoreCollector<'a> {
     fn collect_stmt(&mut self, stmt: &PreHirStmt, path: Vec<usize>, out: &mut Vec<StmtPath>) {
         match stmt {
             PreHirStmt::Assign { lhs, .. } => {
-                let is_mem_write = matches!(lhs, PreHirLValue::Deref { .. } | PreHirLValue::Index { .. });
+                let is_mem_write =
+                    matches!(lhs, PreHirLValue::Deref { .. } | PreHirLValue::Index { .. });
                 if is_mem_write {
                     // Find the matching MemDef by scanning in order.
                     while self.current_def_idx < self.dead_defs.len()
@@ -230,14 +231,34 @@ fn recurse_remove(stmt: &mut PreHirStmt, paths: &[&StmtPath], depth: usize) {
             else_body,
             ..
         } => {
-            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), paths, depth, 0);
-            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), paths, depth, 1);
+            remove_at_branch(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                paths,
+                depth,
+                0,
+            );
+            remove_at_branch(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                paths,
+                depth,
+                1,
+            );
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), paths, depth, 0);
+            remove_at_branch(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                paths,
+                depth,
+                0,
+            );
         }
         PreHirStmt::For { body, .. } => {
-            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), paths, depth, 1);
+            remove_at_branch(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                paths,
+                depth,
+                1,
+            );
         }
         PreHirStmt::Block(stmts) => {
             let top: crate::HashSet<usize> = paths

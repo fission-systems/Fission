@@ -155,7 +155,10 @@ impl FpkReader {
             let comp_len = u32_at(&map, pos + 8) as usize;
             let raw_len = u32_at(&map, pos + 12) as usize;
             pos += 16;
-            if offset.checked_add(comp_len).is_none_or(|e| e > index_offset) {
+            if offset
+                .checked_add(comp_len)
+                .is_none_or(|e| e > index_offset)
+            {
                 return Err(FpkError::Malformed("block outside payload"));
             }
             blocks.push(BlockRef {
@@ -297,7 +300,11 @@ impl FpkReader {
         let mut hi = chunks;
         while lo < hi {
             let mid = (lo + hi) / 2;
-            if first_key_at(mid) < key { lo = mid + 1 } else { hi = mid }
+            if first_key_at(mid) < key {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
         }
         // `lo` is the first chunk whose first key is >= `key`. Anything earlier
         // in the run is in the preceding chunk, and only there, because a chunk
@@ -310,7 +317,10 @@ impl FpkReader {
             let offset = u64_at(directory, base + 8) as usize;
             let comp_len = u32_at(directory, base + 16) as usize;
             let count = u32_at(directory, base + 20) as usize;
-            if offset.checked_add(comp_len).is_none_or(|e| e > self.map.len()) {
+            if offset
+                .checked_add(comp_len)
+                .is_none_or(|e| e > self.map.len())
+            {
                 return Err(FpkError::Malformed("index chunk outside file"));
             }
             let raw = zstd::decode_all(&self.map[offset..offset + comp_len])
@@ -378,8 +388,6 @@ impl FpkReader {
     }
 }
 
-
-
 /// Rebuild rows from a columnar block.
 ///
 /// A columnar block stores every record's first field, then every record's
@@ -397,7 +405,11 @@ fn rows_from_columns(block: &str, offset: usize) -> Result<String, FpkError> {
         if column.is_empty() {
             continue;
         }
-        let values: Vec<&str> = column.strip_suffix('\n').unwrap_or(column).split('\n').collect();
+        let values: Vec<&str> = column
+            .strip_suffix('\n')
+            .unwrap_or(column)
+            .split('\n')
+            .collect();
         columns.push(values);
     }
     let Some(rows) = columns.first().map(Vec::len) else {
@@ -438,7 +450,6 @@ fn columns_from_rows(group: &[&String]) -> Vec<u8> {
     }
     out
 }
-
 
 // ── Auxiliary hash index ────────────────────────────────────────────────────
 //
@@ -510,7 +521,8 @@ pub fn append_hash_index(image: &mut Vec<u8>, mut entries: Vec<HashEntry>) {
         let compressed = zstd::encode_all(&raw[..], 19).expect("zstd encode to Vec cannot fail");
         // first key | offset | compressed len | entry count
         directory.extend_from_slice(&chunk[0].key.to_le_bytes());
-        directory.extend_from_slice(&((chunks_offset as usize + payload.len()) as u64).to_le_bytes());
+        directory
+            .extend_from_slice(&((chunks_offset as usize + payload.len()) as u64).to_le_bytes());
         directory.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
         directory.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
         payload.extend_from_slice(&compressed);
@@ -637,7 +649,9 @@ pub fn pack_with_locators(
         } else {
             let mut encoder =
                 flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
-            encoder.write_all(&raw).expect("zlib write to Vec cannot fail");
+            encoder
+                .write_all(&raw)
+                .expect("zlib write to Vec cannot fail");
             encoder.finish().expect("zlib finish on Vec cannot fail")
         };
         let first_key = key_of(group[0]);
@@ -810,12 +824,19 @@ mod tests {
         let ours = FpkReader::open(&ours_path).unwrap();
         let theirs = FpkReader::open(&theirs_path).unwrap();
         assert_eq!(ours.record_count(), theirs.record_count());
-        assert_eq!(ours.block_count(), theirs.block_count(), "block boundaries differ");
+        assert_eq!(
+            ours.block_count(),
+            theirs.block_count(),
+            "block boundaries differ"
+        );
         assert_eq!(ours.read_all().unwrap(), theirs.read_all().unwrap());
         // And both agree with the source they were built from.
         let mut expected = records;
         expected.sort_by(|a, b| {
-            a.split('|').next().unwrap_or("").cmp(b.split('|').next().unwrap_or(""))
+            a.split('|')
+                .next()
+                .unwrap_or("")
+                .cmp(b.split('|').next().unwrap_or(""))
         });
         assert_eq!(ours.read_all().unwrap(), expected);
 
@@ -828,13 +849,7 @@ mod tests {
         let records: Vec<String> = (0..500)
             .map(|i| format!("name{i:04}|{:016x}|lib{}|flag{}", i * 7919, i % 3, i % 2))
             .collect();
-        let path = write_temp(&super::pack_with(
-            &records,
-            1,
-            CODEC_ZSTD_COLUMNAR,
-            0,
-            4096,
-        ));
+        let path = write_temp(&super::pack_with(&records, 1, CODEC_ZSTD_COLUMNAR, 0, 4096));
         let reader = FpkReader::open(&path).unwrap();
         assert!(reader.block_count() > 1, "test needs several blocks");
         let mut all = reader.read_all().unwrap();
@@ -908,9 +923,7 @@ mod tests {
     fn duplicate_keys_all_come_back() {
         // A full hash can name several functions; keeping only one would
         // silently narrow matching.
-        let records: Vec<String> = (0..5)
-            .map(|i| format!("dup|name{i}|payload"))
-            .collect();
+        let records: Vec<String> = (0..5).map(|i| format!("dup|name{i}|payload")).collect();
         let (mut image, locators) = super::pack_with_locators(&records, 1, CODEC_ZLIB, 1, 64);
         let entries: Vec<HashEntry> = locators
             .iter()
@@ -944,7 +957,11 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, l)| HashEntry {
-                key: if (492..532).contains(&i) { 7 } else { 1000 + i as u64 },
+                key: if (492..532).contains(&i) {
+                    7
+                } else {
+                    1000 + i as u64
+                },
                 block: l.block,
                 row: l.row,
             })
@@ -953,7 +970,11 @@ mod tests {
 
         let path = write_temp(&image);
         let reader = FpkReader::open(&path).unwrap();
-        assert_eq!(reader.records_by_key(7).unwrap().len(), 40, "run split across chunks");
+        assert_eq!(
+            reader.records_by_key(7).unwrap().len(),
+            40,
+            "run split across chunks"
+        );
         assert_eq!(reader.records_by_key(1000).unwrap().len(), 1);
         assert!(reader.records_by_key(9_999_999).unwrap().is_empty());
         std::fs::remove_file(&path).ok();

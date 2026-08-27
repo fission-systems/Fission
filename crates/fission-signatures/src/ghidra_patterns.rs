@@ -122,16 +122,29 @@ pub fn load_ghidra_patterns(arch_tag: &str, compiler_id: Option<&str>) -> Vec<Gh
         // not guessed. Most processors don't branch on compiler_id at all
         // (their constraint file has no <compiler> tag) -- AARCH64 and
         // PowerPC are the exceptions actually present in the source data.
-        ("ARM_LE", _) => &["ghidra/ARM_LE_patterns.xml", "ghidra/ARM_switch_patterns.xml"],
-        ("ARM_BE", _) => &["ghidra/ARM_BE_patterns.xml", "ghidra/ARM_switch_patterns.xml"],
-        ("AARCH64", Some("windows")) => {
-            &["ghidra/AARCH64_LE_patterns.xml", "ghidra/AARCH64_win_patterns.xml"]
-        }
+        ("ARM_LE", _) => &[
+            "ghidra/ARM_LE_patterns.xml",
+            "ghidra/ARM_switch_patterns.xml",
+        ],
+        ("ARM_BE", _) => &[
+            "ghidra/ARM_BE_patterns.xml",
+            "ghidra/ARM_switch_patterns.xml",
+        ],
+        ("AARCH64", Some("windows")) => &[
+            "ghidra/AARCH64_LE_patterns.xml",
+            "ghidra/AARCH64_win_patterns.xml",
+        ],
         ("AARCH64", _) => &["ghidra/AARCH64_LE_patterns.xml"],
         ("MIPS_BE", _) => &["ghidra/MIPS_BE_patterns.xml"],
         ("MIPS_LE", _) => &["ghidra/MIPS_LE_patterns.xml"],
-        ("PowerPC_BE", _) => &["ghidra/PPC_BE_patterns.xml", "ghidra/PPC_BE_prepatterns.xml"],
-        ("PowerPC_LE", _) => &["ghidra/PPC_LE_patterns.xml", "ghidra/PPC_LE_prepatterns.xml"],
+        ("PowerPC_BE", _) => &[
+            "ghidra/PPC_BE_patterns.xml",
+            "ghidra/PPC_BE_prepatterns.xml",
+        ],
+        ("PowerPC_LE", _) => &[
+            "ghidra/PPC_LE_patterns.xml",
+            "ghidra/PPC_LE_prepatterns.xml",
+        ],
         ("Sparc", _) => &["ghidra/SPARC_patterns.xml"],
         ("SuperH4", _) => &["ghidra/SuperH4_patterns.xml"],
         ("V850", _) => &["ghidra/V850_patterns.xml"],
@@ -564,7 +577,10 @@ mod tests {
             ("Xtensa", None),
         ] {
             let patterns = load_ghidra_patterns(tag, compiler);
-            assert!(!patterns.is_empty(), "expected non-empty patterns for {tag}/{compiler:?}");
+            assert!(
+                !patterns.is_empty(),
+                "expected non-empty patterns for {tag}/{compiler:?}"
+            );
         }
     }
 

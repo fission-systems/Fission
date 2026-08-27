@@ -14,10 +14,10 @@
 //! empty bins and a huge page-count field — next dig is mask/init integrity
 //! on the alloc_meta path (not missing syscall numbers).
 
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use std::path::PathBuf;
@@ -52,10 +52,7 @@ fn static_elf_bss_tail_page_mapped() {
     let mut state = MachineState::new();
     let _info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).unwrap();
     // .bss = 0x1007D00 size 0x9E0 → ends 0x10086E0; must cover page 0x1008000.
-    assert!(
-        state.page_map.is_mapped(0x1007F20),
-        "init-flag page"
-    );
+    assert!(state.page_map.is_mapped(0x1007F20), "init-flag page");
     assert!(
         state.page_map.is_mapped(0x10082B0),
         "brk_cur / mallocng tail page must be mapped"
@@ -108,7 +105,10 @@ fn alloc_meta_init_and_mask_sane_after_first_meta() {
         let b = emu.state.read_space(ram, 0x1007F18, 8).unwrap();
         u64::from_le_bytes(b.try_into().unwrap())
     };
-    assert_eq!(init, 1, "alloc_meta init_done must stick (RIP-relative mov imm)");
+    assert_eq!(
+        init, 1,
+        "alloc_meta init_done must stick (RIP-relative mov imm)"
+    );
     assert_ne!(secret, 0, "secret from AT_RANDOM");
     // mask is page count remaining — must not be the bogus (2<<56)-1 pattern
     assert!(

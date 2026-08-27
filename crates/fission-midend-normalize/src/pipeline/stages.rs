@@ -15,11 +15,10 @@ use super::super::cleanup::{
     apply_subvar_trim_pass, apply_switch_norm_pass, canonicalize_minmax_conditional_returns,
     canonicalize_orphaned_stack_slot_names, cast_elision_pass, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
-    eliminate_overwritten_assigns, hoist_shared_select_casts,
-    eliminate_redundant_var_assigns,
-    hoist_param_alias_copies_before_first_use, inline_loop_condition_trailing_temps,
-    normalize_dowhile_decrement_condition, prune_unused_dead_local_bindings,
-    prune_unused_temp_bindings, rescue_undeclared_bindings,
+    eliminate_overwritten_assigns, eliminate_redundant_var_assigns,
+    hoist_param_alias_copies_before_first_use, hoist_shared_select_casts,
+    inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
+    prune_unused_dead_local_bindings, prune_unused_temp_bindings, rescue_undeclared_bindings,
     simplify_empty_and_constant_ifs_recursive, single_pred_label_inline,
 };
 use super::super::global_opt::{
@@ -860,7 +859,8 @@ mod tests {
                             lhs: PreHirLValue::Var("cursor".to_string()),
                             rhs: PreHirExpr::Var("next".to_string()),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                 },
             ],
             calling_convention: Default::default(),

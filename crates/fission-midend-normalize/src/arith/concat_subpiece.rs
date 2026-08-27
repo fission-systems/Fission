@@ -1,8 +1,8 @@
 //! CONCAT/SUBPIECE/SHIFT algebra inspired by Ghidra RuleHumptyDumpty,
 //! RuleDumptyHump, and RuleDumptyHumpLate.
 
-use crate::prelude::*;
 use super::util::*;
+use crate::prelude::*;
 
 /// `Or(Shl(Shr(x, n), n), And(x, low_mask))` where `low_mask == (1<<n)-1`
 /// reassembles a SUBPIECE/CONCAT split back to `x` (optionally cast to `ty`).
@@ -300,7 +300,7 @@ fn scalar_cast_signature(ty: &NirType) -> Option<(u32, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn u32_ty() -> NirType {
         NirType::Int {

@@ -1,7 +1,7 @@
-use anyhow::Result;
 use crate::core::Emulator;
 use crate::os::env::HleResult;
 use crate::os::procedure::SimProcedure;
+use anyhow::Result;
 
 pub struct Malloc;
 impl SimProcedure for Malloc {
@@ -22,12 +22,7 @@ impl SimProcedure for Calloc {
         let total = nmemb.saturating_mul(size);
         let ptr = emu.heap_alloc(total)?;
         // heap_alloc already zeros the region.
-        tracing::info!(
-            "SimProcedure: calloc({}, {}) -> 0x{:X}",
-            nmemb,
-            size,
-            ptr
-        );
+        tracing::info!("SimProcedure: calloc({}, {}) -> 0x{:X}", nmemb, size, ptr);
         emu.write_return_val(ptr)?;
         Ok(HleResult::Continue)
     }
@@ -74,7 +69,13 @@ impl SimProcedure for Strncmp {
         let b = emu.read_arg(1).unwrap_or(0);
         let n = emu.read_arg(2).unwrap_or(0) as usize;
         let r = c_strcmp(emu, a, b, Some(n));
-        tracing::info!("SimProcedure: strncmp(0x{:X}, 0x{:X}, {}) -> {}", a, b, n, r);
+        tracing::info!(
+            "SimProcedure: strncmp(0x{:X}, 0x{:X}, {}) -> {}",
+            a,
+            b,
+            n,
+            r
+        );
         emu.write_return_val(r as u64)?;
         Ok(HleResult::Continue)
     }
@@ -230,9 +231,7 @@ impl SimProcedure for Snprintf {
                 bytes.truncate(size.saturating_sub(1));
             }
             bytes.push(0);
-            let _ = emu
-                .state
-                .write_space(emu.state.ram_space(), buf, &bytes);
+            let _ = emu.state.write_space(emu.state.ram_space(), buf, &bytes);
         }
         tracing::info!(
             "SimProcedure: snprintf(0x{:X}, {}, \"{}\") -> {}",
@@ -342,7 +341,10 @@ impl SimProcedure for Write {
         let count = emu.read_arg(2).unwrap_or(0);
 
         if fd == 1 || fd == 2 {
-            let data = emu.state.read_space(emu.state.ram_space(), buf, count as usize).unwrap_or_default();
+            let data = emu
+                .state
+                .read_space(emu.state.ram_space(), buf, count as usize)
+                .unwrap_or_default();
             print!("{}", String::from_utf8_lossy(&data));
         } else {
             tracing::info!("SimProcedure: write({}, 0x{:X}, {})", fd, buf, count);
@@ -386,9 +388,11 @@ impl SimProcedure for LibcStartMain {
         // our post-main exit stub so main's ret is a clean process halt.
         const POST_MAIN_EXIT_STUB: u64 = 0xFFFFFFF1000000F8;
         if let Ok(rsp) = emu.read_register_u64("RSP") {
-            let _ = emu
-                .state
-                .write_space(emu.state.ram_space(), rsp, &POST_MAIN_EXIT_STUB.to_le_bytes());
+            let _ = emu.state.write_space(
+                emu.state.ram_space(),
+                rsp,
+                &POST_MAIN_EXIT_STUB.to_le_bytes(),
+            );
         }
         // musl main(int argc, char **argv): rdi=argc, rsi=argv
         let _ = emu.write_register_u64("RDI", argc);
@@ -411,11 +415,18 @@ pub fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {
     let mut bytes = Vec::new();
     let mut cur = addr;
     loop {
-        let b = emu.state.read_space(emu.state.ram_space(), cur, 1).unwrap_or(vec![0])[0];
-        if b == 0 { break; }
+        let b = emu
+            .state
+            .read_space(emu.state.ram_space(), cur, 1)
+            .unwrap_or(vec![0])[0];
+        if b == 0 {
+            break;
+        }
         bytes.push(b);
         cur += 1;
-        if bytes.len() > 4096 { break; }
+        if bytes.len() > 4096 {
+            break;
+        }
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
@@ -560,16 +571,17 @@ pub fn format_printf(emu: &mut Emulator, fmt: &str, first_arg: usize) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MachineState;
     use crate::arch::ArchInfo;
     use crate::core::Emulator;
     use crate::os::LinuxEnv;
-    use crate::MachineState;
     use fission_loader::loader::LoadedBinary;
     use fission_sleigh::runtime::RuntimeSleighFrontend;
     use std::path::PathBuf;
 
     fn tiny_emu() -> Emulator {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
         let binary = LoadedBinary::from_file(&path).expect("fixture");
         let mut state = MachineState::new();
         let _ = crate::os::linux::loader::load_elf(&mut state, &binary);

@@ -60,9 +60,9 @@
 //! as the reference owners duplicate into "each predecessor but one") and only
 //! the `goto`s are replaced.
 
-use fission_midend_prehir::PreHirStmt;
 use crate::HashMap;
 use crate::HashSet;
+use fission_midend_prehir::PreHirStmt;
 
 /// Longest tail this pass will copy, in statements (recursive count).
 pub const MAX_TAIL_STMTS: usize = 6;
@@ -222,7 +222,9 @@ fn duplicable_region_at(
 /// its sole reference (`allow_goto`), jumps inside it move rather than
 /// multiply, so they are admissible.
 fn region_is_relocatable(region: &[PreHirStmt], allow_goto: bool) -> bool {
-    region.iter().all(|stmt| stmt_is_relocatable(stmt, allow_goto))
+    region
+        .iter()
+        .all(|stmt| stmt_is_relocatable(stmt, allow_goto))
 }
 
 fn stmt_is_relocatable(stmt: &PreHirStmt, allow_goto: bool) -> bool {

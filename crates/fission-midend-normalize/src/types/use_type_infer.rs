@@ -115,7 +115,9 @@ fn collect_binding_use_roles_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, B
             collect_binding_use_roles_expr(expr, out);
         }
         PreHirStmt::VaStart { va_list, .. } => collect_binding_use_roles_expr(va_list, out),
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             collect_binding_use_roles(body, out);
         }
         PreHirStmt::If {
@@ -590,7 +592,9 @@ fn expr_is_numeric_offset(expr: &PreHirExpr) -> bool {
             PreHirExpr::Var(_) => false,
             other => expr_is_numeric_offset(other),
         },
-        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => expr_is_numeric_offset(expr),
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
+            expr_is_numeric_offset(expr)
+        }
         PreHirExpr::Binary {
             op:
                 PreHirBinaryOp::Add
@@ -806,7 +810,10 @@ fn collect_constraints_cast_source(
         }
         if matches!(ty, NirType::Int { .. })
             && let PreHirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref()
-            && matches!(op, PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Mul)
+            && matches!(
+                op,
+                PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Mul
+            )
         {
             collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
         }
@@ -836,11 +843,17 @@ fn collect_constraints_expr(
                 // Signed comparison → operands are signed integers.  The
                 // comparison expression itself is Bool, so operand width must
                 // come from an actual operand or an existing binding type.
-                PreHirBinaryOp::SLt | PreHirBinaryOp::SLe | PreHirBinaryOp::SGt | PreHirBinaryOp::SGe => {
+                PreHirBinaryOp::SLt
+                | PreHirBinaryOp::SLe
+                | PreHirBinaryOp::SGt
+                | PreHirBinaryOp::SGe => {
                     collect_compare_constraints(lhs, rhs, ty, known_binding_types, true, out)
                 }
                 // Unsigned comparison → operands are unsigned integers.
-                PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge => {
+                PreHirBinaryOp::Lt
+                | PreHirBinaryOp::Le
+                | PreHirBinaryOp::Gt
+                | PreHirBinaryOp::Ge => {
                     collect_compare_constraints(lhs, rhs, ty, known_binding_types, false, out)
                 }
                 // Arithmetic right-shift: the left operand must be a signed integer.
@@ -1118,7 +1131,11 @@ fn is_byte_accumulator_update(
     };
     matches!(
         op,
-        PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Xor | PreHirBinaryOp::And | PreHirBinaryOp::Or
+        PreHirBinaryOp::Add
+            | PreHirBinaryOp::Sub
+            | PreHirBinaryOp::Xor
+            | PreHirBinaryOp::And
+            | PreHirBinaryOp::Or
     ) && ((expr_is_var(lhs, name) && is_byte_expr(rhs, known_binding_types))
         || (expr_is_var(rhs, name) && is_byte_expr(lhs, known_binding_types)))
 }
@@ -1147,7 +1164,12 @@ fn collect_byte_index_accumulator_evidence(
     evidence: &mut HashMap<String, ByteIndexAccumulatorEvidence>,
 ) {
     for stmt in stmts {
-        collect_byte_index_accumulator_evidence_stmt(stmt, candidates, known_binding_types, evidence);
+        collect_byte_index_accumulator_evidence_stmt(
+            stmt,
+            candidates,
+            known_binding_types,
+            evidence,
+        );
     }
 }
 
@@ -1210,8 +1232,15 @@ fn collect_byte_index_accumulator_evidence_stmt(
                 evidence,
             );
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            collect_byte_index_accumulator_evidence(body, candidates, known_binding_types, evidence);
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
+            collect_byte_index_accumulator_evidence(
+                body,
+                candidates,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirStmt::If {
             cond,
@@ -1225,8 +1254,18 @@ fn collect_byte_index_accumulator_evidence_stmt(
                 known_binding_types,
                 evidence,
             );
-            collect_byte_index_accumulator_evidence(then_body, candidates, known_binding_types, evidence);
-            collect_byte_index_accumulator_evidence(else_body, candidates, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(
+                then_body,
+                candidates,
+                known_binding_types,
+                evidence,
+            );
+            collect_byte_index_accumulator_evidence(
+                else_body,
+                candidates,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirStmt::For {
             init,
@@ -1235,7 +1274,12 @@ fn collect_byte_index_accumulator_evidence_stmt(
             body,
         } => {
             if let Some(init) = init {
-                collect_byte_index_accumulator_evidence_stmt(init, candidates, known_binding_types, evidence);
+                collect_byte_index_accumulator_evidence_stmt(
+                    init,
+                    candidates,
+                    known_binding_types,
+                    evidence,
+                );
             }
             if let Some(cond) = cond {
                 collect_byte_index_accumulator_evidence_expr(
@@ -1247,9 +1291,19 @@ fn collect_byte_index_accumulator_evidence_stmt(
                 );
             }
             if let Some(update) = update {
-                collect_byte_index_accumulator_evidence_stmt(update, candidates, known_binding_types, evidence);
+                collect_byte_index_accumulator_evidence_stmt(
+                    update,
+                    candidates,
+                    known_binding_types,
+                    evidence,
+                );
             }
-            collect_byte_index_accumulator_evidence(body, candidates, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(
+                body,
+                candidates,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirStmt::Switch {
             expr,
@@ -1264,9 +1318,19 @@ fn collect_byte_index_accumulator_evidence_stmt(
                 evidence,
             );
             for case in cases {
-                collect_byte_index_accumulator_evidence(&case.body, candidates, known_binding_types, evidence);
+                collect_byte_index_accumulator_evidence(
+                    &case.body,
+                    candidates,
+                    known_binding_types,
+                    evidence,
+                );
             }
-            collect_byte_index_accumulator_evidence(default, candidates, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(
+                default,
+                candidates,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirStmt::VaStart { va_list, .. } => {
             collect_byte_index_accumulator_evidence_expr(
@@ -1333,7 +1397,10 @@ fn collect_byte_index_accumulator_evidence_expr(
         PreHirExpr::Var(var_name) | PreHirExpr::AddressOfGlobal(var_name)
             if candidates.contains(var_name) && Some(var_name.as_str()) != exclude =>
         {
-            evidence.entry(var_name.clone()).or_default().disallowed_uses += 1;
+            evidence
+                .entry(var_name.clone())
+                .or_default()
+                .disallowed_uses += 1;
         }
         PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::Unary { expr: inner, .. }
@@ -1354,12 +1421,14 @@ fn collect_byte_index_accumulator_evidence_expr(
             lhs,
             rhs,
             ..
-        } if direct_var_name(lhs)
-            .is_some_and(|v| candidates.contains(v) && Some(v) != exclude)
+        } if direct_var_name(lhs).is_some_and(|v| candidates.contains(v) && Some(v) != exclude)
             && is_byte_pointer_expr(rhs, known_binding_types) =>
         {
             let v = direct_var_name(lhs).expect("guard matched Some");
-            evidence.entry(v.to_owned()).or_default().byte_pointer_offset_uses += 1;
+            evidence
+                .entry(v.to_owned())
+                .or_default()
+                .byte_pointer_offset_uses += 1;
             // `lhs` (the identified candidate) is fully accounted for above;
             // `rhs` (the pointer operand) may still reference *other*
             // candidates and still needs its own scan.
@@ -1376,12 +1445,14 @@ fn collect_byte_index_accumulator_evidence_expr(
             lhs,
             rhs,
             ..
-        } if direct_var_name(rhs)
-            .is_some_and(|v| candidates.contains(v) && Some(v) != exclude)
+        } if direct_var_name(rhs).is_some_and(|v| candidates.contains(v) && Some(v) != exclude)
             && is_byte_pointer_expr(lhs, known_binding_types) =>
         {
             let v = direct_var_name(rhs).expect("guard matched Some");
-            evidence.entry(v.to_owned()).or_default().byte_pointer_offset_uses += 1;
+            evidence
+                .entry(v.to_owned())
+                .or_default()
+                .byte_pointer_offset_uses += 1;
             collect_byte_index_accumulator_evidence_expr(
                 lhs,
                 candidates,
@@ -2069,7 +2140,13 @@ fn collect_wrapping_narrow_return_vars(
                 {
                     if let Some(Some(def)) = ctx.single_defs.get(name) {
                         seen.push(name.clone());
-                        collect_wrapping_narrow_return_vars(def, context_bits, out, Some(ctx), seen);
+                        collect_wrapping_narrow_return_vars(
+                            def,
+                            context_bits,
+                            out,
+                            Some(ctx),
+                            seen,
+                        );
                         seen.pop();
                         return;
                     }
@@ -2223,10 +2300,7 @@ fn merge_constraint(binding: &mut PreHirBinding, constraint: &UseConstraint) -> 
         (NirType::Bool, _) => false,
         // Full XMM vector bindings start as Aggregate(16) from PXOR zeroing;
         // FLOAT_ADD/MULT use evidence upgrades them to a float lane type.
-        (
-            NirType::Aggregate { .. },
-            UseConstraint::Exact(NirType::Float { bits }),
-        ) => {
+        (NirType::Aggregate { .. }, UseConstraint::Exact(NirType::Float { bits })) => {
             binding.ty = NirType::Float { bits: *bits };
             true
         }
@@ -2234,24 +2308,19 @@ fn merge_constraint(binding: &mut PreHirBinding, constraint: &UseConstraint) -> 
 
         // Same-width int pointee → float pointee when float ops prove element type.
         // Size-4 loads default to `uint*`; FLOAT_MULT use upgrades to `float*`.
-        (
-            NirType::Ptr(cur_pointee),
-            UseConstraint::Ptr(NirType::Float { bits: float_bits }),
-        ) => match cur_pointee.as_ref() {
-            NirType::Int { bits, .. } if bits == float_bits => {
-                binding.ty = NirType::Ptr(Box::new(NirType::Float {
-                    bits: *float_bits,
-                }));
-                true
+        (NirType::Ptr(cur_pointee), UseConstraint::Ptr(NirType::Float { bits: float_bits })) => {
+            match cur_pointee.as_ref() {
+                NirType::Int { bits, .. } if bits == float_bits => {
+                    binding.ty = NirType::Ptr(Box::new(NirType::Float { bits: *float_bits }));
+                    true
+                }
+                NirType::Unknown => {
+                    binding.ty = NirType::Ptr(Box::new(NirType::Float { bits: *float_bits }));
+                    true
+                }
+                _ => false,
             }
-            NirType::Unknown => {
-                binding.ty = NirType::Ptr(Box::new(NirType::Float {
-                    bits: *float_bits,
-                }));
-                true
-            }
-            _ => false,
-        },
+        }
         (NirType::Ptr(_), _) => false,
 
         // Pointer constraint — always upgrade when current is Unknown or Int.
@@ -2271,15 +2340,10 @@ fn merge_constraint(binding: &mut PreHirBinding, constraint: &UseConstraint) -> 
             true
         }
         // Same-width int → float when float arithmetic uses the value.
-        (
-            NirType::Int { bits, .. },
-            UseConstraint::Exact(NirType::Float {
-                bits: float_bits,
-            }),
-        ) if bits == float_bits => {
-            binding.ty = NirType::Float {
-                bits: *float_bits,
-            };
+        (NirType::Int { bits, .. }, UseConstraint::Exact(NirType::Float { bits: float_bits }))
+            if bits == float_bits =>
+        {
+            binding.ty = NirType::Float { bits: *float_bits };
             true
         }
         (
@@ -2498,7 +2562,8 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
-        round_changed |= restore_scalar_only_pointer_locals(func, &constraints, &roles, &dependencies);
+        round_changed |=
+            restore_scalar_only_pointer_locals(func, &constraints, &roles, &dependencies);
         round_changed |= narrow_byte_index_accumulators(func);
         if !round_changed {
             break;
@@ -2531,7 +2596,11 @@ mod tests {
         }
     }
 
-    fn make_func(locals: Vec<PreHirBinding>, body: Vec<PreHirStmt>, return_type: NirType) -> PreHirFunction {
+    fn make_func(
+        locals: Vec<PreHirBinding>,
+        body: Vec<PreHirStmt>,
+        return_type: NirType,
+    ) -> PreHirFunction {
         PreHirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
@@ -3161,8 +3230,12 @@ mod tests {
                 target: "param_1".to_owned(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
-            }))].into(),
-            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("fallback".to_owned())))].into(),
+            }))]
+            .into(),
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var(
+                "fallback".to_owned(),
+            )))]
+            .into(),
         }];
         let mut func = make_func(Vec::new(), body, NirType::Unknown);
         func.is_64bit = false;

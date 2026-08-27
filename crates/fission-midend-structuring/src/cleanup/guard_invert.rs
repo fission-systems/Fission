@@ -45,10 +45,10 @@
 //! conditional does not introduce a loop, so any `break`/`continue` in the
 //! span still binds to the same enclosing loop it did before.
 
-use fission_midend_prehir::{PreHirExpr, PreHirStmt};
-use fission_midend_prehir::util::negate_expr;
 use crate::HashMap;
 use crate::HashSet;
+use fission_midend_prehir::util::negate_expr;
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
 /// Largest span (recursive statement count) this pass will pull into an
 /// inverted guard body.
@@ -102,11 +102,7 @@ pub fn invert_forward_guard_gotos(
 /// anyway. Without this the pass only ever saw labels in its own statement
 /// list, and the commonest remaining forward jump was exactly the shape it
 /// could not reach: `if (c) { goto L; } TAIL }` with `L:` in the parent.
-fn fallthrough_labels_after(
-    stmts: &[PreHirStmt],
-    idx: usize,
-    inherited: &[String],
-) -> Vec<String> {
+fn fallthrough_labels_after(stmts: &[PreHirStmt], idx: usize, inherited: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for stmt in &stmts[idx + 1..] {
         match stmt {
@@ -196,8 +192,7 @@ fn invert_in_place(
                             unreachable!("guard_goto_target matched an If");
                         };
                         let cond = negate_expr(cond.clone());
-                        let span: Vec<PreHirStmt> =
-                            stmts.drain(idx + 1..label_idx).collect();
+                        let span: Vec<PreHirStmt> = stmts.drain(idx + 1..label_idx).collect();
                         stmts[idx] = PreHirStmt::If {
                             cond,
                             then_body: std::rc::Rc::new(span),
@@ -223,10 +218,7 @@ fn invert_in_place(
         }
         // A loop body falls back to its own head, not past the loop, so only
         // straight-line containers inherit anything.
-        let inherited = if matches!(
-            stmts[idx],
-            PreHirStmt::If { .. } | PreHirStmt::Block(_)
-        ) {
+        let inherited = if matches!(stmts[idx], PreHirStmt::If { .. } | PreHirStmt::Block(_)) {
             fallthrough_labels_after(stmts, idx, falls_through_to)
         } else {
             Vec::new()
@@ -270,9 +262,7 @@ fn fold_guard_chain_into_labeled_if(
         conditions.push(cond.clone());
         cursor += 1;
     }
-    if conditions.is_empty()
-        || global_refs.get(target).copied() != Some(conditions.len())
-    {
+    if conditions.is_empty() || global_refs.get(target).copied() != Some(conditions.len()) {
         return None;
     }
 
@@ -573,21 +563,15 @@ mod tests {
     fn labeled_if(target: &str) -> PreHirStmt {
         PreHirStmt::If {
             cond: var("tail_cond"),
-            then_body: vec![
-                PreHirStmt::Label(target.into()),
-                expr_stmt("body"),
-            ]
-            .into(),
+            then_body: vec![PreHirStmt::Label(target.into()), expr_stmt("body")].into(),
             else_body: Vec::new().into(),
         }
     }
 
     #[test]
     fn folds_guard_into_labeled_if_as_short_circuit_or() {
-        let (out, removed) = invert_forward_guard_gotos(
-            vec![guard("L"), labeled_if("L")],
-            &HashSet::default(),
-        );
+        let (out, removed) =
+            invert_forward_guard_gotos(vec![guard("L"), labeled_if("L")], &HashSet::default());
         assert_eq!(removed, 1);
         assert_eq!(out.len(), 1);
         let PreHirStmt::If {
@@ -756,11 +740,7 @@ mod tests {
 
     #[test]
     fn refuses_backward_target() {
-        let body = vec![
-            PreHirStmt::Label("L".into()),
-            expr_stmt("a"),
-            guard("L"),
-        ];
+        let body = vec![PreHirStmt::Label("L".into()), expr_stmt("a"), guard("L")];
         let (out, removed) = invert_forward_guard_gotos(body.clone(), &HashSet::default());
         assert_eq!(removed, 0);
         assert_eq!(out, body);
@@ -861,7 +841,10 @@ mod tests {
         let (out, removed) = invert_forward_guard_gotos(body, &HashSet::default());
         // Falls back to the plain single-jump inversion, never the if/else form.
         assert_ne!(removed, 2);
-        assert!(out.iter().any(|s| matches!(s, PreHirStmt::Label(l) if l == "Lelse")));
+        assert!(
+            out.iter()
+                .any(|s| matches!(s, PreHirStmt::Label(l) if l == "Lelse"))
+        );
     }
 
     #[test]
@@ -877,7 +860,10 @@ mod tests {
             PreHirStmt::Goto("Inner".into()),
         ];
         let (_, removed) = invert_forward_guard_gotos(body, &HashSet::default());
-        assert_ne!(removed, 2, "a label the outside jumps to must block recovery");
+        assert_ne!(
+            removed, 2,
+            "a label the outside jumps to must block recovery"
+        );
     }
 
     #[test]

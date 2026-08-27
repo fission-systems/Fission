@@ -88,9 +88,9 @@ pub enum CallGraphSort {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BinaryString {
     /// File offset of the string start.
-    pub offset:  u64,
+    pub offset: u64,
     /// The string value (UTF-8 decoded).
-    pub value:   String,
+    pub value: String,
     /// Section name if known (e.g. ".rdata", ".rodata").
     pub section: String,
 }
@@ -123,7 +123,9 @@ impl LogEntry {
                 .unwrap_or(0)
         }
         #[cfg(target_arch = "wasm32")]
-        { 0 }
+        {
+            0
+        }
     }
 
     pub fn info(msg: impl Into<String>) -> Self {
@@ -155,16 +157,16 @@ impl LogEntry {
 pub struct AppState {
     // ── Binary ──────────────────────────────────────────────────────────────
     pub binary_name: Option<String>,
-    pub binary:      Option<Arc<LoadedBinary>>,
-    pub functions:   Vec<FunctionInfo>,
+    pub binary: Option<Arc<LoadedBinary>>,
+    pub functions: Vec<FunctionInfo>,
 
     // ── Server (WASM mode) ───────────────────────────────────────────────────
     /// URL of the fission-serve instance (default: http://localhost:7331).
     /// Only used when running as WASM in the browser.
-    pub server_url:        String,
-    pub server_connected:  bool,
+    pub server_url: String,
+    pub server_connected: bool,
     /// Last capability/resource report returned by the active backend.
-    pub backend_status:    Option<StatusResponse>,
+    pub backend_status: Option<StatusResponse>,
     /// Session token returned by POST /api/binary.
     /// All subsequent WASM API calls include this in the path.
     pub server_session_id: Option<String>,
@@ -240,8 +242,8 @@ pub struct AppState {
     pub sidebar_scroll_target: Option<u64>,
 
     // ── Sidebar ──────────────────────────────────────────────────────────────
-    pub sidebar_search:    String,
-    pub sidebar_tab:       SidebarTab,
+    pub sidebar_search: String,
+    pub sidebar_tab: SidebarTab,
     pub sidebar_kind_filter: SidebarKindFilter,
     /// How many rows of the current filtered function list are actually
     /// mounted in the DOM. `content-visibility: auto` only ever addressed
@@ -254,26 +256,26 @@ pub struct AppState {
     pub sidebar_render_limit: usize,
 
     // ── Strings browser ──────────────────────────────────────────────────────
-    pub strings:           Vec<BinaryString>,
-    pub strings_search:    String,
+    pub strings: Vec<BinaryString>,
+    pub strings_search: String,
     /// Set when the user clicks a string in the sidebar: the Hex tab shows a
     /// window centred on this VA instead of the current function's bytes.
     /// Cleared by real navigation (`navigate_to`/`nav_back`/`nav_forward`) so
     /// it never lingers after the user moves to a different function.
-    pub hex_view_target:   Option<u64>,
+    pub hex_view_target: Option<u64>,
 
     // ── Rename map ───────────────────────────────────────────────────────────
     /// User-defined function name overrides: addr → custom name.
-    pub rename_map:        HashMap<u64, String>,
+    pub rename_map: HashMap<u64, String>,
 
     // ── Comments ─────────────────────────────────────────────────────────────
     /// User-authored per-address annotations, editable inline in the
     /// Disassembly view: instruction addr → comment text.
-    pub comments:           HashMap<u64, String>,
+    pub comments: HashMap<u64, String>,
 
     // ── Find bar (editor Ctrl+F) ─────────────────────────────────────────────
-    pub find_query:        String,
-    pub find_bar_open:     bool,
+    pub find_query: String,
+    pub find_bar_open: bool,
     /// 0-based index of the "current" match, for Enter/next/prev navigation.
     /// Clamped against the live match count on every render (see `Editor`).
     pub find_current_index: usize,
@@ -305,9 +307,9 @@ impl AppState {
             binary_name: None,
             binary: None,
             functions: Vec::new(),
-            server_url:        "http://localhost:7331".to_string(),
-            server_connected:  false,
-            backend_status:    None,
+            server_url: "http://localhost:7331".to_string(),
+            server_connected: false,
+            backend_status: None,
             server_session_id: None,
             current_function_addr: None,
             current_function_kind: FunctionKind::Code,
@@ -339,16 +341,16 @@ impl AppState {
             nav_cursor: 0,
             sidebar_scroll_target: None,
             sidebar_search: String::new(),
-            sidebar_tab:    SidebarTab::Functions,
+            sidebar_tab: SidebarTab::Functions,
             sidebar_kind_filter: SidebarKindFilter::All,
             sidebar_render_limit: SIDEBAR_RENDER_BATCH,
-            strings:        Vec::new(),
+            strings: Vec::new(),
             strings_search: String::new(),
             hex_view_target: None,
-            rename_map:     HashMap::new(),
-            comments:       HashMap::new(),
-            find_query:     String::new(),
-            find_bar_open:  false,
+            rename_map: HashMap::new(),
+            comments: HashMap::new(),
+            find_query: String::new(),
+            find_bar_open: false,
             find_current_index: 0,
             is_palette_open: false,
             palette_query: String::new(),
@@ -467,13 +469,23 @@ impl AppState {
 
     /// Returns the *original* (FID/loader) name regardless of rename_map.
     pub fn original_function_name(&self, addr: u64) -> Option<String> {
-        self.functions.iter().find(|f| f.address == addr).map(|f| f.name.clone())
+        self.functions
+            .iter()
+            .find(|f| f.address == addr)
+            .map(|f| f.name.clone())
     }
 
     /// Returns the display name for a given address (rename_map then loader).
     pub fn display_name(&self, addr: u64) -> String {
-        self.rename_map.get(&addr).cloned()
-            .or_else(|| self.functions.iter().find(|f| f.address == addr).map(|f| f.name.clone()))
+        self.rename_map
+            .get(&addr)
+            .cloned()
+            .or_else(|| {
+                self.functions
+                    .iter()
+                    .find(|f| f.address == addr)
+                    .map(|f| f.name.clone())
+            })
             .unwrap_or_else(|| format!("sub_{addr:x}"))
     }
 

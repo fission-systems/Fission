@@ -1,7 +1,7 @@
-use anyhow::Result;
 use crate::core::Emulator;
-use crate::pcode::state::MachineState;
 use crate::os::env::{HleResult, OsEnvironment};
+use crate::pcode::state::MachineState;
+use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 
 /// Bare-metal / firmware execution environment.
@@ -16,7 +16,9 @@ pub struct BareMetalEnv {
 
 impl BareMetalEnv {
     pub fn new() -> Self {
-        Self { mmio_regions: Vec::new() }
+        Self {
+            mmio_regions: Vec::new(),
+        }
     }
 
     /// Register an MMIO region for tracing. Reads/writes in this range
@@ -27,7 +29,9 @@ impl BareMetalEnv {
 }
 
 impl Default for BareMetalEnv {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OsEnvironment for BareMetalEnv {

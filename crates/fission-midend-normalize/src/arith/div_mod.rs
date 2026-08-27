@@ -27,8 +27,12 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
     for i in 0..stmts.len() {
         // Nested structures first (independent scopes).
         match &mut stmts[i] {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= collapse_cdq_signed_mod_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
                 // Conservative: control transfer may clobber linear live set.
                 live.clear();
                 continue;
@@ -38,8 +42,12 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |= collapse_cdq_signed_mod_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                );
+                changed |= collapse_cdq_signed_mod_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                );
                 live.clear();
                 continue;
             }
@@ -48,23 +56,33 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
             } => {
                 if let Some(init_stmt) = init {
                     if let PreHirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
+                        changed |= collapse_cdq_signed_mod_in_stmts(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                        );
                     }
                 }
                 if let Some(upd) = update {
                     if let PreHirStmt::Block(b) = upd.as_mut() {
-                        changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
+                        changed |= collapse_cdq_signed_mod_in_stmts(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                        );
                     }
                 }
-                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= collapse_cdq_signed_mod_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
                 live.clear();
                 continue;
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= collapse_cdq_signed_mod_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    );
                 }
-                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |= collapse_cdq_signed_mod_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                );
                 live.clear();
                 continue;
             }
@@ -826,7 +844,10 @@ pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> 
                                 let div = PreHirExpr::Binary {
                                     op: PreHirBinaryOp::Div,
                                     lhs: Box::new(x_val.clone()),
-                                    rhs: Box::new(PreHirExpr::Const(divisor as i64, expr_type(x_val))),
+                                    rhs: Box::new(PreHirExpr::Const(
+                                        divisor as i64,
+                                        expr_type(x_val),
+                                    )),
                                     ty: expr_type(x_val),
                                 };
                                 return Some(if expr_type(expr) == expr_type(x_val) {

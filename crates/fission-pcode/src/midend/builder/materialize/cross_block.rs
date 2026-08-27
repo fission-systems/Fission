@@ -1435,7 +1435,11 @@ impl<'a> PreviewBuilder<'a> {
         let mut predecessor_blocks = Vec::with_capacity(phi.operands.len());
         let mut incoming_by_pred = HashMap::default();
         for operand in &phi.operands {
-            let pred_addr = self.pcode.blocks.get(operand.predecessor as usize)?.start_address;
+            let pred_addr = self
+                .pcode
+                .blocks
+                .get(operand.predecessor as usize)?
+                .start_address;
             let expr = self.resolve_ssa_value_to_expr(operand.value, merge_block_idx)?;
             predecessor_blocks.push(pred_addr);
             incoming_by_pred.insert(pred_addr, expr);

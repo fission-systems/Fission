@@ -1,8 +1,8 @@
 //! Guarded-tail shared types.
 
-use fission_midend_prehir::{PreHirExpr, PreHirStmt};
-use crate::regions::{RegionKind, RegionLegality, RegionRejectionReason};
 use crate::HashMap;
+use crate::regions::{RegionKind, RegionLegality, RegionRejectionReason};
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
 pub fn guarded_tail_call_target_is_known_pure_helper(target: &str) -> bool {
     matches!(target, "__carry" | "__scarry" | "__sborrow" | "__popcount")
@@ -214,7 +214,6 @@ pub enum PromotionShapeRejection {
     MissingTerminalJoinTarget,
     EmptyNonterminalTail,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConditionAssumption {

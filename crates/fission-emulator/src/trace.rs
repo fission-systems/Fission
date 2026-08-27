@@ -32,15 +32,9 @@ pub enum TraceEntry {
         input_vals: Vec<u64>,
     },
     /// An HLE function interception.
-    HleDispatch {
-        pc: u64,
-        func_name: String,
-    },
+    HleDispatch { pc: u64, func_name: String },
     /// Decode or lift completely failed; instruction was skipped.
-    DecodeError {
-        pc: u64,
-        reason: String,
-    },
+    DecodeError { pc: u64, reason: String },
 }
 
 /// Accumulates trace entries during sandbox execution.
@@ -51,11 +45,17 @@ pub struct ExecutionTrace {
 
 impl ExecutionTrace {
     pub fn enabled() -> Self {
-        Self { entries: Vec::new(), enabled: true }
+        Self {
+            entries: Vec::new(),
+            enabled: true,
+        }
     }
 
     pub fn disabled() -> Self {
-        Self { entries: Vec::new(), enabled: false }
+        Self {
+            entries: Vec::new(),
+            enabled: false,
+        }
     }
 
     /// Record a trace entry if tracing is enabled.
@@ -68,8 +68,8 @@ impl ExecutionTrace {
 
     /// Write all trace entries as newline-delimited JSON (NDJSON) to a file.
     pub fn write_ndjson(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        use std::io::Write;
         use anyhow::Context;
+        use std::io::Write;
         let file = std::fs::File::create(path)
             .with_context(|| format!("Failed to create trace file: {}", path.display()))?;
         let mut writer = std::io::BufWriter::new(file);
@@ -105,9 +105,18 @@ impl ExecutionTrace {
         eprintln!("║       Fission Sandbox Trace Summary      ║");
         eprintln!("╠══════════════════════════════════════════╣");
         eprintln!("║  Total trace entries : {:>6}             ║", total);
-        eprintln!("║  Decode errors       : {:>6}             ║", decode_errors);
-        eprintln!("║  USEROP dispatches   : {:>6}             ║", userop_dispatches);
-        eprintln!("║  HLE dispatches      : {:>6}             ║", hle_dispatches);
+        eprintln!(
+            "║  Decode errors       : {:>6}             ║",
+            decode_errors
+        );
+        eprintln!(
+            "║  USEROP dispatches   : {:>6}             ║",
+            userop_dispatches
+        );
+        eprintln!(
+            "║  HLE dispatches      : {:>6}             ║",
+            hle_dispatches
+        );
         eprintln!("╠══════════════════════════════════════════╣");
         eprintln!("║  Top P-Code opcodes:                     ║");
 

@@ -4,9 +4,9 @@
 //! copy-propagation, and pipeline orchestration do not each carry slightly
 //! different policy checks.
 
-use fission_midend_core::NirBindingOrigin;
-    use fission_midend_prehir::PreHirBinding;
 use crate::HashSet;
+use fission_midend_core::NirBindingOrigin;
+use fission_midend_prehir::PreHirBinding;
 
 pub fn preserved_materialization_names(bindings: &[PreHirBinding]) -> HashSet<&str> {
     bindings
@@ -16,17 +16,11 @@ pub fn preserved_materialization_names(bindings: &[PreHirBinding]) -> HashSet<&s
         .collect()
 }
 
-pub fn should_block_trivial_return_collapse(
-    name: &str,
-    preserved_temps: &HashSet<&str>,
-) -> bool {
+pub fn should_block_trivial_return_collapse(name: &str, preserved_temps: &HashSet<&str>) -> bool {
     preserved_temps.contains(name)
 }
 
-pub fn should_skip_inline_for_preserved_temp(
-    name: &str,
-    preserved_temps: &HashSet<&str>,
-) -> bool {
+pub fn should_skip_inline_for_preserved_temp(name: &str, preserved_temps: &HashSet<&str>) -> bool {
     preserved_temps.contains(name)
 }
 
@@ -52,7 +46,7 @@ pub fn preserved_binding_origin() -> NirBindingOrigin {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
     use fission_midend_core::NirType;
 
     fn int(bits: u32) -> NirType {

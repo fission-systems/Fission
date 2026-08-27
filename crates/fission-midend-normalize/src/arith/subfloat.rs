@@ -1,6 +1,6 @@
+use crate::HashMap;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
-use crate::HashMap;
 
 /// Identifies redundant floating-point widening and narrowing cast chains,
 /// narrowing intermediate double-precision calculations to single-precision float
@@ -54,7 +54,10 @@ fn narrow_float_expression(
         } => {
             if matches!(
                 op,
-                PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Mul | PreHirBinaryOp::Div
+                PreHirBinaryOp::Add
+                    | PreHirBinaryOp::Sub
+                    | PreHirBinaryOp::Mul
+                    | PreHirBinaryOp::Div
             ) {
                 if let (Some(narrowed_lhs), Some(narrowed_rhs)) = (
                     narrow_float_expression(lhs, var_types),

@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use crate::HashSet;
+use crate::prelude::*;
 
 /// Simplifies floating-point comparison expressions by ignoring redundant NaN checks (RuleIgnoreNan).
 /// - `!__isnan(x) && (x < y)` -> `x < y`

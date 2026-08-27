@@ -38,7 +38,9 @@ fn hoist_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
         {
             let n = common_hoist_prefix_len(then_body.as_slice(), else_body.as_slice());
             if n > 0 {
-                let lifted: Vec<PreHirStmt> = std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body).drain(0..n).collect();
+                let lifted: Vec<PreHirStmt> = std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body)
+                    .drain(0..n)
+                    .collect();
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).drain(0..n);
                 for s in lifted.into_iter().rev() {
                     stmts.insert(i, s);

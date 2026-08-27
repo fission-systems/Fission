@@ -42,9 +42,9 @@
 //! region has folded away; under the static model that second chance never
 //! arrives.
 
+use crate::HashSet;
 use crate::graph::BlockOwnership;
 use fission_midend_prehir::PreHirStmt;
-use crate::HashSet;
 
 /// Identifier of a node in a [`CollapseGraph`]. Stable across collapses:
 /// removed slots are tombstoned rather than compacted.
@@ -418,7 +418,10 @@ mod tests {
             g.check_single_entry(&[1], 1),
             Err(CollapseError::DeadMember(1))
         );
-        assert_eq!(g.check_single_entry(&[], 0), Err(CollapseError::EmptyRegion));
+        assert_eq!(
+            g.check_single_entry(&[], 0),
+            Err(CollapseError::EmptyRegion)
+        );
         assert_eq!(
             g.check_single_entry(&[0], 2),
             Err(CollapseError::EntryNotAMember(2))

@@ -1,7 +1,7 @@
-use fission_midend_core::ir::NirType;
-use fission_midend_prehir::{PreHirBinaryOp, PreHirBinding, PreHirExpr, PreHirLValue, PreHirStmt};
-use fission_midend_core::is_pure_intrinsic_call;
 use crate::{HashMap, HashSet};
+use fission_midend_core::ir::NirType;
+use fission_midend_core::is_pure_intrinsic_call;
+use fission_midend_prehir::{PreHirBinaryOp, PreHirBinding, PreHirExpr, PreHirLValue, PreHirStmt};
 
 pub(super) fn is_trivial_temp_name(name: &str) -> bool {
     name == "result"
@@ -225,7 +225,9 @@ pub(super) fn count_var_uses(expr: &PreHirExpr, name: &str) -> usize {
         PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr, .. } => count_var_uses(expr, name),
         PreHirExpr::Unary { expr, .. } => count_var_uses(expr, name),
-        PreHirExpr::Binary { lhs, rhs, .. } => count_var_uses(lhs, name) + count_var_uses(rhs, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            count_var_uses(lhs, name) + count_var_uses(rhs, name)
+        }
         PreHirExpr::Call { args, .. } => args.iter().map(|arg| count_var_uses(arg, name)).sum(),
         PreHirExpr::Load { ptr, .. } => count_var_uses(ptr, name),
         PreHirExpr::PtrOffset { base, .. } => count_var_uses(base, name),
@@ -281,7 +283,9 @@ pub(super) fn stmt_assigns_var(stmt: &PreHirStmt, name: &str) -> bool {
 
 pub(super) fn stmt_may_bypass_following_stmts(stmt: &PreHirStmt) -> bool {
     match stmt {
-        PreHirStmt::Goto(_) | PreHirStmt::Return(_) | PreHirStmt::Break | PreHirStmt::Continue => true,
+        PreHirStmt::Goto(_) | PreHirStmt::Return(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+            true
+        }
         PreHirStmt::Block(body)
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
@@ -332,7 +336,9 @@ pub(super) fn stmt_assigns_any_expr_var(stmt: &PreHirStmt, expr: &PreHirExpr) ->
 pub(super) fn lvalue_assigns_any_expr_var(lhs: &PreHirLValue, expr: &PreHirExpr) -> bool {
     match lhs {
         PreHirLValue::Var(name) => expr_contains_var(expr, name),
-        PreHirLValue::Deref { .. } | PreHirLValue::Index { .. } | PreHirLValue::FieldAccess { .. } => false,
+        PreHirLValue::Deref { .. }
+        | PreHirLValue::Index { .. }
+        | PreHirLValue::FieldAccess { .. } => false,
     }
 }
 

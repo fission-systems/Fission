@@ -1,8 +1,8 @@
-use fission_midend_core::ir::*;
-use std::collections::{BTreeMap, BTreeSet};
+use super::cfg_analysis::{CfgAnalysis, EdgeClass};
 use crate::HashMap;
 use crate::HashSet;
-use super::cfg_analysis::{CfgAnalysis, EdgeClass};
+use fission_midend_core::ir::*;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct LoopBody {

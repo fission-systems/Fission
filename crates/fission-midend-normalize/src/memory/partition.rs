@@ -76,7 +76,10 @@ pub fn collect_partitioned_memory_accesses(stmts: &[PreHirStmt]) -> Vec<Partitio
     accesses
 }
 
-pub fn partition_key_for_pointer_expr(ptr: &PreHirExpr, access_ty: &NirType) -> Option<PartitionKey> {
+pub fn partition_key_for_pointer_expr(
+    ptr: &PreHirExpr,
+    access_ty: &NirType,
+) -> Option<PartitionKey> {
     let access = parse_partitioned_access(ptr, access_ty, MemoryAccessKind::Load)?;
     Some(access.partition_key())
 }

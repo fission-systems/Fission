@@ -4,11 +4,11 @@
 //! hooks on [`crate::host::StructuringHost`].
 
 use super::types::*;
+use crate::HashMap;
 use crate::cleanup::{collect_referenced_label_counts, normalize_guarded_tail_layout};
 use crate::host::StructuringHost;
 use crate::regions::RegionKind;
 use fission_midend_prehir::{PreHirExpr, PreHirStmt};
-use crate::HashMap;
 
 /// Promote all single-entry guarded-tail shapes in `body` (one pass).
 pub fn promote_single_entry_guarded_tail_regions(
@@ -34,9 +34,9 @@ pub fn promote_single_entry_guarded_tail_regions(
         let trial = match trial {
             Ok(trial) => trial,
             Err(reason) => {
-                host.mark_guarded_tail_execution_rejection(
-                    GuardedTailExecutionRejection::Witness(reason),
-                );
+                host.mark_guarded_tail_execution_rejection(GuardedTailExecutionRejection::Witness(
+                    reason,
+                ));
                 match reason {
                     GuardedTailWitnessRejection::MissingTerminalJoin => {
                         host.mark_promotion_shape_rejection(

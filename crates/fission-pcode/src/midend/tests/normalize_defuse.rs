@@ -396,7 +396,8 @@ fn normalize_inlines_pure_copy_before_sle_zero_in_while() {
                             ty: sint(32),
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
             },
             return_expr(varexpr("param_18")),
         ],
@@ -445,7 +446,8 @@ fn normalize_preserves_loop_assigned_temp_used_after_loop() {
                             ty: NirType::Bool,
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
                 cond: varexpr("keep_going"),
             },
             return_expr(varexpr("xVar27")),
@@ -492,7 +494,8 @@ fn normalize_preserves_preheader_temp_used_inside_loop() {
                             ty: int(32),
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
                 cond: varexpr("keep_going"),
             },
             return_expr(varexpr("uVar22")),
@@ -549,7 +552,8 @@ fn normalize_preserves_preheader_loop_carried_self_update() {
                             expr: Box::new(varexpr("uVar22")),
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
                 cond: varexpr("keep_going"),
             },
             return_expr(varexpr("xVar10")),
@@ -630,7 +634,8 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
                             expr: Box::new(varexpr("uVar22")),
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
                 cond: varexpr("keep_going"),
             },
             return_expr(varexpr("xVar10")),
@@ -705,7 +710,8 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
                             expr: Box::new(varexpr("uVar22")),
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
                 cond: varexpr("keep_going"),
             },
             return_expr(varexpr("xVar10")),
@@ -782,7 +788,8 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
                             expr: Box::new(varexpr("uVar22")),
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
                 cond: varexpr("keep_going"),
             },
             return_expr(varexpr("xVar10")),
@@ -848,7 +855,8 @@ fn normalize_preserves_preheader_copy_chain_used_inside_loop() {
                             ty: int(32),
                         },
                     ),
-                ].into(),
+                ]
+                .into(),
                 cond: varexpr("keep_going"),
             },
             return_expr(varexpr("uVar22")),

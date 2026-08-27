@@ -60,7 +60,12 @@ impl ImportTable {
         iat_entries.sort_by_key(|&(&addr, _)| addr);
         for (&addr, name) in iat_entries {
             let magic = self.alloc_stub(name);
-            tracing::debug!("IAT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, magic);
+            tracing::debug!(
+                "IAT patch: {} @ 0x{:X} → trampoline 0x{:X}",
+                name,
+                addr,
+                magic
+            );
             state.write_space(state.ram_space(), addr, &magic.to_le_bytes())?;
         }
         Ok(())

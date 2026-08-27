@@ -1,12 +1,12 @@
 //! JIT shadow propagation + symbolic gate (concolic) unit tests.
 
+use fission_emulator::MachineState;
 use fission_emulator::core::Emulator;
 use fission_emulator::jit::callbacks::{
-    jit_shadow_binop, jit_shadow_copy, jit_shadow_load, jit_shadow_store, jit_shadow_unop,
-    jit_sym_cbranch_gate, SymBinOpKind, SymUnOpKind,
+    SymBinOpKind, SymUnOpKind, jit_shadow_binop, jit_shadow_copy, jit_shadow_load,
+    jit_shadow_store, jit_shadow_unop, jit_sym_cbranch_gate,
 };
 use fission_emulator::pcode::page_map::prot;
-use fission_emulator::MachineState;
 
 /// Build a minimal Emulator enough for shadow callouts (hello fixture).
 fn mini_emu() -> Emulator {
@@ -28,7 +28,8 @@ fn mini_emu() -> Emulator {
         .expect("sleigh");
     let arch = ArchInfo::from_language_id(load_spec.pair.language_id.as_str(), Some(&binary))
         .expect("arch");
-    let mut emu = Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).expect("emu");
+    let mut emu =
+        Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).expect("emu");
     emu.apply_linux_image(info).expect("image");
     emu
 }
@@ -74,12 +75,11 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
         SymBinOpKind::Add as u32,
     );
     let add_id = emu.state.get_shadow_memory(uniq, 0x30).expect("add shadow");
-    assert_ne!(add_id, 77, "AST node should be a new solver id, not raw taint union");
-    let expr = emu
-        .solver
-        .nodes
-        .get(&add_id)
-        .expect("solver node for add");
+    assert_ne!(
+        add_id, 77,
+        "AST node should be a new solver id, not raw taint union"
+    );
+    let expr = emu.solver.nodes.get(&add_id).expect("solver node for add");
     assert!(
         matches!(expr, fission_solver::SymExpr::Add(_, _))
             || matches!(expr, fission_solver::SymExpr::Const { .. }),

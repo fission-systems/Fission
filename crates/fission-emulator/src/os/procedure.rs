@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use anyhow::Result;
 use crate::core::Emulator;
 use crate::os::env::HleResult;
+use anyhow::Result;
+use std::collections::HashMap;
 
 /// A single emulated procedure (e.g. a libc function or a syscall).
 pub trait SimProcedure: Send + Sync {

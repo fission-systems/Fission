@@ -52,7 +52,7 @@ fn render_chat_layout(frame: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(25), Constraint::Min(0)])
         .split(area);
-        
+
     let sidebar_area = h_split[0];
     let main_area = h_split[1];
 
@@ -107,16 +107,26 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(border_color));
 
     let items: Vec<Line> = if app.session_rows.is_empty() {
-        vec![Line::from(Span::styled(" No sessions", Style::default().fg(C_DIM)))]
+        vec![Line::from(Span::styled(
+            " No sessions",
+            Style::default().fg(C_DIM),
+        ))]
     } else {
         app.session_rows
             .iter()
             .enumerate()
             .map(|(i, row)| {
                 let is_current = app.current_session_id == Some(row.id);
-                let is_selected = i == app.sidebar_selected_idx && app.active_pane == crate::app::ActivePane::Sidebar;
-                
-                let prefix = if is_selected { "> " } else if is_current { "* " } else { "  " };
+                let is_selected = i == app.sidebar_selected_idx
+                    && app.active_pane == crate::app::ActivePane::Sidebar;
+
+                let prefix = if is_selected {
+                    "> "
+                } else if is_current {
+                    "* "
+                } else {
+                    "  "
+                };
                 let style = if is_selected {
                     Style::default().fg(Color::Black).bg(C_ACCENT)
                 } else if is_current {
@@ -124,7 +134,7 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     Style::default().fg(C_DIM)
                 };
-                
+
                 Line::from(Span::styled(format!("{}{}", prefix, row.title), style))
             })
             .collect()

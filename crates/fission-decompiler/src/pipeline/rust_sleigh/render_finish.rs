@@ -231,13 +231,6 @@ fn select_nir_output_from_prebuilt_pcode_with_learned_facts(
     options: NirRenderOptions,
 ) -> Result<(NirSelection, Option<FactStore>), String> {
     crate::routing::select_nir_output_from_pcode_with_learned_facts(
-        pcode,
-        binary,
-        fact_store,
-        address,
-        name,
-        mode,
-        timeout_ms,
-        options,
+        pcode, binary, fact_store, address, name, mode, timeout_ms, options,
     )
 }

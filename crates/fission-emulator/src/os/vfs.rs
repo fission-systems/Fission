@@ -3,7 +3,7 @@
 //! Used by Linux open/openat/read and (when seeded) by the dynlink path so
 //! `ld.so` can open the main binary and libraries without a real host FS tree.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -131,7 +131,11 @@ impl SimVFS {
                 return (c.clone(), self.host_aliases.get(base).cloned());
             }
         }
-        if let Some(host) = self.host_aliases.get(name).or_else(|| self.host_aliases.get(base)) {
+        if let Some(host) = self
+            .host_aliases
+            .get(name)
+            .or_else(|| self.host_aliases.get(base))
+        {
             if let Ok(bytes) = std::fs::read(host) {
                 return (bytes, Some(host.clone()));
             }

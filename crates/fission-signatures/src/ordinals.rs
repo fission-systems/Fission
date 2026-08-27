@@ -64,16 +64,16 @@ pub struct OrdinalDatabase {
 static ORDINAL_CACHE: std::sync::OnceLock<Result<OrdinalDatabase, OrdinalError>> =
     std::sync::OnceLock::new();
 
-
 /// One DLL's `ordinal -> name` entries from a packed table.
 ///
 /// The record is `<dll>|<ordinal>:<name>,<ordinal>:<name>`, so a lookup reads
 /// the one block whose key range covers `dll` and scans it for that prefix.
 fn read_dll_table(reader: &crate::fpk::FpkReader, dll: &str) -> Option<Vec<(u32, String)>> {
     let block = reader.block_for(dll).ok().flatten()?;
-    let line = block
-        .lines()
-        .find(|l| l.strip_prefix(dll).is_some_and(|rest| rest.starts_with('|')))?;
+    let line = block.lines().find(|l| {
+        l.strip_prefix(dll)
+            .is_some_and(|rest| rest.starts_with('|'))
+    })?;
     let body = line.split_once('|')?.1;
     Some(
         body.split(',')
@@ -176,7 +176,6 @@ impl OrdinalDatabase {
         return Some(table);
     }
 
-
     /// Resolve `dll_name` (any case, `.dll` suffix optional) + ordinal to an
     /// export name, if known.
     pub fn resolve(&self, dll_name: &str, ordinal: u32) -> Option<&str> {
@@ -209,7 +208,11 @@ mod tests {
     fn resolves_known_ordinals() {
         let db = OrdinalDatabase::try_new().expect("load ordinal corpus");
         assert_eq!(db.resolve("ws2_32.dll", 1), Some("accept"));
-        assert_eq!(db.resolve("WS2_32", 1), Some("accept"), "case/suffix-insensitive lookup");
+        assert_eq!(
+            db.resolve("WS2_32", 1),
+            Some("accept"),
+            "case/suffix-insensitive lookup"
+        );
         assert_eq!(db.resolve("mssign32.dll", 1), Some("DllUnregisterServer"));
         assert_eq!(db.resolve("not_a_real_dll_xyz.dll", 1), None);
     }
@@ -270,11 +273,13 @@ mod packed_tests {
         let mut tables: HashMap<String, HashMap<u32, String>> = HashMap::new();
         // The JSON moved to `utils/source/ordinals` and is not shipped, so this
         // comparison only runs in a tree that still has the packer inputs.
-        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../utils/source/ordinals");
+        let source =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils/source/ordinals");
         for filename in ["x86_ordinals.json", "arm_ordinals.json"] {
             let path = source.join(filename);
-            let Ok(content) = fs::read_to_string(&path) else { continue };
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
             let raw: HashMap<String, HashMap<String, String>> =
                 serde_json::from_str(&content).expect("parse json");
             for (dll, entries) in raw {
@@ -310,6 +315,9 @@ mod packed_tests {
 
         // Misses and normalisation.
         assert_eq!(packed.resolve("no-such-dll.dll", 1), None);
-        assert_eq!(packed.resolve("KERNEL32.DLL", 1), packed.resolve("kernel32", 1));
+        assert_eq!(
+            packed.resolve("KERNEL32.DLL", 1),
+            packed.resolve("kernel32", 1)
+        );
     }
 }

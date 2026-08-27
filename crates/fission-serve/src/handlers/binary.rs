@@ -61,7 +61,7 @@ pub async fn handle_upload_binary(
     match result {
         Ok(Ok(binary)) => {
             let fn_count = binary.functions.len();
-            let summary  = binary.summary().to_string();
+            let summary = binary.summary().to_string();
             match store.create(binary, filename, true).await {
                 Ok(session_id) => {
                     // CFG-based discovery (`fission_cli decomp`'s own
@@ -74,7 +74,11 @@ pub async fn handle_upload_binary(
                     // instead of blocking the upload on it; the session
                     // starts usable with loader-only symbols and
                     // `analyzing` flips false once discovery lands.
-                    tokio::spawn(run_discovery_in_background(store.clone(), session_id, runtime.cloud_mode));
+                    tokio::spawn(run_discovery_in_background(
+                        store.clone(),
+                        session_id,
+                        runtime.cloud_mode,
+                    ));
 
                     (
                         StatusCode::OK,
@@ -87,11 +91,9 @@ pub async fn handle_upload_binary(
                     )
                         .into_response()
                 }
-                Err(e) => (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(ErrorResponse::new(e)),
-                )
-                    .into_response(),
+                Err(e) => {
+                    (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse::new(e))).into_response()
+                }
             }
         }
         Ok(Err(e)) => (
@@ -144,7 +146,10 @@ async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid,
             // enrichment applied to `session.facts` whenever it finishes,
             // not something any UI state should block on.
             session.set_analyzing(false);
-            tracing::info!("[PERF] total background phase (pre-arity): {:?}", t0.elapsed());
+            tracing::info!(
+                "[PERF] total background phase (pre-arity): {:?}",
+                t0.elapsed()
+            );
 
             // Whole-program call-arity pre-analysis: decode every function
             // once now (background, off the request path) so a session's

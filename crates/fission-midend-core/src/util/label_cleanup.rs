@@ -200,7 +200,6 @@ fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<Strin
     }
 }
 
-
 pub fn collect_referenced_label_counts(body: &[HirStmt]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for stmt in body {

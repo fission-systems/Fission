@@ -44,7 +44,7 @@ impl TargetStat {
         buf.write_u64::<LittleEndian>(self.st_mtime_nsec).unwrap();
         buf.write_u64::<LittleEndian>(self.st_ctime).unwrap();
         buf.write_u64::<LittleEndian>(self.st_ctime_nsec).unwrap();
-        
+
         // Pad to exactly 144 bytes if needed, but the struct size in x64 is 144 bytes.
         buf.resize(144, 0);
         buf

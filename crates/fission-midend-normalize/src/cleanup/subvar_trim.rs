@@ -1,7 +1,7 @@
-use crate::prelude::*;
-use crate::analysis::defuse::DefUseMap;
-use fission_midend_prehir::util::expr_type;
 use crate::HashMap;
+use crate::analysis::defuse::DefUseMap;
+use crate::prelude::*;
+use fission_midend_prehir::util::expr_type;
 
 pub fn apply_subvar_trim_pass(func: &mut PreHirFunction) -> bool {
     let mut assignments = HashMap::default();
@@ -56,7 +56,9 @@ fn find_all_assignments(stmts: &[PreHirStmt], assignments: &mut HashMap<String, 
                     .or_default()
                     .push(rhs.clone());
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 find_all_assignments(body, assignments);
             }
             PreHirStmt::For {
@@ -117,8 +119,15 @@ fn simplify_stmt(
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr, assignments, defuse, local_types);
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), assignments, defuse, local_types);
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                assignments,
+                defuse,
+                local_types,
+            );
         }
         PreHirStmt::For {
             init,
@@ -135,7 +144,12 @@ fn simplify_stmt(
             if let Some(u) = update {
                 changed |= simplify_stmt(u.as_mut(), assignments, defuse, local_types);
             }
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), assignments, defuse, local_types);
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                assignments,
+                defuse,
+                local_types,
+            );
         }
         PreHirStmt::If {
             cond,
@@ -143,8 +157,18 @@ fn simplify_stmt(
             else_body,
         } => {
             changed |= simplify_expr(cond, assignments, defuse, local_types);
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), assignments, defuse, local_types);
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), assignments, defuse, local_types);
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                assignments,
+                defuse,
+                local_types,
+            );
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                assignments,
+                defuse,
+                local_types,
+            );
         }
         PreHirStmt::Switch {
             expr,
@@ -153,9 +177,19 @@ fn simplify_stmt(
         } => {
             changed |= simplify_expr(expr, assignments, defuse, local_types);
             for case in cases {
-                changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), assignments, defuse, local_types);
+                changed |= simplify_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    assignments,
+                    defuse,
+                    local_types,
+                );
             }
-            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), assignments, defuse, local_types);
+            changed |= simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                assignments,
+                defuse,
+                local_types,
+            );
         }
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list, assignments, defuse, local_types);
@@ -242,8 +276,9 @@ fn simplify_expr(
                 if exprs.len() == 1 {
                     let def_expr = &exprs[0];
                     let use_count = defuse.use_count.get(name).copied().unwrap_or(0);
-                    let is_safe_to_dup = matches!(def_expr, PreHirExpr::Var(_) | PreHirExpr::Const(_, _))
-                        || use_count <= 1;
+                    let is_safe_to_dup =
+                        matches!(def_expr, PreHirExpr::Var(_) | PreHirExpr::Const(_, _))
+                            || use_count <= 1;
 
                     if is_safe_to_dup {
                         // Pattern 1: (target_ty)(intermediate_ty)inner_expr  where inner_expr: target_ty

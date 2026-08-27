@@ -30,13 +30,13 @@ use callgraph::run_callgraph;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use identify::run_identify;
-use similar::run_similar;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
 use nir_stats::emit_nir_stats;
 use pcode_stages::emit_pcode_stages;
 use pcode_topology::emit_pcode_topology;
 use raw_pcode::emit_raw_pcode;
 use rust_decomp::run_decompilation_rust_sleigh;
+use similar::run_similar;
 use strings::print_strings;
 use xrefs::run_xrefs;
 
@@ -65,10 +65,8 @@ fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Resu
         .map_err(|e| anyhow::anyhow!("failed to load SLEIGH language manifest: {e}"))?;
     if !known.contains(language_id) {
         let prefix = language_id.split(':').next().unwrap_or(language_id);
-        let mut suggestions: Vec<&String> = known
-            .iter()
-            .filter(|id| id.starts_with(prefix))
-            .collect();
+        let mut suggestions: Vec<&String> =
+            known.iter().filter(|id| id.starts_with(prefix)).collect();
         suggestions.sort();
         anyhow::bail!(
             "unknown --language `{language_id}` (not a lift-ready SLEIGH language id).{}",
@@ -94,9 +92,9 @@ fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Resu
             "malformed --language id `{language_id}` (expected processor:endian:size:variant)"
         );
     };
-    let bitness: u8 = size
-        .parse()
-        .map_err(|_| anyhow::anyhow!("malformed --language id `{language_id}`: size `{size}` is not a number"))?;
+    let bitness: u8 = size.parse().map_err(|_| {
+        anyhow::anyhow!("malformed --language id `{language_id}`: size `{size}` is not a number")
+    })?;
 
     binary.load_spec = Some(fission_core::architecture::BinaryLoadSpec::new(
         binary.format.clone(),
@@ -336,14 +334,21 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                 report_tier("ground_truth", &format!("{outcome:?}"), args.json, &mut out);
             }
             Err(err) => {
-                report_tier("ground_truth", &format!("EmulatorSetupFailed({err})"), args.json, &mut out);
+                report_tier(
+                    "ground_truth",
+                    &format!("EmulatorSetupFailed({err})"),
+                    args.json,
+                    &mut out,
+                );
             }
         }
     }
     if run_symbolic {
         let outcome = fission_dir::check_symbolic_equivalence(&pair.prehir, &pair.hir);
         let desc = match outcome {
-            fission_dir::symbolic::SymbolicOutcome::Equivalent => "Equivalent (proved, Unsat)".to_string(),
+            fission_dir::symbolic::SymbolicOutcome::Equivalent => {
+                "Equivalent (proved, Unsat)".to_string()
+            }
             fission_dir::symbolic::SymbolicOutcome::Diverged(cx) => {
                 format!("Diverged (solver counterexample args={:?})", cx.args)
             }
@@ -360,9 +365,17 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
     Ok(())
 }
 
-fn report_tier(tier: &str, desc: &str, json: bool, out: &mut serde_json::Map<String, serde_json::Value>) {
+fn report_tier(
+    tier: &str,
+    desc: &str,
+    json: bool,
+    out: &mut serde_json::Map<String, serde_json::Value>,
+) {
     if json {
-        out.insert(tier.to_string(), serde_json::Value::String(desc.to_string()));
+        out.insert(
+            tier.to_string(),
+            serde_json::Value::String(desc.to_string()),
+        );
     } else {
         println!("{tier}: {desc}");
     }

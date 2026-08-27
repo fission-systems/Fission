@@ -4,8 +4,10 @@
 //! Owning them here lets residual `try_lower_*` free functions take
 //! [`crate::host::StructuringHost`] without depending on PreviewBuilder.
 
-use fission_midend_core::ir::{DispatcherProofUnit, MlilPreviewOptions, UnsupportedControlEvidence};
-use fission_midend_prehir::{PreHirExpr};
+use fission_midend_core::ir::{
+    DispatcherProofUnit, MlilPreviewOptions, UnsupportedControlEvidence,
+};
+use fission_midend_prehir::PreHirExpr;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Instant;

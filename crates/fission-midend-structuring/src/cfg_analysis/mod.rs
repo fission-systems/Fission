@@ -20,7 +20,6 @@ pub use postdom::{CommonPostdominator, ImmPostDomTree, PostDomTree};
 pub use scc::SccAnalysis;
 pub use trace_dag::{TraceDag, TraceDagError};
 
-
 /// Cached CFG facts (edges, dom, postdom, SCC) for a function body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CfgFactCache {

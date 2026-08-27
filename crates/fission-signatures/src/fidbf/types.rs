@@ -261,7 +261,10 @@ mod flag_tests {
     #[test]
     fn auto_pass_is_returned_below_the_size_threshold() {
         let tiny = 4u32;
-        assert!((tiny as f32) < FID_ACCEPT_THRESHOLD, "test needs a sub-threshold size");
+        assert!(
+            (tiny as f32) < FID_ACCEPT_THRESHOLD,
+            "test needs a sub-threshold size"
+        );
         let plain = db(vec![func("tiny", 0xabc, 0xdef, tiny)]);
         assert!(plain.identify_by_hashes(0xabc, 0xdef).is_empty());
 

@@ -47,9 +47,9 @@
 //! - `Break`/`Continue` anywhere inside the region are refused: they bind to
 //!   the nearest enclosing loop, which the move can change.
 
-use fission_midend_prehir::PreHirStmt;
 use crate::HashMap;
 use crate::HashSet;
+use fission_midend_prehir::PreHirStmt;
 
 /// Largest region this pass will relocate, in statements (recursive count).
 /// A move does not grow the output, but an unbounded one would re-indent an
@@ -210,11 +210,7 @@ fn extract_region(body: &mut Vec<PreHirStmt>, label: &str) -> Option<Region> {
     extract_in(body, label, &mut path)
 }
 
-fn extract_in(
-    stmts: &mut Vec<PreHirStmt>,
-    label: &str,
-    path: &mut Vec<u32>,
-) -> Option<Region> {
+fn extract_in(stmts: &mut Vec<PreHirStmt>, label: &str, path: &mut Vec<u32>) -> Option<Region> {
     if let Some(idx) = stmts
         .iter()
         .position(|s| matches!(s, PreHirStmt::Label(l) if l == label))
@@ -252,11 +248,7 @@ fn restore_region(body: &mut Vec<PreHirStmt>, region: Region) {
 }
 
 /// Replace a `goto label` that ends its sequence with the region itself.
-fn splice_into_terminal_goto(
-    body: &mut Vec<PreHirStmt>,
-    label: &str,
-    region: &Region,
-) -> bool {
+fn splice_into_terminal_goto(body: &mut Vec<PreHirStmt>, label: &str, region: &Region) -> bool {
     splice_in(body, label, &region.stmts)
 }
 

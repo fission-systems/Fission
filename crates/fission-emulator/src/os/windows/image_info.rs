@@ -221,10 +221,7 @@ pub fn load_pe_image(
 }
 
 /// Apply PE image SP / PC onto the emulator.
-pub fn apply_stack_and_entry(
-    emu: &mut crate::core::Emulator,
-    info: &PeImageInfo,
-) -> Result<()> {
+pub fn apply_stack_and_entry(emu: &mut crate::core::Emulator, info: &PeImageInfo) -> Result<()> {
     emu.pc = info.entry;
     let sp_reg = emu.arch.sp_reg;
     emu.write_register_u64(sp_reg, info.start_stack)?;

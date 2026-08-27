@@ -3743,9 +3743,7 @@ mod tests {
         );
         let bin = LoadedBinary::from_file(&path).expect("load dynamic ELF");
         let plt_puts = bin.inner().functions.iter().find(|f| {
-            f.is_import
-                && f.name.starts_with("puts")
-                && f.address < ELF_EXTERNAL_IMAGE_BASE
+            f.is_import && f.name.starts_with("puts") && f.address < ELF_EXTERNAL_IMAGE_BASE
         });
         let Some(plt_puts) = plt_puts else {
             panic!(
@@ -3759,7 +3757,13 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         };
-        assert!(plt_puts.is_thunk_like, "PLT stub entry should be marked thunk-like");
-        assert!(plt_puts.address > 0x1000, "PLT stub address should be a real guest VA");
+        assert!(
+            plt_puts.is_thunk_like,
+            "PLT stub entry should be marked thunk-like"
+        );
+        assert!(
+            plt_puts.address > 0x1000,
+            "PLT stub address should be a real guest VA"
+        );
     }
 }

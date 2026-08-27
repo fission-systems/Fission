@@ -73,7 +73,9 @@ impl Rule for RuleFoldConstants {
                             PreHirBinaryOp::Or => Some(c1 | c2),
                             PreHirBinaryOp::Xor => Some(c1 ^ c2),
                             PreHirBinaryOp::Shl => Some(c1.wrapping_shl(*c2 as u32)),
-                            PreHirBinaryOp::Shr => Some((*c1 as u64).wrapping_shr(*c2 as u32) as i64),
+                            PreHirBinaryOp::Shr => {
+                                Some((*c1 as u64).wrapping_shr(*c2 as u32) as i64)
+                            }
                             PreHirBinaryOp::Sar => Some(c1.wrapping_shr(*c2 as u32)),
                             _ => None,
                         };
@@ -418,8 +420,10 @@ fn apply_rules_to_stmt(stmt: &mut PreHirStmt, rules: &[Box<dyn Rule>]) -> bool {
             else_body,
         } => {
             changed |= apply_rules_to_expr(cond, rules);
-            changed |= apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), rules);
-            changed |= apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), rules);
+            changed |=
+                apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), rules);
+            changed |=
+                apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), rules);
         }
         PreHirStmt::Switch {
             expr,
@@ -428,9 +432,13 @@ fn apply_rules_to_stmt(stmt: &mut PreHirStmt, rules: &[Box<dyn Rule>]) -> bool {
         } => {
             changed |= apply_rules_to_expr(expr, rules);
             for case in cases {
-                changed |= apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), rules);
+                changed |= apply_rules_to_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    rules,
+                );
             }
-            changed |= apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), rules);
+            changed |=
+                apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), rules);
         }
         _ => {}
     }
@@ -502,7 +510,7 @@ fn apply_rules_to_expr(expr: &mut PreHirExpr, rules: &[Box<dyn Rule>]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     #[test]
     fn test_rule_simplify_select() {

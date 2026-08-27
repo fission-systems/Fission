@@ -87,8 +87,10 @@ fn eliminate_in_stmts(stmts: &mut Vec<PreHirStmt>, blocked: &HashSet<String>) ->
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |=
-                        eliminate_in_stmts(Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), blocked);
+                    changed |= eliminate_in_stmts(
+                        Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        blocked,
+                    );
                 }
                 changed |= eliminate_in_stmts(Rc::<Vec<PreHirStmt>>::make_mut(default), blocked);
             }

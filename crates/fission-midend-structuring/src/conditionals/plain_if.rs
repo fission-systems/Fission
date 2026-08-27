@@ -1,13 +1,13 @@
 //! Plain if (then-only) lowering free functions.
 
-use super::{
-    forward_join_idx_from_address, is_forward_exit_from, log_try_lower_if_reject_diag,
-};
+use super::{forward_join_idx_from_address, is_forward_exit_from, log_try_lower_if_reject_diag};
 use crate::host::StructuringHost;
-use crate::linear_types::{IfLoweringBudget, LinearExit, LoweredTerminator, structuring_diag_enabled};
-use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_prehir::{PreHirExpr, PreHirStmt};
+use crate::linear_types::{
+    IfLoweringBudget, LinearExit, LoweredTerminator, structuring_diag_enabled,
+};
+use fission_midend_core::ir::MlilPreviewError;
 use fission_midend_prehir::util::negate_expr;
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
 struct PlainIfCandidate {
     cond_prefix: Vec<PreHirStmt>,
@@ -170,7 +170,10 @@ pub fn try_lower_if(
         } else {
             let mut wrapped = candidate.cond_prefix;
             wrapped.push(stmt);
-            Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)))
+            Ok(Some((
+                PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+                skip_to,
+            )))
         }
     })();
 

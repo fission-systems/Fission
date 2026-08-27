@@ -1,8 +1,8 @@
+use crate::HashMap;
+use crate::HashSet;
 use fission_midend_core::ir::*;
 use fission_midend_prehir::ir::*;
 use fission_midend_prehir::util::{collect_referenced_label_counts, negate_expr};
-use crate::HashMap;
-use crate::HashSet;
 
 // ---------------------------------------------------------------------------
 // Goto elimination post-pass
@@ -69,11 +69,7 @@ fn nested_fallthrough_removal(
                 continue;
             }
             PreHirStmt::Block(body) => PreHirStmt::Block(std::rc::Rc::new(
-                nested_fallthrough_removal(
-                    body.as_ref().clone(),
-                    successor.as_deref(),
-                    changed,
-                ),
+                nested_fallthrough_removal(body.as_ref().clone(), successor.as_deref(), changed),
             )),
             PreHirStmt::If {
                 cond,

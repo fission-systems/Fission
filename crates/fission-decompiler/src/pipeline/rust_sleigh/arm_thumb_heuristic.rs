@@ -175,7 +175,12 @@ mod tests {
             0,
             "test-bin-align"
         ));
-        assert!(should_prefer_thumb_decode(0x8000253, &[], 0, "test-bin-align"));
+        assert!(should_prefer_thumb_decode(
+            0x8000253,
+            &[],
+            0,
+            "test-bin-align"
+        ));
     }
 
     #[test]

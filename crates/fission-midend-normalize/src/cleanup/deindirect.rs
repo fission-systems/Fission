@@ -29,8 +29,8 @@
 //!   resolved_symbol(args...)
 //!   ```
 
-use crate::prelude::*;
 use crate::HashMap;
+use crate::prelude::*;
 
 /// Traverse and statically resolve indirect calls in a function.
 ///
@@ -45,7 +45,8 @@ pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
         if let Some(initializer) = &local.initializer {
             match initializer {
                 PreHirExpr::Const(val, ty) => {
-                    const_initializers.insert(local.name.clone(), PreHirExpr::Const(*val, ty.clone()));
+                    const_initializers
+                        .insert(local.name.clone(), PreHirExpr::Const(*val, ty.clone()));
                 }
                 PreHirExpr::Cast { expr, .. } => {
                     if let PreHirExpr::Const(val, ty) = expr.as_ref() {
@@ -97,7 +98,9 @@ fn deindirect_in_stmt(
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= deindirect_in_expr(expr, initializers, addr_to_symbol);
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }

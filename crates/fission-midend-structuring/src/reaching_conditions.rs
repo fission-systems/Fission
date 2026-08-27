@@ -41,9 +41,9 @@
 
 use crate::HashMap;
 use crate::HashSet;
+use fission_midend_core::ir::NirType;
 use fission_midend_prehir::util::{negate_expr, simplify_logical_expr};
 use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr};
-use fission_midend_core::ir::NirType;
 
 /// Node identifier, matching [`crate::collapse_graph::NodeId`].
 pub type NodeId = usize;
@@ -376,7 +376,10 @@ mod tests {
             and(a.clone(), c.clone()),
             and(a.clone(), negate_expr(c.clone())),
         );
-        assert_eq!(guarded, a, "the shared part survives, the decision does not");
+        assert_eq!(
+            guarded, a,
+            "the shared part survives, the decision does not"
+        );
     }
 
     #[test]
@@ -389,13 +392,15 @@ mod tests {
         assert!(!is_always(&joined), "got {joined:?}");
     }
 
-
     fn var(name: &str) -> PreHirExpr {
         PreHirExpr::Var(name.to_string())
     }
 
     /// Diamond: 0 -> {1,2} -> 3, guarded by `c` and `!c`.
-    fn diamond() -> (Vec<Vec<NodeId>>, impl Fn(NodeId, NodeId) -> Option<PreHirExpr>) {
+    fn diamond() -> (
+        Vec<Vec<NodeId>>,
+        impl Fn(NodeId, NodeId) -> Option<PreHirExpr>,
+    ) {
         let succ = vec![vec![1, 2], vec![3], vec![3], vec![]];
         let edge = |p: NodeId, n: NodeId| match (p, n) {
             (0, 1) => Some(var("c")),
@@ -423,8 +428,13 @@ mod tests {
         let r = compute_reaching_conditions(&succ, 0, edge).unwrap();
         let cond = &r[&3];
         assert!(
-            matches!(cond, PreHirExpr::Binary { op: PreHirBinaryOp::LogicalOr, .. })
-                || is_always(cond),
+            matches!(
+                cond,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalOr,
+                    ..
+                }
+            ) || is_always(cond),
             "join condition should be a disjunction over both arms, got {cond:?}"
         );
     }

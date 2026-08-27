@@ -260,7 +260,9 @@ impl AbiState {
             return None;
         }
         let stack_index = usize::try_from(relative / slot_size).ok()?;
-        self.effective_param_offsets().len().checked_add(stack_index)
+        self.effective_param_offsets()
+            .len()
+            .checked_add(stack_index)
     }
 
     pub(crate) fn classify_stack_slot_origin(

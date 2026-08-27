@@ -1,8 +1,8 @@
 use fission_midend_core::ir::{
-    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef,
-    ProcedureCallShape, ProcedureControlEffect, ProcedureMemoryEffect, ProcedureReturnShape,
-    ProcedureStackEffect, ProcedureSummary, SummarySoundness, WrapperClass,
-    WrapperContractionProof, parse_call_target_address,
+    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef, ProcedureCallShape,
+    ProcedureControlEffect, ProcedureMemoryEffect, ProcedureReturnShape, ProcedureStackEffect,
+    ProcedureSummary, SummarySoundness, WrapperClass, WrapperContractionProof,
+    parse_call_target_address,
 };
 use fission_midend_prehir::{PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
 
@@ -101,9 +101,9 @@ pub fn summary_soundness_for_wrapper(summary: &ProcedureSummary) -> SummarySound
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fission_core::CallingConvention;
     use fission_midend_core::ir::NirType;
     use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirStmt};
-        use fission_core::CallingConvention;
 
     fn empty_binding(name: &str) -> PreHirBinding {
         PreHirBinding {
@@ -146,5 +146,4 @@ mod tests {
         );
         assert_eq!(summary.arg_forwarding.forwarded_param_indices, vec![0]);
     }
-
 }

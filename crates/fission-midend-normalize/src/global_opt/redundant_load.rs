@@ -11,9 +11,9 @@
 //!
 //! At `if` / `while` / `switch` boundaries the cache is conservatively reset
 //! (or forked empty) so we do not assume memory state merges across joins.
-use crate::prelude::*;
 use super::mem_ssa::{AliasKey, alias_key_for_pointer_expr, nir_byte_size};
 use crate::HashMap;
+use crate::prelude::*;
 
 type LoadCache = HashMap<AliasKey, String>;
 
@@ -135,7 +135,10 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
             rewrite_loads_in_expr(expr, cache, &mut changed);
             for case in cases.iter_mut() {
                 let mut c = LoadCache::default();
-                if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut c) {
+                if rle_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    &mut c,
+                ) {
                     changed = true;
                 }
             }
@@ -189,7 +192,9 @@ fn rewrite_loads_in_expr(expr: &mut PreHirExpr, cache: &LoadCache, changed: &mut
             rewrite_loads_in_expr(base.as_mut(), cache, changed);
             rewrite_loads_in_expr(index.as_mut(), cache, changed);
         }
-        PreHirExpr::AggregateCopy { src, .. } => rewrite_loads_in_expr(src.as_mut(), cache, changed),
+        PreHirExpr::AggregateCopy { src, .. } => {
+            rewrite_loads_in_expr(src.as_mut(), cache, changed)
+        }
         PreHirExpr::Select {
             cond,
             then_expr,

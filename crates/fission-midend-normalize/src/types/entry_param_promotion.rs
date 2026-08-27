@@ -4,11 +4,11 @@
 //! Conservatively only renames when the RHS is a plain (or cast-wrapped) hardware register
 //! for a parameter slot and the assignment appears in the leading linear prefix of the body.
 
-use fission_midend_core::ir::{NirBindingOrigin, NirType};
-use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
-use fission_midend_prehir::util::rename_vars_in_stmts;
-use fission_midend_core::{AbiState, CallingConvention};
 use crate::HashSet;
+use fission_midend_core::ir::{NirBindingOrigin, NirType};
+use fission_midend_core::{AbiState, CallingConvention};
+use fission_midend_prehir::util::rename_vars_in_stmts;
+use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
 use std::collections::BTreeSet;
 
 use fission_midend_core::wave_stats::add_entry_param_promotions;
@@ -674,9 +674,15 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for c in cases.iter_mut() {
-                remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut c.body), abi);
+                remove_redundant_param_hw_copies(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut c.body),
+                    abi,
+                );
             }
-            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), abi);
+            remove_redundant_param_hw_copies(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                abi,
+            );
             true
         }
         PreHirStmt::If {
@@ -684,8 +690,14 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
             else_body,
             ..
         } => {
-            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), abi);
-            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), abi);
+            remove_redundant_param_hw_copies(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                abi,
+            );
+            remove_redundant_param_hw_copies(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                abi,
+            );
             true
         }
         _ => true,

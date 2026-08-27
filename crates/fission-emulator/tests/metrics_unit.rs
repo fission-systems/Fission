@@ -1,4 +1,4 @@
-use fission_emulator::metrics::{is_jit_supported, EmulatorMetrics};
+use fission_emulator::metrics::{EmulatorMetrics, is_jit_supported};
 use fission_pcode::ir::PcodeOpcode;
 
 #[test]
@@ -56,14 +56,8 @@ fn sandbox_metrics_report_json_budget() {
     let mut m = EmulatorMetrics::default();
     m.instructions = 12;
     m.note_unimplemented(PcodeOpcode::CPoolRef);
-    let ok = SandboxMetricsReport::from_run(
-        "x.elf",
-        "ELF",
-        true,
-        0x400000,
-        m.clone(),
-        Some((1, 1)),
-    );
+    let ok =
+        SandboxMetricsReport::from_run("x.elf", "ELF", true, 0x400000, m.clone(), Some((1, 1)));
     assert!(ok.budget_ok());
     let bad = SandboxMetricsReport::from_run("x.elf", "ELF", true, 0x400000, m, Some((0, 0)));
     assert!(!bad.budget_ok());

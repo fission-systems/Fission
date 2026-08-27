@@ -103,7 +103,12 @@ impl SimProcedure for SysOpenat {
         let pathname = emu.read_register_u64("RSI").unwrap_or(0);
         let flags = emu.read_register_u64("RDX").unwrap_or(0);
         let filename = read_string(emu, pathname).unwrap_or_else(|_| "unknown".into());
-        tracing::info!("sys_openat(dirfd={}, \"{}\", flags=0x{:X})", _dirfd, filename, flags);
+        tracing::info!(
+            "sys_openat(dirfd={}, \"{}\", flags=0x{:X})",
+            _dirfd,
+            filename,
+            flags
+        );
         // O_DIRECTORY / missing file: still return a seed fd when path is registered.
         let fd = emu.vfs.open(&filename, Vec::new());
         // If open produced an empty never-seeded file and path is absolute missing, return -ENOENT.
@@ -341,10 +346,10 @@ impl SimProcedure for SysMprotect {
         // Linux: mprotect on a fully/partially unmapped range returns -ENOMEM.
         // Returning success for unmapped pages made musl mallocng treat a huge
         // corrupted page-count as infinite free pages (silent write failures).
-        let ok = emu
-            .state
-            .page_map
-            .mprotect_checked(addr, len.max(1), prot_bits & 0x07 | prot::VALID);
+        let ok =
+            emu.state
+                .page_map
+                .mprotect_checked(addr, len.max(1), prot_bits & 0x07 | prot::VALID);
         if ok {
             let mut page = page_align_down(addr);
             let end = page_align_up(addr.saturating_add(len.max(1)));
@@ -352,7 +357,12 @@ impl SimProcedure for SysMprotect {
                 emu.jit_cache.invalidate_page(page);
                 page = page.saturating_add(0x1000);
             }
-            tracing::info!("sys_mprotect(0x{:X}, {}, 0x{:X}) -> 0", addr, len, prot_bits);
+            tracing::info!(
+                "sys_mprotect(0x{:X}, {}, 0x{:X}) -> 0",
+                addr,
+                len,
+                prot_bits
+            );
             emu.write_register_u64("RAX", 0)?;
         } else {
             // -ENOMEM
@@ -699,10 +709,8 @@ impl SimProcedure for SysRtSigreturn {
             // Best-effort: pop the minimal frame we pushed at delivery.
             let sp_reg = emu.arch.sp_reg;
             if let Ok(sp) = emu.read_register_u64(sp_reg) {
-                let _ = emu.write_register_u64(
-                    sp_reg,
-                    sp.wrapping_add(emu.arch.pointer_size as u64),
-                );
+                let _ =
+                    emu.write_register_u64(sp_reg, sp.wrapping_add(emu.arch.pointer_size as u64));
             }
             emu.pc = pc;
             emu.pc_override = Some(pc);

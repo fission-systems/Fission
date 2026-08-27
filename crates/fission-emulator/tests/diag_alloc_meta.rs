@@ -1,8 +1,8 @@
 //! Focused alloc_meta / mallocng global integrity probes.
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use std::path::PathBuf;
@@ -73,9 +73,21 @@ fn probe_alloc_meta_globals() {
         let rsp = emu.read_register_u64("RSP").unwrap_or(0);
         // meta at head+0x18 (first object) if head set
         let mbase = if head != 0 { head + 0x18 } else { 0 };
-        let freeable = if mbase != 0 { r32(&mut emu, mbase + 0x18) } else { 0 };
-        let last_idx = if mbase != 0 { r32(&mut emu, mbase + 0x1c) } else { 0 };
-        let amask = if mbase != 0 { r64(&mut emu, mbase + 0x20) } else { 0 };
+        let freeable = if mbase != 0 {
+            r32(&mut emu, mbase + 0x18)
+        } else {
+            0
+        };
+        let last_idx = if mbase != 0 {
+            r32(&mut emu, mbase + 0x1c)
+        } else {
+            0
+        };
+        let amask = if mbase != 0 {
+            r64(&mut emu, mbase + 0x20)
+        } else {
+            0
+        };
         let map_b = emu.state.page_map.is_mapped(0x100B000);
         let prot_b = emu.state.page_map.page_flags(0x100B000);
         eprintln!(

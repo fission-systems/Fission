@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use super::util::*;
+use crate::prelude::*;
 
 pub fn collapse_zero_offset_cast(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {

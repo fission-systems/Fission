@@ -1,9 +1,9 @@
-use anyhow::Result;
 use crate::core::Emulator;
 use crate::os::env::{HleResult, OsEnvironment};
 use crate::os::windows::heap::DummyHeap;
 use crate::os::windows::imports::{ImportTable, SharedImportTable};
 use crate::pcode::state::MachineState;
+use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 use std::sync::Mutex;
 
@@ -62,7 +62,9 @@ impl OsEnvironment for WindowsEnv {
             "LoadLibraryA" | "LoadLibraryExA" => handle_load_library_a(emu)?,
             "LoadLibraryW" | "LoadLibraryExW" => handle_load_library_w(emu)?,
             "GetProcAddress" => handle_get_proc_address(emu, self)?,
-            "FreeLibrary" => { emu.write_return_val(1)?; }
+            "FreeLibrary" => {
+                emu.write_return_val(1)?;
+            }
             "VirtualAlloc" | "VirtualAllocEx" => handle_virtual_alloc(emu)?,
             "VirtualFree" | "VirtualFreeEx" => {
                 let addr = emu.read_arg(0).unwrap_or(0);
@@ -76,8 +78,12 @@ impl OsEnvironment for WindowsEnv {
             "VirtualQuery" => handle_virtual_query(emu)?,
 
             // Heap
-            "GetProcessHeap" => { emu.write_return_val(0x20000000)?; }
-            "HeapCreate" => { emu.write_return_val(0x20000000)?; }
+            "GetProcessHeap" => {
+                emu.write_return_val(0x20000000)?;
+            }
+            "HeapCreate" => {
+                emu.write_return_val(0x20000000)?;
+            }
             "HeapAlloc" | "RtlAllocateHeap" => handle_heap_alloc(emu, self)?,
             "HeapFree" | "RtlFreeHeap" => handle_heap_free(emu, self)?,
             "HeapReAlloc" => handle_heap_realloc(emu, self)?,
@@ -91,14 +97,20 @@ impl OsEnvironment for WindowsEnv {
             // Console / stdio / CRT bootstrap
             "GetStdHandle" => handle_get_std_handle(emu)?,
             "GetConsoleMode" => handle_get_console_mode(emu)?,
-            "SetConsoleMode" => { emu.write_return_val(1)?; }
+            "SetConsoleMode" => {
+                emu.write_return_val(1)?;
+            }
             "WriteConsoleA" => handle_write_console_a(emu)?,
             "WriteFile" => handle_write_file(emu)?,
             "WriteConsoleW" => handle_write_console_w(emu)?,
             "ReadConsoleA" | "ReadFile" => handle_read_console_a(emu)?,
             "ReadConsoleW" => handle_read_console_w(emu)?,
-            "AllocConsole" | "AttachConsole" | "FreeConsole" => { emu.write_return_val(1)?; }
-            "FlushFileBuffers" | "SetEndOfFile" => { emu.write_return_val(1)?; }
+            "AllocConsole" | "AttachConsole" | "FreeConsole" => {
+                emu.write_return_val(1)?;
+            }
+            "FlushFileBuffers" | "SetEndOfFile" => {
+                emu.write_return_val(1)?;
+            }
             "CreateFileA" => handle_create_file_a(emu)?,
             "CreateFileW" => handle_create_file_w(emu)?,
             "GetFileSize" | "GetFileSizeEx" => {
@@ -106,27 +118,57 @@ impl OsEnvironment for WindowsEnv {
             }
             "GetStartupInfoA" => handle_get_startup_info_a(emu)?,
             "GetStartupInfoW" => handle_get_startup_info_w(emu)?,
-            "GetACP" | "GetOEMCP" => { emu.write_return_val(65001)?; } // UTF-8
-            "IsProcessorFeaturePresent" => { emu.write_return_val(0)?; }
+            "GetACP" | "GetOEMCP" => {
+                emu.write_return_val(65001)?;
+            } // UTF-8
+            "IsProcessorFeaturePresent" => {
+                emu.write_return_val(0)?;
+            }
             "GetSystemDirectoryA" | "GetWindowsDirectoryA" => {
                 // Return empty / failure — CRT often tolerates 0.
                 emu.write_return_val(0)?;
             }
-            "FlsAlloc" => { emu.write_return_val(1)?; }
-            "FlsGetValue" => { emu.write_return_val(0)?; }
-            "FlsSetValue" | "FlsFree" => { emu.write_return_val(1)?; }
+            "FlsAlloc" => {
+                emu.write_return_val(1)?;
+            }
+            "FlsGetValue" => {
+                emu.write_return_val(0)?;
+            }
+            "FlsSetValue" | "FlsFree" => {
+                emu.write_return_val(1)?;
+            }
             // Thread / Sync / process identity
             "CreateThread" => handle_create_thread(emu)?,
-            "WaitForSingleObject" | "WaitForSingleObjectEx" => { emu.write_return_val(0)?; }
-            "CloseHandle" => { emu.write_return_val(1)?; }
-            "GetCurrentProcess" => { emu.write_return_val(!0u64)?; } // pseudo -1
-            "GetCurrentProcessId" => { emu.write_return_val(1000)?; }
-            "GetCurrentThread" => { emu.write_return_val(!1u64 + 1)?; }
-            "GetCurrentThreadId" => { emu.write_return_val(1000)?; }
-            "TlsAlloc" => { emu.write_return_val(1)?; }
-            "TlsGetValue" => { emu.write_return_val(0)?; }
-            "TlsSetValue" => { emu.write_return_val(1)?; }
-            "TlsFree" => { emu.write_return_val(1)?; }
+            "WaitForSingleObject" | "WaitForSingleObjectEx" => {
+                emu.write_return_val(0)?;
+            }
+            "CloseHandle" => {
+                emu.write_return_val(1)?;
+            }
+            "GetCurrentProcess" => {
+                emu.write_return_val(!0u64)?;
+            } // pseudo -1
+            "GetCurrentProcessId" => {
+                emu.write_return_val(1000)?;
+            }
+            "GetCurrentThread" => {
+                emu.write_return_val(!1u64 + 1)?;
+            }
+            "GetCurrentThreadId" => {
+                emu.write_return_val(1000)?;
+            }
+            "TlsAlloc" => {
+                emu.write_return_val(1)?;
+            }
+            "TlsGetValue" => {
+                emu.write_return_val(0)?;
+            }
+            "TlsSetValue" => {
+                emu.write_return_val(1)?;
+            }
+            "TlsFree" => {
+                emu.write_return_val(1)?;
+            }
             "InitializeCriticalSection"
             | "InitializeCriticalSectionEx"
             | "InitializeCriticalSectionAndSpinCount"
@@ -145,8 +187,12 @@ impl OsEnvironment for WindowsEnv {
                 emu.win_last_error = emu.read_arg(0).unwrap_or(0) as u32;
                 emu.write_return_val(0)?;
             }
-            "SetUnhandledExceptionFilter" => { emu.write_return_val(0)?; }
-            "IsDebuggerPresent" => { emu.write_return_val(0)?; }
+            "SetUnhandledExceptionFilter" => {
+                emu.write_return_val(0)?;
+            }
+            "IsDebuggerPresent" => {
+                emu.write_return_val(0)?;
+            }
             "CheckRemoteDebuggerPresent" => {
                 let p = emu.read_arg(1).unwrap_or(0);
                 if p != 0 {
@@ -163,7 +209,9 @@ impl OsEnvironment for WindowsEnv {
                 }
                 emu.write_return_val(0)?;
             }
-            "OutputDebugStringW" => { emu.write_return_val(0)?; }
+            "OutputDebugStringW" => {
+                emu.write_return_val(0)?;
+            }
 
             // Str / Mem / codepage
             "lstrcpyA" | "strcpy" => handle_lstrcpy_a(emu)?,
@@ -175,7 +223,8 @@ impl OsEnvironment for WindowsEnv {
             "WideCharToMultiByte" => handle_wide_char_to_multi_byte(emu)?,
 
             // Module
-            "GetModuleHandleA" | "GetModuleHandleW" | "GetModuleHandleExA" | "GetModuleHandleExW" => {
+            "GetModuleHandleA" | "GetModuleHandleW" | "GetModuleHandleExA"
+            | "GetModuleHandleExW" => {
                 emu.write_return_val(0x140000000)?;
             }
             "GetModuleFileNameA" => handle_get_module_file_name_a(emu)?,
@@ -185,11 +234,16 @@ impl OsEnvironment for WindowsEnv {
             "GetEnvironmentStringsW" => {
                 // Return a dummy env block pointer in guest heap region.
                 let base = 0x0000_0000_2100_0000u64;
-                let data = "PATH=C:\\Windows\\System32\0\0".encode_utf16().flat_map(|c| c.to_le_bytes()).collect::<Vec<_>>();
+                let data = "PATH=C:\\Windows\\System32\0\0"
+                    .encode_utf16()
+                    .flat_map(|c| c.to_le_bytes())
+                    .collect::<Vec<_>>();
                 let _ = emu.state.write_space(emu.state.ram_space(), base, &data);
                 emu.write_return_val(base)?;
             }
-            "FreeEnvironmentStringsW" | "FreeEnvironmentStringsA" => { emu.write_return_val(1)?; }
+            "FreeEnvironmentStringsW" | "FreeEnvironmentStringsA" => {
+                emu.write_return_val(1)?;
+            }
 
             "ExitProcess" | "TerminateProcess" => {
                 let code = emu.read_arg(0).unwrap_or(0) as u32;
@@ -224,7 +278,9 @@ impl OsEnvironment for WindowsEnv {
                 let fake_time = file_time_base.wrapping_add(emu.tick_count.wrapping_mul(10_000));
                 let ptr = emu.read_arg(0).unwrap_or(0);
                 if ptr != 0 {
-                    let _ = emu.state.write_space(emu.state.ram_space(), ptr, &fake_time.to_le_bytes());
+                    let _ =
+                        emu.state
+                            .write_space(emu.state.ram_space(), ptr, &fake_time.to_le_bytes());
                 }
                 emu.tick_count = emu.tick_count.wrapping_add(1);
                 // void return
@@ -234,7 +290,9 @@ impl OsEnvironment for WindowsEnv {
                 let ptr = emu.read_arg(0).unwrap_or(0);
                 if ptr != 0 {
                     let counter = emu.tick_count.wrapping_mul(10_000);
-                    let _ = emu.state.write_space(emu.state.ram_space(), ptr, &counter.to_le_bytes());
+                    let _ =
+                        emu.state
+                            .write_space(emu.state.ram_space(), ptr, &counter.to_le_bytes());
                 }
                 emu.tick_count = emu.tick_count.wrapping_add(1);
                 emu.write_return_val(1)?; // TRUE = success
@@ -244,7 +302,9 @@ impl OsEnvironment for WindowsEnv {
                 if ptr != 0 {
                     // Return 10,000,000 Hz (100-ns resolution, matches FILETIME)
                     let freq: u64 = 10_000_000;
-                    let _ = emu.state.write_space(emu.state.ram_space(), ptr, &freq.to_le_bytes());
+                    let _ = emu
+                        .state
+                        .write_space(emu.state.ram_space(), ptr, &freq.to_le_bytes());
                 }
                 emu.write_return_val(1)?;
             }
@@ -283,7 +343,11 @@ impl OsEnvironment for WindowsEnv {
                 tracing::info!("Win32 HLE: Instruct userop '{}' called", userop_name);
             }
             _ => {
-                tracing::debug!("Win32 HLE: Unhandled USEROP: {} (inputs: {:?})", userop_name, inputs);
+                tracing::debug!(
+                    "Win32 HLE: Unhandled USEROP: {} (inputs: {:?})",
+                    userop_name,
+                    inputs
+                );
             }
         }
         Ok(HleResult::Continue)
@@ -297,10 +361,14 @@ fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {
     let mut cur = addr;
     loop {
         let b = emu.state.read_space(emu.state.ram_space(), cur, 1)?[0];
-        if b == 0 { break; }
+        if b == 0 {
+            break;
+        }
         bytes.push(b);
         cur += 1;
-        if bytes.len() > 4096 { break; }
+        if bytes.len() > 4096 {
+            break;
+        }
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
@@ -311,10 +379,14 @@ fn read_wide_string(emu: &mut Emulator, addr: u64) -> Result<String> {
     loop {
         let pair = emu.state.read_space(emu.state.ram_space(), cur, 2)?;
         let wc = pair[0] as u16 | ((pair[1] as u16) << 8);
-        if wc == 0 { break; }
+        if wc == 0 {
+            break;
+        }
         chars.push(wc);
         cur += 2;
-        if chars.len() > 4096 { break; }
+        if chars.len() > 4096 {
+            break;
+        }
     }
     Ok(String::from_utf16_lossy(&chars))
 }
@@ -323,7 +395,11 @@ fn read_wide_string(emu: &mut Emulator, addr: u64) -> Result<String> {
 
 fn handle_load_library_a(emu: &mut Emulator) -> Result<()> {
     let addr = emu.read_arg(0)?;
-    let name = if addr == 0 { String::from("<null>") } else { read_string(emu, addr)? };
+    let name = if addr == 0 {
+        String::from("<null>")
+    } else {
+        read_string(emu, addr)?
+    };
     tracing::info!("LoadLibraryA(\"{}\")", name);
     emu.write_return_val(0x10000000)?; // dummy HMODULE
     Ok(())
@@ -331,7 +407,11 @@ fn handle_load_library_a(emu: &mut Emulator) -> Result<()> {
 
 fn handle_load_library_w(emu: &mut Emulator) -> Result<()> {
     let addr = emu.read_arg(0)?;
-    let name = if addr == 0 { String::from("<null>") } else { read_wide_string(emu, addr)? };
+    let name = if addr == 0 {
+        String::from("<null>")
+    } else {
+        read_wide_string(emu, addr)?
+    };
     tracing::info!("LoadLibraryW(\"{}\")", name);
     emu.write_return_val(0x10000001)?; // dummy HMODULE
     Ok(())
@@ -431,7 +511,10 @@ fn handle_write_file(emu: &mut Emulator) -> Result<()> {
 
     if !is_console_or_stdout_handle(h) && h != 0x50000000 && h != 0x50000001 {
         // Unknown disk handle — still attempt a best-effort write to host for debugging.
-        tracing::debug!("WriteFile: non-std handle 0x{:X}, treating as console-like", h);
+        tracing::debug!(
+            "WriteFile: non-std handle 0x{:X}, treating as console-like",
+            h
+        );
     }
 
     let raw = if n == 0 || buf_ptr == 0 {
@@ -446,7 +529,11 @@ fn handle_write_file(emu: &mut Emulator) -> Result<()> {
     } else {
         // Route through SimVFS when available (best-effort path).
         let s = String::from_utf8_lossy(&raw);
-        tracing::debug!("WriteFile(disk-ish): {} bytes: {:?}", raw.len(), s.chars().take(64).collect::<String>());
+        tracing::debug!(
+            "WriteFile(disk-ish): {} bytes: {:?}",
+            raw.len(),
+            s.chars().take(64).collect::<String>()
+        );
         print!("{}", s);
     }
 
@@ -484,7 +571,9 @@ fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
     let base = if lp_address == 0 {
         emu.state.page_map.mmap_anon(size, page_prot)
     } else {
-        emu.state.page_map.map_region(lp_address, size, page_prot, true);
+        emu.state
+            .page_map
+            .map_region(lp_address, size, page_prot, true);
         lp_address
     };
     let fill = (size as usize).min(0x10_0000);
@@ -599,7 +688,9 @@ fn handle_multi_byte_to_wide_char(emu: &mut Emulator) -> Result<()> {
     } else if cb < 0 {
         read_string(emu, src)?
     } else {
-        let raw = emu.state.read_space(emu.state.ram_space(), src, cb as usize)?;
+        let raw = emu
+            .state
+            .read_space(emu.state.ram_space(), src, cb as usize)?;
         String::from_utf8_lossy(&raw).into_owned()
     };
     let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
@@ -635,7 +726,8 @@ fn handle_wide_char_to_multi_byte(emu: &mut Emulator) -> Result<()> {
         emu.write_return_val(bytes.len() as u64)?;
     } else if dst != 0 {
         let n = (cb as usize).min(bytes.len());
-        emu.state.write_space(emu.state.ram_space(), dst, &bytes[..n])?;
+        emu.state
+            .write_space(emu.state.ram_space(), dst, &bytes[..n])?;
         emu.write_return_val(n as u64)?;
     } else {
         emu.write_return_val(0)?;
@@ -674,7 +766,10 @@ fn handle_get_command_line_a(emu: &mut Emulator) -> Result<()> {
 
 fn handle_get_command_line_w(emu: &mut Emulator) -> Result<()> {
     let base = 0x0000_0000_2110_1000u64;
-    let wide: Vec<u16> = "test.exe".encode_utf16().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = "test.exe"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let mut bytes = Vec::new();
     for c in wide {
         bytes.extend_from_slice(&c.to_le_bytes());
@@ -686,10 +781,11 @@ fn handle_get_command_line_w(emu: &mut Emulator) -> Result<()> {
 
 fn handle_heap_alloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let _h_heap = emu.read_arg(0)?;
-    let flags   = emu.read_arg(1)?;
-    let bytes   = emu.read_arg(2)? as usize;
+    let flags = emu.read_arg(1)?;
+    let bytes = emu.read_arg(2)? as usize;
     let addr = env.heap.lock().unwrap().alloc(bytes);
-    if (flags & 8) != 0 { // HEAP_ZERO_MEMORY
+    if (flags & 8) != 0 {
+        // HEAP_ZERO_MEMORY
         let zeros = vec![0u8; bytes];
         emu.state.write_space(emu.state.ram_space(), addr, &zeros)?;
     }
@@ -700,8 +796,8 @@ fn handle_heap_alloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
 
 fn handle_heap_free(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let _h_heap = emu.read_arg(0)?;
-    let _flags  = emu.read_arg(1)?;
-    let addr    = emu.read_arg(2)?;
+    let _flags = emu.read_arg(1)?;
+    let addr = emu.read_arg(2)?;
     let success = env.heap.lock().unwrap().free(addr);
     tracing::info!("HeapFree(0x{:X}) -> {}", addr, success);
     emu.write_return_val(if success { 1 } else { 0 })?;
@@ -710,9 +806,9 @@ fn handle_heap_free(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
 
 fn handle_heap_realloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let _h_heap = emu.read_arg(0)?;
-    let flags   = emu.read_arg(1)?;
-    let addr    = emu.read_arg(2)?;
-    let bytes   = emu.read_arg(3)? as usize;
+    let flags = emu.read_arg(1)?;
+    let addr = emu.read_arg(2)?;
+    let bytes = emu.read_arg(3)? as usize;
     if let Some(new_addr) = env.heap.lock().unwrap().realloc(addr, bytes) {
         if (flags & 8) != 0 {
             // zeroing memory might be needed but for dummy it's fine to skip diff
@@ -727,16 +823,22 @@ fn handle_heap_realloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
 
 fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
-    let buf_ptr    = emu.read_arg(1)?;
-    let n_chars    = emu.read_arg(2)? as usize;
-    let p_written  = emu.read_arg(3)?;
-    
-    let raw = emu.state.read_space(emu.state.ram_space(), buf_ptr, n_chars)?;
+    let buf_ptr = emu.read_arg(1)?;
+    let n_chars = emu.read_arg(2)? as usize;
+    let p_written = emu.read_arg(3)?;
+
+    let raw = emu
+        .state
+        .read_space(emu.state.ram_space(), buf_ptr, n_chars)?;
     let s = String::from_utf8_lossy(&raw);
     print!("{}", s); // Print to real stdout
-    
+
     if p_written != 0 {
-        emu.state.write_space(emu.state.ram_space(), p_written, &(n_chars as u32).to_le_bytes())?;
+        emu.state.write_space(
+            emu.state.ram_space(),
+            p_written,
+            &(n_chars as u32).to_le_bytes(),
+        )?;
     }
     emu.write_return_val(1)?;
     Ok(())
@@ -744,17 +846,26 @@ fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
 
 fn handle_write_console_w(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
-    let buf_ptr    = emu.read_arg(1)?;
-    let n_chars    = emu.read_arg(2)? as usize;
-    let p_written  = emu.read_arg(3)?;
-    
-    let raw = emu.state.read_space(emu.state.ram_space(), buf_ptr, n_chars * 2)?;
-    let chars: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let buf_ptr = emu.read_arg(1)?;
+    let n_chars = emu.read_arg(2)? as usize;
+    let p_written = emu.read_arg(3)?;
+
+    let raw = emu
+        .state
+        .read_space(emu.state.ram_space(), buf_ptr, n_chars * 2)?;
+    let chars: Vec<u16> = raw
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
     let s = String::from_utf16_lossy(&chars);
     print!("{}", s);
-    
+
     if p_written != 0 {
-        emu.state.write_space(emu.state.ram_space(), p_written, &(n_chars as u32).to_le_bytes())?;
+        emu.state.write_space(
+            emu.state.ram_space(),
+            p_written,
+            &(n_chars as u32).to_le_bytes(),
+        )?;
     }
     emu.write_return_val(1)?;
     Ok(())
@@ -809,23 +920,24 @@ fn handle_rtl_move_memory(emu: &mut Emulator) -> Result<()> {
 
 fn handle_get_module_file_name_a(emu: &mut Emulator) -> Result<()> {
     let _h_module = emu.read_arg(0)?;
-    let buf       = emu.read_arg(1)?;
-    let size      = emu.read_arg(2)? as usize;
-    
+    let buf = emu.read_arg(1)?;
+    let size = emu.read_arg(2)? as usize;
+
     let path = "C:\\sandbox\\test.exe";
     let mut bytes = path.as_bytes().to_vec();
     bytes.push(0);
     let copied = std::cmp::min(bytes.len(), size);
-    emu.state.write_space(emu.state.ram_space(), buf, &bytes[..copied])?;
+    emu.state
+        .write_space(emu.state.ram_space(), buf, &bytes[..copied])?;
     emu.write_return_val((copied - 1) as u64)?;
     Ok(())
 }
 
 fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
-    let buf        = emu.read_arg(1)?;
+    let buf = emu.read_arg(1)?;
     let chars_to_read = emu.read_arg(2)? as usize;
-    let p_chars_read  = emu.read_arg(3)?;
+    let p_chars_read = emu.read_arg(3)?;
     let _p_input_ctrl = emu.read_arg(4)?;
 
     let mut data = vec![0u8; chars_to_read];
@@ -841,29 +953,36 @@ fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
             bytes_read = n;
         }
     }
-    
+
     if bytes_read > 0 {
-        emu.state.write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
+        emu.state
+            .write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
         // Taint stdin bytes for symbolic execution
         for i in 0..bytes_read {
-            let node = emu.solver.register_var(format!("stdin_console_{}", buf+i as u64), 1);
+            let node = emu
+                .solver
+                .register_var(format!("stdin_console_{}", buf + i as u64), 1);
             emu.state
                 .set_shadow_memory(emu.state.ram_space(), buf + i as u64, node);
         }
     }
     if p_chars_read != 0 {
-        emu.state.write_space(emu.state.ram_space(), p_chars_read, &(bytes_read as u32).to_le_bytes())?;
+        emu.state.write_space(
+            emu.state.ram_space(),
+            p_chars_read,
+            &(bytes_read as u32).to_le_bytes(),
+        )?;
     }
-    
+
     emu.write_return_val(1)?; // non-zero on success
     Ok(())
 }
 
 fn handle_read_console_w(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
-    let buf        = emu.read_arg(1)?;
+    let buf = emu.read_arg(1)?;
     let chars_to_read = emu.read_arg(2)? as usize;
-    let p_chars_read  = emu.read_arg(3)?;
+    let p_chars_read = emu.read_arg(3)?;
     let _p_input_ctrl = emu.read_arg(4)?;
 
     let mut data = vec![0u8; chars_to_read];
@@ -879,7 +998,7 @@ fn handle_read_console_w(emu: &mut Emulator) -> Result<()> {
             chars_read = n; // Note: for W, ideally read UTF-16, but reading bytes as ASCII usually works for crackmes
         }
     }
-    
+
     if chars_read > 0 {
         // Expand ASCII to UTF-16
         let mut wdata = Vec::with_capacity(chars_read * 2);
@@ -890,9 +1009,13 @@ fn handle_read_console_w(emu: &mut Emulator) -> Result<()> {
         emu.state.write_space(emu.state.ram_space(), buf, &wdata)?;
     }
     if p_chars_read != 0 {
-        emu.state.write_space(emu.state.ram_space(), p_chars_read, &(chars_read as u32).to_le_bytes())?;
+        emu.state.write_space(
+            emu.state.ram_space(),
+            p_chars_read,
+            &(chars_read as u32).to_le_bytes(),
+        )?;
     }
-    
+
     emu.write_return_val(1)?;
     Ok(())
 }

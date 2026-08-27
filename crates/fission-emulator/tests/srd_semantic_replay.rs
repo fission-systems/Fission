@@ -10,7 +10,7 @@ use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
 use fission_emulator::{
-    CaptureOpts, OwnerLayer, SemanticReplayDelta, SemanticReplaySnapshot, MachineState,
+    CaptureOpts, MachineState, OwnerLayer, SemanticReplayDelta, SemanticReplaySnapshot,
 };
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
@@ -74,8 +74,7 @@ fn srd_dual_budget_not_identical() {
     assert!(
         !delta.identical,
         "expected dual-budget runs to differ; left stop=0x{:X} right stop=0x{:X}",
-        left.stop_pc,
-        right.stop_pc
+        left.stop_pc, right.stop_pc
     );
     assert!(
         !delta.owners_touched.is_empty(),
@@ -104,7 +103,10 @@ fn srd_dual_budget_not_identical() {
     assert_eq!(parsed.label, left.label);
     assert_eq!(parsed.stop_pc, left.stop_pc);
     assert_eq!(parsed.inst_count, left.inst_count);
-    assert!(parsed.mallocng.is_some(), "mallocng probe should be present");
+    assert!(
+        parsed.mallocng.is_some(),
+        "mallocng probe should be present"
+    );
 }
 
 /// Same capture twice → identical SRD (stable serialization surface).
@@ -112,7 +114,11 @@ fn srd_dual_budget_not_identical() {
 fn srd_identical_self_diff() {
     let snap = capture("self", 512);
     let delta = SemanticReplayDelta::diff(&snap, &snap);
-    assert!(delta.identical, "self-diff must be identical: {}", delta.summary);
+    assert!(
+        delta.identical,
+        "self-diff must be identical: {}",
+        delta.summary
+    );
     assert!(delta.field_deltas.is_empty());
     assert_eq!(delta.primary_owner, OwnerLayer::Mixed);
 }

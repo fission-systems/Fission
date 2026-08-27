@@ -1,9 +1,9 @@
 use crate::pcode::state::MachineState;
-use fission_solver::{solver::Solver, SymExpr, SymNodeId};
 use anyhow::Result;
+use fission_solver::{SymExpr, SymNodeId, solver::Solver};
 
 /// angr-style memory mixin for handling symbolic pointers.
-/// 
+///
 /// When a pointer is symbolic, we query the solver to evaluate possible concrete addresses.
 /// If the number of solutions is under a threshold, we create a symbolic If-Then-Else (ITE)
 /// tree representing reading/writing at all possible targets.
@@ -22,25 +22,26 @@ impl MemoryMixin {
         size_bytes: u32,
     ) -> Result<SymNodeId> {
         let ptr_expr = solver.nodes.get(&ptr_node).unwrap().clone();
-        
+
         let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
             id
         } else {
-            let arr_expr = SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
+            let arr_expr =
+                SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
             let id = solver.register_node(arr_expr);
             state.set_theory_array_id(space_id, id);
             id
         };
-        
+
         let array_expr = solver.nodes.get(&array_id).unwrap().clone();
-        
+
         // Single byte read vs Multi-byte read.
         // Memory arrays map addresses to bytes. If size_bytes > 1, we must concat multiple ArraySelects.
         let mut final_expr = SymExpr::ArraySelect {
             array: Box::new(array_expr.clone()),
             index: Box::new(ptr_expr.clone()),
         };
-        
+
         for i in 1..size_bytes {
             let offset = SymExpr::new_const(i as u64, ptr_expr.get_size());
             let next_ptr = SymExpr::new_add(ptr_expr.clone(), offset);
@@ -70,26 +71,31 @@ impl MemoryMixin {
         let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
             id
         } else {
-            let arr_expr = SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
+            let arr_expr =
+                SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
             let id = solver.register_node(arr_expr);
             state.set_theory_array_id(space_id, id);
             id
         };
 
         let mut current_array = solver.nodes.get(&array_id).unwrap().clone();
-        
+
         // If writing multiple bytes, we need multiple ArrayStores
         for i in 0..size_bytes {
             let offset = SymExpr::new_const(i as u64, ptr_expr.get_size());
             let next_ptr = SymExpr::new_add(ptr_expr.clone(), offset);
-            
+
             // Extract byte i from val_expr
             let byte_val = if size_bytes == 1 {
                 val_expr.clone()
             } else {
-                SymExpr::Extract { expr: Box::new(val_expr.clone()), lsb: i * 8, size: 8 }
+                SymExpr::Extract {
+                    expr: Box::new(val_expr.clone()),
+                    lsb: i * 8,
+                    size: 8,
+                }
             };
-            
+
             current_array = SymExpr::ArrayStore {
                 array: Box::new(current_array),
                 index: Box::new(next_ptr),

@@ -17,18 +17,27 @@ fn commit_isolated_semantic_identities<'a>(
     }
     target.locals_next_id = target.locals_next_id.max(isolated.locals_next_id);
     for (offset, owners) in isolated.stack_slot_memory_owners {
-        target.stack_slot_memory_owners.entry(offset).or_insert(owners);
+        target
+            .stack_slot_memory_owners
+            .entry(offset)
+            .or_insert(owners);
     }
     for (name, binding) in isolated.temps {
         target.temps.entry(name).or_insert(binding);
     }
     target.temp_next_id = target.temp_next_id.max(isolated.temp_next_id);
-    target.used_param_local_names.extend(isolated.used_param_local_names);
+    target
+        .used_param_local_names
+        .extend(isolated.used_param_local_names);
     for (key, name) in isolated.materialized_vns {
         target.materialized_vns.entry(key).or_insert(name);
     }
-    target.load_address_bindings.extend(isolated.load_address_bindings);
-    target.load_value_bindings.extend(isolated.load_value_bindings);
+    target
+        .load_address_bindings
+        .extend(isolated.load_address_bindings);
+    target
+        .load_value_bindings
+        .extend(isolated.load_value_bindings);
     for (key, name) in isolated.explicit_merge_bindings {
         target.explicit_merge_bindings.entry(key).or_insert(name);
     }
@@ -39,7 +48,8 @@ fn commit_isolated_semantic_identities<'a>(
         target.register_param_aliases.entry(offset).or_insert(index);
     }
     target.sese_region_proof_calls.set(
-        target.sese_region_proof_calls
+        target
+            .sese_region_proof_calls
             .get()
             .max(isolated.sese_region_proof_calls.get()),
     );
@@ -281,7 +291,8 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         head_idx: usize,
         entry_pred_idx: usize,
     ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
-        let Some(expected_exit) = self.get_loop_body(head_idx).and_then(|body| body.exit_idx) else {
+        let Some(expected_exit) = self.get_loop_body(head_idx).and_then(|body| body.exit_idx)
+        else {
             return Ok(None);
         };
 
@@ -298,9 +309,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         if baseline_exit != expected_exit {
             return Ok(None);
         }
-        let baseline_gotos = fission_midend_structuring::count_explicit_gotos(
-            std::slice::from_ref(&baseline_stmt),
-        ) + usize::from(self.fallthrough_index(entry_pred_idx) != Some(head_idx));
+        let baseline_gotos =
+            fission_midend_structuring::count_explicit_gotos(std::slice::from_ref(&baseline_stmt))
+                + usize::from(self.fallthrough_index(entry_pred_idx) != Some(head_idx));
 
         self.lower_isolated(|isolated| {
             fork_structuring_work_counter(isolated);

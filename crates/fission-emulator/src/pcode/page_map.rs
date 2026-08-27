@@ -158,8 +158,7 @@ impl PageMap {
             page += PAGE_SIZE;
         }
 
-        self.mappings
-            .retain(|m| m.end <= start || m.start >= end);
+        self.mappings.retain(|m| m.end <= start || m.start >= end);
         self.mappings.push(GuestMapping {
             start,
             end,
@@ -231,11 +230,7 @@ impl PageMap {
         // Fail if any page is unmapped — do not partially apply.
         let mut page = start;
         while page < end {
-            if !self
-                .flags
-                .get(&page)
-                .is_some_and(|f| *f & prot::VALID != 0)
-            {
+            if !self.flags.get(&page).is_some_and(|f| *f & prot::VALID != 0) {
                 return false;
             }
             page += PAGE_SIZE;
@@ -266,8 +261,7 @@ impl PageMap {
     }
 
     pub fn is_mapped(&self, addr: u64) -> bool {
-        self.page_flags(addr)
-            .is_some_and(|f| f & prot::VALID != 0)
+        self.page_flags(addr).is_some_and(|f| f & prot::VALID != 0)
     }
 
     pub fn check_access(&self, addr: u64, kind: AccessKind) -> Result<(), PageFault> {
@@ -369,10 +363,7 @@ impl PageMap {
         let mut page = page_align_down(addr);
         let last = page_align_down(end);
         while page <= last {
-            if self
-                .page_flags(page)
-                .is_some_and(|f| f & prot::EXEC != 0)
-            {
+            if self.page_flags(page).is_some_and(|f| f & prot::EXEC != 0) {
                 return true;
             }
             if page == last {
@@ -393,10 +384,7 @@ impl PageMap {
         let mut page = page_align_down(addr);
         let last = page_align_down(end);
         while page <= last {
-            if self
-                .page_flags(page)
-                .is_some_and(|f| f & prot::EXEC != 0)
-            {
+            if self.page_flags(page).is_some_and(|f| f & prot::EXEC != 0) {
                 out.push(page);
             }
             if page == last {
@@ -409,10 +397,7 @@ impl PageMap {
 
     fn region_free(&self, start: u64, len: u64) -> bool {
         let end = start.saturating_add(len);
-        !self
-            .mappings
-            .iter()
-            .any(|m| m.start < end && m.end > start)
+        !self.mappings.iter().any(|m| m.start < end && m.end > start)
     }
 
     fn coalesce_mappings(&mut self) {
@@ -499,7 +484,10 @@ mod tests {
             "tail page (brk_cur) must be mapped — align_down(start)+len drops it"
         );
         assert!(pm.is_mapped(0x10086DF), "last bss byte");
-        assert!(!pm.is_mapped(0x1009000), "must not over-map past page_align_up(end)");
+        assert!(
+            !pm.is_mapped(0x1009000),
+            "must not over-map past page_align_up(end)"
+        );
     }
 
     #[test]

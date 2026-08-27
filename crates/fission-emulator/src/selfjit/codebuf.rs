@@ -16,7 +16,7 @@
 //! `MAP_JIT` + `pthread_jit_write_protect_np` toggling on Apple Silicon for
 //! hardened-runtime processes; not yet handled here (see `finish()`'s doc).
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::ffi::c_void;
 
 /// A single growable buffer of not-yet-executable machine code.
@@ -96,10 +96,7 @@ impl CodeBuffer {
                 0,
             );
             if addr == libc::MAP_FAILED {
-                bail!(
-                    "mmap failed: {}",
-                    std::io::Error::last_os_error()
-                );
+                bail!("mmap failed: {}", std::io::Error::last_os_error());
             }
             std::ptr::copy_nonoverlapping(self.bytes.as_ptr(), addr as *mut u8, len);
 

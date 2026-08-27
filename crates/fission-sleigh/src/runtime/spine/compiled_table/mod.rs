@@ -410,7 +410,9 @@ pub(crate) fn decode_instruction_no_pcode(
         }
         match bind_instruction(compiled, strategy, &ctx, selection) {
             Ok(decoded) => {
-                return decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded, false);
+                return decoded_instruction_from_state(
+                    compiled, address, bytes, &ctx, decoded, false,
+                );
             }
             Err(err) => {
                 if first_error.is_none() {

@@ -189,7 +189,11 @@ fn apply_range_constraint(ranges: &mut RangeEnv, name: &str, kind: CmpKind, val:
         if let Some(hi) = hi_bound {
             iv.hi = iv.hi.min(hi);
         }
-        entry.signed = if iv.lo <= iv.hi { Some((bits, iv)) } else { None };
+        entry.signed = if iv.lo <= iv.hi {
+            Some((bits, iv))
+        } else {
+            None
+        };
     };
 
     match kind {
@@ -213,7 +217,11 @@ fn apply_range_constraint(ranges: &mut RangeEnv, name: &str, kind: CmpKind, val:
         if let Some(hi) = hi_bound {
             iv.hi = iv.hi.min(hi);
         }
-        entry.unsigned = if iv.lo <= iv.hi { Some((bits, iv)) } else { None };
+        entry.unsigned = if iv.lo <= iv.hi {
+            Some((bits, iv))
+        } else {
+            None
+        };
     };
 
     match kind {
@@ -262,7 +270,11 @@ fn extract_range_constraints(cond: &PreHirExpr, is_then_branch: bool, ranges: &m
         }
         _ => {
             if let Some((name, kind, val, bits)) = split_var_const_cmp(cond) {
-                let eff = if is_then_branch { kind } else { negate_cmp(kind) };
+                let eff = if is_then_branch {
+                    kind
+                } else {
+                    negate_cmp(kind)
+                };
                 apply_range_constraint(ranges, name, eff, val, bits);
             }
         }
@@ -343,7 +355,8 @@ fn decide_cmp(ranges: &RangeEnv, cond: &PreHirExpr) -> Option<bool> {
             decide_interval(unsigned_iv?, zext_const(val, bits), kind)
         }
         CmpKind::Eq | CmpKind::Ne => {
-            let via_signed = signed_iv.and_then(|iv| decide_interval(iv, sext_const(val, bits), kind));
+            let via_signed =
+                signed_iv.and_then(|iv| decide_interval(iv, sext_const(val, bits), kind));
             if via_signed.is_some() {
                 return via_signed;
             }
@@ -428,7 +441,12 @@ fn visit_stmt(
             changed |= substitute_expr(expr, env);
         }
         PreHirStmt::Block(body) => {
-            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), env, ranges, binding_types);
+            changed |= visit_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                env,
+                ranges,
+                binding_types,
+            );
         }
         PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
             changed |= substitute_expr(cond, env);
@@ -441,7 +459,12 @@ fn visit_stmt(
                 loop_env.remove(v);
                 loop_ranges.remove(v);
             }
-            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut loop_env, &mut loop_ranges, binding_types);
+            changed |= visit_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                &mut loop_env,
+                &mut loop_ranges,
+                binding_types,
+            );
             // Facts about variables the loop writes do not survive the loop.
             for v in &written {
                 env.remove(v);
@@ -478,7 +501,12 @@ fn visit_stmt(
             if let Some(u) = update {
                 changed |= visit_stmt(u.as_mut(), &mut loop_env, &mut loop_ranges, binding_types);
             }
-            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut loop_env, &mut loop_ranges, binding_types);
+            changed |= visit_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                &mut loop_env,
+                &mut loop_ranges,
+                binding_types,
+            );
             for v in &written {
                 env.remove(v);
                 ranges.remove(v);
@@ -515,8 +543,18 @@ fn visit_stmt(
                 }
             }
 
-            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut then_env, &mut then_ranges, binding_types);
-            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut else_env, &mut else_ranges, binding_types);
+            changed |= visit_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                &mut then_env,
+                &mut then_ranges,
+                binding_types,
+            );
+            changed |= visit_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                &mut else_env,
+                &mut else_ranges,
+                binding_types,
+            );
 
             // Post-if state: facts about variables written in either arm no
             // longer hold on the joined path.
@@ -543,20 +581,24 @@ fn visit_stmt(
                         if let Some(ty) = binding_types.get(x) {
                             case_env.insert(x.clone(), PreHirExpr::Const(val, ty.clone()));
                             if let Some(bits) = int_bits(ty) {
-                                apply_range_constraint(
-                                    &mut case_ranges,
-                                    x,
-                                    CmpKind::Eq,
-                                    val,
-                                    bits,
-                                );
+                                apply_range_constraint(&mut case_ranges, x, CmpKind::Eq, val, bits);
                             }
                         }
                     }
                 }
-                changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut case_env, &mut case_ranges, binding_types);
+                changed |= visit_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    &mut case_env,
+                    &mut case_ranges,
+                    binding_types,
+                );
             }
-            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), env, ranges, binding_types);
+            changed |= visit_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                env,
+                ranges,
+                binding_types,
+            );
             let mut written = HashSet::default();
             for case in cases.iter() {
                 collect_written_vars(&case.body, &mut written);
@@ -638,7 +680,11 @@ fn substitute_lvalue(lval: &mut PreHirLValue, env: &HashMap<String, PreHirExpr>)
     changed
 }
 
-fn extract_constraints(cond: &PreHirExpr, is_then_branch: bool, env: &mut HashMap<String, PreHirExpr>) {
+fn extract_constraints(
+    cond: &PreHirExpr,
+    is_then_branch: bool,
+    env: &mut HashMap<String, PreHirExpr>,
+) {
     match cond {
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Eq,
@@ -719,7 +765,9 @@ fn collect_written_vars(stmts: &[PreHirStmt], written: &mut HashSet<String>) {
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 collect_written_vars_expr(expr, written);
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 collect_written_vars(body, written);
             }
             PreHirStmt::For {

@@ -7,10 +7,10 @@
 //! arguments and the final argument is provably derived from a recovered home
 //! slot.
 
+use crate::HashMap;
+use fission_core::CallingConvention;
 use fission_midend_core::ir::NirBindingOrigin;
 use fission_midend_prehir::{PreHirExpr, PreHirFunction, PreHirStmt};
-use fission_core::CallingConvention;
-use crate::HashMap;
 use std::collections::BTreeSet;
 
 use fission_midend_core::wave_stats::{
@@ -40,7 +40,9 @@ fn expr_uses_home_slot(expr: &PreHirExpr, home_slots: &HashMap<String, i64>) -> 
         PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_uses_home_slot(lhs, home_slots) || expr_uses_home_slot(rhs, home_slots)
         }
-        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_home_slot(arg, home_slots)),
+        PreHirExpr::Call { args, .. } => {
+            args.iter().any(|arg| expr_uses_home_slot(arg, home_slots))
+        }
         PreHirExpr::Index { base, index, .. } => {
             expr_uses_home_slot(base, home_slots) || expr_uses_home_slot(index, home_slots)
         }
@@ -61,9 +63,9 @@ fn expr_uses_home_slot(expr: &PreHirExpr, home_slots: &HashMap<String, i64>) -> 
 
 fn call_tail_uses_home_slot(args: &[PreHirExpr], home_slots: &HashMap<String, i64>) -> bool {
     args.len() > 4
-        && args[4..]
-            .iter()
-            .any(|arg| expr_uses_home_slot(arg, home_slots) || matches!(arg, PreHirExpr::Load { .. }))
+        && args[4..].iter().any(|arg| {
+            expr_uses_home_slot(arg, home_slots) || matches!(arg, PreHirExpr::Load { .. })
+        })
 }
 
 fn call_last_arg_is_va_region(args: &[PreHirExpr], home_slots: &HashMap<String, i64>) -> bool {
@@ -102,9 +104,13 @@ fn recover_in_stmt(
         PreHirStmt::Block(stmts)
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. }
-        | PreHirStmt::For { body: stmts, .. } => {
-            recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), home_slots, last_named_param, folds, va_starts)
-        }
+        | PreHirStmt::For { body: stmts, .. } => recover_in_stmts(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+            home_slots,
+            last_named_param,
+            folds,
+            va_starts,
+        ),
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
@@ -116,7 +122,13 @@ fn recover_in_stmt(
                     va_starts,
                 );
             }
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), home_slots, last_named_param, folds, va_starts);
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                home_slots,
+                last_named_param,
+                folds,
+                va_starts,
+            );
             changed
         }
         PreHirStmt::If {
@@ -124,8 +136,19 @@ fn recover_in_stmt(
             else_body,
             ..
         } => {
-            recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), home_slots, last_named_param, folds, va_starts)
-                | recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), home_slots, last_named_param, folds, va_starts)
+            recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                home_slots,
+                last_named_param,
+                folds,
+                va_starts,
+            ) | recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                home_slots,
+                last_named_param,
+                folds,
+                va_starts,
+            )
         }
         PreHirStmt::Label(_)
         | PreHirStmt::Goto(_)

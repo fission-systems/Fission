@@ -39,7 +39,6 @@ pub struct ShadowDelta {
     pub new_node: Option<u32>,
 }
 
-
 /// Complete execution snapshot at a specific point in time
 #[derive(Debug, Clone)]
 pub struct ExecutionSnapshot {

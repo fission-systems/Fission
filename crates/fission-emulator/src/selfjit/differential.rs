@@ -129,8 +129,7 @@ fn selfjit_supports<'a>(ops: impl IntoIterator<Item = &'a fission_pcode::ir::Pco
             .as_ref()
             .is_none_or(|o| o.size <= crate::selfjit::compiler::SCRATCH_BUF_BYTES),
         PcodeOpcode::Store => {
-            op.inputs.len() < 3
-                || op.inputs[2].size <= crate::selfjit::compiler::SCRATCH_BUF_BYTES
+            op.inputs.len() < 3 || op.inputs[2].size <= crate::selfjit::compiler::SCRATCH_BUF_BYTES
         }
         _ => false,
     })
@@ -165,11 +164,9 @@ fn build_emulator(binary_path: &Path, entry_pc: u64) -> Result<Emulator> {
         .into_iter()
         .next()
         .context("at least one sleigh frontend")?;
-    let arch = crate::arch::ArchInfo::from_language_id(
-        load_spec.pair.language_id.as_str(),
-        Some(&binary),
-    )
-    .context("arch info")?;
+    let arch =
+        crate::arch::ArchInfo::from_language_id(load_spec.pair.language_id.as_str(), Some(&binary))
+            .context("arch info")?;
     let os: Box<dyn crate::os::OsEnvironment> = match binary.format.as_str() {
         "PE" => Box::new(crate::os::WindowsEnv::new()),
         _ => Box::new(LinuxEnv::new()),
@@ -198,7 +195,11 @@ impl DifferentialReport {
 /// pathfinder", see module doc), and for every TB `SelfJitCompiler`
 /// claims to support, replay it independently and diff final register
 /// state against what Cranelift produced for that same TB.
-pub(crate) fn run_differential(binary_path: &Path, entry_pc: u64, max_tbs: usize) -> Result<DifferentialReport> {
+pub(crate) fn run_differential(
+    binary_path: &Path,
+    entry_pc: u64,
+    max_tbs: usize,
+) -> Result<DifferentialReport> {
     let mut cranelift_emu = build_emulator(binary_path, entry_pc)?;
     let register_space = cranelift_emu.state.register_space();
     let mut report = DifferentialReport::default();
@@ -239,8 +240,12 @@ pub(crate) fn run_differential(binary_path: &Path, entry_pc: u64, max_tbs: usize
             }
         }
         if selfjit_supports(ops_flat.iter().copied()) {
-            let pre56 = pre_state.read_space(register_space, 56, 8).unwrap_or_default();
-            let pre128 = pre_state.read_space(register_space, 128, 8).unwrap_or_default();
+            let pre56 = pre_state
+                .read_space(register_space, 56, 8)
+                .unwrap_or_default();
+            let pre128 = pre_state
+                .read_space(register_space, 128, 8)
+                .unwrap_or_default();
             let mut self_compiler = SelfJitCompiler::new().context("build SelfJitCompiler")?;
             match self_compiler.compile_translation_block(&insns, register_space) {
                 Ok(self_func_ptr) => {
@@ -263,17 +268,32 @@ pub(crate) fn run_differential(binary_path: &Path, entry_pc: u64, max_tbs: usize
                     if self_next_pc != next_pc || cl_regs != self_regs {
                         if std::env::var_os("FISSION_DIFF_DEBUG").is_some() {
                             for op in &ops_flat {
-                                eprintln!("    op: {:?} out={:?} in={:?}", op.opcode, op.output, op.inputs);
+                                eprintln!(
+                                    "    op: {:?} out={:?} in={:?}",
+                                    op.opcode, op.output, op.inputs
+                                );
                             }
                             for (i, (a, b)) in cl_regs.iter().zip(self_regs.iter()).enumerate() {
                                 if a != b {
-                                    eprintln!("    reg byte offset {i}: cranelift=0x{a:02x} selfjit=0x{b:02x}");
+                                    eprintln!(
+                                        "    reg byte offset {i}: cranelift=0x{a:02x} selfjit=0x{b:02x}"
+                                    );
                                 }
                             }
-                            eprintln!("    pre_state offset56={pre56:02x?} offset128={pre128:02x?}");
-                            let cl56 = cranelift_emu.state.read_space(register_space, 56, 8).unwrap_or_default();
-                            let self56 = self_emu.state.read_space(register_space, 56, 8).unwrap_or_default();
-                            eprintln!("    post cl offset56={cl56:02x?} self offset56={self56:02x?}");
+                            eprintln!(
+                                "    pre_state offset56={pre56:02x?} offset128={pre128:02x?}"
+                            );
+                            let cl56 = cranelift_emu
+                                .state
+                                .read_space(register_space, 56, 8)
+                                .unwrap_or_default();
+                            let self56 = self_emu
+                                .state
+                                .read_space(register_space, 56, 8)
+                                .unwrap_or_default();
+                            eprintln!(
+                                "    post cl offset56={cl56:02x?} self offset56={self56:02x?}"
+                            );
                         }
                         report.diverged.push(format!(
                             "TB@0x{pc:x}: next_pc cranelift=0x{next_pc:x} selfjit=0x{self_next_pc:x}, \
@@ -339,7 +359,10 @@ mod tests {
         let report = run_differential(&path, entry_pc, 40).expect("run_differential");
         eprintln!(
             "differential: matched={} skipped_unsupported={} skipped_errors={:?} diverged={:?}",
-            report.matched, report.skipped_unsupported_opcode, report.skipped_compile_error, report.diverged
+            report.matched,
+            report.skipped_unsupported_opcode,
+            report.skipped_compile_error,
+            report.diverged
         );
         assert!(
             report.is_clean(),
@@ -405,7 +428,10 @@ mod tests {
         eprintln!(
             "differential (checksum): matched={} skipped_unsupported={} skipped_errors={:?} \
              diverged={:?}",
-            report.matched, report.skipped_unsupported_opcode, report.skipped_compile_error, report.diverged
+            report.matched,
+            report.skipped_unsupported_opcode,
+            report.skipped_compile_error,
+            report.diverged
         );
         assert!(
             report.is_clean(),

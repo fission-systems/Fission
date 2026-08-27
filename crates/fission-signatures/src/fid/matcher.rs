@@ -1,4 +1,6 @@
-use crate::fidbf::{FidbfDatabase, FidbfMatch, FidbfParseError, fpk_store::LazyFidDatabase, parse_fidbf};
+use crate::fidbf::{
+    FidbfDatabase, FidbfMatch, FidbfParseError, fpk_store::LazyFidDatabase, parse_fidbf,
+};
 use fission_core::resources::ResourceProvider;
 use std::path::PathBuf;
 

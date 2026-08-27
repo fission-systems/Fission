@@ -14,7 +14,9 @@ fn process_statement_list(stmts: &mut Vec<PreHirStmt>) -> bool {
     // 1. Recurse into nested blocks first (bottom-up)
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::For {
@@ -22,12 +24,16 @@ fn process_statement_list(stmts: &mut Vec<PreHirStmt>) -> bool {
             } => {
                 if let Some(init_stmt) = init {
                     if let PreHirStmt::Block(init_body) = init_stmt.as_mut() {
-                        changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(init_body));
+                        changed |= process_statement_list(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(init_body),
+                        );
                     }
                 }
                 if let Some(update_stmt) = update {
                     if let PreHirStmt::Block(update_body) = update_stmt.as_mut() {
-                        changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(update_body));
+                        changed |= process_statement_list(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(update_body),
+                        );
                     }
                 }
                 changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
@@ -37,14 +43,19 @@ fn process_statement_list(stmts: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |=
+                    process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |=
+                    process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                        &mut case.body,
+                    ));
                 }
-                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |=
+                    process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -129,7 +140,9 @@ fn get_var_name(expr: &PreHirExpr) -> Option<String> {
     }
 }
 
-fn get_single_switch(stmts: &[PreHirStmt]) -> Option<(&PreHirExpr, &[PreHirSwitchCase], &[PreHirStmt])> {
+fn get_single_switch(
+    stmts: &[PreHirStmt],
+) -> Option<(&PreHirExpr, &[PreHirSwitchCase], &[PreHirStmt])> {
     let block = if stmts.len() == 1 {
         match &stmts[0] {
             PreHirStmt::Block(inner) => inner.as_slice(),

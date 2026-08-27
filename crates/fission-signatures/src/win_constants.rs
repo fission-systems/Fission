@@ -147,9 +147,7 @@ impl WinConstantsDb {
             let mut values: Vec<(String, u64)> = group
                 .members
                 .iter()
-                .filter_map(|(member, raw)| {
-                    member_value(raw).map(|value| (member.clone(), value))
-                })
+                .filter_map(|(member, raw)| member_value(raw).map(|value| (member.clone(), value)))
                 .collect();
             // JSON object order is arbitrary; keep output stable across runs.
             values.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
@@ -485,7 +483,8 @@ mod tests {
         // win32metadata says VirtualAlloc's flProtect carries
         // PAGE_PROTECTION_FLAGS, a flag set.
         assert_eq!(
-            db.resolve_parameter("VirtualAlloc", "flProtect", 0x40).as_deref(),
+            db.resolve_parameter("VirtualAlloc", "flProtect", 0x40)
+                .as_deref(),
             Some("PAGE_EXECUTE_READWRITE"),
         );
         // A combination has to decompose, since the group is a flag set.
@@ -501,22 +500,33 @@ mod tests {
         let db = &*WIN_CONSTANTS_DB;
         // WAIT_EVENT is not a flag set: 0x102 is WAIT_TIMEOUT, not a sum.
         assert_eq!(
-            db.resolve_parameter("WaitForSingleObject", "return", 0x102).as_deref(),
+            db.resolve_parameter("WaitForSingleObject", "return", 0x102)
+                .as_deref(),
             Some("WAIT_TIMEOUT"),
         );
         assert_eq!(
-            db.resolve_parameter("WaitForSingleObject", "return", 0x80).as_deref(),
+            db.resolve_parameter("WaitForSingleObject", "return", 0x80)
+                .as_deref(),
             Some("WAIT_ABANDONED"),
         );
         // A value no member holds resolves to nothing rather than a guess.
-        assert!(db.resolve_parameter("WaitForSingleObject", "return", 0x1234).is_none());
+        assert!(
+            db.resolve_parameter("WaitForSingleObject", "return", 0x1234)
+                .is_none()
+        );
     }
 
     #[test]
     fn resolve_in_names_a_group_member_and_nothing_else() {
         let db = &*WIN_CONSTANTS_DB;
-        assert_eq!(db.resolve_in("WAIT_EVENT", 0x102).as_deref(), Some("WAIT_TIMEOUT"));
-        assert_eq!(db.resolve_in("WAIT_EVENT", 0).as_deref(), Some("WAIT_OBJECT_0"));
+        assert_eq!(
+            db.resolve_in("WAIT_EVENT", 0x102).as_deref(),
+            Some("WAIT_TIMEOUT")
+        );
+        assert_eq!(
+            db.resolve_in("WAIT_EVENT", 0).as_deref(),
+            Some("WAIT_OBJECT_0")
+        );
         // Not a member, and WAIT_EVENT is not a flag set, so nothing is invented.
         assert!(db.resolve_in("WAIT_EVENT", 0x99).is_none());
         assert!(db.resolve_in("NO_SUCH_GROUP", 0).is_none());
@@ -525,8 +535,14 @@ mod tests {
     #[test]
     fn an_unmapped_parameter_resolves_to_nothing() {
         let db = &*WIN_CONSTANTS_DB;
-        assert!(db.resolve_parameter("VirtualAlloc", "dwSize", 0x40).is_none());
-        assert!(db.resolve_parameter("NoSuchApi", "flProtect", 0x40).is_none());
+        assert!(
+            db.resolve_parameter("VirtualAlloc", "dwSize", 0x40)
+                .is_none()
+        );
+        assert!(
+            db.resolve_parameter("NoSuchApi", "flProtect", 0x40)
+                .is_none()
+        );
     }
 
     use super::*;

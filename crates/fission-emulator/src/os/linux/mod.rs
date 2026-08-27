@@ -1,20 +1,20 @@
-pub mod loader;
-pub mod libc;
-pub mod syscall;
 pub mod abi;
 pub mod dynlink;
 pub mod image_info;
+pub mod libc;
+pub mod loader;
 pub mod signal;
+pub mod syscall;
 
 pub use dynlink::{DynlinkInfo, DynlinkMode};
 pub use image_info::{ImageInfo, ProcessArgs};
 pub use signal::{DeliverResult, SigAction, SignalState};
 
-use anyhow::Result;
 use crate::core::Emulator;
-use crate::pcode::state::MachineState;
 use crate::os::env::{HleResult, OsEnvironment};
 use crate::os::procedure::SimOS;
+use crate::pcode::state::MachineState;
+use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 
 const MAGIC_BASE: u64 = 0xFFFFFFF100000000;
@@ -35,7 +35,7 @@ pub struct LinuxEnv {
 impl LinuxEnv {
     pub fn new() -> Self {
         let mut simos = SimOS::new();
-        
+
         // Register Libc Procedures
         simos.register_procedure("malloc", Box::new(libc::Malloc));
         simos.register_procedure("calloc", Box::new(libc::Calloc));
@@ -187,7 +187,12 @@ impl OsEnvironment for LinuxEnv {
                 }
             }
             let trampoline = MAGIC_BASE + (i as u64 * 8);
-            tracing::debug!("PLT/GOT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, trampoline);
+            tracing::debug!(
+                "PLT/GOT patch: {} @ 0x{:X} → trampoline 0x{:X}",
+                name,
+                addr,
+                trampoline
+            );
             state.write_space(state.ram_space(), addr, &trampoline.to_le_bytes())?;
         }
         Ok(())
@@ -272,7 +277,10 @@ impl OsEnvironment for LinuxEnv {
         if let Some(proc) = self.simos.procedures.get(func_name) {
             proc.run(emu)
         } else {
-            tracing::warn!("Unimplemented libc function or procedure: {}. Returning 0.", func_name);
+            tracing::warn!(
+                "Unimplemented libc function or procedure: {}. Returning 0.",
+                func_name
+            );
             emu.metrics.note_hle_miss(func_name);
             emu.write_return_val(0)?;
             Ok(HleResult::Continue)
@@ -312,11 +320,7 @@ impl OsEnvironment for LinuxEnv {
                         let a = inputs[0];
                         let b = inputs[1];
                         // Heuristic: small first arg is selector → use FS/GS base.
-                        if a <= 0x100 {
-                            (emu.fs_base, b)
-                        } else {
-                            (a, b)
-                        }
+                        if a <= 0x100 { (emu.fs_base, b) } else { (a, b) }
                     }
                 };
                 emu.callother_result = base.wrapping_add(offset);

@@ -815,11 +815,11 @@ define_interp!(
     HirFunction
 );
 
+pub use hir::free_names as hir_free_names;
 pub use hir::interpret as interpret_hir;
 pub use hir::interpret_with_memory as interpret_hir_with_memory;
 pub use hir::interpret_with_state as interpret_hir_with_state;
-pub use hir::free_names as hir_free_names;
+pub use prehir::free_names as prehir_free_names;
 pub use prehir::interpret as interpret_prehir;
 pub use prehir::interpret_with_memory as interpret_prehir_with_memory;
 pub use prehir::interpret_with_state as interpret_prehir_with_state;
-pub use prehir::free_names as prehir_free_names;

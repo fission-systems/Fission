@@ -132,8 +132,16 @@ fn cse_stmt(
         } => {
             let mut then_map = map.clone();
             let mut else_map = map.clone();
-            let mut changed = cse_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut then_map, non_value_representatives);
-            if cse_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut else_map, non_value_representatives) {
+            let mut changed = cse_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                &mut then_map,
+                non_value_representatives,
+            );
+            if cse_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                &mut else_map,
+                non_value_representatives,
+            ) {
                 changed = true;
             }
             // After the if, the map is cleared (join point — values may differ).
@@ -143,7 +151,11 @@ fn cse_stmt(
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             // Loop body: fresh map (loop may execute 0 or many times).
             let mut loop_map = HashMap::default();
-            let changed = cse_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut loop_map, non_value_representatives);
+            let changed = cse_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                &mut loop_map,
+                non_value_representatives,
+            );
             // Any representative known before the loop may be clobbered by
             // a loop-carried assignment. Clearing is conservative, but it
             // prevents substituting a pre-loop representative after the loop
@@ -161,7 +173,11 @@ fn cse_stmt(
                 }
             }
             let mut loop_map = HashMap::default();
-            if cse_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut loop_map, non_value_representatives) {
+            if cse_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                &mut loop_map,
+                non_value_representatives,
+            ) {
                 changed = true;
             }
             if let Some(s) = update {
@@ -177,18 +193,30 @@ fn cse_stmt(
             let mut changed = false;
             for case in cases.iter_mut() {
                 let mut arm_map = map.clone();
-                if cse_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut arm_map, non_value_representatives) {
+                if cse_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    &mut arm_map,
+                    non_value_representatives,
+                ) {
                     changed = true;
                 }
             }
             let mut def_map = map.clone();
-            if cse_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), &mut def_map, non_value_representatives) {
+            if cse_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                &mut def_map,
+                non_value_representatives,
+            ) {
                 changed = true;
             }
             map.clear();
             changed
         }
-        PreHirStmt::Block(body) => cse_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), map, non_value_representatives),
+        PreHirStmt::Block(body) => cse_stmts(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            map,
+            non_value_representatives,
+        ),
         PreHirStmt::Return(_) | PreHirStmt::Break | PreHirStmt::Continue => {
             map.clear();
             false
@@ -204,7 +232,7 @@ fn invalidate_representative(map: &mut PureExprMap, defined_var: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn u32_ty() -> NirType {
         NirType::Int {
@@ -301,7 +329,8 @@ mod tests {
                             rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
                             ty: u32_ty(),
                         },
-                    )].into(),
+                    )]
+                    .into(),
                     cond: PreHirExpr::Var("cond".to_owned()),
                 },
                 assign("uVar2", PreHirExpr::Var("param_1".to_owned())),

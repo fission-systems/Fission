@@ -54,7 +54,8 @@ use fission_static::analysis::decomp::facts::FactStore;
 use std::path::PathBuf;
 
 fn corpus_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fission-benchmark/corpus/dev/binaries/c")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fission-benchmark/corpus/dev/binaries/c")
 }
 
 /// Emulator budget per call. Generous enough for the corpus's loops, small
@@ -99,8 +100,7 @@ fn attempt_budget() -> usize {
 /// underscore-prefixed or carries a toolchain prefix.
 fn is_corpus_function(name: &str) -> bool {
     const RUNTIME_PREFIXES: [&str; 6] = ["mingw", "msvcrt", "pre_c", "tls", "Dll", "Wmain"];
-    !name.starts_with('_')
-        && !RUNTIME_PREFIXES.iter().any(|p| name.starts_with(p))
+    !name.starts_with('_') && !RUNTIME_PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
 #[derive(Default, Debug)]
@@ -139,7 +139,13 @@ fn check_binary(path: &PathBuf, tally: &mut Tally, budget: usize) {
             continue;
         }
         let samples = default_samples(pair.hir.params.len());
-        match check_ground_truth(&mut harness, func.address, &pair.prehir, &pair.hir, &samples) {
+        match check_ground_truth(
+            &mut harness,
+            func.address,
+            &pair.prehir,
+            &pair.hir,
+            &samples,
+        ) {
             VerifyOutcome::Equivalent { checked } if checked > 0 => tally.equivalent += 1,
             VerifyOutcome::Diverged(divergences) => {
                 tally.diverged.push(format!(

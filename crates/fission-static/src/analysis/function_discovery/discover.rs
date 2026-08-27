@@ -1,7 +1,9 @@
 use fission_loader::{FunctionCandidateInfo, FunctionInfo, LoadedBinary};
 use fission_signatures::load_ghidra_patterns;
 use fission_sleigh::runtime::DecodedFlowKind;
-use fission_sleigh::runtime::{PackedContextOverride, RuntimeFrontendStatus, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{
+    PackedContextOverride, RuntimeFrontendStatus, RuntimeSleighFrontend,
+};
 
 use super::ranges::{executable_ranges, is_in_executable_ranges, runtime_load_spec_for};
 use super::targets::{collect_instruction_targets, discovery_candidate_targets};
@@ -142,8 +144,8 @@ pub fn discover_functions_with_runtime(
     // benefit.
     const MIN_DISCOVERY_CHUNK_SIZE: usize = 64 * 1024; // 64KB
     let target_chunk_count = rayon::current_num_threads().max(1) * 4;
-    let discovery_chunk_size = (total_executable_bytes / target_chunk_count.max(1))
-        .max(MIN_DISCOVERY_CHUNK_SIZE);
+    let discovery_chunk_size =
+        (total_executable_bytes / target_chunk_count.max(1)).max(MIN_DISCOVERY_CHUNK_SIZE);
 
     let mut chunks = Vec::new();
     for (bytes, virtual_address) in section_ranges {
@@ -553,7 +555,9 @@ pub fn discover_functions_with_runtime(
             // completion line.
             let mut validated_shared_returns: Vec<u64> = shared_returns
                 .into_par_iter()
-                .filter(|&sr| !tracker.is_overlap(sr) && is_strict_boundary(binary, Some(&frontend), sr))
+                .filter(|&sr| {
+                    !tracker.is_overlap(sr) && is_strict_boundary(binary, Some(&frontend), sr)
+                })
                 .filter_map(|sr| {
                     let mut local_cache = std::collections::HashMap::new();
                     let (valid, _) = validate_subroutine_candidate(
@@ -864,7 +868,6 @@ impl InstructionBoundaryTracker {
         self.boundaries.sort_unstable_by_key(|&(start, _)| start);
         self.boundaries.dedup_by_key(|&mut (start, _)| start);
     }
-
 }
 
 /// The actual CFG-following instruction-boundary walk used by both
@@ -1195,7 +1198,10 @@ fn scan_ghidra_patterns(
         }
     }
 
-    eprintln!("[ghidra-patterns] {arch_tag}: raw hits = {}", raw_hits.len());
+    eprintln!(
+        "[ghidra-patterns] {arch_tag}: raw hits = {}",
+        raw_hits.len()
+    );
 
     // Phase 2: SLEIGH validation — once per unique address
     let mut hits: Vec<u64> = raw_hits
@@ -1940,7 +1946,8 @@ fn scan_jmp_thunks(
                 let addr = section.virtual_address + offset as u64;
                 if is_strict_boundary(binary, Some(frontend), addr) {
                     if let Some(target_bytes) = binary.view_bytes(addr, 15) {
-                        if let Ok(decoded) = frontend.decode_window_no_pcode(target_bytes, addr, 1) {
+                        if let Ok(decoded) = frontend.decode_window_no_pcode(target_bytes, addr, 1)
+                        {
                             if !decoded.is_empty() && decoded[0].flow_kind == DecodedFlowKind::Jump
                             {
                                 if let Some(target) = decoded[0].direct_target {
@@ -2042,8 +2049,7 @@ pub(crate) fn validate_subroutine_candidate(
                 // dominant cost: up to `max_instructions` decodes per
                 // candidate, across every candidate from every scanner
                 // (ghidra-patterns, tail-call recovery, dynamic prologues).
-                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, decode_context)
-                else {
+                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, decode_context) else {
                     invalid = true;
                     break;
                 };

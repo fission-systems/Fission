@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use crate::HashSet;
+use crate::prelude::*;
 
 pub fn apply_for_loop_folding(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
@@ -18,14 +18,19 @@ pub fn apply_for_loop_folding(stmts: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |=
+                    apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |=
+                    apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                        &mut case.body,
+                    ));
                 }
-                changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |=
+                    apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }

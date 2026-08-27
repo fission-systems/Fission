@@ -1,6 +1,6 @@
+use crate::HashMap;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
-use crate::HashMap;
 
 /// Normalizes floating-point sign bit manipulation patterns (equivalent to Ghidra's RuleFloatSign):
 /// - `x & 0x7fffffff` -> `fabsf(x)`

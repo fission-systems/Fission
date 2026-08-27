@@ -5,7 +5,10 @@ use clap::Parser;
 /// fission-serve configuration.
 /// Can be supplied from CLI flags or environment variables.
 #[derive(Debug, Clone, Parser)]
-#[command(name = "fission-serve", about = "Fission multi-user decompilation API server")]
+#[command(
+    name = "fission-serve",
+    about = "Fission multi-user decompilation API server"
+)]
 pub struct ServeConfig {
     /// IP address to bind (use 0.0.0.0 for all interfaces)
     #[arg(long, default_value = "127.0.0.1", env = "FISSION_SERVE_HOST")]
@@ -63,14 +66,14 @@ pub struct ServeConfig {
 impl Default for ServeConfig {
     fn default() -> Self {
         Self {
-            host:             "127.0.0.1".into(),
-            port:             7331,
-            max_sessions:     10,
+            host: "127.0.0.1".into(),
+            port: 7331,
+            max_sessions: 10,
             session_ttl_secs: 1800,
             max_upload_bytes: 52_428_800,
-            cloud_mode:       false,
-            api_token:        None,
-            allowed_origins:  vec![
+            cloud_mode: false,
+            api_token: None,
+            allowed_origins: vec![
                 "http://localhost:3000".into(),
                 "http://localhost:8080".into(),
                 "http://localhost:7331".into(),

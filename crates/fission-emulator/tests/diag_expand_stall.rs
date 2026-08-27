@@ -1,8 +1,8 @@
 //! Mallocng expand progress after TZCNT relative-branch fix.
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use std::path::PathBuf;

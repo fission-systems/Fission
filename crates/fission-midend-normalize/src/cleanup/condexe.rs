@@ -1,7 +1,7 @@
-use crate::prelude::*;
 use super::utils::expr_has_side_effects;
 use super::utils::stmt_assigns_var;
 use crate::HashSet;
+use crate::prelude::*;
 
 /// Simplifies a series of conditionally executed statements (Ghidra's ActionConditionalExe equivalent).
 /// Merges sequential sibling Ifs with identical conditions, and uses path-sensitive propagation
@@ -107,14 +107,19 @@ fn fold_sequential_siblings(stmts: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |=
+                    fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |=
+                    fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                        &mut case.body,
+                    ));
                 }
-                changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |=
+                    fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -145,7 +150,10 @@ fn fold_conditions(
             // Case 1: Redundant If statement where condition is proven True
             if true_conds.contains(&cond) {
                 if let PreHirStmt::If { then_body, .. } = stmts.remove(idx) {
-                    for (i, s) in std::rc::Rc::unwrap_or_clone(then_body).into_iter().enumerate() {
+                    for (i, s) in std::rc::Rc::unwrap_or_clone(then_body)
+                        .into_iter()
+                        .enumerate()
+                    {
                         stmts.insert(idx + i, s);
                     }
                     changed = true;
@@ -155,7 +163,10 @@ fn fold_conditions(
             // Case 2: Redundant If statement where condition is proven False
             else if false_conds.contains(&cond) {
                 if let PreHirStmt::If { else_body, .. } = stmts.remove(idx) {
-                    for (i, s) in std::rc::Rc::unwrap_or_clone(else_body).into_iter().enumerate() {
+                    for (i, s) in std::rc::Rc::unwrap_or_clone(else_body)
+                        .into_iter()
+                        .enumerate()
+                    {
                         stmts.insert(idx + i, s);
                     }
                     changed = true;
@@ -174,20 +185,32 @@ fn fold_conditions(
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
                     nested_true.push(cond.clone());
-                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                        &mut nested_true,
+                        &mut nested_false,
+                    );
 
                     // Inside else_body: cond is False
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
                     nested_false.push(cond.clone());
-                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                        &mut nested_true,
+                        &mut nested_false,
+                    );
                 }
             }
         } else {
             // For other control-flow statements, recursively fold with safety invalidations
             match &mut stmts[idx] {
                 PreHirStmt::Block(body) => {
-                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), true_conds, false_conds);
+                    changed |= fold_conditions(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                        true_conds,
+                        false_conds,
+                    );
                 }
                 PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                     let mut assigned_in_body = HashSet::default();
@@ -199,7 +222,11 @@ fn fold_conditions(
                     for var in assigned_in_body {
                         invalidate_variable(&var, &mut nested_true, &mut nested_false);
                     }
-                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                        &mut nested_true,
+                        &mut nested_false,
+                    );
                 }
                 PreHirStmt::For {
                     init, update, body, ..
@@ -219,18 +246,29 @@ fn fold_conditions(
                     for var in assigned {
                         invalidate_variable(&var, &mut nested_true, &mut nested_false);
                     }
-                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                        &mut nested_true,
+                        &mut nested_false,
+                    );
                 }
                 PreHirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         let mut nested_true = true_conds.clone();
                         let mut nested_false = false_conds.clone();
-                        changed |=
-                            fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut nested_true, &mut nested_false);
+                        changed |= fold_conditions(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                            &mut nested_true,
+                            &mut nested_false,
+                        );
                     }
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
-                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                        &mut nested_true,
+                        &mut nested_false,
+                    );
                 }
                 _ => {}
             }
@@ -421,7 +459,8 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |=
+                        iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
                 changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }

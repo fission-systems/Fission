@@ -1,9 +1,9 @@
 //! Heritage stage boundary contract tests.
 
+use crate::pipeline::build_normalize_pipeline;
 use fission_midend_prehir::action_pipeline::{
     GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE, GhidraActionConcept, stage_boundary_violation,
 };
-use crate::pipeline::build_normalize_pipeline;
 
 #[test]
 fn heritage_concept_precedes_normalize_in_canonical_sequence() {

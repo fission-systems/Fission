@@ -21,7 +21,9 @@ fn apply_find_highlights(html: &str, needle: &str, current_index: usize) -> (Str
         let abs = pos + idx;
         out.push_str(&html[pos..abs]);
         if count == current_index {
-            out.push_str("<mark id=\"find-match-current\" class=\"find-match find-match-current\">");
+            out.push_str(
+                "<mark id=\"find-match-current\" class=\"find-match find-match-current\">",
+            );
         } else {
             out.push_str("<mark class=\"find-match\">");
         }
@@ -308,7 +310,10 @@ fn highlight_line(line: &str) -> String {
                 "tok-ty"
             } else if after.trim_start().starts_with('(') {
                 "tok-fn"
-            } else if tok.starts_with("sub_") && tok.len() > 4 && tok[4..].chars().all(|c| c.is_ascii_hexdigit()) {
+            } else if tok.starts_with("sub_")
+                && tok.len() > 4
+                && tok[4..].chars().all(|c| c.is_ascii_hexdigit())
+            {
                 "tok-addr"
             } else {
                 ""
@@ -394,7 +399,8 @@ fn hex_dump(data: &[u8], limit: usize, base_addr: u64, highlight_addr: Option<u6
             })
             .collect();
         let row = html_escape(&format!("{row_addr:016x}  {hex:<49}  {ascii}"));
-        let is_target = highlight_addr.is_some_and(|h| h >= row_addr && h < row_addr + chunk.len() as u64);
+        let is_target =
+            highlight_addr.is_some_and(|h| h >= row_addr && h < row_addr + chunk.len() as u64);
         if is_target {
             out.push_str("<mark id=\"hex-target-row\" class=\"hex-highlight-row\">");
             out.push_str(&row);
@@ -456,12 +462,12 @@ pub fn Editor() -> Element {
     let mut comment_edit_addr: Signal<Option<u64>> = use_signal(|| None);
     let mut comment_edit_draft: Signal<String> = use_signal(String::new);
 
-    let active_tab    = state.read().active_tab.clone();
+    let active_tab = state.read().active_tab.clone();
     let is_decompiling = state.read().is_decompiling;
-    let fn_name       = state.read().current_function_name();
-    let fn_kind       = state.read().current_function_kind.clone();
-    let find_open     = state.read().find_bar_open;
-    let find_query    = state.read().find_query.clone();
+    let fn_name = state.read().current_function_name();
+    let fn_kind = state.read().current_function_kind.clone();
+    let find_open = state.read().find_bar_open;
+    let find_query = state.read().find_query.clone();
 
     // ── Tab-scoped effects, hoisted unconditional ────────────────────────────
     // These used to live inside their respective `match active_tab { .. }` /
@@ -483,10 +489,14 @@ pub fn Editor() -> Element {
             if active_tab != EditorTab::Disasm || is_decompiling {
                 return;
             }
-            let Some(addr) = fn_addr else { return; };
+            let Some(addr) = fn_addr else {
+                return;
+            };
             {
                 let s = state.read();
-                if s.is_loading_disasm { return; }
+                if s.is_loading_disasm {
+                    return;
+                }
             }
             let binary = state.read().binary.clone();
             let session = state.read().server_session_id.clone();
@@ -531,17 +541,21 @@ pub fn Editor() -> Element {
     }
 
     let kind_badge: Option<(&'static str, &'static str)> = match &fn_kind {
-        FunctionKind::Import { .. } => Some(("kind-badge-imp",   "IMPORT STUB")),
-        FunctionKind::Thunk { .. }  => Some(("kind-badge-thunk", "THUNK")),
-        FunctionKind::Code          => None,
+        FunctionKind::Import { .. } => Some(("kind-badge-imp", "IMPORT STUB")),
+        FunctionKind::Thunk { .. } => Some(("kind-badge-thunk", "THUNK")),
+        FunctionKind::Code => None,
     };
 
     let tab_cls = |tab: &EditorTab| -> &'static str {
-        if *tab == active_tab { "tab is-active" } else { "tab" }
+        if *tab == active_tab {
+            "tab is-active"
+        } else {
+            "tab"
+        }
     };
 
     let is_import_stub = matches!(fn_kind, FunctionKind::Import { .. });
-    let is_thunk       = matches!(fn_kind, FunctionKind::Thunk { .. });
+    let is_thunk = matches!(fn_kind, FunctionKind::Thunk { .. });
 
     // ── Body ─────────────────────────────────────────────────────────────────
     let body: Element = if is_decompiling {
@@ -566,7 +580,8 @@ pub fn Editor() -> Element {
                         let (gutter, raw_highlighted) = render_with_lines(&code);
                         // Apply find-bar highlights on top of syntax highlighting
                         let find_idx = state.read().find_current_index;
-                        let (highlighted, _match_count) = apply_find_highlights(&raw_highlighted, &find_query, find_idx);
+                        let (highlighted, _match_count) =
+                            apply_find_highlights(&raw_highlighted, &find_query, find_idx);
                         rsx! {
                             if is_thunk {
                                 div { class: "kind-notice kind-notice-thunk",
@@ -728,57 +743,92 @@ pub fn Editor() -> Element {
                 // Priority: string-click target > current function's bytes > file header.
                 let hex_info: Option<(u64, u64, String, bool)> = {
                     let s = state.read();
-                    hex_view_target.and_then(|target_va| {
-                        let binary = s.binary.as_ref()?;
-                        let file_off = binary.sections.iter().find_map(|sec| {
-                            if target_va >= sec.virtual_address
-                                && target_va < sec.virtual_address + sec.virtual_size
-                            {
-                                Some(sec.file_offset + (target_va - sec.virtual_address))
-                            } else {
-                                None
+                    hex_view_target
+                        .and_then(|target_va| {
+                            let binary = s.binary.as_ref()?;
+                            let file_off = binary.sections.iter().find_map(|sec| {
+                                if target_va >= sec.virtual_address
+                                    && target_va < sec.virtual_address + sec.virtual_size
+                                {
+                                    Some(sec.file_offset + (target_va - sec.virtual_address))
+                                } else {
+                                    None
+                                }
+                            })?;
+                            const WINDOW: u64 = 512;
+                            const LEAD: u64 = 128;
+                            let window_start_va = target_va.saturating_sub(LEAD) & !0xF;
+                            let lead = target_va - window_start_va;
+                            let fo_start = (file_off.saturating_sub(lead) as usize)
+                                .min(binary.data.as_slice().len());
+                            let end =
+                                (fo_start + WINDOW as usize).min(binary.data.as_slice().len());
+                            if fo_start >= binary.data.as_slice().len() {
+                                return None;
                             }
-                        })?;
-                        const WINDOW: u64 = 512;
-                        const LEAD: u64 = 128;
-                        let window_start_va = target_va.saturating_sub(LEAD) & !0xF;
-                        let lead = target_va - window_start_va;
-                        let fo_start = (file_off.saturating_sub(lead) as usize).min(binary.data.as_slice().len());
-                        let end = (fo_start + WINDOW as usize).min(binary.data.as_slice().len());
-                        if fo_start >= binary.data.as_slice().len() {
-                            return None;
-                        }
-                        let hex = hex_dump(&binary.data.as_slice()[fo_start..end], WINDOW as usize, window_start_va, Some(target_va));
-                        Some((window_start_va, (end - fo_start) as u64, hex, true))
-                    })
-                    .or_else(|| {
-                        if let (Some(binary), Some(fn_addr)) = (&s.binary, s.current_function_addr) {
-                            let fn_info = s.functions.iter().find(|f| f.address == fn_addr);
-                            if let Some(fi) = fn_info {
-                                let maybe_fo = binary.sections.iter().find_map(|sec| {
-                                    if fn_addr >= sec.virtual_address
-                                        && fn_addr < sec.virtual_address + sec.virtual_size
-                                    {
-                                        let offset_in_sec = fn_addr - sec.virtual_address;
-                                        Some(sec.file_offset + offset_in_sec)
+                            let hex = hex_dump(
+                                &binary.data.as_slice()[fo_start..end],
+                                WINDOW as usize,
+                                window_start_va,
+                                Some(target_va),
+                            );
+                            Some((window_start_va, (end - fo_start) as u64, hex, true))
+                        })
+                        .or_else(|| {
+                            if let (Some(binary), Some(fn_addr)) =
+                                (&s.binary, s.current_function_addr)
+                            {
+                                let fn_info = s.functions.iter().find(|f| f.address == fn_addr);
+                                if let Some(fi) = fn_info {
+                                    let maybe_fo = binary.sections.iter().find_map(|sec| {
+                                        if fn_addr >= sec.virtual_address
+                                            && fn_addr < sec.virtual_address + sec.virtual_size
+                                        {
+                                            let offset_in_sec = fn_addr - sec.virtual_address;
+                                            Some(sec.file_offset + offset_in_sec)
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                    if let Some(fo) = maybe_fo {
+                                        let fo = fo as usize;
+                                        let sz = if fi.size > 0 { fi.size as usize } else { 256 };
+                                        let end = (fo + sz).min(binary.data.as_slice().len());
+                                        if fo < binary.data.as_slice().len() {
+                                            Some((
+                                                fn_addr,
+                                                sz as u64,
+                                                hex_dump(
+                                                    &binary.data.as_slice()[fo..end],
+                                                    sz,
+                                                    fn_addr,
+                                                    None,
+                                                ),
+                                                false,
+                                            ))
+                                        } else {
+                                            None
+                                        }
                                     } else {
                                         None
                                     }
-                                });
-                                if let Some(fo) = maybe_fo {
-                                    let fo = fo as usize;
-                                    let sz = if fi.size > 0 { fi.size as usize } else { 256 };
-                                    let end = (fo + sz).min(binary.data.as_slice().len());
-                                    if fo < binary.data.as_slice().len() {
-                                        Some((fn_addr, sz as u64, hex_dump(&binary.data.as_slice()[fo..end], sz, fn_addr, None), false))
-                                    } else { None }
-                                } else { None }
-                            } else { None }
-                        } else { None }
-                    })
-                    .or_else(|| {
-                        s.binary.as_ref().map(|b| (0u64, 4096u64, hex_dump(b.data.as_slice(), 4096, 0, None), false))
-                    })
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| {
+                            s.binary.as_ref().map(|b| {
+                                (
+                                    0u64,
+                                    4096u64,
+                                    hex_dump(b.data.as_slice(), 4096, 0, None),
+                                    false,
+                                )
+                            })
+                        })
                 };
                 if let Some((base_va, sz_bytes, hex, is_target_view)) = hex_info {
                     let line_count = hex.lines().count();
@@ -789,7 +839,10 @@ pub fn Editor() -> Element {
                     let fn_label = {
                         let s = state.read();
                         if is_target_view {
-                            format!("String reference  |  VA 0x{:x}  |  showing {sz_bytes} bytes", hex_view_target.unwrap_or(base_va))
+                            format!(
+                                "String reference  |  VA 0x{:x}  |  showing {sz_bytes} bytes",
+                                hex_view_target.unwrap_or(base_va)
+                            )
                         } else if let Some(addr) = s.current_function_addr {
                             let name = s.display_name(addr);
                             format!("{name}  |  VA 0x{base_va:x}  |  {sz_bytes} bytes")

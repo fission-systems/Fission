@@ -54,19 +54,31 @@ fn stabilize_stmt(stmt: &mut PreHirStmt, reps: &mut PureExprMap) -> bool {
             changed |= stabilize_expr(cond, reps);
             let mut then_reps = reps.clone();
             let mut else_reps = reps.clone();
-            changed |= stabilize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut then_reps);
-            changed |= stabilize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut else_reps);
+            changed |= stabilize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                &mut then_reps,
+            );
+            changed |= stabilize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                &mut else_reps,
+            );
             reps.clear();
         }
         PreHirStmt::While { cond, body } => {
             changed |= stabilize_expr(cond, reps);
             let mut body_reps = reps.clone();
-            changed |= stabilize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut body_reps);
+            changed |= stabilize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                &mut body_reps,
+            );
             reps.clear();
         }
         PreHirStmt::DoWhile { body, cond } => {
             let mut body_reps = reps.clone();
-            changed |= stabilize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut body_reps);
+            changed |= stabilize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                &mut body_reps,
+            );
             changed |= stabilize_expr(cond, &mut body_reps);
             reps.clear();
         }
@@ -83,7 +95,10 @@ fn stabilize_stmt(stmt: &mut PreHirStmt, reps: &mut PureExprMap) -> bool {
                 changed |= stabilize_expr(cond, reps);
             }
             let mut body_reps = reps.clone();
-            changed |= stabilize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut body_reps);
+            changed |= stabilize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                &mut body_reps,
+            );
             if let Some(update) = update {
                 changed |= stabilize_stmt(update, &mut body_reps);
             }
@@ -97,10 +112,16 @@ fn stabilize_stmt(stmt: &mut PreHirStmt, reps: &mut PureExprMap) -> bool {
             changed |= stabilize_expr(expr, reps);
             for case in cases {
                 let mut case_reps = reps.clone();
-                changed |= stabilize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut case_reps);
+                changed |= stabilize_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    &mut case_reps,
+                );
             }
             let mut default_reps = reps.clone();
-            changed |= stabilize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), &mut default_reps);
+            changed |= stabilize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                &mut default_reps,
+            );
             reps.clear();
         }
         PreHirStmt::Block(body) => {
@@ -191,7 +212,7 @@ fn is_representable_expr(expr: &PreHirExpr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn int(bits: u32) -> NirType {
         NirType::Int {
@@ -219,7 +240,8 @@ mod tests {
                         rhs: Box::new(PreHirExpr::Const(2, int(64))),
                         ty: int(64),
                     },
-                }].into(),
+                }]
+                .into(),
                 cond: PreHirExpr::Binary {
                     op: PreHirBinaryOp::Sub,
                     lhs: Box::new(PreHirExpr::Binary {

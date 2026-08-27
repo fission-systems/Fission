@@ -3,15 +3,17 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::WindowsEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
 fn fixture_pe(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata")
+        .join(name)
 }
 
 fn run_pe(path: &std::path::Path, max_inst: u64) -> Result<Emulator> {
@@ -25,10 +27,7 @@ fn run_pe(path: &std::path::Path, max_inst: u64) -> Result<Emulator> {
         .context("binary missing load_spec")?
         .clone();
     let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)?;
-    let sleigh = frontends
-        .into_iter()
-        .next()
-        .context("no Sleigh frontend")?;
+    let sleigh = frontends.into_iter().next().context("no Sleigh frontend")?;
 
     let lang_id = load_spec.pair.language_id.as_str();
     let arch = ArchInfo::from_language_id(lang_id, Some(&binary))
@@ -56,7 +55,10 @@ fn smoke_pe_exit_process() {
         panic!("{msg}; full={}", emu.metrics.summary_line());
     }
     assert!(
-        emu.metrics.userops.keys().any(|k| k.contains("ExitProcess")),
+        emu.metrics
+            .userops
+            .keys()
+            .any(|k| k.contains("ExitProcess")),
         "expected ExitProcess HLE, userops={:?}",
         emu.metrics.userops
     );
@@ -66,7 +68,11 @@ fn smoke_pe_exit_process() {
 #[test]
 fn smoke_pe_write_file() {
     let path = fixture_pe("win_x64_write.exe");
-    assert!(path.is_file(), "missing PE WriteFile fixture {}", path.display());
+    assert!(
+        path.is_file(),
+        "missing PE WriteFile fixture {}",
+        path.display()
+    );
     let emu = run_pe(&path, 10_000).unwrap_or_else(|e| panic!("PE WriteFile smoke failed: {e:#}"));
     assert!(
         emu.halt_requested,

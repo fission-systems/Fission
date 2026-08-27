@@ -30,19 +30,18 @@
 //! | DELETE | /api/session/:session             | Release session explicitly         |
 
 pub mod config;
+mod handlers;
 pub mod session;
 pub mod types;
-mod handlers;
 
 use anyhow::Result;
 use axum::{
-    Extension, Router,
+    Extension, Json, Router,
     extract::{DefaultBodyLimit, Request, State},
     http::{HeaderValue, Method, StatusCode, header::AUTHORIZATION},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
-    Json,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::cors::CorsLayer;
@@ -144,7 +143,9 @@ fn cap_rayon_thread_pool() {
         .stack_size(WORKER_STACK_SIZE)
         .build_global()
     {
-        tracing::warn!("rayon global thread pool already initialized ({e}); FISSION_RAYON_THREADS cap not applied");
+        tracing::warn!(
+            "rayon global thread pool already initialized ({e}); FISSION_RAYON_THREADS cap not applied"
+        );
     } else {
         tracing::info!("rayon global thread pool capped at {threads} threads");
     }
@@ -155,7 +156,10 @@ fn cap_rayon_thread_pool() {
 pub async fn run_serve(config: ServeConfig) -> Result<()> {
     config.validate().map_err(anyhow::Error::msg)?;
     cap_rayon_thread_pool();
-    let store = Arc::new(SessionStore::new(config.max_sessions, config.session_ttl_secs));
+    let store = Arc::new(SessionStore::new(
+        config.max_sessions,
+        config.session_ttl_secs,
+    ));
 
     // Start background TTL sweeper
     {
@@ -168,14 +172,32 @@ pub async fn run_serve(config: ServeConfig) -> Result<()> {
     let cors = build_cors(&config.allowed_origins);
 
     let protected = Router::new()
-        .route("/api/status",                    get(handlers::status::handle_status))
-        .route("/api/binary",                    post(handlers::binary::handle_upload_binary))
-        .route("/api/functions/{session}",        get(handlers::functions::handle_list_functions))
-        .route("/api/decompile/{session}/{addr}",  post(handlers::decompile::handle_decompile))
-        .route("/api/xrefs/{session}/{addr}",      get(handlers::xrefs::handle_xrefs))
-        .route("/api/disasm/{session}/{addr}",     get(handlers::disasm::handle_disasm))
-        .route("/api/callgraph/{session}",        get(handlers::callgraph::handle_callgraph))
-        .route("/api/session/{session}",          delete(handlers::binary::handle_delete_session));
+        .route("/api/status", get(handlers::status::handle_status))
+        .route("/api/binary", post(handlers::binary::handle_upload_binary))
+        .route(
+            "/api/functions/{session}",
+            get(handlers::functions::handle_list_functions),
+        )
+        .route(
+            "/api/decompile/{session}/{addr}",
+            post(handlers::decompile::handle_decompile),
+        )
+        .route(
+            "/api/xrefs/{session}/{addr}",
+            get(handlers::xrefs::handle_xrefs),
+        )
+        .route(
+            "/api/disasm/{session}/{addr}",
+            get(handlers::disasm::handle_disasm),
+        )
+        .route(
+            "/api/callgraph/{session}",
+            get(handlers::callgraph::handle_callgraph),
+        )
+        .route(
+            "/api/session/{session}",
+            delete(handlers::binary::handle_delete_session),
+        );
 
     let protected = if let Some(token) = config.api_token.as_deref() {
         protected.route_layer(middleware::from_fn_with_state(
@@ -199,7 +221,8 @@ pub async fn run_serve(config: ServeConfig) -> Result<()> {
 
     let addr = SocketAddr::new(config.host.parse()?, config.port);
     info!("fission-serve  →  http://{}:{}", config.host, config.port);
-    info!("Max sessions: {}  |  Session TTL: {}s  |  Upload limit: {}MB",
+    info!(
+        "Max sessions: {}  |  Session TTL: {}s  |  Upload limit: {}MB",
         config.max_sessions,
         config.session_ttl_secs,
         config.max_upload_bytes / 1024 / 1024,
@@ -207,7 +230,11 @@ pub async fn run_serve(config: ServeConfig) -> Result<()> {
     info!(
         "Backend mode: {}  |  API authentication: {}",
         if config.cloud_mode { "cloud" } else { "local" },
-        if config.api_token.is_some() { "bearer" } else { "disabled" },
+        if config.api_token.is_some() {
+            "bearer"
+        } else {
+            "disabled"
+        },
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

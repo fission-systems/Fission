@@ -43,7 +43,9 @@ fn collect_goto_targets_stmt(stmt: &PreHirStmt, targets: &mut HashSet<String>) {
         PreHirStmt::Goto(label) => {
             targets.insert(label.clone());
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             for s in body.iter() {
                 collect_goto_targets_stmt(s, targets);
             }
@@ -131,7 +133,9 @@ fn branch_defines_goto_target(branch: &[PreHirStmt], goto_targets: &HashSet<Stri
 
 fn stmt_has_side_effects(stmt: &PreHirStmt) -> bool {
     match stmt {
-        PreHirStmt::Assign { lhs, rhs } => lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs),
+        PreHirStmt::Assign { lhs, rhs } => {
+            lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs)
+        }
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
         PreHirStmt::Block(body) => stmt_list_has_side_effects(body),
         PreHirStmt::If {
@@ -139,9 +143,9 @@ fn stmt_has_side_effects(stmt: &PreHirStmt) -> bool {
             else_body,
             ..
         } => stmt_list_has_side_effects(then_body) || stmt_list_has_side_effects(else_body),
-        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => {
-            stmt_list_has_side_effects(body)
-        }
+        PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => stmt_list_has_side_effects(body),
         PreHirStmt::Switch { cases, default, .. } => {
             cases.iter().any(|c| stmt_list_has_side_effects(&c.body))
                 || stmt_list_has_side_effects(default)
@@ -259,7 +263,7 @@ fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn int(bits: u32) -> NirType {
         NirType::Int {
@@ -330,12 +334,14 @@ mod tests {
                     target: "add".to_string(),
                     args: vec![PreHirExpr::Const(1, int(32)), PreHirExpr::Const(2, int(32))],
                     ty: int(32),
-                })].into(),
+                })]
+                .into(),
                 else_body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                     target: "max".to_string(),
                     args: vec![PreHirExpr::Const(3, int(32)), PreHirExpr::Const(4, int(32))],
                     ty: int(32),
-                })].into(),
+                })]
+                .into(),
             }],
             ..Default::default()
         };
@@ -483,7 +489,12 @@ fn sccp_stmt(
                 break;
             }
             PreHirStmt::Block(stmts) => {
-                changed |= sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), env, goto_targets, all_xvars);
+                changed |= sccp_transform_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                    env,
+                    goto_targets,
+                    all_xvars,
+                );
                 break;
             }
             PreHirStmt::If {
@@ -524,10 +535,18 @@ fn sccp_stmt(
                         for (name, val, ty) in else_extra {
                             e2.insert(name, (val, ty));
                         }
-                        changed |=
-                            sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut e1, goto_targets, all_xvars);
-                        changed |=
-                            sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut e2, goto_targets, all_xvars);
+                        changed |= sccp_transform_stmts(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                            &mut e1,
+                            goto_targets,
+                            all_xvars,
+                        );
+                        changed |= sccp_transform_stmts(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                            &mut e2,
+                            goto_targets,
+                            all_xvars,
+                        );
                         *env = merge_env(&e1, &e2);
                     }
                 }
@@ -540,7 +559,12 @@ fn sccp_stmt(
                 changed |= sccp_subst_expr(cond, &loop_entry);
                 changed |= fold_expr_hir(cond);
                 let mut inner = loop_entry;
-                changed |= sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner, goto_targets, all_xvars);
+                changed |= sccp_transform_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    &mut inner,
+                    goto_targets,
+                    all_xvars,
+                );
                 *env = env_without_vars(&pre, &modified);
                 break;
             }
@@ -548,7 +572,12 @@ fn sccp_stmt(
                 let pre = env.clone();
                 let modified = loop_variant_vars(body, all_xvars);
                 let mut inner = env_without_vars(&pre, &modified);
-                changed |= sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner, goto_targets, all_xvars);
+                changed |= sccp_transform_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    &mut inner,
+                    goto_targets,
+                    all_xvars,
+                );
                 let cond_env = env_without_vars(&inner, &modified);
                 changed |= sccp_subst_expr(cond, &cond_env);
                 changed |= fold_expr_hir(cond);
@@ -581,7 +610,12 @@ fn sccp_stmt(
                     changed |= fold_expr_hir(c);
                 }
                 let mut inner = loop_body_entry;
-                changed |= sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner, goto_targets, all_xvars);
+                changed |= sccp_transform_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    &mut inner,
+                    goto_targets,
+                    all_xvars,
+                );
                 *env = env_without_vars(&loop_entry, &modified);
                 if let Some(u) = update.as_mut() {
                     let mut update_env = env_without_vars(&inner, &modified);
@@ -601,7 +635,9 @@ fn sccp_stmt(
                     let mut taken: Option<Vec<PreHirStmt>> = None;
                     for case in cases.iter_mut() {
                         if case.values.iter().any(|x| *x == v) {
-                            taken = Some(std::mem::take(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body)));
+                            taken = Some(std::mem::take(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                                &mut case.body,
+                            )));
                             break;
                         }
                     }
@@ -611,7 +647,9 @@ fn sccp_stmt(
                         .any(|case| stmt_list_has_side_effects(&case.body))
                         || stmt_list_has_side_effects(default);
                     if !discarded_have_side_effects {
-                        let blk = taken.unwrap_or_else(|| std::mem::take(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default)));
+                        let blk = taken.unwrap_or_else(|| {
+                            std::mem::take(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default))
+                        });
                         *stmt = PreHirStmt::Block(blk.into());
                         changed = true;
                         continue;
@@ -620,15 +658,24 @@ fn sccp_stmt(
                 let mut acc: Option<ConstEnv> = None;
                 for case in cases.iter_mut() {
                     let mut e = pre.clone();
-                    changed |=
-                        sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut e, goto_targets, all_xvars);
+                    changed |= sccp_transform_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        &mut e,
+                        goto_targets,
+                        all_xvars,
+                    );
                     acc = Some(match acc {
                         None => e,
                         Some(a) => merge_env(&a, &e),
                     });
                 }
                 let mut ed = pre.clone();
-                changed |= sccp_transform_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), &mut ed, goto_targets, all_xvars);
+                changed |= sccp_transform_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    &mut ed,
+                    goto_targets,
+                    all_xvars,
+                );
                 *env = merge_env(acc.as_ref().unwrap_or(&pre), &ed);
                 break;
             }
@@ -638,7 +685,10 @@ fn sccp_stmt(
                 }
                 break;
             }
-            PreHirStmt::Return(None) | PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Goto(_) => {
+            PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue
+            | PreHirStmt::Goto(_) => {
                 env.clear();
                 break;
             }
@@ -665,7 +715,9 @@ fn collect_xvars_in_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             collect_xvars_in_expr(expr, out);
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             collect_xvars_in_stmts(body, out);
         }
         PreHirStmt::For {

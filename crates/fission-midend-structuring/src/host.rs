@@ -16,22 +16,22 @@
 //!
 //! Pure helpers that only touch `PreHirStmt`/`PreHirExpr` do **not** use this trait.
 
+use crate::HashMap;
+use crate::HashSet;
 use crate::cfg_analysis::{CfgFactCache, DomTree, SccAnalysis};
+use crate::conditionals::VirtualExitIfElsePlan;
 use crate::guarded_tail::types::{
     GuardedTailCanonicalizationFailure, GuardedTailExecutionPlan, GuardedTailExecutionRejection,
     GuardedTailTrial, GuardedTailVerification, PromotionGateRejection, PromotionShapeRejection,
 };
 use crate::linear_types::{
-    ConditionalTailKey, ConditionalTailMismatchSubtype, IfLoweringBudget,
-    LinearBodyCacheKey, LinearBodyCachedOutcome, LinearBodyLoweringOutcome,
-    LinearBodyRejectReason, LinearExit, LoweredTerminator,
+    ConditionalTailKey, ConditionalTailMismatchSubtype, IfLoweringBudget, LinearBodyCacheKey,
+    LinearBodyCachedOutcome, LinearBodyLoweringOutcome, LinearBodyRejectReason, LinearExit,
+    LoweredTerminator,
 };
-use crate::conditionals::VirtualExitIfElsePlan;
 use crate::loop_analysis::LoopBody;
 use fission_midend_core::ir::{MlilPreviewError, MlilPreviewOptions};
 use fission_midend_prehir::{PreHirExpr, PreHirStmt};
-use crate::HashMap;
-use crate::HashSet;
 
 pub type StructuredChildMap = std::collections::HashMap<
     usize,
@@ -174,10 +174,7 @@ pub trait StructuringHost {
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
     ) -> Result<Option<(std::rc::Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError>;
-    fn linear_exit(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<LinearExit>, MlilPreviewError>;
+    fn linear_exit(&mut self, idx: usize) -> Result<Option<LinearExit>, MlilPreviewError>;
     fn linear_exit_with_budget(
         &mut self,
         idx: usize,
@@ -189,15 +186,8 @@ pub trait StructuringHost {
         rhs_idx: usize,
     ) -> Result<Option<LinearExit>, MlilPreviewError>;
     fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool;
-    fn linear_body_cache_get(
-        &self,
-        key: &LinearBodyCacheKey,
-    ) -> Option<LinearBodyCachedOutcome>;
-    fn linear_body_cache_insert(
-        &mut self,
-        key: LinearBodyCacheKey,
-        value: LinearBodyCachedOutcome,
-    );
+    fn linear_body_cache_get(&self, key: &LinearBodyCacheKey) -> Option<LinearBodyCachedOutcome>;
+    fn linear_body_cache_insert(&mut self, key: LinearBodyCacheKey, value: LinearBodyCachedOutcome);
     /// Returns `false` if `key` is already active (revisit cycle).
     fn linear_body_active_insert(&mut self, key: LinearBodyCacheKey) -> bool;
     fn linear_body_active_remove(&mut self, key: &LinearBodyCacheKey);
@@ -222,10 +212,7 @@ pub trait StructuringHost {
     fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool;
     fn is_trivial_linear_tail(&self, idx: usize) -> bool;
     fn forwarding_block_defines_return_tail_live_in(&self, idx: usize, join_idx: usize) -> bool;
-    fn record_conditional_tail_mismatch_subtype(
-        &mut self,
-        subtype: ConditionalTailMismatchSubtype,
-    );
+    fn record_conditional_tail_mismatch_subtype(&mut self, subtype: ConditionalTailMismatchSubtype);
     fn record_conditional_tail_mismatch_sample(
         &self,
         origin_idx: usize,

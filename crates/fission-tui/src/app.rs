@@ -192,14 +192,14 @@ impl App {
             disasm_area: std::cell::Cell::new(ratatui::layout::Rect::default()),
             decomp_area: std::cell::Cell::new(ratatui::layout::Rect::default()),
         };
-        
+
         if let Ok(db) = crate::db::Db::init() {
             if let Ok(rows) = db.get_sessions() {
                 app.session_rows = rows;
             }
             app.db = Some(db);
         }
-        
+
         app
     }
 
@@ -984,7 +984,7 @@ impl App {
         // Simplistic approach: delete all existing messages for this session and re-insert them.
         // A better approach would be to only insert new ones, but `messages` in pipeline is the source of truth.
         let _ = db.clear_messages(session_id);
-        
+
         for msg in messages {
             let role_str = match msg.role {
                 fission_ai::session::Role::System => "system",

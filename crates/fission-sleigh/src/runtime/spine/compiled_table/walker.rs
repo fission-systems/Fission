@@ -32,11 +32,7 @@ struct InstNextShared {
 
 impl InstNextShared {
     fn estimated_rel_len(&self, cursor: usize, local_construct_end: usize) -> usize {
-        let end = self
-            .bound_end
-            .get()
-            .max(cursor)
-            .max(local_construct_end);
+        let end = self.bound_end.get().max(cursor).max(local_construct_end);
         let progress = end.saturating_sub(self.inst_buf_start);
         let with_trailing = progress.saturating_add(self.unbound_min.get());
         with_trailing.max(self.root_min_length.get())
@@ -57,7 +53,10 @@ impl InstNextShared {
 /// formatting is deferred to `Display`, which only ever runs once a decode
 /// has already failed.
 enum WalkFrame {
-    Constructor { source: Box<str>, mnemonic: Box<str> },
+    Constructor {
+        source: Box<str>,
+        mnemonic: Box<str>,
+    },
     Operand(usize),
     Subtable(Box<str>),
 }
@@ -120,14 +119,9 @@ fn bind_instruction_with_inst_next<'a>(
         // resolveHandles-after-resolve). Nested walkers inherit the parent's shared
         // fallthrough from the second pass.
         if parent_inst_next.is_none() && selection.trace.root_bucket.as_ref() == "instruction" {
-            let probe = CompiledParserWalker::new(
-                compiled,
-                strategy,
-                ctx,
-                selection.clone(),
-                None,
-            )?
-            .walk()?;
+            let probe =
+                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None)?
+                    .walk()?;
             // Prefer absolute end-relative-to-start: length may be absolute buffer end.
             let full_len = probe
                 .relative_length
@@ -140,14 +134,8 @@ fn bind_instruction_with_inst_next<'a>(
                 root_min_length: Cell::new(full_len),
             });
             // owns=false: root_min_length already set to full probe length.
-            return CompiledParserWalker::new(
-                compiled,
-                strategy,
-                ctx,
-                selection,
-                Some(shared),
-            )?
-            .walk();
+            return CompiledParserWalker::new(compiled, strategy, ctx, selection, Some(shared))?
+                .walk();
         }
         CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next)?.walk()
     })();
@@ -747,7 +735,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         // conflict with the `&mut self` call below for the whole borrow's
         // lifetime, which is exactly why this used to `.clone()` the
         // pointee instead.
-        let constructor_template = std::sync::Arc::clone(&self.selection.constructor.constructor_template);
+        let constructor_template =
+            std::sync::Arc::clone(&self.selection.constructor.constructor_template);
         let Some(export_tpl) = constructor_template.result.as_ref() else {
             return Ok(None);
         };
@@ -1012,7 +1001,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         if self.owns_inst_next {
             let end = operand_absolute_offset.saturating_add(operand_relative_length);
             let b = self.inst_next_shared.bound_end.get();
-            self.inst_next_shared.bound_end.set(b.max(end).max(self.cursor));
+            self.inst_next_shared
+                .bound_end
+                .set(b.max(end).max(self.cursor));
         }
         self.walker.record_operand_node(
             operand_index,

@@ -1,9 +1,8 @@
 //! Structuring admission gate and budget decisions.
 
-use fission_midend_core::ir::*;
 use crate::HashMap;
 use crate::HashSet;
-
+use fission_midend_core::ir::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuringAdmissionReason {

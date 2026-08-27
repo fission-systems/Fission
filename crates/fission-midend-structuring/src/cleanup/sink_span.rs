@@ -162,8 +162,7 @@ fn no_rebinding_control(stmt: &PreHirStmt) -> bool {
             else_body,
             ..
         } => {
-            then_body.iter().all(no_rebinding_control)
-                && else_body.iter().all(no_rebinding_control)
+            then_body.iter().all(no_rebinding_control) && else_body.iter().all(no_rebinding_control)
         }
         PreHirStmt::Block(inner) => inner.iter().all(no_rebinding_control),
         PreHirStmt::While { body, .. }
@@ -291,11 +290,27 @@ mod tests {
         ];
         let (out, n) = sink_spans_into_if_arms(body, &HashSet::default());
         assert_eq!(n, 1);
-        let [PreHirStmt::If { then_body, else_body, .. }, PreHirStmt::Label(_)] = &out[..] else {
+        let [
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            },
+            PreHirStmt::Label(_),
+        ] = &out[..]
+        else {
             panic!("expected the if then the label, got {out:#?}");
         };
         // Falling off the arm: the guard is inverted over the span.
-        let [_, PreHirStmt::If { cond, then_body: inner, .. }] = then_body.as_slice() else {
+        let [
+            _,
+            PreHirStmt::If {
+                cond,
+                then_body: inner,
+                ..
+            },
+        ] = then_body.as_slice()
+        else {
             panic!("expected the guard rewritten, got {then_body:#?}");
         };
         assert_eq!(cond, &negate_expr(var("b")));

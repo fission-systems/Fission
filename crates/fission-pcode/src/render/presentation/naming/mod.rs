@@ -59,11 +59,7 @@ pub(crate) fn apply_semantic_naming(func: &mut HirFunction) -> bool {
         // display name first (e.g. the first-detected loop counter gets
         // `i`, the second `j`).
         let mut sorted = candidates;
-        sorted.sort_by(|a, b| {
-            b.score
-                .cmp(&a.score)
-                .then_with(|| a.name.cmp(&b.name))
-        });
+        sorted.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.name.cmp(&b.name)));
         for candidate in sorted {
             if already_named.contains(&candidate.name) {
                 continue;

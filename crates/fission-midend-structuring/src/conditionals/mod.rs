@@ -9,9 +9,8 @@ mod short_circuit;
 
 pub use if_else::{
     ComplexArmPlan, VirtualExitIfElsePlan, count_explicit_gotos,
-    lower_virtual_exit_if_else_committed,
-    plan_virtual_exit_if_else, try_lower_if_else, try_lower_return_chain_arm,
-    try_reduce_if_else_with_follow,
+    lower_virtual_exit_if_else_committed, plan_virtual_exit_if_else, try_lower_if_else,
+    try_lower_return_chain_arm, try_reduce_if_else_with_follow,
 };
 pub use plain_if::try_lower_if;
 pub use short_circuit::{
@@ -21,7 +20,7 @@ pub use short_circuit::{
 
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, structuring_diag_enabled};
-use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_core::ir::MlilPreviewError;
 use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
 
 /// Simple assign/expr statements that may sit in a while-loop's condition
@@ -82,12 +81,7 @@ fn shared_forward_linear_exit(
     }
 }
 
-fn log_try_lower_if_reject_diag(
-    diag: bool,
-    idx: usize,
-    block_addr: u64,
-    reason: &str,
-) {
+fn log_try_lower_if_reject_diag(diag: bool, idx: usize, block_addr: u64, reason: &str) {
     if diag {
         eprintln!(
             "[DIAG] try_lower_if {}: idx={} block=0x{:x}",

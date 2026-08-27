@@ -95,7 +95,6 @@ impl AbiState {
     }
 }
 
-
 fn hw_names_for_offset(abi: CallingConvention, offset: u64, pointer_size: u32) -> Vec<String> {
     let x64 = [
         (0x00u64, &["RAX", "EAX", "AX", "AL", "rax", "eax"][..]),

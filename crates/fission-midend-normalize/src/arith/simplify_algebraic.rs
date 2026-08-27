@@ -456,7 +456,7 @@ fn term_order_key(expr: &PreHirExpr) -> (u8, String) {
 #[cfg(test)]
 mod term_order_tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     #[test]
     fn distributes_shared_multiplicand() {
@@ -552,4 +552,3 @@ mod width_signed_const_tests {
         assert!(simplify_negated_const(&add_const(0x1_0000_0000)).is_none());
     }
 }
-

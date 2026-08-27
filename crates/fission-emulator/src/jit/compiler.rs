@@ -6,15 +6,15 @@
 //! - Space ids are whatever SLA assigned (no hardcoded register/ram)
 
 use anyhow::Result;
+use cranelift_codegen::Context;
 use cranelift_codegen::ir::{
-    types, AbiParam, BlockArg, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind,
-    condcodes::IntCC,
+    AbiParam, BlockArg, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind, condcodes::IntCC,
+    types,
 };
 use cranelift_codegen::settings::{self, Configurable};
-use cranelift_codegen::Context;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{default_libcall_names, Linkage, Module};
+use cranelift_module::{Linkage, Module, default_libcall_names};
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 use std::collections::HashMap;
 
@@ -51,31 +51,103 @@ impl JitCompiler {
 
         let mut jit_builder = JITBuilder::with_isa(isa, default_libcall_names());
         for (name, ptr) in [
-            ("jit_read_space", crate::jit::callbacks::jit_read_space as *const u8),
-            ("jit_write_space", crate::jit::callbacks::jit_write_space as *const u8),
-            ("jit_read_bytes", crate::jit::callbacks::jit_read_bytes as *const u8),
-            ("jit_write_bytes", crate::jit::callbacks::jit_write_bytes as *const u8),
-            ("jit_float_binop", crate::jit::callbacks::jit_float_binop as *const u8),
-            ("jit_float_unop", crate::jit::callbacks::jit_float_unop as *const u8),
-            ("jit_int_flag", crate::jit::callbacks::jit_int_flag as *const u8),
-            ("jit_call_other", crate::jit::callbacks::jit_call_other as *const u8),
-            ("jit_callother_result", crate::jit::callbacks::jit_callother_result as *const u8),
-            ("jit_count_insn", crate::jit::callbacks::jit_count_insn as *const u8),
-            ("jit_count_pcode", crate::jit::callbacks::jit_count_pcode as *const u8),
+            (
+                "jit_read_space",
+                crate::jit::callbacks::jit_read_space as *const u8,
+            ),
+            (
+                "jit_write_space",
+                crate::jit::callbacks::jit_write_space as *const u8,
+            ),
+            (
+                "jit_read_bytes",
+                crate::jit::callbacks::jit_read_bytes as *const u8,
+            ),
+            (
+                "jit_write_bytes",
+                crate::jit::callbacks::jit_write_bytes as *const u8,
+            ),
+            (
+                "jit_float_binop",
+                crate::jit::callbacks::jit_float_binop as *const u8,
+            ),
+            (
+                "jit_float_unop",
+                crate::jit::callbacks::jit_float_unop as *const u8,
+            ),
+            (
+                "jit_int_flag",
+                crate::jit::callbacks::jit_int_flag as *const u8,
+            ),
+            (
+                "jit_call_other",
+                crate::jit::callbacks::jit_call_other as *const u8,
+            ),
+            (
+                "jit_callother_result",
+                crate::jit::callbacks::jit_callother_result as *const u8,
+            ),
+            (
+                "jit_count_insn",
+                crate::jit::callbacks::jit_count_insn as *const u8,
+            ),
+            (
+                "jit_count_pcode",
+                crate::jit::callbacks::jit_count_pcode as *const u8,
+            ),
             ("jit_chain", crate::jit::callbacks::jit_chain as *const u8),
-            ("jit_exit_tb", crate::jit::callbacks::jit_exit_tb as *const u8),
-            ("jit_sym_cbranch_gate", crate::jit::callbacks::jit_sym_cbranch_gate as *const u8),
-            ("jit_host_reg_base", crate::jit::callbacks::jit_host_reg_base as *const u8),
-            ("jit_reg_bulk_flush", crate::jit::callbacks::jit_reg_bulk_flush as *const u8),
-            ("jit_shadow_copy", crate::jit::callbacks::jit_shadow_copy as *const u8),
-            ("jit_shadow_load", crate::jit::callbacks::jit_shadow_load as *const u8),
-            ("jit_shadow_store", crate::jit::callbacks::jit_shadow_store as *const u8),
-            ("jit_shadow_binop", crate::jit::callbacks::jit_shadow_binop as *const u8),
-            ("jit_shadow_unop", crate::jit::callbacks::jit_shadow_unop as *const u8),
-            ("jit_read_register", crate::jit::callbacks::jit_read_register as *const u8),
-            ("jit_write_register", crate::jit::callbacks::jit_write_register as *const u8),
-            ("jit_read_memory", crate::jit::callbacks::jit_read_memory as *const u8),
-            ("jit_write_memory", crate::jit::callbacks::jit_write_memory as *const u8),
+            (
+                "jit_exit_tb",
+                crate::jit::callbacks::jit_exit_tb as *const u8,
+            ),
+            (
+                "jit_sym_cbranch_gate",
+                crate::jit::callbacks::jit_sym_cbranch_gate as *const u8,
+            ),
+            (
+                "jit_host_reg_base",
+                crate::jit::callbacks::jit_host_reg_base as *const u8,
+            ),
+            (
+                "jit_reg_bulk_flush",
+                crate::jit::callbacks::jit_reg_bulk_flush as *const u8,
+            ),
+            (
+                "jit_shadow_copy",
+                crate::jit::callbacks::jit_shadow_copy as *const u8,
+            ),
+            (
+                "jit_shadow_load",
+                crate::jit::callbacks::jit_shadow_load as *const u8,
+            ),
+            (
+                "jit_shadow_store",
+                crate::jit::callbacks::jit_shadow_store as *const u8,
+            ),
+            (
+                "jit_shadow_binop",
+                crate::jit::callbacks::jit_shadow_binop as *const u8,
+            ),
+            (
+                "jit_shadow_unop",
+                crate::jit::callbacks::jit_shadow_unop as *const u8,
+            ),
+            (
+                "jit_read_register",
+                crate::jit::callbacks::jit_read_register as *const u8,
+            ),
+            (
+                "jit_write_register",
+                crate::jit::callbacks::jit_write_register as *const u8,
+            ),
+            (
+                "jit_read_memory",
+                crate::jit::callbacks::jit_read_memory as *const u8,
+            ),
+            (
+                "jit_write_memory",
+                crate::jit::callbacks::jit_write_memory as *const u8,
+            ),
         ] {
             jit_builder.symbol(name, ptr);
         }
@@ -151,8 +223,16 @@ impl JitCompiler {
 
         self.ctx.func.signature.params.clear();
         self.ctx.func.signature.returns.clear();
-        self.ctx.func.signature.params.push(AbiParam::new(types::I64));
-        self.ctx.func.signature.returns.push(AbiParam::new(types::I64));
+        self.ctx
+            .func
+            .signature
+            .params
+            .push(AbiParam::new(types::I64));
+        self.ctx
+            .func
+            .signature
+            .returns
+            .push(AbiParam::new(types::I64));
 
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_ctx);
 
@@ -404,14 +484,28 @@ impl JitCompiler {
         builder.seal_block(entry);
         let emu_ptr = builder.block_params(entry)[0];
 
-        let read_space_ref = self.module.declare_func_in_func(read_space_fn, builder.func);
-        let write_space_ref = self.module.declare_func_in_func(write_space_fn, builder.func);
-        let read_bytes_ref = self.module.declare_func_in_func(read_bytes_fn, builder.func);
-        let write_bytes_ref = self.module.declare_func_in_func(write_bytes_fn, builder.func);
-        let float_binop_ref = self.module.declare_func_in_func(float_binop_fn, builder.func);
-        let float_unop_ref = self.module.declare_func_in_func(float_unop_fn, builder.func);
+        let read_space_ref = self
+            .module
+            .declare_func_in_func(read_space_fn, builder.func);
+        let write_space_ref = self
+            .module
+            .declare_func_in_func(write_space_fn, builder.func);
+        let read_bytes_ref = self
+            .module
+            .declare_func_in_func(read_bytes_fn, builder.func);
+        let write_bytes_ref = self
+            .module
+            .declare_func_in_func(write_bytes_fn, builder.func);
+        let float_binop_ref = self
+            .module
+            .declare_func_in_func(float_binop_fn, builder.func);
+        let float_unop_ref = self
+            .module
+            .declare_func_in_func(float_unop_fn, builder.func);
         let int_flag_ref = self.module.declare_func_in_func(int_flag_fn, builder.func);
-        let call_other_ref = self.module.declare_func_in_func(call_other_fn, builder.func);
+        let call_other_ref = self
+            .module
+            .declare_func_in_func(call_other_fn, builder.func);
         let callother_result_ref = self
             .module
             .declare_func_in_func(callother_result_fn, builder.func);
@@ -477,9 +571,7 @@ impl JitCompiler {
                         && ($offset as usize) + ($size as usize).min(8) <= HOST_REG_FILE_SIZE
                     {
                         // Zero-callout register load from host_reg_file.
-                        let ptr = builder
-                            .ins()
-                            .iadd_imm(host_reg_base, $offset as i64);
+                        let ptr = builder.ins().iadd_imm(host_reg_base, $offset as i64);
                         let flags = MemFlagsData::trusted();
                         let val = builder.ins().load(types::I64, flags, ptr, 0);
                         // Mask to size if < 8
@@ -497,13 +589,8 @@ impl JitCompiler {
                     } else {
                         let sp = builder.ins().iconst(types::I64, $space as i64);
                         let off = builder.ins().iconst(types::I64, $offset as i64);
-                        let sz = builder
-                            .ins()
-                            .iconst(types::I64, ($size as i64).min(8));
-                        let call =
-                            builder
-                                .ins()
-                                .call(read_space_ref, &[emu_ptr, sp, off, sz]);
+                        let sz = builder.ins().iconst(types::I64, ($size as i64).min(8));
+                        let call = builder.ins().call(read_space_ref, &[emu_ptr, sp, off, sz]);
                         let val = builder.inst_results(call)[0];
                         builder.def_var(v, val);
                     }
@@ -528,48 +615,28 @@ impl JitCompiler {
                         types::I64,
                         if a.is_constant { 0 } else { a.space_id as i64 },
                     );
-                    let aoff = builder.ins().iconst(
-                        types::I64,
-                        if a.is_constant {
-                            0
-                        } else {
-                            a.offset as i64
-                        },
-                    );
-                    let asz = builder.ins().iconst(
-                        types::I64,
-                        if a.is_constant {
-                            8
-                        } else {
-                            a.size as i64
-                        },
-                    );
+                    let aoff = builder
+                        .ins()
+                        .iconst(types::I64, if a.is_constant { 0 } else { a.offset as i64 });
+                    let asz = builder
+                        .ins()
+                        .iconst(types::I64, if a.is_constant { 8 } else { a.size as i64 });
                     let bsp = builder.ins().iconst(
                         types::I64,
                         if b.is_constant { 0 } else { b.space_id as i64 },
                     );
-                    let boff = builder.ins().iconst(
-                        types::I64,
-                        if b.is_constant {
-                            0
-                        } else {
-                            b.offset as i64
-                        },
-                    );
-                    let bsz = builder.ins().iconst(
-                        types::I64,
-                        if b.is_constant {
-                            8
-                        } else {
-                            b.size as i64
-                        },
-                    );
+                    let boff = builder
+                        .ins()
+                        .iconst(types::I64, if b.is_constant { 0 } else { b.offset as i64 });
+                    let bsz = builder
+                        .ins()
+                        .iconst(types::I64, if b.is_constant { 8 } else { b.size as i64 });
                     let kind_v = builder.ins().iconst(types::I64, kind as i64);
                     builder.ins().call(
                         shadow_binop_ref,
                         &[
-                            emu_ptr, dsp, doff, dsz, asp, aoff, a_val, asz, bsp, boff, b_val,
-                            bsz, kind_v,
+                            emu_ptr, dsp, doff, dsz, asp, aoff, a_val, asz, bsp, boff, b_val, bsz,
+                            kind_v,
                         ],
                     );
                 }
@@ -590,22 +657,12 @@ impl JitCompiler {
                         types::I64,
                         if a.is_constant { 0 } else { a.space_id as i64 },
                     );
-                    let aoff = builder.ins().iconst(
-                        types::I64,
-                        if a.is_constant {
-                            0
-                        } else {
-                            a.offset as i64
-                        },
-                    );
-                    let asz = builder.ins().iconst(
-                        types::I64,
-                        if a.is_constant {
-                            8
-                        } else {
-                            a.size as i64
-                        },
-                    );
+                    let aoff = builder
+                        .ins()
+                        .iconst(types::I64, if a.is_constant { 0 } else { a.offset as i64 });
+                    let asz = builder
+                        .ins()
+                        .iconst(types::I64, if a.is_constant { 8 } else { a.size as i64 });
                     let kind_v = builder.ins().iconst(types::I64, kind as i64);
                     builder.ins().call(
                         shadow_unop_ref,
@@ -677,9 +734,7 @@ impl JitCompiler {
                     if vn.space_id == register_space
                         && (vn.offset as usize) + (rsz as usize) <= HOST_REG_FILE_SIZE
                     {
-                        let ptr = builder
-                            .ins()
-                            .iadd_imm(host_reg_base, vn.offset as i64);
+                        let ptr = builder.ins().iadd_imm(host_reg_base, vn.offset as i64);
                         let flags = MemFlagsData::trusted();
                         match rsz {
                             1 => {
@@ -767,24 +822,21 @@ impl JitCompiler {
                                 // For constants, write bytes manually; for vars, read_bytes.
                                 if src.is_constant {
                                     // store constant low bytes into slot via store sequence (max 8)
-                                    let c = builder
-                                        .ins()
-                                        .iconst(types::I64, src.constant_val as i64);
+                                    let c =
+                                        builder.ins().iconst(types::I64, src.constant_val as i64);
                                     builder.ins().stack_store(c, slot, 0);
                                 } else {
                                     let szv = builder.ins().iconst(types::I64, src.size as i64);
-                                    builder.ins().call(
-                                        read_bytes_ref,
-                                        &[emu_ptr, sp, off, ptr, szv],
-                                    );
+                                    builder
+                                        .ins()
+                                        .call(read_bytes_ref, &[emu_ptr, sp, off, ptr, szv]);
                                 }
                                 let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
                                 let doff = builder.ins().iconst(types::I64, out.offset as i64);
                                 let dsz = builder.ins().iconst(types::I64, out.size as i64);
-                                builder.ins().call(
-                                    write_bytes_ref,
-                                    &[emu_ptr, dsp, doff, ptr, dsz],
-                                );
+                                builder
+                                    .ins()
+                                    .call(write_bytes_ref, &[emu_ptr, dsp, doff, ptr, dsz]);
                             } else {
                                 let val = load_vn!(src);
                                 store_vn!(out, val);
@@ -808,10 +860,9 @@ impl JitCompiler {
                                         src.offset as i64
                                     },
                                 );
-                                builder.ins().call(
-                                    shadow_copy_ref,
-                                    &[emu_ptr, dsp, doff, dsz, ssp, soff],
-                                );
+                                builder
+                                    .ins()
+                                    .call(shadow_copy_ref, &[emu_ptr, dsp, doff, dsz, ssp, soff]);
                             }
                         }
                     }
@@ -843,9 +894,7 @@ impl JitCompiler {
                                 let sp = builder.ins().iconst(types::I64, space_id as i64);
                                 let sz = builder.ins().iconst(types::I64, out.size as i64);
                                 let call =
-                                    builder
-                                        .ins()
-                                        .call(read_space_ref, &[emu_ptr, sp, addr, sz]);
+                                    builder.ins().call(read_space_ref, &[emu_ptr, sp, addr, sz]);
                                 let val = builder.inst_results(call)[0];
                                 store_vn!(out, val);
                             }
@@ -854,10 +903,9 @@ impl JitCompiler {
                             let doff = builder.ins().iconst(types::I64, out.offset as i64);
                             let dsz = builder.ins().iconst(types::I64, out.size as i64);
                             let msp = builder.ins().iconst(types::I64, space_id as i64);
-                            builder.ins().call(
-                                shadow_load_ref,
-                                &[emu_ptr, dsp, doff, dsz, msp, addr],
-                            );
+                            builder
+                                .ins()
+                                .call(shadow_load_ref, &[emu_ptr, dsp, doff, dsz, msp, addr]);
                         }
                     }
                 }
@@ -914,10 +962,9 @@ impl JitCompiler {
                                 val_vn.offset as i64
                             },
                         );
-                        builder.ins().call(
-                            shadow_store_ref,
-                            &[emu_ptr, msp, addr, sz, vsp, voff],
-                        );
+                        builder
+                            .ins()
+                            .call(shadow_store_ref, &[emu_ptr, msp, addr, sz, vsp, voff]);
                     }
                 }
 
@@ -1377,10 +1424,7 @@ impl JitCompiler {
                         };
                         let opi = builder.ins().iconst(types::I32, fop as i64);
                         let szi = builder.ins().iconst(types::I32, size as i64);
-                        let call =
-                            builder
-                                .ins()
-                                .call(float_binop_ref, &[opi, szi, a, b]);
+                        let call = builder.ins().call(float_binop_ref, &[opi, szi, a, b]);
                         store_vn!(out, builder.inst_results(call)[0]);
                         let sk = match op.opcode {
                             PcodeOpcode::FloatAdd => SymBinOpKind::FloatAdd as u32,
@@ -1426,10 +1470,7 @@ impl JitCompiler {
                         let opi = builder.ins().iconst(types::I32, fop as i64);
                         let isz = builder.ins().iconst(types::I32, in_sz as i64);
                         let osz = builder.ins().iconst(types::I32, out_sz as i64);
-                        let call =
-                            builder
-                                .ins()
-                                .call(float_unop_ref, &[opi, isz, osz, a]);
+                        let call = builder.ins().call(float_unop_ref, &[opi, isz, osz, a]);
                         store_vn!(out, builder.inst_results(call)[0]);
                         let sk = match op.opcode {
                             PcodeOpcode::FloatNeg => SymUnOpKind::FloatNeg as u32,
@@ -1462,9 +1503,7 @@ impl JitCompiler {
                         branched = true;
                     } else {
                         let target = builder.ins().iconst(types::I64, dest.offset as i64);
-                        builder
-                            .ins()
-                            .jump(exit_block, &[BlockArg::from(target)]);
+                        builder.ins().jump(exit_block, &[BlockArg::from(target)]);
                         branched = true;
                     }
                 }
@@ -1503,10 +1542,9 @@ impl JitCompiler {
                         );
                         let t_a = builder.ins().iconst(types::I64, taken_addr as i64);
                         let n_a = builder.ins().iconst(types::I64, not_taken_addr as i64);
-                        let gcall = builder.ins().call(
-                            sym_gate_ref,
-                            &[emu_ptr, cond, csp, coff, t_a, n_a],
-                        );
+                        let gcall = builder
+                            .ins()
+                            .call(sym_gate_ref, &[emu_ptr, cond, csp, coff, t_a, n_a]);
                         let stop = builder.inst_results(gcall)[0];
                         let is_stop = builder.ins().icmp_imm(IntCC::NotEqual, stop, 0);
                         let stop_b = builder.create_block();
@@ -1516,10 +1554,8 @@ impl JitCompiler {
                         builder.seal_block(stop_b);
                         // Exit at the concrete branch target so SimulationManager
                         // can resume both forks at real guest PCs.
-                        let is_true =
-                            builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
-                        let concrete_next =
-                            builder.ins().select(is_true, t_a, n_a);
+                        let is_true = builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
+                        let concrete_next = builder.ins().select(is_true, t_a, n_a);
                         builder
                             .ins()
                             .jump(exit_block, &[BlockArg::from(concrete_next)]);
@@ -1553,9 +1589,7 @@ impl JitCompiler {
                         builder.ins().brif(is_true, then_b, &[], else_b, &[]);
                         builder.switch_to_block(then_b);
                         builder.seal_block(then_b);
-                        builder
-                            .ins()
-                            .jump(exit_block, &[BlockArg::from(target)]);
+                        builder.ins().jump(exit_block, &[BlockArg::from(target)]);
                         builder.switch_to_block(else_b);
                         builder.seal_block(else_b);
                         if let Some(ft) = fallthrough {
@@ -1580,16 +1614,12 @@ impl JitCompiler {
                         dest.offset
                     };
                     let target = builder.ins().iconst(types::I64, addr as i64);
-                    builder
-                        .ins()
-                        .jump(exit_block, &[BlockArg::from(target)]);
+                    builder.ins().jump(exit_block, &[BlockArg::from(target)]);
                     branched = true;
                 }
                 PcodeOpcode::CallInd | PcodeOpcode::BranchInd | PcodeOpcode::Return => {
                     let target = load_vn!(&op.inputs[0]);
-                    builder
-                        .ins()
-                        .jump(exit_block, &[BlockArg::from(target)]);
+                    builder.ins().jump(exit_block, &[BlockArg::from(target)]);
                     branched = true;
                 }
 
@@ -1646,9 +1676,7 @@ impl JitCompiler {
                             }
                             let ptr = builder.ins().stack_addr(types::I64, slot, 0);
                             let cnt = builder.ins().iconst(types::I64, n as i64);
-                            builder
-                                .ins()
-                                .call(reg_bulk_ref, &[emu_ptr, ptr, cnt]);
+                            builder.ins().call(reg_bulk_ref, &[emu_ptr, ptr, cnt]);
                         }
                     }
 
@@ -1682,10 +1710,9 @@ impl JitCompiler {
                         types::I64,
                         op.output.as_ref().map(|o| o.size as i64).unwrap_or(0),
                     );
-                    let call = builder.ins().call(
-                        call_other_ref,
-                        &[emu_ptr, uid, args_ptr, argc_v, out_sz],
-                    );
+                    let call = builder
+                        .ins()
+                        .call(call_other_ref, &[emu_ptr, uid, args_ptr, argc_v, out_sz]);
                     let halt = builder.inst_results(call)[0];
                     let is_halt = builder.ins().icmp_imm(IntCC::NotEqual, halt, 0);
                     let halt_b = builder.create_block();
@@ -1717,10 +1744,9 @@ impl JitCompiler {
                         let spv = builder.ins().iconst(types::I64, sp as i64);
                         let offv = builder.ins().iconst(types::I64, off as i64);
                         let szv = builder.ins().iconst(types::I64, sz as i64);
-                        let rcall =
-                            builder
-                                .ins()
-                                .call(read_space_ref, &[emu_ptr, spv, offv, szv]);
+                        let rcall = builder
+                            .ins()
+                            .call(read_space_ref, &[emu_ptr, spv, offv, szv]);
                         let val = builder.inst_results(rcall)[0];
                         builder.def_var(v, val);
                     }
@@ -1730,9 +1756,7 @@ impl JitCompiler {
                     // CallOther data result after reload so it is not clobbered
                     // (e.g. segment_fs → linear address into unique/output).
                     if let Some(out) = op.output.as_ref() {
-                        let rcall = builder
-                            .ins()
-                            .call(callother_result_ref, &[emu_ptr]);
+                        let rcall = builder.ins().call(callother_result_ref, &[emu_ptr]);
                         let val = builder.inst_results(rcall)[0];
                         store_vn!(out, val);
                     }
@@ -1842,7 +1866,10 @@ impl JitCompiler {
         // root-cause the ensure_var! cache-key bug (see its own comment);
         // kept as a permanent debugging aid for future JIT-glue issues.
         if std::env::var_os("FISSION_JIT_DUMP_IR").is_some() {
-            eprintln!("=== Cranelift IR for TB@0x{start_pc:x} ===\n{}", self.ctx.func);
+            eprintln!(
+                "=== Cranelift IR for TB@0x{start_pc:x} ===\n{}",
+                self.ctx.func
+            );
         }
         self.compile_seq = self.compile_seq.wrapping_add(1);
         let name = format!("jit_tb_{:X}_{}", start_pc, self.compile_seq);
@@ -2028,8 +2055,8 @@ mod tests {
 
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/x64_static_printf_malloc.elf");
-        let binary = fission_loader::loader::LoadedBinary::from_file(&path)
-            .expect("load real test ELF");
+        let binary =
+            fission_loader::loader::LoadedBinary::from_file(&path).expect("load real test ELF");
         let mut state = MachineState::new();
         let _info = crate::os::linux::loader::load_elf(&mut state, &binary).expect("load_elf");
         let load_spec = binary.load_spec().expect("load spec").clone();
@@ -2089,7 +2116,14 @@ mod tests {
         }
     }
 
-    fn binop_sized(opcode: PcodeOpcode, out: u64, a: u64, a_size: u32, b: u64, b_size: u32) -> PcodeOp {
+    fn binop_sized(
+        opcode: PcodeOpcode,
+        out: u64,
+        a: u64,
+        a_size: u32,
+        b: u64,
+        b_size: u32,
+    ) -> PcodeOp {
         PcodeOp {
             seq_num: 1,
             opcode,
@@ -2119,8 +2153,8 @@ mod tests {
             // 0 >= -1 (signed) -- i.e. !(0 < -1) -- must be true.
             binop_sized(PcodeOpcode::IntSLess, 16, 8, 4, 0, 4), // 0 <s -1 -> 0 (false)
             binop_sized(PcodeOpcode::IntSLessEqual, 24, 0, 4, 8, 4), // -1 <=s 0 -> 1 (true)
-            binop_sized(PcodeOpcode::IntSDiv, 32, 8, 4, 0, 4), // 0 / -1 -> 0
-            binop_sized(PcodeOpcode::IntSRem, 40, 8, 4, 0, 4), // 0 % -1 -> 0
+            binop_sized(PcodeOpcode::IntSDiv, 32, 8, 4, 0, 4),  // 0 / -1 -> 0
+            binop_sized(PcodeOpcode::IntSRem, 40, 8, 4, 0, 4),  // 0 % -1 -> 0
         ];
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 16), 0, "0 <s -1 should be false");

@@ -42,9 +42,7 @@ fn walk_stmts(stmts: &mut Vec<PreHirStmt>, changed: &mut bool) {
             PreHirStmt::Expr(expr) => rewrite(expr, changed),
             PreHirStmt::VaStart { va_list, .. } => rewrite(va_list, changed),
             PreHirStmt::Return(Some(expr)) => rewrite(expr, changed),
-            PreHirStmt::Block(body) => {
-                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), changed)
-            }
+            PreHirStmt::Block(body) => walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), changed),
             PreHirStmt::While { cond, body } => {
                 rewrite(cond, changed);
                 walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), changed);

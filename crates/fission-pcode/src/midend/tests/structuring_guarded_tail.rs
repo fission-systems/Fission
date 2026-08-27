@@ -72,10 +72,12 @@ fn structuring_promotes_single_entry_guarded_tail_region() {
                     PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
                     PreHirStmt::If {
                         cond: PreHirExpr::Var("flag".to_string()),
-                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))]
+                            .into(),
                         else_body: Vec::new().into(),
                     },
-                ].into(),
+                ]
+                .into(),
                 else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -414,12 +416,15 @@ fn structuring_guarded_tail_execute_rewrite_survives_padded_middle_depth() {
             then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
             else_body: Vec::new().into(),
         },
-        PreHirStmt::Block(vec![
-            PreHirStmt::Expr(PreHirExpr::Var("middle_a".to_string())),
-            PreHirStmt::Block(vec![PreHirStmt::Expr(PreHirExpr::Var(
-                "middle_b".to_string(),
-            ))].into()),
-        ].into()),
+        PreHirStmt::Block(
+            vec![
+                PreHirStmt::Expr(PreHirExpr::Var("middle_a".to_string())),
+                PreHirStmt::Block(
+                    vec![PreHirStmt::Expr(PreHirExpr::Var("middle_b".to_string()))].into(),
+                ),
+            ]
+            .into(),
+        ),
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
             rhs: PreHirExpr::Var("probe".to_string()),
@@ -1325,17 +1330,20 @@ fn structuring_candidate_discovery_counts_interleaved_join_use_with_nontrivial_s
             else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
-        PreHirStmt::Block(vec![
-            PreHirStmt::If {
-                cond: PreHirExpr::Var("inner".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
-                else_body: Vec::new().into(),
-            },
-            PreHirStmt::Label("block_alias".to_string()),
-            PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
-            PreHirStmt::Label("block_join".to_string()),
-            PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
-        ].into()),
+        PreHirStmt::Block(
+            vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("inner".to_string()),
+                    then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Label("block_alias".to_string()),
+                PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
+                PreHirStmt::Label("block_join".to_string()),
+                PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
+            ]
+            .into(),
+        ),
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
@@ -1363,20 +1371,23 @@ fn structuring_candidate_discovery_keeps_interleaved_join_use_with_side_effectfu
             else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
-        PreHirStmt::Block(vec![
-            PreHirStmt::If {
-                cond: PreHirExpr::Var("inner".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
-                else_body: Vec::new().into(),
-            },
-            PreHirStmt::Label("block_alias".to_string()),
-            PreHirStmt::Assign {
-                lhs: PreHirLValue::Var("tmp".to_string()),
-                rhs: PreHirExpr::Var("payload".to_string()),
-            },
-            PreHirStmt::Label("block_join".to_string()),
-            PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
-        ].into()),
+        PreHirStmt::Block(
+            vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("inner".to_string()),
+                    then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Label("block_alias".to_string()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("tmp".to_string()),
+                    rhs: PreHirExpr::Var("payload".to_string()),
+                },
+                PreHirStmt::Label("block_join".to_string()),
+                PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
+            ]
+            .into(),
+        ),
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];

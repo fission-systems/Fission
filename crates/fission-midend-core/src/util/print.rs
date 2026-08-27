@@ -74,16 +74,10 @@ pub fn format_expr_key(expr: &HirExpr) -> String {
         }
         HirExpr::Load { ptr, .. } => format!("*{}", format_expr_key(ptr)),
         HirExpr::FieldAccess {
-            base,
-            field_name,
-            ..
+            base, field_name, ..
         } => format!("{}.{}", format_expr_key(base), field_name),
         HirExpr::Index { base, index, .. } => {
-            format!(
-                "{}[{}]",
-                format_expr_key(base),
-                format_expr_key(index)
-            )
+            format!("{}[{}]", format_expr_key(base), format_expr_key(index))
         }
         HirExpr::PtrOffset { base, offset } => {
             format!("({} + {offset})", format_expr_key(base))
@@ -100,17 +94,10 @@ pub fn format_lvalue_key(lv: &HirLValue) -> String {
         HirLValue::Var(n) => n.clone(),
         HirLValue::Deref { ptr, .. } => format!("*{}", format_expr_key(ptr)),
         HirLValue::Index { base, index, .. } => {
-            format!(
-                "{}[{}]",
-                format_expr_key(base),
-                format_expr_key(index)
-            )
+            format!("{}[{}]", format_expr_key(base), format_expr_key(index))
         }
         HirLValue::FieldAccess {
-            base,
-            field_name,
-            ..
+            base, field_name, ..
         } => format!("{}.{}", format_expr_key(base), field_name),
     }
 }
-

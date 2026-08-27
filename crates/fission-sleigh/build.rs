@@ -29,8 +29,8 @@ use std::path::{Path, PathBuf};
 /// We only need two string keys from a single `[resources.language_manifest]`
 /// table, so a hand-rolled extractor is simpler than pulling in `toml`.
 struct BuildConfig {
-    env_var:            String,
-    env_subpath:        String,
+    env_var: String,
+    env_subpath: String,
     workspace_relative: String,
 }
 
@@ -38,11 +38,15 @@ impl BuildConfig {
     fn load() -> Self {
         let src = include_str!("build.toml");
 
-        let env_var            = extract(src, "env_var");
-        let env_subpath        = extract(src, "env_subpath");
+        let env_var = extract(src, "env_var");
+        let env_subpath = extract(src, "env_subpath");
         let workspace_relative = extract(src, "workspace_relative");
 
-        Self { env_var, env_subpath, workspace_relative }
+        Self {
+            env_var,
+            env_subpath,
+            workspace_relative,
+        }
     }
 }
 
@@ -81,7 +85,7 @@ fn find_workspace_root(start: &Path) -> Option<PathBuf> {
 fn main() {
     let cfg = BuildConfig::load();
 
-    let out_dir      = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
     // Tell cargo to rerun if the config or the env var changes.
@@ -102,7 +106,8 @@ fn main() {
                 "\n\nfission-sleigh build error:\n  \
                  ${} is set to `{spec_dir}` but `{}` was not found there.\n  \
                  Expected: {}\n",
-                cfg.env_var, cfg.env_subpath,
+                cfg.env_var,
+                cfg.env_subpath,
                 PathBuf::from(&spec_dir).join(&cfg.env_subpath).display()
             );
         }
@@ -144,7 +149,8 @@ fn main() {
         panic!(
             "fission-sleigh build error: failed to copy manifest\n  \
              from: {}\n  to:   {}\n  error: {e}",
-            source.display(), dest.display()
+            source.display(),
+            dest.display()
         )
     });
 

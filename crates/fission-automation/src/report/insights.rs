@@ -223,9 +223,13 @@ pub fn build_decision_insights(
         &build_stat_families(&summary.aggregate.nir_build_stats_totals)
             .into_iter()
             .collect::<BTreeMap<_, _>>(),
-        baseline_summary.map(|b| build_stat_families(&b.aggregate.nir_build_stats_totals)
-            .into_iter()
-            .collect::<BTreeMap<_, _>>()).as_ref(),
+        baseline_summary
+            .map(|b| {
+                build_stat_families(&b.aggregate.nir_build_stats_totals)
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .as_ref(),
         &structuring_family_counts_from_stats(&summary.aggregate.nir_build_stats_totals)
             .into_iter()
             .collect::<BTreeMap<_, _>>(),

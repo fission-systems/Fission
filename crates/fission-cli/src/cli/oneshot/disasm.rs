@@ -23,8 +23,8 @@ fn collect_function_instructions(
     let func_start = func.address;
     let needs_boundary_detection = func.size == 0;
 
-    let rows = fission_decompiler::disasm::disassemble_function(binary, addr)
-        .map_err(to_io_error)?;
+    let rows =
+        fission_decompiler::disasm::disassemble_function(binary, addr).map_err(to_io_error)?;
     let instructions = rows
         .into_iter()
         .map(|row| (row.address, row.bytes_hex, row.text))

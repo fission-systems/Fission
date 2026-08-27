@@ -1,10 +1,10 @@
 use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::normalize_expr;
-use crate::prelude::*;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use super::typed_facts::collect_typed_fact_inventory;
-use fission_midend_core::wave_stats::add_surface_binding_promotions;
+use crate::prelude::*;
 use crate::{HashMap, HashSet};
+use fission_midend_core::wave_stats::add_surface_binding_promotions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct MemorySlotKey {
@@ -208,7 +208,9 @@ fn collect_single_var_aliases(stmts: &[PreHirStmt]) -> HashMap<String, PreHirExp
                     defs.remove(name);
                 }
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 for nested in body.iter() {
                     visit_stmt(nested, counts, defs);
                 }
@@ -294,7 +296,9 @@ fn resolve_slot_alias_base(
             return PreHirExpr::Var(name.to_string());
         };
         match initializer {
-            PreHirExpr::Var(other) if other != name => resolve_var(func, alias_defs, other, depth + 1),
+            PreHirExpr::Var(other) if other != name => {
+                resolve_var(func, alias_defs, other, depth + 1)
+            }
             _ => PreHirExpr::Var(name.to_string()),
         }
     }
@@ -373,8 +377,12 @@ fn is_surface_stable_slot_display_base(
             // trusting an absence of classification as a green light.
             !looks_like_synthetic_temp_name(name)
         }
-        PreHirExpr::Cast { expr, .. } => is_surface_stable_slot_display_base(func, inventory, expr, 0),
-        PreHirExpr::Load { ptr, .. } => is_surface_stable_slot_display_base(func, inventory, ptr, 0),
+        PreHirExpr::Cast { expr, .. } => {
+            is_surface_stable_slot_display_base(func, inventory, expr, 0)
+        }
+        PreHirExpr::Load { ptr, .. } => {
+            is_surface_stable_slot_display_base(func, inventory, ptr, 0)
+        }
         PreHirExpr::PtrOffset { base, .. } => {
             is_surface_stable_slot_display_base(func, inventory, base, 0)
         }
@@ -482,7 +490,10 @@ fn rewrite_memory_slot_stmts(
             | PreHirStmt::While { body: stmts, .. }
             | PreHirStmt::DoWhile { body: stmts, .. }
             | PreHirStmt::For { body: stmts, .. } => {
-                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), aliases);
+                changed |= rewrite_memory_slot_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                    aliases,
+                );
             }
             PreHirStmt::Switch {
                 expr,
@@ -491,9 +502,15 @@ fn rewrite_memory_slot_stmts(
             } => {
                 changed |= rewrite_memory_slot_expr(expr, aliases);
                 for case in cases {
-                    changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), aliases);
+                    changed |= rewrite_memory_slot_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        aliases,
+                    );
                 }
-                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), aliases);
+                changed |= rewrite_memory_slot_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    aliases,
+                );
             }
             PreHirStmt::If {
                 cond,
@@ -501,8 +518,14 @@ fn rewrite_memory_slot_stmts(
                 else_body,
             } => {
                 changed |= rewrite_memory_slot_expr(cond, aliases);
-                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), aliases);
-                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), aliases);
+                changed |= rewrite_memory_slot_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    aliases,
+                );
+                changed |= rewrite_memory_slot_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    aliases,
+                );
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)

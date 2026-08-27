@@ -1011,10 +1011,18 @@ struct LanguageManifest {
 /// trusting the manifest field alone.
 pub fn known_language_ids() -> Result<HashSet<String>, String> {
     let path = sleigh_specs_root().join("ghidra_language_manifest.json");
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read language manifest at {}: {e}", path.display()))?;
-    let manifest: LanguageManifest = serde_json::from_str(&content)
-        .map_err(|e| format!("failed to parse language manifest at {}: {e}", path.display()))?;
+    let content = fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "failed to read language manifest at {}: {e}",
+            path.display()
+        )
+    })?;
+    let manifest: LanguageManifest = serde_json::from_str(&content).map_err(|e| {
+        format!(
+            "failed to parse language manifest at {}: {e}",
+            path.display()
+        )
+    })?;
     let compiled_root = sleigh_specs_root().join("compiled");
     Ok(manifest
         .entries

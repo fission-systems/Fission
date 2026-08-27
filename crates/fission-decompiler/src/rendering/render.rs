@@ -107,7 +107,15 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
     base_options: NirRenderOptions,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
-) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>, FactStore)>, String> {
+) -> Result<
+    Option<(
+        String,
+        Option<NirBuildStats>,
+        Option<NirHintStats>,
+        FactStore,
+    )>,
+    String,
+> {
     if enforce_auto_gate && !auto_nir_admission_eligible(binary, pcode) {
         return Ok(None);
     }

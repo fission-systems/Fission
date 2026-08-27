@@ -1,7 +1,7 @@
 use crate::report::insights::MismatchRowDelta;
 use crate::report::snapshot::AutomationSummary;
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoStopDecisionGate {
@@ -77,14 +77,18 @@ pub fn evaluate_quality_gate(
             .filter(|(_, count)| **count > 0)
             .map(|(k, v)| (k.clone(), *v))
             .collect::<Vec<_>>();
-            
+
         let dominant_family = family_ranking
             .iter()
             .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
             .map(|(name, _)| name.as_str());
 
         let safe_dominant = dominant_family.map_or(false, |f| {
-            policy.safety.allowed_dominant_families.iter().any(|a| a == f)
+            policy
+                .safety
+                .allowed_dominant_families
+                .iter()
+                .any(|a| a == f)
         });
 
         let irreducible_scc_delta = summary
@@ -127,7 +131,8 @@ pub fn evaluate_quality_gate(
         } else if violates_row_regression {
             GoStopDecisionGate {
                 decision: "stop_row_level_regression".to_string(),
-                rationale: "row-level regression detected (violates zero-tolerance policy)".to_string(),
+                rationale: "row-level regression detected (violates zero-tolerance policy)"
+                    .to_string(),
             }
         } else {
             GoStopDecisionGate {
@@ -139,7 +144,9 @@ pub fn evaluate_quality_gate(
     } else {
         GoStopDecisionGate {
             decision: "stop_no_baseline".to_string(),
-            rationale: "baseline summary/candidates unavailable; cannot compute stable go/stop gate".to_string(),
+            rationale:
+                "baseline summary/candidates unavailable; cannot compute stable go/stop gate"
+                    .to_string(),
         }
     }
 }

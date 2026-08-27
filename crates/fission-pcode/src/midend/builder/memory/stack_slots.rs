@@ -48,7 +48,12 @@ impl<'a> PreviewBuilder<'a> {
     /// access may become a formal parameter.
     fn current_load_entry_stack_value_offset(&self) -> Option<i64> {
         let site = self.current_lowering_site?;
-        let op = self.pcode.blocks.get(site.block_idx)?.ops.get(site.op_idx)?;
+        let op = self
+            .pcode
+            .blocks
+            .get(site.block_idx)?
+            .ops
+            .get(site.op_idx)?;
         if op.opcode != PcodeOpcode::Load {
             return None;
         }
@@ -97,11 +102,7 @@ impl<'a> PreviewBuilder<'a> {
                 .is_some_and(|phi| {
                     !phi.operands.is_empty()
                         && phi.operands.iter().all(|operand| {
-                            self.memory_value_is_entry_owned(
-                                operand.value,
-                                visiting,
-                                budget - 1,
-                            )
+                            self.memory_value_is_entry_owned(operand.value, visiting, budget - 1)
                         })
                 }),
         };
@@ -637,11 +638,7 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend::builder) fn block_writes_rsp_register(&self, block_idx: usize) -> bool {
         let rsp_offset = match self.options.calling_convention {
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
-                if self.options.is_64bit {
-                    0x20
-                } else {
-                    0x10
-                }
+                if self.options.is_64bit { 0x20 } else { 0x10 }
             }
             CallingConvention::X86_32 => 0x10,
             _ => return false,
@@ -662,7 +659,10 @@ impl<'a> PreviewBuilder<'a> {
         block.ops.iter().any(|op| {
             matches!(
                 op.opcode,
-                PcodeOpcode::IntAdd | PcodeOpcode::IntSub | PcodeOpcode::PtrAdd | PcodeOpcode::PtrSub
+                PcodeOpcode::IntAdd
+                    | PcodeOpcode::IntSub
+                    | PcodeOpcode::PtrAdd
+                    | PcodeOpcode::PtrSub
             ) && op
                 .output
                 .as_ref()

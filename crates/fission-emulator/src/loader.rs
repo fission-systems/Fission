@@ -66,9 +66,7 @@ pub fn map_binary_to_state(state: &mut MachineState, binary: &LoadedBinary) -> R
             false,
         );
 
-        let end = section
-            .virtual_address
-            .saturating_add(section.virtual_size);
+        let end = section.virtual_address.saturating_add(section.virtual_size);
         max_end = max_end.max(end);
 
         tracing::debug!(

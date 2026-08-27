@@ -1,15 +1,16 @@
 use crate::arch::ArchInfo;
 use crate::os::env::{HleResult, OsEnvironment};
 use crate::pcode::state::MachineState;
-use fission_loader::loader::LoadedBinary;
-use fission_sleigh::runtime::RuntimeSleighFrontend;
-use fission_ttd::{TTDRecorder, RegisterState};
-use anyhow::Result;
-use std::sync::Arc;
-use std::collections::BTreeMap;
 use crate::snapshot::EmulatorSnapshot;
 use crate::trace::{ExecutionTrace, TraceEntry};
-pub static IS_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+use anyhow::Result;
+use fission_loader::loader::LoadedBinary;
+use fission_sleigh::runtime::RuntimeSleighFrontend;
+use fission_ttd::{RegisterState, TTDRecorder};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+pub static IS_INTERRUPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Arch-agnostic emulator.
 ///
@@ -70,10 +71,10 @@ pub struct Emulator {
 
     /// The pure-Rust Symbolic Solver context
     pub solver: fission_solver::Solver,
-    
+
     /// Native JIT Compiler instance
     pub jit: Option<crate::jit::JitCompiler>,
-    
+
     /// Native JIT Block Cache
     pub jit_cache: crate::jit::cache::JitCache,
 
@@ -173,8 +174,7 @@ impl Emulator {
         os.patch_imports(&mut state, &binary)?;
 
         let register_map = if let Some(spec) = binary.load_spec() {
-            fission_sleigh::runtime::register_map_for_load_spec(spec)
-                .unwrap_or_default()
+            fission_sleigh::runtime::register_map_for_load_spec(spec).unwrap_or_default()
         } else {
             std::collections::HashMap::new()
         };
@@ -326,11 +326,7 @@ impl Emulator {
     pub fn heap_alloc(&mut self, size: u64) -> Result<u64> {
         let size = size.max(1u64).saturating_add(15) & !15u64;
         if self.heap_cursor == 0 {
-            let base = self
-                .state
-                .page_map
-                .brk
-                .max(self.state.page_map.brk_base);
+            let base = self.state.page_map.brk.max(self.state.page_map.brk_base);
             if base == 0 {
                 self.state.page_map.set_brk_base(0x0000_0000_5000_0000);
             }
@@ -400,7 +396,11 @@ impl Emulator {
     /// Queue a Linux signal for later delivery between TBs.
     pub fn raise_signal(&mut self, signo: i32) {
         if self.signals.queue(signo) {
-            tracing::info!("Signal {} queued (pending=0x{:X})", signo, self.signals.pending);
+            tracing::info!(
+                "Signal {} queued (pending=0x{:X})",
+                signo,
+                self.signals.pending
+            );
         }
     }
 
@@ -527,8 +527,8 @@ impl Emulator {
             rdi: read(self, "RDI"),
             rbp: read(self, "RBP"),
             rsp: read(self, "RSP"),
-            r8:  read(self, "R8"),
-            r9:  read(self, "R9"),
+            r8: read(self, "R8"),
+            r9: read(self, "R9"),
             r10: read(self, "R10"),
             r11: read(self, "R11"),
             r12: read(self, "R12"),
@@ -547,17 +547,24 @@ impl Emulator {
     /// 2. If still short of `target_step`, **recompute** by running JIT with
     ///    chaining disabled and `max_inst` set to the remaining steps.
     pub fn ttd_seek(&mut self, target_step: u64) -> Result<()> {
-        let snapshot = self.ttd.get_snapshot(target_step)
+        let snapshot = self
+            .ttd
+            .get_snapshot(target_step)
             .or_else(|| {
                 // Find the closest snapshot at or before target_step
-                self.ttd.snapshots().into_iter()
+                self.ttd
+                    .snapshots()
+                    .into_iter()
                     .filter(|s| s.step_index <= target_step)
                     .next_back()
             })
             .cloned();
 
         let Some(snap) = snapshot else {
-            anyhow::bail!("No TTD snapshot available at or before step {}", target_step);
+            anyhow::bail!(
+                "No TTD snapshot available at or before step {}",
+                target_step
+            );
         };
 
         // Bulk restore: drop register cache so restored values are authoritative.
@@ -572,8 +579,8 @@ impl Emulator {
         self.write_register_u64("RDI", snap.registers.rdi)?;
         self.write_register_u64("RBP", snap.registers.rbp)?;
         self.write_register_u64("RSP", snap.registers.rsp)?;
-        self.write_register_u64("R8",  snap.registers.r8)?;
-        self.write_register_u64("R9",  snap.registers.r9)?;
+        self.write_register_u64("R8", snap.registers.r8)?;
+        self.write_register_u64("R9", snap.registers.r9)?;
         self.write_register_u64("R10", snap.registers.r10)?;
         self.write_register_u64("R11", snap.registers.r11)?;
         self.write_register_u64("R12", snap.registers.r12)?;
@@ -586,19 +593,27 @@ impl Emulator {
 
         // Restore memory via stored deltas (forward apply new_value at keyframe).
         for delta in &snap.memory_deltas {
-            let _ = self.state.write_space(self.state.ram_space(), delta.address, &delta.new_value);
+            let _ = self
+                .state
+                .write_space(self.state.ram_space(), delta.address, &delta.new_value);
         }
 
         // Restore shadow state via stored deltas
         for delta in &snap.shadow_deltas {
             if let Some(new_node) = delta.new_node {
-                self.state.set_shadow_memory(delta.space_id, delta.address, new_node);
+                self.state
+                    .set_shadow_memory(delta.space_id, delta.address, new_node);
             } else {
-                self.state.clear_shadow_memory(delta.space_id, delta.address);
+                self.state
+                    .clear_shadow_memory(delta.space_id, delta.address);
             }
         }
 
-        tracing::info!("TTD: Restored to step {} (PC=0x{:X})", snap.step_index, self.pc);
+        tracing::info!(
+            "TTD: Restored to step {} (PC=0x{:X})",
+            snap.step_index,
+            self.pc
+        );
 
         // Recompute remaining guest instructions to reach target_step.
         if self.inst_count < target_step {
@@ -631,13 +646,19 @@ impl Emulator {
     // ── Register I/O ─────────────────────────────────────────────────────────
 
     pub fn read_register_u64(&mut self, name: &str) -> Result<u64> {
-        let (space_id, offset, size) = self.register_map.iter()
+        let (space_id, offset, size) = self
+            .register_map
+            .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| *v)
             .ok_or_else(|| anyhow::anyhow!("Register {} not found in register_map", name))?;
 
         if size > 8 {
-            anyhow::bail!("Register {} is too large to read as u64 (size={})", name, size);
+            anyhow::bail!(
+                "Register {} is too large to read as u64 (size={})",
+                name,
+                size
+            );
         }
 
         let bytes = self.state.read_space(space_id, offset, size as usize)?;
@@ -649,13 +670,19 @@ impl Emulator {
     }
 
     pub fn write_register_u64(&mut self, name: &str, mut val: u64) -> Result<()> {
-        let (space_id, offset, size) = self.register_map.iter()
+        let (space_id, offset, size) = self
+            .register_map
+            .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| *v)
             .ok_or_else(|| anyhow::anyhow!("Register {} not found in register_map", name))?;
 
         if size > 8 {
-            anyhow::bail!("Register {} is too large to write as u64 (size={})", name, size);
+            anyhow::bail!(
+                "Register {} is too large to write as u64 (size={})",
+                name,
+                size
+            );
         }
 
         let mut bytes = Vec::with_capacity(size as usize);
@@ -679,11 +706,11 @@ impl Emulator {
         } else {
             let n = index - regs.len();
             let stack_off = self.arch.cc.stack_arg_offset(n);
-            let ptr_size  = self.arch.pointer_size as usize;
-            let sp_reg    = self.arch.sp_reg;
-            let sp        = self.read_register_u64(sp_reg)?;
+            let ptr_size = self.arch.pointer_size as usize;
+            let sp_reg = self.arch.sp_reg;
+            let sp = self.read_register_u64(sp_reg)?;
             let ram = self.state.ram_space();
-            let bytes     = self.state.read_space(ram, sp + stack_off, ptr_size)?;
+            let bytes = self.state.read_space(ram, sp + stack_off, ptr_size)?;
             Ok(crate::arch::calling_convention::le_bytes_to_u64(&bytes))
         }
     }
@@ -703,9 +730,9 @@ impl Emulator {
             self.pc = ret_addr;
         } else {
             let sp_reg = self.arch.sp_reg;
-            let sp     = self.read_register_u64(sp_reg)?;
+            let sp = self.read_register_u64(sp_reg)?;
             let ram = self.state.ram_space();
-            let bytes  = self.state.read_space(ram, sp, ptr_size)?;
+            let bytes = self.state.read_space(ram, sp, ptr_size)?;
             let ret_addr = crate::arch::calling_convention::le_bytes_to_u64(&bytes);
             self.pc = ret_addr;
             self.write_register_u64(sp_reg, sp + ptr_size as u64)?;
@@ -722,7 +749,9 @@ impl Emulator {
     /// decoded `GuestInsn` sequences from a real corpus binary to replay
     /// through both JIT backends, rather than only ever exercising
     /// `SelfJitCompiler` against hand-built synthetic p-code.
-    pub(crate) fn collect_translation_block(&mut self) -> Result<Vec<crate::jit::compiler::GuestInsn>> {
+    pub(crate) fn collect_translation_block(
+        &mut self,
+    ) -> Result<Vec<crate::jit::compiler::GuestInsn>> {
         use crate::jit::compiler::GuestInsn;
         use fission_pcode::ir::PcodeOpcode;
 
@@ -743,9 +772,10 @@ impl Emulator {
                 break;
             }
 
-            let bytes_vec = self.state.read_space(ram, cur, 16).map_err(|_| {
-                anyhow::anyhow!("Failed to fetch instruction bytes at 0x{:X}", cur)
-            })?;
+            let bytes_vec = self
+                .state
+                .read_space(ram, cur, 16)
+                .map_err(|_| anyhow::anyhow!("Failed to fetch instruction bytes at 0x{:X}", cur))?;
 
             let (pcode_ops, inst_len, details) = self
                 .sleigh
@@ -1017,18 +1047,25 @@ impl Emulator {
                     .state
                     .trace_shadow_writes
                     .iter()
-                    .map(|(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
-                        space_id: *space_id,
-                        address: *addr,
-                        old_node: *old_node,
-                        new_node: *new_node,
-                    })
+                    .map(
+                        |(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
+                            space_id: *space_id,
+                            address: *addr,
+                            old_node: *old_node,
+                            new_node: *new_node,
+                        },
+                    )
                     .collect();
-                self.ttd.record_step_with_memory(regs, 0, deltas, shadow_deltas);
+                self.ttd
+                    .record_step_with_memory(regs, 0, deltas, shadow_deltas);
                 self.state.trace_mem_writes.clear();
                 self.state.trace_mem_reads.clear();
                 self.state.trace_shadow_writes.clear();
-                tracing::trace!("TTD: recorded step {} at PC=0x{:X}", self.inst_count, self.pc);
+                tracing::trace!(
+                    "TTD: recorded step {} at PC=0x{:X}",
+                    self.inst_count,
+                    self.pc
+                );
             }
         };
         if self.ttd.is_recording() {

@@ -31,8 +31,8 @@
 //!
 //! Both are bounded and rerun to a fixpoint, because folding exposes new
 //! single-read temps that a first pass could not see.
-use crate::prelude::*;
 use crate::analysis::defuse::collect_expr_vars;
+use crate::prelude::*;
 use crate::{HashMap, HashSet};
 
 use super::scratch_liveness::is_builder_minted_temp;
@@ -404,12 +404,12 @@ fn run(
             PreHirStmt::Switch { cases, default, .. } => {
                 for c in cases.iter_mut() {
                     run(
-                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut c.body),
-                    scratch,
-                    foldable,
-                    reads,
-                    changed,
-                );
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut c.body),
+                        scratch,
+                        foldable,
+                        reads,
+                        changed,
+                    );
                 }
                 run(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
@@ -575,8 +575,7 @@ fn run(
             // whole-function count has to agree that it is dead.
             !(scratch.contains(dst)
                 && after.get(dst).copied().unwrap_or(0) == 0
-                && reads.get(dst).copied().unwrap_or(0)
-                    <= run_reads.get(dst).copied().unwrap_or(0)
+                && reads.get(dst).copied().unwrap_or(0) <= run_reads.get(dst).copied().unwrap_or(0)
                 && !expr_has_call(rhs))
         }
         _ => true,

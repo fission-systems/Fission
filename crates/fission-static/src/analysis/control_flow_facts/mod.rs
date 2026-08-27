@@ -79,7 +79,9 @@ pub fn control_flow_facts_for(binary: &LoadedBinary) -> ControlFlowFacts {
     let hash = binary.hash.clone();
 
     let slot = {
-        let mut cache = facts_cache().lock().expect("control-flow facts cache poisoned");
+        let mut cache = facts_cache()
+            .lock()
+            .expect("control-flow facts cache poisoned");
         if let Some(slot) = cache.get(&hash) {
             slot.clone()
         } else {

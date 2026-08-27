@@ -260,10 +260,7 @@ pub fn should_skip_got_hle(binary: &LoadedBinary) -> bool {
 ///
 /// Returns info; on `Interpreter` mode also maps PT_LOAD segments of the
 /// interpreter and sets `interp_entry` for the process image entry override.
-pub fn prepare_dynlink(
-    state: &mut MachineState,
-    binary: &LoadedBinary,
-) -> Result<DynlinkInfo> {
+pub fn prepare_dynlink(state: &mut MachineState, binary: &LoadedBinary) -> Result<DynlinkInfo> {
     let data = binary.inner().data.as_slice();
     let main_entry = binary.inner().entry_point;
     let interp = parse_pt_interp(data);
@@ -322,9 +319,7 @@ pub fn prepare_dynlink(
     let mut hle_globals = std::collections::HashMap::new();
     if has_got || guest_interp.is_some() {
         match load_shared_libraries(state, binary) {
-            Ok(shared)
-                if !shared.loaded_libs.is_empty() || shared.bind_now_applied =>
-            {
+            Ok(shared) if !shared.loaded_libs.is_empty() || shared.bind_now_applied => {
                 tracing::info!(
                     "dynlink: SharedLibs mode — {} libs, bind_now={}, globals={}",
                     shared.loaded_libs.len(),
@@ -431,9 +426,9 @@ pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
         }
         let p_type = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
         if p_type == PT_DYNAMIC {
-            dyn_off = Some(u64::from_le_bytes(data[off + 8..off + 16].try_into().unwrap()) as usize);
-            dyn_filesz =
-                u64::from_le_bytes(data[off + 32..off + 40].try_into().unwrap()) as usize;
+            dyn_off =
+                Some(u64::from_le_bytes(data[off + 8..off + 16].try_into().unwrap()) as usize);
+            dyn_filesz = u64::from_le_bytes(data[off + 32..off + 40].try_into().unwrap()) as usize;
             break;
         }
     }
@@ -454,10 +449,7 @@ pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
         i += 16;
     }
 
-    let strtab_va = tags
-        .iter()
-        .find(|(t, _)| *t == DT_STRTAB)
-        .map(|(_, v)| *v);
+    let strtab_va = tags.iter().find(|(t, _)| *t == DT_STRTAB).map(|(_, v)| *v);
     let strsz = tags
         .iter()
         .find(|(t, _)| *t == DT_STRSZ)
@@ -548,11 +540,7 @@ fn collect_global_symbols(data: &[u8], load_bias: u64) -> std::collections::Hash
         let sym_size = u64::from_le_bytes(data[soff + 32..soff + 40].try_into().unwrap()) as usize;
         let entsz = {
             let e = u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
-            if e > 0 {
-                e
-            } else {
-                24
-            }
+            if e > 0 { e } else { 24 }
         };
         let str_link = u32::from_le_bytes(data[soff + 40..soff + 44].try_into().unwrap()) as usize;
         if str_link >= shnum {
@@ -598,7 +586,8 @@ fn collect_global_symbols(data: &[u8], load_bias: u64) -> std::collections::Hash
             if name.is_empty() {
                 continue;
             }
-            out.entry(name).or_insert(st_value.saturating_add(load_bias));
+            out.entry(name)
+                .or_insert(st_value.saturating_add(load_bias));
         }
     }
     out
@@ -625,8 +614,8 @@ fn load_shared_libraries(
         };
         let mapped = map_interpreter(state, &host, next_base)
             .with_context(|| format!("map shared lib {}", host.display()))?;
-        let lib_bytes = std::fs::read(&host)
-            .with_context(|| format!("read shared lib {}", host.display()))?;
+        let lib_bytes =
+            std::fs::read(&host).with_context(|| format!("read shared lib {}", host.display()))?;
         let lib_globals = collect_global_symbols(&lib_bytes, mapped.base);
         // Prefer first definition (main then earlier libs).
         for (k, v) in lib_globals {
@@ -703,7 +692,13 @@ pub fn install_lazy_got(state: &mut MachineState, table: &PltLazyTable) -> Resul
     for (i, (got_va, name)) in table.entries.iter().enumerate() {
         let mark = make_lazy_mark(i);
         state.write_space(state.ram_space(), *got_va, &mark.to_le_bytes())?;
-        tracing::debug!("plt lazy install: [{}] {} GOT 0x{:X} mark=0x{:X}", i, name, got_va, mark);
+        tracing::debug!(
+            "plt lazy install: [{}] {} GOT 0x{:X} mark=0x{:X}",
+            i,
+            name,
+            got_va,
+            mark
+        );
     }
     Ok(())
 }
@@ -753,11 +748,7 @@ fn map_interpreter(
     if min_vaddr == u64::MAX {
         anyhow::bail!("interpreter has no PT_LOAD");
     }
-    let bias = if min_vaddr == 0 {
-        preferred_base
-    } else {
-        0
-    };
+    let bias = if min_vaddr == 0 { preferred_base } else { 0 };
 
     for i in 0..phnum {
         let off = phoff + i * phentsize;
@@ -857,10 +848,14 @@ pub fn apply_rela_x86_64(
         if sh_type != SHT_RELA {
             continue;
         }
-        let sh_offset = u64::from_le_bytes(elf_bytes[soff + 24..soff + 32].try_into().unwrap()) as usize;
-        let sh_size = u64::from_le_bytes(elf_bytes[soff + 32..soff + 40].try_into().unwrap()) as usize;
-        let sh_link = u32::from_le_bytes(elf_bytes[soff + 40..soff + 44].try_into().unwrap()) as usize;
-        let sh_entsize = u64::from_le_bytes(elf_bytes[soff + 56..soff + 64].try_into().unwrap()) as usize;
+        let sh_offset =
+            u64::from_le_bytes(elf_bytes[soff + 24..soff + 32].try_into().unwrap()) as usize;
+        let sh_size =
+            u64::from_le_bytes(elf_bytes[soff + 32..soff + 40].try_into().unwrap()) as usize;
+        let sh_link =
+            u32::from_le_bytes(elf_bytes[soff + 40..soff + 44].try_into().unwrap()) as usize;
+        let sh_entsize =
+            u64::from_le_bytes(elf_bytes[soff + 56..soff + 64].try_into().unwrap()) as usize;
         let entsz = if sh_entsize > 0 { sh_entsize } else { 24 };
         let count = sh_size / entsz;
 
@@ -937,8 +932,7 @@ fn symtab_strtab(
     }
     let sym_off = u64::from_le_bytes(data[soff + 24..soff + 32].try_into().unwrap()) as usize;
     let sym_size = u64::from_le_bytes(data[soff + 32..soff + 40].try_into().unwrap()) as usize;
-    let sym_entsize =
-        u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
+    let sym_entsize = u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
     let str_link = u32::from_le_bytes(data[soff + 40..soff + 44].try_into().unwrap()) as usize;
     if str_link >= shnum {
         return (Some((sym_off, sym_size, sym_entsize.max(24))), None);
@@ -952,7 +946,11 @@ fn symtab_strtab(
     let str_size =
         u64::from_le_bytes(data[stroff_hdr + 32..stroff_hdr + 40].try_into().unwrap()) as usize;
     (
-        Some((sym_off, sym_size, if sym_entsize > 0 { sym_entsize } else { 24 })),
+        Some((
+            sym_off,
+            sym_size,
+            if sym_entsize > 0 { sym_entsize } else { 24 },
+        )),
         Some((str_off, str_size)),
     )
 }
@@ -1059,7 +1057,9 @@ mod tests {
         let (needed, bind_now) = parse_dt_needed(&data);
         // musl dynamic hello typically needs libc.so
         assert!(
-            needed.iter().any(|n| n.contains("libc") || n.contains("ld-")),
+            needed
+                .iter()
+                .any(|n| n.contains("libc") || n.contains("ld-")),
             "expected libc/ld in DT_NEEDED, got {needed:?}"
         );
         assert!(bind_now, "mini-dynlink defaults BIND_NOW");
@@ -1076,9 +1076,7 @@ mod tests {
     fn plt_lazy_bind_writes_got() {
         let mut state = MachineState::new();
         let got = 0x1000u64;
-        state
-            .page_map
-            .map_region(got, 0x1000, prot::RW, true);
+        state.page_map.map_region(got, 0x1000, prot::RW, true);
         state
             .write_space(state.ram_space(), got, &make_lazy_mark(0).to_le_bytes())
             .unwrap();
@@ -1086,7 +1084,9 @@ mod tests {
         table.entries.push((got, "puts".into()));
         table.globals.insert("puts".into(), 0x401000);
         let empty = std::collections::HashMap::new();
-        let t = table.bind_slot(&mut state, 0, 0xFFFFFFF100000000, &empty).unwrap();
+        let t = table
+            .bind_slot(&mut state, 0, 0xFFFFFFF100000000, &empty)
+            .unwrap();
         assert_eq!(t, 0x401000);
         let bytes = state.read_space(state.ram_space(), got, 8).unwrap();
         assert_eq!(u64::from_le_bytes(bytes.try_into().unwrap()), 0x401000);

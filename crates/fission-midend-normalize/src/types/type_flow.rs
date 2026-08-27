@@ -614,9 +614,9 @@ fn collect_edges(stmts: &[PreHirStmt], edges: &mut Vec<TypeFlowEdge>) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign { lhs, rhs } => collect_assignment_edges(lhs, rhs, edges),
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                collect_edges(body, edges)
-            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => collect_edges(body, edges),
             PreHirStmt::For {
                 init, update, body, ..
             } => {
@@ -654,9 +654,9 @@ pub(super) fn collect_definition_counts(stmts: &[PreHirStmt], counts: &mut HashM
                 lhs: PreHirLValue::Var(name),
                 ..
             } => *counts.entry(name.clone()).or_default() += 1,
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                collect_definition_counts(body, counts)
-            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => collect_definition_counts(body, counts),
             PreHirStmt::For {
                 init, update, body, ..
             } => {
@@ -707,9 +707,9 @@ pub(super) fn collect_self_referential_bindings(stmts: &[PreHirStmt], out: &mut 
             _ => {}
         }
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                collect_self_referential_bindings(body, out)
-            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => collect_self_referential_bindings(body, out),
             PreHirStmt::For {
                 init, update, body, ..
             } => {

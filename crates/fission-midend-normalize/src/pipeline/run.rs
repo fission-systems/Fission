@@ -913,7 +913,8 @@ mod tests {
                             ty: u8_ty,
                         },
                     },
-                ].into(),
+                ]
+                .into(),
                 else_body: Vec::new().into(),
             },
             PreHirStmt::If {
@@ -1965,21 +1966,36 @@ fn cleanup_boundary_labels_recursive(
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= cleanup_boundary_labels_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
+                changed |= cleanup_boundary_labels_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    global_refs,
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= cleanup_boundary_labels_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), global_refs);
-                changed |= cleanup_boundary_labels_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), global_refs);
+                changed |= cleanup_boundary_labels_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    global_refs,
+                );
+                changed |= cleanup_boundary_labels_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    global_refs,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= cleanup_boundary_labels_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), global_refs);
+                    changed |= cleanup_boundary_labels_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        global_refs,
+                    );
                 }
-                changed |= cleanup_boundary_labels_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), global_refs);
+                changed |= cleanup_boundary_labels_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    global_refs,
+                );
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::VaStart { .. }
@@ -2002,21 +2018,37 @@ fn collapse_redundant_conditional_returns_recursive(stmts: &mut Vec<PreHirStmt>)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= collapse_redundant_conditional_returns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |=
+                    collapse_redundant_conditional_returns_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= collapse_redundant_conditional_returns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= collapse_redundant_conditional_returns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |=
+                    collapse_redundant_conditional_returns_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    );
+                changed |=
+                    collapse_redundant_conditional_returns_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= collapse_redundant_conditional_returns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= collapse_redundant_conditional_returns_recursive(std::rc::Rc::<
+                        Vec<PreHirStmt>,
+                    >::make_mut(
+                        &mut case.body
+                    ));
                 }
-                changed |= collapse_redundant_conditional_returns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |=
+                    collapse_redundant_conditional_returns_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    );
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::VaStart { .. }

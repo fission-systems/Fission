@@ -17,9 +17,9 @@ pub fn sidecar_path_for(binary_path: &str) -> PathBuf {
 }
 
 fn parse_addr(s: &str) -> Option<u64> {
-    s.parse::<u64>()
-        .ok()
-        .or_else(|| u64::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16).ok())
+    s.parse::<u64>().ok().or_else(|| {
+        u64::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16).ok()
+    })
 }
 
 fn string_map_from(value: &serde_json::Value, key: &str) -> HashMap<u64, String> {
@@ -66,18 +66,37 @@ pub fn save_sidecar(
 
     let names_obj: serde_json::Map<String, serde_json::Value> = renames
         .iter()
-        .map(|(addr, name)| (format!("0x{addr:x}"), serde_json::Value::String(name.clone())))
+        .map(|(addr, name)| {
+            (
+                format!("0x{addr:x}"),
+                serde_json::Value::String(name.clone()),
+            )
+        })
         .collect();
     let comments_obj: serde_json::Map<String, serde_json::Value> = comments
         .iter()
-        .map(|(addr, text)| (format!("0x{addr:x}"), serde_json::Value::String(text.clone())))
+        .map(|(addr, text)| {
+            (
+                format!("0x{addr:x}"),
+                serde_json::Value::String(text.clone()),
+            )
+        })
         .collect();
 
     let obj = root.as_object_mut().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "sidecar root is not a JSON object")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "sidecar root is not a JSON object",
+        )
     })?;
-    obj.insert("user_function_names".to_string(), serde_json::Value::Object(names_obj));
-    obj.insert("user_comments".to_string(), serde_json::Value::Object(comments_obj));
+    obj.insert(
+        "user_function_names".to_string(),
+        serde_json::Value::Object(names_obj),
+    );
+    obj.insert(
+        "user_comments".to_string(),
+        serde_json::Value::Object(comments_obj),
+    );
 
     std::fs::write(path, serde_json::to_string_pretty(&root)?)
 }

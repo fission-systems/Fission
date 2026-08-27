@@ -66,8 +66,8 @@
 /// This preserves do-while entry semantics without requiring a separate
 /// preheader proof, while still removing the outer label/goto recurrence.
 use crate::prelude::*;
-use fission_midend_prehir::util::expr_type;
 use crate::{HashMap, HashSet};
+use fission_midend_prehir::util::expr_type;
 
 // ── Part B — Break/Continue recovery ─────────────────────────────────────────
 
@@ -275,7 +275,12 @@ fn apply_break_continue_in_stmts(
             | PreHirStmt::For { body, .. } => body,
             _ => unreachable!(),
         };
-        changed |= recover_break_continue_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &after_labels, &head_labels, goto_counts);
+        changed |= recover_break_continue_in_body(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            &after_labels,
+            &head_labels,
+            goto_counts,
+        );
     }
 
     // Recurse into If/Block/Switch to catch loops nested there.
@@ -286,23 +291,41 @@ fn apply_break_continue_in_stmts(
                 else_body,
                 ..
             } => {
-                changed |= apply_break_continue_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), goto_counts);
-                changed |= apply_break_continue_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), goto_counts);
+                changed |= apply_break_continue_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    goto_counts,
+                );
+                changed |= apply_break_continue_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    goto_counts,
+                );
             }
             PreHirStmt::Block(body) => {
-                changed |= apply_break_continue_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), goto_counts);
+                changed |= apply_break_continue_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    goto_counts,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= apply_break_continue_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), goto_counts);
+                    changed |= apply_break_continue_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        goto_counts,
+                    );
                 }
-                changed |= apply_break_continue_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), goto_counts);
+                changed |= apply_break_continue_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    goto_counts,
+                );
             }
             PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
                 // Recurse for nested loops.
-                changed |= apply_break_continue_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), goto_counts);
+                changed |= apply_break_continue_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    goto_counts,
+                );
             }
             _ => {}
         }
@@ -364,7 +387,8 @@ fn tail_goto_condition(stmt: &PreHirStmt, label: &str) -> Option<PreHirExpr> {
     if !else_body.is_empty() {
         return None;
     }
-    matches!(then_body.as_slice(), [PreHirStmt::Goto(target)] if target == label).then(|| cond.clone())
+    matches!(then_body.as_slice(), [PreHirStmt::Goto(target)] if target == label)
+        .then(|| cond.clone())
 }
 
 fn collect_loop_body_labels(stmts: &[PreHirStmt]) -> HashSet<String> {
@@ -906,8 +930,18 @@ fn try_split_merged_dual_iv_tail(
     });
 
     let mut new_body = body;
-    substitute_var_in_stmt(&mut std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut new_body)[tail[0].0], &var_one, &row_name, false);
-    substitute_var_in_stmt(&mut std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut new_body)[tail[2].0], &var_one, &row_name, false);
+    substitute_var_in_stmt(
+        &mut std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut new_body)[tail[0].0],
+        &var_one,
+        &row_name,
+        false,
+    );
+    substitute_var_in_stmt(
+        &mut std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut new_body)[tail[2].0],
+        &var_one,
+        &row_name,
+        false,
+    );
 
     stmts[loop_idx] = PreHirStmt::For {
         init: None,
@@ -997,7 +1031,12 @@ fn parse_break_eq_var(stmt: &PreHirStmt) -> Option<(PreHirExpr, String)> {
 
 /// Replace `var` with `replacement` in `stmt`. When `assign_lhs_only`, only rewrite
 /// the assignment target (for splitting a shared temp across dual IV updates).
-fn substitute_var_in_stmt(stmt: &mut PreHirStmt, var: &str, replacement: &str, assign_lhs_only: bool) {
+fn substitute_var_in_stmt(
+    stmt: &mut PreHirStmt,
+    var: &str,
+    replacement: &str,
+    assign_lhs_only: bool,
+) {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
             if let PreHirLValue::Var(name) = lhs {
@@ -1016,7 +1055,10 @@ fn substitute_var_in_stmt(stmt: &mut PreHirStmt, var: &str, replacement: &str, a
             ..
         } => {
             substitute_var_in_expr(cond, var, &PreHirExpr::Var(replacement.to_string()));
-            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body).iter_mut().chain(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).iter_mut()) {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body)
+                .iter_mut()
+                .chain(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).iter_mut())
+            {
                 substitute_var_in_stmt(s, var, replacement, false);
             }
         }
@@ -1065,20 +1107,35 @@ fn apply_tail_label_loop_recovery_in_stmts(
                 else_body,
                 ..
             } => {
-                changed |= apply_tail_label_loop_recovery_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), goto_counts);
-                changed |= apply_tail_label_loop_recovery_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), goto_counts);
+                changed |= apply_tail_label_loop_recovery_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    goto_counts,
+                );
+                changed |= apply_tail_label_loop_recovery_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    goto_counts,
+                );
             }
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= apply_tail_label_loop_recovery_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), goto_counts);
+                changed |= apply_tail_label_loop_recovery_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    goto_counts,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= apply_tail_label_loop_recovery_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), goto_counts);
+                    changed |= apply_tail_label_loop_recovery_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        goto_counts,
+                    );
                 }
-                changed |= apply_tail_label_loop_recovery_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), goto_counts);
+                changed |= apply_tail_label_loop_recovery_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    goto_counts,
+                );
             }
             _ => {}
         }
@@ -1101,7 +1158,9 @@ fn expr_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
             expr_vars(rhs, out);
         }
         PreHirExpr::Load { ptr, .. } => expr_vars(ptr, out),
-        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => expr_vars(base, out),
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
+            expr_vars(base, out)
+        }
         PreHirExpr::Index { base, index, .. } => {
             expr_vars(base, out);
             expr_vars(index, out);
@@ -1401,7 +1460,8 @@ fn find_pointer_end_assignment_before(
                 {
                     if matches!(strip_casts(lhs), PreHirExpr::Var(name) if name == cursor) {
                         found_count_expr = Some(add_rhs.as_ref().clone());
-                    } else if matches!(strip_casts(add_rhs), PreHirExpr::Var(name) if name == cursor) {
+                    } else if matches!(strip_casts(add_rhs), PreHirExpr::Var(name) if name == cursor)
+                    {
                         found_count_expr = Some(lhs.as_ref().clone());
                     }
                 }
@@ -1550,7 +1610,9 @@ fn count_var_uses_in_stmt(stmt: &PreHirStmt, name: &str) -> usize {
         PreHirStmt::Assign { lhs, rhs } => {
             count_var_uses_in_lvalue(lhs, name) + count_var_uses(rhs, name)
         }
-        PreHirStmt::VaStart { va_list, .. } | PreHirStmt::Expr(va_list) => count_var_uses(va_list, name),
+        PreHirStmt::VaStart { va_list, .. } | PreHirStmt::Expr(va_list) => {
+            count_var_uses(va_list, name)
+        }
         PreHirStmt::Return(Some(expr)) => count_var_uses(expr, name),
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } => body
             .iter()
@@ -1643,7 +1705,9 @@ fn count_var_uses(expr: &PreHirExpr, name: &str) -> usize {
         | PreHirExpr::PtrOffset { base: expr, .. }
         | PreHirExpr::AggregateCopy { src: expr, .. }
         | PreHirExpr::FieldAccess { base: expr, .. } => count_var_uses(expr, name),
-        PreHirExpr::Binary { lhs, rhs, .. } => count_var_uses(lhs, name) + count_var_uses(rhs, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            count_var_uses(lhs, name) + count_var_uses(rhs, name)
+        }
         PreHirExpr::Call { args, .. } => args.iter().map(|arg| count_var_uses(arg, name)).sum(),
         PreHirExpr::Index { base, index, .. } => {
             count_var_uses(base, name) + count_var_uses(index, name)
@@ -1905,12 +1969,17 @@ fn rewrite_cursor_stmt_to_index(stmt: &mut PreHirStmt, cursor: &str, index_name:
             rewrite_cursor_expr_to_index(va_list, cursor, index_name)
         }
         PreHirStmt::Return(Some(expr)) => rewrite_cursor_expr_to_index(expr, cursor, index_name),
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } => {
-            rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), cursor, index_name)
-        }
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } => rewrite_cursor_body_to_index(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            cursor,
+            index_name,
+        ),
         PreHirStmt::DoWhile { body, cond } => {
-            rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), cursor, index_name)
-                && rewrite_cursor_expr_to_index(cond, cursor, index_name)
+            rewrite_cursor_body_to_index(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                cursor,
+                index_name,
+            ) && rewrite_cursor_expr_to_index(cond, cursor, index_name)
         }
         PreHirStmt::For {
             init,
@@ -1926,7 +1995,11 @@ fn rewrite_cursor_stmt_to_index(stmt: &mut PreHirStmt, cursor: &str, index_name:
                 && update
                     .as_deref_mut()
                     .is_none_or(|stmt| rewrite_cursor_stmt_to_index(stmt, cursor, index_name))
-                && rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), cursor, index_name)
+                && rewrite_cursor_body_to_index(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    cursor,
+                    index_name,
+                )
         }
         PreHirStmt::If {
             cond,
@@ -1934,8 +2007,16 @@ fn rewrite_cursor_stmt_to_index(stmt: &mut PreHirStmt, cursor: &str, index_name:
             else_body,
         } => {
             rewrite_cursor_expr_to_index(cond, cursor, index_name)
-                && rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), cursor, index_name)
-                && rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), cursor, index_name)
+                && rewrite_cursor_body_to_index(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    cursor,
+                    index_name,
+                )
+                && rewrite_cursor_body_to_index(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    cursor,
+                    index_name,
+                )
         }
         PreHirStmt::Switch {
             expr,
@@ -1943,10 +2024,18 @@ fn rewrite_cursor_stmt_to_index(stmt: &mut PreHirStmt, cursor: &str, index_name:
             default,
         } => {
             rewrite_cursor_expr_to_index(expr, cursor, index_name)
-                && cases
-                    .iter_mut()
-                    .all(|case| rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), cursor, index_name))
-                && rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), cursor, index_name)
+                && cases.iter_mut().all(|case| {
+                    rewrite_cursor_body_to_index(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        cursor,
+                        index_name,
+                    )
+                })
+                && rewrite_cursor_body_to_index(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    cursor,
+                    index_name,
+                )
         }
         PreHirStmt::Return(None)
         | PreHirStmt::Label(_)
@@ -2357,7 +2446,11 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
     let mut indexed_body = new_body.clone();
     if cursor_body_uses > 0
         && is_cursor_increment_by_one(&update_stmt, cursor)
-        && rewrite_cursor_body_to_index(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut indexed_body), cursor, &index_name)
+        && rewrite_cursor_body_to_index(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut indexed_body),
+            cursor,
+            &index_name,
+        )
     {
         let index_ty = index_type_for_count(&count_expr);
         locals.push(PreHirBinding {
@@ -2423,15 +2516,30 @@ fn replace_gotos_with_continue_shallow(stmts: &mut Vec<PreHirStmt>, label: &str)
                 else_body,
                 ..
             } => {
-                replace_gotos_with_continue_shallow(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), label);
-                replace_gotos_with_continue_shallow(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), label);
+                replace_gotos_with_continue_shallow(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    label,
+                );
+                replace_gotos_with_continue_shallow(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    label,
+                );
             }
-            PreHirStmt::Block(body) => replace_gotos_with_continue_shallow(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), label),
+            PreHirStmt::Block(body) => replace_gotos_with_continue_shallow(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                label,
+            ),
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    replace_gotos_with_continue_shallow(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), label);
+                    replace_gotos_with_continue_shallow(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        label,
+                    );
                 }
-                replace_gotos_with_continue_shallow(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), label);
+                replace_gotos_with_continue_shallow(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    label,
+                );
             }
             // Do NOT recurse into nested loops: continue binds to the inner loop there.
             _ => {}
@@ -2596,21 +2704,41 @@ fn apply_scev_upgrade_in_stmts(
                 cond,
             } => {
                 active_guards.push(cond.clone());
-                changed |= apply_scev_upgrade_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), locals, active_guards);
+                changed |= apply_scev_upgrade_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    locals,
+                    active_guards,
+                );
                 active_guards.pop();
-                changed |= apply_scev_upgrade_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), locals, active_guards);
+                changed |= apply_scev_upgrade_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    locals,
+                    active_guards,
+                );
             }
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= apply_scev_upgrade_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals, active_guards);
+                changed |= apply_scev_upgrade_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    locals,
+                    active_guards,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= apply_scev_upgrade_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), locals, active_guards);
+                    changed |= apply_scev_upgrade_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        locals,
+                        active_guards,
+                    );
                 }
-                changed |= apply_scev_upgrade_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), locals, active_guards);
+                changed |= apply_scev_upgrade_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    locals,
+                    active_guards,
+                );
             }
             _ => {}
         }
@@ -2642,7 +2770,7 @@ pub fn apply_break_continue_pass(func: &mut PreHirFunction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn int(bits: u32, signed: bool) -> NirType {
         NirType::Int { bits, signed }
@@ -2715,7 +2843,8 @@ mod tests {
                             lhs: PreHirLValue::Var("ptr".to_string()),
                             rhs: add(var("ptr"), const_i(1), ptr_u32()),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                     cond: ne(var("ptr"), var("end")),
                 },
                 PreHirStmt::Label("exit".to_string()),
@@ -2788,7 +2917,8 @@ mod tests {
                     body: vec![PreHirStmt::Assign {
                         lhs: PreHirLValue::Var("ptr".to_string()),
                         rhs: add(var("ptr"), const_i(1), ptr_u32()),
-                    }].into(),
+                    }]
+                    .into(),
                     cond: ne(var("ptr"), var("end")),
                 },
             ],
@@ -2816,7 +2946,11 @@ mod tests {
                         rhs: Box::new(const_i(0)),
                         ty: NirType::Bool,
                     },
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(0, int(32, false))))].into(),
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
+                        0,
+                        int(32, false),
+                    )))]
+                    .into(),
                     else_body: Vec::new().into(),
                 },
                 PreHirStmt::Assign {
@@ -2841,7 +2975,8 @@ mod tests {
                             lhs: PreHirLValue::Var("ptr".to_string()),
                             rhs: add(var("ptr"), const_i(1), ptr_u32()),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                     cond: ne(var("ptr"), var("end")),
                 },
                 PreHirStmt::Return(Some(var("sum"))),
@@ -3103,7 +3238,8 @@ mod tests {
                             lhs: PreHirLValue::Var("i".to_string()),
                             rhs: var("t"),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                 },
             ],
             ..Default::default()
@@ -3169,7 +3305,8 @@ mod tests {
                             lhs: PreHirLValue::Var("i".to_string()),
                             rhs: var("t"),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                 },
             ],
             ..Default::default()
@@ -3491,7 +3628,8 @@ mod tests {
             panic!("expected For");
         };
         assert!(
-            body.iter().any(|stmt| matches!(stmt, PreHirStmt::For { .. })),
+            body.iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::For { .. })),
             "expected nested inner for, got {body:?}"
         );
         let inner = body

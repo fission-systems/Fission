@@ -1,9 +1,9 @@
-pub mod peb_teb;
+pub mod heap;
 pub mod hle;
+pub mod image_info;
 pub mod imports;
 pub mod loader;
-pub mod heap;
-pub mod image_info;
+pub mod peb_teb;
 
 pub use hle::WindowsEnv;
 pub use image_info::{PeImageInfo, PeProcessArgs};

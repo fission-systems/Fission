@@ -36,8 +36,8 @@
 /// - RetDec `reaching_definitions.h`: UD/DU chains
 /// - LLVM `BasicAliasAnalysis.cpp`: stack-slot no-alias rule
 use super::super::memory::{PartitionKey, partition_key_for_pointer_expr};
-use crate::prelude::*;
 use crate::HashMap;
+use crate::prelude::*;
 
 /// Identifies a memory location for alias analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

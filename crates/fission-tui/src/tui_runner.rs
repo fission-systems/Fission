@@ -272,7 +272,9 @@ fn run_event_loop(
                             let _ = db.delete_session(id);
                             if let Ok(rows) = db.get_sessions() {
                                 app.session_rows = rows;
-                                if app.sidebar_selected_idx >= app.session_rows.len() && !app.session_rows.is_empty() {
+                                if app.sidebar_selected_idx >= app.session_rows.len()
+                                    && !app.session_rows.is_empty()
+                                {
                                     app.sidebar_selected_idx = app.session_rows.len() - 1;
                                 }
                             }
@@ -335,7 +337,10 @@ fn run_event_loop(
                 }
             }
             AppAction::Delete => {
-                if app.active_pane == crate::app::ActivePane::Sidebar && app.rename_session_input.is_none() && app.delete_session_confirm.is_none() {
+                if app.active_pane == crate::app::ActivePane::Sidebar
+                    && app.rename_session_input.is_none()
+                    && app.delete_session_confirm.is_none()
+                {
                     app.start_delete_session();
                 }
             }
@@ -506,7 +511,9 @@ fn run_event_loop(
                     let _ = db.delete_session(session_id);
                     if let Ok(rows) = db.get_sessions() {
                         app.session_rows = rows;
-                        if app.sidebar_selected_idx >= app.session_rows.len() && !app.session_rows.is_empty() {
+                        if app.sidebar_selected_idx >= app.session_rows.len()
+                            && !app.session_rows.is_empty()
+                        {
                             app.sidebar_selected_idx = app.session_rows.len() - 1;
                         }
                     }
@@ -517,7 +524,7 @@ fn run_event_loop(
                     if app.sidebar_selected_idx < app.session_rows.len() {
                         let session_id = app.session_rows[app.sidebar_selected_idx].id;
                         app.current_session_id = Some(session_id);
-                        
+
                         if let Ok(messages) = db.get_messages(session_id) {
                             // Update pipeline
                             {

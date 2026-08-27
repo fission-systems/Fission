@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 #[test]
 fn dump_static_printf_sections() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_printf_malloc.elf");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_printf_malloc.elf");
     let b = LoadedBinary::from_file(&path).unwrap();
     let inner = b.inner();
     for s in &inner.sections {
@@ -22,5 +23,8 @@ fn dump_static_printf_sections() {
     let ram = state.ram_space();
     let got = state.read_space(ram, 0x1007f68, 32).unwrap();
     println!("bins@0x1007f68 after load: {:02x?}", got);
-    assert!(got.iter().all(|&b| b == 0), "malloc bin heads must be zeroed BSS");
+    assert!(
+        got.iter().all(|&b| b == 0),
+        "malloc bin heads must be zeroed BSS"
+    );
 }

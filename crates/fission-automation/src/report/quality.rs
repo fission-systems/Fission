@@ -41,17 +41,34 @@ fn stats_to_map(stats: &NirBuildStats) -> BTreeMap<String, usize> {
 pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)> {
     let map = stats_to_map(stats);
     let mut families: BTreeMap<String, usize> = BTreeMap::new();
-    
+
     for (k, v) in map {
-        if v == 0 { continue; }
-        
-        let family = if k.contains("abi_") || k.contains("param_promotion_spill") || k.contains("home_slot_") {
+        if v == 0 {
+            continue;
+        }
+
+        let family = if k.contains("abi_")
+            || k.contains("param_promotion_spill")
+            || k.contains("home_slot_")
+        {
             "abi"
-        } else if k.contains("object_shape") || k.contains("object_root") || k.contains("surface_binding") || k.contains("surface_fact") || k == "call_artifact_removed_count" {
+        } else if k.contains("object_shape")
+            || k.contains("object_root")
+            || k.contains("surface_binding")
+            || k.contains("surface_fact")
+            || k == "call_artifact_removed_count"
+        {
             "memory_shape"
         } else if k.contains("variadic") || k.contains("va_start") {
             "variadic"
-        } else if k.contains("call_signature") || k.contains("prototype_summary") || k.contains("call_effect") || k.contains("wrapper_summary") || k.contains("interproc_signature") || k.contains("unsupported_indirect_call") || k.contains("indirect_target_set") {
+        } else if k.contains("call_signature")
+            || k.contains("prototype_summary")
+            || k.contains("call_effect")
+            || k.contains("wrapper_summary")
+            || k.contains("interproc_signature")
+            || k.contains("unsupported_indirect_call")
+            || k.contains("indirect_target_set")
+        {
             "call_signature"
         } else if k.starts_with("cleanup_family_binding_init") {
             "cleanup_binding_init"
@@ -67,22 +84,38 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
             "cleanup_dead_binding"
         } else if k.starts_with("cleanup_budget") {
             "cleanup_budget"
-        } else if k.starts_with("dispatcher_") || k == "switch_emit_ready_failed_count" || k.contains("unsupported_indirect_control") || k.contains("unsupported_external_target") || k.contains("indirect_surface_preserved") {
+        } else if k.starts_with("dispatcher_")
+            || k == "switch_emit_ready_failed_count"
+            || k.contains("unsupported_indirect_control")
+            || k.contains("unsupported_external_target")
+            || k.contains("indirect_surface_preserved")
+        {
             "dispatcher"
         } else if k.contains("security_cookie") {
             "security"
-        } else if k.contains("guarded_tail_replacement_plan_rejected") || k.starts_with("guarded_tail_rejected_") || k.contains("ambiguous_follow") || k == "region_emit_ready_failed_count" {
+        } else if k.contains("guarded_tail_replacement_plan_rejected")
+            || k.starts_with("guarded_tail_rejected_")
+            || k.contains("ambiguous_follow")
+            || k == "region_emit_ready_failed_count"
+        {
             "canonical_rewrite_conflict"
-        } else if k.contains("structuring") || k.contains("region_") || k.contains("promotion_") || k.contains("promoted_region") {
+        } else if k.contains("structuring")
+            || k.contains("region_")
+            || k.contains("promotion_")
+            || k.contains("promoted_region")
+        {
             "structuring"
         } else {
             "other"
         };
-        
+
         *families.entry(family.to_string()).or_insert(0) += v;
     }
-    
-    let mut pairs: Vec<_> = families.into_iter().filter(|(k, v)| *v > 0 && k != "other").collect();
+
+    let mut pairs: Vec<_> = families
+        .into_iter()
+        .filter(|(k, v)| *v > 0 && k != "other")
+        .collect();
     pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     pairs
 }
@@ -105,7 +138,12 @@ pub(crate) fn structuring_fallback_reasons(stats: &NirBuildStats) -> Vec<(String
             continue;
         }
         if k.starts_with("region_linearize_rejected_") {
-            let mut reason = k.strip_prefix("region_linearize_rejected_").unwrap_or(&k).strip_suffix("_count").unwrap_or(&k).to_string();
+            let mut reason = k
+                .strip_prefix("region_linearize_rejected_")
+                .unwrap_or(&k)
+                .strip_suffix("_count")
+                .unwrap_or(&k)
+                .to_string();
             reason = reason.replace("body_lowering_conditional_tail_", "cond_tail_");
             reason = reason.replace("body_lowering_", "");
             pairs.push((reason, v));

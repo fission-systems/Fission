@@ -172,8 +172,7 @@ fn locate_load_config_directory_va(binary: &LoadedBinary) -> Option<u64> {
     // DataDirectory[NumberOfRvaAndSizes] array starts right after it, at
     // offset 96, each entry 8 bytes (RVA u32 + Size u32). Entry 10
     // (0-indexed) is IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG.
-    let number_of_rva_and_sizes =
-        u32::from_le_bytes(file.get(oh + 92..oh + 96)?.try_into().ok()?);
+    let number_of_rva_and_sizes = u32::from_le_bytes(file.get(oh + 92..oh + 96)?.try_into().ok()?);
     if number_of_rva_and_sizes <= 10 {
         return None;
     }

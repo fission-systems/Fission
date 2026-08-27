@@ -166,4 +166,3 @@ pub enum HirBinaryOp {
     SGt,
     SGe,
 }
-

@@ -1,4 +1,7 @@
-use crate::{SessionStore, types::{DecompileResponse, ErrorResponse}};
+use crate::{
+    SessionStore,
+    types::{DecompileResponse, ErrorResponse},
+};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -27,7 +30,9 @@ pub async fn handle_decompile(
     };
 
     let binary = sess.binary().await;
-    let name = binary.functions.iter()
+    let name = binary
+        .functions
+        .iter()
         .find(|f| f.address == addr)
         .map(|f| f.name.clone())
         .unwrap_or_else(|| format!("sub_{addr:x}"));
@@ -70,9 +75,9 @@ pub async fn handle_decompile(
             }
             Json(DecompileResponse {
                 pseudocode: out.code,
-                nir:        out.code_nir,
-                fell_back:  out.fell_back,
-                reason:     out.fallback_reason,
+                nir: out.code_nir,
+                fell_back: out.fell_back,
+                reason: out.fallback_reason,
             })
             .into_response()
         }

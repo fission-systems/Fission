@@ -38,7 +38,10 @@ fn runtime_frontend_for_binary(binary: &LoadedBinary) -> Result<RuntimeSleighFro
 /// necessarily `addr` itself). Falls back to guessing the function's size
 /// from the next-higher known function address when the loader didn't
 /// record one (e.g. a function discovered without a symbol-table size).
-pub fn disassemble_function(binary: &LoadedBinary, addr: u64) -> Result<Vec<InstructionRow>, String> {
+pub fn disassemble_function(
+    binary: &LoadedBinary,
+    addr: u64,
+) -> Result<Vec<InstructionRow>, String> {
     let func = binary
         .function_at(addr)
         .ok_or_else(|| format!("No function found at address 0x{addr:x}"))?;

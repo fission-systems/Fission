@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -29,18 +29,19 @@ impl Db {
     /// Initialize the database. Connects to `~/.fission/sessions.db` by default.
     pub fn init() -> Result<Self> {
         let db_path = Self::db_path()?;
-        
+
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
+
         let conn = Connection::open(&db_path)?;
         Self::run_migrations(&conn)?;
         Ok(Self { conn })
     }
 
     fn db_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+        let home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         Ok(home.join(".fission").join("sessions.db"))
     }
 
@@ -56,7 +57,7 @@ impl Db {
             )",
             [],
         )?;
-        
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +69,7 @@ impl Db {
             )",
             [],
         )?;
-        
+
         Ok(())
     }
 
@@ -104,7 +105,7 @@ impl Db {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, provider, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
         )?;
-        
+
         let session_iter = stmt.query_map([], |row| {
             Ok(SessionRow {
                 id: row.get(0)?,
@@ -115,7 +116,7 @@ impl Db {
                 updated_at: row.get(5)?,
             })
         })?;
-        
+
         let mut sessions = Vec::new();
         for s in session_iter {
             sessions.push(s?);
@@ -127,7 +128,7 @@ impl Db {
         let mut stmt = self.conn.prepare(
             "SELECT id, session_id, role, content, created_at FROM messages WHERE session_id = ?1 ORDER BY id ASC"
         )?;
-        
+
         let msg_iter = stmt.query_map(params![session_id], |row| {
             Ok(MessageRow {
                 id: row.get(0)?,
@@ -137,7 +138,7 @@ impl Db {
                 created_at: row.get(4)?,
             })
         })?;
-        
+
         let mut messages = Vec::new();
         for m in msg_iter {
             messages.push(m?);
@@ -154,10 +155,8 @@ impl Db {
     }
 
     pub fn delete_session(&self, session_id: i64) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM sessions WHERE id = ?1",
-            params![session_id],
-        )?;
+        self.conn
+            .execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
         Ok(())
     }
 }

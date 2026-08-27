@@ -329,13 +329,14 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 // already decode in forced low-bit-code mode.
                 if initial_context_override.is_none()
                     && let Some(forced_override) = lifter.low_bit_code_mode_override()
-                    && let Ok(retry) = lifter.lift_raw_pcode_function_with_context_and_memory_context(
-                        &bytes,
-                        decode_entry_address,
-                        lift_contract,
-                        &memory_context,
-                        Some(forced_override),
-                    )
+                    && let Ok(retry) = lifter
+                        .lift_raw_pcode_function_with_context_and_memory_context(
+                            &bytes,
+                            decode_entry_address,
+                            lift_contract,
+                            &memory_context,
+                            Some(forced_override),
+                        )
                 {
                     let template_source_counts = retry.template_source_counts.clone();
                     return Ok((

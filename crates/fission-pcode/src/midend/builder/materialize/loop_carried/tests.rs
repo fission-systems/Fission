@@ -433,7 +433,12 @@ fn loop_carried_pointer_advance_not_hijacked_by_load_address_role() {
                     vec![constant(0), addr_temp.clone()],
                 ),
                 // param_1 = next -- the pointer advance under test
-                op(4, PcodeOpcode::Copy, Some(param_1.clone()), vec![next_temp.clone()]),
+                op(
+                    4,
+                    PcodeOpcode::Copy,
+                    Some(param_1.clone()),
+                    vec![next_temp.clone()],
+                ),
                 op(5, PcodeOpcode::CBranch, None, vec![constant(0x1010), cond]),
             ],
         ),

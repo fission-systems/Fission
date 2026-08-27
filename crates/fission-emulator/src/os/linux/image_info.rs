@@ -4,9 +4,9 @@
 //! `create_elf_tables` — no vendor code dependency.
 
 use crate::os::linux::dynlink::{self, DynlinkInfo, DynlinkMode};
-use crate::pcode::page_map::{page_align_up, prot, PAGE_SIZE};
+use crate::pcode::page_map::{PAGE_SIZE, page_align_up, prot};
 use crate::pcode::state::MachineState;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fission_loader::loader::LoadedBinary;
 use serde::{Deserialize, Serialize};
 
@@ -395,7 +395,9 @@ mod tests {
     fn auxv_stack_layout_smoke() {
         // Minimal synthetic: no binary sections — just tables.
         let mut state = MachineState::new();
-        state.page_map.map_region(0x7FFF_0000_0000, 0x10_0000, prot::RW, true);
+        state
+            .page_map
+            .map_region(0x7FFF_0000_0000, 0x10_0000, prot::RW, true);
         let mut info = ImageInfo {
             load_addr: 0x400000,
             entry: 0x401000,

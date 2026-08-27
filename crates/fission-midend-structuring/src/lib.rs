@@ -34,57 +34,59 @@ pub mod collapse_loop;
 pub mod collapse_shapes;
 pub mod collapse_structure;
 pub mod conditionals;
+pub mod driver_pure;
 pub mod graph;
 pub mod guarded_tail;
 pub mod guarded_tail_pure;
-pub mod driver_pure;
 pub mod helpers;
 pub mod host;
 pub mod irreducible;
 pub mod linear_body;
-pub mod linear_recovery;
 mod linear_multiblock;
+pub mod linear_recovery;
 pub mod linear_types;
 pub mod loop_analysis;
 pub mod loops;
+pub mod orphan_repair;
 pub mod reaching_conditions;
 pub mod reaching_driver;
 pub mod reaching_emit;
 pub mod regions;
+pub mod sese_discovery;
+pub mod sese_driver;
 pub mod structuring_quality;
 pub mod switch;
-pub mod sese_driver;
-pub mod sese_discovery;
-pub mod orphan_repair;
 
-pub use cfg_analysis::{
-    CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
-    compute_follow_blocks,
-};
-pub use cleanup::{
-    cleanup_redundant_labels, finalize_structured_body, has_orphan_goto_labels,
-};
-pub use host::StructuringHost;
-pub use graph::{
-    BlockOwnership, DuplicateBlockOwnership, StructureEdge, StructureEdgeFlags, StructureGraph,
-    StructureNode, StructureNodeId, StructureNodeKind, capture_structuring_failure,
-    surface_structure_graph,
-};
 pub use admission::{
     StructuringAdmissionInput, StructuringAdmissionReason, blockgraph_collapse_admission_enabled,
     decide_structuring_admission,
 };
-pub use linear_types::{
-    CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey, ConditionalTailLoweringResult,
-    ConditionalTailMismatchSubtype, IfLoweringBudget, LinearBodyCacheKey, LinearBodyCachedOutcome,
-    LinearBodyLoweringOutcome, LinearBodyRejectReason, STRUCTURING_TOTAL_WORK_BUDGET,
-    LinearExit, LoweredTerminator, MAX_LINEAR_STRUCTURING_DEPTH, NormalizedConditionalTailArm,
-    structuring_diag_enabled,
+pub use cfg_analysis::{
+    CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis, compute_follow_blocks,
 };
-pub use linear_multiblock::{build_linear_multiblock_body, lower_structured_switch_terminator, switch_recovery_cfg_admitted};
-pub use linear_recovery::{
-    SESE_REGION_PROOF_BUDGET_CALLS, build_linear_sese_child_fallback,
-    region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
+pub use cleanup::{cleanup_redundant_labels, finalize_structured_body, has_orphan_goto_labels};
+pub use collapse_loop::{
+    apply_virtual_goto_edge, collapse_loop_admission_enabled, is_virtual_goto_edge,
+    try_virtualize_one_bad_edge,
+};
+pub use collapse_structure::{
+    collapse_all_virtualize_one, collect_likely_gotos, emit_likely_edges_for_loop, select_goto,
+};
+pub use conditionals::{
+    ComplexArmPlan, VirtualExitIfElsePlan, count_explicit_gotos, is_trivial_structuring_stmt,
+    lower_virtual_exit_if_else_committed, plan_virtual_exit_if_else, try_lower_if,
+    try_lower_if_else, try_lower_return_chain_arm, try_lower_short_circuit_and,
+    try_lower_short_circuit_and_else, try_lower_short_circuit_if, try_lower_short_circuit_or,
+    try_reduce_if_else_with_follow,
+};
+pub use driver_pure::{
+    apply_blockgraph_collapse_admission_gate, is_switch_scaffold_stmt, region_kind_for_stmt,
+    region_selector_or_condition, switch_stmt_has_scaffold_only_arms,
+};
+pub use graph::{
+    BlockOwnership, DuplicateBlockOwnership, StructureEdge, StructureEdgeFlags, StructureGraph,
+    StructureNode, StructureNodeId, StructureNodeKind, capture_structuring_failure,
+    surface_structure_graph,
 };
 pub use guarded_tail::{
     discover_guarded_tail_candidates, promote_guarded_tail_regions_until_stable,
@@ -94,10 +96,8 @@ pub use guarded_tail_pure::{
     count_var_defs_stmt, count_var_reads_stmt, expr_contains_var, replace_var_in_expr,
     replace_var_in_stmt,
 };
-pub use driver_pure::{
-    apply_blockgraph_collapse_admission_gate, is_switch_scaffold_stmt, region_kind_for_stmt,
-    region_selector_or_condition, switch_stmt_has_scaffold_only_arms,
-};
+pub use helpers::{block_label, merge_equivalent_switch_cases, recovered_switch_case_values};
+pub use host::StructuringHost;
 pub use linear_body::{
     can_inline_linear_successor, can_inline_linear_successor_for_region,
     canonicalize_region_target_for_exit_for_test, find_shared_tail_entries_for_region_for_test,
@@ -105,32 +105,36 @@ pub use linear_body::{
     lower_linear_body, lower_linear_body_for_region_recovery_detailed,
     lower_linear_body_with_budget, shared_exit_for_indices, shared_linear_exit,
 };
-pub use conditionals::{
-    ComplexArmPlan, VirtualExitIfElsePlan, count_explicit_gotos, is_trivial_structuring_stmt,
-    lower_virtual_exit_if_else_committed, plan_virtual_exit_if_else, try_lower_if,
-    try_lower_if_else, try_lower_return_chain_arm,
-    try_lower_short_circuit_and, try_lower_short_circuit_and_else, try_lower_short_circuit_if,
-    try_lower_short_circuit_or, try_reduce_if_else_with_follow,
+pub use linear_multiblock::{
+    build_linear_multiblock_body, lower_structured_switch_terminator, switch_recovery_cfg_admitted,
 };
-pub use helpers::{block_label, merge_equivalent_switch_cases, recovered_switch_case_values};
+pub use linear_recovery::{
+    SESE_REGION_PROOF_BUDGET_CALLS, build_linear_sese_child_fallback,
+    region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
+};
+pub use linear_types::{
+    CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey, ConditionalTailLoweringResult,
+    ConditionalTailMismatchSubtype, IfLoweringBudget, LinearBodyCacheKey, LinearBodyCachedOutcome,
+    LinearBodyLoweringOutcome, LinearBodyRejectReason, LinearExit, LoweredTerminator,
+    MAX_LINEAR_STRUCTURING_DEPTH, NormalizedConditionalTailArm, STRUCTURING_TOTAL_WORK_BUDGET,
+    structuring_diag_enabled,
+};
 pub use loops::{
     lower_loop_body_subgraph, try_lower_dowhile, try_lower_for, try_lower_infloop,
     try_lower_infloop_with_break, try_lower_multiblock_dowhile, try_lower_multiblock_infloop,
     try_lower_rotated_while, try_lower_while,
 };
-pub use sese_discovery::{SeseRegion, SeseRegionTree, build_sese_tree, compute_rpo_map, find_sese_regions, sese_structure_region, structure_cfg_via_sese};
 pub use orphan_repair::{find_block_index_by_label, try_repair_orphan_gotos};
-pub use collapse_loop::{
-    apply_virtual_goto_edge, collapse_loop_admission_enabled, is_virtual_goto_edge,
-    try_virtualize_one_bad_edge,
+pub use sese_discovery::{
+    SeseRegion, SeseRegionTree, build_sese_tree, compute_rpo_map, find_sese_regions,
+    sese_structure_region, structure_cfg_via_sese,
 };
-pub use collapse_structure::{
-    collapse_all_virtualize_one, collect_likely_gotos, emit_likely_edges_for_loop, select_goto,
+pub use sese_driver::{
+    ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule, IDEAL_COLLAPSE_RULES,
+    apply_collapse_rule, build_sese_region_body, build_sese_region_body_for_members,
+    reconstruct_sese_final_body, reconstruct_sese_final_body_for_members,
 };
-pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule, build_sese_region_body, build_sese_region_body_for_members, reconstruct_sese_final_body, reconstruct_sese_final_body_for_members};
-pub use switch::{
-    SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch,
-};
+pub use switch::{SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch};
 
 pub use fission_midend_core::{NirBuildStats, SWITCH_FALLTHROUGH_SENTINEL};
 pub use fission_midend_prehir::{PreHirFunction, PreHirStmt};

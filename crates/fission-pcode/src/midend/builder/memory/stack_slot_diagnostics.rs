@@ -177,7 +177,12 @@ impl<'a> PreviewBuilder<'a> {
         offset: i64,
     ) -> Option<fission_midend_core::ir::SsaMemoryValueId> {
         let site = self.current_lowering_site?;
-        let op = self.pcode.blocks.get(site.block_idx)?.ops.get(site.op_idx)?;
+        let op = self
+            .pcode
+            .blocks
+            .get(site.block_idx)?
+            .ops
+            .get(site.op_idx)?;
         let ssa_site = SsaOpSite {
             block: u32::try_from(site.block_idx).ok()?,
             op: u32::try_from(site.op_idx).ok()?,
@@ -189,7 +194,8 @@ impl<'a> PreviewBuilder<'a> {
         }?;
         let piece = pieces.iter().find(|piece| piece.byte_offset == 0)?;
         let value = self.scalar_ssa.memory_value(piece.value)?;
-        if value.storage.region != SsaMemoryRegion::Stack || value.storage.offset != i128::from(offset)
+        if value.storage.region != SsaMemoryRegion::Stack
+            || value.storage.offset != i128::from(offset)
         {
             return None;
         }
@@ -423,9 +429,7 @@ mod tests {
             block_idx: 1,
             op_idx: 0,
         });
-        builder
-            .stack_slot_memory_owners
-            .insert(OFFSET, vec![owner]);
+        builder.stack_slot_memory_owners.insert(OFFSET, vec![owner]);
         builder
     }
 

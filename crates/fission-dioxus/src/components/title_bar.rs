@@ -15,7 +15,11 @@ pub fn save_project(mut state: Signal<crate::state::AppState>) {
         let Some(binary) = s.binary.as_ref() else {
             return;
         };
-        (binary.path.clone(), s.rename_map.clone(), s.comments.clone())
+        (
+            binary.path.clone(),
+            s.rename_map.clone(),
+            s.comments.clone(),
+        )
     };
     let ann_count = renames.len() + comments.len();
     spawn(async move {
@@ -140,11 +144,15 @@ pub fn TitleBar() -> Element {
 
             let Ok(facts) = facts else {
                 state.write().is_batch_running = false;
-                state.write().push_log(LogEntry::error("Failed to build static facts for batch."));
+                state
+                    .write()
+                    .push_log(LogEntry::error("Failed to build static facts for batch."));
                 continue;
             };
 
-            state.write().push_log(LogEntry::info("Static facts built. Running decompile pipeline…"));
+            state.write().push_log(LogEntry::info(
+                "Static facts built. Running decompile pipeline…",
+            ));
 
             let mut ok_count = 0usize;
             let mut err_count = 0usize;
@@ -254,7 +262,8 @@ pub fn TitleBar() -> Element {
                     // Grab Arc<LoadedBinary> before taking the write lock
                     let binary_arc = load.binary.clone();
                     let path_str = path.display().to_string();
-                    let (sidecar_renames, sidecar_comments) = crate::sidecar::load_sidecar(&path_str);
+                    let (sidecar_renames, sidecar_comments) =
+                        crate::sidecar::load_sidecar(&path_str);
                     let sidecar_count = sidecar_renames.len() + sidecar_comments.len();
                     {
                         let mut s = state.write();
@@ -267,14 +276,16 @@ pub fn TitleBar() -> Element {
                         );
                         s.binary = load.binary.clone();
                         s.functions = load.functions;
-                        s.strings   = load.strings;
+                        s.strings = load.strings;
                         s.rename_map = sidecar_renames;
-                        s.comments   = sidecar_comments;
+                        s.comments = sidecar_comments;
                         s.is_loading_binary = false;
                         s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                         s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
                         if sidecar_count > 0 {
-                            s.push_log(LogEntry::info(format!("Restored {sidecar_count} saved annotation(s) from project file.")));
+                            s.push_log(LogEntry::info(format!(
+                                "Restored {sidecar_count} saved annotation(s) from project file."
+                            )));
                         }
                     }
                     // ── Eager FactStore preload ────────────────────────────────
@@ -294,7 +305,8 @@ pub fn TitleBar() -> Element {
                                 if s.cached_facts.is_none() {
                                     s.cached_facts = Some(std::sync::Arc::new(f));
                                     s.push_log(LogEntry::info(
-                                        "Analysis ready — first decompile will be instant.".to_string(),
+                                        "Analysis ready — first decompile will be instant."
+                                            .to_string(),
                                     ));
                                 }
                             }

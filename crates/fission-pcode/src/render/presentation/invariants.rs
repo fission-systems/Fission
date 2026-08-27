@@ -113,7 +113,9 @@ fn collect_goto_targets_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             collect_goto_targets_in_stmts(then_body, out);
             collect_goto_targets_in_stmts(else_body, out);
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(i) = init {
                 collect_goto_targets_in_stmt(i, out);
             }
@@ -154,7 +156,9 @@ fn collect_label_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             collect_label_defs_in_stmts(then_body, out);
             collect_label_defs_in_stmts(else_body, out);
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(i) = init {
                 collect_label_defs_in_stmt(i, out);
             }

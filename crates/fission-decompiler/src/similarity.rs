@@ -296,7 +296,11 @@ impl WeightedVector {
             let coeff = idf_weight(df, idf.total_docs) * tf_weight(tf);
             entries.push(WeightedEntry { hash, coeff });
         }
-        let length = entries.iter().map(|e| e.coeff * e.coeff).sum::<f64>().sqrt();
+        let length = entries
+            .iter()
+            .map(|e| e.coeff * e.coeff)
+            .sum::<f64>()
+            .sqrt();
         Self { entries, length }
     }
 
@@ -513,11 +517,7 @@ mod tests {
                         opcode: PcodeOpcode::Store,
                         address: 0x2004,
                         output: None,
-                        inputs: vec![
-                            varnode(3, 0, 8),
-                            const_vn(0x30, 8),
-                            varnode(1, 0x200, 8),
-                        ],
+                        inputs: vec![varnode(3, 0, 8), const_vn(0x30, 8), varnode(1, 0x200, 8)],
                         asm_mnemonic: None,
                     },
                     PcodeOp {
@@ -600,7 +600,10 @@ mod tests {
                 extract_function_features(&simple_add_function(0x38)),
                 &corpus.idf,
             ),
-            &WeightedVector::from_raw_features(extract_function_features(&different_function()), &corpus.idf),
+            &WeightedVector::from_raw_features(
+                extract_function_features(&different_function()),
+                &corpus.idf,
+            ),
         );
         assert!(
             identical_score > different_score,

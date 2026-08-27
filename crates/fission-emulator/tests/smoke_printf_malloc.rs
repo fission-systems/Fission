@@ -6,10 +6,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
@@ -18,10 +18,7 @@ fn run_linux(path: &Path, max_inst: u64) -> Result<Emulator> {
         LoadedBinary::from_file(path).with_context(|| format!("load {}", path.display()))?;
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary)?;
-    let load_spec = binary
-        .load_spec()
-        .context("missing load_spec")?
-        .clone();
+    let load_spec = binary.load_spec().context("missing load_spec")?.clone();
     let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)?
         .into_iter()
         .next()

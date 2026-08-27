@@ -84,7 +84,10 @@ fn loop_counter_gets_short_letter_name() {
     // for (uVar1 = 0; uVar1 < param_2; uVar1 = uVar1 + 1) {}
     let mut func = HirFunction {
         name: "f".into(),
-        params: vec![param("param_1", ptr_ty()), param("param_2", int_ty(32, true))],
+        params: vec![
+            param("param_1", ptr_ty()),
+            param("param_2", int_ty(32, true)),
+        ],
         locals: vec![local("uVar1", int_ty(32, true))],
         return_type: NirType::Unknown,
         body: vec![HirStmt::For {

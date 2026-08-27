@@ -1,7 +1,7 @@
 //! Shared helpers for dominators, postdominators, and graph walks.
 
-use fission_midend_core::fast_hash::FastMap as HashMap;
 use crate::HashSet;
+use fission_midend_core::fast_hash::FastMap as HashMap;
 
 /// Cooper et al.'s `intersect(b1, b2)`: walk both fingers up the idom tree
 /// (guided by RPO numbers) until they meet.  Returns the LCA node.
@@ -306,4 +306,3 @@ mod cycle_guard_tests {
         assert_eq!(cooper_intersect(2, 1, &idom, &rpo), 1);
     }
 }
-

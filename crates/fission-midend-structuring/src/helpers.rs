@@ -1,10 +1,12 @@
 //! Shared pure helpers for residual structuring free functions.
 
-use fission_midend_core::ir::{DispatcherProofUnit};
-use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirStmt, PreHirSwitchCase, PreHirUnaryOp};
-use fission_midend_prehir::util::strip_casts;
-use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
 use crate::regions::EmitReadyDecision;
+use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
+use fission_midend_core::ir::DispatcherProofUnit;
+use fission_midend_prehir::util::strip_casts;
+use fission_midend_prehir::{
+    PreHirBinaryOp, PreHirExpr, PreHirStmt, PreHirSwitchCase, PreHirUnaryOp,
+};
 
 /// Label name for a block target key / address (matches pcode midend cfg helper).
 const DUPLICATE_BLOCK_KEY_TAG: u64 = 0x8000_0000_0000_0000;
@@ -107,7 +109,10 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<PreHirSwitchCase>) -> u
     patched
 }
 
-pub fn extract_eq_const_for_case(expr: &PreHirExpr, case_on_true: bool) -> Option<(PreHirExpr, i64)> {
+pub fn extract_eq_const_for_case(
+    expr: &PreHirExpr,
+    case_on_true: bool,
+) -> Option<(PreHirExpr, i64)> {
     let expr = strip_casts(expr);
     match expr {
         PreHirExpr::Binary {
@@ -148,8 +153,12 @@ pub fn extract_range_guard_for_chain(expr: &PreHirExpr, chain_on_true: bool) -> 
             rhs,
             ..
         } => match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
-            (other, PreHirExpr::Const(_, _)) if chain_on_true => normalize_affine_bound_expr(&other),
-            (PreHirExpr::Const(_, _), other) if !chain_on_true => normalize_affine_bound_expr(&other),
+            (other, PreHirExpr::Const(_, _)) if chain_on_true => {
+                normalize_affine_bound_expr(&other)
+            }
+            (PreHirExpr::Const(_, _), other) if !chain_on_true => {
+                normalize_affine_bound_expr(&other)
+            }
             _ => None,
         },
         PreHirExpr::Unary {

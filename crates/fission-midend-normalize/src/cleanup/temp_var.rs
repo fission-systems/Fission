@@ -5,9 +5,9 @@ use super::super::analysis::preservation::{
 };
 use super::utils::*;
 use crate::prelude::*;
+use crate::{HashMap, HashSet};
 use fission_midend_core::wave_stats;
 use fission_midend_prehir::util::{rename_vars_in_expr, rename_vars_in_stmts};
-use crate::{HashMap, HashSet};
 
 /// Reclaim a canonical `local_<stack-offset>` name after the binding that
 /// originally occupied it has been removed by cleanup.
@@ -30,8 +30,7 @@ pub fn canonicalize_orphaned_stack_slot_names(func: &mut PreHirFunction) -> bool
     for binding in &func.locals {
         if !matches!(
             binding.origin,
-            Some(NirBindingOrigin::StackOffset(_)
-                | NirBindingOrigin::DerivedFromStackOffset(_))
+            Some(NirBindingOrigin::StackOffset(_) | NirBindingOrigin::DerivedFromStackOffset(_))
         ) {
             continue;
         }
@@ -41,7 +40,10 @@ pub fn canonicalize_orphaned_stack_slot_names(func: &mut PreHirFunction) -> bool
         if occupied.contains(&base) {
             continue;
         }
-        claimants.entry(base).or_default().push(binding.name.clone());
+        claimants
+            .entry(base)
+            .or_default()
+            .push(binding.name.clone());
     }
 
     let mut renames = claimants
@@ -141,7 +143,10 @@ pub fn collapse_trivial_assign_returns(
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                if collapse_trivial_assign_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), preserved_temps) {
+                if collapse_trivial_assign_returns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    preserved_temps,
+                ) {
                     changed = true;
                 }
             }
@@ -150,20 +155,32 @@ pub fn collapse_trivial_assign_returns(
                 else_body,
                 ..
             } => {
-                if collapse_trivial_assign_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), preserved_temps) {
+                if collapse_trivial_assign_returns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    preserved_temps,
+                ) {
                     changed = true;
                 }
-                if collapse_trivial_assign_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), preserved_temps) {
+                if collapse_trivial_assign_returns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    preserved_temps,
+                ) {
                     changed = true;
                 }
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    if collapse_trivial_assign_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), preserved_temps) {
+                    if collapse_trivial_assign_returns(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        preserved_temps,
+                    ) {
                         changed = true;
                     }
                 }
-                if collapse_trivial_assign_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), preserved_temps) {
+                if collapse_trivial_assign_returns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    preserved_temps,
+                ) {
                     changed = true;
                 }
             }
@@ -175,7 +192,10 @@ pub fn collapse_trivial_assign_returns(
     changed
 }
 
-pub fn inline_single_use_temps(stmts: &mut Vec<PreHirStmt>, preserved_temps: &HashSet<&str>) -> bool {
+pub fn inline_single_use_temps(
+    stmts: &mut Vec<PreHirStmt>,
+    preserved_temps: &HashSet<&str>,
+) -> bool {
     // Whole-function use counts: nested scopes must see post-loop uses so
     // loop-carried temps (def in loop, use after) are not falsely single-use.
     let use_counts = DefUseMap::build(stmts).use_count;
@@ -199,38 +219,63 @@ fn collapse_adjacent_pure_copy_into_if_with_counts(
     let mut changed = collapse_adjacent_pure_copy_into_if_linear(stmts, use_counts);
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), use_counts);
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    use_counts,
+                );
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
                     if let PreHirStmt::Block(b) = &mut **i {
-                        changed |= collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b), use_counts);
+                        changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            use_counts,
+                        );
                     }
                 }
                 if let Some(u) = update {
                     if let PreHirStmt::Block(b) = &mut **u {
-                        changed |= collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b), use_counts);
+                        changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            use_counts,
+                        );
                     }
                 }
-                changed |= collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), use_counts);
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    use_counts,
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), use_counts);
-                changed |= collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), use_counts);
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    use_counts,
+                );
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    use_counts,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |=
-                        collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), use_counts);
+                    changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        use_counts,
+                    );
                 }
-                changed |= collapse_adjacent_pure_copy_into_if_with_counts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), use_counts);
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    use_counts,
+                );
             }
             _ => {}
         }
@@ -293,37 +338,55 @@ pub fn collapse_temp_self_square_assigns(stmts: &mut Vec<PreHirStmt>) -> bool {
     changed |= collapse_temp_self_square_linear(stmts);
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= collapse_temp_self_square_assigns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
                     if let PreHirStmt::Block(b) = &mut **i {
-                        changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
+                        changed |= collapse_temp_self_square_assigns(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                        );
                     }
                 }
                 if let Some(u) = update {
                     if let PreHirStmt::Block(b) = &mut **u {
-                        changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
+                        changed |= collapse_temp_self_square_assigns(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                        );
                     }
                 }
-                changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= collapse_temp_self_square_assigns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |= collapse_temp_self_square_assigns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                );
+                changed |= collapse_temp_self_square_assigns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= collapse_temp_self_square_assigns(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    );
                 }
-                changed |= collapse_temp_self_square_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |= collapse_temp_self_square_assigns(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                );
             }
             _ => {}
         }
@@ -369,7 +432,10 @@ fn collapse_temp_self_square_linear(stmts: &mut Vec<PreHirStmt>) -> bool {
     changed
 }
 
-fn match_temp_self_square_window(stmts: &[PreHirStmt], i: usize) -> Option<(String, String, NirType)> {
+fn match_temp_self_square_window(
+    stmts: &[PreHirStmt],
+    i: usize,
+) -> Option<(String, String, NirType)> {
     let PreHirStmt::Assign {
         lhs: PreHirLValue::Var(t1),
         rhs: PreHirExpr::Var(a1),
@@ -486,35 +552,57 @@ fn inline_single_use_temps_recursive(
 
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= inline_single_use_temps_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), preserved_temps, use_counts);
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= inline_single_use_temps_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    preserved_temps,
+                    use_counts,
+                );
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
                     if let PreHirStmt::Block(b) = &mut **i {
-                        changed |=
-                            inline_single_use_temps_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b), preserved_temps, use_counts);
+                        changed |= inline_single_use_temps_recursive(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            preserved_temps,
+                            use_counts,
+                        );
                     }
                 }
                 if let Some(u) = update {
                     if let PreHirStmt::Block(b) = &mut **u {
-                        changed |=
-                            inline_single_use_temps_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b), preserved_temps, use_counts);
+                        changed |= inline_single_use_temps_recursive(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            preserved_temps,
+                            use_counts,
+                        );
                     }
                 }
-                changed |= inline_single_use_temps_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), preserved_temps, use_counts);
+                changed |= inline_single_use_temps_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    preserved_temps,
+                    use_counts,
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |=
-                    inline_single_use_temps_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), preserved_temps, use_counts);
-                changed |=
-                    inline_single_use_temps_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), preserved_temps, use_counts);
+                changed |= inline_single_use_temps_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    preserved_temps,
+                    use_counts,
+                );
+                changed |= inline_single_use_temps_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    preserved_temps,
+                    use_counts,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
@@ -524,7 +612,11 @@ fn inline_single_use_temps_recursive(
                         use_counts,
                     );
                 }
-                changed |= inline_single_use_temps_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), preserved_temps, use_counts);
+                changed |= inline_single_use_temps_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    preserved_temps,
+                    use_counts,
+                );
             }
             _ => {}
         }
@@ -664,7 +756,10 @@ fn stmt_allows_forward_scan(stmt: &PreHirStmt) -> bool {
 fn stmt_allows_inline_target(stmt: &PreHirStmt) -> bool {
     matches!(
         stmt,
-        PreHirStmt::Assign { .. } | PreHirStmt::Expr(_) | PreHirStmt::Return(_) | PreHirStmt::If { .. }
+        PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::If { .. }
     )
 }
 
@@ -814,37 +909,63 @@ fn eliminate_dead_temp_assigns_recursive(
 
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), use_counts);
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= eliminate_dead_temp_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    use_counts,
+                );
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
                     if let PreHirStmt::Block(b) = &mut **i {
-                        changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b), use_counts);
+                        changed |= eliminate_dead_temp_assigns_recursive(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            use_counts,
+                        );
                     }
                 }
                 if let Some(u) = update {
                     if let PreHirStmt::Block(b) = &mut **u {
-                        changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b), use_counts);
+                        changed |= eliminate_dead_temp_assigns_recursive(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            use_counts,
+                        );
                     }
                 }
-                changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), use_counts);
+                changed |= eliminate_dead_temp_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    use_counts,
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), use_counts);
-                changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), use_counts);
+                changed |= eliminate_dead_temp_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    use_counts,
+                );
+                changed |= eliminate_dead_temp_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    use_counts,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), use_counts);
+                    changed |= eliminate_dead_temp_assigns_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        use_counts,
+                    );
                 }
-                changed |= eliminate_dead_temp_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), use_counts);
+                changed |= eliminate_dead_temp_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    use_counts,
+                );
             }
             _ => {}
         }
@@ -907,37 +1028,58 @@ fn eliminate_redundant_var_assigns_recursive(stmts: &mut Vec<PreHirStmt>) -> boo
 
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= eliminate_redundant_var_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
                     if let PreHirStmt::Block(b) = &mut **i {
-                        changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
+                        changed |=
+                            eliminate_redundant_var_assigns_recursive(
+                                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            );
                     }
                 }
                 if let Some(u) = update {
                     if let PreHirStmt::Block(b) = &mut **u {
-                        changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
+                        changed |=
+                            eliminate_redundant_var_assigns_recursive(
+                                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            );
                     }
                 }
-                changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= eliminate_redundant_var_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |= eliminate_redundant_var_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                );
+                changed |= eliminate_redundant_var_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |=
+                        eliminate_redundant_var_assigns_recursive(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        );
                 }
-                changed |= eliminate_redundant_var_assigns_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |= eliminate_redundant_var_assigns_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                );
             }
             _ => {}
         }
@@ -1010,21 +1152,32 @@ pub fn hoist_param_alias_copies_before_first_use(stmts: &mut Vec<PreHirStmt>) ->
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= hoist_param_alias_copies_before_first_use(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= hoist_param_alias_copies_before_first_use(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= hoist_param_alias_copies_before_first_use(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= hoist_param_alias_copies_before_first_use(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |= hoist_param_alias_copies_before_first_use(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                );
+                changed |= hoist_param_alias_copies_before_first_use(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= hoist_param_alias_copies_before_first_use(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |=
+                        hoist_param_alias_copies_before_first_use(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        );
                 }
-                changed |= hoist_param_alias_copies_before_first_use(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |= hoist_param_alias_copies_before_first_use(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                );
             }
             _ => {}
         }
@@ -1043,7 +1196,9 @@ fn first_top_level_use_index_of_var(stmts: &[PreHirStmt], name: &str) -> Option<
 
 fn stmt_uses_var(stmt: &PreHirStmt, name: &str) -> bool {
     match stmt {
-        PreHirStmt::Assign { lhs, rhs } => lvalue_uses_var(lhs, name) || expr_mentions_var(rhs, name),
+        PreHirStmt::Assign { lhs, rhs } => {
+            lvalue_uses_var(lhs, name) || expr_mentions_var(rhs, name)
+        }
         PreHirStmt::Expr(expr)
         | PreHirStmt::Return(Some(expr))
         | PreHirStmt::VaStart { va_list: expr, .. } => expr_mentions_var(expr, name),
@@ -1056,9 +1211,9 @@ fn stmt_uses_var(stmt: &PreHirStmt, name: &str) -> bool {
                 || then_body.iter().any(|s| stmt_uses_var(s, name))
                 || else_body.iter().any(|s| stmt_uses_var(s, name))
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            body.iter().any(|s| stmt_uses_var(s, name))
-        }
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => body.iter().any(|s| stmt_uses_var(s, name)),
         PreHirStmt::For {
             init,
             cond,
@@ -1253,8 +1408,18 @@ pub fn prune_unused_temp_bindings(func: &mut PreHirFunction) -> bool {
     let use_map = DefUseMap::build(&func.body);
     let mut changed = false;
     func.locals.retain(|binding| {
-        let used = use_map.use_count.get(binding.name.as_str()).copied().unwrap_or(0) > 0;
-        let written = use_map.def_count.get(binding.name.as_str()).copied().unwrap_or(0) > 0;
+        let used = use_map
+            .use_count
+            .get(binding.name.as_str())
+            .copied()
+            .unwrap_or(0)
+            > 0;
+        let written = use_map
+            .def_count
+            .get(binding.name.as_str())
+            .copied()
+            .unwrap_or(0)
+            > 0;
         let initializer_has_side_effects = binding
             .initializer
             .as_ref()
@@ -1383,7 +1548,12 @@ pub fn prune_unused_dead_local_bindings(func: &mut PreHirFunction) -> bool {
             || param_names.contains(binding.name.as_str())
             || binding.name.starts_with("slot_")
             || matches!(binding.ty, NirType::Aggregate { .. })
-            || use_map.use_count.get(binding.name.as_str()).copied().unwrap_or(0) > 0
+            || use_map
+                .use_count
+                .get(binding.name.as_str())
+                .copied()
+                .unwrap_or(0)
+                > 0
             || binding
                 .initializer
                 .as_ref()
@@ -1415,19 +1585,14 @@ fn stmt_defines_var(stmt: &PreHirStmt, name: &str) -> bool {
             ..
         } => stmt_list_defines_var(then_body, name) || stmt_list_defines_var(else_body, name),
         PreHirStmt::For {
-            init,
-            update,
-            body,
-            ..
+            init, update, body, ..
         } => {
             init.as_ref().is_some_and(|s| stmt_defines_var(s, name))
                 || update.as_ref().is_some_and(|s| stmt_defines_var(s, name))
                 || stmt_list_defines_var(body, name)
         }
         PreHirStmt::Switch { cases, default, .. } => {
-            cases
-                .iter()
-                .any(|c| stmt_list_defines_var(&c.body, name))
+            cases.iter().any(|c| stmt_list_defines_var(&c.body, name))
                 || stmt_list_defines_var(default, name)
         }
         _ => false,
@@ -1779,26 +1944,54 @@ fn collect_assigned_names(stmt: &PreHirStmt) -> Vec<String> {
 fn elide_popcount_in_stmts(stmts: &mut Vec<PreHirStmt>, use_map: &DefUseMap, changed: &mut bool) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) => elide_popcount_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), use_map, changed),
+            PreHirStmt::Block(body) => elide_popcount_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                use_map,
+                changed,
+            ),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                elide_popcount_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), use_map, changed);
-                elide_popcount_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), use_map, changed);
+                elide_popcount_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    use_map,
+                    changed,
+                );
+                elide_popcount_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    use_map,
+                    changed,
+                );
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                elide_popcount_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), use_map, changed);
+                elide_popcount_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    use_map,
+                    changed,
+                );
             }
             PreHirStmt::For { body, .. } => {
-                elide_popcount_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), use_map, changed);
+                elide_popcount_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    use_map,
+                    changed,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    elide_popcount_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), use_map, changed);
+                    elide_popcount_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        use_map,
+                        changed,
+                    );
                 }
-                elide_popcount_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), use_map, changed);
+                elide_popcount_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    use_map,
+                    changed,
+                );
             }
             _ => {}
         }

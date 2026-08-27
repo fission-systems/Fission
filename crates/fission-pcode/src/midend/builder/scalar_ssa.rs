@@ -1149,7 +1149,8 @@ fn is_call_return_address_scaffold_sub(
         return false;
     };
     let op_index = site.op as usize;
-    let (Some(store), Some(call)) = (block.ops.get(op_index + 1), block.ops.get(op_index + 2)) else {
+    let (Some(store), Some(call)) = (block.ops.get(op_index + 1), block.ops.get(op_index + 2))
+    else {
         return false;
     };
     if store.opcode != PcodeOpcode::Store
@@ -1417,12 +1418,26 @@ fn compute_escaping_stack_storages(
             match op.opcode {
                 PcodeOpcode::Store if op.inputs.len() >= 2 => {
                     let value_index = op.inputs.len() - 1;
-                    mark_escaping_input(pcode, ssa, options, layout, site, value_index, &mut escaping);
+                    mark_escaping_input(
+                        pcode,
+                        ssa,
+                        options,
+                        layout,
+                        site,
+                        value_index,
+                        &mut escaping,
+                    );
                 }
                 PcodeOpcode::Return => {
                     for input_index in 0..op.inputs.len() {
                         mark_escaping_input(
-                            pcode, ssa, options, layout, site, input_index, &mut escaping,
+                            pcode,
+                            ssa,
+                            options,
+                            layout,
+                            site,
+                            input_index,
+                            &mut escaping,
                         );
                     }
                 }
@@ -2101,11 +2116,7 @@ fn union_values_with_covers(
     // cached group cover into it (see `groups_interfere`'s doc comment for
     // why this avoids re-scanning every value on each interference check).
     let (before, after) = group_covers.split_at_mut(maximum);
-    let merged = merge_covers(
-        before[minimum]
-            .drain(..)
-            .chain(after[0].drain(..)),
-    );
+    let merged = merge_covers(before[minimum].drain(..).chain(after[0].drain(..)));
     before[minimum] = merged;
 }
 
@@ -2184,8 +2195,7 @@ fn build_memory_out_of_ssa_facts(
     }
 
     let mut high_variables = Vec::with_capacity(member_groups.len());
-    let mut value_high_variables =
-        vec![SsaMemoryHighVariableId(0); ssa.memory_values.len()];
+    let mut value_high_variables = vec![SsaMemoryHighVariableId(0); ssa.memory_values.len()];
     for (id, members) in member_groups.into_values().enumerate() {
         let hv_id = SsaMemoryHighVariableId(id as u32);
         let cover = merge_covers(
@@ -3161,20 +3171,17 @@ mod tests {
             ..MlilPreviewOptions::default()
         };
 
-        let ssa = build_scalar_ssa_with_context(
-            &pcode,
-            &successors,
-            &predecessors,
-            &options,
-            None,
-        );
+        let ssa = build_scalar_ssa_with_context(&pcode, &successors, &predecessors, &options, None);
         let load_site = SsaOpSite { block: 0, op: 6 };
         let guard = &ssa.dynamic_guards[&load_site];
         assert_eq!(guard.region, Some(SsaMemoryRegion::Stack));
         assert_eq!(guard.precision, SsaGuardRangePrecision::Exact);
         assert_eq!(guard.minimum_offset, 8);
         assert_eq!(guard.maximum_offset_exclusive, Some(16));
-        assert!(!ssa.dynamic_guards.contains_key(&SsaOpSite { block: 0, op: 3 }));
+        assert!(
+            !ssa.dynamic_guards
+                .contains_key(&SsaOpSite { block: 0, op: 3 })
+        );
     }
 
     #[test]
@@ -3639,7 +3646,8 @@ mod tests {
         let store = ssa.memory_operation_outputs[&SsaOpSite { block: 0, op: 1 }][0].value;
         let load = ssa.memory_operation_inputs[&SsaOpSite { block: 0, op: 3 }][0].value;
         assert!(
-            !ssa.memory_operation_outputs.contains_key(&SsaOpSite { block: 0, op: 2 }),
+            !ssa.memory_operation_outputs
+                .contains_key(&SsaOpSite { block: 0, op: 2 }),
             "unknown call must not fabricate a write to a non-escaping local"
         );
         assert_eq!(store, load);

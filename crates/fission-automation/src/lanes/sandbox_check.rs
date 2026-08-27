@@ -2,7 +2,7 @@
 //! and gate on unimplemented-opcode budget.
 
 use crate::inventory::ensure_fission_cli;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -206,7 +206,10 @@ pub fn run(args: SandboxCheckArgs) -> Result<()> {
     } else {
         (
             "stop_sandbox_budget".to_string(),
-            format!("{failed}/{total} sandbox fixtures failed", total = rows.len()),
+            format!(
+                "{failed}/{total} sandbox fixtures failed",
+                total = rows.len()
+            ),
         )
     };
 
@@ -222,8 +225,7 @@ pub fn run(args: SandboxCheckArgs) -> Result<()> {
 
     let summary_path = out_dir.join("summary.json");
     let json = serde_json::to_string_pretty(&summary).context("serialize sandbox summary")?;
-    fs::write(&summary_path, &json)
-        .with_context(|| format!("write {}", summary_path.display()))?;
+    fs::write(&summary_path, &json).with_context(|| format!("write {}", summary_path.display()))?;
 
     println!("sandbox-check: {decision} — {rationale}");
     println!("artifacts: {}", out_dir.display());

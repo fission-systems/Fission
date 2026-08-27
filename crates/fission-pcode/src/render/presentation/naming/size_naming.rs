@@ -9,8 +9,8 @@
 //! handful of entries.
 
 use super::super::{HirExpr, HirFunction, HirStmt};
-use super::util::as_var;
 use super::Candidate;
+use super::util::as_var;
 use std::collections::HashMap;
 
 pub(super) const PRIORITY: u32 = 70; // after pointer naming

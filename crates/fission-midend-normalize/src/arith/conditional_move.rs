@@ -1,8 +1,8 @@
+use crate::HashMap;
 use crate::analysis::defuse::DefUseMap;
 use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
-use crate::HashMap;
 
 pub fn apply_conditional_move_pass(func: &mut PreHirFunction) -> bool {
     let mut type_map = HashMap::default();
@@ -34,8 +34,14 @@ fn rewrite_stmts(
     // Step 1: Recursively simplify nested blocks first
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, use_counts);
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    type_map,
+                    use_counts,
+                );
             }
             PreHirStmt::For {
                 init, update, body, ..
@@ -46,21 +52,41 @@ fn rewrite_stmts(
                 if let Some(update_stmt) = update {
                     changed |= rewrite_stmt_nested(update_stmt.as_mut(), type_map, use_counts);
                 }
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, use_counts);
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    type_map,
+                    use_counts,
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), type_map, use_counts);
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), type_map, use_counts);
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    type_map,
+                    use_counts,
+                );
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    type_map,
+                    use_counts,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), type_map, use_counts);
+                    changed |= rewrite_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        type_map,
+                        use_counts,
+                    );
                 }
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), type_map, use_counts);
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    type_map,
+                    use_counts,
+                );
             }
             _ => {}
         }
@@ -253,8 +279,14 @@ fn rewrite_stmt_nested(
 ) -> bool {
     let mut changed = false;
     match stmt {
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, use_counts);
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
+            changed |= rewrite_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                type_map,
+                use_counts,
+            );
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -265,7 +297,11 @@ fn rewrite_stmt_nested(
             if let Some(update_stmt) = update {
                 changed |= rewrite_stmt_nested(update_stmt.as_mut(), type_map, use_counts);
             }
-            changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, use_counts);
+            changed |= rewrite_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                type_map,
+                use_counts,
+            );
         }
         PreHirStmt::If {
             cond,
@@ -294,15 +330,31 @@ fn rewrite_stmt_nested(
                 };
                 changed = true;
             } else {
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), type_map, use_counts);
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), type_map, use_counts);
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    type_map,
+                    use_counts,
+                );
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    type_map,
+                    use_counts,
+                );
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), type_map, use_counts);
+                changed |= rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    type_map,
+                    use_counts,
+                );
             }
-            changed |= rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), type_map, use_counts);
+            changed |= rewrite_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                type_map,
+                use_counts,
+            );
         }
         _ => {}
     }

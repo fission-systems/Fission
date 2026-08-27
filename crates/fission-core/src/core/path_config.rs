@@ -94,7 +94,10 @@ const GCC_FID_FILES_X86: &[&str] = &["gcc-x86.LE.32.default.fidbf", "gcc-ARM.LE.
 /// function until a real sample-set gcc/glibc-linked ELF (bin_000.elf)
 /// showed Fission resolving under half the call sites Ghidra resolved for
 /// the identical function, entirely because this database was never tried.
-const LIBC_FID_FILES_X64: &[&str] = &["libc-x86.LE.64.default.fidbf", "libc-AARCH64.LE.64.v8A.fidbf"];
+const LIBC_FID_FILES_X64: &[&str] = &[
+    "libc-x86.LE.64.default.fidbf",
+    "libc-AARCH64.LE.64.v8A.fidbf",
+];
 
 const LIBC_FID_FILES_X86: &[&str] = &["libc-x86.LE.32.default.fidbf", "libc-ARM.LE.32.v8.fidbf"];
 
@@ -113,23 +116,47 @@ const LIBC_FID_FILES_X86: &[&str] = &["libc-x86.LE.32.default.fidbf", "libc-ARM.
 fn non_x86_fid_files(processor: &str, is_64bit: bool) -> Option<(&'static str, &'static str)> {
     let p = processor.to_ascii_lowercase();
     if p.contains("aarch64") || (p.contains("arm") && is_64bit) {
-        Some(("gcc-AARCH64.LE.64.v8A.fidbf", "libc-AARCH64.LE.64.v8A.fidbf"))
+        Some((
+            "gcc-AARCH64.LE.64.v8A.fidbf",
+            "libc-AARCH64.LE.64.v8A.fidbf",
+        ))
     } else if p.contains("arm") {
         Some(("gcc-ARM.LE.32.v8.fidbf", "libc-ARM.LE.32.v8.fidbf"))
     } else if p.contains("mips") {
-        Some(("gcc-MIPS.BE.32.default.fidbf", "libc-MIPS.LE.32.default.fidbf"))
+        Some((
+            "gcc-MIPS.BE.32.default.fidbf",
+            "libc-MIPS.LE.32.default.fidbf",
+        ))
     } else if p.contains("powerpc") || p.contains("ppc") {
-        Some(("gcc-PowerPC.BE.32.default.fidbf", "libc-PowerPC.BE.32.default.fidbf"))
+        Some((
+            "gcc-PowerPC.BE.32.default.fidbf",
+            "libc-PowerPC.BE.32.default.fidbf",
+        ))
     } else if p.contains("sparc") {
-        Some(("gcc-sparc.BE.64.default.fidbf", "libc-sparc.BE.32.default.fidbf"))
+        Some((
+            "gcc-sparc.BE.64.default.fidbf",
+            "libc-sparc.BE.32.default.fidbf",
+        ))
     } else if p.contains("superh") || p.contains("sh4") {
-        Some(("gcc-SuperH4.BE.32.default.fidbf", "libc-SuperH4.LE.32.default.fidbf"))
+        Some((
+            "gcc-SuperH4.BE.32.default.fidbf",
+            "libc-SuperH4.LE.32.default.fidbf",
+        ))
     } else if p.contains("avr") {
-        Some(("gcc-avr8.LE.16.extended.fidbf", "libc-avr8.LE.16.extended.fidbf"))
+        Some((
+            "gcc-avr8.LE.16.extended.fidbf",
+            "libc-avr8.LE.16.extended.fidbf",
+        ))
     } else if p.contains("pa-risc") || p.contains("parisc") {
-        Some(("gcc-pa-risc.BE.32.default.fidbf", "libc-pa-risc.BE.32.default.fidbf"))
+        Some((
+            "gcc-pa-risc.BE.32.default.fidbf",
+            "libc-pa-risc.BE.32.default.fidbf",
+        ))
     } else if p.contains("68000") || p.contains("coldfire") || p.contains("m68k") {
-        Some(("gcc-68000.BE.32.Coldfire.fidbf", "libc-68000.BE.32.Coldfire.fidbf"))
+        Some((
+            "gcc-68000.BE.32.Coldfire.fidbf",
+            "libc-68000.BE.32.Coldfire.fidbf",
+        ))
     } else {
         None
     }
@@ -438,7 +465,9 @@ impl PathConfig {
 
     /// `generic_clib_signatures.txt` (pipe-separated generic C library signatures), if present.
     pub fn get_generic_clib_signatures_path(&self) -> Option<PathBuf> {
-        if let Some(path) = self.signature_table_path("generic_clib_signatures.txt", "typeinfo/generic") {
+        if let Some(path) =
+            self.signature_table_path("generic_clib_signatures.txt", "typeinfo/generic")
+        {
             return Some(path);
         }
         let filename = "generic_clib_signatures.txt";
@@ -467,7 +496,9 @@ impl PathConfig {
 
     /// `generic_clib_64_signatures.txt` (x86-64 generic C library signatures), if present.
     pub fn get_generic_clib_64_signatures_path(&self) -> Option<PathBuf> {
-        if let Some(path) = self.signature_table_path("generic_clib_64_signatures.txt", "typeinfo/generic") {
+        if let Some(path) =
+            self.signature_table_path("generic_clib_64_signatures.txt", "typeinfo/generic")
+        {
             return Some(path);
         }
         let filename = "generic_clib_64_signatures.txt";
@@ -490,7 +521,8 @@ impl PathConfig {
 
     /// `mac_osx_signatures.txt` (macOS API signatures), if present.
     pub fn get_mac_osx_signatures_path(&self) -> Option<PathBuf> {
-        if let Some(path) = self.signature_table_path("mac_osx_signatures.txt", "typeinfo/mac_10.9") {
+        if let Some(path) = self.signature_table_path("mac_osx_signatures.txt", "typeinfo/mac_10.9")
+        {
             return Some(path);
         }
         let filename = "mac_osx_signatures.txt";
@@ -586,20 +618,23 @@ impl PathConfig {
     }
 
     fn get_typeinfo_json_path_in(&self, subdir: &str, filename: &str) -> Option<PathBuf> {
-        self.signatures_base.as_ref().and_then(|base| {
-            let path = base.join("typeinfo").join(subdir).join(filename);
-            path.exists().then_some(path)
-        }).or_else(|| {
-            self.workspace_root.as_ref().and_then(|root| {
-                let path = root
-                    .join("utils")
-                    .join("signatures")
-                    .join("typeinfo")
-                    .join(subdir)
-                    .join(filename);
+        self.signatures_base
+            .as_ref()
+            .and_then(|base| {
+                let path = base.join("typeinfo").join(subdir).join(filename);
                 path.exists().then_some(path)
             })
-        })
+            .or_else(|| {
+                self.workspace_root.as_ref().and_then(|root| {
+                    let path = root
+                        .join("utils")
+                        .join("signatures")
+                        .join("typeinfo")
+                        .join(subdir)
+                        .join(filename);
+                    path.exists().then_some(path)
+                })
+            })
     }
 
     /// Detect It Easy `.sg` mirror root (`detect-it-easy/`), if present.
@@ -752,9 +787,15 @@ impl PathConfig {
 
         if compiler.contains("gcc") || compiler.contains("mingw") {
             let (gcc, libc): (Option<&str>, Option<&str>) = if is_64bit {
-                (GCC_FID_FILES_X64.first().copied(), LIBC_FID_FILES_X64.first().copied())
+                (
+                    GCC_FID_FILES_X64.first().copied(),
+                    LIBC_FID_FILES_X64.first().copied(),
+                )
             } else {
-                (GCC_FID_FILES_X86.first().copied(), LIBC_FID_FILES_X86.first().copied())
+                (
+                    GCC_FID_FILES_X86.first().copied(),
+                    LIBC_FID_FILES_X86.first().copied(),
+                )
             };
             // The glibc FID database only matches statically-linked
             // *glibc* code; MinGW targets link a different C runtime
@@ -773,9 +814,17 @@ impl PathConfig {
 
         if compiler.contains("clang") && !is_pe {
             let primary = if is_64bit {
-                GCC_FID_FILES_X64.first().copied().into_iter().chain(LIBC_FID_FILES_X64.first().copied())
+                GCC_FID_FILES_X64
+                    .first()
+                    .copied()
+                    .into_iter()
+                    .chain(LIBC_FID_FILES_X64.first().copied())
             } else {
-                GCC_FID_FILES_X86.first().copied().into_iter().chain(LIBC_FID_FILES_X86.first().copied())
+                GCC_FID_FILES_X86
+                    .first()
+                    .copied()
+                    .into_iter()
+                    .chain(LIBC_FID_FILES_X86.first().copied())
             };
             return primary
                 .into_iter()
@@ -1081,11 +1130,14 @@ impl PathConfig {
 
     /// Get gate policy configuration path
     pub fn get_gate_policy_path(&self) -> Option<PathBuf> {
-        self.workspace_root.as_ref().map(|root| {
-            root.join("benchmark")
-                .join("config")
-                .join("gate_policy.toml")
-        }).filter(|p| p.exists())
+        self.workspace_root
+            .as_ref()
+            .map(|root| {
+                root.join("benchmark")
+                    .join("config")
+                    .join("gate_policy.toml")
+            })
+            .filter(|p| p.exists())
     }
 
     /// Check if paths are properly configured
@@ -1177,7 +1229,10 @@ mod tests {
         ] {
             let found = config.get_library_fid_paths(true, name);
             if expect_hit {
-                assert!(!found.is_empty(), "expected at least one FID path for {name}");
+                assert!(
+                    !found.is_empty(),
+                    "expected at least one FID path for {name}"
+                );
             } else {
                 assert!(found.is_empty(), "expected no FID path for {name}");
             }
@@ -1225,7 +1280,8 @@ mod tests {
     fn preferred_fid_paths_select_arm_databases_for_arm_processor() {
         let config = PathConfig::detect();
 
-        let arm32_paths = config.get_preferred_fid_paths(false, Some("ELF"), Some("gcc"), Some("ARM"));
+        let arm32_paths =
+            config.get_preferred_fid_paths(false, Some("ELF"), Some("gcc"), Some("ARM"));
         assert!(
             arm32_paths.iter().any(|p| p
                 .file_name()
@@ -1234,7 +1290,8 @@ mod tests {
             "32-bit ARM should select the ARM (not x86) FID databases, got {arm32_paths:?}"
         );
 
-        let aarch64_paths = config.get_preferred_fid_paths(true, Some("ELF"), Some("gcc"), Some("AArch64"));
+        let aarch64_paths =
+            config.get_preferred_fid_paths(true, Some("ELF"), Some("gcc"), Some("AArch64"));
         assert!(
             aarch64_paths.iter().any(|p| p
                 .file_name()

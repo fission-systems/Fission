@@ -3,8 +3,11 @@
 //! P-code opcode triviality checks remain host residual; this owner assembles
 //! the multiblock HIR body from host lowering primitives.
 
+use crate::HashSet;
 use crate::cleanup::{cleanup_redundant_labels_protecting, finalize_structured_body};
-use crate::guarded_tail::{discover_guarded_tail_candidates, promote_guarded_tail_regions_until_stable};
+use crate::guarded_tail::{
+    discover_guarded_tail_candidates, promote_guarded_tail_regions_until_stable,
+};
 use crate::helpers::{block_label, recovered_switch_case_values};
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator};
@@ -12,7 +15,6 @@ use crate::regions::EmitReadyDecision;
 use crate::switch::{SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch};
 use fission_midend_core::ir::{DispatcherProofUnit, MlilPreviewError};
 use fission_midend_prehir::{PreHirExpr, PreHirStmt, PreHirSwitchCase};
-use crate::HashSet;
 
 /// Admit switch-chain recovery from CFG shape alone (no p-code opcodes).
 pub fn switch_recovery_cfg_admitted(host: &impl StructuringHost, start_idx: usize) -> bool {
@@ -208,7 +210,8 @@ pub fn build_linear_multiblock_body(
                 true_target,
                 false_target,
             } => {
-                let then_body = if let Some(true_idx) = host.find_block_index_by_address(true_target)
+                let then_body = if let Some(true_idx) =
+                    host.find_block_index_by_address(true_target)
                     && let Some(expr) =
                         host.lower_return_join_expr_for_predecessor(idx, true_idx)?
                 {

@@ -1,15 +1,15 @@
 //! SESE region discovery and hierarchical structuring (ADR 0012 free owner).
 
+use crate::HashMap;
+use crate::HashSet;
 use crate::cfg_analysis::util::compute_rpo;
 use crate::cfg_analysis::{DomTree, PostDomTree};
 use crate::host::StructuringHost;
 use crate::linear_recovery::build_linear_sese_child_fallback;
 use crate::regions::{RegionKind, RegionProof};
 use crate::sese_driver::build_sese_region_body;
-use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_prehir::{PreHirStmt};
-use crate::HashMap;
-use crate::HashSet;
+use fission_midend_core::ir::MlilPreviewError;
+use fission_midend_prehir::PreHirStmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeseRegion {
@@ -268,7 +268,10 @@ pub fn sese_structure_region(
 
     match build_sese_region_body(host, region.entry, region.exit, child_map) {
         Ok((body, achieved_exit, extra_members)) => {
-            results.insert((region.entry, region.exit), (body, achieved_exit, extra_members));
+            results.insert(
+                (region.entry, region.exit),
+                (body, achieved_exit, extra_members),
+            );
             Ok(())
         }
         Err(err) if is_root => Err(err),
@@ -410,11 +413,19 @@ mod tests {
         child_map.insert(0, (Vec::new(), 3, owner));
         child_map.insert(
             2,
-            (Vec::new(), 5, RegionProof::structured(RegionKind::Sequence, 2, 5, None)),
+            (
+                Vec::new(),
+                5,
+                RegionProof::structured(RegionKind::Sequence, 2, 5, None),
+            ),
         );
         child_map.insert(
             4,
-            (Vec::new(), 6, RegionProof::structured(RegionKind::Sequence, 4, 6, None)),
+            (
+                Vec::new(),
+                6,
+                RegionProof::structured(RegionKind::Sequence, 4, 6, None),
+            ),
         );
 
         prune_children_overlapping_non_contiguous_owner(&mut child_map);

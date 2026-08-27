@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use fission_sleigh::compiler::sla::{PackedElement, PackedParser, load_compiled_sla, sla_format};
+use fission_sleigh::compiler::sla::{load_compiled_sla, sla_format, PackedElement, PackedParser};
 
 fn main() {
     let root_dir = Path::new(env!("CARGO_MANIFEST_DIR"))

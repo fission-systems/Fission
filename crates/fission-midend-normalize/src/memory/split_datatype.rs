@@ -33,12 +33,14 @@ fn recurse_split_stmt(stmt: &mut PreHirStmt) -> bool {
         } => {
             if let Some(init) = init {
                 if let PreHirStmt::Block(body) = init.as_mut() {
-                    changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                    changed |=
+                        split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
             }
             if let Some(update) = update {
                 if let PreHirStmt::Block(body) = update.as_mut() {
-                    changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                    changed |=
+                        split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
             }
             changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
@@ -53,7 +55,9 @@ fn recurse_split_stmt(stmt: &mut PreHirStmt) -> bool {
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                    &mut case.body,
+                ));
             }
             changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
         }

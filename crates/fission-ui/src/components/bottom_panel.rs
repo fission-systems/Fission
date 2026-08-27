@@ -11,7 +11,11 @@ pub fn BottomPanel() -> Element {
     let active_tab = state.read().active_bottom_tab.clone();
 
     let tab_cls = |t: &BottomTab| -> &'static str {
-        if *t == active_tab { "bottom-tab is-active" } else { "bottom-tab" }
+        if *t == active_tab {
+            "bottom-tab is-active"
+        } else {
+            "bottom-tab"
+        }
     };
 
     rsx! {

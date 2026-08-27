@@ -26,7 +26,11 @@ fn main() {
         collect(&root.join(child), &mut sg_files);
     }
     sg_files.sort();
-    eprintln!("found {} .sg files under {}", sg_files.len(), root.display());
+    eprintln!(
+        "found {} .sg files under {}",
+        sg_files.len(),
+        root.display()
+    );
 
     let mut records: Vec<String> = Vec::new();
     let mut skipped = 0usize;

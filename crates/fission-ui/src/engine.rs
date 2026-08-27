@@ -21,16 +21,16 @@ use std::sync::Arc;
 use crate::state::BinaryString;
 
 pub struct LoadResult {
-    pub binary:     Option<Arc<LoadedBinary>>,
-    pub functions:  Vec<FunctionInfo>,
-    pub summary:    String,
+    pub binary: Option<Arc<LoadedBinary>>,
+    pub functions: Vec<FunctionInfo>,
+    pub summary: String,
     pub session_id: Option<String>,
-    pub strings:    Vec<BinaryString>,
+    pub strings: Vec<BinaryString>,
     /// `true` on WASM when the server is still running CFG-based function
     /// discovery in the background — `functions` is loader-symbols-only
     /// until a follow-up `poll_functions` call reports `false`. Always
     /// `false` on native (analysis is synchronous there).
-    pub analyzing:  bool,
+    pub analyzing: bool,
 }
 
 /// CFG edge classification for the GUI renderer.
@@ -47,36 +47,38 @@ pub enum CfgEdgeKind {
 impl CfgEdgeKind {
     pub fn svg_color(&self) -> &'static str {
         match self {
-            Self::ConditionalTrue  => "#4ec97b",
+            Self::ConditionalTrue => "#4ec97b",
             Self::ConditionalFalse => "#f47067",
-            Self::Unconditional    => "#8d97a5",
-            Self::Fallthrough      => "#6b7785",
-            Self::Return           => "#c099ff",
-            Self::Indirect         => "#ffb347",
+            Self::Unconditional => "#8d97a5",
+            Self::Fallthrough => "#6b7785",
+            Self::Return => "#c099ff",
+            Self::Indirect => "#ffb347",
         }
     }
     pub fn label(&self) -> &'static str {
         match self {
-            Self::ConditionalTrue  => "T",
+            Self::ConditionalTrue => "T",
             Self::ConditionalFalse => "F",
-            Self::Return           => "ret",
-            Self::Indirect         => "ind",
-            _                      => "",
+            Self::Return => "ret",
+            Self::Indirect => "ind",
+            _ => "",
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CfgNodeData {
-    pub index:    usize,
-    pub address:  u64,
+    pub index: usize,
+    pub address: u64,
     pub op_count: usize,
     pub is_entry: bool,
-    pub is_exit:  bool,
+    pub is_exit: bool,
 }
 
 impl CfgNodeData {
-    pub fn label(&self) -> String { format!("0x{:x}", self.address) }
+    pub fn label(&self) -> String {
+        format!("0x{:x}", self.address)
+    }
     pub fn node_height(&self) -> f64 {
         (36.0 + (self.op_count as f64).min(8.0) * 4.5).min(72.0)
     }
@@ -84,19 +86,19 @@ impl CfgNodeData {
 
 #[derive(Debug, Clone)]
 pub struct CfgEdgeData {
-    pub from:    usize,
-    pub to:      usize,
-    pub kind:    CfgEdgeKind,
+    pub from: usize,
+    pub to: usize,
+    pub kind: CfgEdgeKind,
     pub is_back: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct CfgGraphData {
-    pub nodes:       Vec<CfgNodeData>,
-    pub edges:       Vec<CfgEdgeData>,
-    pub cyclomatic:  usize,
+    pub nodes: Vec<CfgNodeData>,
+    pub edges: Vec<CfgEdgeData>,
+    pub cyclomatic: usize,
     pub block_count: usize,
-    pub edge_count:  usize,
+    pub edge_count: usize,
 }
 
 /// Build CfgGraphData from native decompile evidence (native only).
@@ -106,29 +108,39 @@ impl CfgGraphData {
         evidence: &fission_decompiler::RustSleighPipelineEvidence,
     ) -> Option<Self> {
         let blocks = &evidence.raw_pcode_blocks;
-        if blocks.is_empty() { return None; }
+        if blocks.is_empty() {
+            return None;
+        }
         let n = blocks.len();
 
-        let mut visited  = vec![false; n];
+        let mut visited = vec![false; n];
         let mut in_stack = vec![false; n];
         let mut back_set = std::collections::HashSet::new();
 
-        let adj: Vec<Vec<usize>> = blocks.iter().map(|b| {
-            b.successors.iter().map(|&s| s as usize).filter(|&s| s < n).collect()
-        }).collect();
+        let adj: Vec<Vec<usize>> = blocks
+            .iter()
+            .map(|b| {
+                b.successors
+                    .iter()
+                    .map(|&s| s as usize)
+                    .filter(|&s| s < n)
+                    .collect()
+            })
+            .collect();
 
         let mut stack: Vec<(usize, usize)> = vec![(0, 0)];
-        visited[0]  = true;
+        visited[0] = true;
         in_stack[0] = true;
 
         while let Some((u, ci)) = stack.last_mut() {
             let u = *u;
             if *ci < adj[u].len() {
-                let v = adj[u][*ci]; *ci += 1;
+                let v = adj[u][*ci];
+                *ci += 1;
                 if in_stack[v] {
                     back_set.insert((u, v));
                 } else if !visited[v] {
-                    visited[v]  = true;
+                    visited[v] = true;
                     in_stack[v] = true;
                     stack.push((v, 0));
                 }
@@ -138,62 +150,96 @@ impl CfgGraphData {
             }
         }
 
-        let nodes: Vec<CfgNodeData> = blocks.iter().enumerate().map(|(i, b)| {
-            let is_exit = b.terminal_opcode.as_deref()
-                .map_or(false, |op| op.contains("Return") || op.contains("BranchInd"));
-            CfgNodeData { index: i, address: b.start_address, op_count: b.op_count,
-                          is_entry: i == 0, is_exit }
-        }).collect();
+        let nodes: Vec<CfgNodeData> = blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let is_exit = b.terminal_opcode.as_deref().map_or(false, |op| {
+                    op.contains("Return") || op.contains("BranchInd")
+                });
+                CfgNodeData {
+                    index: i,
+                    address: b.start_address,
+                    op_count: b.op_count,
+                    is_entry: i == 0,
+                    is_exit,
+                }
+            })
+            .collect();
 
         let mut edges = Vec::new();
         for (i, block) in blocks.iter().enumerate() {
-            let term       = block.terminal_opcode.as_deref();
+            let term = block.terminal_opcode.as_deref();
             let is_cbranch = term.map_or(false, |t| t.contains("CBranch"));
-            let is_branch  = term.map_or(false, |t| t.contains("Branch") && !t.contains("CBranch") && !t.contains("BranchInd"));
-            let is_ret     = term.map_or(false, |t| t.contains("Return"));
-            let is_ind     = term.map_or(false, |t| t.contains("BranchInd"));
-            if is_ret { continue; }
+            let is_branch = term.map_or(false, |t| {
+                t.contains("Branch") && !t.contains("CBranch") && !t.contains("BranchInd")
+            });
+            let is_ret = term.map_or(false, |t| t.contains("Return"));
+            let is_ind = term.map_or(false, |t| t.contains("BranchInd"));
+            if is_ret {
+                continue;
+            }
             for (si, &raw_succ) in block.successors.iter().enumerate() {
                 let to = raw_succ as usize;
-                if to >= n { continue; }
+                if to >= n {
+                    continue;
+                }
                 let kind = if is_cbranch {
-                    if si == 0 { CfgEdgeKind::ConditionalTrue } else { CfgEdgeKind::ConditionalFalse }
-                } else if is_branch { CfgEdgeKind::Unconditional
-                } else if is_ind   { CfgEdgeKind::Indirect
-                } else             { CfgEdgeKind::Fallthrough };
-                edges.push(CfgEdgeData { from: i, to, kind, is_back: back_set.contains(&(i, to)) });
+                    if si == 0 {
+                        CfgEdgeKind::ConditionalTrue
+                    } else {
+                        CfgEdgeKind::ConditionalFalse
+                    }
+                } else if is_branch {
+                    CfgEdgeKind::Unconditional
+                } else if is_ind {
+                    CfgEdgeKind::Indirect
+                } else {
+                    CfgEdgeKind::Fallthrough
+                };
+                edges.push(CfgEdgeData {
+                    from: i,
+                    to,
+                    kind,
+                    is_back: back_set.contains(&(i, to)),
+                });
             }
         }
         let e = edges.len();
-        Some(CfgGraphData { nodes, edges, cyclomatic: e.saturating_sub(n) + 2,
-                            block_count: n, edge_count: e })
+        Some(CfgGraphData {
+            nodes,
+            edges,
+            cyclomatic: e.saturating_sub(n) + 2,
+            block_count: n,
+            edge_count: e,
+        })
     }
 }
 
 /// Decompile output returned by both native and WASM paths.
 pub struct DecompileOutput {
-    pub code:            String,
-    pub code_nir:        Option<String>,
-    pub fell_back:       bool,
+    pub code: String,
+    pub code_nir: Option<String>,
+    pub fell_back: bool,
     pub fallback_reason: Option<String>,
-    pub cfg:             Option<CfgGraphData>,
+    pub cfg: Option<CfgGraphData>,
 }
 
 /// Lightweight xref row shared by both platforms.
 #[derive(Debug, Clone)]
 pub struct XrefRow {
     pub from_addr: u64,
-    pub to_addr:   Option<u64>,
-    pub kind:      String,
-    pub symbol:    Option<String>,
-    pub fn_name:   Option<String>,
+    pub to_addr: Option<u64>,
+    pub kind: String,
+    pub symbol: Option<String>,
+    pub fn_name: Option<String>,
 }
 
 /// One row in the whole-program call graph browser, shared by both platforms.
 #[derive(Debug, Clone)]
 pub struct CallGraphNode {
-    pub address:      u64,
-    pub name:         String,
+    pub address: u64,
+    pub name: String,
     pub caller_count: usize,
     pub callee_count: usize,
 }
@@ -201,20 +247,20 @@ pub struct CallGraphNode {
 /// One decoded instruction row, shared by both platforms.
 #[derive(Debug, Clone)]
 pub struct InstructionRow {
-    pub address:     u64,
-    pub bytes_hex:   String,
-    pub text:        String,
+    pub address: u64,
+    pub bytes_hex: String,
+    pub text: String,
     pub target_addr: Option<u64>,
 }
 
 /// Minimal batch result (native only, used by Analyse All worker).
 #[derive(Debug, Clone)]
 pub struct BatchResult {
-    pub addr:      u64,
-    pub name:      String,
-    pub ok:        bool,
+    pub addr: u64,
+    pub name: String,
+    pub ok: bool,
     pub fell_back: bool,
-    pub error:     Option<String>,
+    pub error: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,13 +270,16 @@ pub struct BatchResult {
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::*;
-    use fission_decompiler::{RustSleighDecompileConfig, decompile_with_rust_sleigh_with_facts};
+    use fission_decompiler::{decompile_with_rust_sleigh_with_facts, RustSleighDecompileConfig};
     pub use fission_static::analysis::decomp::facts::FactStore;
     use fission_static::analysis::xref_index::{
-        XrefKind, build_xref_index, resolve_enclosing_function,
+        build_xref_index, resolve_enclosing_function, XrefKind,
     };
 
-    pub fn load_binary_from_bytes_blocking(data: Vec<u8>, name: &str) -> Result<LoadResult, String> {
+    pub fn load_binary_from_bytes_blocking(
+        data: Vec<u8>,
+        name: &str,
+    ) -> Result<LoadResult, String> {
         let binary = LoadedBinary::from_bytes(data, name.to_string())
             .map_err(|e| format!("Load failed: {e}"))?;
         let mut functions = binary.functions.clone();
@@ -243,7 +292,14 @@ mod native {
             binary.entry_point,
         );
         let strings = extract_strings_blocking(&binary);
-        Ok(LoadResult { binary: Some(Arc::new(binary)), functions, summary, session_id: None, strings, analyzing: false })
+        Ok(LoadResult {
+            binary: Some(Arc::new(binary)),
+            functions,
+            summary,
+            session_id: None,
+            strings,
+            analyzing: false,
+        })
     }
 
     /// Extract printable strings from a loaded binary.
@@ -254,7 +310,9 @@ mod native {
     pub fn extract_strings_blocking(binary: &LoadedBinary) -> Vec<BinaryString> {
         // Helper: find which section a virtual address falls into
         let section_for = |va: u64| -> String {
-            binary.sections.iter()
+            binary
+                .sections
+                .iter()
                 .find(|s| va >= s.virtual_address && va < s.virtual_address + s.virtual_size)
                 .map(|s| s.name.clone())
                 .unwrap_or_default()
@@ -262,11 +320,13 @@ mod native {
 
         if !binary.string_map.is_empty() {
             // Use loader-extracted string map (VA → content)
-            let mut result: Vec<BinaryString> = binary.string_map.iter()
+            let mut result: Vec<BinaryString> = binary
+                .string_map
+                .iter()
                 .filter(|(_, v)| v.len() >= 4)
                 .map(|(&va, val)| BinaryString {
-                    offset:  va,
-                    value:   val.clone(),
+                    offset: va,
+                    value: val.clone(),
                     section: section_for(va),
                 })
                 .collect();
@@ -281,13 +341,19 @@ mod native {
 
             for (i, &b) in data.iter().enumerate() {
                 if b >= 0x20 && b < 0x7f {
-                    if run_start.is_none() { run_start = Some(i); }
+                    if run_start.is_none() {
+                        run_start = Some(i);
+                    }
                     run.push(b as char);
                 } else {
                     if run.len() >= 4 {
                         let offset = run_start.unwrap() as u64;
                         let section = section_for(binary.image_base + offset);
-                        result.push(BinaryString { offset, value: run.clone(), section });
+                        result.push(BinaryString {
+                            offset,
+                            value: run.clone(),
+                            section,
+                        });
                     }
                     run.clear();
                     run_start = None;
@@ -299,18 +365,30 @@ mod native {
     }
 
     pub fn decompile_blocking(
-        binary: &Arc<LoadedBinary>, addr: u64, name: &str,
+        binary: &Arc<LoadedBinary>,
+        addr: u64,
+        name: &str,
     ) -> Result<DecompileOutput, String> {
         let facts = FactStore::from_binary(binary.as_ref());
         let mut config = RustSleighDecompileConfig::cli_defaults();
         config.nir_timeout_ms = Some(10_000);
         let result = decompile_with_rust_sleigh_with_facts(
-            binary.as_ref(), &facts, addr, name, &config, None, None,
-        ).map_err(|e| e.to_string())?;
+            binary.as_ref(),
+            &facts,
+            addr,
+            name,
+            &config,
+            None,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
         let cfg = CfgGraphData::from_evidence(&result.evidence);
         Ok(DecompileOutput {
-            code: result.code, code_nir: result.code_nir,
-            fell_back: result.fell_back, fallback_reason: result.fallback_reason, cfg,
+            code: result.code,
+            code_nir: result.code_nir,
+            fell_back: result.fell_back,
+            fallback_reason: result.fallback_reason,
+            cfg,
         })
     }
 
@@ -320,10 +398,17 @@ mod native {
     // more than one slot -- just enough to avoid re-disassembling the whole
     // binary on every Xrefs-tab view of a different function.
     static XREF_INDEX_CACHE: std::sync::OnceLock<
-        std::sync::Mutex<Option<(String, std::sync::Arc<fission_static::analysis::xref_index::XrefIndex>)>>,
+        std::sync::Mutex<
+            Option<(
+                String,
+                std::sync::Arc<fission_static::analysis::xref_index::XrefIndex>,
+            )>,
+        >,
     > = std::sync::OnceLock::new();
 
-    fn xref_index_for(binary: &LoadedBinary) -> std::sync::Arc<fission_static::analysis::xref_index::XrefIndex> {
+    fn xref_index_for(
+        binary: &LoadedBinary,
+    ) -> std::sync::Arc<fission_static::analysis::xref_index::XrefIndex> {
         let cache = XREF_INDEX_CACHE.get_or_init(|| std::sync::Mutex::new(None));
         {
             let guard = cache.lock().expect("xref index cache poisoned");
@@ -345,27 +430,49 @@ mod native {
     }
 
     pub fn xrefs_for_function_blocking(
-        binary: &Arc<LoadedBinary>, fn_addr: u64,
+        binary: &Arc<LoadedBinary>,
+        fn_addr: u64,
     ) -> (Vec<XrefRow>, Vec<XrefRow>) {
-        let index    = xref_index_for(binary.as_ref());
-        let name_map: std::collections::HashMap<u64, String> =
-            binary.functions.iter().map(|f| (f.address, f.name.clone())).collect();
+        let index = xref_index_for(binary.as_ref());
+        let name_map: std::collections::HashMap<u64, String> = binary
+            .functions
+            .iter()
+            .map(|f| (f.address, f.name.clone()))
+            .collect();
 
-        let callers = index.refs_to_address(fn_addr).iter().map(|r| {
-            let from = r.source.address;
-            let enc  = resolve_enclosing_function(&binary.functions, from, 512);
-            XrefRow { from_addr: from, to_addr: r.target.address,
-                      kind: format!("{:?}", r.kind), symbol: r.target.symbol.clone(),
-                      fn_name: enc.and_then(|a| name_map.get(&a).cloned()) }
-        }).collect();
+        let callers = index
+            .refs_to_address(fn_addr)
+            .iter()
+            .map(|r| {
+                let from = r.source.address;
+                let enc = resolve_enclosing_function(&binary.functions, from, 512);
+                XrefRow {
+                    from_addr: from,
+                    to_addr: r.target.address,
+                    kind: format!("{:?}", r.kind),
+                    symbol: r.target.symbol.clone(),
+                    fn_name: enc.and_then(|a| name_map.get(&a).cloned()),
+                }
+            })
+            .collect();
 
-        let callees = index.refs_from_address(fn_addr).iter()
-            .filter(|r| matches!(r.kind, XrefKind::Call | XrefKind::Jump | XrefKind::ConditionalJump))
+        let callees = index
+            .refs_from_address(fn_addr)
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.kind,
+                    XrefKind::Call | XrefKind::Jump | XrefKind::ConditionalJump
+                )
+            })
             .map(|r| XrefRow {
-                from_addr: r.source.address, to_addr: r.target.address,
-                kind: format!("{:?}", r.kind), symbol: r.target.symbol.clone(),
+                from_addr: r.source.address,
+                to_addr: r.target.address,
+                kind: format!("{:?}", r.kind),
+                symbol: r.target.symbol.clone(),
                 fn_name: r.target.address.and_then(|a| name_map.get(&a).cloned()),
-            }).collect();
+            })
+            .collect();
 
         (callers, callees)
     }
@@ -378,13 +485,17 @@ mod native {
     pub fn callgraph_blocking(binary: &Arc<LoadedBinary>) -> Vec<CallGraphNode> {
         let index = xref_index_for(binary.as_ref());
         let graph = fission_static::analysis::CallGraph::build_from_xref_index(
-            &binary.functions, &index, 0x40,
+            &binary.functions,
+            &index,
+            0x40,
         );
-        binary.functions.iter()
+        binary
+            .functions
+            .iter()
             .filter(|f| !f.is_import)
             .map(|f| CallGraphNode {
-                address:      f.address,
-                name:         f.name.clone(),
+                address: f.address,
+                name: f.name.clone(),
                 caller_count: graph.callers_of(f.address).len(),
                 callee_count: graph.callees_of(f.address).len(),
             })
@@ -392,7 +503,8 @@ mod native {
     }
 
     pub fn disasm_for_function_blocking(
-        binary: &Arc<LoadedBinary>, fn_addr: u64,
+        binary: &Arc<LoadedBinary>,
+        fn_addr: u64,
     ) -> Result<Vec<InstructionRow>, String> {
         fission_decompiler::disasm::disassemble_function(binary.as_ref(), fn_addr).map(|rows| {
             rows.into_iter()
@@ -411,28 +523,47 @@ mod native {
     }
 
     pub fn decompile_blocking_with_facts(
-        binary: &LoadedBinary, facts: &FactStore, addr: u64, name: &str,
+        binary: &LoadedBinary,
+        facts: &FactStore,
+        addr: u64,
+        name: &str,
     ) -> Result<DecompileOutput, String> {
         let mut config = RustSleighDecompileConfig::cli_defaults();
         config.nir_timeout_ms = Some(10_000);
-        let result = decompile_with_rust_sleigh_with_facts(
-            binary, facts, addr, name, &config, None, None,
-        ).map_err(|e| e.to_string())?;
+        let result =
+            decompile_with_rust_sleigh_with_facts(binary, facts, addr, name, &config, None, None)
+                .map_err(|e| e.to_string())?;
         let cfg = CfgGraphData::from_evidence(&result.evidence);
         Ok(DecompileOutput {
-            code: result.code, code_nir: result.code_nir,
-            fell_back: result.fell_back, fallback_reason: result.fallback_reason, cfg,
+            code: result.code,
+            code_nir: result.code_nir,
+            fell_back: result.fell_back,
+            fallback_reason: result.fallback_reason,
+            cfg,
         })
     }
 
     pub fn batch_decompile_one_with_facts(
-        binary: &LoadedBinary, facts: &FactStore, addr: u64, name: &str,
+        binary: &LoadedBinary,
+        facts: &FactStore,
+        addr: u64,
+        name: &str,
     ) -> BatchResult {
         match decompile_blocking_with_facts(binary, facts, addr, name) {
-            Ok(out) => BatchResult { addr, name: name.to_string(), ok: true,
-                                     fell_back: out.fell_back, error: out.fallback_reason },
-            Err(e)  => BatchResult { addr, name: name.to_string(), ok: false,
-                                     fell_back: false, error: Some(e) },
+            Ok(out) => BatchResult {
+                addr,
+                name: name.to_string(),
+                ok: true,
+                fell_back: out.fell_back,
+                error: out.fallback_reason,
+            },
+            Err(e) => BatchResult {
+                addr,
+                name: name.to_string(),
+                ok: false,
+                fell_back: false,
+                error: Some(e),
+            },
         }
     }
 
@@ -444,10 +575,9 @@ mod native {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{
-    batch_decompile_one, batch_decompile_one_with_facts, build_facts_blocking,
-    callgraph_blocking, decompile_blocking, decompile_blocking_with_facts,
-    disasm_for_function_blocking, load_binary_from_bytes_blocking,
-    xrefs_for_function_blocking, FactStore,
+    batch_decompile_one, batch_decompile_one_with_facts, build_facts_blocking, callgraph_blocking,
+    decompile_blocking, decompile_blocking_with_facts, disasm_for_function_blocking,
+    load_binary_from_bytes_blocking, xrefs_for_function_blocking, FactStore,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -541,8 +671,13 @@ mod wasm_api {
     }
 
     fn to_xref_row(r: ApiXrefRow) -> XrefRow {
-        XrefRow { from_addr: r.from_addr, to_addr: r.to_addr,
-                  kind: r.kind, symbol: r.symbol, fn_name: r.fn_name }
+        XrefRow {
+            from_addr: r.from_addr,
+            to_addr: r.to_addr,
+            kind: r.kind,
+            symbol: r.symbol,
+            fn_name: r.fn_name,
+        }
     }
 
     // ── WASM async helpers ────────────────────────────────────────────────
@@ -553,14 +688,16 @@ mod wasm_api {
         // Multipart upload using raw fetch (gloo-net doesn't support multipart form yet)
         let form = web_sys::FormData::new().map_err(|e| format!("{e:?}"))?;
         let array = js_sys::Uint8Array::from(data.as_slice());
-        let blob  = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&array.into()))
+        let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&array.into()))
             .map_err(|e| format!("{e:?}"))?;
-        let file  = web_sys::File::new_with_blob_sequence_and_options(
+        let file = web_sys::File::new_with_blob_sequence_and_options(
             &js_sys::Array::of1(&blob.into()),
             &name,
             &web_sys::FilePropertyBag::new(),
-        ).map_err(|e| format!("{e:?}"))?;
-        form.append_with_blob_and_filename("file", &file, &name).map_err(|e| format!("{e:?}"))?;
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        form.append_with_blob_and_filename("file", &file, &name)
+            .map_err(|e| format!("{e:?}"))?;
 
         let resp = authorized(Request::post(&format!("{base}/api/binary")))
             .body(form)
@@ -572,7 +709,9 @@ mod wasm_api {
         if !resp.ok() {
             return Err(server_error_detail(resp, "upload").await);
         }
-        let upload: ApiUploadResponse = resp.json().await
+        let upload: ApiUploadResponse = resp
+            .json()
+            .await
             .map_err(|e| format!("Parse upload response: {e:?}"))?;
 
         // Fetch function list scoped to this session. While the server is
@@ -582,32 +721,42 @@ mod wasm_api {
         let (functions, analyzing) = fetch_functions(&base, &upload.session_id).await?;
 
         Ok(LoadResult {
-            binary:     None,   // server holds the binary
+            binary: None, // server holds the binary
             functions,
-            summary:    upload.summary,
+            summary: upload.summary,
             session_id: Some(upload.session_id),
-            strings:    Vec::new(),   // server-side; not yet serialised
+            strings: Vec::new(), // server-side; not yet serialised
             analyzing,
         })
     }
 
-    async fn fetch_functions(base: &str, session_id: &str) -> Result<(Vec<FunctionInfo>, bool), String> {
+    async fn fetch_functions(
+        base: &str,
+        session_id: &str,
+    ) -> Result<(Vec<FunctionInfo>, bool), String> {
         let fn_resp = authorized(Request::get(&format!("{base}/api/functions/{session_id}")))
-            .send().await
+            .send()
+            .await
             .map_err(|e| format!("Functions fetch failed: {e:?}"))?;
 
-        let parsed: ApiFunctionsResponse = fn_resp.json().await
+        let parsed: ApiFunctionsResponse = fn_resp
+            .json()
+            .await
             .map_err(|e| format!("Parse functions: {e:?}"))?;
 
-        let functions: Vec<FunctionInfo> = parsed.functions.into_iter().map(|f: ApiFnEntry| FunctionInfo {
-            name:          f.name,
-            address:       f.addr,
-            size:          f.size,
-            is_import:     f.is_import,
-            is_export:     f.is_export,
-            is_thunk_like: f.is_thunk,
-            ..Default::default()
-        }).collect();
+        let functions: Vec<FunctionInfo> = parsed
+            .functions
+            .into_iter()
+            .map(|f: ApiFnEntry| FunctionInfo {
+                name: f.name,
+                address: f.addr,
+                size: f.size,
+                is_import: f.is_import,
+                is_export: f.is_export,
+                is_thunk_like: f.is_thunk,
+                ..Default::default()
+            })
+            .collect();
 
         Ok((functions, parsed.analyzing))
     }
@@ -621,7 +770,7 @@ mod wasm_api {
     }
 
     pub async fn run_decompile(
-        _binary: Option<Arc<LoadedBinary>>,   // unused on WASM
+        _binary: Option<Arc<LoadedBinary>>, // unused on WASM
         session_id: Option<String>,
         addr: u64,
         _name: String,
@@ -631,17 +780,22 @@ mod wasm_api {
         let resp = authorized(Request::post(&format!(
             "{base}/api/decompile/{sid}/{addr:x}"
         )))
-            .send().await
-            .map_err(|e| format!("Decompile request failed: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("Decompile request failed: {e}"))?;
         if !resp.ok() {
             return Err(server_error_detail(resp, "decompile").await);
         }
-        let out: ApiDecompileResponse = resp.json().await
+        let out: ApiDecompileResponse = resp
+            .json()
+            .await
             .map_err(|e| format!("Parse decompile response: {e}"))?;
         Ok(DecompileOutput {
-            code: out.pseudocode, code_nir: out.nir,
-            fell_back: out.fell_back, fallback_reason: out.reason,
-            cfg: None,  // CFG not yet serialised over API
+            code: out.pseudocode,
+            code_nir: out.nir,
+            fell_back: out.fell_back,
+            fallback_reason: out.reason,
+            cfg: None, // CFG not yet serialised over API
         })
     }
 
@@ -651,11 +805,12 @@ mod wasm_api {
         fn_addr: u64,
     ) -> (Vec<XrefRow>, Vec<XrefRow>) {
         let base = get_server_url();
-        let Some(sid) = session_id else { return (vec![], vec![]); };
-        let resp = authorized(Request::get(&format!(
-            "{base}/api/xrefs/{sid}/{fn_addr:x}"
-        )))
-            .send().await;
+        let Some(sid) = session_id else {
+            return (vec![], vec![]);
+        };
+        let resp = authorized(Request::get(&format!("{base}/api/xrefs/{sid}/{fn_addr:x}")))
+            .send()
+            .await;
         match resp {
             Ok(r) if r.ok() => {
                 if let Ok(x) = r.json::<ApiXrefsResponse>().await {
@@ -680,16 +835,26 @@ mod wasm_api {
         let resp = authorized(Request::get(&format!(
             "{base}/api/disasm/{sid}/{fn_addr:x}"
         )))
-            .send().await
-            .map_err(|e| format!("Disasm request failed: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("Disasm request failed: {e}"))?;
         if !resp.ok() {
             return Err(server_error_detail(resp, "disasm").await);
         }
-        let out: ApiDisasmResponse = resp.json().await
+        let out: ApiDisasmResponse = resp
+            .json()
+            .await
             .map_err(|e| format!("Parse disasm response: {e}"))?;
-        Ok(out.rows.into_iter().map(|r| InstructionRow {
-            address: r.address, bytes_hex: r.bytes_hex, text: r.text, target_addr: r.target_addr,
-        }).collect())
+        Ok(out
+            .rows
+            .into_iter()
+            .map(|r| InstructionRow {
+                address: r.address,
+                bytes_hex: r.bytes_hex,
+                text: r.text,
+                target_addr: r.target_addr,
+            })
+            .collect())
     }
 
     pub async fn run_callgraph(
@@ -699,17 +864,26 @@ mod wasm_api {
         let base = get_server_url();
         let sid = session_id.ok_or("no active session — upload a binary first")?;
         let resp = authorized(Request::get(&format!("{base}/api/callgraph/{sid}")))
-            .send().await
+            .send()
+            .await
             .map_err(|e| format!("Call graph request failed: {e}"))?;
         if !resp.ok() {
             return Err(server_error_detail(resp, "callgraph").await);
         }
-        let out: ApiCallGraphResponse = resp.json().await
+        let out: ApiCallGraphResponse = resp
+            .json()
+            .await
             .map_err(|e| format!("Parse callgraph response: {e}"))?;
-        Ok(out.nodes.into_iter().map(|n| CallGraphNode {
-            address: n.address, name: n.name,
-            caller_count: n.caller_count, callee_count: n.callee_count,
-        }).collect())
+        Ok(out
+            .nodes
+            .into_iter()
+            .map(|n| CallGraphNode {
+                address: n.address,
+                name: n.name,
+                caller_count: n.caller_count,
+                callee_count: n.callee_count,
+            })
+            .collect())
     }
 }
 
@@ -763,7 +937,9 @@ pub async fn run_xrefs(
     _session_id: Option<String>,
     fn_addr: u64,
 ) -> (Vec<XrefRow>, Vec<XrefRow>) {
-    let Some(bin) = binary else { return (vec![], vec![]); };
+    let Some(bin) = binary else {
+        return (vec![], vec![]);
+    };
     tokio::task::spawn_blocking(move || xrefs_for_function_blocking(&bin, fn_addr))
         .await
         .unwrap_or_default()

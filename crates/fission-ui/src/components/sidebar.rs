@@ -17,7 +17,10 @@
 //!     nothing for the browser's own scroll adjustment to fight.
 //!   • Import / Thunk classification before decompile
 
-use crate::state::{use_app_state, AppState, CachedDecompile, FunctionKind, LogEntry, SidebarKindFilter, SIDEBAR_RENDER_BATCH};
+use crate::state::{
+    use_app_state, AppState, CachedDecompile, FunctionKind, LogEntry, SidebarKindFilter,
+    SIDEBAR_RENDER_BATCH,
+};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
@@ -114,10 +117,9 @@ pub fn Sidebar() -> Element {
             .collect()
     });
 
-
     // Inline rename state: Some(addr) when editing
     let rename_addr: Signal<Option<u64>> = use_signal(|| None);
-    let rename_draft: Signal<String>     = use_signal(|| String::new());
+    let rename_draft: Signal<String> = use_signal(|| String::new());
 
     // Grow the render window as the user scrolls near the bottom of the
     // (real, natively-scrolling) function list. Delegated on `document`
@@ -163,7 +165,9 @@ pub fn Sidebar() -> Element {
     // once the DOM actually has the row.
     use_effect(move || {
         let target = state.read().sidebar_scroll_target;
-        let Some(addr) = target else { return; };
+        let Some(addr) = target else {
+            return;
+        };
 
         let idx = filtered.read().iter().position(|f| f.addr == addr);
         if let Some(idx) = idx {
@@ -216,26 +220,31 @@ pub fn Sidebar() -> Element {
     let render_limit = state.read().sidebar_render_limit.min(fn_total);
 
     // ── Read once for rendering ───────────────────────────────────────────────
-    let has_binary   = state.read().has_binary_loaded();
-    let is_loading   = state.read().is_loading_binary;
+    let has_binary = state.read().has_binary_loaded();
+    let is_loading = state.read().is_loading_binary;
     let is_analyzing = state.read().is_analyzing;
-    let fn_count     = fn_total;
-    let search_val   = state.read().sidebar_search.clone();
-    let selected     = state.read().current_function_addr;
-    let active_tab   = state.read().sidebar_tab.clone();
-    let str_search   = state.read().strings_search.clone();
-    let rename_now   = *rename_addr.read();
+    let fn_count = fn_total;
+    let search_val = state.read().sidebar_search.clone();
+    let selected = state.read().current_function_addr;
+    let active_tab = state.read().sidebar_tab.clone();
+    let str_search = state.read().strings_search.clone();
+    let rename_now = *rename_addr.read();
 
     // Strings list (filtered)
     let strings_list: Vec<crate::state::BinaryString> = {
         let s = state.read();
         let q = str_search.to_lowercase();
-        s.strings.iter()
-            .filter(|bs| q.is_empty() || bs.value.to_lowercase().contains(&q) || bs.section.to_lowercase().contains(&q))
+        s.strings
+            .iter()
+            .filter(|bs| {
+                q.is_empty()
+                    || bs.value.to_lowercase().contains(&q)
+                    || bs.section.to_lowercase().contains(&q)
+            })
             .cloned()
             .collect()
     };
-    let str_total    = strings_list.len();
+    let str_total = strings_list.len();
 
     // Call graph list (filtered + sorted). Capped to CALLGRAPH_RENDER_LIMIT
     // rows for the same reason the function list is incrementally mounted
@@ -245,22 +254,32 @@ pub fn Sidebar() -> Element {
     // a search narrows past the cap same as the Functions tab's filter.
     const CALLGRAPH_RENDER_LIMIT: usize = 500;
     let cg_search = state.read().call_graph_search.clone();
-    let cg_sort   = state.read().call_graph_sort.clone();
+    let cg_sort = state.read().call_graph_sort.clone();
     let is_loading_callgraph = state.read().is_loading_callgraph;
     let (call_graph_list, cg_matched_total): (Vec<crate::engine::CallGraphNode>, usize) = {
         let s = state.read();
         let q = cg_search.to_lowercase();
-        let mut list: Vec<crate::engine::CallGraphNode> = s.call_graph_nodes.iter()
-            .filter(|n| q.is_empty()
-                || n.name.to_lowercase().contains(&q)
-                || format!("{:x}", n.address).contains(&q))
+        let mut list: Vec<crate::engine::CallGraphNode> = s
+            .call_graph_nodes
+            .iter()
+            .filter(|n| {
+                q.is_empty()
+                    || n.name.to_lowercase().contains(&q)
+                    || format!("{:x}", n.address).contains(&q)
+            })
             .cloned()
             .collect();
         match cg_sort {
-            crate::state::CallGraphSort::CallersDesc => list.sort_by(|a, b|
-                b.caller_count.cmp(&a.caller_count).then_with(|| a.name.cmp(&b.name))),
-            crate::state::CallGraphSort::CalleesDesc => list.sort_by(|a, b|
-                b.callee_count.cmp(&a.callee_count).then_with(|| a.name.cmp(&b.name))),
+            crate::state::CallGraphSort::CallersDesc => list.sort_by(|a, b| {
+                b.caller_count
+                    .cmp(&a.caller_count)
+                    .then_with(|| a.name.cmp(&b.name))
+            }),
+            crate::state::CallGraphSort::CalleesDesc => list.sort_by(|a, b| {
+                b.callee_count
+                    .cmp(&a.callee_count)
+                    .then_with(|| a.name.cmp(&b.name))
+            }),
             crate::state::CallGraphSort::NameAsc => list.sort_by(|a, b| a.name.cmp(&b.name)),
         }
         let matched_total = list.len();
@@ -623,10 +642,18 @@ fn FunctionListItem(
     mut rename_draft: Signal<String>,
 ) -> Element {
     let addr = entry.addr;
-    let dot_cls = if entry.is_exp { "fn-type-dot is-export" }
-                  else if entry.is_thunk || entry.is_imp { "fn-type-dot is-import" }
-                  else { "fn-type-dot is-code" };
-    let item_cls = if is_selected { "function-item is-selected" } else { "function-item" };
+    let dot_cls = if entry.is_exp {
+        "fn-type-dot is-export"
+    } else if entry.is_thunk || entry.is_imp {
+        "fn-type-dot is-import"
+    } else {
+        "fn-type-dot is-code"
+    };
+    let item_cls = if is_selected {
+        "function-item is-selected"
+    } else {
+        "function-item"
+    };
     let entry_for_click = entry.clone();
 
     rsx! {
@@ -700,10 +727,14 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
     // exactly like plain imports: show the stub comment, skip decompile.
     let kind = if entry.is_imp {
         // Covers both pure imports (is_thunk=false) and import thunks (is_thunk=true)
-        FunctionKind::Import { library: entry.lib.clone() }
+        FunctionKind::Import {
+            library: entry.lib.clone(),
+        }
     } else if entry.is_thunk {
         // Non-import thunks (e.g. vtable thunks, tail-call thunks) — still try to decompile
-        FunctionKind::Thunk { target: entry.thunk_t }
+        FunctionKind::Thunk {
+            target: entry.thunk_t,
+        }
     } else {
         FunctionKind::Code
     };
@@ -723,10 +754,14 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
 
     match kind {
         FunctionKind::Import { library } => {
-            let lib_str   = library.as_deref().unwrap_or("unknown");
-            let thunk_t   = entry.thunk_t;
-            let is_thunk  = entry.is_thunk;
-            let kind_tag  = if is_thunk { "Import thunk (IAT stub)" } else { "Import stub" };
+            let lib_str = library.as_deref().unwrap_or("unknown");
+            let thunk_t = entry.thunk_t;
+            let is_thunk = entry.is_thunk;
+            let kind_tag = if is_thunk {
+                "Import thunk (IAT stub)"
+            } else {
+                "Import stub"
+            };
             let thunk_line = thunk_t
                 .map(|t| format!("\n *  IAT target: 0x{t:x}"))
                 .unwrap_or_default();
@@ -747,11 +782,13 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
             if is_thunk {
                 let tgt_str = thunk_t.map(|t| format!(" → 0x{t:x}")).unwrap_or_default();
                 s.push_log(LogEntry::info(format!(
-                    "Import thunk: {}{tgt_str}  (from {lib_str})", entry.name
+                    "Import thunk: {}{tgt_str}  (from {lib_str})",
+                    entry.name
                 )));
             } else {
                 s.push_log(LogEntry::info(format!(
-                    "Import stub: {}  (from {lib_str})", entry.name
+                    "Import stub: {}  (from {lib_str})",
+                    entry.name
                 )));
             }
         }
@@ -775,15 +812,17 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
                      (IAT target: {tgt})"
                 )));
             }
-            let binary  = state.read().binary.clone();
+            let binary = state.read().binary.clone();
             let session = state.read().server_session_id.clone();
             spawn(async move { run_decompile(state, binary, session, addr, name).await });
         }
         FunctionKind::Code => {
-            let name    = entry.name.clone();
-            let addr    = entry.addr;
+            let name = entry.name.clone();
+            let addr = entry.addr;
             if apply_cached_decompile(state, addr) {
-                state.write().push_log(LogEntry::info(format!("{name}  @  0x{addr:x}  (cached)")));
+                state
+                    .write()
+                    .push_log(LogEntry::info(format!("{name}  @  0x{addr:x}  (cached)")));
                 return;
             }
             let session = state.read().server_session_id.clone();
@@ -821,9 +860,13 @@ async fn navigate_to_address_impl(
         let s = state.read();
         if let Some(fi) = s.functions.iter().find(|f| f.address == addr) {
             let k = if fi.is_import && !fi.is_thunk_like {
-                FunctionKind::Import { library: fi.external_library.clone() }
+                FunctionKind::Import {
+                    library: fi.external_library.clone(),
+                }
             } else if fi.is_thunk_like {
-                FunctionKind::Thunk { target: fi.thunk_target }
+                FunctionKind::Thunk {
+                    target: fi.thunk_target,
+                }
             } else {
                 FunctionKind::Code
             };
@@ -831,7 +874,10 @@ async fn navigate_to_address_impl(
         } else {
             // Not a known function (e.g. an xref target only known by
             // symbol name) -- prefer the caller's hint over a generic label.
-            (FunctionKind::Code, hint_name.unwrap_or_else(|| format!("sub_{addr:x}")))
+            (
+                FunctionKind::Code,
+                hint_name.unwrap_or_else(|| format!("sub_{addr:x}")),
+            )
         }
     };
 
@@ -848,7 +894,9 @@ async fn navigate_to_address_impl(
         if record_history {
             s.navigate_to(addr);
         }
-        s.push_log(LogEntry::info(format!("Jumped to {resolved_name}  @  0x{addr:x}")));
+        s.push_log(LogEntry::info(format!(
+            "Jumped to {resolved_name}  @  0x{addr:x}"
+        )));
     }
 
     match kind {
@@ -946,9 +994,7 @@ pub async fn run_decompile(
                 // First call: build FactStore from binary (expensive, once)
                 Arc::new(build_facts_blocking(binary.as_ref()))
             });
-            let out = decompile_blocking_with_facts(
-                binary.as_ref(), &facts, addr, &name_clone,
-            )?;
+            let out = decompile_blocking_with_facts(binary.as_ref(), &facts, addr, &name_clone)?;
             Ok((out, facts))
         })
         .await
@@ -957,22 +1003,25 @@ pub async fn run_decompile(
 
     match result {
         Ok((out, facts)) => {
-            let bytes   = out.code.len();
-            let fell    = out.fell_back;
-            let reason  = out.fallback_reason.clone();
+            let bytes = out.code.len();
+            let fell = out.fell_back;
+            let reason = out.fallback_reason.clone();
             let has_cfg = out.cfg.is_some();
-            let mut s   = state.write();
-            s.decompile_cache.insert(addr, CachedDecompile {
-                code: out.code.clone(),
-                code_nir: out.code_nir.clone(),
-                cfg: out.cfg.clone(),
-            });
+            let mut s = state.write();
+            s.decompile_cache.insert(
+                addr,
+                CachedDecompile {
+                    code: out.code.clone(),
+                    code_nir: out.code_nir.clone(),
+                    cfg: out.cfg.clone(),
+                },
+            );
             s.decompiled_code = Some(out.code);
-            s.decompiled_nir  = out.code_nir;
-            s.current_cfg     = out.cfg;
-            s.is_decompiling  = false;
+            s.decompiled_nir = out.code_nir;
+            s.current_cfg = out.cfg;
+            s.is_decompiling = false;
             // Store the FactStore for subsequent calls (O(1) Arc clone)
-            s.cached_facts    = Some(facts);
+            s.cached_facts = Some(facts);
             if fell {
                 s.push_log(LogEntry::warn(format!(
                     "Fell back \u{2014} {}",
@@ -1010,20 +1059,23 @@ pub async fn run_decompile(
 
     match result {
         Ok(out) => {
-            let bytes   = out.code.len();
-            let fell    = out.fell_back;
-            let reason  = out.fallback_reason.clone();
+            let bytes = out.code.len();
+            let fell = out.fell_back;
+            let reason = out.fallback_reason.clone();
             let has_cfg = out.cfg.is_some();
-            let mut s   = state.write();
-            s.decompile_cache.insert(addr, CachedDecompile {
-                code: out.code.clone(),
-                code_nir: out.code_nir.clone(),
-                cfg: out.cfg.clone(),
-            });
+            let mut s = state.write();
+            s.decompile_cache.insert(
+                addr,
+                CachedDecompile {
+                    code: out.code.clone(),
+                    code_nir: out.code_nir.clone(),
+                    cfg: out.cfg.clone(),
+                },
+            );
             s.decompiled_code = Some(out.code);
-            s.decompiled_nir  = out.code_nir;
-            s.current_cfg     = out.cfg;
-            s.is_decompiling  = false;
+            s.decompiled_nir = out.code_nir;
+            s.current_cfg = out.cfg;
+            s.is_decompiling = false;
             if fell {
                 s.push_log(LogEntry::warn(format!(
                     "Fell back \u{2014} {}",

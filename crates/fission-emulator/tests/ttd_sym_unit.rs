@@ -1,8 +1,8 @@
 //! Phase D unit tests: symbolic gate + TTD seek recompute surface.
 
+use fission_emulator::MachineState;
 use fission_emulator::core::{Emulator, SymBranch};
 use fission_emulator::jit::callbacks::jit_sym_cbranch_gate;
-use fission_emulator::MachineState;
 
 /// Direct gate callout: taint on condition space/offset → sym_events + stop.
 #[test]
@@ -56,7 +56,10 @@ fn reg_cache_hits_after_write() {
     assert!(state.reg_cache.contains_key(&off));
     let hits_before = state.reg_cache_hits;
     let v = state.read_space(reg, off, 8).unwrap();
-    assert_eq!(u64::from_le_bytes(v.try_into().unwrap()), 0x1122_3344_5566_7788);
+    assert_eq!(
+        u64::from_le_bytes(v.try_into().unwrap()),
+        0x1122_3344_5566_7788
+    );
     assert!(state.reg_cache_hits > hits_before);
     state.invalidate_reg_cache();
     assert!(state.reg_cache.is_empty());
@@ -100,7 +103,12 @@ fn ttd_seek_recompute_on_hello_fixture() {
         // Re-enable recording-off seek
         let r = emu.ttd_seek(target);
         assert!(r.is_ok(), "ttd_seek failed: {r:?}");
-        assert!(emu.inst_count <= target + 8, "inst_count={} target={}", emu.inst_count, target);
+        assert!(
+            emu.inst_count <= target + 8,
+            "inst_count={} target={}",
+            emu.inst_count,
+            target
+        );
     }
 }
 

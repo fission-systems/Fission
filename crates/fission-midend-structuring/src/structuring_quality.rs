@@ -186,7 +186,8 @@ fn statement_budget(baseline_statements: usize, removed_gotos: usize) -> usize {
     // per jump is well past the six-statement ceiling `cleanup::tail_dup` uses
     // for the same trade, so this refuses only the runaway case.
     const MAX_STATEMENTS_PER_REMOVED_GOTO: usize = 16;
-    baseline_statements.saturating_add(removed_gotos.saturating_mul(MAX_STATEMENTS_PER_REMOVED_GOTO))
+    baseline_statements
+        .saturating_add(removed_gotos.saturating_mul(MAX_STATEMENTS_PER_REMOVED_GOTO))
 }
 
 /// How many short-circuit branches a structuring may add for the jumps it

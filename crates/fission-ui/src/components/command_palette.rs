@@ -80,7 +80,13 @@ pub fn CommandPalette() -> Element {
             .palette_results(18)
             .into_iter()
             .map(|(score, f)| {
-                (score, f.name.clone(), f.address, f.is_import, f.is_thunk_like)
+                (
+                    score,
+                    f.name.clone(),
+                    f.address,
+                    f.is_import,
+                    f.is_thunk_like,
+                )
             })
             .collect();
         std::sync::Arc::new(v)

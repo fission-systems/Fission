@@ -4,12 +4,12 @@ use super::{forward_join_idx_from_address, shared_forward_linear_exit};
 use crate::HashMap;
 use crate::HashSet;
 use crate::cfg_analysis::{CommonPostdominator, ImmPostDomTree};
-use crate::host::{StructuringHost, StructuredChildMap};
+use crate::host::{StructuredChildMap, StructuringHost};
 use crate::linear_types::{LinearExit, LoweredTerminator};
 use crate::regions::RegionProof;
 use crate::sese_driver::build_sese_region_body_for_members;
-use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_prehir::{PreHirStmt};
+use fission_midend_core::ir::MlilPreviewError;
+use fission_midend_prehir::PreHirStmt;
 use fission_midend_prehir::util::negate_expr;
 
 /// Count the explicit control-flow debt retained by a structured candidate.
@@ -111,7 +111,10 @@ pub fn plan_virtual_exit_if_else(
     if succs.len() != 2 || !succs.contains(&fallthrough_idx) {
         return None;
     }
-    let other_idx = succs.iter().copied().find(|&succ| succ != fallthrough_idx)?;
+    let other_idx = succs
+        .iter()
+        .copied()
+        .find(|&succ| succ != fallthrough_idx)?;
     if !matches!(
         postdom.nearest_common_postdominator_target(&[fallthrough_idx, other_idx]),
         Some(CommonPostdominator::VirtualExit)
@@ -213,7 +216,8 @@ pub fn lower_virtual_exit_if_else_committed(
         cond,
         true_target,
         false_target: Some(false_target),
-    } = host.lower_block_terminator(idx)? else {
+    } = host.lower_block_terminator(idx)?
+    else {
         return Ok(None);
     };
     let true_idx = host.find_block_index_by_address(true_target);
@@ -246,7 +250,8 @@ pub fn lower_virtual_exit_if_else_committed(
         let members: HashSet<usize> = arm.members.iter().copied().collect();
         let (body, achieved_exit, extra_members) =
             build_sese_region_body_for_members(host, arm.entry, scan_end, child_map, &members)?;
-        if achieved_exit != scan_end || extra_members.iter().any(|member| !members.contains(member)) {
+        if achieved_exit != scan_end || extra_members.iter().any(|member| !members.contains(member))
+        {
             return Ok(None);
         }
         Ok(Some(std::rc::Rc::new(body)))
@@ -269,7 +274,10 @@ pub fn lower_virtual_exit_if_else_committed(
     } else {
         let mut wrapped = cond_prefix;
         wrapped.push(stmt);
-        Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), plan.skip_to)))
+        Ok(Some((
+            PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+            plan.skip_to,
+        )))
     }
 }
 
@@ -372,7 +380,10 @@ pub fn try_lower_if_else(
     } else {
         let mut wrapped = cond_prefix;
         wrapped.push(stmt);
-        Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)))
+        Ok(Some((
+            PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+            skip_to,
+        )))
     }
 }
 
@@ -450,7 +461,10 @@ pub fn try_reduce_if_else_with_follow(
     } else {
         let mut wrapped = cond_prefix;
         wrapped.push(stmt);
-        Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), follow_idx)))
+        Ok(Some((
+            PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+            follow_idx,
+        )))
     }
 }
 
@@ -476,8 +490,14 @@ mod tests {
         assert_eq!(
             plan_virtual_exit_if_else(&successors, &predecessors, &postdom, 0, 1, 6),
             Some(VirtualExitIfElsePlan {
-                first_arm: ComplexArmPlan { entry: 1, members: vec![1, 2, 3] },
-                second_arm: ComplexArmPlan { entry: 4, members: vec![4, 5] },
+                first_arm: ComplexArmPlan {
+                    entry: 1,
+                    members: vec![1, 2, 3]
+                },
+                second_arm: ComplexArmPlan {
+                    entry: 4,
+                    members: vec![4, 5]
+                },
                 shared_tail: vec![],
                 skip_to: 6,
             })
@@ -487,15 +507,27 @@ mod tests {
     #[test]
     fn plans_interleaved_arms_and_shared_terminal_tail() {
         let successors = vec![
-            vec![1, 4], vec![2], vec![3, 6], vec![], vec![5], vec![3, 6], vec![],
+            vec![1, 4],
+            vec![2],
+            vec![3, 6],
+            vec![],
+            vec![5],
+            vec![3, 6],
+            vec![],
         ];
         let predecessors = predecessors(&successors);
         let postdom = ImmPostDomTree::compute(&successors, &predecessors);
         assert_eq!(
             plan_virtual_exit_if_else(&successors, &predecessors, &postdom, 0, 1, 7),
             Some(VirtualExitIfElsePlan {
-                first_arm: ComplexArmPlan { entry: 1, members: vec![1, 2] },
-                second_arm: ComplexArmPlan { entry: 4, members: vec![4, 5] },
+                first_arm: ComplexArmPlan {
+                    entry: 1,
+                    members: vec![1, 2]
+                },
+                second_arm: ComplexArmPlan {
+                    entry: 4,
+                    members: vec![4, 5]
+                },
                 shared_tail: vec![3, 6],
                 skip_to: 3,
             })

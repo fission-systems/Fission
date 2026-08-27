@@ -40,19 +40,16 @@ pub mod prelude {
     pub use fission_midend_core::ir::*;
     // PreHirStmt/PreHirExpr/etc, plus the Nir* re-exports fission-midend-prehir itself
     // needs -- this crate operates purely on PreHIR, never HIR.
+    pub use fission_midend_core::wave_stats;
+    pub use fission_midend_core::{AbiState, CallingConvention, SWITCH_FALLTHROUGH_SENTINEL};
     pub use fission_midend_prehir::ir::*;
     pub use fission_midend_prehir::util::{
         cleanup_redundant_labels, collect_referenced_labels, expr_has_side_effecting_call,
-        expr_type, fold_logical_chain, is_pure_intrinsic_call, negate_expr, next_temp_name,
-        format_expr_key, pre_hir_body_expr_nodes_fit_budget,
-        pre_hir_function_expr_nodes_fit_budget, rename_vars_in_stmts, simplify_logical_expr,
-        strip_casts,
+        expr_type, fold_logical_chain, format_expr_key, is_pure_intrinsic_call, negate_expr,
+        next_temp_name, pre_hir_body_expr_nodes_fit_budget, pre_hir_function_expr_nodes_fit_budget,
+        rename_vars_in_stmts, simplify_logical_expr, strip_casts,
     };
-    pub use fission_midend_prehir::vsa::{
-        apply_jump_resolver_pass, jump_resolver_candidate_count,
-    };
-    pub use fission_midend_core::wave_stats;
-    pub use fission_midend_core::{AbiState, CallingConvention, SWITCH_FALLTHROUGH_SENTINEL};
+    pub use fission_midend_prehir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
     pub use std::collections::{BTreeMap, BTreeSet};
 }
 
@@ -71,12 +68,12 @@ pub use types::set_operand_metatype_names;
 
 pub use rule_normalizer::apply_rule_normalization;
 
-pub use types::is_known_api_signature;
 pub use types::apply_callsite_type_prop_pass;
+pub use types::is_known_api_signature;
 
+pub use analysis::defuse::constant_folding_pass;
 /// Pure `x = x` / adjacent-duplicate assign cleanup (nested Block/If safe).
 pub use cleanup::eliminate_redundant_var_assigns;
-pub use analysis::defuse::constant_folding_pass;
 pub use cleanup::propagate_copies_in_runs;
 pub use cleanup::prune_unobservable_scratch;
 

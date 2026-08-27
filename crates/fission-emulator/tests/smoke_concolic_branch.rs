@@ -5,10 +5,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
@@ -77,7 +77,11 @@ fn smoke_concolic_branch_concrete_b() {
         "expected halt: {}",
         emu.metrics.summary_line()
     );
-    eprintln!("concolic B: events={} {}", emu.sym_events.len(), emu.metrics.summary_line());
+    eprintln!(
+        "concolic B: events={} {}",
+        emu.sym_events.len(),
+        emu.metrics.summary_line()
+    );
 }
 
 /// With concolic stop enabled, first tainted CBranch stops the run with sym_events.
@@ -144,8 +148,7 @@ fn smoke_explore_fork_both_exits() {
 fn stdin_read_taints_buffer_unit() {
     use fission_emulator::os::procedure::SimProcedure;
 
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
     let binary = LoadedBinary::from_file(&path).expect("load");
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");
@@ -164,9 +167,12 @@ fn stdin_read_taints_buffer_unit() {
     emu.seed_stdin(b"Z");
 
     let buf = 0x6000_0000u64;
-    emu.state
-        .page_map
-        .map_region(buf, 0x1000, fission_emulator::pcode::page_map::prot::RW, true);
+    emu.state.page_map.map_region(
+        buf,
+        0x1000,
+        fission_emulator::pcode::page_map::prot::RW,
+        true,
+    );
     emu.write_register_u64("RDI", 0).unwrap();
     emu.write_register_u64("RSI", buf).unwrap();
     emu.write_register_u64("RDX", 1).unwrap();

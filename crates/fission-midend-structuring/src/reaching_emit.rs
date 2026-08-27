@@ -156,7 +156,12 @@ pub fn structure_guarded_entries(entries: &[GuardedEntry]) -> Vec<PreHirStmt> {
 }
 
 /// Emit one `if`, inverting when that avoids an empty then-arm.
-fn push_if(out: &mut Vec<PreHirStmt>, cond: PreHirExpr, then_body: Vec<PreHirStmt>, else_body: Vec<PreHirStmt>) {
+fn push_if(
+    out: &mut Vec<PreHirStmt>,
+    cond: PreHirExpr,
+    then_body: Vec<PreHirStmt>,
+    else_body: Vec<PreHirStmt>,
+) {
     if then_body.is_empty() && else_body.is_empty() {
         return;
     }

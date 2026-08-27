@@ -79,7 +79,11 @@ impl JitCache {
 
         // Publish hard-chain target for this entry PC (absolute + fallthrough inbound).
         self.chain_slot(pc).store(host, Ordering::Release);
-        tracing::debug!("JIT hard-chain: publish TB@0x{:X} host={:p}", pc, block.host_func_ptr);
+        tracing::debug!(
+            "JIT hard-chain: publish TB@0x{:X} host={:p}",
+            pc,
+            block.host_func_ptr
+        );
 
         self.blocks.write().unwrap().insert(pc, block);
         let mut ptb = self.page_to_blocks.write().unwrap();
@@ -119,10 +123,7 @@ impl JitCache {
                     let cur = slot.load(Ordering::Acquire);
                     if removed_hosts.contains(&cur) {
                         slot.store(0, Ordering::Release);
-                        tracing::debug!(
-                            "JIT hard-chain: cleared stale slot for 0x{:X}",
-                            entry_pc
-                        );
+                        tracing::debug!("JIT hard-chain: cleared stale slot for 0x{:X}", entry_pc);
                     }
                 }
             }

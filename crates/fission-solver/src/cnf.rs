@@ -85,7 +85,9 @@ impl CnfBuilder {
 
     /// Add a unit clause asserting a literal is true.
     pub fn assert_lit(&mut self, lit: AigLit) {
-        if lit == AigLit::TRUE { return; }
+        if lit == AigLit::TRUE {
+            return;
+        }
         if lit == AigLit::FALSE {
             // Trivially UNSAT: add an empty clause (∅ is always false)
             self.clauses.push(Clause(vec![]));

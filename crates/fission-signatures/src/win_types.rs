@@ -431,10 +431,20 @@ impl WindowsStructures {
         // only for the same reason: ~2-3% of overlapping names disagree on
         // size and not all are individually audited).
         if let Ok(vs12_json) = try_read_typeinfo_json("windows_vs12_structures.json") {
-            merge_json_struct_defs(&mut structures, "windows_vs12_structures.json", &vs12_json, false);
+            merge_json_struct_defs(
+                &mut structures,
+                "windows_vs12_structures.json",
+                &vs12_json,
+                false,
+            );
         }
         if let Some(generic_json) = try_read_generic_typeinfo_json("generic_clib_structures.json") {
-            merge_json_struct_defs(&mut structures, "generic_clib_structures.json", &generic_json, false);
+            merge_json_struct_defs(
+                &mut structures,
+                "generic_clib_structures.json",
+                &generic_json,
+                false,
+            );
         }
         if let Some(mac_json) = try_read_mac_typeinfo_json("mac_osx_structures.json") {
             // mac_osx.gdt has no 64-bit sibling archive (a legacy Mac OS X
@@ -514,7 +524,9 @@ mod tests {
         // (correctly, additively) but collide with windows_vs12's own CRT
         // `stat`/`tm` definitions, which load first and win -- timespec/
         // div_t don't collide with anything in the win32-family sources.
-        let timespec = ws.get("timespec").expect("timespec from generic_clib corpus");
+        let timespec = ws
+            .get("timespec")
+            .expect("timespec from generic_clib corpus");
         assert_eq!(timespec.size_32, 8);
         assert_eq!(timespec.size_64, 16);
         let div_t = ws.get("div_t").expect("div_t from generic_clib corpus");

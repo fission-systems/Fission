@@ -410,16 +410,12 @@ impl SemanticReplayDelta {
         }
 
         let identical = field_deltas.is_empty();
-        let mut owners_touched: Vec<OwnerLayer> =
-            field_deltas.iter().map(|d| d.owner).collect();
+        let mut owners_touched: Vec<OwnerLayer> = field_deltas.iter().map(|d| d.owner).collect();
         owners_touched.sort();
         owners_touched.dedup();
         let primary_owner = pick_primary_owner(&field_deltas);
         let summary = if identical {
-            format!(
-                "identical runs ({} vs {})",
-                left.label, right.label
-            )
+            format!("identical runs ({} vs {})", left.label, right.label)
         } else {
             format!(
                 "{} field delta(s); primary_owner={:?}; owners={:?}",
@@ -490,13 +486,7 @@ fn probe_mallocng(emu: &mut Emulator, bins_base: u64) -> MallocngProbe {
     }
 }
 
-fn push_scalar(
-    out: &mut Vec<FieldDelta>,
-    field: &str,
-    left: &str,
-    right: &str,
-    owner: OwnerLayer,
-) {
+fn push_scalar(out: &mut Vec<FieldDelta>, field: &str, left: &str, right: &str, owner: OwnerLayer) {
     if left != right {
         out.push(FieldDelta {
             field: field.into(),
@@ -628,10 +618,11 @@ mod tests {
         let mut right = minimal_snap("b");
         right.unknown_syscalls.insert(999, 1);
         let d = SemanticReplayDelta::diff(&left, &right);
-        assert!(d
-            .field_deltas
-            .iter()
-            .any(|f| f.field.starts_with("unknown_syscalls") && f.owner == OwnerLayer::HleOs));
+        assert!(
+            d.field_deltas
+                .iter()
+                .any(|f| f.field.starts_with("unknown_syscalls") && f.owner == OwnerLayer::HleOs)
+        );
         assert_eq!(d.primary_owner, OwnerLayer::HleOs);
     }
 
@@ -649,9 +640,11 @@ mod tests {
             ..Default::default()
         });
         let d = SemanticReplayDelta::diff(&left, &right);
-        assert!(d.field_deltas.iter().any(|f| {
-            f.field == "mallocng.freeable_bin5" && f.owner == OwnerLayer::PageMem
-        }));
+        assert!(
+            d.field_deltas
+                .iter()
+                .any(|f| { f.field == "mallocng.freeable_bin5" && f.owner == OwnerLayer::PageMem })
+        );
     }
 
     fn minimal_snap(label: &str) -> SemanticReplaySnapshot {

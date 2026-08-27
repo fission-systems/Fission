@@ -90,15 +90,22 @@ pub(crate) fn scan_msvc_eh_funcinfo(binary: &LoadedBinary) -> Vec<u64> {
 
     // Matches Ghidra's own search scope: `.rdata`, falling back to `.text`
     // if the binary has no `.rdata` (e.g. some non-MSVC-linker PEs).
-    let mut sections: Vec<_> = binary.sections.iter().filter(|s| s.name == ".rdata").collect();
+    let mut sections: Vec<_> = binary
+        .sections
+        .iter()
+        .filter(|s| s.name == ".rdata")
+        .collect();
     if sections.is_empty() {
-        sections = binary.sections.iter().filter(|s| s.name == ".text").collect();
+        sections = binary
+            .sections
+            .iter()
+            .filter(|s| s.name == ".text")
+            .collect();
     }
 
     let mut candidates = Vec::new();
     for section in sections {
-        let Some(bytes) =
-            binary.view_bytes(section.virtual_address, section.virtual_size as usize)
+        let Some(bytes) = binary.view_bytes(section.virtual_address, section.virtual_size as usize)
         else {
             continue;
         };
@@ -112,7 +119,13 @@ pub(crate) fn scan_msvc_eh_funcinfo(binary: &LoadedBinary) -> Vec<u64> {
             let magic = field0 & 0x1FFF_FFFF;
             if matches!(magic, EH_MAGIC_V1 | EH_MAGIC_V2 | EH_MAGIC_V3) {
                 let addr = section_start + offset as u64;
-                collect_func_info_candidates(binary, addr, section_start, section_end, &mut candidates);
+                collect_func_info_candidates(
+                    binary,
+                    addr,
+                    section_start,
+                    section_end,
+                    &mut candidates,
+                );
             }
             offset += 4;
         }
@@ -143,7 +156,10 @@ fn collect_func_info_candidates(
     // Mirrors Ghidra's `EHFunctionInfoModel.validateModelSpecificInfo`:
     // reject unreasonable counts, and reject a FuncInfo with no map data at
     // all (a magic-number coincidence, not a real match).
-    if max_state > MAX_MAP_ENTRIES || n_try_blocks > MAX_MAP_ENTRIES || n_ip_map_entries > MAX_MAP_ENTRIES {
+    if max_state > MAX_MAP_ENTRIES
+        || n_try_blocks > MAX_MAP_ENTRIES
+        || n_ip_map_entries > MAX_MAP_ENTRIES
+    {
         return;
     }
     if max_state == 0 && n_try_blocks == 0 && n_ip_map_entries == 0 {
@@ -173,8 +189,12 @@ fn collect_func_info_candidates(
         if let Some(try_blocks) = binary.get_bytes(p_try_block_map, len) {
             for try_block in try_blocks.chunks_exact(20) {
                 let n_catches = u32::from_le_bytes(try_block[12..16].try_into().unwrap());
-                let p_handler_array = u32::from_le_bytes(try_block[16..20].try_into().unwrap()) as u64;
-                if n_catches == 0 || n_catches > MAX_MAP_ENTRIES || !in_same_section(p_handler_array) {
+                let p_handler_array =
+                    u32::from_le_bytes(try_block[16..20].try_into().unwrap()) as u64;
+                if n_catches == 0
+                    || n_catches > MAX_MAP_ENTRIES
+                    || !in_same_section(p_handler_array)
+                {
                     continue;
                 }
                 let handlers_len = n_catches as usize * 16;
@@ -182,7 +202,8 @@ fn collect_func_info_candidates(
                     continue;
                 };
                 for handler in handlers.chunks_exact(16) {
-                    let address_of_handler = u32::from_le_bytes(handler[12..16].try_into().unwrap());
+                    let address_of_handler =
+                        u32::from_le_bytes(handler[12..16].try_into().unwrap());
                     if address_of_handler != 0 {
                         out.push(address_of_handler as u64);
                     }

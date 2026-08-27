@@ -45,12 +45,7 @@ fn decode_packed(path: &Path) -> Option<FidbfDatabase> {
     let stem = path.file_stem()?.to_str()?;
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let table = |suffix: &str| dir.join(format!("{stem}.{suffix}.fpk"));
-    let (lib, func, rel, dom) = (
-        table("lib"),
-        table("fn"),
-        table("rel"),
-        table("dom"),
-    );
+    let (lib, func, rel, dom) = (table("lib"), table("fn"), table("rel"), table("dom"));
     if !func.exists() {
         return None;
     }

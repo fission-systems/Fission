@@ -274,8 +274,7 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
         }
         emu.metrics.hard_chains += 1;
         emu.chain_depth += 1;
-        let func: extern "C" fn(*mut Emulator) -> u64 =
-            unsafe { std::mem::transmute(host) };
+        let func: extern "C" fn(*mut Emulator) -> u64 = unsafe { std::mem::transmute(host) };
         let result = func(emu_ptr);
         emu.chain_depth -= 1;
         return result;
@@ -329,11 +328,7 @@ pub extern "C" fn jit_host_reg_base(emu_ptr: *mut Emulator) -> u64 {
 /// `entries` is a packed array of `(offset:u64, size:u64, value:u64)` triples
 /// (`count` triples). One callout replaces N `jit_write_space` calls at CallOther.
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_reg_bulk_flush(
-    emu_ptr: *mut Emulator,
-    entries: *const u64,
-    count: u64,
-) {
+pub extern "C" fn jit_reg_bulk_flush(emu_ptr: *mut Emulator, entries: *const u64, count: u64) {
     if entries.is_null() || count == 0 {
         return;
     }
@@ -404,10 +399,7 @@ pub extern "C" fn jit_shadow_load(
     for i in 0..n {
         if let Some(id) = node {
             // Prefer per-byte shadow when present.
-            let b = emu
-                .state
-                .get_shadow_memory(mem_sp, addr + i)
-                .unwrap_or(id);
+            let b = emu.state.get_shadow_memory(mem_sp, addr + i).unwrap_or(id);
             emu.state.set_shadow_memory(dst_sp, dst_off + i, b);
         } else {
             emu.state.clear_shadow_memory(dst_sp, dst_off + i);
@@ -626,12 +618,8 @@ pub extern "C" fn jit_shadow_unop(
 
     let new_expr = match op_kind {
         x if x == SymUnOpKind::Not as u32 => SymExpr::new_not(a_expr),
-        x if x == SymUnOpKind::Neg as u32 => {
-            SymExpr::new_sub(SymExpr::new_const(0, a_sz), a_expr)
-        }
-        x if x == SymUnOpKind::BoolNot as u32 => {
-            SymExpr::new_eq(a_expr, SymExpr::new_const(0, 1))
-        }
+        x if x == SymUnOpKind::Neg as u32 => SymExpr::new_sub(SymExpr::new_const(0, a_sz), a_expr),
+        x if x == SymUnOpKind::BoolNot as u32 => SymExpr::new_eq(a_expr, SymExpr::new_const(0, 1)),
         x if x == SymUnOpKind::FloatNeg as u32 => SymExpr::new_fneg(a_expr),
         x if x == SymUnOpKind::FloatAbs as u32 => SymExpr::new_fabs(a_expr),
         x if x == SymUnOpKind::FloatSqrt as u32 => SymExpr::new_fsqrt(a_expr),

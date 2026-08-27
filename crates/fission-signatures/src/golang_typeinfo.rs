@@ -152,7 +152,6 @@ const UNIX_GOOS: &[&str] = &[
 // Implementation
 // ---------------------------------------------------------------------------
 
-
 /// Build tags to consult, lowest priority first -- the order `from_raw` merged
 /// them in, so trying them in sequence and taking the first hit reproduces
 /// `or_insert`'s "first definition wins".
@@ -619,7 +618,10 @@ mod tests {
             eprintln!("skipped: packed tables not built here");
             return;
         }
-        assert!(golang.join("go1.22.0.ty.fpk").exists(), "both halves ship together");
+        assert!(
+            golang.join("go1.22.0.ty.fpk").exists(),
+            "both halves ship together"
+        );
     }
 
     #[test]

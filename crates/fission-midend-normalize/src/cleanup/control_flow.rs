@@ -190,7 +190,10 @@ pub fn simplify_empty_and_constant_ifs_recursive(
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. } => {
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
+                changed |= simplify_empty_and_constant_ifs_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    global_refs,
+                );
             }
             PreHirStmt::For {
                 init, update, body, ..
@@ -198,28 +201,49 @@ pub fn simplify_empty_and_constant_ifs_recursive(
                 if let Some(init) = init.as_mut()
                     && let PreHirStmt::Block(body) = init.as_mut()
                 {
-                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
+                    changed |= simplify_empty_and_constant_ifs_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                        global_refs,
+                    );
                 }
                 if let Some(update) = update.as_mut()
                     && let PreHirStmt::Block(body) = update.as_mut()
                 {
-                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
+                    changed |= simplify_empty_and_constant_ifs_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                        global_refs,
+                    );
                 }
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
+                changed |= simplify_empty_and_constant_ifs_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    global_refs,
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), global_refs);
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), global_refs);
+                changed |= simplify_empty_and_constant_ifs_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    global_refs,
+                );
+                changed |= simplify_empty_and_constant_ifs_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    global_refs,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), global_refs);
+                    changed |= simplify_empty_and_constant_ifs_recursive(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        global_refs,
+                    );
                 }
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), global_refs);
+                changed |= simplify_empty_and_constant_ifs_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    global_refs,
+                );
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::VaStart { .. }
@@ -660,7 +684,9 @@ pub fn single_pred_label_inline(stmts: &mut Vec<PreHirStmt>) -> bool {
 
 fn single_pred_label_inline_in_stmt(stmt: &mut PreHirStmt) -> bool {
     match stmt {
-        PreHirStmt::Block(body) => single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
+        PreHirStmt::Block(body) => {
+            single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
+        }
         PreHirStmt::If {
             then_body,
             else_body,
@@ -673,11 +699,15 @@ fn single_pred_label_inline_in_stmt(stmt: &mut PreHirStmt) -> bool {
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
         }
-        PreHirStmt::For { body, .. } => single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
+        PreHirStmt::For { body, .. } => {
+            single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
+        }
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases.iter_mut() {
-                changed |= single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                changed |= single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                    &mut case.body,
+                ));
             }
             changed |= single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             changed

@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
@@ -23,10 +23,7 @@ fn run_dyn(path: &std::path::Path, max_inst: u64) -> Result<Emulator> {
     );
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary)?;
-    let load_spec = binary
-        .load_spec()
-        .context("missing load_spec")?
-        .clone();
+    let load_spec = binary.load_spec().context("missing load_spec")?.clone();
     let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)?
         .into_iter()
         .next()
@@ -105,5 +102,8 @@ fn smoke_dyn_puts_lazy_bind() {
     if let Err(msg) = emu.metrics.check_unimplemented_budget(128, 16) {
         panic!("{msg}; full={}", emu.metrics.summary_line());
     }
-    eprintln!("dyn puts lazy-bind smoke ok: {}", emu.metrics.summary_line());
+    eprintln!(
+        "dyn puts lazy-bind smoke ok: {}",
+        emu.metrics.summary_line()
+    );
 }

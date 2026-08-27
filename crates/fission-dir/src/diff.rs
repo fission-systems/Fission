@@ -363,7 +363,8 @@ mod tests {
                             ty: i32_ty(),
                         },
                     },
-                ].into(),
+                ]
+                .into(),
             },
             PreHirStmt::Return(Some(prehir_var("acc"))),
         ];

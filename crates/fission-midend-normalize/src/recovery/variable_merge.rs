@@ -1,6 +1,6 @@
 use crate::prelude::*; // For accessing normalizer structures
-use fission_midend_prehir::util::rename_vars_in_stmts;
 use crate::{HashMap, HashSet};
+use fission_midend_prehir::util::rename_vars_in_stmts;
 
 fn collect_direct_copies(stmts: &[PreHirStmt]) -> crate::HashSet<(String, String)> {
     let mut copies = crate::HashSet::default();
@@ -99,7 +99,9 @@ fn collect_cooccurring_var_pairs_in_stmts(
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 collect_cooccurring_var_pairs_in_expr(expr, pairs);
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 collect_cooccurring_var_pairs_in_stmts(body, pairs);
             }
             PreHirStmt::If {
@@ -162,7 +164,9 @@ fn collect_cooccurring_var_pairs_in_lvalue(
             collect_cooccurring_var_pairs_in_expr(base, pairs);
             collect_cooccurring_var_pairs_in_expr(index, pairs);
         }
-        PreHirLValue::FieldAccess { base, .. } => collect_cooccurring_var_pairs_in_expr(base, pairs),
+        PreHirLValue::FieldAccess { base, .. } => {
+            collect_cooccurring_var_pairs_in_expr(base, pairs)
+        }
     }
 }
 
@@ -220,8 +224,12 @@ fn collect_read_vars_in_stmts(stmts: &[PreHirStmt], vars: &mut HashSet<String>) 
                 collect_read_vars_in_lvalue(lhs, vars);
                 collect_vars_in_expr(rhs, vars);
             }
-            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => collect_vars_in_expr(expr, vars),
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+                collect_vars_in_expr(expr, vars)
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 collect_read_vars_in_stmts(body, vars);
             }
             PreHirStmt::If {
@@ -315,7 +323,9 @@ impl CopyMergeBarrierCollector {
                 self.visit_expr(rhs);
             }
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => self.visit_expr(expr),
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 self.visit_stmts(body);
             }
             PreHirStmt::If {
@@ -434,7 +444,9 @@ impl CopyMergeBarrierCollector {
                 .any(|arg| self.expr_is_load_derived_barrier(arg)),
             PreHirExpr::PtrOffset { base, .. }
             | PreHirExpr::FieldAccess { base, .. }
-            | PreHirExpr::AggregateCopy { src: base, .. } => self.expr_is_load_derived_barrier(base),
+            | PreHirExpr::AggregateCopy { src: base, .. } => {
+                self.expr_is_load_derived_barrier(base)
+            }
             PreHirExpr::Index { base, index, .. } => {
                 self.expr_is_load_derived_barrier(base) || self.expr_is_load_derived_barrier(index)
             }
@@ -597,7 +609,9 @@ fn collect_dominant_copy_join_merges_in_stmts(
                 collect_dominant_copy_join_merges_in_stmts(then_body, renames);
                 collect_dominant_copy_join_merges_in_stmts(else_body, renames);
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 collect_dominant_copy_join_merges_in_stmts(body, renames);
             }
             PreHirStmt::For {
@@ -660,8 +674,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
 
     // Keep track of parameters to avoid merging them
-    let param_names: crate::HashSet<String> =
-        func.params.iter().map(|p| p.name.clone()).collect();
+    let param_names: crate::HashSet<String> = func.params.iter().map(|p| p.name.clone()).collect();
 
     // Step 1: Merge overlapping stack variables (coalescing multiple stack-slot views)
     let mut stack_renames = Vec::new();
@@ -1362,9 +1375,11 @@ fn type_byte_size(ty: &NirType) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
     use fission_midend_core::{NirBindingOrigin, NirType};
-    use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
+    use fission_midend_prehir::{
+        PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt,
+    };
 
     #[test]
     fn test_stack_slot_coalescing_and_domain_separation() {
@@ -1832,7 +1847,8 @@ mod tests {
                             lhs: PreHirLValue::Var("dummy2".to_string()),
                             rhs: PreHirExpr::Var("temp_2".to_string()),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                 },
             ],
             ..Default::default()
@@ -2098,7 +2114,8 @@ mod tests {
                                 },
                             ),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                 },
             ],
             ..Default::default()
@@ -2172,7 +2189,8 @@ mod tests {
                     then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
                         2147483647,
                         i32_ty.clone(),
-                    )))].into(),
+                    )))]
+                    .into(),
                     else_body: vec![].into(),
                 },
                 PreHirStmt::Return(Some(PreHirExpr::Var("eax".to_string()))),

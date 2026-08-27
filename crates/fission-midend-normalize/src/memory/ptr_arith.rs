@@ -1422,7 +1422,10 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             changed |= recover_in_expr(expr, binding_types);
         }
         PreHirStmt::Block(body) => {
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                binding_types,
+            );
         }
         PreHirStmt::If {
             cond,
@@ -1430,15 +1433,27 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             else_body,
         } => {
             changed |= recover_condition_expr(cond, binding_types);
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), binding_types);
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), binding_types);
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                binding_types,
+            );
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                binding_types,
+            );
         }
         PreHirStmt::While { cond, body } => {
             changed |= recover_condition_expr(cond, binding_types);
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                binding_types,
+            );
         }
         PreHirStmt::DoWhile { body, cond } => {
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                binding_types,
+            );
             changed |= recover_condition_expr(cond, binding_types);
         }
         PreHirStmt::For {
@@ -1456,7 +1471,10 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             if let Some(u) = update {
                 changed |= recover_in_stmt(u, binding_types);
             }
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                binding_types,
+            );
         }
         PreHirStmt::Switch {
             expr,
@@ -1465,9 +1483,15 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
         } => {
             changed |= recover_in_expr(expr, binding_types);
             for case in cases.iter_mut() {
-                changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), binding_types);
+                changed |= recover_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    binding_types,
+                );
             }
-            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), binding_types);
+            changed |= recover_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                binding_types,
+            );
         }
         PreHirStmt::Return(Some(expr)) => {
             changed |= recover_in_expr(expr, binding_types);

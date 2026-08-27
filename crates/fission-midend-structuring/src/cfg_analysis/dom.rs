@@ -3,8 +3,8 @@
 use super::util::{
     compute_dominator_sets, compute_rpo, cooper_intersect, nearest_common_from_sets, reachable_from,
 };
-use fission_midend_core::fast_hash::FastMap as HashMap;
 use crate::HashSet;
+use fission_midend_core::fast_hash::FastMap as HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomTree {

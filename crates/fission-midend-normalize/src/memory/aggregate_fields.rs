@@ -465,12 +465,19 @@ fn rewrite_alias_stmts(
                 else_body,
             } => {
                 changed |= rewrite_alias_expr(cond, aliases);
-                changed |= rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), aliases);
-                changed |= rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), aliases);
+                changed |= rewrite_alias_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    aliases,
+                );
+                changed |= rewrite_alias_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    aliases,
+                );
             }
             PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
                 changed |= rewrite_alias_expr(cond, aliases);
-                changed |= rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases);
+                changed |=
+                    rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases);
             }
             PreHirStmt::For {
                 init,
@@ -487,7 +494,8 @@ fn rewrite_alias_stmts(
                 if let Some(update) = update.as_deref_mut() {
                     changed |= rewrite_alias_stmts(std::slice::from_mut(update), aliases);
                 }
-                changed |= rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases);
+                changed |=
+                    rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases);
             }
             PreHirStmt::Switch {
                 expr,
@@ -496,12 +504,17 @@ fn rewrite_alias_stmts(
             } => {
                 changed |= rewrite_alias_expr(expr, aliases);
                 for case in cases {
-                    changed |= rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), aliases);
+                    changed |= rewrite_alias_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        aliases,
+                    );
                 }
-                changed |= rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), aliases);
+                changed |=
+                    rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), aliases);
             }
             PreHirStmt::Block(body) => {
-                changed |= rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases);
+                changed |=
+                    rewrite_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases);
             }
             PreHirStmt::Return(None)
             | PreHirStmt::VaStart { .. }

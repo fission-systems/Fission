@@ -13,7 +13,9 @@ pub fn rename_vars_in_stmts(body: &mut [PreHirStmt], renames: &[(String, String)
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 rename_var_in_expr(expr, renames)
             }
-            PreHirStmt::Block(stmts) => rename_vars_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), renames),
+            PreHirStmt::Block(stmts) => {
+                rename_vars_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), renames)
+            }
             PreHirStmt::While { cond, body } => {
                 rename_var_in_expr(cond, renames);
                 rename_vars_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), renames);
@@ -46,7 +48,10 @@ pub fn rename_vars_in_stmts(body: &mut [PreHirStmt], renames: &[(String, String)
             } => {
                 rename_var_in_expr(expr, renames);
                 for case in cases {
-                    rename_vars_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), renames);
+                    rename_vars_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        renames,
+                    );
                 }
                 rename_vars_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), renames);
             }
@@ -165,15 +170,22 @@ pub fn rewrite_field_access_names_in_stmts(
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 rewrite_field_access_names_in_expr(expr, renames)
             }
-            PreHirStmt::Block(stmts) => {
-                rewrite_field_access_names_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), renames)
-            }
+            PreHirStmt::Block(stmts) => rewrite_field_access_names_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                renames,
+            ),
             PreHirStmt::While { cond, body } => {
                 rewrite_field_access_names_in_expr(cond, renames);
-                rewrite_field_access_names_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), renames);
+                rewrite_field_access_names_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    renames,
+                );
             }
             PreHirStmt::DoWhile { body, cond } => {
-                rewrite_field_access_names_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), renames);
+                rewrite_field_access_names_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    renames,
+                );
                 rewrite_field_access_names_in_expr(cond, renames);
             }
             PreHirStmt::For {
@@ -197,7 +209,10 @@ pub fn rewrite_field_access_names_in_stmts(
                         renames,
                     );
                 }
-                rewrite_field_access_names_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), renames);
+                rewrite_field_access_names_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    renames,
+                );
             }
             PreHirStmt::Switch {
                 expr,
@@ -211,7 +226,10 @@ pub fn rewrite_field_access_names_in_stmts(
                         renames,
                     );
                 }
-                rewrite_field_access_names_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), renames);
+                rewrite_field_access_names_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    renames,
+                );
             }
             PreHirStmt::If {
                 cond,
@@ -219,8 +237,14 @@ pub fn rewrite_field_access_names_in_stmts(
                 else_body,
             } => {
                 rewrite_field_access_names_in_expr(cond, renames);
-                rewrite_field_access_names_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), renames);
-                rewrite_field_access_names_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), renames);
+                rewrite_field_access_names_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    renames,
+                );
+                rewrite_field_access_names_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    renames,
+                );
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)

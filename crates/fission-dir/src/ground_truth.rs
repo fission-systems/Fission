@@ -144,8 +144,14 @@ pub fn check_ground_truth(
         // compares two different conventions, and reports a divergence for
         // values that are the same bits. `mul_ints(1, -1)` did exactly that:
         // 4294967295 against -1, one 32-bit pattern read two ways.
-        let prehir_val = normalize(mask_to_width(*prehir_val as u64, return_bits), &hir.return_type);
-        let hir_val = normalize(mask_to_width(*hir_val as u64, return_bits), &hir.return_type);
+        let prehir_val = normalize(
+            mask_to_width(*prehir_val as u64, return_bits),
+            &hir.return_type,
+        );
+        let hir_val = normalize(
+            mask_to_width(*hir_val as u64, return_bits),
+            &hir.return_type,
+        );
 
         checked += 1;
         if prehir_val != emulator_val || hir_val != emulator_val {

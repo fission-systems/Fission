@@ -121,10 +121,12 @@ impl CallGraph {
                 continue;
             };
 
-            let caller = match resolve_enclosing_function(&functions, record.source.address, fallback_range) {
-                Some(addr) => addr,
-                None => continue,
-            };
+            let caller =
+                match resolve_enclosing_function(&functions, record.source.address, fallback_range)
+                {
+                    Some(addr) => addr,
+                    None => continue,
+                };
             let callee =
                 resolve_enclosing_function(&functions, to_addr, fallback_range).unwrap_or(to_addr);
 

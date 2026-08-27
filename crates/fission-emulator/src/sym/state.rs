@@ -1,5 +1,5 @@
-use fission_solver::SymExpr;
 use crate::pcode::state::MachineState;
+use fission_solver::SymExpr;
 
 /// A concolic execution state.
 /// Instead of deep-copying the entire emulator, we rely on TTD (Time-Travel Debugging).
@@ -19,10 +19,10 @@ pub struct SimState {
 impl std::fmt::Debug for SimState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimState")
-         .field("step_index", &self.step_index)
-         .field("pc", &self.pc)
-         .field("history", &self.history)
-         .finish()
+            .field("step_index", &self.step_index)
+            .field("pc", &self.pc)
+            .field("history", &self.history)
+            .finish()
     }
 }
 
@@ -42,7 +42,13 @@ impl SimState {
         }
     }
 
-    pub fn with_constraint(&self, constraint: SymExpr, next_step: u64, next_pc: u64, machine_state: MachineState) -> Self {
+    pub fn with_constraint(
+        &self,
+        constraint: SymExpr,
+        next_step: u64,
+        next_pc: u64,
+        machine_state: MachineState,
+    ) -> Self {
         let mut new_state = self.clone(); // Clones history
         new_state.history.constraints.push(constraint);
         new_state.step_index = next_step;

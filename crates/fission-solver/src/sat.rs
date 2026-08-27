@@ -47,8 +47,8 @@ pub struct Watcher {
 
 #[derive(Debug, Clone)]
 struct VarOrder {
-    heap: Vec<usize>,       // heap[i] = var, 1-indexed for easy math
-    indices: Vec<usize>,    // indices[var] = position in heap, 0 if not in heap
+    heap: Vec<usize>,    // heap[i] = var, 1-indexed for easy math
+    indices: Vec<usize>, // indices[var] = position in heap, 0 if not in heap
 }
 
 impl VarOrder {
@@ -58,36 +58,40 @@ impl VarOrder {
             indices: vec![0],
         }
     }
-    
+
     fn ensure_var(&mut self, var: usize) {
         while self.indices.len() <= var {
             self.indices.push(0);
         }
     }
-    
+
     fn in_heap(&self, var: usize) -> bool {
         var < self.indices.len() && self.indices[var] != 0
     }
-    
+
     fn insert(&mut self, var: usize, activity: &[f64]) {
-        if self.in_heap(var) { return; }
+        if self.in_heap(var) {
+            return;
+        }
         let idx = self.heap.len();
         self.heap.push(var);
         self.indices[var] = idx;
         self.percolate_up(idx, activity);
     }
-    
+
     fn update(&mut self, var: usize, activity: &[f64]) {
         if self.in_heap(var) {
             self.percolate_up(self.indices[var], activity);
         }
     }
-    
+
     fn pop_max(&mut self, activity: &[f64]) -> Option<usize> {
-        if self.heap.len() <= 1 { return None; }
+        if self.heap.len() <= 1 {
+            return None;
+        }
         let max_var = self.heap[1];
         self.indices[max_var] = 0;
-        
+
         let last = self.heap.pop().unwrap();
         if self.heap.len() > 1 {
             self.heap[1] = last;
@@ -96,7 +100,7 @@ impl VarOrder {
         }
         Some(max_var)
     }
-    
+
     fn percolate_up(&mut self, mut i: usize, activity: &[f64]) {
         let var = self.heap[i];
         let act = activity[var];
@@ -113,7 +117,7 @@ impl VarOrder {
         self.heap[i] = var;
         self.indices[var] = i;
     }
-    
+
     fn percolate_down(&mut self, mut i: usize, activity: &[f64]) {
         let var = self.heap[i];
         let act = activity[var];
@@ -140,28 +144,28 @@ impl VarOrder {
 pub struct SatSolver {
     /// The formula clauses (original + learned)
     pub clauses: Vec<Clause>,
-    
+
     /// Value assignment for each variable (1-indexed)
     assigns: Vec<LBool>,
     /// Meta-data for each variable (reason, level)
     vardata: Vec<VarData>,
-    
+
     /// Watch lists: lit.index() -> list of clauses watching this literal.
     /// A clause watches 2 literals. If one becomes false, we must find another or propagate.
     watches: Vec<Vec<Watcher>>,
-    
+
     /// Assignment trail (stack of assigned literals)
     trail: Vec<Lit>,
     /// Indices into the trail marking the start of each decision level
     trail_lim: Vec<usize>,
-    
+
     /// Index in `trail` of the next literal to propagate
     qhead: usize,
-    
+
     /// VSIDS Variable Activity (for decision heuristic)
     activity: Vec<f64>,
     var_inc: f64,
-    
+
     order: VarOrder,
     phase: Vec<LBool>,
 
@@ -189,7 +193,10 @@ impl SatSolver {
         Self {
             clauses: vec![],
             assigns: vec![LBool::Undef], // 0 is unused
-            vardata: vec![VarData { reason: None, level: 0 }],
+            vardata: vec![VarData {
+                reason: None,
+                level: 0,
+            }],
             watches: vec![],
             trail: vec![],
             trail_lim: vec![],
@@ -210,14 +217,17 @@ impl SatSolver {
         let var = var as usize;
         while self.assigns.len() <= var {
             self.assigns.push(LBool::Undef);
-            self.vardata.push(VarData { reason: None, level: 0 });
+            self.vardata.push(VarData {
+                reason: None,
+                level: 0,
+            });
             self.activity.push(0.0);
             self.phase.push(LBool::False);
-            
+
             // Watch lists for var and !var
             self.watches.push(vec![]);
             self.watches.push(vec![]);
-            
+
             let new_var = self.assigns.len() - 1;
             self.order.ensure_var(new_var);
             self.order.insert(new_var, &self.activity);
@@ -240,7 +250,10 @@ impl SatSolver {
 
     /// Returns the assigned value of a CNF variable (1-indexed). Returns Undef if not assigned.
     pub fn get_var_value(&self, var: u32) -> LBool {
-        self.assigns.get(var as usize).copied().unwrap_or(LBool::Undef)
+        self.assigns
+            .get(var as usize)
+            .copied()
+            .unwrap_or(LBool::Undef)
     }
 
     pub fn decision_level(&self) -> u32 {
@@ -289,10 +302,10 @@ impl SatSolver {
         // Simplify clause (remove duplicates, handle True/False if any)
         lits.sort_by_key(|l| l.0);
         lits.dedup();
-        
+
         // Check for tautology (contains lit and !lit)
         for i in 0..lits.len() {
-            for j in (i+1)..lits.len() {
+            for j in (i + 1)..lits.len() {
                 if lits[i].0 == -lits[j].0 {
                     return true; // Trivial true
                 }
@@ -315,12 +328,18 @@ impl SatSolver {
         let c_idx = self.clauses.len();
         let lit0 = lits[0];
         let lit1 = lits[1];
-        
+
         self.clauses.push(Clause(lits));
-        
-        self.watches[lit0.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit1 });
-        self.watches[lit1.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit0 });
-        
+
+        self.watches[lit0.not().index()].push(Watcher {
+            clause_idx: c_idx,
+            blocker: lit1,
+        });
+        self.watches[lit1.not().index()].push(Watcher {
+            clause_idx: c_idx,
+            blocker: lit0,
+        });
+
         true
     }
 
@@ -366,7 +385,7 @@ impl SatSolver {
                     self.clauses[c_idx].0[0] = c0;
                     self.clauses[c_idx].0[1] = c1;
                 }
-                
+
                 // If c0 is true, blocker was just wrong, update it and continue.
                 if self.value_lit(c0) == LBool::True {
                     let mut new_w = w.clone();
@@ -375,7 +394,7 @@ impl SatSolver {
                     j += 1;
                     continue;
                 }
-                
+
                 // Look for a new literal to watch
                 let mut found_new_watch = false;
                 let c_len = self.clauses[c_idx].0.len();
@@ -393,19 +412,19 @@ impl SatSolver {
                         break;
                     }
                 }
-                
+
                 if found_new_watch {
                     continue; // we didn't keep it in the current list
                 }
-                
+
                 // Could not find a new watch. This means clause is unit or empty (conflict).
                 ws[j] = w.clone();
                 j += 1;
-                
+
                 if self.value_lit(c0) == LBool::False {
                     // CONFLICT
                     conflict = Some(w.clause_idx);
-                    
+
                     // Copy remaining watches back
                     while i < ws.len() {
                         ws[j] = ws[i].clone();
@@ -418,7 +437,7 @@ impl SatSolver {
                     self.enqueue(c0, Some(w.clause_idx));
                 }
             }
-            
+
             ws.truncate(j);
             self.watches[p.index()] = ws;
 
@@ -442,11 +461,11 @@ impl SatSolver {
             let lits = self.clauses[confl].0.clone();
             // Iterate all literals in the reason clause except the one that is true (if p!=0)
             let start = if p.0 == 0 { 0 } else { 1 };
-            
+
             for j in start..lits.len() {
                 let q = lits[j];
                 let v = q.var() as usize;
-                
+
                 if !seen[v] && self.vardata[v].level > 0 {
                     self.var_bump_activity(v);
                     seen[v] = true;
@@ -472,7 +491,7 @@ impl SatSolver {
 
             seen[p.var() as usize] = false;
             path_c -= 1;
-            
+
             if path_c == 0 {
                 break;
             }
@@ -480,7 +499,7 @@ impl SatSolver {
         }
 
         learned[0] = p.not();
-        
+
         // Decay activities
         self.var_decay_activity();
         self.conflicts_since_gc += 1;
@@ -512,13 +531,18 @@ impl SatSolver {
     fn gc_learned(&mut self) {
         let ls = self.learned_start;
         let total = self.clauses.len();
-        if total <= ls { return; }
+        if total <= ls {
+            return;
+        }
 
         let learned_count = total - ls;
-        if learned_count < 10 { return; }
+        if learned_count < 10 {
+            return;
+        }
 
         // Collect (lbd, original_index) for each learned clause
-        let mut order: Vec<(u32, usize)> = self.learned_meta
+        let mut order: Vec<(u32, usize)> = self
+            .learned_meta
             .iter()
             .enumerate()
             .map(|(i, m)| (m.lbd, ls + i))
@@ -537,9 +561,16 @@ impl SatSolver {
         let mut new_meta: Vec<LearnedMeta> = Vec::new();
         let mut index_map: Vec<Option<usize>> = vec![None; self.clauses.len()];
 
-        for i in 0..ls { index_map[i] = Some(i); }
+        for i in 0..ls {
+            index_map[i] = Some(i);
+        }
 
-        for (meta_i, orig_idx) in self.learned_meta.iter().enumerate().map(|(i, _)| (i, ls + i)) {
+        for (meta_i, orig_idx) in self
+            .learned_meta
+            .iter()
+            .enumerate()
+            .map(|(i, _)| (i, ls + i))
+        {
             if to_keep.contains(&orig_idx) {
                 let new_idx = new_clauses.len();
                 index_map[orig_idx] = Some(new_idx);
@@ -549,7 +580,11 @@ impl SatSolver {
         }
 
         let evicted = total - new_clauses.len();
-        tracing::debug!("gc_learned: evicted {} of {} learned clauses", evicted, learned_count);
+        tracing::debug!(
+            "gc_learned: evicted {} of {} learned clauses",
+            evicted,
+            learned_count
+        );
 
         // Remap watch lists
         for ws in &mut self.watches {
@@ -577,13 +612,13 @@ impl SatSolver {
             let limit = self.trail_lim[level as usize];
             for c in (limit..self.trail.len()).rev() {
                 let v = self.trail[c].var() as usize;
-                
+
                 // Phase saving: remember the last assigned polarity before unassigning
                 self.phase[v] = self.assigns[v];
-                
+
                 self.assigns[v] = LBool::Undef;
                 self.vardata[v].reason = None;
-                
+
                 // Re-insert unassigned variable back into the heap
                 self.order.insert(v, &self.activity);
             }
@@ -630,7 +665,11 @@ impl SatSolver {
         self.solve_with_assumptions(theory, &[])
     }
 
-    pub fn solve_with_assumptions(&mut self, mut theory: Option<&mut dyn crate::theory::Theory>, assumptions: &[Lit]) -> bool {
+    pub fn solve_with_assumptions(
+        &mut self,
+        mut theory: Option<&mut dyn crate::theory::Theory>,
+        assumptions: &[Lit],
+    ) -> bool {
         self.cancel_until(0);
 
         for &lit in assumptions {
@@ -656,22 +695,22 @@ impl SatSolver {
                 if let Some(th) = &mut theory {
                     // Extract current assignments as a list of True literals for the theory to check
                     let assignments: Vec<Lit> = self.trail.clone();
-                    
+
                     if let crate::theory::TheoryStatus::Lemmas(lemmas) = th.check(&assignments) {
                         // Theory produced new clauses (lazy constraints or conflicts)
                         for lits in lemmas {
                             if lits.is_empty() {
                                 return false; // Trivially UNSAT
                             }
-                            
+
                             let c_idx = self.clauses.len();
                             self.clauses.push(Clause(lits.clone()));
-                            
+
                             let lbd = self.compute_lbd(&lits);
                             if c_idx >= self.learned_start {
                                 self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
                             }
-                            
+
                             if lits.len() == 1 {
                                 // Unit clause. Enqueue it.
                                 // It could be conflicting right now, so we backtrack to 0 just in case.
@@ -680,13 +719,22 @@ impl SatSolver {
                             } else {
                                 let lit0 = lits[0];
                                 let lit1 = lits[1];
-                                self.watches[lit0.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit1 });
-                                self.watches[lit1.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit0 });
-                                
+                                self.watches[lit0.not().index()].push(Watcher {
+                                    clause_idx: c_idx,
+                                    blocker: lit1,
+                                });
+                                self.watches[lit1.not().index()].push(Watcher {
+                                    clause_idx: c_idx,
+                                    blocker: lit0,
+                                });
+
                                 // Check if this new clause is conflicting under the current trail
                                 // A clause is conflicting if ALL its literals are False.
-                                let is_conflicting = lits.iter().all(|&l| self.assigns[l.var() as usize] == (if l.0 < 0 { LBool::True } else { LBool::False }));
-                                
+                                let is_conflicting = lits.iter().all(|&l| {
+                                    self.assigns[l.var() as usize]
+                                        == (if l.0 < 0 { LBool::True } else { LBool::False })
+                                });
+
                                 if is_conflicting {
                                     confl_opt = Some(c_idx);
                                 }
@@ -701,21 +749,21 @@ impl SatSolver {
                 if self.decision_level() <= assumptions.len() as u32 {
                     return false; // Root or assumption level conflict -> UNSAT
                 }
-                
+
                 let (learned_clause, mut backtrack_level) = self.analyze(confl);
-                
+
                 // Do not backtrack past assumptions
                 if backtrack_level < assumptions.len() as u32 {
                     backtrack_level = assumptions.len() as u32;
                 }
-                
+
                 self.cancel_until(backtrack_level);
-                
+
                 if learned_clause.len() == 1 {
                     self.enqueue(learned_clause[0], None);
                 } else {
                     let c_idx = self.clauses.len();
-                    
+
                     // We must watch the first two literals. The first is the asserting literal.
                     // The second must be one with the highest decision level (which is backtrack_level).
                     let mut max_i = 1;
@@ -727,26 +775,32 @@ impl SatSolver {
                             max_i = i;
                         }
                     }
-                    
+
                     let mut final_clause = learned_clause.clone();
                     final_clause.swap(1, max_i);
-                    
+
                     let lit0 = final_clause[0];
                     let lit1 = final_clause[1];
-                    
+
                     // Compute LBD before moving final_clause into the Clause struct
                     let lbd = self.compute_lbd(&final_clause);
 
                     self.clauses.push(Clause(final_clause));
-                    
+
                     // Track learned clause metadata for LBD-based GC
                     if c_idx >= self.learned_start {
                         self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
                     }
 
-                    self.watches[lit0.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit1 });
-                    self.watches[lit1.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit0 });
-                    
+                    self.watches[lit0.not().index()].push(Watcher {
+                        clause_idx: c_idx,
+                        blocker: lit1,
+                    });
+                    self.watches[lit1.not().index()].push(Watcher {
+                        clause_idx: c_idx,
+                        blocker: lit0,
+                    });
+
                     // BCP will flip the asserting literal
                     self.enqueue(lit0, Some(c_idx));
                 }

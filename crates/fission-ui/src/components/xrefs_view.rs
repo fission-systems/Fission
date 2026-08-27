@@ -22,12 +22,14 @@ pub fn XrefsView() -> Element {
         let Some(addr) = load_addr else {
             return;
         };
-        let binary  = state.read().binary.clone();
+        let binary = state.read().binary.clone();
         let session = state.read().server_session_id.clone();
 
         {
             let s = state.read();
-            if s.is_loading_xrefs { return; }
+            if s.is_loading_xrefs {
+                return;
+            }
         }
         {
             let mut s = state.write();

@@ -12,10 +12,10 @@
 //! mod.rs`), rather than reimplementing binary loading.
 
 use anyhow::{Context, Result, bail};
+use fission_emulator::pcode::page_map::prot;
 use fission_emulator::{
     ArchInfo, Emulator, LinuxEnv, MachineState, OsEnvironment, RunOutcome, WindowsEnv,
 };
-use fission_emulator::pcode::page_map::prot;
 use fission_loader::loader::LoadedBinary;
 use std::path::Path;
 

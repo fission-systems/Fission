@@ -1,4 +1,4 @@
-use crate::ast::{SymExpr, SymNodeId, Sort};
+use crate::ast::{Sort, SymExpr, SymNodeId};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -22,7 +22,7 @@ pub struct Solver {
     pub model: HashMap<SymNodeId, u64>,
     /// Storage for AST nodes by ID.
     pub nodes: HashMap<SymNodeId, SymExpr>,
-    
+
     pub bv_theory: crate::theory::bitvector::BvTheorySolver,
     pub sat: crate::sat::SatSolver,
     pub lowered_assertions: usize,
@@ -54,7 +54,11 @@ impl Solver {
 
     pub fn register_var(&mut self, name: String, size: u32) -> SymNodeId {
         let id = crate::ast::VAR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let expr = SymExpr::Var { id, name, sort: Sort::BitVector(size) };
+        let expr = SymExpr::Var {
+            id,
+            name,
+            sort: Sort::BitVector(size),
+        };
         self.nodes.insert(id, expr);
         id
     }
@@ -74,7 +78,11 @@ impl Solver {
         self.check_sat_with_oracle(None, &[])
     }
 
-    pub fn check_sat_with_oracle(&mut self, oracle: Option<&dyn MemoryOracle>, extra: &[SymExpr]) -> Result<SatResult> {
+    pub fn check_sat_with_oracle(
+        &mut self,
+        oracle: Option<&dyn MemoryOracle>,
+        extra: &[SymExpr],
+    ) -> Result<SatResult> {
         let mut loop_count = 0;
 
         // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
@@ -85,7 +93,7 @@ impl Solver {
                 return Ok(SatResult::Unsat);
             }
         }
-        
+
         // Push missing assertions to SAT (if any somehow bypassed assert)
         while self.lowered_assertions < self.assertions.len() {
             let expr = &self.assertions[self.lowered_assertions];
@@ -97,7 +105,7 @@ impl Solver {
         if !self.bv_theory.load_into_sat(&mut self.sat) {
             return Ok(SatResult::Unsat);
         }
-        
+
         loop {
             loop_count += 1;
             if loop_count > 10 {
@@ -128,8 +136,9 @@ impl Solver {
 
             // 4. Model Extraction
             self.model.clear();
-            self.bv_theory.extract_model(&self.sat, &self.nodes, &mut self.model);
-            
+            self.bv_theory
+                .extract_model(&self.sat, &self.nodes, &mut self.model);
+
             // 5. Memory CEGAR
             if let Some(oracle) = oracle {
                 let mut new_lemmas = Vec::new();
@@ -140,13 +149,25 @@ impl Solver {
                                 let space_id: u64 = name["space_".len()..].parse().unwrap_or(0);
                                 let c_idx = self.bv_theory.evaluate_expr_in_model(&self.sat, index);
                                 let c_val = self.bv_theory.evaluate_expr_in_model(&self.sat, expr);
-                                
+
                                 if let Some(oracle_val) = oracle.read_concrete(space_id, c_idx) {
                                     if c_val != oracle_val as u64 {
                                         // Lemma: index == c_idx => ArraySelect == oracle_val
-                                        let eq_idx = SymExpr::Eq(index.clone(), Box::new(SymExpr::new_const(c_idx, index.get_size())));
-                                        let eq_val = SymExpr::Eq(Box::new(expr.clone()), Box::new(SymExpr::new_const(oracle_val as u64, expr.get_size())));
-                                        let implies = SymExpr::Or(Box::new(SymExpr::new_not(eq_idx)), Box::new(eq_val));
+                                        let eq_idx = SymExpr::Eq(
+                                            index.clone(),
+                                            Box::new(SymExpr::new_const(c_idx, index.get_size())),
+                                        );
+                                        let eq_val = SymExpr::Eq(
+                                            Box::new(expr.clone()),
+                                            Box::new(SymExpr::new_const(
+                                                oracle_val as u64,
+                                                expr.get_size(),
+                                            )),
+                                        );
+                                        let implies = SymExpr::Or(
+                                            Box::new(SymExpr::new_not(eq_idx)),
+                                            Box::new(eq_val),
+                                        );
                                         new_lemmas.push(implies);
                                     }
                                 }
@@ -187,8 +208,16 @@ impl Solver {
         self.satisfiable_with_oracle(extra, None)
     }
 
-    pub fn satisfiable_with_oracle(&mut self, extra: &[SymExpr], oracle: Option<&dyn MemoryOracle>) -> bool {
-        matches!(self.check_sat_with_oracle(oracle, extra).unwrap_or(SatResult::Unknown), SatResult::Sat)
+    pub fn satisfiable_with_oracle(
+        &mut self,
+        extra: &[SymExpr],
+        oracle: Option<&dyn MemoryOracle>,
+    ) -> bool {
+        matches!(
+            self.check_sat_with_oracle(oracle, extra)
+                .unwrap_or(SatResult::Unknown),
+            SatResult::Sat
+        )
     }
 
     /// Evaluate the expression and return up to `n` concrete values that satisfy
@@ -203,7 +232,10 @@ impl Solver {
         }
 
         let mut results = Vec::new();
-        if !matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat) {
+        if !matches!(
+            self.check_sat().unwrap_or(SatResult::Unknown),
+            SatResult::Sat
+        ) {
             return results;
         }
 
@@ -220,16 +252,25 @@ impl Solver {
         let mut extra_exclusions: Vec<SymExpr> = Vec::new();
         while results.len() < n {
             let last = *results.last().unwrap_or(&0);
-            let exclusion = SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_size()));
+            let exclusion =
+                SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_size()));
             extra_exclusions.push(exclusion);
 
-            let sat = matches!(self.check_sat_with_oracle(None, &extra_exclusions).unwrap_or(SatResult::Unknown), SatResult::Sat);
+            let sat = matches!(
+                self.check_sat_with_oracle(None, &extra_exclusions)
+                    .unwrap_or(SatResult::Unknown),
+                SatResult::Sat
+            );
             if sat {
                 if let SymExpr::Var { id, .. } = expr {
                     if let Some(val) = self.model.get(id) {
                         results.push(*val);
-                    } else { break; }
-                } else { break; }
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
@@ -268,10 +309,14 @@ impl Solver {
     /// Uses binary search over constraint space (reference: angr min/max with signed flag).
     pub fn min(&mut self, expr: &SymExpr) -> Option<u64> {
         // Concrete shortcut
-        if let SymExpr::Const { val, .. } = expr { return Some(*val); }
+        if let SymExpr::Const { val, .. } = expr {
+            return Some(*val);
+        }
 
         let solutions = self.eval(expr, 1);
-        if solutions.is_empty() { return None; }
+        if solutions.is_empty() {
+            return None;
+        }
 
         let mut lo = 0u64;
         let mut hi = solutions[0];
@@ -297,14 +342,22 @@ impl Solver {
     /// Find the maximum concrete value of `expr` satisfying the current constraints.
     pub fn max(&mut self, expr: &SymExpr) -> Option<u64> {
         // Concrete shortcut
-        if let SymExpr::Const { val, .. } = expr { return Some(*val); }
+        if let SymExpr::Const { val, .. } = expr {
+            return Some(*val);
+        }
 
         let solutions = self.eval(expr, 1);
-        if solutions.is_empty() { return None; }
+        if solutions.is_empty() {
+            return None;
+        }
 
         let mut lo = solutions[0];
         let size_bits = expr.get_size() * 8;
-        let mut hi = if size_bits >= 64 { u64::MAX } else { (1u64 << size_bits) - 1 };
+        let mut hi = if size_bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << size_bits) - 1
+        };
         let mut best = lo;
 
         // Binary search upward

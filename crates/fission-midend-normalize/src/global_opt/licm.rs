@@ -1,3 +1,4 @@
+use crate::HashSet;
 /// Loop Invariant Code Motion (LICM) for HIR.
 ///
 /// Identifies assignments inside `While`/`DoWhile`/`For` loops whose
@@ -37,7 +38,6 @@
 /// - LLVM `lib/Transforms/Scalar/LICM.cpp` (concept)
 /// - Aho, Lam, Sethi, Ullman "Compilers" §9.5 (code motion)
 use crate::prelude::*;
-use crate::HashSet;
 
 /// Apply LICM to all loops in `func`.  Returns `true` if any statement was
 /// hoisted.
@@ -242,7 +242,9 @@ fn is_invariant_stmt(stmt: &PreHirStmt, loop_defs: &HashSet<String>) -> bool {
 fn is_pure_and_invariant(expr: &PreHirExpr, loop_defs: &HashSet<String>) -> bool {
     match expr {
         PreHirExpr::Const(_, _) => true,
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => !loop_defs.contains(name.as_str()),
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+            !loop_defs.contains(name.as_str())
+        }
         PreHirExpr::Cast { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
         PreHirExpr::Unary { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
         PreHirExpr::Binary { lhs, rhs, .. } => {

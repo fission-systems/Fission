@@ -16,13 +16,13 @@ use fission_midend_core::ir::{
 use fission_midend_prehir::{PreHirExpr, PreHirFunction, PreHirStmt};
 use indexmap::IndexMap;
 
-use fission_midend_core::wave_stats::{
-    add_call_effect_summary_refinements, add_interproc_constraint_rounds,
-    add_prototype_summary_refinements, add_prototype_summary_rounds, add_wrapper_summary_folds,
-};
 use super::{
     callsite_type_prop::{api_signature, is_known_api_signature, win_type_name_to_nir},
     summarize_wrapper_hir_function, summary_soundness_for_wrapper,
+};
+use fission_midend_core::wave_stats::{
+    add_call_effect_summary_refinements, add_interproc_constraint_rounds,
+    add_prototype_summary_refinements, add_prototype_summary_rounds, add_wrapper_summary_folds,
 };
 use fission_signatures::type_name_is_informative;
 
@@ -398,9 +398,9 @@ pub fn apply_interproc_callsite_arity_pass(func: &mut PreHirFunction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
-    use fission_midend_prehir::PreHirBinding;
+    // prelude via parent
     use fission_core::CallingConvention;
+    use fission_midend_prehir::PreHirBinding;
 
     fn empty_binding(name: &str) -> PreHirBinding {
         PreHirBinding {

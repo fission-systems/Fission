@@ -36,7 +36,9 @@ pub const KIND_FID_DOMAIN_PATH: u16 = 13;
 fn esc(text: &str) -> String {
     // `|` separates fields and `\n` separates records; a library or symbol name
     // containing either would otherwise shift every field after it.
-    text.replace('\\', "\\\\").replace('|', "\\p").replace('\n', "\\n")
+    text.replace('\\', "\\\\")
+        .replace('|', "\\p")
+        .replace('\n', "\\n")
 }
 
 fn unesc(text: &str) -> String {
@@ -80,7 +82,10 @@ fn relation_kind(code: &str) -> FidbfRelationType {
         "i" => FidbfRelationType::Inferior,
         "s" => FidbfRelationType::Superior,
         other => FidbfRelationType::Unknown(
-            other.strip_prefix('u').and_then(|v| v.parse().ok()).unwrap_or(-1),
+            other
+                .strip_prefix('u')
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(-1),
         ),
     }
 }
@@ -177,7 +182,13 @@ pub fn encode(db: &FidbfDatabase) -> FidFpkImages {
     // lookup path here -- and name order is what lets neighbouring records
     // share prefixes, which is worth more than every other choice combined.
     let bulk = |records: &Vec<String>, kind: u16, sort_field: usize| {
-        pack_with(records, kind, CODEC_ZSTD_COLUMNAR, sort_field, BLOCK_TARGET_BULK)
+        pack_with(
+            records,
+            kind,
+            CODEC_ZSTD_COLUMNAR,
+            sort_field,
+            BLOCK_TARGET_BULK,
+        )
     };
 
     // The function table carries a `full_hash -> record` index so a match can
@@ -302,7 +313,12 @@ pub fn decode(
         });
     }
 
-    Ok(FidbfDatabase::new(source_path, libraries, functions, relations))
+    Ok(FidbfDatabase::new(
+        source_path,
+        libraries,
+        functions,
+        relations,
+    ))
 }
 
 #[cfg(test)]
@@ -320,9 +336,8 @@ mod tests {
     /// match on counts and hashes.
     #[test]
     fn a_real_database_round_trips_field_for_field() {
-        let src = Path::new(
-            "/Users/sjkim1127/Fission/utils/signatures/fid/libc-x86.LE.64.default.fidbf",
-        );
+        let src =
+            Path::new("/Users/sjkim1127/Fission/utils/signatures/fid/libc-x86.LE.64.default.fidbf");
         let Ok(original) = crate::fidbf::parse_fidbf(src) else {
             return; // bundle not present in this checkout
         };
@@ -342,19 +357,31 @@ mod tests {
         assert_eq!(back.functions.len(), original.functions.len());
         assert_eq!(back.relations.len(), original.relations.len());
 
-        let mut a: Vec<String> = original.functions.iter().map(|x| format!("{x:?}")).collect();
+        let mut a: Vec<String> = original
+            .functions
+            .iter()
+            .map(|x| format!("{x:?}"))
+            .collect();
         let mut b: Vec<String> = back.functions.iter().map(|x| format!("{x:?}")).collect();
         a.sort();
         b.sort();
         assert_eq!(a, b, "function fields differ");
 
-        let mut a: Vec<String> = original.libraries.iter().map(|x| format!("{x:?}")).collect();
+        let mut a: Vec<String> = original
+            .libraries
+            .iter()
+            .map(|x| format!("{x:?}"))
+            .collect();
         let mut b: Vec<String> = back.libraries.iter().map(|x| format!("{x:?}")).collect();
         a.sort();
         b.sort();
         assert_eq!(a, b, "library fields differ");
 
-        let mut a: Vec<String> = original.relations.iter().map(|x| format!("{x:?}")).collect();
+        let mut a: Vec<String> = original
+            .relations
+            .iter()
+            .map(|x| format!("{x:?}"))
+            .collect();
         let mut b: Vec<String> = back.relations.iter().map(|x| format!("{x:?}")).collect();
         a.sort();
         b.sort();
@@ -374,7 +401,10 @@ mod tests {
             let db = crate::fidbf::parse_fidbf(&path)
                 .unwrap_or_else(|e| panic!("{stem} should parse: {e}"));
             assert!(!db.functions.is_empty(), "{stem} has functions");
-            assert!(db.relations.is_empty(), "{stem} is the empty-relations case");
+            assert!(
+                db.relations.is_empty(),
+                "{stem} is the empty-relations case"
+            );
         }
     }
 
@@ -382,7 +412,13 @@ mod tests {
     fn separators_inside_names_survive() {
         // A symbol containing `|` or a newline would otherwise shift every
         // field after it, silently.
-        for raw in ["plain", "has|pipe", "has\nnewline", "back\\slash", "all|of\nthem\\"] {
+        for raw in [
+            "plain",
+            "has|pipe",
+            "has\nnewline",
+            "back\\slash",
+            "all|of\nthem\\",
+        ] {
             assert_eq!(unesc(&esc(raw)), raw, "escaping lost {raw:?}");
         }
     }
@@ -465,8 +501,12 @@ impl LazyFidDatabase {
             .filter(|f| !f.force_specific || f.specific_hash == specific_hash)
             .filter_map(|f| {
                 let score = (f.code_unit_size as f32
-                    + if f.specific_hash == specific_hash { 10.0 } else { 0.0 })
-                    .min(100.0);
+                    + if f.specific_hash == specific_hash {
+                        10.0
+                    } else {
+                        0.0
+                    })
+                .min(100.0);
                 if !f.auto_pass && score < FID_ACCEPT_THRESHOLD {
                     return None;
                 }

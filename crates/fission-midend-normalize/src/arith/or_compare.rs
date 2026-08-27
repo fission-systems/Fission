@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use super::util::is_zero_const;
+use crate::prelude::*;
 
 /// Simplifies bitwise-OR comparisons with zero:
 /// - `(V | W) == 0` => `(V == 0) && (W == 0)`
@@ -31,7 +31,9 @@ fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr);
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::For {

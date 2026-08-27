@@ -29,13 +29,22 @@ fn translate_color(c: syntect::highlighting::Color) -> Color {
 
 fn translate_style(style: SyntectStyle) -> Style {
     let mut s = Style::default().fg(translate_color(style.foreground));
-    if style.font_style.contains(syntect::highlighting::FontStyle::BOLD) {
+    if style
+        .font_style
+        .contains(syntect::highlighting::FontStyle::BOLD)
+    {
         s = s.add_modifier(Modifier::BOLD);
     }
-    if style.font_style.contains(syntect::highlighting::FontStyle::ITALIC) {
+    if style
+        .font_style
+        .contains(syntect::highlighting::FontStyle::ITALIC)
+    {
         s = s.add_modifier(Modifier::ITALIC);
     }
-    if style.font_style.contains(syntect::highlighting::FontStyle::UNDERLINE) {
+    if style
+        .font_style
+        .contains(syntect::highlighting::FontStyle::UNDERLINE)
+    {
         s = s.add_modifier(Modifier::UNDERLINED);
     }
     s
@@ -266,7 +275,10 @@ pub fn render_markdown(input: &str, _width: usize) -> Vec<Line<'static>> {
                         for (style, text) in ranges {
                             let trimmed = text.trim_end_matches('\n').trim_end_matches('\r');
                             if !trimmed.is_empty() {
-                                spans.push(Span::styled(trimmed.to_string(), translate_style(style)));
+                                spans.push(Span::styled(
+                                    trimmed.to_string(),
+                                    translate_style(style),
+                                ));
                             }
                         }
                         lines.push(Line::from(spans));

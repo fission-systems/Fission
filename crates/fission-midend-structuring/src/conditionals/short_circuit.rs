@@ -1,13 +1,11 @@
 //! Short-circuit and/or conditional-chain free functions.
 
-use super::{
-    is_trivial_structuring_stmt, log_short_circuit_cache, shared_forward_linear_exit,
-};
+use super::{is_trivial_structuring_stmt, log_short_circuit_cache, shared_forward_linear_exit};
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
-use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_prehir::{PreHirBinaryOp, PreHirStmt};
+use fission_midend_core::ir::MlilPreviewError;
 use fission_midend_prehir::util::{fold_logical_chain, negate_expr, simplify_logical_expr};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirStmt};
 
 /// Dispatch short-circuit or / and-else / and patterns at `idx`.
 pub fn try_lower_short_circuit_if(
@@ -114,7 +112,10 @@ pub fn try_lower_short_circuit_and(
         } else {
             let mut wrapped = first_prefix;
             wrapped.push(stmt);
-            return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
+            return Ok(Some((
+                PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+                skip_to,
+            )));
         }
     }
 }
@@ -216,7 +217,10 @@ pub fn try_lower_short_circuit_and_else(
         } else {
             let mut wrapped = first_prefix;
             wrapped.push(stmt);
-            return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
+            return Ok(Some((
+                PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+                skip_to,
+            )));
         }
     }
 }
@@ -298,7 +302,10 @@ pub fn try_lower_short_circuit_or(
                 } else {
                     let mut wrapped = first_prefix;
                     wrapped.push(stmt);
-                    return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
+                    return Ok(Some((
+                        PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+                        skip_to,
+                    )));
                 }
             }
             let Some(exit) = shared_forward_linear_exit(host, idx, body_idx, false_entry_idx)?
@@ -306,8 +313,7 @@ pub fn try_lower_short_circuit_or(
                 return Ok(None);
             };
             log_short_circuit_cache(host, diag, "or", false_entry_idx, exit);
-            let Some((false_body, false_skip)) =
-                host.lower_linear_body(false_entry_idx, exit)?
+            let Some((false_body, false_skip)) = host.lower_linear_body(false_entry_idx, exit)?
             else {
                 return Ok(None);
             };
@@ -335,7 +341,10 @@ pub fn try_lower_short_circuit_or(
             } else {
                 let mut wrapped = first_prefix;
                 wrapped.push(stmt);
-                return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
+                return Ok(Some((
+                    PreHirStmt::Block(std::rc::Rc::new(wrapped)),
+                    skip_to,
+                )));
             }
         }
 

@@ -91,10 +91,18 @@ impl AigManager {
         if a == AigLit::FALSE || b == AigLit::FALSE {
             return AigLit::FALSE;
         }
-        if a == AigLit::TRUE { return b; }
-        if b == AigLit::TRUE { return a; }
-        if a == b { return a; }
-        if a == b.not() { return AigLit::FALSE; }
+        if a == AigLit::TRUE {
+            return b;
+        }
+        if b == AigLit::TRUE {
+            return a;
+        }
+        if a == b {
+            return a;
+        }
+        if a == b.not() {
+            return AigLit::FALSE;
+        }
 
         // Canonicalize ordering
         if a.0 > b.0 {
@@ -154,7 +162,12 @@ impl AigManager {
         (sum, cout)
     }
 
-    pub fn add_ripple_carry_adder(&mut self, a_bits: &[AigLit], b_bits: &[AigLit], cin: AigLit) -> Vec<AigLit> {
+    pub fn add_ripple_carry_adder(
+        &mut self,
+        a_bits: &[AigLit],
+        b_bits: &[AigLit],
+        cin: AigLit,
+    ) -> Vec<AigLit> {
         let len = std::cmp::max(a_bits.len(), b_bits.len());
         let mut sum_bits = Vec::with_capacity(len);
         let mut carry = cin;
@@ -174,7 +187,11 @@ impl AigManager {
             SymExpr::Const { val, size } => {
                 let mut bits = Vec::with_capacity(*size as usize);
                 for i in 0..*size {
-                    bits.push(if (val & (1 << i)) != 0 { AigLit::TRUE } else { AigLit::FALSE });
+                    bits.push(if (val & (1 << i)) != 0 {
+                        AigLit::TRUE
+                    } else {
+                        AigLit::FALSE
+                    });
                 }
                 bits
             }
@@ -325,7 +342,9 @@ impl AigManager {
                     out.extend(a_bits.into_iter().take(take_count));
                     out.truncate(a_len);
                     // Pad to original length if truncated
-                    while out.len() < a_len { out.push(AigLit::FALSE); }
+                    while out.len() < a_len {
+                        out.push(AigLit::FALSE);
+                    }
                     out
                 } else {
                     tracing::warn!("Symbolic shift not yet supported — treating as identity");
@@ -340,7 +359,9 @@ impl AigManager {
                         vec![AigLit::FALSE; a_bits.len()]
                     } else {
                         let mut out = a_bits[shift..].to_vec();
-                        while out.len() < a_bits.len() { out.push(AigLit::FALSE); }
+                        while out.len() < a_bits.len() {
+                            out.push(AigLit::FALSE);
+                        }
                         out
                     }
                 } else {
@@ -353,7 +374,9 @@ impl AigManager {
                 let lsb = *lsb as usize;
                 let end = (lsb + *size as usize).min(bits.len());
                 let mut out = bits[lsb..end].to_vec();
-                while out.len() < *size as usize { out.push(AigLit::FALSE); }
+                while out.len() < *size as usize {
+                    out.push(AigLit::FALSE);
+                }
                 out
             }
             SymExpr::Concat(a, b) => {
@@ -419,11 +442,17 @@ impl AigManager {
                     vec![self.bv_ult(&a_ord, &b_ord)]
                 }
             }
-            SymExpr::FAdd(a, b) | SymExpr::FSub(a, b) | SymExpr::FMul(a, b) | SymExpr::FDiv(a, b) => {
+            SymExpr::FAdd(a, b)
+            | SymExpr::FSub(a, b)
+            | SymExpr::FMul(a, b)
+            | SymExpr::FDiv(a, b) => {
                 // Full IEEE arithmetic bit-blast is enormous; for symbolic operands
                 // allocate a free result bitvector of the float width (under-approx
                 // of theory axioms). Concrete cases are already folded in SymExpr::new_f*.
-                let width = self.lower_float_bits(a).len().max(self.lower_float_bits(b).len());
+                let width = self
+                    .lower_float_bits(a)
+                    .len()
+                    .max(self.lower_float_bits(b).len());
                 let mut out = Vec::with_capacity(width);
                 for _ in 0..width {
                     let idx = self.nodes.len() as u32 + 1;
@@ -519,7 +548,7 @@ impl AigManager {
             let f = self.add_and(sign.not(), bits[i]);
             out.push(self.add_or(t, f));
         }
-        // Sign bit becomes inverted sense for order: keep as !sign for positives first? 
+        // Sign bit becomes inverted sense for order: keep as !sign for positives first?
         // Standard: positive sign bit 1 in ordered map.
         out.push(sign.not());
         out
@@ -597,7 +626,7 @@ mod tests {
     fn test_const_eq_unsat() {
         // 5 == 6  => should fold to Const{val:0} => trivially UNSAT
         let five = SymExpr::new_const(5, 8);
-        let six  = SymExpr::new_const(6, 8);
+        let six = SymExpr::new_const(6, 8);
         let eq = SymExpr::new_eq(five, six);
         assert_eq!(eq, SymExpr::Const { val: 0, size: 1 });
         assert!(!check_sat(eq));
@@ -614,20 +643,20 @@ mod tests {
     #[test]
     fn test_add_eq_sat() {
         // x + 5 == 10  =>  SAT (x = 5)
-        let x    = SymExpr::new_var("x", 8);
+        let x = SymExpr::new_var("x", 8);
         let five = SymExpr::new_const(5, 8);
-        let ten  = SymExpr::new_const(10, 8);
-        let eq   = SymExpr::new_eq(SymExpr::new_add(x, five), ten);
+        let ten = SymExpr::new_const(10, 8);
+        let eq = SymExpr::new_eq(SymExpr::new_add(x, five), ten);
         assert!(check_sat(eq));
     }
 
     #[test]
     fn test_sub_eq_sat() {
         // x - 3 == 7  =>  SAT (x = 10)
-        let x     = SymExpr::new_var("x", 8);
+        let x = SymExpr::new_var("x", 8);
         let three = SymExpr::new_const(3, 8);
         let seven = SymExpr::new_const(7, 8);
-        let eq    = SymExpr::new_eq(SymExpr::new_sub(x, three), seven);
+        let eq = SymExpr::new_eq(SymExpr::new_sub(x, three), seven);
         assert!(check_sat(eq));
     }
 
@@ -636,9 +665,9 @@ mod tests {
         // 5 + 5 == 6  =>  constant-folds to 10 == 6 => Const{val:0} => UNSAT
         let five_a = SymExpr::new_const(5, 8);
         let five_b = SymExpr::new_const(5, 8);
-        let six    = SymExpr::new_const(6, 8);
-        let sum    = SymExpr::new_add(five_a, five_b);
-        let eq     = SymExpr::new_eq(sum, six);
+        let six = SymExpr::new_const(6, 8);
+        let sum = SymExpr::new_add(five_a, five_b);
+        let eq = SymExpr::new_eq(sum, six);
         assert!(!check_sat(eq));
     }
 
@@ -653,7 +682,7 @@ mod tests {
     #[test]
     fn test_ult_sat() {
         // x < 10 (unsigned)  => SAT (x = 0..9)
-        let x   = SymExpr::new_var("x", 8);
+        let x = SymExpr::new_var("x", 8);
         let ten = SymExpr::new_const(10, 8);
         assert!(check_sat(SymExpr::Ult(Box::new(x), Box::new(ten))));
     }
@@ -771,7 +800,7 @@ mod tests {
     fn test_slt_signed_wrap() {
         // -1 <_s 0: i8(-1) = 0xFF, i8(0) = 0x00 => -1 < 0 signed => SAT
         let neg_one = SymExpr::new_const(0xFF, 1); // 1-byte -1
-        let zero    = SymExpr::new_const(0, 1);
+        let zero = SymExpr::new_const(0, 1);
         assert!(check_sat(SymExpr::new_slt(neg_one, zero)));
     }
 
@@ -779,7 +808,11 @@ mod tests {
     fn test_extract_sat() {
         // Extract bits [7:4] of x, assert they equal 0xA
         let x = SymExpr::new_var("x", 8);
-        let hi_nibble = SymExpr::Extract { expr: Box::new(x), lsb: 4, size: 4 };
+        let hi_nibble = SymExpr::Extract {
+            expr: Box::new(x),
+            lsb: 4,
+            size: 4,
+        };
         let target = SymExpr::new_const(0xA, 4);
         assert!(check_sat(SymExpr::new_eq(hi_nibble, target)));
     }
@@ -787,11 +820,10 @@ mod tests {
     #[test]
     fn test_lshr_sat() {
         // (x >> 1) == 5  => x must be 10 or 11 => SAT
-        let x     = SymExpr::new_var("x", 8);
+        let x = SymExpr::new_var("x", 8);
         let shift = SymExpr::new_const(1, 8);
-        let five  = SymExpr::new_const(5, 8);
+        let five = SymExpr::new_const(5, 8);
         let shifted = SymExpr::Lshr(Box::new(x), Box::new(shift));
         assert!(check_sat(SymExpr::new_eq(shifted, five)));
     }
-
 }

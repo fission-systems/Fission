@@ -92,7 +92,9 @@ fn collect_assignments(
             PreHirStmt::VaStart { va_list, .. } => {
                 collect_expr_assigns(va_list, assigns, multi_def);
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 collect_assignments(body, assigns, multi_def);
             }
             PreHirStmt::For {
@@ -298,7 +300,12 @@ fn find_uses(stmts: &[PreHirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
     }
 }
 
-fn analyze_expr_use(expr: &PreHirExpr, var_name: &str, dest: Option<&str>, uses: &mut Vec<UseInfo>) {
+fn analyze_expr_use(
+    expr: &PreHirExpr,
+    var_name: &str,
+    dest: Option<&str>,
+    uses: &mut Vec<UseInfo>,
+) {
     if !expr_contains_var(expr, var_name) {
         return;
     }
@@ -667,7 +674,10 @@ impl SubvarFlowSolver {
                     }
                     true
                 }
-                PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::And | PreHirBinaryOp::Xor => {
+                PreHirBinaryOp::Add
+                | PreHirBinaryOp::Sub
+                | PreHirBinaryOp::And
+                | PreHirBinaryOp::Xor => {
                     if let PreHirExpr::Var(l) = &**lhs {
                         self.worklist.push((l.clone(), mask));
                     }
@@ -1015,7 +1025,10 @@ fn rewrite_stmt(stmt: &mut PreHirStmt, varmap: &HashMap<String, ReplaceVar>) {
         } => {
             rewrite_expr(expr, varmap);
             for case in cases {
-                rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), varmap);
+                rewrite_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    varmap,
+                );
             }
             rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), varmap);
         }

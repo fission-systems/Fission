@@ -17,12 +17,14 @@
 //! no-return in the next round, so this iterates rather than running once
 //! (same shape kuna's own `noreturn_propagate` fixpoint uses).
 
-use std::collections::hash_map::HashMap as StdHashMap;
 use std::collections::BTreeSet;
+use std::collections::hash_map::HashMap as StdHashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
 
-use fission_core::core::ghidra_no_return::{binary_format_to_ghidra_format, ghidra_no_return_index};
+use fission_core::core::ghidra_no_return::{
+    binary_format_to_ghidra_format, ghidra_no_return_index,
+};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{PcodeFunction, PcodeOpcode};
 use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleighFrontend};
@@ -256,7 +258,12 @@ mod tests {
         }
     }
 
-    fn block(index: u32, start_address: u64, successors: Vec<u32>, ops: Vec<PcodeOp>) -> PcodeBasicBlock {
+    fn block(
+        index: u32,
+        start_address: u64,
+        successors: Vec<u32>,
+        ops: Vec<PcodeOp>,
+    ) -> PcodeBasicBlock {
         PcodeBasicBlock {
             index,
             start_address,
@@ -270,7 +277,10 @@ mod tests {
         let pcode = PcodeFunction {
             blocks: vec![block(0, 0x1000, vec![], vec![op(0, PcodeOpcode::Return)])],
         };
-        assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
+        assert!(!function_is_structurally_no_return(
+            &pcode,
+            &BTreeSet::new()
+        ));
     }
 
     #[test]
@@ -292,7 +302,10 @@ mod tests {
                 vec![call_op(0, 0x1234), op(1, PcodeOpcode::Return)],
             )],
         };
-        assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
+        assert!(!function_is_structurally_no_return(
+            &pcode,
+            &BTreeSet::new()
+        ));
     }
 
     #[test]
@@ -322,7 +335,10 @@ mod tests {
     #[test]
     fn empty_function_is_not_no_return() {
         let pcode = PcodeFunction { blocks: vec![] };
-        assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
+        assert!(!function_is_structurally_no_return(
+            &pcode,
+            &BTreeSet::new()
+        ));
     }
 
     #[test]
@@ -339,7 +355,10 @@ mod tests {
                 vec![op(0, PcodeOpcode::BranchInd)],
             )],
         };
-        assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
+        assert!(!function_is_structurally_no_return(
+            &pcode,
+            &BTreeSet::new()
+        ));
     }
 
     #[test]
@@ -349,7 +368,9 @@ mod tests {
         let pcode = PcodeFunction {
             blocks: vec![block(0, 0x1000, vec![], vec![call_op(0, 0x9999)])],
         };
-        assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
+        assert!(!function_is_structurally_no_return(
+            &pcode,
+            &BTreeSet::new()
+        ));
     }
-
 }

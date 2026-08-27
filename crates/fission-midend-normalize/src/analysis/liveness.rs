@@ -1,8 +1,8 @@
 //! Composable backward-liveness summaries for structured HIR statements.
 
+use crate::HashSet;
 use crate::analysis::defuse::collect_expr_vars;
 use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
-use crate::HashSet;
 
 /// Transfer summary for `live_in = uses_before_definition U (live_out - must_definitions)`.
 ///
@@ -50,7 +50,10 @@ impl LivenessTransfer {
                     ..Self::default()
                 }
             }
-            PreHirStmt::Return(None) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => Self {
+            PreHirStmt::Return(None)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => Self {
                 may_diverge: true,
                 ..Self::default()
             },
@@ -203,7 +206,7 @@ fn collect_lvalue_reads(lhs: &PreHirLValue, out: &mut HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
     use fission_midend_core::NirType;
     use fission_midend_prehir::PreHirBinaryOp;
 
@@ -238,7 +241,8 @@ mod tests {
                     then_body: Vec::new().into(),
                     else_body: Vec::new().into(),
                 },
-            ].into(),
+            ]
+            .into(),
         };
 
         let transfer = LivenessTransfer::for_stmt(&stmt);
@@ -256,7 +260,8 @@ mod tests {
                     else_body: Vec::new().into(),
                 },
                 assign("cf", lt("value", "limit")),
-            ].into(),
+            ]
+            .into(),
         };
 
         let transfer = LivenessTransfer::for_stmt(&stmt);

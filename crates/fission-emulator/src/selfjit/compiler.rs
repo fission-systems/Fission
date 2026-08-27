@@ -149,18 +149,17 @@
 //! `FLOAT_*` decompiler opcodes, the emulator's own TZCNT bug) that a
 //! loud failure beats silently-wrong output every time.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::jit::backend::{GuestInsn, TbBackend};
 use crate::jit::callbacks::{
-    jit_float_binop, jit_float_unop, jit_int_flag, jit_read_bytes, jit_read_space,
-    jit_write_bytes, jit_write_space,
+    jit_float_binop, jit_float_unop, jit_int_flag, jit_read_bytes, jit_read_space, jit_write_bytes,
+    jit_write_space,
 };
 use crate::selfjit::codebuf::CodeBuffer;
 use crate::selfjit::emit::{
-    Asm, Cond, ARG0, ARG1, ARG2, ARG3, ARG4, A_VAL_SLOT, B_VAL_SLOT, EMU_PTR_SLOT, RESULT_SLOT,
-    RET,
+    A_VAL_SLOT, ARG0, ARG1, ARG2, ARG3, ARG4, Asm, B_VAL_SLOT, Cond, EMU_PTR_SLOT, RESULT_SLOT, RET,
 };
 
 // Fixed "the value is here right now" slots between callback calls -- not
@@ -286,7 +285,12 @@ impl TbBackend for SelfJitCompiler {
             insn_start_indices.insert(base);
             for (local_i, op) in insn.ops.iter().enumerate() {
                 let mut op = op.clone();
-                crate::jit::compiler::remap_relative_branches(&mut op, base, local_i, insn.ops.len());
+                crate::jit::compiler::remap_relative_branches(
+                    &mut op,
+                    base,
+                    local_i,
+                    insn.ops.len(),
+                );
                 flat.push(op);
             }
         }
@@ -390,7 +394,7 @@ fn emit_insn_count(asm: &mut Asm) {
 /// generic body in favor of `#[cfg(target_arch = ...)]`-gated ones.
 #[cfg(target_arch = "aarch64")]
 mod frame {
-    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET, SCRATCH_BUF_BYTES};
+    use super::{A_VAL, Asm, B_VAL, EMU_PTR, RESULT, RET, SCRATCH_BUF_BYTES};
     use crate::selfjit::emit::aarch64;
 
     /// Frame layout for the 5 callee-saved registers this file repurposes
@@ -439,7 +443,7 @@ mod frame {
 
 #[cfg(target_arch = "x86_64")]
 mod frame {
-    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET, SCRATCH_BUF_BYTES};
+    use super::{A_VAL, Asm, B_VAL, EMU_PTR, RESULT, RET, SCRATCH_BUF_BYTES};
 
     /// PUSH-ing 4 callee-saved registers (8 bytes each = 32, a multiple of
     /// 16) leaves RSP's alignment exactly where it started -- this
@@ -810,7 +814,11 @@ fn compile_op(
                 asm.mov_reg(RESULT, A_VAL);
             }
             let bits = (out.size as u64).saturating_mul(8).min(63);
-            let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+            let mask = if bits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << bits) - 1
+            };
             asm.mov_imm64(TMP1, mask);
             asm.and_reg(RESULT, RESULT, TMP1);
             store_value(asm, out, RESULT);
@@ -864,7 +872,11 @@ fn compile_op(
                 asm.mov_reg(RESULT, A_VAL);
             }
             let bits = (out.size as u64).saturating_mul(8).min(63);
-            let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+            let mask = if bits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << bits) - 1
+            };
             asm.mov_imm64(TMP1, mask);
             asm.and_reg(RESULT, RESULT, TMP1);
             store_value(asm, out, RESULT);
@@ -877,7 +889,10 @@ fn compile_op(
         // cutting a real corner).
         PcodeOpcode::Insert => {
             let out = require_output(op)?;
-            anyhow::ensure!(op.inputs.len() >= 2, "Insert needs at least 2 inputs (dest, src)");
+            anyhow::ensure!(
+                op.inputs.len() >= 2,
+                "Insert needs at least 2 inputs (dest, src)"
+            );
             load_value(asm, &op.inputs[0], A_VAL); // dest
             load_value(asm, &op.inputs[1], B_VAL); // src
             let pos = if op.inputs.len() > 2 && op.inputs[2].is_constant {
@@ -891,7 +906,11 @@ fn compile_op(
                 (op.inputs[1].size * 8).min(64)
             };
             let nbits = nbits.min(64);
-            let mask = if nbits >= 64 { u64::MAX } else { (1u64 << nbits) - 1 };
+            let mask = if nbits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << nbits) - 1
+            };
             let clear_mask = !(mask.wrapping_shl(pos));
             asm.mov_imm64(TMP1, clear_mask);
             asm.and_reg(RESULT, A_VAL, TMP1); // RESULT = dest & clear_mask
@@ -1278,7 +1297,10 @@ fn compile_op(
             }
         }
         PcodeOpcode::CBranch => {
-            anyhow::ensure!(op.inputs.len() >= 2, "CBranch needs a target and a condition");
+            anyhow::ensure!(
+                op.inputs.len() >= 2,
+                "CBranch needs a target and a condition"
+            );
             let target = &op.inputs[0];
             load_value(asm, &op.inputs[1], A_VAL);
             asm.mov_imm64(B_VAL, 0);
@@ -1340,7 +1362,11 @@ fn compile_op(
         // (register/memory) rather than encoding it directly -- matches
         // `crate::jit::compiler`'s own combined arm for these three.
         PcodeOpcode::CallInd | PcodeOpcode::BranchInd | PcodeOpcode::Return => {
-            anyhow::ensure!(!op.inputs.is_empty(), "{:?} needs a target input", op.opcode);
+            anyhow::ensure!(
+                !op.inputs.is_empty(),
+                "{:?} needs a target input",
+                op.opcode
+            );
             load_value(asm, &op.inputs[0], RET);
             epilogue_return(asm, RET);
         }
@@ -1442,8 +1468,8 @@ mod tests {
 
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/x64_static_printf_malloc.elf");
-        let binary = fission_loader::loader::LoadedBinary::from_file(&path)
-            .expect("load real test ELF");
+        let binary =
+            fission_loader::loader::LoadedBinary::from_file(&path).expect("load real test ELF");
         let mut state = MachineState::new();
         let _info = crate::os::linux::loader::load_elf(&mut state, &binary).expect("load_elf");
         let load_spec = binary.load_spec().expect("load spec").clone();
@@ -1611,8 +1637,8 @@ mod tests {
     #[test]
     fn shifts_and_unary_negation_match_host_arithmetic() {
         let ops = vec![
-            copy_const(0, 17),  // a
-            copy_const(8, 3),   // shift amount
+            copy_const(0, 17), // a
+            copy_const(8, 3),  // shift amount
             binop(PcodeOpcode::IntLeft, 16, 0, 8),
             binop(PcodeOpcode::IntRight, 24, 0, 8),
             binop(PcodeOpcode::IntSRight, 32, 0, 8),
@@ -1744,9 +1770,21 @@ mod tests {
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 16), 1, "-1 < 1 signed");
         assert_eq!(read_reg(&mut emu, 24), 0, "1 <= -1 signed is false");
-        assert_eq!(read_reg(&mut emu, 48) as i64, -8i32 as i64 / 3, "-8 / 3 signed");
-        assert_eq!(read_reg(&mut emu, 56) as i64, -8i32 as i64 % 3, "-8 % 3 signed");
-        assert_eq!(read_reg(&mut emu, 64) as i64, (-8i32 >> 1) as i64, "-8 >> 1 arithmetic");
+        assert_eq!(
+            read_reg(&mut emu, 48) as i64,
+            -8i32 as i64 / 3,
+            "-8 / 3 signed"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 56) as i64,
+            -8i32 as i64 % 3,
+            "-8 % 3 signed"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 64) as i64,
+            (-8i32 >> 1) as i64,
+            "-8 >> 1 arithmetic"
+        );
     }
 
     /// Regression test proving the module doc's previously-documented
@@ -1768,7 +1806,14 @@ mod tests {
     /// register performing the shift.
     #[test]
     fn truncation_and_shift_clamp_are_already_correct_for_narrow_widths() {
-        fn narrow(opcode: PcodeOpcode, out: u64, out_size: u32, a: u64, a_size: u32, b: Varnode) -> PcodeOp {
+        fn narrow(
+            opcode: PcodeOpcode,
+            out: u64,
+            out_size: u32,
+            a: u64,
+            a_size: u32,
+            b: Varnode,
+        ) -> PcodeOp {
             PcodeOp {
                 seq_num: 1,
                 opcode,
@@ -1804,8 +1849,16 @@ mod tests {
             narrow(PcodeOpcode::IntSRight, 24, 4, 0, 4, imm(40, 4)),
         ];
         let mut emu = compile_and_run(ops);
-        assert_eq!(read_reg(&mut emu, 8) as u32, 0xFFFFFFFE, "0xFFFFFFFF * 2 truncated to 4 bytes");
-        assert_eq!(read_reg(&mut emu, 16) as u32, 0, "1u32 << 40 (>= width) is 0");
+        assert_eq!(
+            read_reg(&mut emu, 8) as u32,
+            0xFFFFFFFE,
+            "0xFFFFFFFF * 2 truncated to 4 bytes"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 16) as u32,
+            0,
+            "1u32 << 40 (>= width) is 0"
+        );
         assert_eq!(
             read_reg(&mut emu, 24) as u32,
             0xFFFFFFFF,
@@ -1830,7 +1883,14 @@ mod tests {
     /// declared width).
     #[test]
     fn shift_amounts_past_declared_width_are_clamped_correctly() {
-        fn binop_imm_shift(opcode: PcodeOpcode, out: u64, out_size: u32, a: u64, a_size: u32, shift: i64) -> PcodeOp {
+        fn binop_imm_shift(
+            opcode: PcodeOpcode,
+            out: u64,
+            out_size: u32,
+            a: u64,
+            a_size: u32,
+            shift: i64,
+        ) -> PcodeOp {
             PcodeOp {
                 seq_num: 1,
                 opcode,
@@ -1864,8 +1924,16 @@ mod tests {
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 16), 0, "1 << 64 (full width) is 0");
         assert_eq!(read_reg(&mut emu, 24), 0, "1 >> 64 (full width) is 0");
-        assert_eq!(read_reg(&mut emu, 32), u64::MAX, "-1 >> 64 arithmetic stays -1 (sign-filled)");
-        assert_eq!(read_reg(&mut emu, 48) as u32, 0, "1u32 << 74 (74 mod 64 == 10 < 32) is still 0");
+        assert_eq!(
+            read_reg(&mut emu, 32),
+            u64::MAX,
+            "-1 >> 64 arithmetic stays -1 (sign-filled)"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 48) as u32,
+            0,
+            "1u32 << 74 (74 mod 64 == 10 < 32) is still 0"
+        );
     }
 
     /// `IntLessEqual` (unsigned <=) and `IntSLessEqual` (signed <=), plus
@@ -1903,14 +1971,14 @@ mod tests {
         let ops = vec![
             copy_const(0, 3),
             copy_const(8, 7),
-            binop(PcodeOpcode::IntEqual, 16, 0, 0),    // 3 == 3 -> 1
-            binop(PcodeOpcode::IntEqual, 24, 0, 8),    // 3 == 7 -> 0
+            binop(PcodeOpcode::IntEqual, 16, 0, 0), // 3 == 3 -> 1
+            binop(PcodeOpcode::IntEqual, 24, 0, 8), // 3 == 7 -> 0
             binop(PcodeOpcode::IntNotEqual, 32, 0, 8), // 3 != 7 -> 1
             binop(PcodeOpcode::IntNotEqual, 40, 0, 0), // 3 != 3 -> 0
-            binop(PcodeOpcode::IntSLess, 48, 0, 8),    // 3 < 7 -> 1
-            binop(PcodeOpcode::IntSLess, 56, 8, 0),    // 7 < 3 -> 0
-            binop(PcodeOpcode::IntLess, 64, 0, 8),     // 3 < 7 (unsigned) -> 1
-            binop(PcodeOpcode::IntLess, 72, 8, 0),     // 7 < 3 (unsigned) -> 0
+            binop(PcodeOpcode::IntSLess, 48, 0, 8), // 3 < 7 -> 1
+            binop(PcodeOpcode::IntSLess, 56, 8, 0), // 7 < 3 -> 0
+            binop(PcodeOpcode::IntLess, 64, 0, 8),  // 3 < 7 (unsigned) -> 1
+            binop(PcodeOpcode::IntLess, 72, 8, 0),  // 7 < 3 (unsigned) -> 0
         ];
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 16), 1, "3 == 3");
@@ -1939,10 +2007,10 @@ mod tests {
     #[test]
     fn intra_instruction_relative_branch_loop_sums_via_backward_jump() {
         let ops = vec![
-            copy_const(0, 3),  // counter = 3               (local_i=0)
-            copy_const(8, 0),  // acc = 0                    (local_i=1)
-            copy_const(16, 1), // one = 1                    (local_i=2)
-            binop(PcodeOpcode::IntAdd, 8, 8, 0), // acc += counter -- LOOP HEAD (local_i=3)
+            copy_const(0, 3),                     // counter = 3               (local_i=0)
+            copy_const(8, 0),                     // acc = 0                    (local_i=1)
+            copy_const(16, 1),                    // one = 1                    (local_i=2)
+            binop(PcodeOpcode::IntAdd, 8, 8, 0),  // acc += counter -- LOOP HEAD (local_i=3)
             binop(PcodeOpcode::IntSub, 0, 0, 16), // counter -= 1  (local_i=4)
             PcodeOp {
                 seq_num: 5,
@@ -1955,8 +2023,16 @@ mod tests {
             },
         ];
         let mut emu = compile_and_run(ops);
-        assert_eq!(read_reg(&mut emu, 8), 6, "acc == 3+2+1 after the loop runs 3 iterations");
-        assert_eq!(read_reg(&mut emu, 0), 0, "counter reached 0, loop correctly terminated");
+        assert_eq!(
+            read_reg(&mut emu, 8),
+            6,
+            "acc == 3+2+1 after the loop runs 3 iterations"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 0),
+            0,
+            "counter reached 0, loop correctly terminated"
+        );
     }
 
     /// The per-op fuse (`emit_pcode_fuse_check`, the same host callback
@@ -1972,7 +2048,7 @@ mod tests {
     #[test]
     fn pcode_fuse_stops_a_would_be_infinite_intra_instruction_loop() {
         let ops = vec![
-            copy_const(0, 1), // r0 = 1 -- always-nonzero CBranch condition
+            copy_const(0, 1),                    // r0 = 1 -- always-nonzero CBranch condition
             binop(PcodeOpcode::IntAdd, 8, 8, 0), // acc += 1 -- LOOP HEAD (local_i=1)
             PcodeOp {
                 seq_num: 2,
@@ -1985,7 +2061,11 @@ mod tests {
                 asm_mnemonic: None,
             },
         ];
-        let insns = [GuestInsn { pc: 0x1000, len: 4, ops }];
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops,
+        }];
         let mut compiler = SelfJitCompiler::new().expect("selfjit backend available");
         let func_ptr = compiler
             .compile_translation_block(&insns, 4)
@@ -2047,7 +2127,11 @@ mod tests {
         ];
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 0), 42, "8-byte round trip");
-        assert_eq!(read_reg(&mut emu, 8), 0xFFFFFFFF, "4-byte round trip, zero-extended");
+        assert_eq!(
+            read_reg(&mut emu, 8),
+            0xFFFFFFFF,
+            "4-byte round trip, zero-extended"
+        );
     }
 
     /// `Load`/`Store` beyond the 8-byte narrow path -- copies the raw
@@ -2063,7 +2147,7 @@ mod tests {
     fn wide_load_and_store_round_trip_16_bytes() {
         let ops = vec![
             copy_const(300, 0x1122334455667788u64 as i64), // source low 8 bytes
-            copy_const(308, -1i64),                         // source high 8 bytes (all-ones)
+            copy_const(308, -1i64),                        // source high 8 bytes (all-ones)
             store_op(4, imm(400, 8), reg(300, 16)), // wide Store: 16 bytes, reg space offset 300 -> address 400
             PcodeOp {
                 seq_num: 3,
@@ -2075,8 +2159,16 @@ mod tests {
             },
         ];
         let mut emu = compile_and_run(ops);
-        assert_eq!(read_reg(&mut emu, 500), 0x1122334455667788, "wide round trip: low 8 bytes");
-        assert_eq!(read_reg(&mut emu, 508), u64::MAX, "wide round trip: high 8 bytes");
+        assert_eq!(
+            read_reg(&mut emu, 500),
+            0x1122334455667788,
+            "wide round trip: low 8 bytes"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 508),
+            u64::MAX,
+            "wide round trip: high 8 bytes"
+        );
     }
 
     /// A value wider than the fixed scratch buffer (`SCRATCH_BUF_BYTES`,
@@ -2093,12 +2185,19 @@ mod tests {
             inputs: vec![imm(4, 8), imm(200, 8)],
             asm_mnemonic: None,
         }];
-        let insns = [GuestInsn { pc: 0x1000, len: 4, ops: load_ops }];
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops: load_ops,
+        }];
         let mut compiler = SelfJitCompiler::new().expect("selfjit backend available");
         let err = compiler
             .compile_translation_block(&insns, 4)
             .expect_err("Load past the scratch buffer must fail loudly, not silently truncate");
-        assert!(err.to_string().contains("scratch buffer"), "unexpected error: {err}");
+        assert!(
+            err.to_string().contains("scratch buffer"),
+            "unexpected error: {err}"
+        );
 
         let store_ops = vec![PcodeOp {
             seq_num: 0,
@@ -2108,12 +2207,19 @@ mod tests {
             inputs: vec![imm(4, 8), imm(200, 8), reg(0, too_wide)],
             asm_mnemonic: None,
         }];
-        let insns2 = [GuestInsn { pc: 0x1000, len: 4, ops: store_ops }];
+        let insns2 = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops: store_ops,
+        }];
         let mut compiler2 = SelfJitCompiler::new().expect("selfjit backend available");
         let err2 = compiler2
             .compile_translation_block(&insns2, 4)
             .expect_err("Store past the scratch buffer must fail loudly, not silently truncate");
-        assert!(err2.to_string().contains("scratch buffer"), "unexpected error: {err2}");
+        assert!(
+            err2.to_string().contains("scratch buffer"),
+            "unexpected error: {err2}"
+        );
     }
 
     /// `IntCarry`/`IntSCarry`/`IntSBorrow` -- checked against known
@@ -2123,16 +2229,16 @@ mod tests {
     #[test]
     fn int_carry_scarry_sborrow_match_known_cases() {
         let ops = vec![
-            copy_const(0, u64::MAX as i64),  // r0 = u64::MAX
-            copy_const(8, 1),                // r1 = 1
-            copy_const(16, i64::MAX),        // r2 = i64::MAX
-            copy_const(24, i64::MIN),        // r3 = i64::MIN
-            copy_const(32, 5),               // r4 = 5
-            copy_const(40, 3),                // r5 = 3
-            binop(PcodeOpcode::IntCarry, 48, 0, 8),   // u64::MAX + 1 -> carries
-            binop(PcodeOpcode::IntCarry, 56, 8, 8),   // 1 + 1 -> no carry
-            binop(PcodeOpcode::IntSCarry, 64, 16, 8), // i64::MAX + 1 -> signed overflow
-            binop(PcodeOpcode::IntSCarry, 72, 8, 8),  // 1 + 1 -> no overflow
+            copy_const(0, u64::MAX as i64),             // r0 = u64::MAX
+            copy_const(8, 1),                           // r1 = 1
+            copy_const(16, i64::MAX),                   // r2 = i64::MAX
+            copy_const(24, i64::MIN),                   // r3 = i64::MIN
+            copy_const(32, 5),                          // r4 = 5
+            copy_const(40, 3),                          // r5 = 3
+            binop(PcodeOpcode::IntCarry, 48, 0, 8),     // u64::MAX + 1 -> carries
+            binop(PcodeOpcode::IntCarry, 56, 8, 8),     // 1 + 1 -> no carry
+            binop(PcodeOpcode::IntSCarry, 64, 16, 8),   // i64::MAX + 1 -> signed overflow
+            binop(PcodeOpcode::IntSCarry, 72, 8, 8),    // 1 + 1 -> no overflow
             binop(PcodeOpcode::IntSBorrow, 80, 24, 8),  // i64::MIN - 1 -> signed overflow
             binop(PcodeOpcode::IntSBorrow, 88, 32, 40), // 5 - 3 -> no overflow
         ];
@@ -2141,7 +2247,11 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 56), 0, "1 + 1 does not carry");
         assert_eq!(read_reg(&mut emu, 64), 1, "i64::MAX + 1 signed-overflows");
         assert_eq!(read_reg(&mut emu, 72), 0, "1 + 1 does not signed-overflow");
-        assert_eq!(read_reg(&mut emu, 80), 1, "i64::MIN - 1 signed-overflows (sborrow)");
+        assert_eq!(
+            read_reg(&mut emu, 80),
+            1,
+            "i64::MIN - 1 signed-overflows (sborrow)"
+        );
         assert_eq!(read_reg(&mut emu, 88), 0, "5 - 3 does not sborrow");
     }
 
@@ -2202,7 +2312,11 @@ mod tests {
         ];
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 24), 0x1000 + 3 * 8, "scaled PtrAdd");
-        assert_eq!(read_reg(&mut emu, 32), 0x1000 + 3, "unscaled (mul=1) PtrAdd");
+        assert_eq!(
+            read_reg(&mut emu, 32),
+            0x1000 + 3,
+            "unscaled (mul=1) PtrAdd"
+        );
         assert_eq!(read_reg(&mut emu, 40), 0x1000 - 3, "PtrSub");
     }
 
@@ -2249,9 +2363,21 @@ mod tests {
             },
         ];
         let mut emu = compile_and_run(ops);
-        assert_eq!(read_reg(&mut emu, 16), 0x1122 << 16 | 0x3344, "Piece concat");
-        assert_eq!(read_reg(&mut emu, 24), 0x1122, "SubPiece extracts high 2 bytes back");
-        assert_eq!(read_reg(&mut emu, 32), 0x3344, "SubPiece extracts low 2 bytes back");
+        assert_eq!(
+            read_reg(&mut emu, 16),
+            0x1122 << 16 | 0x3344,
+            "Piece concat"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 24),
+            0x1122,
+            "SubPiece extracts high 2 bytes back"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 32),
+            0x3344,
+            "SubPiece extracts low 2 bytes back"
+        );
     }
 
     /// `LzCount` -- checked against known leading-zero-count cases,
@@ -2260,8 +2386,8 @@ mod tests {
     #[test]
     fn lzcount_matches_known_cases() {
         let ops = vec![
-            copy_const(0, 0),          // all-zero
-            copy_const(8, 1),          // 8-byte: 1 leading zero bit short of 64
+            copy_const(0, 0),              // all-zero
+            copy_const(8, 1),              // 8-byte: 1 leading zero bit short of 64
             copy_const(16, 0x80u8 as i64), // read back as 1 byte: top bit set
             PcodeOp {
                 seq_num: 1,
@@ -2289,9 +2415,17 @@ mod tests {
             },
         ];
         let mut emu = compile_and_run(ops);
-        assert_eq!(read_reg(&mut emu, 40), 64, "lzcount(0) over 8 bytes == width, not 0");
+        assert_eq!(
+            read_reg(&mut emu, 40),
+            64,
+            "lzcount(0) over 8 bytes == width, not 0"
+        );
         assert_eq!(read_reg(&mut emu, 48), 63, "lzcount(1) over 8 bytes");
-        assert_eq!(read_reg(&mut emu, 56), 0, "lzcount(0x80) over 1 byte -- top bit set");
+        assert_eq!(
+            read_reg(&mut emu, 56),
+            0,
+            "lzcount(0x80) over 1 byte -- top bit set"
+        );
     }
 
     fn f64_imm(val: f64) -> Varnode {
@@ -2408,7 +2542,11 @@ mod tests {
             },
         ];
         let mut emu = compile_and_run(ops);
-        assert_eq!(read_reg(&mut emu, 0) as i64, -3, "FloatTrunc(-3.9) toward 0");
+        assert_eq!(
+            read_reg(&mut emu, 0) as i64,
+            -3,
+            "FloatTrunc(-3.9) toward 0"
+        );
         assert_eq!(read_f64(&mut emu, 8), -42.0, "FloatInt2Float(-42)");
         assert_eq!(
             f32::from_bits(read_reg(&mut emu, 16) as u32),
@@ -2455,9 +2593,21 @@ mod tests {
             },
         ];
         let mut emu = compile_and_run(ops);
-        assert_eq!(read_reg(&mut emu, 8) as u16, 0x5566, "Extract(offset=16, 2 bytes)");
-        assert_eq!(read_reg(&mut emu, 16) as u16, 0x7788, "Extract(no offset, 2 bytes)");
-        assert_eq!(read_reg(&mut emu, 32), 0xFFFFFFFFFFFFABFF, "Insert(pos=8, size=8)");
+        assert_eq!(
+            read_reg(&mut emu, 8) as u16,
+            0x5566,
+            "Extract(offset=16, 2 bytes)"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 16) as u16,
+            0x7788,
+            "Extract(no offset, 2 bytes)"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 32),
+            0xFFFFFFFFFFFFABFF,
+            "Insert(pos=8, size=8)"
+        );
     }
 
     /// `Call` (direct, absolute address encoded as a genuine constant) and
@@ -2477,7 +2627,11 @@ mod tests {
             inputs: vec![imm(0x2000, 8)],
             asm_mnemonic: None,
         }];
-        let insns = [GuestInsn { pc: 0x1000, len: 4, ops: call_ops }];
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops: call_ops,
+        }];
         let mut compiler = SelfJitCompiler::new().expect("selfjit backend available");
         let func_ptr = compiler
             .compile_translation_block(&insns, 4)
@@ -2485,7 +2639,11 @@ mod tests {
         let mut emu = make_emu();
         let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
             unsafe { std::mem::transmute(func_ptr) };
-        assert_eq!(f(&mut emu as *mut _), 0x2000, "Call ends the TB at its target address");
+        assert_eq!(
+            f(&mut emu as *mut _),
+            0x2000,
+            "Call ends the TB at its target address"
+        );
 
         let return_ops = vec![
             copy_const(0, 0x3000),
@@ -2498,7 +2656,11 @@ mod tests {
                 asm_mnemonic: None,
             },
         ];
-        let insns2 = [GuestInsn { pc: 0x1000, len: 4, ops: return_ops }];
+        let insns2 = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops: return_ops,
+        }];
         let mut compiler2 = SelfJitCompiler::new().expect("selfjit backend available");
         let func_ptr2 = compiler2
             .compile_translation_block(&insns2, 4)
@@ -2546,4 +2708,3 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 16), 0x1234);
     }
 }
-

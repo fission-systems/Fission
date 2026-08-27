@@ -65,7 +65,10 @@ fn main() {
 
     println!("databases read     : {read}");
     println!("total records      : {total_records}");
-    println!("uncompressed bytes : {:.1} MB", total_bytes as f64 / 1048576.0);
+    println!(
+        "uncompressed bytes : {:.1} MB",
+        total_bytes as f64 / 1048576.0
+    );
     println!("on disk (.fn.fpk)  : {:.1} MB", on_disk as f64 / 1048576.0);
     println!();
 
@@ -88,8 +91,12 @@ fn main() {
     // like `memcpy` appear in every database that ships a CRT.
     let mut name_dbs: HashMap<String, u32> = HashMap::new();
     for path in &files {
-        let Ok(reader) = FpkReader::open(path) else { continue };
-        let Ok(lines) = reader.read_all() else { continue };
+        let Ok(reader) = FpkReader::open(path) else {
+            continue;
+        };
+        let Ok(lines) = reader.read_all() else {
+            continue;
+        };
         let mut here = HashSet::new();
         for line in &lines {
             // records are `hash|...|name|...`; take the longest alphabetic field

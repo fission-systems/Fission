@@ -1,9 +1,9 @@
 use crate::core::Emulator;
 use crate::pcode::state::MachineState;
-use std::time::SystemTime;
-use std::path::Path;
 use anyhow::{Context, Result};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::time::SystemTime;
 
 /// A point-in-time snapshot of the emulator state.
 #[derive(Serialize, Deserialize)]
@@ -47,7 +47,8 @@ impl EmulatorSnapshot {
     pub fn load_from_disk(path: impl AsRef<Path>) -> Result<Self> {
         let file = std::fs::File::open(path).context("Failed to open snapshot file")?;
         let reader = std::io::BufReader::new(file);
-        let snapshot = bincode::deserialize_from(reader).context("Failed to deserialize snapshot")?;
+        let snapshot =
+            bincode::deserialize_from(reader).context("Failed to deserialize snapshot")?;
         Ok(snapshot)
     }
 }

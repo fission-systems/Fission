@@ -6,10 +6,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::os::LinuxEnv;
-use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
@@ -43,17 +43,15 @@ fn run_binary(path: &Path, expect: SmokeExpect) -> Result<Emulator> {
         .context("binary missing load_spec")?
         .clone();
     let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)?;
-    let sleigh = frontends
-        .into_iter()
-        .next()
-        .context("no Sleigh frontend")?;
+    let sleigh = frontends.into_iter().next().context("no Sleigh frontend")?;
 
     let lang_id = load_spec.pair.language_id.as_str();
     let arch = ArchInfo::from_language_id(lang_id, Some(&binary))
         .with_context(|| format!("arch {lang_id}"))?;
     let os = Box::new(LinuxEnv::new());
 
-    let mut emu = Emulator::new(state, binary, sleigh, arch, os)?.with_max_inst(Some(expect.max_inst));
+    let mut emu =
+        Emulator::new(state, binary, sleigh, arch, os)?.with_max_inst(Some(expect.max_inst));
     emu.apply_linux_image(info)?;
     emu.run()?;
 

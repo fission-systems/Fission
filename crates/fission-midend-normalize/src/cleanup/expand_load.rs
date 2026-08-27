@@ -50,8 +50,12 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
     let mut changed = false;
     match stmt {
         PreHirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
-        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => changed |= expand_load_in_expr(expr),
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+            changed |= expand_load_in_expr(expr)
+        }
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
@@ -186,7 +190,8 @@ fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
                                         ty: wide_ty.clone(),
                                     });
                                     *and_ty = wide_ty.clone();
-                                    *and_rhs = Box::new(PreHirExpr::Const(mask_val, wide_ty.clone()));
+                                    *and_rhs =
+                                        Box::new(PreHirExpr::Const(mask_val, wide_ty.clone()));
                                     *cmp_rhs = Box::new(PreHirExpr::Const(cmp_val, wide_ty));
                                     *cmp_ty = NirType::Bool;
                                     return true;
@@ -267,7 +272,7 @@ fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn make_int(bits: u32, signed: bool) -> NirType {
         NirType::Int { bits, signed }

@@ -1,4 +1,7 @@
-use crate::{SessionStore, types::{ErrorResponse, XrefRow, XrefsResponse}};
+use crate::{
+    SessionStore,
+    types::{ErrorResponse, XrefRow, XrefsResponse},
+};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -29,31 +32,43 @@ pub async fn handle_xrefs(
     let binary = sess.binary().await;
     let index = sess.xref_index().await;
     let result = tokio::task::spawn_blocking(move || {
-        let name_map: HashMap<u64, String> = binary.functions.iter()
+        let name_map: HashMap<u64, String> = binary
+            .functions
+            .iter()
             .map(|f| (f.address, f.name.clone()))
             .collect();
 
-        let callers: Vec<XrefRow> = index.refs_to_address(addr).iter().map(|r| {
-            let from = r.source.address;
-            let enc  = resolve_enclosing_function(&binary.functions, from, 512);
-            XrefRow {
-                from_addr: from,
-                to_addr:   r.target.address,
-                kind:      format!("{:?}", r.kind),
-                symbol:    r.target.symbol.clone(),
-                fn_name:   enc.and_then(|a| name_map.get(&a).cloned()),
-            }
-        }).collect();
+        let callers: Vec<XrefRow> = index
+            .refs_to_address(addr)
+            .iter()
+            .map(|r| {
+                let from = r.source.address;
+                let enc = resolve_enclosing_function(&binary.functions, from, 512);
+                XrefRow {
+                    from_addr: from,
+                    to_addr: r.target.address,
+                    kind: format!("{:?}", r.kind),
+                    symbol: r.target.symbol.clone(),
+                    fn_name: enc.and_then(|a| name_map.get(&a).cloned()),
+                }
+            })
+            .collect();
 
-        let callees: Vec<XrefRow> = index.refs_from_address(addr).iter()
-            .filter(|r| matches!(r.kind,
-                XrefKind::Call | XrefKind::Jump | XrefKind::ConditionalJump))
+        let callees: Vec<XrefRow> = index
+            .refs_from_address(addr)
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.kind,
+                    XrefKind::Call | XrefKind::Jump | XrefKind::ConditionalJump
+                )
+            })
             .map(|r| XrefRow {
                 from_addr: r.source.address,
-                to_addr:   r.target.address,
-                kind:      format!("{:?}", r.kind),
-                symbol:    r.target.symbol.clone(),
-                fn_name:   r.target.address.and_then(|a| name_map.get(&a).cloned()),
+                to_addr: r.target.address,
+                kind: format!("{:?}", r.kind),
+                symbol: r.target.symbol.clone(),
+                fn_name: r.target.address.and_then(|a| name_map.get(&a).cloned()),
             })
             .collect();
 

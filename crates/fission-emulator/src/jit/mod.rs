@@ -1,7 +1,7 @@
 pub mod backend;
-pub mod compiler;
 pub mod cache;
 pub mod callbacks;
+pub mod compiler;
 pub mod float_ops;
 pub mod softfloat;
 

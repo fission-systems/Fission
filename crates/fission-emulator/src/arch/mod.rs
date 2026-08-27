@@ -156,7 +156,11 @@ impl ArchInfo {
         let arch = match lang_id {
             s if s.contains("x86:LE:64") => {
                 // Use Win64 CC for PE files, SysV for ELF/Mach-O
-                if is_pe { ArchInfo::x86_64_win() } else { ArchInfo::x86_64_sysv() }
+                if is_pe {
+                    ArchInfo::x86_64_win()
+                } else {
+                    ArchInfo::x86_64_sysv()
+                }
             }
             s if s.contains("x86:LE:32") => ArchInfo::x86_32(),
             s if s.contains("AARCH64") || s.contains("AArch64") => ArchInfo::aarch64(),
@@ -167,7 +171,12 @@ impl ArchInfo {
             s if s.contains("PowerPC:BE:64") => ArchInfo::ppc64(),
             _ => bail!("Unsupported Sleigh Language ID: {}", lang_id),
         };
-        tracing::debug!("ArchInfo resolved: {} (ptr={}B, cc={:?})", arch.name, arch.pointer_size, arch.cc.arg_regs());
+        tracing::debug!(
+            "ArchInfo resolved: {} (ptr={}B, cc={:?})",
+            arch.name,
+            arch.pointer_size,
+            arch.cc.arg_regs()
+        );
         Ok(arch)
     }
 }

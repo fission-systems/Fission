@@ -97,24 +97,25 @@ mod tests {
         // entry point as the function we're asking about at the
         // Thumb-bit-stripped 0x800035c -- not a real subsequent function.
         // `func_after` at 0x8000500 is a genuinely later, different function.
-        let binary = LoadedBinaryBuilder::new("test.elf".to_string(), DataBuffer::Heap(vec![0u8; 0x1000]))
-            .load_spec(load_spec)
-            .entry_point(0x800035d)
-            .image_base(0x8000000)
-            .is_64bit(false)
-            .add_function(FunctionInfo {
-                name: "_start".to_string(),
-                address: 0x800035d,
-                origin: Some("elf-entry".to_string()),
-                ..Default::default()
-            })
-            .add_function(FunctionInfo {
-                name: "func_after".to_string(),
-                address: 0x8000500,
-                ..Default::default()
-            })
-            .build()
-            .expect("build");
+        let binary =
+            LoadedBinaryBuilder::new("test.elf".to_string(), DataBuffer::Heap(vec![0u8; 0x1000]))
+                .load_spec(load_spec)
+                .entry_point(0x800035d)
+                .image_base(0x8000000)
+                .is_64bit(false)
+                .add_function(FunctionInfo {
+                    name: "_start".to_string(),
+                    address: 0x800035d,
+                    origin: Some("elf-entry".to_string()),
+                    ..Default::default()
+                })
+                .add_function(FunctionInfo {
+                    name: "func_after".to_string(),
+                    address: 0x8000500,
+                    ..Default::default()
+                })
+                .build()
+                .expect("build");
 
         assert_eq!(
             next_function_distance(&binary, 0x800035c),

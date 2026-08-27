@@ -1,4 +1,7 @@
-use crate::{SessionStore, types::{CallGraphNode, CallGraphResponse, ErrorResponse}};
+use crate::{
+    SessionStore,
+    types::{CallGraphNode, CallGraphResponse, ErrorResponse},
+};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -48,9 +51,11 @@ pub async fn handle_callgraph(
     .await;
 
     match result {
-        Ok((nodes, total_call_sites)) => {
-            Json(CallGraphResponse { nodes, total_call_sites }).into_response()
-        }
+        Ok((nodes, total_call_sites)) => Json(CallGraphResponse {
+            nodes,
+            total_call_sites,
+        })
+        .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse::new(e.to_string())),

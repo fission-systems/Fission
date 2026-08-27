@@ -22,10 +22,10 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 
-pub mod fpk;
 pub mod api_types;
 pub mod fid;
 pub mod fidbf;
+pub mod fpk;
 pub mod ghidra_patterns;
 pub mod golang_typeinfo;
 pub mod import_flat;

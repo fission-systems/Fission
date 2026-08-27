@@ -124,12 +124,9 @@ pub(crate) fn decode_instruction_no_pcode(
     context_override: Option<PackedContextOverride>,
 ) -> Result<DecodedInstruction> {
     match registry::executable_engine_key_for_entry(entry) {
-        Some(ExecutionEngineKey::CompiledTable) => compiled_table::decode_instruction_no_pcode(
-            compiled,
-            bytes,
-            address,
-            context_override,
-        ),
+        Some(ExecutionEngineKey::CompiledTable) => {
+            compiled_table::decode_instruction_no_pcode(compiled, bytes, address, context_override)
+        }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),
             reason: format!(

@@ -1,6 +1,6 @@
+use crate::HashMap;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
-use crate::HashMap;
 
 /// Bit-level consumed-mask backward propagation pass.
 ///
@@ -118,7 +118,9 @@ fn collect_def_stmt(
                 def_map.insert(name.clone(), rhs.clone());
             }
         }
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             collect_definitions(body, def_map, multi_def);
         }
         PreHirStmt::For {
@@ -188,7 +190,9 @@ fn seed_stmt(
         PreHirStmt::Return(None) => {}
         PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Label(_) | PreHirStmt::Goto(_) => {}
         PreHirStmt::VaStart { va_list, .. } => seed_expr_fully(va_list, consumed),
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             collect_consumed_seeds(body, consumed, def_map, multi_def);
         }
         PreHirStmt::For {
@@ -555,8 +559,16 @@ fn simplify_stmt(
             simplify_expr(expr, consumed, any_changed);
         }
         PreHirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), consumed, multi_def, type_map, any_changed);
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
+            simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                consumed,
+                multi_def,
+                type_map,
+                any_changed,
+            );
         }
         PreHirStmt::For {
             init,
@@ -573,7 +585,13 @@ fn simplify_stmt(
             if let Some(u) = update {
                 simplify_stmt(u, consumed, multi_def, type_map, any_changed);
             }
-            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), consumed, multi_def, type_map, any_changed);
+            simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                consumed,
+                multi_def,
+                type_map,
+                any_changed,
+            );
         }
         PreHirStmt::If {
             cond,
@@ -581,8 +599,20 @@ fn simplify_stmt(
             else_body,
         } => {
             simplify_expr(cond, consumed, any_changed);
-            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), consumed, multi_def, type_map, any_changed);
-            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), consumed, multi_def, type_map, any_changed);
+            simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                consumed,
+                multi_def,
+                type_map,
+                any_changed,
+            );
+            simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                consumed,
+                multi_def,
+                type_map,
+                any_changed,
+            );
         }
         PreHirStmt::Switch {
             expr,
@@ -591,9 +621,21 @@ fn simplify_stmt(
         } => {
             simplify_expr(expr, consumed, any_changed);
             for case in cases.iter_mut() {
-                simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), consumed, multi_def, type_map, any_changed);
+                simplify_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    consumed,
+                    multi_def,
+                    type_map,
+                    any_changed,
+                );
             }
-            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), consumed, multi_def, type_map, any_changed);
+            simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                consumed,
+                multi_def,
+                type_map,
+                any_changed,
+            );
         }
         _ => {}
     }
@@ -704,7 +746,11 @@ fn simplify_expr(expr: &mut PreHirExpr, consumed: &HashMap<String, u64>, any_cha
     }
 }
 
-fn simplify_lvalue(lhs: &mut PreHirLValue, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
+fn simplify_lvalue(
+    lhs: &mut PreHirLValue,
+    consumed: &HashMap<String, u64>,
+    any_changed: &mut bool,
+) {
     match lhs {
         PreHirLValue::Var(_) => {}
         PreHirLValue::Deref { ptr, .. } => simplify_expr(ptr, consumed, any_changed),
@@ -754,7 +800,7 @@ fn expr_type_with_bindings(expr: &PreHirExpr, type_map: &HashMap<String, NirType
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn uint(bits: u32) -> NirType {
         NirType::Int {

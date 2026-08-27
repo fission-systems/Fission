@@ -1,6 +1,6 @@
 use super::super::global_opt::{AliasKey, MemDef, MemPhi, MemUse, build_mem_ssa, nir_byte_size};
-use crate::prelude::*;
 use super::partition_key_for_pointer_expr;
+use crate::prelude::*;
 use crate::{HashMap, HashSet};
 
 /// Incremental Memory Heritage Solver pass (Ghidra `Heritage` partial).
@@ -619,7 +619,9 @@ impl<'a> Rewriter<'a> {
                                         .or_else(|| pre_var.cloned());
                                     if let Some(v) = arm_var {
                                         append_to_body_before_cf(
-                                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                                                &mut case.body,
+                                            ),
                                             PreHirStmt::Assign {
                                                 lhs: PreHirLValue::Var(phi_var.clone()),
                                                 rhs: PreHirExpr::Var(v),

@@ -1,4 +1,7 @@
-use crate::{SessionStore, types::{DisasmResponse, DisasmRow, ErrorResponse}};
+use crate::{
+    SessionStore,
+    types::{DisasmResponse, DisasmRow, ErrorResponse},
+};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -44,7 +47,11 @@ pub async fn handle_disasm(
                 .collect();
             Json(DisasmResponse { rows }).into_response()
         }
-        Ok(Err(e)) => (StatusCode::UNPROCESSABLE_ENTITY, Json(ErrorResponse::new(e))).into_response(),
+        Ok(Err(e)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrorResponse::new(e)),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse::new(e.to_string())),

@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use super::util::*;
+use crate::prelude::*;
 
 pub fn canonicalize_integer_expr(expr: &PreHirExpr) -> Option<PreHirExpr> {
     canonicalize_cast_expr(expr)

@@ -26,7 +26,7 @@ impl DummyHeap {
     pub fn free(&mut self, addr: u64) -> bool {
         self.allocations.remove(&addr).is_some()
     }
-    
+
     pub fn realloc(&mut self, old_addr: u64, new_size: usize) -> Option<u64> {
         if self.free(old_addr) {
             Some(self.alloc(new_size))

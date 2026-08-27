@@ -755,7 +755,12 @@ mod tests {
         targets.sort();
         assert_eq!(
             targets,
-            vec!["alloca_probe", "alloca_probe_16", "alloca_probe_8", "chkstk"]
+            vec![
+                "alloca_probe",
+                "alloca_probe_16",
+                "alloca_probe_8",
+                "chkstk"
+            ]
         );
 
         // The last callfixup in the file (past several CDATA bodies with

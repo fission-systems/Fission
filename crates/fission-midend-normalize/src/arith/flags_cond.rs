@@ -406,10 +406,18 @@ fn canonicalize_sborrow_compare(expr: &PreHirExpr) -> Option<PreHirExpr> {
     };
 
     let (cmp_lhs, cmp_rhs, cmp_op) = match (op, sign_test) {
-        (PreHirBinaryOp::Ne, SignedDiffSignTest::Negative) => (a.clone(), b.clone(), PreHirBinaryOp::SLt),
-        (PreHirBinaryOp::Ne, SignedDiffSignTest::Positive) => (b.clone(), a.clone(), PreHirBinaryOp::SLt),
-        (PreHirBinaryOp::Eq, SignedDiffSignTest::Positive) => (a.clone(), b.clone(), PreHirBinaryOp::SLe),
-        (PreHirBinaryOp::Eq, SignedDiffSignTest::Negative) => (b.clone(), a.clone(), PreHirBinaryOp::SLe),
+        (PreHirBinaryOp::Ne, SignedDiffSignTest::Negative) => {
+            (a.clone(), b.clone(), PreHirBinaryOp::SLt)
+        }
+        (PreHirBinaryOp::Ne, SignedDiffSignTest::Positive) => {
+            (b.clone(), a.clone(), PreHirBinaryOp::SLt)
+        }
+        (PreHirBinaryOp::Eq, SignedDiffSignTest::Positive) => {
+            (a.clone(), b.clone(), PreHirBinaryOp::SLe)
+        }
+        (PreHirBinaryOp::Eq, SignedDiffSignTest::Negative) => {
+            (b.clone(), a.clone(), PreHirBinaryOp::SLe)
+        }
         _ => return None,
     };
 

@@ -169,9 +169,13 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
             let range = eval_expr(cond, env);
             if let Some(v) = range.singleton_value() {
                 let replacement = if v != 0 {
-                    std::rc::Rc::make_mut(then_body).drain(..).collect::<Vec<_>>()
+                    std::rc::Rc::make_mut(then_body)
+                        .drain(..)
+                        .collect::<Vec<_>>()
                 } else {
-                    std::rc::Rc::make_mut(else_body).drain(..).collect::<Vec<_>>()
+                    std::rc::Rc::make_mut(else_body)
+                        .drain(..)
+                        .collect::<Vec<_>>()
                 };
                 *stmt = PreHirStmt::Block(std::rc::Rc::new(replacement));
                 return true;

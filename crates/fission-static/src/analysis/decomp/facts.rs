@@ -241,15 +241,14 @@ fn runtime_callback_from_entry_pcode(
                 .enumerate()
                 .rev()
                 .find(|(_, op)| {
-                    op.output.as_ref().is_some_and(|output| {
-                        register_namer
-                            .register_name_with_param_owned(output.offset, output.size)
-                            .is_some_and(|(_, param_index)| {
-                                param_index == Some(0)
-                                    && output.size >= register_namer.pointer_size
-                            })
-                    })
-                })?;
+                op.output.as_ref().is_some_and(|output| {
+                    register_namer
+                        .register_name_with_param_owned(output.offset, output.size)
+                        .is_some_and(|(_, param_index)| {
+                            param_index == Some(0) && output.size >= register_namer.pointer_size
+                        })
+                })
+            })?;
             let callback = resolve_constant_before(
                 &block.ops,
                 definition_index,
@@ -311,9 +310,7 @@ impl FactStore {
                     SymbolKind::Function
                     | SymbolKind::Label
                     | SymbolKind::Data
-                    | SymbolKind::RelocationTarget => {
-                        FactProvenance::BinarySymbol
-                    }
+                    | SymbolKind::RelocationTarget => FactProvenance::BinarySymbol,
                 };
                 store.ingest_name_fact(symbol.address, symbol.name.clone(), provenance);
             }
@@ -623,7 +620,9 @@ impl FactStore {
                 }
                 // Same preference as `discover_for_load_spec`: packed tables
                 // answer from an index, the `.fidbf` has to be built first.
-                if let Some(lazy) = fission_signatures::fidbf::fpk_store::LazyFidDatabase::open(&path) {
+                if let Some(lazy) =
+                    fission_signatures::fidbf::fpk_store::LazyFidDatabase::open(&path)
+                {
                     databases.push(FidDatabase::Lazy(lazy));
                 } else if let Ok(db) = fission_signatures::fidbf::parse_fidbf(&path) {
                     databases.push(FidDatabase::Eager(Box::new(db)));
@@ -1357,11 +1356,12 @@ mod tests {
     /// here is pure standing per-session duplication, not a one-off cost.
     #[test]
     fn from_binary_shares_dwarf_and_pdb_function_allocations_with_loaded_binary() {
-        let mut binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
-            .format("PE")
-            .is_64bit(true)
-            .build()
-            .expect("build test binary");
+        let mut binary =
+            LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+                .format("PE")
+                .is_64bit(true)
+                .build()
+                .expect("build test binary");
         Arc::make_mut(&mut binary.dwarf_functions).insert(
             0x401000,
             DwarfFunctionInfo {

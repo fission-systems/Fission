@@ -1,8 +1,8 @@
 use crate::core::Emulator;
-use crate::sym::state::SimState;
 use crate::sym::exploration::ExplorationTechnique;
-use fission_solver::SymExpr;
+use crate::sym::state::SimState;
 use anyhow::Result;
+use fission_solver::SymExpr;
 use std::collections::HashMap;
 
 /// An angr-style Simulation Manager that orchestrates states across different stashes.
@@ -63,7 +63,11 @@ impl SimulationManager {
     }
 
     /// Best-effort path-condition SAT. Panics are treated as SAT (keep the fork).
-    fn path_sat(&mut self, constraints: &[SymExpr], ms: &crate::pcode::state::MachineState) -> bool {
+    fn path_sat(
+        &mut self,
+        constraints: &[SymExpr],
+        ms: &crate::pcode::state::MachineState,
+    ) -> bool {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.emu
                 .solver
@@ -168,10 +172,7 @@ impl SimulationManager {
             }
         }
 
-        self.stashes
-            .get_mut("active")
-            .unwrap()
-            .extend(next_active);
+        self.stashes.get_mut("active").unwrap().extend(next_active);
         self.stashes
             .get_mut("deadended")
             .unwrap()
