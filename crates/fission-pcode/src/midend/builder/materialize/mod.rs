@@ -875,6 +875,54 @@ impl<'a> PreviewBuilder<'a> {
             .unwrap_or(0)
     }
 
+    /// Whether this op's output names a location in memory rather than a
+    /// register or a temporary.
+    ///
+    /// SLEIGH lowers an absolute-addressed write (`mov dword ptr [rip+N], 0`)
+    /// to an ordinary op whose *output varnode lives in ram space* -- not to a
+    /// `Store`. The runtime numbers that space 3, which collides with the
+    /// legacy engine's unique space, so such an output reaches the generic
+    /// path and is judged by the same "does anything read it?" rules that
+    /// govern a temporary. Nothing reads a global inside the function that
+    /// writes it, so the write was dropped: 64 of 65 such stores across the
+    /// benchmark's binaries never reached the emitted C at all.
+    ///
+    /// The offset is the discriminator the space id cannot be: a legacy unique
+    /// offset is a small slot index, while this is an address the loader
+    /// actually mapped, and one no legacy unique register name claims.
+    fn output_is_mapped_global_memory(&self, output: &Varnode) -> bool {
+        !output.is_constant
+            && output.space_id == UNIQUE_SPACE_ID
+            && self.pcode_uses_runtime_space_numbering()
+            && self.options.is_mapped_global(output.offset)
+    }
+
+    /// Whether this function's p-code came from the rust-sleigh runtime.
+    ///
+    /// Decided from the space ids the op stream actually uses: the runtime
+    /// numbers unique 2 and registers 4/5, the legacy engine unique 3 and
+    /// registers 1. Either sighting settles it, and space 3 then means ram
+    /// rather than unique. Offsets cannot stand in for this -- a PIE image
+    /// maps sections from a low base, so `is_mapped_global` is true of the
+    /// runtime's own unique offsets too.
+    fn pcode_uses_runtime_space_numbering(&self) -> bool {
+        if let Some(known) = self.runtime_space_numbering.get() {
+            return known;
+        }
+        let runtime = self.pcode.blocks.iter().any(|block| {
+            block.ops.iter().any(|op| {
+                op.output.iter().chain(op.inputs.iter()).any(|vn| {
+                    !vn.is_constant
+                        && (vn.space_id == RUST_SLEIGH_UNIQUE_SPACE_ID
+                            || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID
+                            || vn.space_id == RUST_SLEIGH_ALT_REGISTER_SPACE_ID)
+                })
+            })
+        });
+        self.runtime_space_numbering.set(Some(runtime));
+        runtime
+    }
+
     fn maybe_materialize_output_stmt(
         &mut self,
         block_addr: u64,
@@ -886,6 +934,24 @@ impl<'a> PreviewBuilder<'a> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
+        // A write to memory is observable whether or not this function reads
+        // it back, so it is decided before every suppression rule below --
+        // all of which reason about a value's consumers.
+        if self.output_is_mapped_global_memory(output) {
+            let name = self
+                .options
+                .global_names
+                .get(&output.offset)
+                .cloned()
+                .unwrap_or_else(|| format!("tmp_{:x}", output.offset));
+            let name = self.ensure_live_register_binding(&name, output.size);
+            if let Some(rhs) = self.try_lower_materialized_output_rhs(block_addr, op)? {
+                return Ok(Some(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs,
+                }));
+            }
+        }
         if self.output_used_only_as_stack_return_target(block, op_idx, terminator_index, op, output)
         {
             return Ok(None);

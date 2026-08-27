@@ -91,6 +91,13 @@ pub(crate) struct PreviewBuilder<'a> {
     /// nested attempt must fail closed instead of recursively expanding the
     /// same def-site until the thread stack is exhausted.
     pub(crate) active_materialized_rhs_keys: BuilderCacheSet<MaterializedVarnodeKey>,
+    /// Memoized answer to "did the rust-sleigh runtime produce this p-code?".
+    ///
+    /// The two lifters number their address spaces differently and collide on
+    /// 3: it is the legacy engine's unique space and the runtime's *ram*
+    /// space. Nothing in a single varnode tells them apart, so this is decided
+    /// once per function from the space ids the whole op stream uses.
+    pub(crate) runtime_space_numbering: std::cell::Cell<Option<bool>>,
     pub(crate) load_address_bindings: HashSet<String>,
     pub(crate) load_value_bindings: HashSet<String>,
     pub(crate) explicit_merge_bindings: HashMap<(usize, VarnodeKey), String>,
