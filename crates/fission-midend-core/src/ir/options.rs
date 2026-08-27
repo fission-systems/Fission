@@ -167,11 +167,7 @@ impl NirAdmissionFacts {
     /// Callers that have a `PcodeFunction` should use the pcode-side adapter
     /// (`fission_pcode::midend::nir_admission_facts_from_pcode`) so this crate
     /// stays free of a reverse dependency on the lifter IR.
-    pub fn from_counts(
-        block_count: usize,
-        op_count: usize,
-        max_multiequal_fanin: usize,
-    ) -> Self {
+    pub fn from_counts(block_count: usize, op_count: usize, max_multiequal_fanin: usize) -> Self {
         Self {
             block_count,
             op_count,
@@ -398,9 +394,21 @@ impl NirRenderOptions {
             })
             .collect();
 
-        let mut global_names = inner.iat_symbols.clone();
+        // ELF symbol names are not C identifiers. Versioned ones carry dots
+        // (`ZLIB_1.2.2`, `LIBBSD_0.11.0`) and imported ones carry `@`, and
+        // printing either verbatim emits source no compiler will parse --
+        // gcc reads `&ZLIB_1.2.2` as a malformed number. Only the symbol
+        // entries are rewritten; the string-literal entries added below are
+        // spelled with quotes on purpose.
+        let mut global_names: HashMap<u64, String> = inner
+            .iat_symbols
+            .iter()
+            .map(|(addr, name)| (*addr, sanitize_c_identifier(name)))
+            .collect();
         for (addr, name) in &inner.global_symbols {
-            global_names.entry(*addr).or_insert_with(|| name.clone());
+            global_names
+                .entry(*addr)
+                .or_insert_with(|| sanitize_c_identifier(name));
         }
         for (addr, value) in &inner.string_map {
             global_names
@@ -678,5 +686,71 @@ impl MlilPreviewError {
             }
             _ => None,
         }
+    }
+}
+
+/// Rewrite a linker symbol so C can spell it.
+///
+/// ELF names are not identifiers: a versioned symbol carries dots
+/// (`ZLIB_1.2.2`), an imported one carries `@` (`memcpy@GLIBC_2.14`), and a
+/// compiler-local one can carry `.` or `$`. Every character C forbids becomes
+/// `_`, and a leading digit gains one, so the name still reads as itself.
+///
+/// Two symbols can collide after this. That is the same trade every
+/// disassembler makes here, and a name that collides is still better than one
+/// that does not compile.
+pub fn sanitize_c_identifier(name: &str) -> String {
+    if !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !name.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return name.to_string();
+    }
+    let mut out = String::with_capacity(name.len() + 1);
+    if name.starts_with(|c: char| c.is_ascii_digit()) {
+        out.push('_');
+    }
+    for c in name.chars() {
+        out.push(if c.is_ascii_alphanumeric() || c == '_' {
+            c
+        } else {
+            '_'
+        });
+    }
+    if out.is_empty() { "_".to_string() } else { out }
+}
+
+#[cfg(test)]
+mod sanitize_identifier_tests {
+    use super::sanitize_c_identifier;
+
+    #[test]
+    fn an_ordinary_name_is_returned_unchanged() {
+        assert_eq!(sanitize_c_identifier("stderr"), "stderr");
+        assert_eq!(sanitize_c_identifier("_edata"), "_edata");
+    }
+
+    #[test]
+    fn a_versioned_symbol_loses_its_dots() {
+        assert_eq!(sanitize_c_identifier("ZLIB_1.2.2"), "ZLIB_1_2_2");
+        assert_eq!(sanitize_c_identifier("LIBBSD_0.11.0"), "LIBBSD_0_11_0");
+    }
+
+    #[test]
+    fn an_imported_symbol_loses_its_at_sign() {
+        assert_eq!(
+            sanitize_c_identifier("memcpy@GLIBC_2.14"),
+            "memcpy_GLIBC_2_14"
+        );
+    }
+
+    #[test]
+    fn a_leading_digit_gains_an_underscore() {
+        assert_eq!(sanitize_c_identifier("3com"), "_3com");
+    }
+
+    #[test]
+    fn an_empty_name_still_yields_an_identifier() {
+        assert_eq!(sanitize_c_identifier(""), "_");
     }
 }

@@ -17,6 +17,11 @@ struct PrintCtx<'a> {
     /// variable name → declared type
     var_types: HashMap<&'a str, &'a NirType>,
     pointer_decl_names: HashSet<&'a str>,
+    /// The type text each binding is actually declared with, which is not
+    /// always `print_type(&b.ty)` -- a `surface_type_name` wins there. Casts
+    /// back to a variable's own type have to spell the declared one or they
+    /// are a different type.
+    decl_type_text: HashMap<&'a str, String>,
     return_type: &'a NirType,
     inline_guard_goto: bool,
     global_names: Option<&'a HashMap<u64, String>>,
@@ -98,8 +103,7 @@ fn for_each_stmt<'a>(stmts: &'a [HirStmt], visit: &mut impl FnMut(&'a HirStmt)) 
 fn collect_return_enum_groups(func: &HirFunction, out: &mut HashMap<String, String>) {
     let mut assignments = HashMap::new();
     count_var_assignments(&func.body, &mut assignments);
-    let assigned_once =
-        |name: &str| assignments.get(name).copied().unwrap_or(0) == 1;
+    let assigned_once = |name: &str| assignments.get(name).copied().unwrap_or(0) == 1;
 
     // Copies are followed to a fixed point: the chain can be longer than one
     // hop, and statement order does not have to agree with data flow.
@@ -206,8 +210,10 @@ impl<'a> PrintCtx<'a> {
     fn build_with_profile(func: &'a HirFunction, profile: PrintProfile) -> Self {
         let mut var_types = HashMap::new();
         let mut pointer_decl_names = HashSet::new();
+        let mut decl_type_text = HashMap::new();
         for b in func.locals.iter().chain(func.params.iter()) {
             var_types.insert(b.name.as_str(), &b.ty);
+            decl_type_text.insert(b.name.as_str(), print_binding_type(b));
             if matches!(b.ty, NirType::Ptr(_))
                 || b.surface_type_name
                     .as_deref()
@@ -223,6 +229,7 @@ impl<'a> PrintCtx<'a> {
         Self {
             var_types,
             pointer_decl_names,
+            decl_type_text,
             return_enum_groups,
             return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
@@ -247,6 +254,23 @@ impl<'a> PrintCtx<'a> {
         }
     }
 
+    /// Whether this operand *prints* as a pointer, for deciding what C will
+    /// accept as an operand.
+    ///
+    /// Wider than [`Self::expr_is_pointer`] on purpose: a binding whose
+    /// `surface_type_name` spells a pointer is declared as one in the emitted
+    /// text even when its `ty` is not `Ptr`, and it is the emitted text gcc
+    /// has to accept. Kept separate so the deref/index printing decisions that
+    /// read `expr_is_pointer` keep the narrower meaning they were written for.
+    fn operand_prints_as_pointer(&self, expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(name) => {
+                self.pointer_decl_names.contains(name.as_str()) || self.expr_is_pointer(expr)
+            }
+            _ => self.expr_is_pointer(expr),
+        }
+    }
+
     fn expr_has_pointer_like_result(&self, expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Binary {
@@ -265,9 +289,23 @@ impl<'a> PrintCtx<'a> {
         }
     }
 
+    /// Whether `name` is declared `void *`, which cannot be dereferenced.
+    ///
+    /// `void` is not a type a value can have, so `*p` on one is an error
+    /// rather than a warning -- the deref has to name the type it is reading.
+    fn declared_pointee_is_void(&self, name: &str) -> bool {
+        self.decl_type_text.get(name).is_some_and(|text| {
+            let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+            compact == "void*"
+        })
+    }
+
     fn simple_deref_target_is_declared_pointer(&self, expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::Var(name) => self.pointer_decl_names.contains(name.as_str()),
+            HirExpr::Var(name) => {
+                self.pointer_decl_names.contains(name.as_str())
+                    && !self.declared_pointee_is_void(name.as_str())
+            }
             HirExpr::AddressOfGlobal(_) => true,
             HirExpr::Cast {
                 ty: NirType::Ptr(_),
@@ -960,12 +998,7 @@ fn callind_target_symbol(fn_ptr: &HirExpr) -> Option<String> {
 /// Only a literal argument is annotated. A variable holding the value would
 /// need the definition chased to know what reaches the call, and guessing there
 /// would attach a name to something that is not that constant.
-fn annotate_enum_argument(
-    target: &str,
-    index: usize,
-    arg: &HirExpr,
-    printed: String,
-) -> String {
+fn annotate_enum_argument(target: &str, index: usize, arg: &HirExpr, printed: String) -> String {
     let HirExpr::Const(value, _) = arg else {
         return printed;
     };
@@ -978,11 +1011,8 @@ fn annotate_enum_argument(
     let Some(param) = signature.params.get(index) else {
         return printed;
     };
-    match fission_signatures::WIN_CONSTANTS_DB.resolve_parameter(
-        target,
-        &param.name,
-        *value as u64,
-    ) {
+    match fission_signatures::WIN_CONSTANTS_DB.resolve_parameter(target, &param.name, *value as u64)
+    {
         Some(name) => format!("{printed} /* {name} */"),
         None => printed,
     }
@@ -1186,7 +1216,10 @@ fn print_expr_prec_ctx(
                 inner = cast_pointer_vars_in_bitop_text(inner, ctx);
             }
             if expr_is_ptr && target_is_int {
-                (format!("({})(unsigned long long){}", print_type(ty), inner), 110)
+                (
+                    format!("({})(unsigned long long){}", print_type(ty), inner),
+                    110,
+                )
             } else {
                 (format!("({}){}", print_type(ty), inner), 110)
             }
@@ -1223,16 +1256,24 @@ fn print_expr_prec_ctx(
                 }
             }
 
-            // If both sides are pointers and the operation is Add, this is invalid in C.
-            // Cast the rhs to ulonglong to avoid compilation failure.
-            if *op == HirBinaryOp::Add && ctx.expr_is_pointer(lhs) && ctx.expr_is_pointer(rhs) {
+            // Pointer plus pointer, and pointer minus pointer of unrelated
+            // types, are both things C will not do. One side becomes an
+            // integer and the operation keeps the meaning the machine gave it.
+            if matches!(*op, HirBinaryOp::Add | HirBinaryOp::Sub)
+                && ctx.operand_prints_as_pointer(lhs)
+                && ctx.operand_prints_as_pointer(rhs)
+            {
                 rhs_str = format!("(unsigned long long){rhs_str}");
             }
-            if is_integer_bitop(*op) {
-                if ctx.expr_is_pointer(lhs) || printed_operand_is_pointer_var(&lhs_str, ctx) {
+            if rejects_pointer_operands(*op) {
+                if ctx.operand_prints_as_pointer(lhs)
+                    || printed_operand_is_pointer_var(&lhs_str, ctx)
+                {
                     lhs_str = format!("(unsigned long long){lhs_str}");
                 }
-                if ctx.expr_is_pointer(rhs) || printed_operand_is_pointer_var(&rhs_str, ctx) {
+                if ctx.operand_prints_as_pointer(rhs)
+                    || printed_operand_is_pointer_var(&rhs_str, ctx)
+                {
                     rhs_str = format!("(unsigned long long){rhs_str}");
                 }
             }
@@ -1318,7 +1359,13 @@ fn print_expr_prec_ctx(
             elem_ty,
         } => {
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
-            let index = print_expr_prec_ctx(index, 0, depth + 1, ctx);
+            let mut index_str = print_expr_prec_ctx(index, 0, depth + 1, ctx);
+            // A subscript has to be an integer, whatever the value was
+            // recovered as.
+            if ctx.operand_prints_as_pointer(index) {
+                index_str = format!("(unsigned long long){index_str}");
+            }
+            let index = index_str;
             let text = if matches!(elem_ty, NirType::Aggregate { .. }) {
                 format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
             } else {
@@ -1432,6 +1479,14 @@ fn is_integer_bitop(op: HirBinaryOp) -> bool {
     )
 }
 
+/// Operators C refuses a pointer operand for outright.
+///
+/// `+` and `-` are not here: pointer plus integer is exactly what they are
+/// for. Only pointer *and* pointer is the illegal shape, handled separately.
+fn rejects_pointer_operands(op: HirBinaryOp) -> bool {
+    is_integer_bitop(op) || matches!(op, HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod)
+}
+
 fn printed_operand_is_pointer_var(operand: &str, ctx: &PrintCtx<'_>) -> bool {
     ctx.var_types
         .get(operand)
@@ -1497,15 +1552,12 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
     // If the LHS variable is a pointer type and the operation is scalar-only,
     // we cannot emit `ptr *= val` / `ptr &= val` (invalid C). Keep the same
     // surface variable but force the arithmetic through a pointer-sized scalar.
-    let var_is_ptr = ctx
-        .var_types
-        .get(var_name.as_str())
-        .is_some_and(|ty| matches!(ty, NirType::Ptr(_)));
+    let var_is_ptr = ctx.pointer_decl_names.contains(var_name.as_str());
     if var_is_ptr && let Some(op_str) = pointer_scalar_compound_op(*op) {
         let ptr_ty = ctx
-            .var_types
+            .decl_type_text
             .get(var_name.as_str())
-            .map(|ty| print_type(ty))
+            .cloned()
             .unwrap_or_else(|| "void *".to_string());
         let rhs_str = print_expr_with_ctx(rhs_expr, ctx);
         return Some(format!(
@@ -1534,9 +1586,12 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
     };
 
     let mut rhs_str = print_expr_with_ctx(rhs_expr, ctx);
-    if matches!(op, HirBinaryOp::Add)
-        && ctx.expr_is_pointer(lhs_expr)
-        && ctx.expr_is_pointer(rhs_expr)
+    // The compound form hides an operand, but C still reads it: `x &= p` is
+    // `x & p`, and `x += p` is pointer plus pointer when x is one too.
+    if ctx.operand_prints_as_pointer(rhs_expr)
+        && (rejects_pointer_operands(*op)
+            || (matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub)
+                && ctx.operand_prints_as_pointer(lhs_expr)))
     {
         rhs_str = format!("(unsigned long long){rhs_str}");
     }
@@ -1570,7 +1625,10 @@ fn print_return_expr(expr: &HirExpr, ctx: &PrintCtx<'_>) -> String {
             format!("({})({expr_str})", print_type(ctx.return_type))
         }
         NirType::Int { .. } if ctx.expr_has_pointer_like_result(expr) => {
-            format!("({})(unsigned long long)({expr_str})", print_type(ctx.return_type))
+            format!(
+                "({})(unsigned long long)({expr_str})",
+                print_type(ctx.return_type)
+            )
         }
         _ => expr_str,
     }
