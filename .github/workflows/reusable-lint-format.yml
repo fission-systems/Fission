@@ -46,8 +46,8 @@ jobs:
           shared-key: fission-lint-${{ runner.os }}
           cache-on-failure: true
 
-      - name: Check changed Rust formatting
-        run: python3 scripts/ci/check_changed_rustfmt.py
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
 
       - name: Lint with Clippy (Deny Warnings)
         shell: bash

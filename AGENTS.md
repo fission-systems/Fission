@@ -115,7 +115,18 @@ cargo run -p fission-automation -- nir-check --lane nir
 
 # Canonical benchmark runner
 python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --help
+
+# Formatting -- CI runs exactly this
+cargo fmt --all --check
 ```
+
+The workspace is fully rustfmt-clean and CI enforces it across every file, so
+run `cargo fmt --all` and commit the result with your change. Two things to
+avoid: do not run `cargo fmt --all` as a separate sweep on top of unrelated
+work (it used to surface three hundred files at once, which is why the debt
+was paid off in one commit -- see `.git-blame-ignore-revs`), and do not format
+by invoking `rustfmt` on a single file, which follows `mod` declarations into
+submodules and rewrites files you never touched.
 
 ## Workflow Bias
 

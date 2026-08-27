@@ -1,0 +1,9 @@
+# Revisions to skip when running `git blame`.
+#
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Only mechanical, semantics-preserving rewrites belong here.
+
+# style: format the workspace, once
+06cd2fa1c76829af4afffdeb1d74c6988c7a5a34
