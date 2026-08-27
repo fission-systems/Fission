@@ -263,9 +263,41 @@ impl<'a> PrintCtx<'a> {
     /// has to accept. Kept separate so the deref/index printing decisions that
     /// read `expr_is_pointer` keep the narrower meaning they were written for.
     fn operand_prints_as_pointer(&self, expr: &HirExpr) -> bool {
+        self.operand_prints_as_pointer_at(expr, 0)
+    }
+
+    fn operand_prints_as_pointer_at(&self, expr: &HirExpr, depth: usize) -> bool {
+        if depth > 8 {
+            return false;
+        }
         match expr {
             HirExpr::Var(name) => {
                 self.pointer_decl_names.contains(name.as_str()) || self.expr_is_pointer(expr)
+            }
+            // Pointer arithmetic yields a pointer, so the result is an operand
+            // of the next operator up. `local_8 - 1 + rax` is pointer plus
+            // pointer even though neither `-` nor its operands say so on their
+            // own.
+            HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs,
+                rhs,
+                ..
+            } => {
+                self.operand_prints_as_pointer_at(lhs, depth + 1)
+                    || self.operand_prints_as_pointer_at(rhs, depth + 1)
+            }
+            HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs,
+                rhs,
+                ..
+            } => {
+                self.operand_prints_as_pointer_at(lhs, depth + 1)
+                    && !self.operand_prints_as_pointer_at(rhs, depth + 1)
+            }
+            HirExpr::Load { ty, .. } | HirExpr::Index { elem_ty: ty, .. } => {
+                matches!(ty, NirType::Ptr(_))
             }
             _ => self.expr_is_pointer(expr),
         }
@@ -736,7 +768,22 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             } else {
                 let lhs_str = print_expr_prec(lhs, prec, depth + 1);
                 let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
-                let rhs_str = print_expr_prec(rhs, rhs_parent_prec, depth + 1);
+                let mut lhs_str = lhs_str;
+                let mut rhs_str = print_expr_prec(rhs, rhs_parent_prec, depth + 1);
+                // Same rule the ctx-aware path applies: a pointer cannot be an
+                // operand of `* / % & | ^ << >>`, and cannot sit on the right
+                // of `-` or opposite another pointer under `+`.
+                if expr_prints_as_pointer_ctx_free(rhs)
+                    && (rejects_pointer_operands(*op)
+                        || matches!(*op, HirBinaryOp::Sub)
+                        || (matches!(*op, HirBinaryOp::Add)
+                            && expr_prints_as_pointer_ctx_free(lhs)))
+                {
+                    rhs_str = format!("(unsigned long long){rhs_str}");
+                }
+                if rejects_pointer_operands(*op) && expr_prints_as_pointer_ctx_free(lhs) {
+                    lhs_str = format!("(unsigned long long){lhs_str}");
+                }
                 (
                     format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
                     prec,
@@ -1302,9 +1349,13 @@ fn print_expr_prec_ctx(
             // Pointer plus pointer, and pointer minus pointer of unrelated
             // types, are both things C will not do. One side becomes an
             // integer and the operation keeps the meaning the machine gave it.
-            if matches!(*op, HirBinaryOp::Add | HirBinaryOp::Sub)
-                && ctx.operand_prints_as_pointer(lhs)
-                && ctx.operand_prints_as_pointer(rhs)
+            // C subtracts an integer from a pointer and one pointer from
+            // another, but never a pointer from an integer -- so a pointer on
+            // the right of `-` always has to become one. Addition is
+            // commutative and only pointer *plus pointer* is out of bounds.
+            if ctx.operand_prints_as_pointer(rhs)
+                && (matches!(*op, HirBinaryOp::Sub)
+                    || (matches!(*op, HirBinaryOp::Add) && ctx.operand_prints_as_pointer(lhs)))
             {
                 rhs_str = format!("(unsigned long long){rhs_str}");
             }
@@ -1529,6 +1580,35 @@ fn is_integer_bitop(op: HirBinaryOp) -> bool {
             | HirBinaryOp::Shr
             | HirBinaryOp::Sar
     )
+}
+
+/// Whether `expr` prints as a pointer using only what the node itself says.
+///
+/// The ctx-free printer has no declarations to consult, so this sees less than
+/// [`PrintCtx::operand_prints_as_pointer`] -- but `&global` and a cast to a
+/// pointer type are unambiguous without one, and those are what reach a bitop
+/// or a subtraction in practice.
+fn expr_prints_as_pointer_ctx_free(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::AddressOfGlobal(_) => true,
+        HirExpr::Cast { ty, .. } => matches!(ty, NirType::Ptr(_)),
+        HirExpr::Load { ty, .. } | HirExpr::Index { elem_ty: ty, .. } => {
+            matches!(ty, NirType::Ptr(_))
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => expr_prints_as_pointer_ctx_free(lhs) || expr_prints_as_pointer_ctx_free(rhs),
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => expr_prints_as_pointer_ctx_free(lhs) && !expr_prints_as_pointer_ctx_free(rhs),
+        _ => false,
+    }
 }
 
 /// Operators C refuses a pointer operand for outright.

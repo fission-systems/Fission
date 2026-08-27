@@ -1144,7 +1144,11 @@ fn try_recover_field_access(
     let field = fields.iter().find(|f| f.offset == field_offset);
     let (field_name, field_ty) = match field {
         Some(f) => (f.name.clone(), f.ty.clone()),
-        None => (format!("field_{field_offset}"), NirType::Unknown),
+        // Hex, like every other synthetic field name -- the typedef the
+        // printer emits spells them `field_{offset:x}`, so a decimal name here
+        // reads `->field_16` against a struct that declares `field_10` and the
+        // member does not exist.
+        None => (format!("field_{field_offset:x}"), NirType::Unknown),
     };
 
     let final_ty = if matches!(field_ty, NirType::Unknown) {
@@ -2631,11 +2635,14 @@ mod tests {
             panic!("expected assignment");
         }
 
-        // Verify the store/deref is now FieldAccess (synthetic fallback)
+        // Verify the store/deref is now FieldAccess (synthetic fallback).
+        // The name is hex like every other synthetic field name, so offset 16
+        // is `field_10` -- decimal here spelled a member the emitted typedef
+        // does not declare.
         if let PreHirStmt::Assign { lhs, .. } = &func.body[1] {
             assert!(
-                matches!(lhs, PreHirLValue::FieldAccess { field_name, offset, .. } if field_name == "field_16" && *offset == 16),
-                "expected FieldAccess for field_16, got {:?}",
+                matches!(lhs, PreHirLValue::FieldAccess { field_name, offset, .. } if field_name == "field_10" && *offset == 16),
+                "expected FieldAccess for field_10 (offset 16), got {:?}",
                 lhs
             );
         } else {
