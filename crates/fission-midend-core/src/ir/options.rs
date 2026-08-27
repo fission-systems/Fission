@@ -410,6 +410,24 @@ impl NirRenderOptions {
                 .entry(*addr)
                 .or_insert_with(|| sanitize_c_identifier(name));
         }
+        // A constant that lands exactly on a function entry is a function
+        // reference, not a magic number: coreutils `ls` passes `strcmp` to a
+        // comparator and we printed `46050`. The compiler then emits
+        // `mov edx, 0xb3e2` where the original had `lea rdx, [rip+strcmp]`.
+        // Added after the symbol tables so a real symbol name still wins, and
+        // skipping unnamed entries, which carry nothing worth printing.
+        for func in &inner.functions {
+            global_names.entry(func.address).or_insert_with(|| {
+                if func.name.is_empty() {
+                    // Same fallback the call-target lowering uses, so a
+                    // function referenced as data and one that is called
+                    // print under one name.
+                    format!("sub_{:x}", func.address)
+                } else {
+                    sanitize_c_identifier(&func.name)
+                }
+            });
+        }
         for (addr, value) in &inner.string_map {
             global_names
                 .entry(*addr)
