@@ -1,11 +1,11 @@
 {
   "full": {
     "decompiled": 250,
-    "elapsed_sec": 574,
+    "elapsed_sec": 575,
     "functions": 250,
-    "ged_hir_perfect": 52,
+    "ged_hir_perfect": 53,
     "ged_hir_scored": 232,
-    "ged_nir_perfect": 51,
+    "ged_nir_perfect": 52,
     "ged_nir_scored": 232,
     "type_hir_perfect": 14,
     "type_hir_scored": 222,
