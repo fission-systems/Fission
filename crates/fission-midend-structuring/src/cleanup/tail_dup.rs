@@ -78,9 +78,12 @@ pub fn duplicate_terminal_tails(
     mut body: Vec<PreHirStmt>,
     protected: &HashSet<String>,
 ) -> (Vec<PreHirStmt>, usize) {
+    let mut gotoless_budget = MAX_DUPLICATED_STMTS;
+    let (next, split) = split_fallthrough_return_tails(body, &mut gotoless_budget);
+    body = next;
     let counts = super::collect_referenced_label_counts(&body);
     if counts.is_empty() {
-        return (body, 0);
+        return (body, split);
     }
     let mut definitions = HashMap::default();
     super::collect_defined_label_counts_in(&body, &mut definitions);
@@ -119,6 +122,160 @@ pub fn duplicate_terminal_tails(
 
 /// Walk every statement sequence looking for `Label(L)` followed by a
 /// duplicable terminal region.
+/// Split a shared `return` tail into the arms of the `if` that falls into it.
+///
+/// [`duplicate_terminal_tails`] is goto-driven: it rewrites `goto L` sites and
+/// needs a `Label` to key on. A join reached by *fallthrough* has neither, so
+/// this is the gotoless case -- the one angr's `ReturnDuplicatorHigh` covers
+/// and the doc comment above already names.
+///
+/// ```text
+/// if (c) { A } else { B }        if (c) { A; return X; }
+/// return X;                 =>   else   { B; return X; }
+/// ```
+///
+/// The source usually returned from each branch and the compiler merged the
+/// tails; the merged join is a node the source CFG has no counterpart for, so
+/// leaving it costs a node and both of its in-edges.
+///
+/// Admission is the same shape the goto case demands, for the same reasons:
+/// the tail must be relocatable (no `Break`/`Continue`/`Label`/`Goto`, which
+/// would rebind or duplicate), must end the function, and must be small. Both
+/// arms must exist and must fall through -- an arm that already returns has no
+/// join to remove, and an empty arm is a negated guard whose "else" is the
+/// rest of the function rather than a branch.
+fn split_fallthrough_return_tails(
+    body: Vec<PreHirStmt>,
+    budget: &mut usize,
+) -> (Vec<PreHirStmt>, usize) {
+    let mut split = 0usize;
+    let mut out: Vec<PreHirStmt> = Vec::with_capacity(body.len());
+    let mut rest = body.into_iter().collect::<Vec<_>>();
+    let mut idx = 0usize;
+
+    while idx < rest.len() {
+        // The `if` is often the last statement of a `Block` the structurer
+        // emitted, which puts the shared tail one level out -- a sibling of
+        // the block rather than of the `if`. Look through it.
+        let is_candidate_if = last_if_is_splittable(&rest[idx]);
+        if !is_candidate_if {
+            let stmt = std::mem::replace(&mut rest[idx], PreHirStmt::Break);
+            out.push(recurse_split(stmt, budget, &mut split));
+            idx += 1;
+            continue;
+        }
+
+        let tail: Vec<PreHirStmt> = rest[idx + 1..].to_vec();
+        let cost: usize = tail.iter().map(statement_count).sum();
+        let admissible = !tail.is_empty()
+            && region_leaves(&tail)
+            && region_is_relocatable(&tail, false)
+            && cost <= MAX_TAIL_STMTS
+            && cost <= *budget;
+        if !admissible {
+            let stmt = std::mem::replace(&mut rest[idx], PreHirStmt::Break);
+            out.push(recurse_split(stmt, budget, &mut split));
+            idx += 1;
+            continue;
+        }
+
+        let host = std::mem::replace(&mut rest[idx], PreHirStmt::Break);
+        let Some(host) = append_tail_to_last_if(host, &tail) else {
+            out.push(recurse_split(
+                std::mem::replace(&mut rest[idx], PreHirStmt::Break),
+                budget,
+                &mut split,
+            ));
+            idx += 1;
+            continue;
+        };
+        *budget = budget.saturating_sub(cost);
+        split += 1;
+        out.push(host);
+        return (out, split);
+    }
+
+    (out, split)
+}
+
+/// Whether control provably leaves `region` rather than running off its end.
+/// Whether `stmt` is -- or ends in -- an `if` whose arms both fall through.
+fn last_if_is_splittable(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            !then_body.is_empty()
+                && !else_body.is_empty()
+                && !region_leaves(then_body)
+                && !region_leaves(else_body)
+        }
+        PreHirStmt::Block(body) => body.last().is_some_and(last_if_is_splittable),
+        _ => false,
+    }
+}
+
+/// Append `tail` to both arms of the `if` [`last_if_is_splittable`] found.
+fn append_tail_to_last_if(stmt: PreHirStmt, tail: &[PreHirStmt]) -> Option<PreHirStmt> {
+    match stmt {
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let mut then_next = then_body.as_ref().clone();
+            then_next.extend(tail.iter().cloned());
+            let mut else_next = else_body.as_ref().clone();
+            else_next.extend(tail.iter().cloned());
+            Some(PreHirStmt::If {
+                cond,
+                then_body: std::rc::Rc::new(then_next),
+                else_body: std::rc::Rc::new(else_next),
+            })
+        }
+        PreHirStmt::Block(body) => {
+            let mut inner = body.as_ref().clone();
+            let last = inner.pop()?;
+            inner.push(append_tail_to_last_if(last, tail)?);
+            Some(PreHirStmt::Block(std::rc::Rc::new(inner)))
+        }
+        _ => None,
+    }
+}
+
+fn region_leaves(region: &[PreHirStmt]) -> bool {
+    match region.last() {
+        Some(
+            PreHirStmt::Return(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue,
+        ) => true,
+        Some(PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        }) => {
+            !then_body.is_empty()
+                && !else_body.is_empty()
+                && region_leaves(then_body)
+                && region_leaves(else_body)
+        }
+        Some(PreHirStmt::Block(body)) => region_leaves(body),
+        _ => false,
+    }
+}
+
+fn recurse_split(stmt: PreHirStmt, budget: &mut usize, split: &mut usize) -> PreHirStmt {
+    let mut stmt = stmt;
+    for seq in child_sequences_mut(&mut stmt) {
+        let taken = std::mem::take(seq);
+        let (next, n) = split_fallthrough_return_tails(taken, budget);
+        *seq = next;
+        *split += n;
+    }
+    stmt
+}
+
 fn collect_candidates(
     stmts: &[PreHirStmt],
     protected: &HashSet<String>,
