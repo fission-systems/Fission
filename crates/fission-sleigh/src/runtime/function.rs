@@ -319,6 +319,29 @@ fn control_op_branch_target_address(
     direct_control_target_with_symbolic_internal_label(op)
 }
 
+/// Whether this control op branches to another P-code op of its *own*
+/// instruction rather than to a machine address.
+///
+/// SLEIGH emits these instruction-internal labels routinely -- ARM's IT
+/// blocks, x86's repeat prefixes -- and they carry no machine-level control
+/// flow, so they must not split the block. The test is the resolution path,
+/// not the resulting address: a machine branch whose target *equals* its own
+/// instruction address is a genuine self-loop (Thumb's `b .`, the idiom every
+/// Cortex-M `Default_Handler` ends in), and treating that as internal erases
+/// the loop from the CFG entirely -- no leader, no back edge, and a body that
+/// renders as a bare `goto` to the function entry.
+fn targets_own_instruction_internally(
+    op: &PcodeOp,
+    ops: &[PcodeOp],
+    op_seq_to_idx: &HashMap<(u64, u32), usize>,
+) -> bool {
+    op.inputs
+        .first()
+        .and_then(|input| relative_pcode_target_seq(op, input))
+        .and_then(|target_seq| op_seq_to_idx.get(&(op.address, target_seq)))
+        .is_some_and(|&idx| ops[idx].address == op.address)
+}
+
 fn control_op_splits_instruction_cfg(
     op: &PcodeOp,
     ops: &[PcodeOp],
@@ -329,10 +352,8 @@ fn control_op_splits_instruction_cfg(
     match op.opcode {
         PcodeOpcode::Return | PcodeOpcode::BranchInd => true,
         PcodeOpcode::Branch | PcodeOpcode::CBranch => {
-            if let Some(target_addr) = control_op_branch_target_address(op, ops, op_seq_to_idx) {
-                if target_addr == op.address {
-                    return false;
-                }
+            if targets_own_instruction_internally(op, ops, op_seq_to_idx) {
+                return false;
             }
             let Some(fallthrough) = instruction_fallthrough(op.address, instruction_lengths) else {
                 return true;
@@ -340,7 +361,6 @@ fn control_op_splits_instruction_cfg(
             let branch_target = control_op_branch_target_address(op, ops, op_seq_to_idx)
                 .or_else(|| direct_control_target_with_symbolic_internal_label(op));
             match branch_target {
-                Some(target) if target == op.address => false,
                 Some(target) if target != fallthrough => true,
                 Some(_) if op.opcode == PcodeOpcode::CBranch => {
                     cbranch_equal_target_is_cfg_split(op.address, fallthrough, ops_at)

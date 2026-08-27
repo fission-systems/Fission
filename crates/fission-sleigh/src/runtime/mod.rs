@@ -1105,6 +1105,38 @@ mod tests {
     }
 
     #[test]
+    fn cfg_blocks_split_machine_level_self_branch() {
+        // Thumb's `b .` -- the idiom every Cortex-M `Default_Handler` ends
+        // in -- branches to its own instruction address. That is a genuine
+        // machine-level self-loop, not one of SLEIGH's instruction-internal
+        // P-code labels, so it has to split the block and carry a back edge.
+        let ops = vec![
+            op(
+                0,
+                0x4500,
+                PcodeOpcode::Copy,
+                Some(var(0x10, 4)),
+                vec![Varnode::constant(1, 4)],
+            ),
+            op(
+                1,
+                0x4504,
+                PcodeOpcode::Copy,
+                Some(var(0x20, 4)),
+                vec![var(0x10, 4)],
+            ),
+            op(2, 0x4506, PcodeOpcode::Branch, None, vec![var(0x4506, 8)]),
+        ];
+
+        let blocks = build_cfg_blocks_from_ops(0x4500, ops, &BTreeSet::new());
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert_eq!(blocks[0].start_address, 0x4500);
+        assert_eq!(blocks[1].start_address, 0x4506);
+        assert_eq!(blocks[0].successors, vec![1]);
+        assert_eq!(blocks[1].successors, vec![1]);
+    }
+
+    #[test]
     fn mips32_le_lifts_addu_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:32:default")
             .expect("MIPS32 LE runtime");
