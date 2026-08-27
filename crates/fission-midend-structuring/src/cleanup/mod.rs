@@ -1,12 +1,11 @@
-use fission_midend_core::ir::{NirType};
-use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt, PreHirSwitchCase};
-use fission_midend_prehir::util::label_cleanup as core_labels;
 use crate::HashMap;
 use crate::HashSet;
+use fission_midend_core::ir::NirType;
+use fission_midend_prehir::util::label_cleanup as core_labels;
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt, PreHirSwitchCase};
 
-
-pub mod sink_span;
 mod goto;
+pub mod sink_span;
 pub use goto::eliminate_redundant_gotos;
 
 mod tail_dup;
@@ -19,6 +18,9 @@ mod join_layout;
 
 /// Dropping statements control cannot reach.
 mod unreachable_tail;
+
+/// Dropping the branch `-fstack-protector` inserted.
+mod stack_protector;
 pub use join_layout::relocate_jump_only_joins;
 
 /// `protected` labels are never removed by the cleanup passes below even
@@ -26,7 +28,10 @@ pub use join_layout::relocate_jump_only_joins;
 /// [`cleanup_redundant_labels_protecting`]. Pass `host.lsda_landing_pad_labels()`
 /// (empty for the overwhelming majority of functions, which have no C++
 /// exception handling at all).
-pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+pub fn finalize_structured_body(
+    protected: &HashSet<String>,
+    mut body: Vec<PreHirStmt>,
+) -> Vec<PreHirStmt> {
     body = eliminate_redundant_gotos(body);
     body = dedupe_structured_region_entry_labels(body);
     // Secondary multi-emit guard (belt-and-suspenders after exclusive emission
@@ -95,8 +100,11 @@ pub fn finalize_post_layout_body_with(
     let (body, _) = unreachable_tail::drop_unreachable_tails(body, &referenced);
     // After the dead tail is gone, and not before: an `else` is only
     // unwrappable once the `then` arm's real last statement is visible.
-    let (body, _) =
-        unreachable_tail::unwrap_else_after_diverging_then_with(body, proven_no_return);
+    let (body, _) = unreachable_tail::unwrap_else_after_diverging_then_with(body, proven_no_return);
+    // Last: the guard `-fstack-protector` inserted is not in the source, so
+    // every rewrite above should see the body the compiler actually produced,
+    // and only the finished layout should lose it.
+    let (body, _) = stack_protector::drop_stack_protector_guards(body);
     body
 }
 
@@ -117,12 +125,7 @@ pub fn eliminate_nonfallthrough_label_aliases(
     collect_defined_label_counts_in(&body, &mut definition_counts);
 
     let mut aliases = HashMap::default();
-    collect_nonfallthrough_label_aliases(
-        &body,
-        protected,
-        &definition_counts,
-        &mut aliases,
-    );
+    collect_nonfallthrough_label_aliases(&body, protected, &definition_counts, &mut aliases);
     if aliases.is_empty() {
         return (body, 0);
     }
@@ -138,10 +141,7 @@ pub fn eliminate_nonfallthrough_label_aliases(
     (rewrite_stmt_labels(body, &aliases), rewritten_count)
 }
 
-fn collect_defined_label_counts_in(
-    stmts: &[PreHirStmt],
-    counts: &mut HashMap<String, usize>,
-) {
+fn collect_defined_label_counts_in(stmts: &[PreHirStmt], counts: &mut HashMap<String, usize>) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Label(label) => *counts.entry(label.clone()).or_insert(0) += 1,
@@ -149,7 +149,11 @@ fn collect_defined_label_counts_in(
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => collect_defined_label_counts_in(body, counts),
-            PreHirStmt::If { then_body, else_body, .. } => {
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 collect_defined_label_counts_in(then_body, counts);
                 collect_defined_label_counts_in(else_body, counts);
             }
@@ -189,25 +193,41 @@ fn collect_nonfallthrough_label_aliases(
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
-            | PreHirStmt::For { body, .. } => collect_nonfallthrough_label_aliases(
-                body, protected, definition_counts, aliases,
-            ),
-            PreHirStmt::If { then_body, else_body, .. } => {
+            | PreHirStmt::For { body, .. } => {
+                collect_nonfallthrough_label_aliases(body, protected, definition_counts, aliases)
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 collect_nonfallthrough_label_aliases(
-                    then_body, protected, definition_counts, aliases,
+                    then_body,
+                    protected,
+                    definition_counts,
+                    aliases,
                 );
                 collect_nonfallthrough_label_aliases(
-                    else_body, protected, definition_counts, aliases,
+                    else_body,
+                    protected,
+                    definition_counts,
+                    aliases,
                 );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_nonfallthrough_label_aliases(
-                        &case.body, protected, definition_counts, aliases,
+                        &case.body,
+                        protected,
+                        definition_counts,
+                        aliases,
                     );
                 }
                 collect_nonfallthrough_label_aliases(
-                    default, protected, definition_counts, aliases,
+                    default,
+                    protected,
+                    definition_counts,
+                    aliases,
                 );
             }
             _ => {}
@@ -254,24 +274,33 @@ fn remove_nonfallthrough_alias_segments_in_place(
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => remove_nonfallthrough_alias_segments_in_place(
-                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases,
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                aliases,
             ),
-            PreHirStmt::If { then_body, else_body, .. } => {
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 remove_nonfallthrough_alias_segments_in_place(
-                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), aliases,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    aliases,
                 );
                 remove_nonfallthrough_alias_segments_in_place(
-                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), aliases,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    aliases,
                 );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     remove_nonfallthrough_alias_segments_in_place(
-                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), aliases,
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        aliases,
                     );
                 }
                 remove_nonfallthrough_alias_segments_in_place(
-                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), aliases,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    aliases,
                 );
             }
             _ => {}
@@ -301,25 +330,43 @@ fn strip_duplicate_label_definitions_in_place(
                     continue;
                 }
             }
-            PreHirStmt::Block(body) => strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), seen),
+            PreHirStmt::Block(body) => strip_duplicate_label_definitions_in_place(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                seen,
+            ),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), seen);
-                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), seen);
+                strip_duplicate_label_definitions_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    seen,
+                );
+                strip_duplicate_label_definitions_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    seen,
+                );
             }
             PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), seen);
+                strip_duplicate_label_definitions_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    seen,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), seen);
+                    strip_duplicate_label_definitions_in_place(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        seen,
+                    );
                 }
-                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), seen);
+                strip_duplicate_label_definitions_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    seen,
+                );
             }
             _ => {}
         }
@@ -345,21 +392,31 @@ fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<PreHirStmt>
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                strip_post_total_infloop_label_residuals_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                strip_post_total_infloop_label_residuals_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                );
+                strip_post_total_infloop_label_residuals_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    strip_post_total_infloop_label_residuals_in_place(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    );
                 }
-                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                strip_post_total_infloop_label_residuals_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                );
             }
             _ => {}
         }
@@ -434,7 +491,11 @@ fn is_constant_true_cond(cond: &PreHirExpr) -> bool {
 /// Last meaningful control at the end of a while body is `if (…) break; else continue`
 /// or the reverse (possibly after trailing labels).
 fn while_body_ends_with_total_break_continue(body: &[PreHirStmt]) -> bool {
-    let Some(last) = body.iter().rev().find(|s| !matches!(s, PreHirStmt::Label(_))) else {
+    let Some(last) = body
+        .iter()
+        .rev()
+        .find(|s| !matches!(s, PreHirStmt::Label(_)))
+    else {
         return false;
     };
     match last {
@@ -536,7 +597,6 @@ fn collect_goto_targets_in(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
     }
 }
 
-
 /// Like [`cleanup_redundant_labels`], but additionally protects every label
 /// in `protected` from removal even when nothing in `body` textually
 /// references it via `Goto` -- for labels reachable only via an edge with
@@ -584,7 +644,11 @@ fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<PreHirStmt>) {
                     PreHirStmt::While { body, .. }
                     | PreHirStmt::DoWhile { body, .. }
                     | PreHirStmt::For { body, .. } => {
-                        dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                        dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<
+                            Vec<PreHirStmt>,
+                        >::make_mut(
+                            body
+                        ));
                         first_meaningful_label(body) == Some(outer.as_str())
                     }
                     _ => false,
@@ -602,27 +666,46 @@ fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<PreHirStmt>) {
 
 fn dedupe_structured_region_entry_labels_stmt(stmt: &mut PreHirStmt) {
     match stmt {
-        PreHirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
+        PreHirStmt::Block(body) => {
+            dedupe_structured_region_entry_labels_in_place(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            )
+        }
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+            dedupe_structured_region_entry_labels_in_place(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+            );
+            dedupe_structured_region_entry_labels_in_place(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+            );
         }
-        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => {
-            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+        PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
+            dedupe_structured_region_entry_labels_in_place(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            );
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 if case.body.len() >= 2 {
                     if let PreHirStmt::Label(outer) = case.body[0].clone() {
-                        let inner_matches = match &mut std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body)[1] {
+                        let inner_matches = match &mut std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                            &mut case.body,
+                        )[1]
+                        {
                             PreHirStmt::While { body, .. }
                             | PreHirStmt::DoWhile { body, .. }
                             | PreHirStmt::For { body, .. } => {
-                                dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                                dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<
+                                    Vec<PreHirStmt>,
+                                >::make_mut(
+                                    body
+                                ));
                                 first_meaningful_label(body) == Some(outer.as_str())
                             }
                             _ => false,
@@ -632,9 +715,13 @@ fn dedupe_structured_region_entry_labels_stmt(stmt: &mut PreHirStmt) {
                         }
                     }
                 }
-                dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                dedupe_structured_region_entry_labels_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                );
             }
-            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+            dedupe_structured_region_entry_labels_in_place(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+            );
         }
         _ => {}
     }
@@ -643,9 +730,9 @@ fn dedupe_structured_region_entry_labels_stmt(stmt: &mut PreHirStmt) {
 /// True when `child_body` is a single loop whose body already begins with `label`.
 pub fn child_body_has_entry_label(child_body: &[PreHirStmt], label: &str) -> bool {
     child_body.iter().any(|stmt| match stmt {
-        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => {
-            first_meaningful_label(body) == Some(label)
-        }
+        PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => first_meaningful_label(body) == Some(label),
         _ => false,
     })
 }
@@ -865,7 +952,10 @@ fn canonicalize_label(label: &str, aliases: &HashMap<String, String>) -> String 
     current
 }
 
-fn rewrite_stmt_labels(body: Vec<PreHirStmt>, aliases: &HashMap<String, String>) -> Vec<PreHirStmt> {
+fn rewrite_stmt_labels(
+    body: Vec<PreHirStmt>,
+    aliases: &HashMap<String, String>,
+) -> Vec<PreHirStmt> {
     body.into_iter()
         .map(|stmt| rewrite_stmt_label(stmt, aliases))
         .collect()
@@ -1079,7 +1169,8 @@ pub fn has_top_level_label(body: &[PreHirStmt]) -> bool {
 }
 
 pub fn is_ignorable_discovery_stmt(stmt: &PreHirStmt) -> bool {
-    matches!(stmt, PreHirStmt::Label(_)) || matches!(stmt, PreHirStmt::Block(body) if body.is_empty())
+    matches!(stmt, PreHirStmt::Label(_))
+        || matches!(stmt, PreHirStmt::Block(body) if body.is_empty())
 }
 
 pub fn trim_ignorable_stmt_bounds(body: &[PreHirStmt]) -> Option<(usize, usize)> {
@@ -1099,8 +1190,8 @@ pub fn has_non_ignorable_payload(body: &[PreHirStmt]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use fission_midend_core::ir::*;
     use super::*;
+    use fission_midend_core::ir::*;
 
     use super::*;
 
@@ -1124,7 +1215,8 @@ mod tests {
                         transfer,
                         PreHirStmt::Label("alias".to_string()),
                         PreHirStmt::Goto("target".to_string()),
-                    ].into(),
+                    ]
+                    .into(),
                 },
                 PreHirStmt::Label("escape".to_string()),
                 PreHirStmt::Label("target".to_string()),
@@ -1206,7 +1298,10 @@ mod tests {
         let result = eliminate_redundant_gotos(stmts);
         assert_eq!(
             result,
-            vec![PreHirStmt::Label("exit".to_string()), PreHirStmt::Return(None)]
+            vec![
+                PreHirStmt::Label("exit".to_string()),
+                PreHirStmt::Return(None)
+            ]
         );
     }
 
@@ -1338,10 +1433,7 @@ mod tests {
         let PreHirStmt::Switch { cases, .. } = &result[0] else {
             panic!("expected switch: {result:?}");
         };
-        assert_eq!(
-            *cases[0].body,
-            vec![PreHirStmt::Goto("join".to_string())]
-        );
+        assert_eq!(*cases[0].body, vec![PreHirStmt::Goto("join".to_string())]);
     }
 
     #[test]
@@ -1587,10 +1679,7 @@ mod tests {
             PreHirStmt::Expr(PreHirExpr::Var("a".to_string())),
             PreHirStmt::While {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                body: vec![
-                    PreHirStmt::Label("L".to_string()),
-                    PreHirStmt::Continue,
-                ].into(),
+                body: vec![PreHirStmt::Label("L".to_string()), PreHirStmt::Continue].into(),
             },
         ];
         let cleaned = strip_duplicate_label_definitions(body);
@@ -1624,7 +1713,8 @@ mod tests {
                         then_body: vec![PreHirStmt::Break].into(),
                         else_body: vec![PreHirStmt::Continue].into(),
                     },
-                ].into(),
+                ]
+                .into(),
             },
             PreHirStmt::DoWhile {
                 body: vec![PreHirStmt::Expr(PreHirExpr::Var("work".to_string()))].into(),
@@ -1657,7 +1747,8 @@ mod tests {
                             },
                         ),
                     },
-                ].into(),
+                ]
+                .into(),
             },
         ];
 
@@ -1694,7 +1785,9 @@ mod tests {
         assert_eq!(
             deduped
                 .iter()
-                .filter(|stmt| matches!(stmt, PreHirStmt::Label(label) if label == "block_residual"))
+                .filter(
+                    |stmt| matches!(stmt, PreHirStmt::Label(label) if label == "block_residual")
+                )
                 .count(),
             0,
             "the nested definition owns the C label"
@@ -1731,7 +1824,10 @@ mod tests {
             vec![
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".to_string()),
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("zero".to_string())))].into(),
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var(
+                        "zero".to_string()
+                    )))]
+                    .into(),
                     else_body: Vec::new().into(),
                 },
                 PreHirStmt::Assign {
