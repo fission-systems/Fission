@@ -211,6 +211,18 @@ fn function_is_structurally_no_return(pcode: &PcodeFunction, no_return: &BTreeSe
         if terminal_no_continue {
             continue;
         }
+        // A path that leaves without a `Return` and without a proven
+        // no-return terminator has left this analysis, not the program: an
+        // unresolved indirect branch has no successors to walk, so the loop
+        // simply ends and every remaining block looks accounted for. That
+        // silently promoted a PLT stub -- `endbr64; jmp qword ptr [GOT]`,
+        // which is how every imported call is reached -- into the no-return
+        // set, and `__strcat_chk` is not a function that fails to return.
+        // Under-detecting is the documented tradeoff; this is the
+        // over-detection the same paragraph forbids.
+        if block.successors.is_empty() {
+            return false;
+        }
         stack.extend(block.successors.iter().copied());
     }
 
@@ -310,6 +322,33 @@ mod tests {
     #[test]
     fn empty_function_is_not_no_return() {
         let pcode = PcodeFunction { blocks: vec![] };
+        assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
+    }
+
+    #[test]
+    fn unresolved_indirect_tail_branch_is_not_no_return() {
+        // A PLT stub: `endbr64; jmp qword ptr [GOT]`. No `Return` op, and
+        // the indirect branch resolves to nothing, so the block has no
+        // successors to walk. Reading that as "no path returns" makes every
+        // imported call look like it never comes back.
+        let pcode = PcodeFunction {
+            blocks: vec![block(
+                0,
+                0x1150,
+                vec![],
+                vec![op(0, PcodeOpcode::BranchInd)],
+            )],
+        };
+        assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
+    }
+
+    #[test]
+    fn direct_branch_to_unknown_target_is_not_no_return() {
+        // Same shape, direct: a tail call whose target this function's own
+        // decode never covered. Not evidence either way, so not no-return.
+        let pcode = PcodeFunction {
+            blocks: vec![block(0, 0x1000, vec![], vec![call_op(0, 0x9999)])],
+        };
         assert!(!function_is_structurally_no_return(&pcode, &BTreeSet::new()));
     }
 
