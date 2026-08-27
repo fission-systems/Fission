@@ -304,7 +304,17 @@ fn try_alternative_structurings(
                     winner: &mut Option<AlternativeDriver>| {
         let candidate = match candidate {
             Ok(Some(candidate)) => candidate,
-            Ok(None) => return,
+            Ok(None) => {
+                // A driver declines both when the CFG holds no region it
+                // recognises and when its own profitability check fired, and
+                // `Ok(None)` cannot tell those apart. Recording the decline at
+                // least distinguishes "asked and refused" from "never asked",
+                // which the surrounding gates make easy to confuse.
+                if diag {
+                    eprintln!("[DIAG] {name} offered no candidate");
+                }
+                return;
+            }
             Err(err) => {
                 if diag {
                     eprintln!("[DIAG] {name} failed ({err:?}), keeping the existing structuring");
