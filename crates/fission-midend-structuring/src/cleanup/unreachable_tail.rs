@@ -32,6 +32,16 @@ use crate::HashMap;
 /// same set (it prints `WARNING: Subroutine does not return` there). Kept to
 /// names whose non-returning contract is part of the C standard or POSIX, so
 /// no binary-specific knowledge enters this file.
+/// Whether a call to `target` never comes back.
+///
+/// `proven` is what the binary's own no-return fixpoint established. The
+/// name list below is the floor for a target it had nothing to say about;
+/// on a stripped binary the list alone sees nothing, because the function
+/// that leaves is a `sub_XXXX` wrapper around `exit`.
+fn call_never_returns_with(target: &str, proven: &dyn Fn(&str) -> bool) -> bool {
+    proven(target) || call_never_returns(target)
+}
+
 fn call_never_returns(target: &str) -> bool {
     matches!(
         target.trim_start_matches('_'),
@@ -52,13 +62,18 @@ fn call_never_returns(target: &str) -> bool {
 }
 
 /// Whether `stmt` is a call to a function that never returns.
-fn is_diverging_call(stmt: &PreHirStmt) -> bool {
+fn is_diverging_call_with(stmt: &PreHirStmt, proven: &dyn Fn(&str) -> bool) -> bool {
     let expr = match stmt {
         PreHirStmt::Expr(expr) => expr,
         PreHirStmt::Assign { rhs, .. } => rhs,
         _ => return false,
     };
-    matches!(expr, PreHirExpr::Call { target, .. } if call_never_returns(target))
+    matches!(expr, PreHirExpr::Call { target, .. } if call_never_returns_with(target, proven))
+}
+
+/// [`is_diverging_call_with`] with only the name list to go on.
+fn is_diverging_call(stmt: &PreHirStmt) -> bool {
+    is_diverging_call_with(stmt, &|_| false)
 }
 
 /// Whether control can continue past `stmt` to the next statement.
@@ -255,11 +270,19 @@ fn recurse(
 /// removing either one by itself still scores 6; removing both scores 0,
 /// which is what Ghidra emits for that function.
 pub fn unwrap_else_after_diverging_then(body: Vec<PreHirStmt>) -> (Vec<PreHirStmt>, bool) {
+    unwrap_else_after_diverging_then_with(body, &|_| false)
+}
+
+/// [`unwrap_else_after_diverging_then`], told which local calls never return.
+pub fn unwrap_else_after_diverging_then_with(
+    body: Vec<PreHirStmt>,
+    proven_no_return: &dyn Fn(&str) -> bool,
+) -> (Vec<PreHirStmt>, bool) {
     let mut changed = false;
     let mut out: Vec<PreHirStmt> = Vec::with_capacity(body.len());
 
     for stmt in body {
-        let stmt = unwrap_recurse(stmt, &mut changed);
+        let stmt = unwrap_recurse(stmt, proven_no_return, &mut changed);
         let PreHirStmt::If {
             cond,
             then_body,
@@ -270,7 +293,9 @@ pub fn unwrap_else_after_diverging_then(body: Vec<PreHirStmt>) -> (Vec<PreHirStm
             continue;
         };
         // An empty `then` is a negated guard, not this shape.
-        let leaves_by_call = then_body.last().is_some_and(is_diverging_call);
+        let leaves_by_call = then_body
+            .last()
+            .is_some_and(|last| is_diverging_call_with(last, proven_no_return));
         if then_body.is_empty() || else_body.is_empty() || !leaves_by_call {
             out.push(PreHirStmt::If {
                 cond,
@@ -290,32 +315,38 @@ pub fn unwrap_else_after_diverging_then(body: Vec<PreHirStmt>) -> (Vec<PreHirStm
     (out, changed)
 }
 
-fn unwrap_recurse(stmt: PreHirStmt, changed: &mut bool) -> PreHirStmt {
+fn unwrap_recurse(
+    stmt: PreHirStmt,
+    proven_no_return: &dyn Fn(&str) -> bool,
+    changed: &mut bool,
+) -> PreHirStmt {
     fn body_of(
         body: &std::rc::Rc<Vec<PreHirStmt>>,
+        proven_no_return: &dyn Fn(&str) -> bool,
         changed: &mut bool,
     ) -> std::rc::Rc<Vec<PreHirStmt>> {
-        let (next, did) = unwrap_else_after_diverging_then(body.as_ref().clone());
+        let (next, did) =
+            unwrap_else_after_diverging_then_with(body.as_ref().clone(), proven_no_return);
         *changed |= did;
         std::rc::Rc::new(next)
     }
     match stmt {
-        PreHirStmt::Block(body) => PreHirStmt::Block(body_of(&body, changed)),
+        PreHirStmt::Block(body) => PreHirStmt::Block(body_of(&body, proven_no_return, changed)),
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => PreHirStmt::If {
             cond,
-            then_body: body_of(&then_body, changed),
-            else_body: body_of(&else_body, changed),
+            then_body: body_of(&then_body, proven_no_return, changed),
+            else_body: body_of(&else_body, proven_no_return, changed),
         },
         PreHirStmt::While { cond, body } => PreHirStmt::While {
             cond,
-            body: body_of(&body, changed),
+            body: body_of(&body, proven_no_return, changed),
         },
         PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
-            body: body_of(&body, changed),
+            body: body_of(&body, proven_no_return, changed),
             cond,
         },
         PreHirStmt::For {
@@ -327,7 +358,7 @@ fn unwrap_recurse(stmt: PreHirStmt, changed: &mut bool) -> PreHirStmt {
             init,
             cond,
             update,
-            body: body_of(&body, changed),
+            body: body_of(&body, proven_no_return, changed),
         },
         PreHirStmt::Switch {
             expr,
@@ -335,12 +366,12 @@ fn unwrap_recurse(stmt: PreHirStmt, changed: &mut bool) -> PreHirStmt {
             default,
         } => {
             for case in &mut cases {
-                case.body = body_of(&case.body, changed);
+                case.body = body_of(&case.body, proven_no_return, changed);
             }
             PreHirStmt::Switch {
                 expr,
                 cases,
-                default: body_of(&default, changed),
+                default: body_of(&default, proven_no_return, changed),
             }
         }
         other => other,

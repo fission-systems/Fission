@@ -520,6 +520,20 @@ fn build_nir_call_effect_summaries(
         }
     }
 
+    // What the binary's own fixpoint proved, under the name the renderer
+    // will call it by. A local `report-and-die` helper has no import symbol
+    // and no `CallTargetRef`, so nothing above ever reaches it -- and on a
+    // stripped binary that helper is every `exit` wrapper the program has.
+    for address in fission_static::analysis::noreturn::no_return_functions_for(binary) {
+        let entry = result
+            .entry(format!("sub_{address:x}"))
+            .or_insert(NirCallEffectSummary::default());
+        if entry.may_exit.is_none() {
+            entry.may_exit = Some(true);
+            entry.source = Some(CallEffectSummarySource::TransitiveNoReturnAnalysis);
+        }
+    }
+
     result
 }
 

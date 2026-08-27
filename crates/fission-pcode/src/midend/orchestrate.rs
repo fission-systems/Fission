@@ -308,7 +308,20 @@ pub fn render_mlil_preview_with_binary_and_context(
     // chance, then remove labels made dead by that second rewrite. This stays
     // builder-free and uses the same terminality, loop-control, label, and
     // growth admission as the first invocation.
-    let body = fission_midend_structuring::cleanup::finalize_post_layout_body(&protected, body);
+    // What the binary's own no-return fixpoint proved, so the `else` unwrap
+    // can recognize a `sub_XXXX` wrapper around `exit` for what it is.
+    let proven_no_return = |target: &str| {
+        type_context.is_some_and(|ctx| {
+            ctx.call_effect_summaries
+                .get(target)
+                .is_some_and(|summary| summary.may_exit == Some(true))
+        })
+    };
+    let body = fission_midend_structuring::cleanup::finalize_post_layout_body_with(
+        &protected,
+        body,
+        &proven_no_return,
+    );
     hir.body = body;
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to

@@ -343,6 +343,16 @@ pub enum CallEffectSummarySource {
     /// (`noReturnFunctionConstraints.xml`, `*FunctionsThatDoNotReturn`, or
     /// DLL-specific `.hints` files in `utils/ghidra-data`).
     GhidraNoReturnData,
+    /// `may_exit = true` was proven by the binary's own transitive no-return
+    /// fixpoint (`fission_static::analysis::noreturn`) rather than read from
+    /// a name list -- which is the only way to see it on a stripped binary,
+    /// where a `report-and-die` helper is called `sub_1ab0`.
+    ///
+    /// Kept distinct from [`Self::GhidraNoReturnData`] on purpose. That
+    /// variant gates `prune_proven_noreturn_successors`, which cuts a call's
+    /// successors out of the p-code CFG; a fact proven here is good enough to
+    /// shape the printed body and not (yet) to delete control flow.
+    TransitiveNoReturnAnalysis,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

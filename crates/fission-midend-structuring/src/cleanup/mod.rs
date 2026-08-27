@@ -52,6 +52,19 @@ pub fn finalize_post_layout_body(
     protected: &HashSet<String>,
     body: Vec<PreHirStmt>,
 ) -> Vec<PreHirStmt> {
+    finalize_post_layout_body_with(protected, body, &|_| false)
+}
+
+/// [`finalize_post_layout_body`], told which local calls never return.
+///
+/// The `else`-unwrap below fires on an arm that leaves by a non-returning
+/// call. On a stripped binary that call is a `sub_XXXX` wrapper around
+/// `exit`, which a name list cannot recognize.
+pub fn finalize_post_layout_body_with(
+    protected: &HashSet<String>,
+    body: Vec<PreHirStmt>,
+    proven_no_return: &dyn Fn(&str) -> bool,
+) -> Vec<PreHirStmt> {
     // Each rewrite can expose the shape another one matches: the finalizer's
     // goto rule and terminal-tail duplication both reshape the layout after
     // guard inversion has already run, and the guards they leave behind used
@@ -82,7 +95,8 @@ pub fn finalize_post_layout_body(
     let (body, _) = unreachable_tail::drop_unreachable_tails(body, &referenced);
     // After the dead tail is gone, and not before: an `else` is only
     // unwrappable once the `then` arm's real last statement is visible.
-    let (body, _) = unreachable_tail::unwrap_else_after_diverging_then(body);
+    let (body, _) =
+        unreachable_tail::unwrap_else_after_diverging_then_with(body, proven_no_return);
     body
 }
 
