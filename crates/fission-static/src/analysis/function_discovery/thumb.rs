@@ -33,7 +33,7 @@ const SRAM_REGION_MASK: u64 = 0xF000_0000;
 ///    bit. This is what separates a Cortex-M image from a Cortex-A one --
 ///    u-boot's ARM-mode image opens with a branch instruction
 ///    (`0xea0000b8`) and no Thumb-marked words follow it.
-pub(crate) fn image_executes_thumb(binary: &LoadedBinary) -> bool {
+pub fn image_executes_thumb(binary: &LoadedBinary) -> bool {
     if !is_arm32(binary) {
         return false;
     }

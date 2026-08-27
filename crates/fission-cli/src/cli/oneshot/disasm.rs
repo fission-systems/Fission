@@ -103,8 +103,13 @@ pub(super) fn disassemble(
         std::process::exit(1);
     };
 
+    let context_override = fission_decompiler::disasm::decode_context_for_address(
+        binary,
+        &frontend,
+        address_state.context_override,
+    );
     let instructions = frontend
-        .decode_window_with_context_override(bytes, base, count, address_state.context_override)
+        .decode_window_with_context_override(bytes, base, count, context_override)
         .map_err(to_io_error)?
         .into_iter()
         .map(|instr| {

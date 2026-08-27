@@ -37,6 +37,7 @@ pub use external_symbol::{
 };
 pub use function_discovery::{
     FunctionDiscoveryProfile, FunctionDiscoveryReport, discover_functions_with_runtime,
+    image_executes_thumb,
 };
 pub use function_provenance::{
     FunctionProvenanceIndex, FunctionProvenanceKind, FunctionProvenanceRecord,

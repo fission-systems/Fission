@@ -13,6 +13,7 @@ mod thumb;
 mod types;
 
 pub use discover::discover_functions_with_runtime;
+pub use thumb::image_executes_thumb;
 pub use types::{FunctionDiscoveryProfile, FunctionDiscoveryReport};
 
 #[cfg(test)]

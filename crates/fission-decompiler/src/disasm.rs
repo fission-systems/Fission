@@ -10,8 +10,10 @@
 
 use fission_core::PAGE_SIZE;
 use fission_loader::loader::LoadedBinary;
+use fission_sleigh::packed_context::PackedContextOverride;
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 use fission_static::analysis::control_flow_facts::decode_memory_context_for;
+use fission_static::analysis::image_executes_thumb;
 
 /// One decoded instruction, ready for direct GUI/API display.
 #[derive(Debug, Clone)]
@@ -25,6 +27,43 @@ pub struct InstructionRow {
     /// caller (e.g. the GUI's click-to-navigate) jump there without having
     /// to parse `text`.
     pub target_addr: Option<u64>,
+}
+
+/// The decode context for a bare address window, once a Thumb-only image is
+/// accounted for. Same reasoning as `thumb_image_context`, exposed for
+/// callers that decode a fixed instruction count rather than a whole
+/// function.
+pub fn decode_context_for_address(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    from_address: Option<PackedContextOverride>,
+) -> Option<PackedContextOverride> {
+    thumb_image_context(binary, frontend, from_address)
+}
+
+/// The decode context to lift with, once a Thumb-only image is accounted for.
+///
+/// `normalize_low_bit_code_address` can only speak for the *address*: it
+/// yields a Thumb context when the caller passed the ABI's bit-0 marker, and
+/// nothing when the address is even. That leaves every even-addressed
+/// function of a Cortex-M image -- which cannot execute ARM at all -- being
+/// lifted in the language's default ARM mode, decoding Thumb bytes into
+/// dense, plausible, entirely wrong ARM instructions (`80 b5`, a
+/// `push {r7,lr}`, reads as `addlt`). Fall back to the whole-image signal
+/// the discovery pass already relies on, which is decisive exactly when the
+/// per-address one has nothing to say.
+fn thumb_image_context(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    from_address: Option<PackedContextOverride>,
+) -> Option<PackedContextOverride> {
+    if from_address.is_some() {
+        return from_address;
+    }
+    if !image_executes_thumb(binary) {
+        return None;
+    }
+    frontend.low_bit_code_mode_override()
 }
 
 fn runtime_frontend_for_binary(binary: &LoadedBinary) -> Result<RuntimeSleighFrontend, String> {
@@ -62,6 +101,7 @@ pub fn disassemble_function(
     let frontend = runtime_frontend_for_binary(binary)?;
     let address_state = frontend.normalize_low_bit_code_address(func_start);
     let decode_addr = address_state.address;
+    let context_override = thumb_image_context(binary, &frontend, address_state.context_override);
     let max_bytes = binary
         .available_execution_bytes(decode_addr)
         .map(|available| max_bytes.min(available).max(1))
@@ -76,7 +116,7 @@ pub fn disassemble_function(
             decode_addr,
             DecodeContract::strict_function(max_bytes),
             &memory_context,
-            address_state.context_override,
+            context_override,
         )
         .map_err(|e| e.to_string())?;
 
