@@ -576,7 +576,24 @@ fn nir_type_byte_size(ty: &NirType) -> Option<u32> {
     }
 }
 
+/// Whether a member of `field_ty` would make `fission_agg{size}` contain itself.
+///
+/// Aggregates are named by their byte size, so a field whose own type is an
+/// aggregate of the same size is spelled with the name of the struct being
+/// defined -- `struct fission_agg16 { fission_agg16 field_0; }`. That type has
+/// no finite size and no compiler accepts it, which takes the whole
+/// translation unit with it.
+fn field_would_be_self_referential(size: u32, field_ty: &NirType) -> bool {
+    matches!(field_ty, NirType::Aggregate { size: inner, .. } if *inner == size)
+}
+
 fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>) -> String {
+    let fields: BTreeMap<u32, (String, NirType)> = fields
+        .iter()
+        .filter(|(_, (_, ty))| !field_would_be_self_referential(size, ty))
+        .map(|(offset, member)| (*offset, member.clone()))
+        .collect();
+    let fields = &fields;
     if fields.is_empty() {
         return format!(
             "typedef struct fission_agg{size} {{ unsigned char bytes[{size}]; }} fission_agg{size};\n"

@@ -8,7 +8,14 @@ pub fn cleanup_redundant_labels(
     body: Vec<PreHirStmt>,
     global_refs: Option<&HashSet<String>>,
 ) -> Vec<PreHirStmt> {
-    let aliases = adjacent_label_aliases(&body);
+    let mut aliases = adjacent_label_aliases(&body);
+    if let Some(referenced) = global_refs {
+        // Recursive callers clean one nested statement list at a time.  They
+        // cannot rewrite gotos in sibling or parent lists, so a label that is
+        // referenced elsewhere in the function must not be folded into an
+        // adjacent local alias here.
+        aliases.retain(|alias, _| !referenced.contains(alias));
+    }
     let body = rewrite_stmt_labels(body, &aliases);
     let local_refs = if global_refs.is_none() {
         Some(collect_referenced_labels(&body))
@@ -34,6 +41,27 @@ pub fn cleanup_redundant_labels(
     }
 
     cleaned
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_preserves_adjacent_alias_referenced_outside_current_body() {
+        let body = vec![
+            PreHirStmt::Return(None),
+            PreHirStmt::Label("dream_L9".to_string()),
+            PreHirStmt::Label("block_401000".to_string()),
+            PreHirStmt::Return(None),
+        ];
+        let global_refs = HashSet::from(["dream_L9".to_string()]);
+
+        let cleaned = cleanup_redundant_labels(body, Some(&global_refs));
+
+        assert!(cleaned.contains(&PreHirStmt::Label("dream_L9".to_string())));
+        assert!(!cleaned.contains(&PreHirStmt::Label("block_401000".to_string())));
+    }
 }
 
 fn adjacent_label_aliases(body: &[PreHirStmt]) -> HashMap<String, String> {

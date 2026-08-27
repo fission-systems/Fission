@@ -318,6 +318,40 @@ impl<'a> PrintCtx<'a> {
             _ => false,
         }
     }
+
+    /// Whether `name`'s declaration cannot bear an access of `access_ty`.
+    ///
+    /// The bare `*p` and `p[i]` spellings only work when the declared type
+    /// already says what the access needs; otherwise the deref has to name the
+    /// type it is reading. The disagreement that matters is about
+    /// aggregate-ness, not about spelling: `LPRECT` and `fission_agg16 *` are
+    /// both pointers to a 16-byte aggregate, and treating the different text
+    /// as a mismatch strips a recovered type off every Windows typedef.
+    ///
+    /// A binding declared through a `surface_type_name` is therefore trusted:
+    /// `ty` is not the authority on what that name means, so it cannot be the
+    /// evidence that the name is wrong.
+    fn direct_var_has_aggregate_access_mismatch(&self, name: &str, access_ty: &NirType) -> bool {
+        let Some(NirType::Ptr(pointee)) = self.var_types.get(name).copied() else {
+            return false;
+        };
+        let compact =
+            |text: &str| -> String { text.chars().filter(|c| !c.is_whitespace()).collect() };
+        let declared_by_surface = self.decl_type_text.get(name).is_some_and(|declared| {
+            compact(declared) != compact(&print_type(&NirType::Ptr(pointee.clone())))
+        });
+        if declared_by_surface {
+            return false;
+        }
+        matches!(pointee.as_ref(), NirType::Aggregate { .. })
+            != matches!(access_ty, NirType::Aggregate { .. })
+    }
+
+    fn simple_deref_target_matches_access(&self, expr: &HirExpr, access_ty: &NirType) -> bool {
+        self.simple_deref_target_is_declared_pointer(expr)
+            && peel_simple_deref_target(expr)
+                .is_some_and(|name| !self.direct_var_has_aggregate_access_mismatch(name, access_ty))
+    }
 }
 
 pub(crate) fn print_hir_function(func: &HirFunction) -> String {
@@ -637,7 +671,10 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
         HirLValue::FieldAccess {
             base, field_name, ..
         } => {
-            let inner = print_expr_prec(base, 110, depth + 1);
+            let mut inner = print_expr_prec(base, 110, depth + 1);
+            if matches!(base.as_ref(), HirExpr::Cast { .. }) {
+                inner = format!("({inner})");
+            }
             let is_ptr = matches!(expr_type(base), NirType::Ptr(_));
             let op = if is_ptr { "->" } else { "." };
             format!("{inner}{op}{field_name}")
@@ -794,7 +831,10 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
         HirExpr::FieldAccess {
             base, field_name, ..
         } => {
-            let inner = print_expr_prec(base, 110, depth + 1);
+            let mut inner = print_expr_prec(base, 110, depth + 1);
+            if matches!(base.as_ref(), HirExpr::Cast { .. }) {
+                inner = format!("({inner})");
+            }
             let is_ptr = matches!(expr_type(base), NirType::Ptr(_));
             let op = if is_ptr { "->" } else { "." };
             (format!("{inner}{op}{field_name}"), 110)
@@ -1173,7 +1213,10 @@ fn print_expr_prec_ctx(
         HirExpr::FieldAccess {
             base, field_name, ..
         } => {
-            let inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
+            let mut inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
+            if matches!(base.as_ref(), HirExpr::Cast { .. }) {
+                inner = format!("({inner})");
+            }
             let is_ptr = ctx.expr_is_pointer(base);
             let op = if is_ptr { "->" } else { "." };
             (format!("{inner}{op}{field_name}"), 110)
@@ -1344,7 +1387,7 @@ fn print_expr_prec_ctx(
             }
         }
         HirExpr::Load { ptr, ty } => {
-            if ctx.simple_deref_target_is_declared_pointer(ptr)
+            if ctx.simple_deref_target_matches_access(ptr, ty)
                 && let Some(target) = peel_simple_deref_target(ptr)
             {
                 (format!("*{target}"), 110)
@@ -1370,9 +1413,12 @@ fn print_expr_prec_ctx(
                 format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
             } else {
                 match base.as_ref() {
-                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                    HirExpr::Var(name)
+                        if !ctx.direct_var_has_aggregate_access_mismatch(name, elem_ty) =>
+                    {
                         format!("{name}[{index}]")
                     }
+                    HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
                     _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
                 }
             };
@@ -1428,13 +1474,16 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
         HirLValue::FieldAccess {
             base, field_name, ..
         } => {
-            let inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
+            let mut inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
+            if matches!(base.as_ref(), HirExpr::Cast { .. }) {
+                inner = format!("({inner})");
+            }
             let is_ptr = ctx.expr_is_pointer(base);
             let op = if is_ptr { "->" } else { "." };
             format!("{inner}{op}{field_name}")
         }
         HirLValue::Deref { ptr, ty } => {
-            if ctx.simple_deref_target_is_declared_pointer(ptr)
+            if ctx.simple_deref_target_matches_access(ptr, ty)
                 && let Some(target) = peel_simple_deref_target(ptr)
             {
                 format!("*{target}")
@@ -1457,9 +1506,12 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
                 format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
             } else {
                 match base.as_ref() {
-                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                    HirExpr::Var(name)
+                        if !ctx.direct_var_has_aggregate_access_mismatch(name, elem_ty) =>
+                    {
                         format!("{name}[{index}]")
                     }
+                    HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
                     _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
                 }
             }

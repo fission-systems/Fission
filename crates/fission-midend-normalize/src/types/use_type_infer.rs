@@ -2050,6 +2050,51 @@ fn promote_store_value_only_unsigned_params(func: &mut PreHirFunction) -> bool {
     changed
 }
 
+fn promote_store_value_only_aggregate_bindings(
+    func: &mut PreHirFunction,
+    constraints: &HashMap<String, Vec<UseConstraint>>,
+    roles: &HashMap<String, BindingUseRole>,
+) -> bool {
+    let mut all_uses = HashMap::default();
+    count_var_uses_stmts(&func.body, &mut all_uses);
+    let mut store_value_uses = HashMap::default();
+    count_store_value_uses_stmts(&func.body, &mut store_value_uses);
+
+    let mut changed = false;
+    for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
+        if binding.surface_type_name.is_some() {
+            continue;
+        }
+        let all = all_uses.get(&binding.name).copied().unwrap_or(0);
+        let stores = store_value_uses.get(&binding.name).copied().unwrap_or(0);
+        let has_conflicting_role = roles
+            .get(&binding.name)
+            .is_some_and(|role| role.scalar_use || role.address_use);
+        if all == 0 || (all != stores && has_conflicting_role) {
+            continue;
+        }
+        let Some(expected) = constraints.get(&binding.name).and_then(|items| {
+            let mut aggregates = items.iter().filter_map(|item| match item {
+                UseConstraint::Exact(ty @ NirType::Aggregate { fields, .. })
+                    if fields.is_empty() =>
+                {
+                    Some(ty)
+                }
+                _ => None,
+            });
+            let first = aggregates.next()?;
+            aggregates.all(|ty| ty == first).then(|| first.clone())
+        }) else {
+            continue;
+        };
+        if binding.ty != expected {
+            binding.ty = expected;
+            changed = true;
+        }
+    }
+    changed
+}
+
 fn wrapping_narrow_op(op: PreHirBinaryOp) -> bool {
     matches!(
         op,
@@ -2562,6 +2607,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
+        round_changed |= promote_store_value_only_aggregate_bindings(func, &constraints, &roles);
         round_changed |=
             restore_scalar_only_pointer_locals(func, &constraints, &roles, &dependencies);
         round_changed |= narrow_byte_index_accumulators(func);
@@ -2611,6 +2657,38 @@ mod tests {
             body,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn aggregate_store_value_promotes_binding_without_scalar_or_address_role() {
+        let aggregate = NirType::Aggregate {
+            size: 16,
+            fields: Vec::new(),
+        };
+        let pointer = NirType::Ptr(Box::new(aggregate.clone()));
+        let value = make_typed_binding(
+            "value",
+            NirType::Int {
+                bits: 16,
+                signed: false,
+            },
+            NirBindingOrigin::ParamIndex(0),
+        );
+        let mut func = make_func(
+            vec![make_typed_binding("out", pointer, NirBindingOrigin::Temp)],
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("out".to_owned())),
+                    ty: aggregate.clone(),
+                },
+                rhs: PreHirExpr::Var("value".to_owned()),
+            }],
+            NirType::Unknown,
+        );
+        func.params.push(value);
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[0].ty, aggregate);
     }
 
     /// `x = a * b` with float result upgrades int temps and `uint*` bases.

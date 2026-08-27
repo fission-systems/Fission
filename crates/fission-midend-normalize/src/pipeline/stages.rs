@@ -783,6 +783,11 @@ pub fn run_stage_cleanup(func: &mut PreHirFunction, diag: bool, perf: bool) {
         perf,
         canonicalize_orphaned_stack_slot_names,
     );
+    // Late cleanup and rescue passes can expose a different RHS directly on a
+    // surviving binding (for example after eliminating a typed aggregate
+    // alias). Reconcile the final body once more so declarations and access
+    // annotations describe the statements that are actually emitted.
+    apply_type_signature_fixed_point(func, diag, perf);
 }
 
 #[cfg(test)]
