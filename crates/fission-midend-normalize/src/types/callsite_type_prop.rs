@@ -1616,6 +1616,11 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     if !rename_conflicts.is_empty() {
         add_typed_fact_conflicts(rename_conflicts.len());
     }
+    let void_receivers = drop_void_call_receivers(&mut func.body);
+    if void_receivers > 0 {
+        add_call_signature_refinements(void_receivers);
+        changed = true;
+    }
     let pruned_count = prune_known_api_call_args_stmts(&mut func.body, &func.callee_summaries);
     if pruned_count > 0 {
         add_call_signature_refinements(pruned_count);
@@ -1664,6 +1669,91 @@ fn exact_arity_for_target(
         .and_then(|summary| summary.prototype.locked_exact_arity)
         .or_else(|| api_signature_via_import_aliases(resolved_target).map(|sig| sig.params.len()))
         .or_else(|| api_signature_via_import_aliases(target).map(|sig| sig.params.len()))
+}
+
+/// Whether this target leaves nothing for a receiver to read.
+///
+/// Two independent sources, either of which is decisive:
+///
+/// 1. The API type library's signature says the return type is `void`.
+///    `resolve_return_ty` maps `void` to `None`, the same answer it gives for
+///    a type it could not resolve, so the two are indistinguishable there --
+///    this asks the signature string directly.
+/// 2. Ghidra's no-return lists name it. A function that never returns cannot
+///    have left a result behind either, and that covers the ones missing from
+///    the signature library (`__stack_chk_fail`, `setutent`). Asked across
+///    every executable format rather than the binary's own, which this pass
+///    does not carry: the names on those lists are libc/OS primitives whose
+///    no-return-ness does not vary by container.
+fn api_target_returns_void(target: &str) -> bool {
+    if api_signature_via_import_aliases(target)
+        .is_some_and(|sig| matches!(sig.return_type.trim(), "void" | "VOID"))
+    {
+        return true;
+    }
+    let index = fission_core::core::ghidra_no_return::ghidra_no_return_index();
+    [
+        fission_core::core::ghidra_no_return::GHIDRA_FORMAT_ELF,
+        fission_core::core::ghidra_no_return::GHIDRA_FORMAT_PE,
+        fission_core::core::ghidra_no_return::GHIDRA_FORMAT_MACHO,
+    ]
+    .iter()
+    .any(|format| index.is_no_return(format, None, None, target))
+}
+
+/// Drop the receiver from a call whose target is known to return nothing.
+///
+/// A call clobbers the ABI's result register, so a later read of it that
+/// liveness cannot rule out makes the call site materialize a receiver --
+/// giving `rax = free(ptr);` and `rax = (uchar *)(__stack_chk_fail());`.
+/// Neither is valid C (gcc: "void value not ignored as it ought to be"), and
+/// neither is true: the callee left nothing there to read.
+///
+/// Only the assignment goes; the call itself stays as an expression
+/// statement, and the receiver stays declared, so a later use of it reads an
+/// uninitialized local -- which is exactly as defined as reading the
+/// register the callee never wrote.
+fn drop_void_call_receivers(stmts: &mut Vec<PreHirStmt>) -> usize {
+    let mut dropped = 0usize;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            PreHirStmt::Assign { rhs, .. } => {
+                if let PreHirExpr::Call { target, .. } = rhs
+                    && api_target_returns_void(target)
+                {
+                    *stmt = PreHirStmt::Expr(rhs.clone());
+                    dropped += 1;
+                }
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
+                dropped += drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                dropped +=
+                    drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                dropped +=
+                    drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    dropped += drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
+                        &mut case.body,
+                    ));
+                }
+                dropped +=
+                    drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+            }
+            _ => {}
+        }
+    }
+    dropped
 }
 
 fn prune_known_api_call_args_stmts(
