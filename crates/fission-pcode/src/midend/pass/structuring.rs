@@ -214,6 +214,46 @@ enum AlternativeAdmission {
     LinearFallback,
 }
 
+/// Research escape hatch: measure the candidate space instead of shipping the
+/// best guess.
+///
+/// `FISSION_EXPERIMENTAL_STRUCTURING_ORACLE=1` lifts the profitability gates
+/// that keep a driver from being *asked*, so the ceiling of what the existing
+/// drivers can express becomes measurable. Correctness preconditions are
+/// untouched: a driver that declines because the CFG holds no region it
+/// recognises still declines, and a candidate that fails to commit is still
+/// discarded.
+///
+/// **Never affects default behaviour.** Both controls are inert without the
+/// environment variables, and neither belongs in a normal decompilation.
+fn oracle_mode() -> bool {
+    oracle_enabled(std::env::var_os(ORACLE_VAR).is_some())
+}
+
+const ORACLE_VAR: &str = "FISSION_EXPERIMENTAL_STRUCTURING_ORACLE";
+const FORCE_VAR: &str = "FISSION_EXPERIMENTAL_STRUCTURING_FORCE";
+
+fn oracle_enabled(env_present: bool) -> bool {
+    env_present
+}
+
+/// Which driver's candidate to take regardless of quality, for oracle runs.
+///
+/// Diagnostic/research only. This **bypasses candidate quality admission and
+/// may intentionally produce worse output** -- measured, forcing DREAM took
+/// `user_name` from GED 3 to 35. It is therefore refused unless the oracle is
+/// also on, so no single misplaced variable can put it on a production run.
+fn forced_driver() -> Option<String> {
+    forced_driver_from(oracle_mode(), std::env::var(FORCE_VAR).ok())
+}
+
+fn forced_driver_from(oracle: bool, requested: Option<String>) -> Option<String> {
+    if !oracle {
+        return None;
+    }
+    requested.filter(|value| !value.trim().is_empty())
+}
+
 fn try_alternative_structurings(
     ir: &mut NirFunc<'_, '_>,
     baseline: Vec<PreHirStmt>,
@@ -266,7 +306,14 @@ fn try_alternative_structurings(
     let baseline_quality = measure(&baseline);
     let baseline_normalized = normalized(&baseline);
     // Nothing to win: the existing path already left no jumps.
-    if baseline_quality.gotos == 0 {
+    //
+    // Jump count is what the quality function optimises, not what a CFG
+    // comparison measures -- a jump-free body can still carry a topology the
+    // source does not have. Measured on the sample set's GED 3-10 near-misses,
+    // lifting this gate and forcing every driver produced no new perfect score
+    // at all, so it is a fast path rather than a lost opportunity. The oracle
+    // exists to check that this stays true as the drivers change.
+    if baseline_quality.gotos == 0 && !oracle_mode() {
         if diag {
             eprintln!("[DIAG] alternatives not asked: baseline already jump-free");
         }
@@ -338,12 +385,18 @@ fn try_alternative_structurings(
         let max_guard_admitted = !max_guard_required
             || (quality.has_proportional_max_guard_growth(best_quality)
                 && candidate_normalized.has_proportional_max_guard_growth(best_normalized));
-        if quality.improves_on(best_quality)
-            && candidate_normalized.gotos <= best_normalized.gotos
-            && post_layout_pair
-                .as_ref()
-                .is_none_or(|(best, candidate)| candidate.gotos <= best.gotos)
-            && max_guard_admitted
+        // The oracle names one driver and takes its candidate whenever it has
+        // one, so what gets measured is "what this driver can express" rather
+        // than "what the quality function would have kept". The named winner
+        // still goes through the same isolated commit rerun below.
+        let forced = forced_driver().is_some_and(|want| want.eq_ignore_ascii_case(name));
+        if forced
+            || (quality.improves_on(best_quality)
+                && candidate_normalized.gotos <= best_normalized.gotos
+                && post_layout_pair
+                    .as_ref()
+                    .is_none_or(|(best, candidate)| candidate.gotos <= best.gotos)
+                && max_guard_admitted)
         {
             if diag {
                 let post_layout_note = post_layout_pair
@@ -871,5 +924,42 @@ impl NirPass for OrphanGotoRepairPass {
             ir.set_structured_body(fallback_result);
             return Ok(PassResult::Changed);
         }
+    }
+}
+
+#[cfg(test)]
+mod oracle_control_tests {
+    use super::{forced_driver_from, oracle_enabled};
+
+    /// The default path must be exactly what it was before the controls
+    /// existed: no oracle, and therefore nothing forced.
+    #[test]
+    fn without_the_environment_nothing_changes() {
+        assert!(!oracle_enabled(false));
+        assert_eq!(forced_driver_from(false, None), None);
+    }
+
+    /// The oracle on its own only lifts the profitability gates. Quality
+    /// admission still decides which candidate wins.
+    #[test]
+    fn the_oracle_alone_forces_no_driver() {
+        assert!(oracle_enabled(true));
+        assert_eq!(forced_driver_from(true, None), None);
+    }
+
+    /// Forcing bypasses quality admission, so it is refused unless the oracle
+    /// is on too -- one misplaced variable must not reach a production run.
+    #[test]
+    fn forcing_is_refused_without_the_oracle() {
+        assert_eq!(forced_driver_from(false, Some("DREAM".to_string())), None);
+        assert_eq!(
+            forced_driver_from(true, Some("DREAM".to_string())),
+            Some("DREAM".to_string())
+        );
+    }
+
+    #[test]
+    fn an_empty_driver_name_forces_nothing() {
+        assert_eq!(forced_driver_from(true, Some("   ".to_string())), None);
     }
 }
