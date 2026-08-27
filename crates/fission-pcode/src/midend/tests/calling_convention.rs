@@ -262,6 +262,69 @@ fn x86_32_stack_pushes_become_call_arguments() {
     assert!(!code.contains("local_"), "{code}");
 }
 
+#[test]
+fn x86_64_call_retaddr_push_is_not_a_stack_argument() {
+    // Verbatim shape of a real x86-64 `call` (raw p-code dump of coreutils
+    // `touch`): `RSP = RSP - 8; STORE ram[RSP], <next instruction>; CALL
+    // target`, all three carrying the call instruction's own address. That
+    // store sits at stack offset zero -- exactly where the first stack
+    // argument would be -- so reading it as one appends the return address to
+    // every call site's argument list, and the arguments' own stores (always
+    // at earlier instructions) can never displace it.
+    let mut options = preview_options_for(CallingConvention::SystemVAmd64);
+    options.format = "ELF64".to_string();
+    options.pointer_size = 8;
+    options.is_64bit = true;
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x396d,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x396d,
+                    output: Some(reg(0x20, 8)),
+                    inputs: vec![reg(0x20, 8), cst(8, 8)],
+                    asm_mnemonic: Some("call 0x99b0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x396d,
+                    output: None,
+                    inputs: vec![cst(3, 8), reg(0x20, 8), cst(0x3972, 8)],
+                    asm_mnemonic: Some("call 0x99b0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x396d,
+                    output: None,
+                    inputs: vec![cst(0x99b0, 8)],
+                    asm_mnemonic: Some("call 0x99b0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x3972,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("ret".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "caller", 0x396d, &options).expect("preview render");
+    assert!(
+        !code.contains("14706") && !code.contains("0x3972"),
+        "return address leaked into the argument list: {code}"
+    );
+}
+
 /// Ghidra `X86FunctionPurgeAnalyzer` scorecard item, isolated to just the
 /// arity-floor mechanism (no ebp-relative reads modeled -- that's a
 /// separate, already-covered code path with its own prologue-detection

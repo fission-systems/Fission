@@ -210,6 +210,16 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 break;
             }
+            // A store the *call instruction itself* lowers to is its return-address
+            // push, not an argument: x86's `call` is `RSP = RSP - 8; STORE ram[RSP],
+            // <next instruction>; CALL target`, and that store lands at stack offset
+            // zero -- exactly where the first stack argument would be. Read as one it
+            // appends the return address to every call site's arguments, which the
+            // arguments' own stores (always at earlier instructions) never displace.
+            // The x86-32 path below already skips these; the 64-bit one did not.
+            if Some(prev.address) == call_address {
+                continue;
+            }
             if prev.opcode != PcodeOpcode::Store || prev.inputs.len() < 3 {
                 continue;
             }
