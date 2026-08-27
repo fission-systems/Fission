@@ -341,8 +341,18 @@ fn parse_hints_xml(text: &str) -> (String, Vec<String>) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Strip at most one leading `_` from a symbol name (Ghidra ELF rule).
+/// Ghidra's own normalisation for a no-return name: strip *every* leading
+/// underscore.
+///
+/// `NoReturnFunctionAnalyzer` does this with a `while` loop over the leading
+/// `'_'` chars, on both the symbol and the list entry, and the shipped lists
+/// rely on it -- not one of their entries starts with an underscore, while
+/// the names they are meant to match are `__stack_chk_fail`, `__assert_fail`,
+/// `_Unwind_Resume`, `__longjmp_chk`. Stripping only one leaves `_stack_chk_fail`,
+/// which matches nothing, so the single most common no-return call in a
+/// glibc binary went unrecognised.
 fn canonical_name(name: &str) -> String {
-    name.strip_prefix('_').unwrap_or(name).to_string()
+    name.trim_start_matches('_').to_string()
 }
 
 /// Normalise a DLL name for case-insensitive matching:
@@ -474,7 +484,9 @@ mod tests {
     fn test_canonical_name() {
         assert_eq!(canonical_name("_exit"), "exit");
         assert_eq!(canonical_name("ExitProcess"), "ExitProcess");
-        assert_eq!(canonical_name("__underscores"), "_underscores");
+        assert_eq!(canonical_name("__underscores"), "underscores");
+        assert_eq!(canonical_name("__stack_chk_fail"), "stack_chk_fail");
+        assert_eq!(canonical_name("_Unwind_Resume"), "Unwind_Resume");
     }
 
     #[test]
