@@ -37,6 +37,19 @@ fn encode_duplicate_block_key(start_address: u64, ordinal: u32) -> u64 {
         | (start_address & 0x0000_ffff_ffff_ffff)
 }
 
+/// Map a code address onto the block that actually contains it.
+///
+/// A branch may target the middle of a block, so the candidate is the greatest
+/// block start at or below `address`. That candidate is only correct if the
+/// address is genuinely covered by the block: a tail call (`jmp other_func`)
+/// leaves the function entirely, and without the coverage check its target
+/// silently collapses onto the last block that happens to start below it --
+/// for a single-block leaf function, onto the function's own entry, turning
+/// `return other(x)` into `goto entry`.
+///
+/// Coverage is exact rather than a range test: every instruction in a block
+/// stamps its address onto the ops it lowers to, and a branch can only target
+/// an instruction boundary.
 pub(super) fn canonical_block_start_for_address(
     pcode: &PcodeFunction,
     address: u64,
@@ -50,7 +63,16 @@ pub(super) fn canonical_block_start_for_address(
     starts.dedup();
 
     let idx = starts.partition_point(|start| *start <= address);
-    idx.checked_sub(1).map(|idx| starts[idx])
+    let start = idx.checked_sub(1).map(|idx| starts[idx])?;
+    if start == address {
+        return Some(start);
+    }
+    pcode
+        .blocks
+        .iter()
+        .filter(|block| block.start_address == start)
+        .any(|block| block.ops.iter().any(|op| op.address == address))
+        .then_some(start)
 }
 
 pub(super) fn canonical_block_index_for_address(
@@ -584,7 +606,7 @@ pub fn structuring_cfg_edges(pcode: &PcodeFunction) -> Vec<crate::cfg::AddressEd
 #[cfg(test)]
 mod same_block_forward_tests {
     use super::*;
-    use crate::pcode::{PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
     fn op(seq: u32, addr: u64, opcode: PcodeOpcode, inputs: Vec<Varnode>) -> PcodeOp {
         PcodeOp {
@@ -595,6 +617,50 @@ mod same_block_forward_tests {
             inputs,
             asm_mnemonic: None,
         }
+    }
+
+    #[test]
+    fn tail_call_target_outside_the_function_does_not_resolve() {
+        // `jmp other_func` leaves the function: with only one block, the
+        // greatest-start-below rule would hand back the entry, turning the
+        // tail call into `goto entry` -- a fabricated self-loop.
+        let pcode = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0xf110,
+                successors: vec![],
+                ops: vec![
+                    op(0, 0xf114, PcodeOpcode::Copy, vec![]),
+                    op(1, 0xf124, PcodeOpcode::Branch, vec![]),
+                ],
+            }],
+        };
+        assert_eq!(canonical_block_start_for_address(&pcode, 0x15380), None);
+        assert_eq!(
+            canonical_block_start_for_address(&pcode, 0xf110),
+            Some(0xf110)
+        );
+    }
+
+    #[test]
+    fn branch_into_the_middle_of_a_block_still_resolves() {
+        let pcode = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x4000,
+                successors: vec![],
+                ops: vec![
+                    op(0, 0x4000, PcodeOpcode::Copy, vec![]),
+                    op(1, 0x4008, PcodeOpcode::Copy, vec![]),
+                    op(2, 0x400c, PcodeOpcode::Return, vec![]),
+                ],
+            }],
+        };
+        assert_eq!(
+            canonical_block_start_for_address(&pcode, 0x4008),
+            Some(0x4000)
+        );
+        assert_eq!(canonical_block_start_for_address(&pcode, 0x4010), None);
     }
 
     #[test]

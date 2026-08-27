@@ -3162,7 +3162,44 @@ fn preview_build_stats_records_max_structuring_scc_component_size() {
     assert_eq!(stats.max_structuring_scc_component_size, 1);
 }
 
+/// Lower the condition of a single-block `cmp`/`jcc` fixture.
+///
+/// The fixtures carry only the compare block, so the `CBranch` target has no
+/// block of its own. A branch target that lands outside the function no longer
+/// collapses onto the nearest block below it, so give the fixture the landing
+/// block a real function would have -- otherwise the terminator is `Unsupported`
+/// and there is no condition to inspect.
 fn lower_x86_cond_expr(func: &PcodeFunction) -> PreHirExpr {
+    let mut func = func.clone();
+    if let Some(target) = func.blocks[0]
+        .ops
+        .iter()
+        .find(|op| op.opcode == PcodeOpcode::CBranch)
+        .and_then(|op| op.inputs.first())
+        .map(|vn| {
+            if vn.is_constant {
+                vn.constant_val as u64
+            } else {
+                vn.offset
+            }
+        })
+        && !func.blocks.iter().any(|b| b.start_address == target)
+    {
+        func.blocks.push(PcodeBasicBlock {
+            index: func.blocks.len() as u32,
+            start_address: target,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: target,
+                output: None,
+                inputs: vec![cst(0, 4)],
+                asm_mnemonic: None,
+            }],
+        });
+    }
+    let func = &func;
     let options = preview_options_for(CallingConvention::X86_32);
     let mut builder = PreviewBuilder::new(func, &options, None);
     match builder
