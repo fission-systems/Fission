@@ -21,6 +21,7 @@
 //! nothing else** -- every one of them one node and zero edges away. Removing
 //! it takes that binary from 30% exact to 52%.
 
+use fission_midend_prehir::util::negate_expr;
 use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
 use crate::HashMap;
@@ -292,11 +293,8 @@ pub fn unwrap_else_after_diverging_then_with(
             out.push(stmt);
             continue;
         };
-        // An empty `then` is a negated guard, not this shape.
-        let leaves_by_call = then_body
-            .last()
-            .is_some_and(|last| is_diverging_call_with(last, proven_no_return));
-        if then_body.is_empty() || else_body.is_empty() || !leaves_by_call {
+        // An empty arm is a negated guard, not this shape.
+        if then_body.is_empty() || else_body.is_empty() {
             out.push(PreHirStmt::If {
                 cond,
                 then_body,
@@ -304,12 +302,33 @@ pub fn unwrap_else_after_diverging_then_with(
             });
             continue;
         }
+        let leaves = |body: &std::rc::Rc<Vec<PreHirStmt>>| {
+            body.last()
+                .is_some_and(|last| is_diverging_call_with(last, proven_no_return))
+        };
+        // Whichever arm leaves is the guard; the other one is the tail that
+        // belongs after the `if`. Structuring picks the condition's polarity
+        // from the p-code, so the same source guard arrives either way round
+        // -- bzip2's `bsPutBit` with the call in the `then` arm and its
+        // `bsOpenReadStream` with the call in the `else`.
+        let (guard_cond, guard_body, tail) = if leaves(&then_body) {
+            (cond, then_body, else_body)
+        } else if leaves(&else_body) {
+            (negate_expr(cond), else_body, then_body)
+        } else {
+            out.push(PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            });
+            continue;
+        };
         out.push(PreHirStmt::If {
-            cond,
-            then_body,
+            cond: guard_cond,
+            then_body: guard_body,
             else_body: std::rc::Rc::new(Vec::new()),
         });
-        out.extend(else_body.as_ref().iter().cloned());
+        out.extend(tail.as_ref().iter().cloned());
         changed = true;
     }
     (out, changed)
