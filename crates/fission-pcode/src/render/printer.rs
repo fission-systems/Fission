@@ -455,7 +455,99 @@ fn print_binding_type(binding: &NirBinding) -> String {
     binding
         .surface_type_name
         .clone()
+        .filter(|surface| surface_type_is_definable(surface, &binding.ty))
         .unwrap_or_else(|| print_type(&binding.ty))
+}
+
+/// The recovered type a kept `surface_type_name` would be defined from.
+///
+/// The type library supplies names it does not supply definitions for -- a
+/// declaration reading `STARTUPINFOA *lpStartupInfo` with no struct behind it.
+/// The name alone invalidates its declaration and every use of the variable
+/// with it: one such name accounted for 13 of the first whole-binary compile's
+/// 20 errors, most of them `arithmetic on a pointer to an incomplete type`.
+///
+/// Dropping every library name would fix that and cost every `HWND` and
+/// `LPRECT` in the output. It is not necessary, because the emitted unit can
+/// define these names itself, from the type it recovered: `typedef unsigned
+/// long long HWND;`. That spelling is exact -- same width, same pointer
+/// stride, same arithmetic -- so the name stays pure annotation and cannot
+/// change what the code does, which is the property a rebuild needs.
+///
+/// This returns the type the definition would be written from: the surface's
+/// trailing stars peeled off `ty`, since those stars belong to the variable
+/// and not to the name.
+pub(crate) fn surface_type_definition_source<'a>(
+    surface: &str,
+    ty: &'a NirType,
+) -> Option<&'a NirType> {
+    let stars = surface.chars().filter(|c| *c == '*').count();
+    let mut core = ty;
+    for _ in 0..stars {
+        // `ty` does not always model every level the surface spells. Where it
+        // stops, it is describing what the name stands for rather than the
+        // variable, so that is the definition source and peeling ends.
+        let NirType::Ptr(pointee) = core else {
+            break;
+        };
+        core = pointee;
+    }
+    Some(core)
+}
+
+/// Whether a `surface_type_name` can carry a declaration in emitted C.
+fn surface_type_is_definable(surface: &str, ty: &NirType) -> bool {
+    let base = surface
+        .trim_end_matches(|c: char| c == '*' || c.is_whitespace())
+        .trim();
+    base.is_empty()
+        || is_self_describing_c_type(base)
+        || surface_type_definition_source(surface, ty).is_some()
+}
+
+/// Whether every word of `base` is a type C or the emitted prelude provides.
+fn is_self_describing_c_type(base: &str) -> bool {
+    base.starts_with("fission_agg")
+        || base.split_whitespace().all(|word| {
+            matches!(
+                word,
+                "void"
+                    | "char"
+                    | "short"
+                    | "int"
+                    | "long"
+                    | "float"
+                    | "double"
+                    | "signed"
+                    | "unsigned"
+                    | "_Bool"
+                    | "bool"
+                    | "size_t"
+                    | "ptrdiff_t"
+                    | "intptr_t"
+                    | "uintptr_t"
+                    | "uint"
+                    | "ushort"
+                    | "uchar"
+                    | "ulong"
+                    | "int8_t"
+                    | "int16_t"
+                    | "int32_t"
+                    | "int64_t"
+                    | "uint8_t"
+                    | "uint16_t"
+                    | "uint32_t"
+                    | "uint64_t"
+                    | "int128"
+                    | "undefined"
+                    | "undefined1"
+                    | "undefined2"
+                    | "undefined4"
+                    | "undefined8"
+                    | "const"
+                    | "volatile"
+            )
+        })
 }
 
 pub(crate) fn print_stmt(stmt: &HirStmt) -> String {

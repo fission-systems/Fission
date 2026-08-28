@@ -1951,7 +1951,14 @@ fn preview_recovers_cross_block_rust_sleigh_register_call_arg() {
     )
     .expect("preview render");
     assert!(code.contains("external_call(7);"), "{code}");
-    assert!(!code.contains("external_call();"), "{code}");
+    // The argument has to survive at the call site. The `extern` declaration
+    // the unit now emits for an undefined callee also spells empty parens --
+    // deliberately, since the signature is unknown -- so the statement, not
+    // the whole render, is what must not lose the argument.
+    assert!(
+        !code.lines().any(|line| line.trim() == "external_call();"),
+        "{code}"
+    );
 }
 
 #[test]

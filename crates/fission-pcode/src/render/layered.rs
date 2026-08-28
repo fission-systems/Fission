@@ -6,12 +6,13 @@
 use super::globals::is_c_identifier;
 use super::layer::{LayeredPseudocode, PrintProfile};
 use super::presentation::apply_hir_presentation_with_globals;
+use super::printer::surface_type_definition_source;
 use super::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
     NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_type,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub(crate) fn render_hir_function_with_global_decls(
     hir: &HirFunction,
@@ -125,7 +126,18 @@ fn render_hir_function_with_profile(
         .retain(|binding| !decls.contains_key(&binding.name));
     let aggregate_typedefs = collect_referenced_aggregate_typedefs(&printable, decls.values());
     let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(&printable);
-    if decls.is_empty() && aggregate_typedefs.is_empty() && opaque_pcodeop_stubs.is_empty() {
+    // A call to a name this unit does not define needs a declaration for the
+    // result to compile as a project rather than as one loose function.
+    let undefined_types = collect_undefined_surface_types(&printable);
+    let mut called_externs = collect_called_externs(&printable, &printable.name);
+    called_externs
+        .retain(|name, _| !decls.contains_key(name) && !opaque_pcodeop_stubs.contains_key(name));
+    if decls.is_empty()
+        && aggregate_typedefs.is_empty()
+        && opaque_pcodeop_stubs.is_empty()
+        && called_externs.is_empty()
+        && undefined_types.is_empty()
+    {
         return print_hir_function_with_profile(&printable, Some(&options.global_names), profile);
     }
 
@@ -143,6 +155,12 @@ fn render_hir_function_with_profile(
             name
         ));
     }
+    for (name, definition) in &undefined_types {
+        rendered.push_str(&format!("typedef {definition} {name};\n"));
+    }
+    for (target, return_ty) in &called_externs {
+        rendered.push_str(&render_called_extern(target, return_ty));
+    }
     rendered.push('\n');
     rendered.push_str(&print_hir_function_with_profile(
         &printable,
@@ -150,6 +168,189 @@ fn render_hir_function_with_profile(
         profile,
     ));
     rendered
+}
+
+/// Type names the declarations keep, paired with what to define each as.
+///
+/// The printer keeps a `surface_type_name` only when the recovered type can
+/// define it (see `surface_type_definition_source`), so every name reaching
+/// here has an exact definition available: `typedef unsigned long long HWND;`,
+/// `typedef fission_agg16 *LPRECT;`. Emitting them makes the unit compile
+/// without the name meaning anything the recovered type did not already say --
+/// same width, same stride, same arithmetic. Names the aggregate typedefs or C
+/// itself already provide are left alone.
+fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String> {
+    let mut names = BTreeMap::new();
+    for binding in hir.params.iter().chain(hir.locals.iter()) {
+        let Some(surface) = binding.surface_type_name.as_deref() else {
+            continue;
+        };
+        let base = surface
+            .trim_end_matches(|c: char| c == '*' || c.is_whitespace())
+            .trim();
+        if base.is_empty() || !is_c_identifier(base) {
+            continue;
+        }
+        // Anything the prelude or an aggregate typedef already provides.
+        if base.starts_with("fission_agg") || KNOWN_C_TYPE_NAMES.contains(&base) {
+            continue;
+        }
+        let Some(source) = surface_type_definition_source(surface, &binding.ty) else {
+            continue;
+        };
+        names.insert(base.to_string(), print_type(source));
+    }
+    names
+}
+
+/// Spelled out rather than derived: these are the names the emitted prelude
+/// and C itself already provide, and a typedef for one would be a redefinition.
+const KNOWN_C_TYPE_NAMES: &[&str] = &[
+    "void",
+    "char",
+    "short",
+    "int",
+    "long",
+    "float",
+    "double",
+    "signed",
+    "unsigned",
+    "_Bool",
+    "bool",
+    "size_t",
+    "ptrdiff_t",
+    "intptr_t",
+    "uintptr_t",
+    "uint",
+    "ushort",
+    "uchar",
+    "ulong",
+    "int8_t",
+    "int16_t",
+    "int32_t",
+    "int64_t",
+    "uint8_t",
+    "uint16_t",
+    "uint32_t",
+    "uint64_t",
+    "int128",
+    "undefined",
+    "undefined1",
+    "undefined2",
+    "undefined4",
+    "undefined8",
+];
+
+/// Names this function calls but does not define.
+///
+/// A restored project has to compile as a unit, and a call to a name with no
+/// declaration is not portable C -- gcc warns, clang refuses. These get an
+/// `extern` declaration rather than a stub body: a stub would compile and
+/// then behave differently from the original, which for a rebuild is worse
+/// than not compiling.
+fn collect_called_externs(hir: &HirFunction, defined: &str) -> BTreeMap<String, NirType> {
+    let mut calls = BTreeMap::new();
+    collect_called_externs_from_stmts(&hir.body, &mut calls);
+    calls.retain(|name, _| name != defined && !name.starts_with("__pcodeop_"));
+    calls
+}
+
+fn collect_called_externs_from_stmts(stmts: &[HirStmt], out: &mut BTreeMap<String, NirType>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                collect_called_externs_from_lvalue(lhs, out);
+                collect_called_externs_from_expr(rhs, out);
+            }
+            HirStmt::VaStart { va_list: e, .. } | HirStmt::Expr(e) | HirStmt::Return(Some(e)) => {
+                collect_called_externs_from_expr(e, out)
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_called_externs_from_stmts(body, out);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_called_externs_from_expr(cond, out);
+                collect_called_externs_from_stmts(then_body, out);
+                collect_called_externs_from_stmts(else_body, out);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_called_externs_from_stmts(std::slice::from_ref(init.as_ref()), out);
+                }
+                if let Some(cond) = cond {
+                    collect_called_externs_from_expr(cond, out);
+                }
+                if let Some(update) = update {
+                    collect_called_externs_from_stmts(std::slice::from_ref(update.as_ref()), out);
+                }
+                collect_called_externs_from_stmts(body, out);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_called_externs_from_expr(expr, out);
+                for case in cases {
+                    collect_called_externs_from_stmts(&case.body, out);
+                }
+                collect_called_externs_from_stmts(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_called_externs_from_lvalue(lvalue: &HirLValue, out: &mut BTreeMap<String, NirType>) {
+    if let HirLValue::Deref { ptr, .. } = lvalue {
+        collect_called_externs_from_expr(ptr, out);
+    }
+}
+
+fn collect_called_externs_from_expr(expr: &HirExpr, out: &mut BTreeMap<String, NirType>) {
+    match expr {
+        HirExpr::Call { target, args, ty } => {
+            if is_c_identifier(target) {
+                out.entry(target.clone()).or_insert_with(|| ty.clone());
+            }
+            for arg in args {
+                collect_called_externs_from_expr(arg, out);
+            }
+        }
+        HirExpr::Binary { lhs, rhs, .. }
+        | HirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            collect_called_externs_from_expr(lhs, out);
+            collect_called_externs_from_expr(rhs, out);
+        }
+        HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => collect_called_externs_from_expr(inner, out),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_called_externs_from_expr(cond, out);
+            collect_called_externs_from_expr(then_expr, out);
+            collect_called_externs_from_expr(else_expr, out);
+        }
+        _ => {}
+    }
 }
 
 fn collect_opaque_pcodeop_stubs(hir: &HirFunction) -> BTreeMap<String, NirType> {
@@ -318,6 +519,17 @@ fn merge_opaque_pcodeop_return_type(existing: &NirType, next: &NirType) -> NirTy
         },
         _ => existing.clone(),
     }
+}
+
+/// `extern` for a called name, never a definition.
+///
+/// Deliberately not a stub with a body: a stub compiles and then behaves
+/// differently from the original, and for a rebuild that is worse than not
+/// compiling. The parameter list is left open because the call sites are the
+/// only evidence of arity, and they disagree often enough not to be trusted.
+fn render_called_extern(target: &str, return_ty: &NirType) -> String {
+    let return_type = opaque_pcodeop_return_type_name(return_ty);
+    format!("extern {return_type} {target}();\n")
 }
 
 fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
