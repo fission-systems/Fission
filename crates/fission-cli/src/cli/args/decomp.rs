@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[command(group(
     clap::ArgGroup::new("decomp_target")
         .required(true)
-        .args(["addr", "all", "addresses_file"])
+        .args(["addr", "all", "addresses_file", "project"])
 ))]
 #[command(
     long_about = "Decompile one function, an explicit address file, or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` for focused analysis and `--addresses-file` for benchmark/operator batches that should reuse one loaded binary. Use `--all` only for bounded batch-style local runs.\n\nBy default, batch selection filters imported functions and the zero-size `register_frame_ctor` runtime wrapper. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
@@ -88,6 +88,11 @@ pub struct DecompArgs {
     /// Suppress the '// ===...=== Function: ...' header comment in output
     #[arg(long)]
     pub no_header: bool,
+
+    /// Emit one buildable translation unit: shared declarations hoisted to a
+    /// single prelude, then every function body. Implies --all.
+    #[arg(long)]
+    pub project: bool,
 
     /// Suppress WARNING/NOTICE diagnostic lines in decompilation output
     #[arg(long)]

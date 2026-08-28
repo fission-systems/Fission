@@ -7,6 +7,7 @@ mod record;
 mod selection;
 mod serialize;
 mod strip;
+mod unit;
 mod workers;
 
 pub(crate) use selection::collect_target_functions;
@@ -390,6 +391,7 @@ fn run_with_functions(
     let total_decomp_secs: f64 = results.iter().map(|entry| entry.decomp_sec).sum();
     let total_postprocess_secs: f64 = results.iter().map(|entry| entry.postprocess_sec).sum();
 
+    let mut project_renders: Vec<String> = Vec::new();
     for entry in &results {
         if effective_json {
             let mut je = entry.json_entry.clone();
@@ -410,14 +412,22 @@ fn run_with_functions(
                 all_output.push_str(&format!("// Function: {} @ 0x{:x}\n", name, entry.address));
                 all_output.push_str("// ============================================\n\n");
             }
-            all_output.push_str(&entry.plain_output);
-            all_output.push_str("\n\n");
+            if cli.project {
+                project_renders.push(entry.plain_output.clone());
+            } else {
+                all_output.push_str(&entry.plain_output);
+                all_output.push_str("\n\n");
+            }
         }
         if let Some(rows) = debug_bundle_rows.as_mut() {
             if let Some(ref b) = entry.debug_bundle {
                 rows.push(b.clone());
             }
         }
+    }
+
+    if cli.project {
+        all_output = unit::assemble(&project_renders);
     }
 
     let wall_clock_sec = round_six(init_start.elapsed().as_secs_f64());
