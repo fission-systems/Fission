@@ -130,6 +130,11 @@ pub enum PcodeNativeBinaryOp {
     NotEqual,
     UnsignedLess,
     UnsignedLessEqual,
+    SignedLess,
+    SignedLessEqual,
+    Multiply,
+    ShiftLeft,
+    ShiftRightLogical,
 }
 
 /// Executable candidate for one side-effect-free P-code region.

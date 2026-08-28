@@ -77,10 +77,26 @@ fn runtime_frontend_for_binary(binary: &LoadedBinary) -> Result<RuntimeSleighFro
 /// necessarily `addr` itself). Falls back to guessing the function's size
 /// from the next-higher known function address when the loader didn't
 /// record one (e.g. a function discovered without a symbol-table size).
-pub fn disassemble_function(
+/// The raw p-code of one function, lifted exactly as `disassemble_function`
+/// lifts it.
+///
+/// Same decode contract, same Thumb-image handling, same memory context -- the
+/// two differ only in what they hand back. Anything that wants to reason about
+/// the lifted semantics rather than print instructions (DIR's verification
+/// path, coverage measurement) needs the function, not the instruction rows.
+pub fn raw_pcode_function(
     binary: &LoadedBinary,
     addr: u64,
-) -> Result<Vec<InstructionRow>, String> {
+) -> Result<fission_pcode::PcodeFunction, String> {
+    lift_function(binary, addr).map(|lifted| lifted.function)
+}
+
+/// The lift both public entry points share: locate the function, size the
+/// decode window, resolve the Thumb-image context, and lift.
+fn lift_function(
+    binary: &LoadedBinary,
+    addr: u64,
+) -> Result<fission_sleigh::runtime::DecodedPcodeFunction, String> {
     let func = binary
         .function_at(addr)
         .ok_or_else(|| format!("No function found at address 0x{addr:x}"))?;
@@ -120,6 +136,14 @@ pub fn disassemble_function(
         )
         .map_err(|e| e.to_string())?;
 
+    Ok(lifted)
+}
+
+pub fn disassemble_function(
+    binary: &LoadedBinary,
+    addr: u64,
+) -> Result<Vec<InstructionRow>, String> {
+    let lifted = lift_function(binary, addr)?;
     Ok(lifted
         .instructions
         .iter()

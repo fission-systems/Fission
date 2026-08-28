@@ -220,7 +220,8 @@ fn reconstruct_op(
         | PcodeOpcode::IntSub
         | PcodeOpcode::IntAnd
         | PcodeOpcode::IntOr
-        | PcodeOpcode::IntXor => {
+        | PcodeOpcode::IntXor
+        | PcodeOpcode::IntMult => {
             require_widths(op, op_index, &[output.size, output.size])?;
             let left = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
             let right = value_for(&op.inputs[1], op_index, value_space_ids, values, inputs)?;
@@ -230,6 +231,7 @@ fn reconstruct_op(
                 PcodeOpcode::IntAnd => PcodeNativeBinaryOp::BitAnd,
                 PcodeOpcode::IntOr => PcodeNativeBinaryOp::BitOr,
                 PcodeOpcode::IntXor => PcodeNativeBinaryOp::BitXor,
+                PcodeOpcode::IntMult => PcodeNativeBinaryOp::Multiply,
                 _ => unreachable!(),
             };
             Ok(PcodeNativeExpr::Binary {
@@ -242,7 +244,9 @@ fn reconstruct_op(
         PcodeOpcode::IntEqual
         | PcodeOpcode::IntNotEqual
         | PcodeOpcode::IntLess
-        | PcodeOpcode::IntLessEqual => {
+        | PcodeOpcode::IntLessEqual
+        | PcodeOpcode::IntSLess
+        | PcodeOpcode::IntSLessEqual => {
             let input_size = op.inputs[0].size;
             validate_width(op_index, input_size)?;
             require_widths(op, op_index, &[input_size, input_size])?;
@@ -253,6 +257,8 @@ fn reconstruct_op(
                 PcodeOpcode::IntNotEqual => PcodeNativeBinaryOp::NotEqual,
                 PcodeOpcode::IntLess => PcodeNativeBinaryOp::UnsignedLess,
                 PcodeOpcode::IntLessEqual => PcodeNativeBinaryOp::UnsignedLessEqual,
+                PcodeOpcode::IntSLess => PcodeNativeBinaryOp::SignedLess,
+                PcodeOpcode::IntSLessEqual => PcodeNativeBinaryOp::SignedLessEqual,
                 _ => unreachable!(),
             };
             Ok(PcodeNativeExpr::Binary {
@@ -262,8 +268,111 @@ fn reconstruct_op(
                 bits: bits_for_size(output.size),
             })
         }
+        // Flags and boolean negation are not new algebra: each is an identity
+        // over operations already modelled, so representing them as a
+        // composition keeps evaluation, symbolic lowering and rendering in
+        // step automatically -- there is no second definition to get wrong.
+        PcodeOpcode::IntCarry
+        | PcodeOpcode::IntSCarry
+        | PcodeOpcode::IntSBorrow
+        | PcodeOpcode::BoolNegate
+        | PcodeOpcode::BoolAnd
+        | PcodeOpcode::BoolOr => {
+            let bits = bits_for_size(output.size);
+            if op.opcode == PcodeOpcode::BoolNegate {
+                let input_size = op.inputs[0].size;
+                validate_width(op_index, input_size)?;
+                require_widths(op, op_index, &[input_size])?;
+                let value = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
+                let width = bits_for_size(input_size);
+                // `!a` on a p-code boolean is `a == 0`.
+                return Ok(PcodeNativeExpr::Binary {
+                    op: PcodeNativeBinaryOp::Equal,
+                    left: Box::new(value),
+                    right: Box::new(PcodeNativeExpr::Constant {
+                        value: 0,
+                        bits: width,
+                    }),
+                    bits,
+                });
+            }
+            let input_size = op.inputs[0].size;
+            validate_width(op_index, input_size)?;
+            require_widths(op, op_index, &[input_size, input_size])?;
+            let a = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
+            let b = value_for(&op.inputs[1], op_index, value_space_ids, values, inputs)?;
+            let width = bits_for_size(input_size);
+            let bin = |op, left, right, bits| PcodeNativeExpr::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                bits,
+            };
+            let zero = PcodeNativeExpr::Constant {
+                value: 0,
+                bits: width,
+            };
+            Ok(match op.opcode {
+                // Unsigned add overflows exactly when the sum wraps below an operand.
+                PcodeOpcode::IntCarry => bin(
+                    PcodeNativeBinaryOp::UnsignedLess,
+                    bin(PcodeNativeBinaryOp::Add, a.clone(), b, width),
+                    a,
+                    bits,
+                ),
+                // Signed add overflows iff `(a + b) <s a` disagrees with `b <s 0`.
+                PcodeOpcode::IntSCarry => bin(
+                    PcodeNativeBinaryOp::NotEqual,
+                    bin(
+                        PcodeNativeBinaryOp::SignedLess,
+                        bin(PcodeNativeBinaryOp::Add, a.clone(), b.clone(), width),
+                        a,
+                        1,
+                    ),
+                    bin(PcodeNativeBinaryOp::SignedLess, b, zero, 1),
+                    bits,
+                ),
+                // Signed subtract overflows iff `a <s b` disagrees with `(a - b) <s 0`.
+                PcodeOpcode::IntSBorrow => bin(
+                    PcodeNativeBinaryOp::NotEqual,
+                    bin(PcodeNativeBinaryOp::SignedLess, a.clone(), b.clone(), 1),
+                    bin(
+                        PcodeNativeBinaryOp::SignedLess,
+                        bin(PcodeNativeBinaryOp::Subtract, a, b, width),
+                        zero,
+                        1,
+                    ),
+                    bits,
+                ),
+                // On p-code booleans (0 or 1) the bitwise forms coincide.
+                PcodeOpcode::BoolAnd => bin(PcodeNativeBinaryOp::BitAnd, a, b, bits),
+                PcodeOpcode::BoolOr => bin(PcodeNativeBinaryOp::BitOr, a, b, bits),
+                _ => unreachable!(),
+            })
+        }
         opcode => Err(PcodeNativeReconstructError::UnsupportedOpcode { op_index, opcode }),
     }
+}
+
+/// The width an expression produces, for operators whose semantics depend on
+/// the *operand* width rather than the result's — a signed comparison yields
+/// one bit but must sign-extend from the operands, and a shift count past the
+/// operand width yields zero.
+fn expression_bits(expr: &PcodeNativeExpr) -> u32 {
+    match expr {
+        PcodeNativeExpr::Input { bits, .. }
+        | PcodeNativeExpr::Constant { bits, .. }
+        | PcodeNativeExpr::Binary { bits, .. } => *bits,
+    }
+}
+
+/// `value`, whose meaningful width is `bits`, as a signed 64-bit integer.
+fn sign_extend(value: u64, bits: u32) -> i64 {
+    if bits == 0 || bits >= 64 {
+        return value as i64;
+    }
+    let shift = 64 - bits;
+    ((value << shift) as i64) >> shift
 }
 
 fn require_widths(
@@ -649,6 +758,7 @@ fn validate_expression_contract(
                     | PcodeNativeBinaryOp::BitAnd
                     | PcodeNativeBinaryOp::BitOr
                     | PcodeNativeBinaryOp::BitXor
+                    | PcodeNativeBinaryOp::Multiply
             ) && left_bits != *bits
             {
                 return Err(format!(
@@ -934,6 +1044,17 @@ fn lower_candidate_symbolically(
                 PcodeNativeBinaryOp::UnsignedLessEqual => {
                     widen_boolean(SymExpr::Ule(Box::new(left), Box::new(right)), *bits)
                 }
+                PcodeNativeBinaryOp::SignedLess => {
+                    widen_boolean(SymExpr::Slt(Box::new(left), Box::new(right)), *bits)
+                }
+                PcodeNativeBinaryOp::SignedLessEqual => {
+                    widen_boolean(SymExpr::Sle(Box::new(left), Box::new(right)), *bits)
+                }
+                PcodeNativeBinaryOp::Multiply => SymExpr::Mul(Box::new(left), Box::new(right)),
+                PcodeNativeBinaryOp::ShiftLeft => SymExpr::Shl(Box::new(left), Box::new(right)),
+                PcodeNativeBinaryOp::ShiftRightLogical => {
+                    SymExpr::Lshr(Box::new(left), Box::new(right))
+                }
             })
         }
     }
@@ -964,6 +1085,7 @@ fn evaluate_expression(expression: &PcodeNativeExpr, inputs: &[u64]) -> u64 {
             right,
             bits,
         } => {
+            let lhs_expr = left.as_ref();
             let left = evaluate_expression(left, inputs);
             let right = evaluate_expression(right, inputs);
             let value = match op {
@@ -976,6 +1098,33 @@ fn evaluate_expression(expression: &PcodeNativeExpr, inputs: &[u64]) -> u64 {
                 PcodeNativeBinaryOp::NotEqual => u64::from(left != right),
                 PcodeNativeBinaryOp::UnsignedLess => u64::from(left < right),
                 PcodeNativeBinaryOp::UnsignedLessEqual => u64::from(left <= right),
+                // The operands carry the *operand* width, not the result's, so
+                // sign-extend from there before comparing.
+                PcodeNativeBinaryOp::SignedLess => {
+                    let w = expression_bits(lhs_expr);
+                    u64::from(sign_extend(left, w) < sign_extend(right, w))
+                }
+                PcodeNativeBinaryOp::SignedLessEqual => {
+                    let w = expression_bits(lhs_expr);
+                    u64::from(sign_extend(left, w) <= sign_extend(right, w))
+                }
+                PcodeNativeBinaryOp::Multiply => left.wrapping_mul(right),
+                PcodeNativeBinaryOp::ShiftLeft => {
+                    let w = expression_bits(lhs_expr);
+                    if right >= u64::from(w) {
+                        0
+                    } else {
+                        left.wrapping_shl(right as u32)
+                    }
+                }
+                PcodeNativeBinaryOp::ShiftRightLogical => {
+                    let w = expression_bits(lhs_expr);
+                    if right >= u64::from(w) {
+                        0
+                    } else {
+                        left.wrapping_shr(right as u32)
+                    }
+                }
             };
             mask_value(value, *bits)
         }
@@ -1124,6 +1273,11 @@ fn render_expression(expression: &PcodeNativeExpr, inputs: &[PcodeNativeInput]) 
                 PcodeNativeBinaryOp::NotEqual => "!=",
                 PcodeNativeBinaryOp::UnsignedLess => "<u",
                 PcodeNativeBinaryOp::UnsignedLessEqual => "<=u",
+                PcodeNativeBinaryOp::SignedLess => "<s",
+                PcodeNativeBinaryOp::SignedLessEqual => "<=s",
+                PcodeNativeBinaryOp::Multiply => "*",
+                PcodeNativeBinaryOp::ShiftLeft => "<<",
+                PcodeNativeBinaryOp::ShiftRightLogical => ">>u",
             };
             format!(
                 "({} {operator} {})",
@@ -1233,6 +1387,77 @@ mod tests {
     }
 
     #[test]
+    /// The composed flag identities, checked against the semantics they stand
+    /// in for rather than against themselves.
+    ///
+    /// `IntCarry`, `IntSCarry` and `IntSBorrow` are not modelled as new
+    /// algebra: each is rewritten into operations the verifier already has.
+    /// That is only sound if the rewrite *is* the flag, so this evaluates the
+    /// reconstruction over every 8-bit operand pair and compares against the
+    /// arithmetic definition -- unsigned wrap for carry, and a signed result
+    /// that does not fit for the two overflow flags.
+    #[test]
+    fn composed_flag_identities_match_their_arithmetic_definitions() {
+        fn sign_extend8(v: u64) -> i64 {
+            ((v << 56) as i64) >> 56
+        }
+        for opcode in [
+            PcodeOpcode::IntCarry,
+            PcodeOpcode::IntSCarry,
+            PcodeOpcode::IntSBorrow,
+        ] {
+            let a_in = varnode(2, 0, 1);
+            let b_in = varnode(2, 8, 1);
+            let out = varnode(2, 16, 1);
+            let function = PcodeFunction {
+                blocks: vec![PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x401000,
+                    successors: Vec::new(),
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode,
+                        address: 0x401000,
+                        output: Some(out.clone()),
+                        inputs: vec![a_in, b_in],
+                        asm_mnemonic: None,
+                    }],
+                }],
+            };
+            let selection = PcodeRegionSelection {
+                block_index: 0,
+                first_op: 0,
+                op_count: 1,
+                output: location_of(&out),
+            };
+            let foundation = PcodeFoundation::new(0x401000, function).unwrap();
+            let candidates = PcodeNativeReconstructor::new(selection, [1, 2])
+                .reconstruct(&foundation)
+                .expect("flag region reconstructs");
+            let region = match &candidates[0].semantics {
+                CandidateSemantics::PcodeNativeRegion(region) => region,
+                other => panic!("unexpected candidate semantics: {other:?}"),
+            };
+            for a in 0u64..=0xff {
+                for b in 0u64..=0xff {
+                    let got = evaluate_expression(&region.expression, &[a, b]);
+                    let (ai, bi) = (sign_extend8(a), sign_extend8(b));
+                    let want = match opcode {
+                        PcodeOpcode::IntCarry => u64::from(a + b > 0xff),
+                        PcodeOpcode::IntSCarry => {
+                            u64::from(ai + bi != sign_extend8(a.wrapping_add(b) & 0xff))
+                        }
+                        PcodeOpcode::IntSBorrow => {
+                            u64::from(ai - bi != sign_extend8(a.wrapping_sub(b) & 0xff))
+                        }
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(got, want, "{opcode:?} at a={a} b={b}");
+                }
+            }
+        }
+    }
+
     fn reconstructs_and_proves_a_pcode_native_region() {
         let (foundation, selection) = arithmetic_foundation();
         let artifacts = DirPipeline::new(
