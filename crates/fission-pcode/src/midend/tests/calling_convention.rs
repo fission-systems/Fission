@@ -345,6 +345,96 @@ fn x86_64_argument_registers_do_not_survive_an_intervening_call() {
     );
 }
 
+/// Minimal reproduction of a live defect: a loop-latch arm loses its body.
+///
+/// Three blocks -- a header that branches out or falls through, an arm whose
+/// only statement is a write to a mapped global and whose terminator is an
+/// unconditional branch back to the header, and an exit. The write reaches
+/// `lower_block_stmts` (the builder emits it) and is absent from the body
+/// structuring assembles, so `normalize` never sees it. Rendered today as
+/// `while (!rax) { }` -- an empty loop.
+///
+/// On the sample set this owns the last of the dropped global writes: every
+/// one of them sits in a block that ends in an unconditional branch to its
+/// loop header (`bin_033 main` blocks 68/70/73/81/83 all target 0xf456,
+/// `bin_009 sub_3920` blocks 38/46 both target 0x3b75). The pattern is the
+/// `case ...: global++; continue;` arm of an option-parsing loop.
+#[test]
+#[ignore = "known defect: structuring drops a loop-latch arm's statements"]
+fn backedge_arm_keeps_its_global_write() {
+    let mut options = preview_options_for(CallingConvention::SystemVAmd64);
+    options.format = "ELF64".to_string();
+    options.pointer_size = 8;
+    options.is_64bit = true;
+    options.sections = vec![(0x1000, 0x3000)];
+
+    let ram = |off: u64, size: u32| Varnode {
+        space_id: 3,
+        offset: off,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2, 1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1000,
+                    output: None,
+                    inputs: vec![ram(0x1020, 8), reg(0x0, 1)],
+                    asm_mnemonic: Some("jne 0x1020".to_string()),
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![0],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1010,
+                        output: Some(ram(0x2000, 4)),
+                        inputs: vec![cst(1, 4)],
+                        asm_mnemonic: Some("movl $1, 0x2000".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1016,
+                        output: None,
+                        inputs: vec![ram(0x1000, 8)],
+                        asm_mnemonic: Some("jmp 0x1000".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1020,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("ret".to_string()),
+                }],
+            },
+        ],
+    };
+    let code = render_mlil_preview(&func, "loopfn", 0x1000, &options).expect("render");
+    assert!(
+        code.contains("tmp_2000"),
+        "the loop-latch arm lost its global write:\n{code}"
+    );
+}
+
 #[test]
 fn x86_64_call_retaddr_push_is_not_a_stack_argument() {
     // Verbatim shape of a real x86-64 `call` (raw p-code dump of coreutils
