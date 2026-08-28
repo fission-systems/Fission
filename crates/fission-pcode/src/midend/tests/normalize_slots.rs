@@ -1238,3 +1238,118 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
         "{rendered}"
     );
 }
+
+/// A local written, then handed to a callee by address, keeps its write.
+///
+/// This is the shape three separate passes got wrong the moment `&local`
+/// became expressible, each by the same reasoning: the local's *name* is never
+/// read, so the write looked dead. It is not -- the address escapes to a
+/// callee that reads the storage, and deleting the write hands that callee an
+/// uninitialised frame. Constant propagation removed it, dead store
+/// elimination was entitled to (its escape check was collected and never
+/// consulted), and HIR presentation dropped it again on the way out.
+///
+/// The invariant, stated once: an address-taken local is potentially
+/// observable after the address escapes, so its stores are live regardless of
+/// how often the name is read.
+#[test]
+fn a_local_handed_to_a_callee_by_address_keeps_its_write() {
+    let addr = uniq(0x100, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                // local_10 = 7  -- the write no pass may remove
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1000,
+                    output: Some(addr.clone()),
+                    inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1001,
+                    output: None,
+                    inputs: vec![cst(0, 4), addr.clone(), cst(7, 4)],
+                    asm_mnemonic: None,
+                },
+                // local_c = 9 -- the rest of the same buffer, written but
+                // never read by name and never address-taken itself
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1002,
+                    output: Some(addr.clone()),
+                    inputs: vec![reg(0x28, 8), cst(-0xc, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1003,
+                    output: None,
+                    inputs: vec![cst(0, 4), addr.clone(), cst(9, 4)],
+                    asm_mnemonic: None,
+                },
+                // callee(&local_10) -- RCX is the first Win64 integer argument
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1004,
+                    output: Some(addr.clone()),
+                    inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1005,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![addr],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x1006,
+                    output: None,
+                    inputs: vec![cst(0x2000, 8), reg(0x08, 8)],
+                    asm_mnemonic: Some("CALL 0x2000".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1007,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "escaping_local_fn", 0x1000, &preview_options())
+        .expect("preview render");
+    assert!(
+        code.contains("local_10 = 7;"),
+        "the write to an address-taken local must survive:\n{code}"
+    );
+    assert!(
+        code.contains("&local_10"),
+        "the argument must be the local's address:\n{code}"
+    );
+    // The rest of the buffer is reached by arithmetic on that same address,
+    // which no analysis here can follow. `main` builds a six-byte string out
+    // of two slots and passes the address of the first; the second was
+    // dropped because its own name is never read and its own address never
+    // taken.
+    assert!(
+        code.contains("local_c = 9;"),
+        "a neighbouring slot's write must survive too:\n{code}"
+    );
+}

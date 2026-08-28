@@ -4308,6 +4308,46 @@ mod tests {
     }
 
     #[test]
+    fn hir_presentation_keeps_a_write_to_a_stack_slot_nothing_reads_by_name() {
+        // A stack slot's store is observable through a pointer into the
+        // frame, so an unread *name* is not evidence the write is dead --
+        // `main` builds a six-byte string across two slots and passes the
+        // address of the first.
+        //
+        // The binding arrives with a `Temp` origin on purpose: that is what a
+        // slot looks like here once a name-based liveness pass has pruned it
+        // and `rescue_undeclared_bindings` has put it back, which is exactly
+        // how the second half of that string was lost. The name is all that is
+        // left to recognise it by.
+        let mut func = HirFunction {
+            name: "f".into(),
+            params: vec![],
+            locals: vec![local("local_2"), local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_2".into()),
+                    rhs: HirExpr::Const(111, int_ty(32, true)),
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation_with_globals(&mut func, &HashSet::new());
+        assert!(
+            func.body.iter().any(|stmt| matches!(
+                stmt,
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(name),
+                    ..
+                } if name == "local_2"
+            )),
+            "the write to a stack slot must survive:\n{:?}",
+            func.body
+        );
+    }
+
+    #[test]
     fn hir_presentation_keeps_a_write_to_a_global_nothing_reads() {
         // A store to a global is the observable effect, whether or not this
         // function reads it back -- the dead-assignment pass reasons about

@@ -362,6 +362,47 @@ mod tests {
         }
     }
 
+    /// A slot whose address reaches a callee keeps its store.
+    ///
+    /// This pass documented an escape check it never performed: the set of
+    /// escaping names was collected and never consulted, so `may_escape` came
+    /// only from the partition key's own class. Nothing exercised it, because
+    /// a taken address survived as arithmetic on a register that no partition
+    /// key matched -- no store was ever attributed to the slot to begin with.
+    /// `&local_18` makes the attribution work, and the missing check with it.
+    #[test]
+    fn dead_store_elimination_keeps_a_write_whose_address_reaches_a_callee() {
+        let store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::AddressOfLocal("local_18".to_string())),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            },
+            rhs: PreHirExpr::Const(
+                7,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            ),
+        };
+        let call = PreHirStmt::Expr(PreHirExpr::Call {
+            target: "callee".to_string(),
+            args: vec![PreHirExpr::AddressOfLocal("local_18".to_string())],
+            ty: NirType::Unknown,
+        });
+        let mut func = base_func(vec![store, call], vec![ptr_binding("local_18")]);
+        apply_dead_store_elimination(&mut func);
+        assert_eq!(
+            func.body.len(),
+            2,
+            "the write must survive -- the callee reads it:\n{:?}",
+            func.body
+        );
+    }
+
     /// A `local_XX`-named binding used as a Deref base plus a runtime-
     /// scaled index (`local_18 + i * 4`) is exactly the shape a spilled
     /// VLA base pointer produces -- confirmed via a real `int arr[n]`
