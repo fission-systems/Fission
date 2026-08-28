@@ -24,8 +24,22 @@ use std::collections::{HashMap, HashSet};
 /// On structural invariant failure (use-without-def, call/load inflation, empty
 /// if shells), restores the pre-polish tree so broken presentation never ships.
 pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
+    apply_hir_presentation_with_globals(func, &HashSet::new());
+}
+
+/// As `apply_hir_presentation`, told which names denote file-scope globals.
+///
+/// Presentation's dead-assignment pass reasons about values: a name nothing
+/// reads back holds nothing worth printing. That is true of a local and false
+/// of a global -- writing one is the observable effect, whether or not this
+/// function reads it again -- so without the set it silently deleted stores
+/// like `max_flush_loops = rax;` from the emitted C.
+pub(crate) fn apply_hir_presentation_with_globals(
+    func: &mut HirFunction,
+    globals: &HashSet<String>,
+) {
     let before = func.clone();
-    apply_hir_presentation_passes(func);
+    apply_hir_presentation_passes(func, globals);
     if let Err(_violations) = check_hir_presentation_invariants(&before, func) {
         // Prefer mechanical NIR-shaped tree over observationally broken HIR polish.
         *func = before;
@@ -39,7 +53,7 @@ pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
     }
 }
 
-fn apply_hir_presentation_passes(func: &mut HirFunction) {
+fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<String>) {
     for _ in 0..16 {
         let mut changed = false;
         changed |= flatten_redundant_blocks(&mut func.body);
@@ -93,7 +107,7 @@ fn apply_hir_presentation_passes(func: &mut HirFunction) {
         collect_goto_targets(&func.body, &mut goto_targets);
         changed |= prune_unreachable_after_total_return(&mut func.body, &goto_targets);
         changed |= inline_single_use_pure_assigns(func);
-        changed |= eliminate_pure_dead_assigns(func);
+        changed |= eliminate_pure_dead_assigns(func, globals);
         changed |= remove_unreferenced_labels(&mut func.body);
         if !changed {
             break;
@@ -3953,7 +3967,7 @@ fn remove_labels_not_in(stmts: &mut Vec<HirStmt>, keep: &HashSet<String>) -> boo
     changed
 }
 
-fn eliminate_pure_dead_assigns(func: &mut HirFunction) -> bool {
+fn eliminate_pure_dead_assigns(func: &mut HirFunction, globals: &HashSet<String>) -> bool {
     let formal: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
     // Whole-function use counts only. Nested subtree-local counts incorrectly
     // treat `if { x = e; } return x;` as dead `x` (use lives outside the if body).
@@ -3965,7 +3979,7 @@ fn eliminate_pure_dead_assigns(func: &mut HirFunction) -> bool {
             .keys()
             .map(|n| (n.clone(), count_uses_in_stmts(&func.body, n)))
             .collect();
-        let changed = eliminate_pure_dead_in_stmts(&mut func.body, &formal, &use_counts);
+        let changed = eliminate_pure_dead_in_stmts(&mut func.body, &formal, &use_counts, globals);
         if !changed {
             break;
         }
@@ -3978,6 +3992,7 @@ fn eliminate_pure_dead_in_stmts(
     stmts: &mut Vec<HirStmt>,
     formal: &HashSet<&str>,
     use_counts: &HashMap<String, usize>,
+    globals: &HashSet<String>,
 ) -> bool {
     let mut changed = false;
     let before = stmts.len();
@@ -3986,6 +4001,7 @@ fn eliminate_pure_dead_in_stmts(
             lhs: HirLValue::Var(name),
             rhs,
         } if !formal.contains(name.as_str())
+            && !globals.contains(name.as_str())
             && use_counts.get(name.as_str()).copied().unwrap_or(0) == 0
             && expr_is_presentation_pure(rhs) =>
         {
@@ -4002,36 +4018,37 @@ fn eliminate_pure_dead_in_stmts(
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts);
+                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts, globals);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= eliminate_pure_dead_in_stmts(then_body, formal, use_counts);
-                changed |= eliminate_pure_dead_in_stmts(else_body, formal, use_counts);
+                changed |= eliminate_pure_dead_in_stmts(then_body, formal, use_counts, globals);
+                changed |= eliminate_pure_dead_in_stmts(else_body, formal, use_counts, globals);
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
                     if let HirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts);
+                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts, globals);
                     }
                 }
                 if let Some(upd) = update {
                     if let HirStmt::Block(b) = upd.as_mut() {
-                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts);
+                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts, globals);
                     }
                 }
-                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts);
+                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts, globals);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= eliminate_pure_dead_in_stmts(&mut case.body, formal, use_counts);
+                    changed |=
+                        eliminate_pure_dead_in_stmts(&mut case.body, formal, use_counts, globals);
                 }
-                changed |= eliminate_pure_dead_in_stmts(default, formal, use_counts);
+                changed |= eliminate_pure_dead_in_stmts(default, formal, use_counts, globals);
             }
             _ => {}
         }
@@ -4193,6 +4210,46 @@ mod tests {
             origin: Some(NirBindingOrigin::ParamIndex(0)),
             initializer: None,
         }
+    }
+
+    #[test]
+    fn hir_presentation_keeps_a_write_to_a_global_nothing_reads() {
+        // A store to a global is the observable effect, whether or not this
+        // function reads it back -- the dead-assignment pass reasons about
+        // values and would otherwise delete it from the emitted C.
+        let mut func = HirFunction {
+            name: "f".into(),
+            params: vec![],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("max_flush_loops".into()),
+                    rhs: HirExpr::Var("x".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("dead_local".into()),
+                    rhs: HirExpr::Var("x".into()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        let globals: HashSet<String> = ["max_flush_loops".to_string()].into_iter().collect();
+        apply_hir_presentation_with_globals(&mut func, &globals);
+        let assigns: Vec<&str> = func
+            .body
+            .iter()
+            .filter_map(|stmt| match stmt {
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(name),
+                    ..
+                } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(assigns.contains(&"max_flush_loops"), "{assigns:?}");
+        assert!(!assigns.contains(&"dead_local"), "{assigns:?}");
     }
 
     #[test]

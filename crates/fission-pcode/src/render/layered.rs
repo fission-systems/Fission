@@ -5,7 +5,7 @@
 
 use super::globals::is_c_identifier;
 use super::layer::{LayeredPseudocode, PrintProfile};
-use super::presentation::apply_hir_presentation;
+use super::presentation::apply_hir_presentation_with_globals;
 use super::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
     NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
@@ -27,7 +27,25 @@ pub(crate) fn render_layered_pseudocode(
 ) -> LayeredPseudocode {
     let nir = render_hir_function_with_profile(hir, options, PrintProfile::Nir);
     let mut hir_tree = hir.clone();
-    apply_hir_presentation(&mut hir_tree);
+    // Presentation must know which names are file-scope, or its
+    // dead-assignment pass deletes stores to globals -- the write is the
+    // observable effect even when this function never reads it back.
+    let mut global_names = options
+        .global_names
+        .values()
+        .filter(|name| is_c_identifier(name))
+        .cloned()
+        .collect::<HashSet<_>>();
+    // A global the binary carries no symbol for still prints under its
+    // address (`tmp_1a004`, `DAT_1a004`), and it is no less a global for
+    // being unnamed -- so recover the address from the spelling and keep it
+    // if the loader mapped it.
+    collect_address_named_globals(hir, options, &mut global_names);
+    global_names.retain(|name| {
+        !hir.params.iter().any(|binding| binding.name == *name)
+            && !hir.locals.iter().any(|binding| binding.name == *name)
+    });
+    apply_hir_presentation_with_globals(&mut hir_tree, &global_names);
     let hir_code = render_hir_function_with_profile(&hir_tree, options, PrintProfile::Hir);
     LayeredPseudocode { nir, hir: hir_code }
 }
@@ -634,6 +652,76 @@ fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>
         ));
     }
     format!("typedef struct fission_agg{size} {{\n{members}}} fission_agg{size};\n")
+}
+
+/// Names spelled as an address (`tmp_1a004`, `DAT_1a004`) that the loader
+/// mapped, added to the global set.
+///
+/// A stripped binary carries no symbol for most of its globals, so the
+/// printer falls back to the address. Presentation still has to know these
+/// name memory: without it, a store to one is deleted for having no reader.
+fn collect_address_named_globals(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+    globals: &mut HashSet<String>,
+) {
+    let mut consider = |name: &str| {
+        let Some(rest) = name
+            .strip_prefix("tmp_")
+            .or_else(|| name.strip_prefix("DAT_"))
+        else {
+            return;
+        };
+        if let Ok(address) = u64::from_str_radix(rest, 16)
+            && options.is_mapped_global(address)
+        {
+            globals.insert(name.to_string());
+        }
+    };
+    for binding in hir.locals.iter().chain(hir.params.iter()) {
+        consider(&binding.name);
+    }
+    collect_assigned_names(&hir.body, &mut consider);
+}
+
+fn collect_assigned_names(stmts: &[HirStmt], consider: &mut impl FnMut(&str)) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } => consider(name),
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_assigned_names(body, consider);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_assigned_names(then_body, consider);
+                collect_assigned_names(else_body, consider);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_assigned_names(std::slice::from_ref(init.as_ref()), consider);
+                }
+                if let Some(update) = update {
+                    collect_assigned_names(std::slice::from_ref(update.as_ref()), consider);
+                }
+                collect_assigned_names(body, consider);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_assigned_names(&case.body, consider);
+                }
+                collect_assigned_names(default, consider);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn collect_referenced_global_decls(
