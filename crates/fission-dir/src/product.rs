@@ -97,7 +97,48 @@ pub struct PcodeRegionSelection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PcodeNativeInput {
     pub name: String,
-    pub location: ObservedLocation,
+    /// Where the value comes from. A register or unique read has a static
+    /// location; a load does not -- its address is computed, so the region
+    /// carries the address *expression* and resolves it per sample.
+    pub origin: PcodeNativeInputOrigin,
+}
+
+impl PcodeNativeInput {
+    /// Width of the value this input supplies, in bytes.
+    #[must_use]
+    pub fn size(&self) -> u32 {
+        match &self.origin {
+            PcodeNativeInputOrigin::Location(location) => location.size,
+            PcodeNativeInputOrigin::Memory { size, .. } => *size,
+        }
+    }
+
+    /// The static location, when there is one.
+    #[must_use]
+    pub fn location(&self) -> Option<ObservedLocation> {
+        match &self.origin {
+            PcodeNativeInputOrigin::Location(location) => Some(*location),
+            PcodeNativeInputOrigin::Memory { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PcodeNativeInputOrigin {
+    Location(ObservedLocation),
+    /// A load. The value is whatever memory holds at `address` when the region
+    /// runs. Sound to treat as a free input because the region contains no
+    /// store -- stores are rejected, not modelled -- so nothing it does can
+    /// change that memory while it executes.
+    ///
+    /// Two loads share an input exactly when their address expressions are
+    /// structurally equal. Distinct expressions are *assumed* not to alias,
+    /// and that assumption is reported rather than hidden.
+    Memory {
+        space_id: u64,
+        address: Box<PcodeNativeExpr>,
+        size: u32,
+    },
 }
 
 /// Pure expression reconstructed from a supported P-code region.

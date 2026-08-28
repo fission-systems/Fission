@@ -19,9 +19,9 @@ use crate::product::{
     AssumptionKind, CallObservation, CandidateSemantics, CandidateSource, DirCandidate,
     DirCounterexample, DirReconstructor, DirVerifier, EvidenceStrength, ObservationScope,
     ObservedLocation, PcodeFoundation, PcodeNativeBinaryOp, PcodeNativeConvertOp, PcodeNativeExpr,
-    PcodeNativeInput, PcodeNativeRegion, PcodeNativeUnaryOp, PcodeRegionSelection,
-    UnresolvedEffect, UnresolvedEffectKind, ValidationAssumption, ValidationBudget,
-    ValidationEvidence, ValidationVerdict,
+    PcodeNativeInput, PcodeNativeInputOrigin, PcodeNativeRegion, PcodeNativeUnaryOp,
+    PcodeRegionSelection, UnresolvedEffect, UnresolvedEffectKind, ValidationAssumption,
+    ValidationBudget, ValidationEvidence, ValidationVerdict,
 };
 
 /// Reconstructs one explicitly selected P-code region.
@@ -432,6 +432,54 @@ fn reconstruct_op(
                 bits,
             })
         }
+        PcodeOpcode::Load => {
+            // input0 names the space, input1 is the address.
+            let Some(space) = op.inputs.first().filter(|vn| vn.is_constant) else {
+                return Err(PcodeNativeReconstructError::UnsupportedOpcode {
+                    op_index,
+                    opcode: op.opcode,
+                });
+            };
+            let space_id = u64::try_from(space.constant_val.max(0)).map_err(|_| {
+                PcodeNativeReconstructError::UnsupportedOpcode {
+                    op_index,
+                    opcode: op.opcode,
+                }
+            })?;
+            let address =
+                op.inputs
+                    .get(1)
+                    .ok_or(PcodeNativeReconstructError::UnsupportedOpcode {
+                        op_index,
+                        opcode: op.opcode,
+                    })?;
+            validate_width(op_index, address.size)?;
+            validate_width(op_index, output.size)?;
+            let address = value_for(address, op_index, value_space_ids, values, inputs)?;
+            let bits = bits_for_size(output.size);
+            // Two loads are the same value exactly when their addresses are the
+            // same expression. Distinct expressions may still alias; that is
+            // reported as an assumption rather than assumed away silently.
+            if let Some(index) = inputs.iter().position(|input| {
+                matches!(
+                    &input.origin,
+                    PcodeNativeInputOrigin::Memory { space_id: s, address: a, size }
+                        if *s == space_id && **a == address && *size == output.size
+                )
+            }) {
+                return Ok(PcodeNativeExpr::Input { index, bits });
+            }
+            let index = inputs.len();
+            inputs.push(PcodeNativeInput {
+                name: format!("mem_{index}"),
+                origin: PcodeNativeInputOrigin::Memory {
+                    space_id,
+                    address: Box::new(address),
+                    size: output.size,
+                },
+            });
+            Ok(PcodeNativeExpr::Input { index, bits })
+        }
         opcode => Err(PcodeNativeReconstructError::UnsupportedOpcode { op_index, opcode }),
     }
 }
@@ -508,14 +556,17 @@ fn value_for(
     if let Some(expression) = values.get(&location) {
         return Ok(expression.clone());
     }
-    if let Some(index) = inputs.iter().position(|input| input.location == location) {
+    if let Some(index) = inputs
+        .iter()
+        .position(|input| input.location() == Some(location))
+    {
         return Ok(PcodeNativeExpr::Input { index, bits });
     }
 
     let index = inputs.len();
     inputs.push(PcodeNativeInput {
         name: input_name(location),
-        location,
+        origin: PcodeNativeInputOrigin::Location(location),
     });
     Ok(PcodeNativeExpr::Input { index, bits })
 }
@@ -690,7 +741,7 @@ impl DirVerifier for PcodeObservationVerifier {
                     budget,
                     explored_paths: 1,
                     executed_traces,
-                    assumptions: value_space_assumptions(region),
+                    assumptions: region_assumptions(region),
                     unresolved_effects: Vec::new(),
                     counterexample: None,
                     detail: format!(
@@ -735,7 +786,7 @@ impl DirVerifier for PcodeObservationVerifier {
                     budget,
                     explored_paths: 1,
                     executed_traces,
-                    assumptions: value_space_assumptions(region),
+                    assumptions: region_assumptions(region),
                     unresolved_effects: vec![UnresolvedEffect {
                         kind: UnresolvedEffectKind::Other,
                         description: "solver returned unknown".to_string(),
@@ -753,7 +804,7 @@ impl DirVerifier for PcodeObservationVerifier {
                     budget,
                     explored_paths: 1,
                     executed_traces,
-                    assumptions: value_space_assumptions(region),
+                    assumptions: region_assumptions(region),
                     unresolved_effects: vec![UnresolvedEffect {
                         kind: UnresolvedEffectKind::Other,
                         description: detail.clone(),
@@ -809,7 +860,7 @@ fn validate_expression_contract(
             let input = inputs
                 .get(*index)
                 .ok_or_else(|| format!("input index {index} is out of bounds"))?;
-            let expected = bits_for_size(input.location.size);
+            let expected = bits_for_size(input.size());
             if *bits != expected {
                 return Err(format!(
                     "input {index} is declared as {bits} bits but its location is {expected} bits"
@@ -899,6 +950,42 @@ fn supports_scope(scope: &ObservationScope, output: ObservedLocation) -> bool {
         && !scope.traps
 }
 
+/// Everything the verifier had to take on trust for this region.
+fn region_assumptions(region: &PcodeNativeRegion) -> Vec<ValidationAssumption> {
+    let mut out = value_space_assumptions(region);
+    out.extend(memory_assumptions(region));
+    out
+}
+
+fn memory_assumptions(region: &PcodeNativeRegion) -> Vec<ValidationAssumption> {
+    let loads = region
+        .inputs
+        .iter()
+        .filter(|input| matches!(input.origin, PcodeNativeInputOrigin::Memory { .. }))
+        .count();
+    if loads == 0 {
+        return Vec::new();
+    }
+    let mut out = vec![ValidationAssumption {
+        kind: AssumptionKind::Memory,
+        description: format!(
+            "{loads} load(s) are treated as free inputs; sound only because the \
+             region performs no store, so nothing it does can change the memory \
+             it reads"
+        ),
+    }];
+    if loads > 1 {
+        out.push(ValidationAssumption {
+            kind: AssumptionKind::Memory,
+            description: format!(
+                "loads through {loads} distinct address expressions are assumed \
+                 not to alias; equal expressions already share one input"
+            ),
+        });
+    }
+    out
+}
+
 fn value_space_assumptions(region: &PcodeNativeRegion) -> Vec<ValidationAssumption> {
     vec![ValidationAssumption {
         kind: AssumptionKind::Memory,
@@ -938,8 +1025,32 @@ fn execute_foundation_region(
         .ok_or_else(|| "region no longer fits its foundation block".to_string())?;
 
     let mut state = MachineState::new();
+    // Static locations first: a load's address expression is built from
+    // values computed before it, so it can only reference inputs already
+    // seeded here or earlier in this same pass.
     for (input, value) in region.inputs.iter().zip(sample) {
-        write_location(&mut state, input.location, *value)?;
+        if let PcodeNativeInputOrigin::Location(location) = &input.origin {
+            write_location(&mut state, *location, *value)?;
+        }
+    }
+    for (input, value) in region.inputs.iter().zip(sample) {
+        if let PcodeNativeInputOrigin::Memory {
+            space_id,
+            address,
+            size,
+        } = &input.origin
+        {
+            let resolved = evaluate_expression(address, sample);
+            write_location(
+                &mut state,
+                ObservedLocation {
+                    space_id: *space_id,
+                    offset: resolved,
+                    size: *size,
+                },
+                *value,
+            )?;
+        }
     }
     let mut solver = Solver::new();
     let mut evaluator = Evaluator::new(&mut state, &mut solver);
@@ -992,7 +1103,7 @@ fn prove_symbolically(
     let mut solver = Solver::new();
     let mut symbolic_inputs = Vec::with_capacity(region.inputs.len());
     for input in &region.inputs {
-        let bits = bits_for_size(input.location.size);
+        let bits = bits_for_size(input.size());
         let expression = SymExpr::new_var(&input.name, bits);
         if let SymExpr::Var { id, .. } = expression {
             solver.nodes.insert(id, expression.clone());
@@ -1050,7 +1161,7 @@ fn lower_foundation_symbolically(
         .inputs
         .iter()
         .zip(inputs)
-        .map(|(input, expression)| (input.location, expression.clone()))
+        .filter_map(|(input, expression)| Some((input.location()?, expression.clone())))
         .collect::<HashMap<_, _>>();
     let mut values = HashMap::<ObservedLocation, SymExpr>::new();
 
@@ -1348,13 +1459,13 @@ fn deterministic_samples(inputs: &[PcodeNativeInput], limit: u64) -> Vec<Vec<u64
             &mut samples,
             inputs
                 .iter()
-                .map(|input| mask_value(pattern, bits_for_size(input.location.size)))
+                .map(|input| mask_value(pattern, bits_for_size(input.size())))
                 .collect(),
             limit,
         );
     }
     for (index, input) in inputs.iter().enumerate() {
-        let bits = bits_for_size(input.location.size);
+        let bits = bits_for_size(input.size());
         let max = mask_value(u64::MAX, bits);
         let sign = 1_u64 << (bits - 1);
         for value in [1, max, max.saturating_sub(1), sign, sign.saturating_sub(1)] {
@@ -1893,8 +2004,16 @@ mod tests {
         assert!(evidence.detail.contains("solver counterexample"));
     }
 
+    /// A load becomes a free input, and says so.
+    ///
+    /// The region contains no store -- stores are still rejected -- so nothing
+    /// it does can change the memory it reads, which is what makes treating a
+    /// load as an unconstrained input sound rather than an approximation. The
+    /// part that is *not* free is aliasing between distinct address
+    /// expressions, and that has to appear in the assumptions rather than be
+    /// taken silently.
     #[test]
-    fn rejects_memory_regions_instead_of_approximating_them() {
+    fn a_load_becomes_a_free_input_with_its_assumption_reported() {
         let output = varnode(1, 0, 4);
         let function = PcodeFunction {
             blocks: vec![PcodeBasicBlock {
@@ -1912,7 +2031,7 @@ mod tests {
             }],
         };
         let foundation = PcodeFoundation::new(0x1000, function).unwrap();
-        let error = PcodeNativeReconstructor::new(
+        let candidates = PcodeNativeReconstructor::new(
             PcodeRegionSelection {
                 block_index: 0,
                 first_op: 0,
@@ -1922,15 +2041,30 @@ mod tests {
             [1, 2],
         )
         .reconstruct(&foundation)
-        .unwrap_err();
+        .expect("a load region reconstructs");
 
-        assert!(matches!(
-            error,
-            PcodeNativeReconstructError::UnsupportedOpcode {
-                opcode: PcodeOpcode::Load,
-                ..
-            }
-        ));
+        let CandidateSemantics::PcodeNativeRegion(region) = &candidates[0].semantics else {
+            panic!("expected a native region");
+        };
+        let memory_inputs: Vec<_> = region
+            .inputs
+            .iter()
+            .filter(|input| matches!(input.origin, PcodeNativeInputOrigin::Memory { .. }))
+            .collect();
+        assert_eq!(memory_inputs.len(), 1, "{:?}", region.inputs);
+        // The address is the register the load reads through, not a constant.
+        let PcodeNativeInputOrigin::Memory { address, .. } = &memory_inputs[0].origin else {
+            unreachable!()
+        };
+        assert!(matches!(**address, PcodeNativeExpr::Input { .. }));
+
+        let assumptions = region_assumptions(region);
+        assert!(
+            assumptions
+                .iter()
+                .any(|a| a.kind == AssumptionKind::Memory && a.description.contains("no store")),
+            "the no-store premise must be stated: {assumptions:?}"
+        );
     }
 
     #[test]
