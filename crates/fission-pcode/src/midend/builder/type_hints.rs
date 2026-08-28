@@ -2,7 +2,7 @@ use super::*;
 use crate::midend::abstract_location::AbstractStackSlot;
 use crate::midend::support::pcode_util::InputMetatype;
 use fission_midend_core::util::var_rename::{
-    rename_vars_in_stmts, rewrite_field_access_names_in_stmts,
+    rename_var_in_expr, rename_vars_in_stmts, rewrite_field_access_names_in_stmts,
 };
 use tracing::trace_span;
 
@@ -219,6 +219,16 @@ fn apply_function_name_hints(
 
     if !renames.is_empty() {
         rename_vars_in_stmts(&mut func.body, &renames);
+        // A local's initializer is printed as part of its declaration and is
+        // not reached by a walk of the body. Renaming a parameter without it
+        // left the old spelling in the one place the new name is never
+        // declared: `int *slot_3c = (uint *)(param_1 + 60);` in a function
+        // whose parameter is now `pImageBase`.
+        for binding in &mut func.locals {
+            if let Some(initializer) = binding.initializer.as_mut() {
+                rename_var_in_expr(initializer, &renames);
+            }
+        }
     }
 
     for binding in &mut func.params {
