@@ -118,12 +118,45 @@ impl<'a> PreviewBuilder<'a> {
         call_block_idx: usize,
         call_op_idx: usize,
     ) -> bool {
+        // Every argument register is caller-saved, so a call anywhere on the
+        // path from the definition to this call site destroys the value. The
+        // intermediate-block sweep below is Ghidra's; it misses the two ends
+        // of the path, and a call sits at one of them more often than in the
+        // middle -- a block that *ends* in a call, with the next block
+        // starting at the call site, is the ordinary shape of two calls in a
+        // row. Missing it let a previous call's staged arguments be recovered
+        // as this call's: `setutent()`, which takes none, came out as
+        // `setutent(14, __act, 0, xVar25)` -- the preceding `sigaction`'s.
+        let clobbered_in = |block_idx: usize, range: std::ops::Range<usize>| {
+            self.pcode.blocks[block_idx].ops[range]
+                .iter()
+                .any(|op| op.opcode.is_call())
+        };
         if def_site.block_idx == call_block_idx {
-            return def_site.op_idx < call_op_idx;
+            return def_site.op_idx < call_op_idx
+                && (self.is_callee_saved_register_varnode(vn)
+                    || !clobbered_in(
+                        call_block_idx,
+                        def_site.op_idx + 1
+                            ..call_op_idx.min(self.pcode.blocks[call_block_idx].ops.len()),
+                    ));
         }
 
         if !self.dom_tree.dominates(def_site.block_idx, call_block_idx) {
             return false;
+        }
+
+        if !self.is_callee_saved_register_varnode(vn) {
+            let def_block_len = self.pcode.blocks[def_site.block_idx].ops.len();
+            if clobbered_in(
+                def_site.block_idx,
+                (def_site.op_idx + 1).min(def_block_len)..def_block_len,
+            ) || clobbered_in(
+                call_block_idx,
+                0..call_op_idx.min(self.pcode.blocks[call_block_idx].ops.len()),
+            ) {
+                return false;
+            }
         }
 
         // According to Ghidra 11.4.2 AncestorRealistic:
@@ -1194,6 +1227,16 @@ impl<'a> PreviewBuilder<'a> {
         for pred_idx in pred_indices {
             let pred = self.pcode_block(*pred_idx);
             let end = self.block_terminator_index(pred).unwrap_or(pred.ops.len());
+            // A predecessor that ends in a call staged those registers for
+            // *that* call, and every argument register is caller-saved, so
+            // none of them reach this call site. Reading them anyway hands a
+            // previous call's arguments to this one: `setutent()`, which takes
+            // none, came out carrying the preceding `sigaction`'s.
+            if pred.ops.get(end).is_some_and(|op| op.opcode.is_call())
+                || pred.ops[..end].iter().any(|op| op.opcode.is_call())
+            {
+                continue;
+            }
             predecessor_carriers.extend(pred.ops[..end].iter().filter_map(|op| op.output.as_ref()));
         }
         abi.assign_carriers(predecessor_carriers)

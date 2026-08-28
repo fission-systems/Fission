@@ -263,6 +263,89 @@ fn x86_32_stack_pushes_become_call_arguments() {
 }
 
 #[test]
+fn x86_64_argument_registers_do_not_survive_an_intervening_call() {
+    // Two calls in a row, in the ordinary shape: a block that ends in the
+    // first call, and the next block starting at the second. Every argument
+    // register is caller-saved, so the registers the first call's arguments
+    // were staged in hold nothing by the time the second runs -- recovering
+    // them anyway hands one call's arguments to the other, which is how
+    // `setutent()` (no parameters) came out as `setutent(14, act, 0, x)`.
+    let mut options = preview_options_for(CallingConvention::SystemVAmd64);
+    options.format = "ELF64".to_string();
+    options.pointer_size = 8;
+    options.is_64bit = true;
+
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x2e90,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x2e90,
+                        output: Some(reg(0x38, 8)),
+                        inputs: vec![cst(14, 8)],
+                        asm_mnemonic: Some("mov edi,0xe".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x2e95,
+                        output: Some(reg(0x30, 8)),
+                        inputs: vec![cst(0x40, 8)],
+                        asm_mnemonic: Some("mov esi,0x40".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x2e9f,
+                        output: None,
+                        inputs: vec![cst(0x2330, 8)],
+                        asm_mnemonic: Some("call 0x2330".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x2ea4,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x2ea4,
+                        output: None,
+                        inputs: vec![cst(0x25d0, 8)],
+                        asm_mnemonic: Some("call 0x25d0".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x2ea9,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: Some("ret".to_string()),
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "caller", 0x2e90, &options).expect("preview render");
+    assert!(
+        code.contains("sub_2330(14"),
+        "first call keeps its own args: {code}"
+    );
+    assert!(
+        code.contains("sub_25d0()"),
+        "second call must not inherit them: {code}"
+    );
+}
+
+#[test]
 fn x86_64_call_retaddr_push_is_not_a_stack_argument() {
     // Verbatim shape of a real x86-64 `call` (raw p-code dump of coreutils
     // `touch`): `RSP = RSP - 8; STORE ram[RSP], <next instruction>; CALL
