@@ -36,15 +36,19 @@ pub(crate) fn render_layered_pseudocode(
         .filter(|name| is_c_identifier(name))
         .cloned()
         .collect::<HashSet<_>>();
-    // A global the binary carries no symbol for still prints under its
-    // address (`tmp_1a004`, `DAT_1a004`), and it is no less a global for
-    // being unnamed -- so recover the address from the spelling and keep it
-    // if the loader mapped it.
-    collect_address_named_globals(hir, options, &mut global_names);
+    // A symbol name this function also declares as a param or local is that
+    // binding, not the global it shadows.
     global_names.retain(|name| {
         !hir.params.iter().any(|binding| binding.name == *name)
             && !hir.locals.iter().any(|binding| binding.name == *name)
     });
+    // A global the binary carries no symbol for still prints under its address
+    // (`tmp_1a004`, `DAT_1a004`), and it is no less a global for being
+    // unnamed. Added after the shadowing filter, not before: the builder
+    // declares these among the locals, and dropping them for that would put
+    // the write back in reach of the dead-assignment pass -- which is the
+    // whole reason the set exists.
+    collect_address_named_globals(hir, options, &mut global_names);
     apply_hir_presentation_with_globals(&mut hir_tree, &global_names);
     let hir_code = render_hir_function_with_profile(&hir_tree, options, PrintProfile::Hir);
     LayeredPseudocode { nir, hir: hir_code }
@@ -1220,6 +1224,39 @@ fn merge_global_decl_type(decls: &mut BTreeMap<String, NirType>, name: &str, ty:
 mod global_decl_tests {
     use super::*;
     use crate::midend::{CallingConvention, StructuringEngineKind};
+
+    #[test]
+    fn layered_keeps_a_write_to_an_address_named_global_declared_as_a_local() {
+        // The builder declares an unnamed global among the locals -- it has no
+        // symbol to name it by -- so filtering the global set against `locals`
+        // (right for deciding what to *declare*, since a local shadows a
+        // global) put the write back in reach of presentation's
+        // dead-assignment pass: it reached NIR and vanished from the HIR
+        // surface that ships. 0x2000 is inside this fixture's mapped section.
+        let options = preview_options_with_global("unused");
+        let int32 = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let hir = HirFunction {
+            name: "f".to_string(),
+            locals: vec![NirBinding {
+                name: "tmp_2000".to_string(),
+                ty: int32.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("tmp_2000".to_string()),
+                rhs: HirExpr::Const(1, int32),
+            }],
+            ..HirFunction::default()
+        };
+        let layered = render_layered_pseudocode(&hir, &options);
+        assert!(layered.nir.contains("tmp_2000 = 1;"), "{}", layered.nir);
+        assert!(layered.hir.contains("tmp_2000 = 1;"), "{}", layered.hir);
+    }
 
     fn preview_options_with_global(name: &str) -> MlilPreviewOptions {
         let mut global_names = HashMap::new();
