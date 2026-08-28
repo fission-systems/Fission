@@ -94,6 +94,14 @@ pub(crate) fn assemble(renders: &[String]) -> String {
                 }
                 continue;
             }
+            // A function's own address reaches the printer as a name, and the
+            // render declares it the way it declares any other address-named
+            // global. The unit defines that name as a function, so the data
+            // declaration is not just redundant -- it is a different kind of
+            // symbol under the same name, which does not compile.
+            if global_name(decl).is_some_and(|name| defined.contains(name)) {
+                continue;
+            }
             if seen.insert(decl) {
                 globals.push(decl);
             }
@@ -197,6 +205,11 @@ fn typedef_name(decl: &str) -> Option<&str> {
     identifier_before(rest.trim_end().strip_suffix(';')?)
 }
 
+/// The name a `<type> <name>;` data declaration declares.
+fn global_name(decl: &str) -> Option<&str> {
+    identifier_before(decl.trim_end().strip_suffix(';')?)
+}
+
 /// The name a function definition line declares.
 fn declared_function_name(line: &str) -> Option<&str> {
     let open = line.find('(')?;
@@ -260,6 +273,17 @@ mod tests {
         ]);
         assert!(unit.contains("typedef unsigned long long FILE;"), "{unit}");
         assert!(!unit.contains("typedef long long FILE;"), "{unit}");
+    }
+
+    #[test]
+    fn unit_drops_a_data_declaration_naming_a_function_it_defines() {
+        let unit = assemble(&[
+            "unsigned long long handler;\n\nvoid uses(void)\n{\n    take(handler);\n}\n"
+                .to_string(),
+            "void handler(void)\n{\n    return;\n}\n".to_string(),
+        ]);
+        assert!(!unit.contains("unsigned long long handler;"), "{unit}");
+        assert!(unit.contains("void handler(void);"), "{unit}");
     }
 
     #[test]
