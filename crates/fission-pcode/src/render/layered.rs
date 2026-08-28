@@ -115,10 +115,18 @@ fn render_hir_function_with_profile(
     profile: PrintProfile,
 ) -> String {
     let decls = collect_referenced_global_decls(hir, options);
-    let aggregate_typedefs = collect_referenced_aggregate_typedefs(hir, decls.values());
-    let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(hir);
+    // Address-spelled globals could have acquired a rescue Temp binding in an
+    // older/alternate lowering path. Once the mapped address and a referenced
+    // global declaration prove the storage class, do not print a shadowing
+    // automatic declaration for the same object.
+    let mut printable = hir.clone();
+    printable
+        .locals
+        .retain(|binding| !decls.contains_key(&binding.name));
+    let aggregate_typedefs = collect_referenced_aggregate_typedefs(&printable, decls.values());
+    let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(&printable);
     if decls.is_empty() && aggregate_typedefs.is_empty() && opaque_pcodeop_stubs.is_empty() {
-        return print_hir_function_with_profile(hir, Some(&options.global_names), profile);
+        return print_hir_function_with_profile(&printable, Some(&options.global_names), profile);
     }
 
     let mut rendered = String::new();
@@ -137,7 +145,7 @@ fn render_hir_function_with_profile(
     }
     rendered.push('\n');
     rendered.push_str(&print_hir_function_with_profile(
-        hir,
+        &printable,
         Some(&options.global_names),
         profile,
     ));
@@ -732,7 +740,7 @@ fn collect_referenced_global_decls(
     hir: &HirFunction,
     options: &MlilPreviewOptions,
 ) -> BTreeMap<String, NirType> {
-    let global_names = options
+    let mut global_names = options
         .global_names
         .values()
         .filter(|name| is_c_identifier(name))
@@ -743,6 +751,11 @@ fn collect_referenced_global_decls(
         })
         .cloned()
         .collect::<HashSet<_>>();
+    // Direct rust-sleigh RAM outputs in stripped binaries have no symbol and
+    // therefore use their mapped address as the stable name. They are still
+    // file-scope objects and need the same declaration treatment as named
+    // loader globals. Add them after the ordinary local-shadowing filter.
+    collect_address_named_globals(hir, options, &mut global_names);
     if global_names.is_empty() {
         return BTreeMap::new();
     }
@@ -1256,6 +1269,16 @@ mod global_decl_tests {
         let layered = render_layered_pseudocode(&hir, &options);
         assert!(layered.nir.contains("tmp_2000 = 1;"), "{}", layered.nir);
         assert!(layered.hir.contains("tmp_2000 = 1;"), "{}", layered.hir);
+        assert!(
+            layered.nir.starts_with("int tmp_2000;\n"),
+            "the mapped address must be declared at file scope:\n{}",
+            layered.nir
+        );
+        assert!(
+            !layered.nir.contains("    int tmp_2000;"),
+            "the rescue binding must not shadow mapped RAM:\n{}",
+            layered.nir
+        );
     }
 
     fn preview_options_with_global(name: &str) -> MlilPreviewOptions {

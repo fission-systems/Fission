@@ -938,12 +938,11 @@ impl<'a> PreviewBuilder<'a> {
         // it back, so it is decided before every suppression rule below --
         // all of which reason about a value's consumers.
         if self.output_is_mapped_global_memory(output) {
-            // Deliberately *not* `ensure_live_register_binding`: that registers
-            // the name as a `Temp` local, and the dead-assignment pass removes
-            // every assignment to a temp-like binding that nothing reads --
-            // which is exactly the shape of a global written and never read
-            // back. The `Store` path resolves its global lvalues the same way,
-            // as a bare name the renderer declares alongside the body.
+            // Keep the memory identity in the IR. A bare `Var(name)` reaches
+            // `rescue_undeclared_bindings`, which correctly makes ordinary
+            // undeclared names Temp locals but thereby turns this global write
+            // into an automatic local. `AddressOfGlobal` is the existing
+            // provenance-bearing representation used by the Store path.
             let name = self
                 .options
                 .global_names
@@ -952,7 +951,10 @@ impl<'a> PreviewBuilder<'a> {
                 .unwrap_or_else(|| format!("tmp_{:x}", output.offset));
             if let Some(rhs) = self.try_lower_materialized_output_rhs(block_addr, op)? {
                 return Ok(Some(PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var(name),
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::AddressOfGlobal(name)),
+                        ty: type_from_size(output.size, false),
+                    },
                     rhs,
                 }));
             }

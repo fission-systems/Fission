@@ -16,6 +16,50 @@ fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
 }
 
 #[test]
+fn materialized_mapped_ram_output_keeps_global_lvalue_provenance() {
+    let runtime_marker = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x80, 4);
+    let mapped_ram = register(UNIQUE_SPACE_ID, 0x1400_1800, 4);
+    let marker = op(
+        0,
+        PcodeOpcode::Copy,
+        Some(runtime_marker),
+        vec![Varnode::constant(0, 4)],
+    );
+    let write = op(
+        1,
+        PcodeOpcode::Copy,
+        Some(mapped_ram),
+        vec![Varnode::constant(7, 4)],
+    );
+    let pcode = pcode_function(vec![block(vec![marker, write.clone()])]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options
+        .global_names
+        .insert(0x1400_1800, "counter".to_string());
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let stmt = builder
+        .maybe_materialize_output_stmt(0x1000, &pcode.blocks[0], 1, None, &write)
+        .expect("mapped RAM output should lower")
+        .expect("mapped RAM write is observable");
+
+    assert!(
+        matches!(
+            stmt,
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ref ptr, .. },
+                ..
+            } if matches!(ptr.as_ref(), PreHirExpr::AddressOfGlobal(name) if name == "counter")
+        ),
+        "mapped RAM must remain a provenance-bearing memory lvalue: {stmt:?}"
+    );
+    assert!(
+        !builder.used_param_local_names.contains("counter"),
+        "a global must not be registered as a function local"
+    );
+}
+
+#[test]
 fn materialized_rhs_reentry_through_self_predecessor_fails_closed() {
     let eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
     let seed = op(1, PcodeOpcode::Copy, Some(eax.clone()), vec![constant(0)]);
