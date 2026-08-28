@@ -1,6 +1,6 @@
 [package]
 name = "fission-midend-prehir"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "PreHIR midend substrate: the mutable pre-structuring AST, action pipeline, and value-set analysis used before HIR materialization"
