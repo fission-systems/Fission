@@ -6,6 +6,11 @@ use std::path::PathBuf;
 #[command(group(
     clap::ArgGroup::new("decomp_target")
         .required(true)
+        // `--project` names a target (every discovered function) and also
+        // changes the shape of the output, so it has to be combinable with
+        // `--addresses-file`, which names a different set of functions to
+        // assemble.
+        .multiple(true)
         .args(["addr", "all", "addresses_file", "project"])
 ))]
 #[command(
