@@ -12,14 +12,26 @@
 
 # Fission
 
-Fission is a Rust-native reverse-engineering and decompilation workspace. It
-loads binaries, lifts instruction semantics through Ghidra-style Sleigh
-specifications, and owns everything after that — its own IR, structuring,
-type recovery, rendering, and quality gates — in Rust.
+**Fission is working toward taking a compiled binary back to a project you can
+build and run again.** Not a listing to read — a tree that compiles, links, and
+behaves the way the original did.
 
-The goal is not to decode instructions. It is to produce output that is
-mechanically traceable, semantically defensible, and readable enough to be
-worth reading.
+That is the target, and it is not reached. Decompiling one binary's 68
+functions and compiling them as a single unit currently stops on 20 errors,
+every one of them a missing or duplicated *declaration* rather than a wrong
+statement. Where the work stands against each axis is below.
+
+Fission is a Rust-native reverse-engineering workspace. It loads binaries,
+lifts instruction semantics through Ghidra-style Sleigh specifications, and
+owns everything after that — its own IR, structuring, type recovery,
+rendering, and quality gates — in Rust.
+
+Restoration sets the standards, and they are stricter than readability's.
+Output that reads well but drops a write to a global is fine to skim and
+useless to rebuild from, so correctness is checked by execution rather than by
+eye: `fission-dir` evaluates the decompiled body, runs the same machine code
+under `fission-emulator`, and compares. What it cannot prove it reports as an
+assumption instead of hiding.
 
 ## Where it stands
 
