@@ -23,34 +23,60 @@ worth reading.
 
 ## Where it stands
 
-Measured on [DecBench](https://decbench.com)'s sample set: 224 binaries,
-250 functions, compared per file. Not aggregate totals — every claim below
-survived a per-function diff.
+Measured on [DecBench](https://decbench.com)'s sample set — 224 binaries, 250
+functions, scored by the benchmark's own metrics. The published row is what the
+maintainer's ingest produced; the local column is our harness, whose denominators
+are smaller because it cannot rebuild a source CFG for every row.
 
-| | v0.1.9 | v0.2.1 |
-|---|---|---|
-| Explicit `goto`s (NIR) | 2,089 | **621** (−70.3%) |
-| Explicit `goto`s (HIR) | 1,983 | **621** (−68.7%) |
-| Functions decompiled | 250/250 | 250/250 |
-| Binaries | 224/224 | 224/224 |
+| | v0.1.9 | v0.2.1 | v0.2.3 (local) |
+|---|---|---|---|
+| Structure (GED), exact matches | — | 51 / 246 | **63–64** / 233 |
+| Types, exact matches (code-only parser) | — | 9 / 235 | 8 / 222 |
+| Union — perfect on ≥1 metric | — | 56 / 250 | **66–67** / 250 |
+| Functions decompiled | 250/250 | 250/250 | 250/250 |
 
-On the 204 functions Fission, Ghidra, and angr all decompile:
+DecBench scores three axes and ranks by their union. **Structure** is a graph
+edit distance against the CFG the compiler was given; **types** compares
+recovered variables against DWARF; **byte_match** recompiles the output and
+diffs the assembly. All three count only *exact* matches — a near miss scores
+the same as a miss.
 
-| Decompiler | `goto`s |
-|---|---|
-| angr 9.2 | 420 |
-| **Fission** | **597** |
-| Ghidra 12.0 | 691 |
+### What the metrics do not see
 
-Control flow is one axis, and not the one that decides whether output is
-*correct*. Fission also runs an execution differential: evaluate the
-decompiled body, run the same machine code under `fission-emulator`, and
-compare. It catches semantics-preserving claims that are not — including a
-deliberately injected "negate every `if` condition" sabotage.
+A benchmark that scores CFG shape and declared types is blind to whether the
+emitted C *does what the binary does*. v0.2.3 fixed a class of defect found by
+diffing recompiled assembly rather than by any metric moving:
 
-See [`docs/changelog/v0.2.0.md`](docs/changelog/v0.2.0.md) for how the
-structuring numbers were reached, including the approaches that were
-measured and rejected.
+- writes to absolute-addressed globals were dropped (1 of 46 reached the output;
+  now 30, and it had been that way since v0.1.9)
+- every call site carried the return address as a trailing argument, on 66 of
+  250 rows
+- argument registers were read across an intervening call, handing one call's
+  arguments to the next
+- a receiver was materialized for functions that return nothing (`rax = free(p)`)
+
+None of these moved a score by more than a row. All of them were wrong.
+
+### On `goto` counts
+
+Earlier releases reported `goto` density as a headline number, and v0.2.0 drove
+it from 2,089 to 621 on this corpus. That framing is retired.
+
+The structure metric is purely topological: it costs a matched node pair
+`|out-degree difference| + |in-degree difference|`, and nothing else — statement
+text, names, casts and types are invisible to it. `goto` count is not part of
+that, and selecting between structuring candidates on it does not help: forcing
+every one of the six alternative drivers onto the near-miss functions yields
+**zero** additional exact matches. v0.2.3 optimizes structural accuracy instead,
+and the `goto` count rose to 1,087 as a consequence.
+
+Fission also runs an execution differential: evaluate the decompiled body, run
+the same machine code under `fission-emulator`, and compare. It catches
+semantics-preserving claims that are not — including a deliberately injected
+"negate every `if` condition" sabotage.
+
+See [`docs/changelog/`](docs/changelog/) for how each number was reached,
+including the approaches that were measured and rejected.
 
 ## Quick start
 
@@ -131,6 +157,12 @@ wins after it. `goto` count must strictly drop; destroying a recovered
 `switch` or leaving empty `if` shells is a hard veto; nesting depth, guard
 formula size, and statement count are budgets scaled by how many jumps the
 candidate actually removed.
+
+That admission rule is known to be optimizing the wrong thing. Forcing all six
+drivers on the near-miss functions yields zero additional exact matches, and
+`goto` count does not track the structural distance the benchmark scores. The
+open work is finding a signal that does — one computable without the source CFG,
+which is the constraint that makes it hard.
 
 ## Where to look next
 
