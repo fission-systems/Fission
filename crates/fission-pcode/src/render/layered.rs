@@ -690,10 +690,19 @@ fn collect_address_named_globals(
             globals.insert(name.to_string());
         }
     };
-    for binding in hir.locals.iter().chain(hir.params.iter()) {
+    // Locals only: a *parameter* is never file-scope storage, whatever it is
+    // called. Collecting one would put its name in the declaration set, and
+    // the caller's `retain` only strips shadowing *locals* -- so the function
+    // would carry both a file-scope declaration and a parameter of that name.
+    for binding in &hir.locals {
         consider(&binding.name);
     }
     collect_assigned_names(&hir.body, &mut consider);
+    // An assignment can name a parameter, so re-check after the body scan
+    // rather than trusting the loop above to be the only source.
+    for binding in &hir.params {
+        globals.remove(&binding.name);
+    }
 }
 
 fn collect_assigned_names(stmts: &[HirStmt], consider: &mut impl FnMut(&str)) {
@@ -1279,6 +1288,41 @@ mod global_decl_tests {
             "the rescue binding must not shadow mapped RAM:\n{}",
             layered.nir
         );
+    }
+
+    #[test]
+    fn an_address_named_parameter_is_not_declared_at_file_scope() {
+        // A parameter is never file-scope storage, whatever it is called.
+        // Declaring one as a global would leave the function carrying both a
+        // file-scope object and a parameter of that name, since the render
+        // step only strips shadowing *locals*.
+        let options = preview_options_with_global("unused");
+        let int32 = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let hir = HirFunction {
+            name: "f".to_string(),
+            params: vec![NirBinding {
+                name: "tmp_2000".to_string(),
+                ty: int32.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("tmp_2000".to_string()),
+                rhs: HirExpr::Const(1, int32),
+            }],
+            ..HirFunction::default()
+        };
+        let layered = render_layered_pseudocode(&hir, &options);
+        assert!(
+            !layered.nir.starts_with("int tmp_2000;"),
+            "a parameter must not gain a file-scope declaration:\n{}",
+            layered.nir
+        );
+        assert!(layered.nir.contains("tmp_2000 = 1;"), "{}", layered.nir);
     }
 
     fn preview_options_with_global(name: &str) -> MlilPreviewOptions {
