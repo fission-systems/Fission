@@ -601,7 +601,10 @@ fn collect_raw_call_arities(stmts: &[fission_pcode::PreHirStmt], out: &mut HashM
                 visit_expr(then_expr, out);
                 visit_expr(else_expr, out);
             }
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => {}
         }
     }
 

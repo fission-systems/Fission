@@ -203,7 +203,10 @@ fn contains_call_expr(expr: &PreHirExpr) -> bool {
                 || contains_call_expr(then_expr)
                 || contains_call_expr(else_expr)
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
@@ -358,7 +361,10 @@ fn expr_contains_popcount_call(expr: &PreHirExpr) -> bool {
                 || expr_contains_popcount_call(then_expr)
                 || expr_contains_popcount_call(else_expr)
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
@@ -644,7 +650,10 @@ fn lvalue_has_memory_surface_interest(lhs: &PreHirLValue) -> bool {
 
 fn expr_has_memory_surface_interest(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => false,
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => false,
         PreHirExpr::Load { ptr, .. } => {
             let _ = ptr;
             true
@@ -680,7 +689,9 @@ fn expr_has_memory_surface_interest(expr: &PreHirExpr) -> bool {
 fn expr_contains_const(expr: &PreHirExpr) -> bool {
     match expr {
         PreHirExpr::Const(_, _) => true,
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => false,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+            false
+        }
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -2107,7 +2118,10 @@ pub fn normalize_expr(expr: &mut PreHirExpr) {
             normalize_expr(then_expr);
             normalize_expr(else_expr);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 
     loop {

@@ -1149,7 +1149,9 @@ fn apply_tail_label_loop_recovery_in_stmts(
 /// Collect all variable names mentioned in an expression.
 fn expr_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             out.insert(name.clone());
         }
         PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => expr_vars(expr, out),
@@ -1697,7 +1699,9 @@ fn count_var_uses_in_lvalue(lhs: &PreHirLValue, name: &str) -> usize {
 
 fn count_var_uses(expr: &PreHirExpr, name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(var) | PreHirExpr::AddressOfGlobal(var) => usize::from(var == name),
+        PreHirExpr::Var(var)
+        | PreHirExpr::AddressOfGlobal(var)
+        | PreHirExpr::AddressOfLocal(var) => usize::from(var == name),
         PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
@@ -1898,7 +1902,9 @@ fn is_cursor_increment_by_one(stmt: &PreHirStmt, cursor: &str) -> bool {
 fn rewrite_cursor_expr_to_index(expr: &mut PreHirExpr, cursor: &str, index_name: &str) -> bool {
     match expr {
         PreHirExpr::Var(name) => name != cursor,
-        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+        PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => true,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::AggregateCopy { src: expr, .. } => {

@@ -87,7 +87,9 @@ fn rename_var_in_lvalue(lvalue: &mut PreHirLValue, renames: &[(String, String)])
 
 fn rename_var_in_expr(expr: &mut PreHirExpr, renames: &[(String, String)]) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => rename_var_name(name, renames),
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => rename_var_name(name, renames),
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -283,7 +285,10 @@ fn rewrite_field_access_names_in_expr(
     renames: &std::collections::HashMap<(String, u32), String>,
 ) {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }

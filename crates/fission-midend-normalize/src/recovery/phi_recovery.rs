@@ -41,13 +41,16 @@ use fission_midend_core::wave_stats;
 pub fn copy_propagation_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     let loop_preservation_vars = collect_loop_preservation_vars(&func.body);
+    // A local whose address is taken is reached by more than its name, and
+    // this pass only sees names -- see `collect_address_taken_locals`.
+    let address_taken = crate::analysis::defuse::collect_address_taken_locals(&func.body);
 
     // --- Phase 1: Standard Copy Propagation ---
     let preserved_temps = preserved_materialization_names(&func.locals);
     let temp_names: HashSet<&str> = func
         .locals
         .iter()
-        .filter(|b| b.is_temp_like())
+        .filter(|b| b.is_temp_like() && !address_taken.contains(&b.name))
         .map(|b| b.name.as_str())
         .collect();
 
@@ -106,6 +109,7 @@ pub fn copy_propagation_pass(func: &mut PreHirFunction) -> bool {
                 NirType::Int { .. } | NirType::Float { .. } | NirType::Bool
             ) && !should_skip_copyprop_for_preserved_name(&b.name, &preserved_temps)
                 && !loop_preservation_vars.contains(b.name.as_str())
+                && !address_taken.contains(&b.name)
         })
         .map(|b| b.name.as_str())
         .collect();
@@ -494,7 +498,9 @@ fn collect_predicate_vars_in_stmt<'a>(stmt: &'a PreHirStmt, out: &mut HashSet<&'
 
 fn collect_vars_in_expr<'a>(expr: &'a PreHirExpr, out: &mut HashSet<&'a str>) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             out.insert(name.as_str());
         }
         PreHirExpr::Const(_, _) => {}
@@ -788,7 +794,9 @@ fn substitute_copies_expr(
     changed: &mut bool,
 ) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             if let Some(src) = copy_map.get(name.as_str()) {
                 *name = src.clone();
                 *changed = true;
@@ -980,7 +988,9 @@ fn last_assigns(stmts: &[PreHirStmt], temp_names: &HashSet<String>) -> Vec<(Stri
 fn type_repr(expr: &PreHirExpr) -> String {
     match expr {
         PreHirExpr::Const(_, ty) | PreHirExpr::Cast { ty, .. } => format!("{ty:?}"),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => "var".to_string(),
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+            "var".to_string()
+        }
         PreHirExpr::Binary { ty, .. } | PreHirExpr::Unary { ty, .. } => format!("{ty:?}"),
         PreHirExpr::Load { ty, .. } => format!("load_{ty:?}"),
         _ => "other".to_string(),
@@ -1060,7 +1070,9 @@ fn count_uses_in_stmt_flat(stmt: &PreHirStmt, name: &str) -> usize {
 
 fn count_var_in_expr(expr: &PreHirExpr, name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(n) | PreHirExpr::AddressOfGlobal(n) => usize::from(n.as_str() == name),
+        PreHirExpr::Var(n) | PreHirExpr::AddressOfGlobal(n) | PreHirExpr::AddressOfLocal(n) => {
+            usize::from(n.as_str() == name)
+        }
         PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
@@ -1238,7 +1250,9 @@ fn apply_join_renames_expr(
     changed: &mut bool,
 ) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             if let Some(canonical) = rename_map.get(name.as_str()) {
                 *name = canonical.clone();
                 *changed = true;

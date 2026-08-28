@@ -16,6 +16,7 @@ pub fn pure_expr_key(expr: &PreHirExpr) -> Option<PureExprKey> {
         PreHirExpr::Const(v, ty) => Some(format!("K({},{})", v, type_key(ty))),
         PreHirExpr::Var(name) => Some(format!("V({})", name)),
         PreHirExpr::AddressOfGlobal(name) => Some(format!("A({})", name)),
+        PreHirExpr::AddressOfLocal(name) => Some(format!("L({})", name)),
         PreHirExpr::Cast { ty, expr: inner } => {
             let ik = pure_expr_key(inner)?;
             Some(format!("C({},{})", type_key(ty), ik))

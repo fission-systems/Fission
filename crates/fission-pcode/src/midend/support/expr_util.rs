@@ -2,7 +2,9 @@ use super::*;
 
 pub(crate) fn expr_type(expr: &PreHirExpr) -> NirType {
     match expr {
-        PreHirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+            NirType::Ptr(Box::new(NirType::Unknown))
+        }
         PreHirExpr::Var(_) => NirType::Unknown,
         PreHirExpr::Const(_, ty)
         | PreHirExpr::Unary { ty, .. }
@@ -73,7 +75,10 @@ pub(crate) fn expr_has_side_effecting_call(expr: &PreHirExpr) -> bool {
                 || expr_has_side_effecting_call(then_expr)
                 || expr_has_side_effecting_call(else_expr)
         }
-        PreHirExpr::Var(_, ..) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, ..) => false,
+        PreHirExpr::Var(_, ..)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, ..) => false,
     }
 }
 

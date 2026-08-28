@@ -47,7 +47,10 @@ impl<'a> PreviewBuilder<'a> {
 
     fn no_consumer_flag_rhs_is_pure(expr: &PreHirExpr) -> bool {
         match expr {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => true,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(..) => true,
             PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
                 Self::no_consumer_flag_rhs_is_pure(expr)
             }
@@ -174,7 +177,7 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &PreHirExpr,
     ) -> NoConsumerSuppressionRhsKind {
         match rhs {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
                 NoConsumerSuppressionRhsKind::Var
             }
             PreHirExpr::Const(..) => NoConsumerSuppressionRhsKind::Const,

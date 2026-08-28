@@ -481,7 +481,10 @@ fn rewrite_call_targets_expr(expr: &mut PreHirExpr, rewrites: &HashMap<String, S
             changed |= rewrite_call_targets_expr(then_expr, rewrites);
             changed |= rewrite_call_targets_expr(else_expr, rewrites);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     changed
 }
@@ -701,7 +704,10 @@ fn collect_site_sensitive_format_evidence_expr(
             collect_site_sensitive_format_evidence_expr(func, then_expr, state, out);
             collect_site_sensitive_format_evidence_expr(func, else_expr, state, out);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1115,7 +1121,10 @@ fn expr_uses_pointer_base(expr: &PreHirExpr, names: &HashSet<String>) -> bool {
         PreHirExpr::Call { args, .. } => args
             .iter()
             .any(|argument| expr_uses_pointer_base(argument, names)),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
@@ -1866,7 +1875,10 @@ fn prune_known_api_call_args_expr(
             pruned += prune_known_api_call_args_expr(then_expr, summaries);
             pruned += prune_known_api_call_args_expr(else_expr, summaries);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     pruned
 }
@@ -1978,7 +1990,10 @@ fn prune_self_call_args_expr(expr: &mut PreHirExpr, func_name: &str, arity: usiz
             pruned += prune_self_call_args_expr(then_expr, func_name, arity);
             pruned += prune_self_call_args_expr(else_expr, func_name, arity);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     pruned
 }
@@ -1994,7 +2009,9 @@ fn binding_by_name_mut<'a>(
 /// `Var(x)` or `Cast(_, Var(x))`).  Returns `None` for complex expressions.
 fn arg_var_name(expr: &PreHirExpr) -> Option<String> {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => Some(name.clone()),
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => Some(name.clone()),
         PreHirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
         _ => None,
     }

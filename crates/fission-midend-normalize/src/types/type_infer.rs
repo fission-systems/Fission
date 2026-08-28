@@ -148,6 +148,7 @@ fn collect_value_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
         | PreHirExpr::FieldAccess { .. }
         | PreHirExpr::Call { .. }
         | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
         | PreHirExpr::Const(_, _) => {}
     }
 }
@@ -489,7 +490,10 @@ fn collect_pointer_compare_peer_promotions_expr(
             collect_pointer_compare_peer_promotions_expr(base, types, out);
             collect_pointer_compare_peer_promotions_expr(index, types, out);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -903,7 +907,10 @@ fn collect_strong_scalar_param_roots_expr(
                 );
             }
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1086,7 +1093,10 @@ fn collect_param_pointer_offset_params_expr(
             collect_param_pointer_offset_params_expr(base, context, out);
             collect_param_pointer_offset_params_expr(index, context, out);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1264,7 +1274,10 @@ fn param_pointer_candidates_from_expr(
             param_pointer_candidates_from_expr(base, context, out);
             param_pointer_candidates_from_expr(index, context, out);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1652,7 +1665,10 @@ fn collect_word_load_pointer_names(expr: &PreHirExpr, out: &mut HashMap<String, 
             collect_word_load_pointer_names(base, out);
             collect_word_load_pointer_names(index, out);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1798,7 +1814,10 @@ fn collect_signed_neutral_load_contexts_expr(
             collect_signed_neutral_load_contexts_expr(base, candidates, blockers);
             collect_signed_neutral_load_contexts_expr(index, candidates, blockers);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1889,7 +1908,8 @@ fn mark_address_use(
             | PreHirExpr::Call { .. }
             | PreHirExpr::Load { .. }
             | PreHirExpr::Const(_, _)
-            | PreHirExpr::AddressOfGlobal(_) => {}
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_) => {}
         }
     }
 
@@ -2011,7 +2031,10 @@ fn collect_binding_use_roles_lvalue(
 
 fn collect_binding_use_roles_expr(expr: &PreHirExpr, roles: &mut HashMap<String, BindingUseRole>) {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
         PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
             collect_binding_use_roles_expr(expr, roles);
         }
@@ -2126,7 +2149,9 @@ fn collect_return_types_stmt(
     match stmt {
         PreHirStmt::Return(Some(expr)) => {
             let ty = match expr {
-                PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+                PreHirExpr::Var(name)
+                | PreHirExpr::AddressOfGlobal(name)
+                | PreHirExpr::AddressOfLocal(name) => {
                     let mut visited = HashSet::default();
                     infer_type_for_binding(name, defs, known_binding_types, &mut visited)
                 }
@@ -2218,7 +2243,9 @@ fn zero_extended_return_candidate_type(
             // 64-bit unsigned cast (explicit ZExt): recurse into the inner expression to
             // find the narrower source type.
             let inner_ty = match inner.as_ref() {
-                PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+                PreHirExpr::Var(name)
+                | PreHirExpr::AddressOfGlobal(name)
+                | PreHirExpr::AddressOfLocal(name) => {
                     zero_extended_return_candidate_type_for_binding(
                         name,
                         defs,
@@ -2234,7 +2261,9 @@ fn zero_extended_return_candidate_type(
                 _ => None,
             }
         }
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             // Prefer multi-assign aggregation when available via defs map alone first;
             // full body scan is applied in `collect_zero_extended_return_candidates_stmt`.
             let ty =
@@ -2384,7 +2413,9 @@ fn aggregate_return_temp_candidates_guarded(
     let mut best = None;
     for rhs in rhss {
         let ty = match rhs {
-            PreHirExpr::Var(src) | PreHirExpr::AddressOfGlobal(src) => {
+            PreHirExpr::Var(src)
+            | PreHirExpr::AddressOfGlobal(src)
+            | PreHirExpr::AddressOfLocal(src) => {
                 aggregate_return_temp_candidates_guarded(
                     src,
                     stmts,
@@ -2589,7 +2620,9 @@ fn collect_zero_extended_return_candidates_stmt(
     match stmt {
         PreHirStmt::Return(Some(expr)) => {
             let ty = match expr {
-                PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+                PreHirExpr::Var(name)
+                | PreHirExpr::AddressOfGlobal(name)
+                | PreHirExpr::AddressOfLocal(name) => {
                     aggregate_return_temp_candidates(name, root_body, defs, known_binding_types)
                         .or_else(|| {
                             zero_extended_return_candidate_type(expr, defs, known_binding_types)
@@ -2858,7 +2891,9 @@ fn promote_sub32_abi_return_width(
     collect_all_return_exprs(&func.body, &mut rhss);
     let signed_evidence = rhss.iter().any(|e| rhs_has_i32_sign_bit_evidence(e))
         || rhss.iter().any(|e| match e {
-            PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+            PreHirExpr::Var(name)
+            | PreHirExpr::AddressOfGlobal(name)
+            | PreHirExpr::AddressOfLocal(name) => {
                 let mut assign_rhss = Vec::new();
                 collect_var_assign_rhs(&func.body, name, &mut assign_rhss);
                 assign_rhss
@@ -2976,7 +3011,9 @@ fn collect_all_return_exprs<'a>(stmts: &'a [PreHirStmt], out: &mut Vec<&'a PreHi
 fn collect_returned_var_names(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            PreHirStmt::Return(Some(PreHirExpr::Var(n) | PreHirExpr::AddressOfGlobal(n))) => {
+            PreHirStmt::Return(Some(
+                PreHirExpr::Var(n) | PreHirExpr::AddressOfGlobal(n) | PreHirExpr::AddressOfLocal(n),
+            )) => {
                 out.insert(n.clone());
             }
             PreHirStmt::Block(body)

@@ -81,6 +81,7 @@ pub enum HirLValue {
 pub enum HirExpr {
     Var(String),
     AddressOfGlobal(String),
+    AddressOfLocal(String),
     Const(i64, NirType),
     Cast {
         ty: NirType,

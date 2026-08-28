@@ -305,7 +305,7 @@ fn collect_var_uses_in_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
 
 fn collect_var_uses_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(n) => {
+        HirExpr::Var(n) | HirExpr::AddressOfLocal(n) => {
             out.insert(n.clone());
         }
         HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
@@ -433,7 +433,10 @@ fn count_real_calls_in_expr(expr: &HirExpr) -> usize {
         HirExpr::Index { base, index, .. } => {
             count_real_calls_in_expr(base) + count_real_calls_in_expr(index)
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => 0,
+        HirExpr::Var(_)
+        | HirExpr::Const(_, _)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_) => 0,
     }
 }
 
@@ -506,7 +509,10 @@ fn count_loads_in_expr(expr: &HirExpr) -> usize {
         HirExpr::Index { base, index, .. } => {
             count_loads_in_expr(base) + count_loads_in_expr(index)
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => 0,
+        HirExpr::Var(_)
+        | HirExpr::Const(_, _)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_) => 0,
     }
 }
 

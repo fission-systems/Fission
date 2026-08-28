@@ -27,7 +27,9 @@ pub(crate) use crate::midend::{
 /// `&HirExpr`-typed twin rather than depending on builder's PreHIR-side copy.
 pub(crate) fn expr_type(expr: &HirExpr) -> NirType {
     match expr {
-        HirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
+        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => {
+            NirType::Ptr(Box::new(NirType::Unknown))
+        }
         HirExpr::Var(_) => NirType::Unknown,
         HirExpr::Const(_, ty)
         | HirExpr::Unary { ty, .. }

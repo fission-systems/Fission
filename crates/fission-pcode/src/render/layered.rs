@@ -446,7 +446,10 @@ fn collect_opaque_pcodeop_stubs_from_lvalue(
 
 fn collect_opaque_pcodeop_stubs_from_expr(expr: &HirExpr, stubs: &mut BTreeMap<String, NirType>) {
     match expr {
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -714,7 +717,10 @@ fn collect_aggregate_typedefs_from_expr(
     aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
 ) {
     match expr {
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
         HirExpr::Cast { ty, expr }
         | HirExpr::Unary { ty, expr, .. }
         | HirExpr::Load { ty, ptr: expr } => {
@@ -791,7 +797,7 @@ fn collect_field_access_into_aggregate(
             merge_aggregate_fields(aggs, *size, &mapped);
             Some(*size)
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => {
             // Size unknown from var alone; skip (binding type collection covers it).
             None
         }
@@ -1263,9 +1269,14 @@ fn collect_global_decls_from_expr(
     decls: &mut BTreeMap<String, NirType>,
 ) {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) if global_names.contains(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) | HirExpr::AddressOfLocal(name)
+            if global_names.contains(name) =>
+        {
             let ty = global_decl_types.get(name).cloned().unwrap_or_else(|| {
-                if matches!(expr, HirExpr::AddressOfGlobal(_)) {
+                if matches!(
+                    expr,
+                    HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_)
+                ) {
                     NirType::Unknown
                 } else {
                     infer_global_decl_expr_type(expr, binding_types)
@@ -1355,7 +1366,10 @@ fn collect_global_decls_from_expr(
                 decls,
             );
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
     }
 }
 
@@ -1364,10 +1378,12 @@ fn infer_global_decl_expr_type(
     binding_types: &HashMap<String, NirType>,
 ) -> NirType {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => binding_types
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| expr_type(expr)),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) | HirExpr::AddressOfLocal(name) => {
+            binding_types
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| expr_type(expr))
+        }
         HirExpr::Cast { ty, .. }
         | HirExpr::Unary { ty, .. }
         | HirExpr::Binary { ty, .. }

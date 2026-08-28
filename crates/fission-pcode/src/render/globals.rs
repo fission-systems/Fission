@@ -203,7 +203,7 @@ fn recover_global_symbol_accesses_in_expr(
                 *expr = HirExpr::AddressOfGlobal(global_name.clone());
             }
         }
-        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) | HirExpr::Const(_, _) => {}
     }
 }
 

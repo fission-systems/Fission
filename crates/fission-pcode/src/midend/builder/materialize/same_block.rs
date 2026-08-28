@@ -4,7 +4,10 @@ use super::*;
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn should_preserve_materialized_expr(expr: &PreHirExpr) -> bool {
         match expr {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => false,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(..) => false,
             PreHirExpr::Cast { expr, .. } => Self::should_preserve_materialized_expr(expr),
             PreHirExpr::Select { .. } => true,
             PreHirExpr::Unary { .. }
@@ -51,7 +54,10 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::expr_is_side_effectful_for_materialization_trace(then_expr)
                     || Self::expr_is_side_effectful_for_materialization_trace(else_expr)
             }
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => false,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(..) => false,
         }
     }
 
@@ -251,7 +257,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => classify_var_name(name),
+            PreHirExpr::Var(name)
+            | PreHirExpr::AddressOfGlobal(name)
+            | PreHirExpr::AddressOfLocal(name) => classify_var_name(name),
             PreHirExpr::Const(..) => AddressStableRequiredBaseKind::UnknownBase,
             PreHirExpr::Cast { expr, .. }
             | PreHirExpr::Unary { expr, .. }
@@ -307,9 +315,10 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => {
-                AddressStableRequiredExprKind::PureArithmetic
-            }
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(..) => AddressStableRequiredExprKind::PureArithmetic,
             PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
                 Self::classify_address_stable_required_expr_kind(expr)
             }
@@ -431,7 +440,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => classify_var_name(name),
+            PreHirExpr::Var(name)
+            | PreHirExpr::AddressOfGlobal(name)
+            | PreHirExpr::AddressOfLocal(name) => classify_var_name(name),
             PreHirExpr::Const(..) | PreHirExpr::Call { .. } => StackAddressBaseReg::Unknown,
             PreHirExpr::Cast { expr, .. }
             | PreHirExpr::Unary { expr, .. }
@@ -471,7 +482,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => is_stack_base(rhs).then_some(0),
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+                is_stack_base(rhs).then_some(0)
+            }
             PreHirExpr::Const(..)
             | PreHirExpr::Unary { .. }
             | PreHirExpr::Call { .. }
@@ -508,7 +521,9 @@ impl<'a> PreviewBuilder<'a> {
     fn stack_address_frame_relative_candidate(rhs: &PreHirExpr) -> bool {
         fn is_simple_frame_relative_expr(expr: &PreHirExpr) -> bool {
             match expr {
-                PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => true,
+                PreHirExpr::Var(_)
+                | PreHirExpr::AddressOfGlobal(_)
+                | PreHirExpr::AddressOfLocal(_) => true,
                 PreHirExpr::Cast { expr, .. } => is_simple_frame_relative_expr(expr),
                 PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
                     is_simple_frame_relative_expr(base)
@@ -1019,6 +1034,7 @@ impl<'a> PreviewBuilder<'a> {
             PreHirExpr::Call { .. }
             | PreHirExpr::Var(_)
             | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
             | PreHirExpr::Const(_, _) => false,
         }
     }
@@ -1052,7 +1068,10 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_call(then_expr)
                     || Self::materialize_expr_contains_call(else_expr)
             }
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => false,
         }
     }
 
@@ -1083,7 +1102,10 @@ impl<'a> PreviewBuilder<'a> {
             } => Self::first_call_expr_in_materialize_expr(cond)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(then_expr))
                 .or_else(|| Self::first_call_expr_in_materialize_expr(else_expr)),
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => None,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => None,
         }
     }
 
@@ -1114,6 +1136,7 @@ impl<'a> PreviewBuilder<'a> {
             PreHirExpr::Call { .. }
             | PreHirExpr::Var(_)
             | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
             | PreHirExpr::Const(_, _) => None,
         }
     }
@@ -1133,9 +1156,10 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &PreHirExpr,
     ) -> DisallowedSingleConsumerRhsKind {
         match rhs {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {
-                DisallowedSingleConsumerRhsKind::VarOrConst
-            }
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => DisallowedSingleConsumerRhsKind::VarOrConst,
             PreHirExpr::Unary {
                 op: PreHirUnaryOp::Not,
                 ..
@@ -1468,7 +1492,7 @@ impl<'a> PreviewBuilder<'a> {
         expr: &PreHirExpr,
     ) -> SingleConsumerPredicateFamily {
         match expr {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
                 SingleConsumerPredicateFamily::DirectFlag
             }
             PreHirExpr::Cast { expr, .. } => Self::classify_single_consumer_predicate_family(expr),
@@ -1721,7 +1745,8 @@ impl<'a> PreviewBuilder<'a> {
             | PreHirExpr::Index { .. }
             | PreHirExpr::AggregateCopy { .. }
             | PreHirExpr::Var(_)
-            | PreHirExpr::AddressOfGlobal(_) => false,
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_) => false,
         }
     }
 
@@ -1768,6 +1793,7 @@ impl<'a> PreviewBuilder<'a> {
             | PreHirExpr::Select { .. }
             | PreHirExpr::Var(_)
             | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
             | PreHirExpr::Const(_, _) => LowBitMaskInputOriginKind::Unknown,
         }
     }
@@ -2233,7 +2259,9 @@ impl<'a> PreviewBuilder<'a> {
                     {
                         SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
                     }
-                    PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {
+                    PreHirExpr::Var(_)
+                    | PreHirExpr::AddressOfGlobal(_)
+                    | PreHirExpr::AddressOfLocal(_) => {
                         SingleConsumerLoadAliasClass::GlobalOrExternalLoad
                     }
                     PreHirExpr::Call { .. } | PreHirExpr::Load { .. } => {
@@ -2242,7 +2270,7 @@ impl<'a> PreviewBuilder<'a> {
                     _ => SingleConsumerLoadAliasClass::UnknownLoad,
                 }
             }
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
                 SingleConsumerLoadAliasClass::GlobalOrExternalLoad
             }
             PreHirExpr::Call { .. } | PreHirExpr::Load { .. } => {
@@ -3038,7 +3066,10 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn expr_is_low_cost_builder_inline_candidate(expr: &PreHirExpr) -> bool {
         match expr {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => true,
             PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
                 Self::expr_is_low_cost_builder_inline_candidate(expr)
             }
@@ -3136,7 +3167,10 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn expr_requires_passthrough_single_use_inline(expr: &PreHirExpr) -> bool {
         match expr {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => false,
             PreHirExpr::Cast { expr, .. } => {
                 Self::expr_requires_passthrough_single_use_inline(expr)
             }

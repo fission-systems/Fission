@@ -335,7 +335,10 @@ fn add_guard(q: &mut StructuringQuality, guard: &PreHirExpr) {
 /// Short-circuit operators in `e`, each of which is one conditional branch.
 pub fn expr_branch_terms(e: &PreHirExpr) -> usize {
     match e {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => 0,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => 0,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -384,7 +387,10 @@ pub fn guard_formula_size(body: &[PreHirStmt]) -> usize {
 /// Expression nodes in `e`, counting every operand.
 pub fn expr_size(e: &PreHirExpr) -> usize {
     match e {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => 1,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => 1,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }

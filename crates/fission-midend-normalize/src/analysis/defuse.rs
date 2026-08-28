@@ -151,7 +151,9 @@ impl DefUseMap {
 
     fn count_expr(&mut self, expr: &PreHirExpr) {
         match expr {
-            PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+            PreHirExpr::Var(name)
+            | PreHirExpr::AddressOfGlobal(name)
+            | PreHirExpr::AddressOfLocal(name) => {
                 *self.use_count.entry(name.clone()).or_default() += 1;
             }
             PreHirExpr::Const(_, _) => {}
@@ -432,6 +434,7 @@ fn collect_address_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>)
         | PreHirExpr::FieldAccess { .. }
         | PreHirExpr::AggregateCopy { .. }
         | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
         | PreHirExpr::Const(_, _) => {}
     }
 }
@@ -462,13 +465,138 @@ fn collect_identity_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>
         | PreHirExpr::FieldAccess { .. }
         | PreHirExpr::AggregateCopy { .. }
         | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
         | PreHirExpr::Const(_, _) => {}
     }
 }
 
+/// Locals whose address `stmts` takes.
+///
+/// A pass that reasons about a local's *value* -- constant propagation, dead
+/// store elimination -- is reasoning about a name. Once the address is taken,
+/// the name is no longer the only way the storage is reached: whoever holds
+/// the address reads and writes it, and this function cannot see that. So the
+/// value analyses have to leave these alone, and the storage has to keep
+/// whatever was written to it.
+///
+/// Constant propagation is what made this necessary. `main` writes a string
+/// into `local_6` and passes `&local_6` to two callees; the write was the
+/// binding's only mention by name, so the constant was propagated to nowhere
+/// and the write deleted, leaving both callees reading an uninitialised frame.
+pub fn collect_address_taken_locals(stmts: &[PreHirStmt]) -> HashSet<String> {
+    // `collect_expr_vars` already walks every subexpression and inserts the
+    // name an `AddressOfLocal` carries; the addresses are the subset of what
+    // it finds that appears under one.
+    fn walk_expr(expr: &PreHirExpr, out: &mut HashSet<String>) {
+        match expr {
+            PreHirExpr::AddressOfLocal(name) => {
+                out.insert(name.clone());
+            }
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. } => walk_expr(expr, out),
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                walk_expr(lhs, out);
+                walk_expr(rhs, out);
+            }
+            PreHirExpr::Call { args, .. } => {
+                for arg in args {
+                    walk_expr(arg, out);
+                }
+            }
+            PreHirExpr::Index { base, index, .. } => {
+                walk_expr(base, out);
+                walk_expr(index, out);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                walk_expr(cond, out);
+                walk_expr(then_expr, out);
+                walk_expr(else_expr, out);
+            }
+        }
+    }
+    fn walk_lvalue(lhs: &PreHirLValue, out: &mut HashSet<String>) {
+        match lhs {
+            PreHirLValue::Var(_) => {}
+            PreHirLValue::Deref { ptr, .. } => walk_expr(ptr, out),
+            PreHirLValue::FieldAccess { base, .. } => walk_expr(base, out),
+            PreHirLValue::Index { base, index, .. } => {
+                walk_expr(base, out);
+                walk_expr(index, out);
+            }
+        }
+    }
+    fn walk_stmts(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
+        for stmt in stmts {
+            match stmt {
+                PreHirStmt::Assign { lhs, rhs } => {
+                    walk_lvalue(lhs, out);
+                    walk_expr(rhs, out);
+                }
+                PreHirStmt::VaStart { va_list: expr, .. }
+                | PreHirStmt::Expr(expr)
+                | PreHirStmt::Return(Some(expr)) => walk_expr(expr, out),
+                PreHirStmt::Block(body)
+                | PreHirStmt::While { body, .. }
+                | PreHirStmt::DoWhile { body, .. } => walk_stmts(body, out),
+                PreHirStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    walk_expr(cond, out);
+                    walk_stmts(then_body, out);
+                    walk_stmts(else_body, out);
+                }
+                PreHirStmt::For {
+                    init,
+                    cond,
+                    update,
+                    body,
+                } => {
+                    if let Some(init) = init {
+                        walk_stmts(std::slice::from_ref(init.as_ref()), out);
+                    }
+                    if let Some(cond) = cond {
+                        walk_expr(cond, out);
+                    }
+                    if let Some(update) = update {
+                        walk_stmts(std::slice::from_ref(update.as_ref()), out);
+                    }
+                    walk_stmts(body, out);
+                }
+                PreHirStmt::Switch {
+                    expr,
+                    cases,
+                    default,
+                } => {
+                    walk_expr(expr, out);
+                    for case in cases {
+                        walk_stmts(&case.body, out);
+                    }
+                    walk_stmts(default, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = HashSet::default();
+    walk_stmts(stmts, &mut out);
+    out
+}
+
 pub fn collect_expr_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfLocal(name) => {
             out.insert(name.clone());
         }
         PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
@@ -657,7 +785,10 @@ fn collect_address_contributors_expr(
             collect_address_contributors_expr(proof, then_expr, out);
             collect_address_contributors_expr(proof, else_expr, out);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -818,7 +949,10 @@ fn fold_expr(expr: &mut PreHirExpr) -> bool {
             changed |= fold_expr(then_expr);
             changed |= fold_expr(else_expr);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     // Try to fold this node.
     if let Some(folded) = try_fold(expr) {
@@ -864,6 +998,7 @@ pub fn eval_hir_expr_with_const_env(
             Some((result, ty.clone()))
         }
         PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
         | PreHirExpr::Load { .. }
         | PreHirExpr::Call { .. }
         | PreHirExpr::PtrOffset { .. }
@@ -1705,7 +1840,9 @@ fn count_mention_lhs(lhs: &PreHirLValue, name: &str) -> usize {
 
 fn count_mention_expr(expr: &PreHirExpr, name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(n) | PreHirExpr::AddressOfGlobal(n) => usize::from(n.as_str() == name),
+        PreHirExpr::Var(n) | PreHirExpr::AddressOfGlobal(n) | PreHirExpr::AddressOfLocal(n) => {
+            usize::from(n.as_str() == name)
+        }
         PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
@@ -1925,7 +2062,10 @@ fn collect_repeated_pure_exprs(
     }
 
     match expr {
-        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => {}
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -1968,9 +2108,10 @@ fn replace_matching_pure_expr(
     }
 
     match expr {
-        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {
-            expr.clone()
-        }
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => expr.clone(),
         PreHirExpr::Cast { ty, expr: inner } => PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(replace_matching_pure_expr(inner, needle, replacement)),
@@ -2075,7 +2216,7 @@ fn is_stabilization_candidate_expr(expr: &PreHirExpr) -> bool {
 fn count_nonconst_leaf_inputs(expr: &PreHirExpr) -> usize {
     match expr {
         PreHirExpr::Const(_, _) => 0,
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => 1,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => 1,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -2104,7 +2245,10 @@ fn count_nonconst_leaf_inputs(expr: &PreHirExpr) -> usize {
 
 fn expr_node_count(expr: &PreHirExpr) -> usize {
     match expr {
-        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => 1,
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => 1,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }

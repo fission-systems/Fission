@@ -645,7 +645,10 @@ pub fn evaluate_condition_assumptions(
 
 pub fn expr_is_pure_value(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => true,
         PreHirExpr::Cast { expr, .. } => expr_is_pure_value(expr),
         PreHirExpr::Unary { expr, .. } => expr_is_pure_value(expr),
         PreHirExpr::Binary { lhs, rhs, .. } => expr_is_pure_value(lhs) && expr_is_pure_value(rhs),
@@ -1665,7 +1668,10 @@ pub fn suffix_expr_contains_call(expr: &PreHirExpr) -> bool {
                 || suffix_expr_contains_call(then_expr)
                 || suffix_expr_contains_call(else_expr)
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
@@ -2528,7 +2534,7 @@ pub fn classify_suffix_side_effect_shape(stmt: &PreHirStmt) -> SuffixSideEffectS
             lhs: PreHirLValue::Var(_),
             rhs,
         } if expr_is_pure_value(rhs) => match rhs {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
                 SuffixSideEffectShapeKind::PureTempAssign
             }
             _ => SuffixSideEffectShapeKind::PureRegisterAssign,
@@ -2813,7 +2819,10 @@ pub fn expr_contains_load(expr: &PreHirExpr) -> bool {
                 || expr_contains_load(then_expr)
                 || expr_contains_load(else_expr)
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 

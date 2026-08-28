@@ -197,7 +197,10 @@ fn stabilize_expr(expr: &mut PreHirExpr, reps: &PureExprMap) -> bool {
             changed |= stabilize_expr(then_expr, reps);
             changed |= stabilize_expr(else_expr, reps);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     changed
 }
@@ -205,7 +208,10 @@ fn stabilize_expr(expr: &mut PreHirExpr, reps: &PureExprMap) -> bool {
 fn is_representable_expr(expr: &PreHirExpr) -> bool {
     !matches!(
         expr,
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _)
+        PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _)
     ) && pure_expr_key(expr).is_some()
 }
 

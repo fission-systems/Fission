@@ -308,7 +308,9 @@ fn aggregate_alias_root(expr: &PreHirExpr) -> Option<(PreHirExpr, i64)> {
 
 fn root_is_typed_object_carrier(func: &PreHirFunction, root: &PreHirExpr) -> bool {
     match root {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => func
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => func
             .params
             .iter()
             .chain(func.locals.iter())
@@ -400,7 +402,9 @@ fn lvalue_uses_var(lhs: &PreHirLValue, name: &str) -> bool {
 
 fn expr_uses_var(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
-        PreHirExpr::Var(var) | PreHirExpr::AddressOfGlobal(var) => var == name,
+        PreHirExpr::Var(var)
+        | PreHirExpr::AddressOfGlobal(var)
+        | PreHirExpr::AddressOfLocal(var) => var == name,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::PtrOffset { base: expr, .. }
@@ -597,7 +601,10 @@ fn rewrite_alias_expr(expr: &mut PreHirExpr, aliases: &HashMap<String, Aggregate
             }
             changed
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     };
     changed
 }

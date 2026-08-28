@@ -220,7 +220,9 @@ fn loop_variant_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
 fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
     let mut changed = false;
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             if let Some((v, ty)) = env.get(name) {
                 *expr = PreHirExpr::Const(*v, ty.clone());
                 changed = true;
@@ -783,7 +785,9 @@ fn collect_xvars_in_lvalue(lhs: &PreHirLValue, out: &mut HashSet<String>) {
 
 fn collect_xvars_in_expr(expr: &PreHirExpr, out: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             if name.starts_with("xVar") {
                 out.insert(name.clone());
             }

@@ -420,7 +420,7 @@ fn structuring_total_work_budget_exceeded(host: &impl StructuringHost) -> bool {
 
 fn count_var_refs(expr: &PreHirExpr, name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(n) => usize::from(n == name),
+        PreHirExpr::Var(n) | PreHirExpr::AddressOfLocal(n) => usize::from(n == name),
         PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => 0,
         PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
             count_var_refs(expr, name)
@@ -452,7 +452,10 @@ fn count_var_refs(expr: &PreHirExpr, name: &str) -> usize {
 fn substitute_var(expr: &PreHirExpr, name: &str, replacement: &PreHirExpr) -> PreHirExpr {
     match expr {
         PreHirExpr::Var(n) if n == name => replacement.clone(),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => expr.clone(),
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => expr.clone(),
         PreHirExpr::Cast { ty, expr: inner } => PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(substitute_var(inner, name, replacement)),

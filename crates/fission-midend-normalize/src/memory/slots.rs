@@ -304,9 +304,9 @@ fn resolve_slot_alias_base(
     }
 
     match base {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
-            resolve_var(func, alias_defs, name, 0)
-        }
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => resolve_var(func, alias_defs, name, 0),
         PreHirExpr::Cast { ty, expr } => PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(resolve_slot_alias_base(func, alias_defs, expr)),
@@ -321,7 +321,9 @@ fn resolve_slot_alias_base(
 
 fn derive_slot_alias_origin(func: &PreHirFunction, base: &PreHirExpr) -> Option<NirBindingOrigin> {
     match base {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => func
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => func
             .params
             .iter()
             .chain(func.locals.iter())
@@ -357,7 +359,9 @@ fn is_surface_stable_slot_display_base(
     _offset: i64,
 ) -> bool {
     match base {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             if is_cheap_slot_base(base) || slot_surface_type_name(base, func, inventory).is_some() {
                 return true;
             }
@@ -415,7 +419,9 @@ fn is_cheap_slot_candidate(candidate: &MemorySlotCandidate) -> bool {
 
 fn is_cheap_slot_base(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             matches!(
                 name.as_str(),
                 "esp" | "ebp" | "rsp" | "rbp" | "eax" | "ecx" | "edx" | "ebx" | "esi" | "edi"
@@ -630,7 +636,10 @@ fn rewrite_memory_slot_expr(
             changed |= rewrite_memory_slot_expr(then_expr, aliases);
             changed |= rewrite_memory_slot_expr(else_expr, aliases);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     changed
 }

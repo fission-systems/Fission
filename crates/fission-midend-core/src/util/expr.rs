@@ -2,7 +2,9 @@ use crate::ir::{HirExpr, NirType};
 
 pub fn expr_type(expr: &HirExpr) -> NirType {
     match expr {
-        HirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
+        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => {
+            NirType::Ptr(Box::new(NirType::Unknown))
+        }
         HirExpr::Var(_) => NirType::Unknown,
         HirExpr::Const(_, ty)
         | HirExpr::Unary { ty, .. }
@@ -54,7 +56,10 @@ pub fn expr_has_side_effecting_call(expr: &HirExpr) -> bool {
                 || expr_has_side_effecting_call(then_expr)
                 || expr_has_side_effecting_call(else_expr)
         }
-        HirExpr::Var(_, ..) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, ..) => false,
+        HirExpr::Var(_, ..)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, ..) => false,
     }
 }
 

@@ -249,7 +249,9 @@ fn vars_in_expr(expr: &PreHirExpr) -> HashSet<String> {
 
 fn collect_vars_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             vars.insert(name.clone());
         }
         PreHirExpr::Const(_, _) => {}
@@ -652,7 +654,9 @@ fn try_inline_loop_header_break_temp(
 fn resolve_loop_header_expr(expr: &PreHirExpr, values: &HashMap<String, PreHirExpr>) -> PreHirExpr {
     match expr {
         PreHirExpr::Var(name) => values.get(name).cloned().unwrap_or_else(|| expr.clone()),
-        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => expr.clone(),
+        PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => expr.clone(),
         PreHirExpr::Cast { ty, expr } => PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(resolve_loop_header_expr(expr, values)),
@@ -724,7 +728,10 @@ fn resolve_loop_header_expr(expr: &PreHirExpr, values: &HashMap<String, PreHirEx
 
 fn expr_memory_read_count(expr: &PreHirExpr) -> usize {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => 0,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::PtrOffset { base: expr, .. }
@@ -756,7 +763,10 @@ fn expr_is_loop_header_inline_candidate(expr: &PreHirExpr, depth_budget: usize) 
         return false;
     }
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => true,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -1014,7 +1024,10 @@ fn inline_trailing_temps_into_condition(
 
 fn expr_is_low_cost_inline_candidate(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => true,
         PreHirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
             args.iter().all(expr_is_low_cost_inline_candidate)
         }
@@ -1387,7 +1400,7 @@ fn single_assign(body: &[PreHirStmt]) -> Option<(&str, &PreHirExpr)> {
 fn expr_nir_type(expr: &PreHirExpr) -> Option<NirType> {
     match expr {
         PreHirExpr::Const(_, ty) => Some(ty.clone()),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => None,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => None,
         PreHirExpr::Cast { ty, .. } => Some(ty.clone()),
         PreHirExpr::Binary { ty, .. } => Some(ty.clone()),
         PreHirExpr::Unary { ty, .. } => Some(ty.clone()),

@@ -241,6 +241,8 @@ impl<'a> PreviewBuilder<'a> {
             loop_bodies,
             extra_absorbed_members: Vec::new(),
             params: BTreeMap::new(),
+            value_used_varnodes: None,
+            lowering_memory_pointer: false,
             locals: BTreeMap::new(),
             locals_next_id: 0,
             stack_slot_memory_owners: BTreeMap::new(),

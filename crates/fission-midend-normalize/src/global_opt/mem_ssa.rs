@@ -315,14 +315,29 @@ impl Builder {
                 self.add_use(key);
                 self.scan_expr_uses(ptr);
             }
+            PreHirExpr::AddressOfLocal(name) | PreHirExpr::AddressOfGlobal(name) => {
+                // Taking a slot's address is where this function stops being
+                // able to see what reads it. Whoever receives the address may
+                // read the slot, so every store to it is live from here on --
+                // and the address is usually taken precisely to hand it to a
+                // callee that does.
+                //
+                // This became load-bearing when `&local_6` became
+                // expressible: before, a taken address survived as arithmetic
+                // on a register that no partition key matched, so no store
+                // was ever attributed to the slot in the first place. `main`
+                // passes `&local_6` to two callees, and its initialisation
+                // was eliminated as dead the moment the address started
+                // naming the slot.
+                self.escaped.insert(name.clone());
+            }
             PreHirExpr::Call { args, .. } => {
-                // Mark any Var whose address might be passed as potentially escaped.
                 for arg in args {
                     self.scan_expr_uses(arg);
-                    if let PreHirExpr::PtrOffset { base, .. } = arg {
-                        if let PreHirExpr::Var(name) = base.as_ref() {
-                            self.escaped.insert(name.clone());
-                        }
+                    if let PreHirExpr::PtrOffset { base, .. } = arg
+                        && let PreHirExpr::Var(name) = base.as_ref()
+                    {
+                        self.escaped.insert(name.clone());
                     }
                 }
             }
@@ -382,7 +397,8 @@ impl Builder {
         // Mark defs whose variable escaped.
         for def in &mut self.defs {
             if let AliasKey::Partition(key) = &def.key {
-                def.may_escape = !key.is_heritage_promotable();
+                let base = key.base_object.trim_start_matches('&');
+                def.may_escape = !key.is_heritage_promotable() || self.escaped.contains(base);
             }
         }
         MemSsa {

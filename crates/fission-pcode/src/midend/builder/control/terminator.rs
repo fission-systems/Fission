@@ -483,6 +483,7 @@ impl<'a> PreviewBuilder<'a> {
     fn arm32_return_pair_part_is_address_like(&self, expr: &PreHirExpr) -> bool {
         match expr {
             PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
             | PreHirExpr::PtrOffset { .. }
             | PreHirExpr::Index { .. } => true,
             PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
@@ -2448,7 +2449,10 @@ impl<'a> PreviewBuilder<'a> {
     fn expr_contains_call(expr: &PreHirExpr) -> bool {
         match expr {
             PreHirExpr::Call { .. } => true,
-            PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => false,
+            PreHirExpr::Const(_, _)
+            | PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_) => false,
             PreHirExpr::Cast { expr, .. }
             | PreHirExpr::Unary { expr, .. }
             | PreHirExpr::Load { ptr: expr, .. }
@@ -2476,7 +2480,10 @@ impl<'a> PreviewBuilder<'a> {
 
     fn expr_node_count(expr: &PreHirExpr) -> usize {
         match expr {
-            PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => 1,
+            PreHirExpr::Const(_, _)
+            | PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_) => 1,
             PreHirExpr::Cast { expr, .. }
             | PreHirExpr::Unary { expr, .. }
             | PreHirExpr::Load { ptr: expr, .. }
@@ -3052,7 +3059,9 @@ impl<'a> PreviewBuilder<'a> {
             | PreHirExpr::Unary { ty, .. }
             | PreHirExpr::Binary { ty, .. }
             | PreHirExpr::FieldAccess { ty, .. } => Self::nir_type_width(ty),
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => None,
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+                None
+            }
             PreHirExpr::Call { ty, .. } => Self::nir_type_width(ty),
             PreHirExpr::PtrOffset { .. } => None,
             PreHirExpr::AggregateCopy { size, .. } => Some(*size * 8),
@@ -3074,7 +3083,10 @@ impl<'a> PreviewBuilder<'a> {
 
     fn selector_expr_is_side_effect_free(expr: &PreHirExpr) -> bool {
         match expr {
-            PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => true,
+            PreHirExpr::Const(_, _)
+            | PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_) => true,
             PreHirExpr::Cast { expr, .. }
             | PreHirExpr::Unary { expr, .. }
             | PreHirExpr::Load { ptr: expr, .. }

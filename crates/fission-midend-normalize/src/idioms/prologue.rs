@@ -57,9 +57,9 @@ fn looks_like_stack_scaffold_name(name: &str) -> bool {
 
 fn stack_scaffold_ptr_expr(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
-            looks_like_stack_scaffold_name(name)
-        }
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => looks_like_stack_scaffold_name(name),
         PreHirExpr::PtrOffset { base, .. }
         | PreHirExpr::Cast { expr: base, .. }
         | PreHirExpr::Unary { expr: base, .. } => stack_scaffold_ptr_expr(base),
@@ -101,7 +101,9 @@ fn looks_like_stack_slot_name(name: &str) -> bool {
 
 fn var_name_through_cast(expr: &PreHirExpr) -> Option<&str> {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => Some(name.as_str()),
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => Some(name.as_str()),
         PreHirExpr::Cast { expr, .. } => var_name_through_cast(expr),
         _ => None,
     }
@@ -382,7 +384,9 @@ fn count_ptr_in_stmt_inner(stmt: &PreHirStmt, name: &str) -> usize {
 
 fn count_ptr_in_expr(expr: &PreHirExpr, name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(v) | PreHirExpr::AddressOfGlobal(v) => usize::from(v == name),
+        PreHirExpr::Var(v) | PreHirExpr::AddressOfGlobal(v) | PreHirExpr::AddressOfLocal(v) => {
+            usize::from(v == name)
+        }
         PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::Unary { expr: inner, .. }

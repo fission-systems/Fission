@@ -813,7 +813,10 @@ fn expr_observes_runtime_state(expr: &PreHirExpr) -> bool {
         }
         PreHirExpr::Call { args, .. } => args.iter().any(expr_observes_runtime_state),
         PreHirExpr::PtrOffset { base, .. } => expr_observes_runtime_state(base),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 

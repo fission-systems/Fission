@@ -17,7 +17,7 @@ use crate::ir::{HirBinaryOp, HirExpr, HirLValue, HirUnaryOp};
 pub fn format_expr_key(expr: &HirExpr) -> String {
     match expr {
         HirExpr::Var(name) => name.clone(),
-        HirExpr::AddressOfGlobal(name) => format!("&{name}"),
+        HirExpr::AddressOfGlobal(name) | HirExpr::AddressOfLocal(name) => format!("&{name}"),
         HirExpr::Const(v, _) => v.to_string(),
         HirExpr::Cast { ty, expr } => format!("({ty:?}){}", format_expr_key(expr)),
         HirExpr::Unary { op, expr, .. } => match op {

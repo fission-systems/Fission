@@ -743,7 +743,9 @@ pub(super) fn collect_self_referential_bindings(stmts: &[PreHirStmt], out: &mut 
 fn expr_mentions_var(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
         PreHirExpr::Var(v) => v == name,
-        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }

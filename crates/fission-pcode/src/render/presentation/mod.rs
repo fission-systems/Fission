@@ -138,7 +138,10 @@ fn is_presentation_pure_intrinsic(target: &str) -> bool {
 
 fn expr_is_presentation_pure(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => true,
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => true,
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => expr_is_presentation_pure(expr),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_is_presentation_pure(lhs) && expr_is_presentation_pure(rhs)
@@ -170,7 +173,7 @@ fn expr_is_presentation_pure(expr: &HirExpr) -> bool {
 fn expr_mentions_var(expr: &HirExpr, name: &str) -> bool {
     match expr {
         HirExpr::Var(n) => n == name,
-        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) | HirExpr::Const(_, _) => false,
         HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => expr_mentions_var(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_mentions_var(lhs, name) || expr_mentions_var(rhs, name)
@@ -199,7 +202,10 @@ fn expr_mentions_var(expr: &HirExpr, name: &str) -> bool {
 fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr) {
     match expr {
         HirExpr::Var(var) if var == name => *expr = replacement.clone(),
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
             replace_var_in_expr(expr, name, replacement)
         }
@@ -437,7 +443,7 @@ fn count_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
 
 fn count_uses_in_expr(expr: &HirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(n) => usize::from(n == name),
+        HirExpr::Var(n) | HirExpr::AddressOfLocal(n) => usize::from(n == name),
         HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => 0,
         HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => count_uses_in_expr(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -965,7 +971,7 @@ fn pure_expr_free_var_redefined_before(
 
 fn collect_free_vars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(n) => {
+        HirExpr::Var(n) | HirExpr::AddressOfLocal(n) => {
             out.insert(n.clone());
         }
         HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
@@ -1972,7 +1978,10 @@ fn canonicalize_conditions_in_stmt(stmt: &mut HirStmt) -> bool {
 fn canonicalize_conditions_in_expr(expr: &mut HirExpr) -> bool {
     let mut changed = false;
     match expr {
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
             changed |= canonicalize_conditions_in_expr(expr);
         }
@@ -2285,7 +2294,7 @@ fn expr_result_type(expr: &HirExpr) -> NirType {
         | HirExpr::Cast { ty, .. }
         | HirExpr::FieldAccess { ty, .. }
         | HirExpr::Index { elem_ty: ty, .. } => ty.clone(),
-        HirExpr::PtrOffset { .. } | HirExpr::AddressOfGlobal(_) => {
+        HirExpr::PtrOffset { .. } | HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => {
             NirType::Ptr(Box::new(NirType::Unknown))
         }
         HirExpr::Var(_) | HirExpr::AggregateCopy { .. } => NirType::Unknown,
@@ -3402,7 +3411,10 @@ fn simplify_casts_in_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirTyp
             simplify_casts_in_expr(base, var_types);
             simplify_casts_in_expr(index, var_types);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
     }
 }
 
@@ -3967,8 +3979,46 @@ fn remove_labels_not_in(stmts: &mut Vec<HirStmt>, keep: &HashSet<String>) -> boo
     changed
 }
 
+/// Whether `name` is one the builder mints for a stack slot.
+///
+/// The origin alone is not enough by the time presentation runs: a binding
+/// pruned by a name-based liveness pass and then put back by
+/// `rescue_undeclared_bindings` comes back as `Temp`, losing the one field
+/// that said it was a frame slot. `local_2` -- the second half of a six-byte
+/// string `main` passes to two callees -- arrives here exactly that way. The
+/// prefixes are the same ones `partition.rs` and `slots.rs` already key on.
+fn name_is_stack_slot(name: &str) -> bool {
+    name.starts_with("local_")
+        || name.starts_with("stack_")
+        || name.starts_with("home_")
+        || name.starts_with("arg_out_")
+        || name.starts_with("ret_scaffold_")
+}
+
 fn eliminate_pure_dead_assigns(func: &mut HirFunction, globals: &HashSet<String>) -> bool {
     let formal: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
+    // A stack slot's store is observable through a pointer into the frame, so
+    // an unread *name* is not evidence the write is dead. `main` builds a
+    // six-byte string across `local_6` and `local_2` and passes `&local_6` to
+    // its callees: neither name is ever read, and dropping either write hands
+    // the callees a frame that was never filled in. This is the same rule
+    // `eliminate_dead_local_clobber_assigns` holds in normalize.
+    let stack_backed: HashSet<&str> = func
+        .locals
+        .iter()
+        .filter(|binding| {
+            matches!(
+                binding.origin,
+                Some(
+                    NirBindingOrigin::StackOffset(_)
+                        | NirBindingOrigin::DerivedFromStackOffset(_)
+                        | NirBindingOrigin::HomeSlot(_)
+                        | NirBindingOrigin::OutgoingArgSlot(_)
+                )
+            ) || name_is_stack_slot(&binding.name)
+        })
+        .map(|binding| binding.name.as_str())
+        .collect();
     // Whole-function use counts only. Nested subtree-local counts incorrectly
     // treat `if { x = e; } return x;` as dead `x` (use lives outside the if body).
     let mut any = false;
@@ -3979,7 +4029,13 @@ fn eliminate_pure_dead_assigns(func: &mut HirFunction, globals: &HashSet<String>
             .keys()
             .map(|n| (n.clone(), count_uses_in_stmts(&func.body, n)))
             .collect();
-        let changed = eliminate_pure_dead_in_stmts(&mut func.body, &formal, &use_counts, globals);
+        let changed = eliminate_pure_dead_in_stmts(
+            &mut func.body,
+            &formal,
+            &stack_backed,
+            &use_counts,
+            globals,
+        );
         if !changed {
             break;
         }
@@ -3991,6 +4047,7 @@ fn eliminate_pure_dead_assigns(func: &mut HirFunction, globals: &HashSet<String>
 fn eliminate_pure_dead_in_stmts(
     stmts: &mut Vec<HirStmt>,
     formal: &HashSet<&str>,
+    stack_backed: &HashSet<&str>,
     use_counts: &HashMap<String, usize>,
     globals: &HashSet<String>,
 ) -> bool {
@@ -4001,6 +4058,7 @@ fn eliminate_pure_dead_in_stmts(
             lhs: HirLValue::Var(name),
             rhs,
         } if !formal.contains(name.as_str())
+            && !stack_backed.contains(name.as_str())
             && !globals.contains(name.as_str())
             && use_counts.get(name.as_str()).copied().unwrap_or(0) == 0
             && expr_is_presentation_pure(rhs) =>
@@ -4018,37 +4076,74 @@ fn eliminate_pure_dead_in_stmts(
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts, globals);
+                changed |=
+                    eliminate_pure_dead_in_stmts(body, formal, stack_backed, use_counts, globals);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= eliminate_pure_dead_in_stmts(then_body, formal, use_counts, globals);
-                changed |= eliminate_pure_dead_in_stmts(else_body, formal, use_counts, globals);
+                changed |= eliminate_pure_dead_in_stmts(
+                    then_body,
+                    formal,
+                    stack_backed,
+                    use_counts,
+                    globals,
+                );
+                changed |= eliminate_pure_dead_in_stmts(
+                    else_body,
+                    formal,
+                    stack_backed,
+                    use_counts,
+                    globals,
+                );
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
                     if let HirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts, globals);
+                        changed |= eliminate_pure_dead_in_stmts(
+                            b,
+                            formal,
+                            stack_backed,
+                            use_counts,
+                            globals,
+                        );
                     }
                 }
                 if let Some(upd) = update {
                     if let HirStmt::Block(b) = upd.as_mut() {
-                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts, globals);
+                        changed |= eliminate_pure_dead_in_stmts(
+                            b,
+                            formal,
+                            stack_backed,
+                            use_counts,
+                            globals,
+                        );
                     }
                 }
-                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts, globals);
+                changed |=
+                    eliminate_pure_dead_in_stmts(body, formal, stack_backed, use_counts, globals);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |=
-                        eliminate_pure_dead_in_stmts(&mut case.body, formal, use_counts, globals);
+                    changed |= eliminate_pure_dead_in_stmts(
+                        &mut case.body,
+                        formal,
+                        stack_backed,
+                        use_counts,
+                        globals,
+                    );
                 }
-                changed |= eliminate_pure_dead_in_stmts(default, formal, use_counts, globals);
+                changed |= eliminate_pure_dead_in_stmts(
+                    default,
+                    formal,
+                    stack_backed,
+                    use_counts,
+                    globals,
+                );
             }
             _ => {}
         }
@@ -4145,7 +4240,7 @@ fn collect_used_names_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
 
 fn collect_used_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(n) | HirExpr::AddressOfGlobal(n) => {
+        HirExpr::Var(n) | HirExpr::AddressOfGlobal(n) | HirExpr::AddressOfLocal(n) => {
             out.insert(n.clone());
         }
         HirExpr::Const(_, _) => {}

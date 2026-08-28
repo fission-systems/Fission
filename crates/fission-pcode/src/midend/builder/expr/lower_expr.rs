@@ -3172,7 +3172,7 @@ impl<'a> PreviewBuilder<'a> {
                     Ok(PreHirExpr::Const(value as i64, load_ty))
                 } else {
                     Ok(PreHirExpr::Load {
-                        ptr: Box::new(self.lower_varnode(&op.inputs[1], visiting)?),
+                        ptr: Box::new(self.lower_memory_pointer(&op.inputs[1], visiting)?),
                         ty: load_ty,
                     })
                 }
@@ -3402,11 +3402,30 @@ impl<'a> PreviewBuilder<'a> {
         Err(MlilPreviewError::UnsupportedExprMultiequal)
     }
 
+    /// Lower the pointer operand of a memory access.
+    ///
+    /// Same as `lower_varnode`, except frame arithmetic stays arithmetic:
+    /// `&local` is what the address *value* means, and putting it under the
+    /// dereference the access already carries only spells the same slot twice.
+    pub(in crate::midend) fn lower_memory_pointer(
+        &mut self,
+        ptr: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<PreHirExpr, MlilPreviewError> {
+        let outer = std::mem::replace(&mut self.lowering_memory_pointer, true);
+        let lowered = self.lower_varnode(ptr, visiting);
+        self.lowering_memory_pointer = outer;
+        lowered
+    }
+
     pub(in crate::midend) fn lower_ptr_op(
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<PreHirExpr, MlilPreviewError> {
+        if let Some(address) = self.stack_local_address_expr(op) {
+            return Ok(address);
+        }
         let base = self.lower_varnode(&op.inputs[0], visiting)?;
         let offset = if op.inputs.len() > 1 && op.inputs[1].is_constant {
             op.inputs[1].constant_val
@@ -3477,6 +3496,12 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<PreHirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
             return Err(MlilPreviewError::UnsupportedExprVarnodeLowering);
+        }
+        // Frame arithmetic that lands on a known local is that local's
+        // address, not a number computed from a register the output never
+        // declares.
+        if let Some(address) = self.stack_local_address_expr(op) {
+            return Ok(address);
         }
         if op.opcode == PcodeOpcode::IntXor
             && VarnodeKey::from(&op.inputs[0]) == VarnodeKey::from(&op.inputs[1])

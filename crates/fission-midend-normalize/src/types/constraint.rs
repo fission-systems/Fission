@@ -210,7 +210,8 @@ fn scalarize_fieldless_aggregate_values(stmts: &mut [PreHirStmt]) -> bool {
                 changed |= expr(base);
                 changed |= expr(index);
             }
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {}
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+            }
         }
         changed
     }
@@ -477,7 +478,10 @@ fn collect_constraints_expr(
             }
             collect_constraints_expr(base, field_accesses);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -499,7 +503,9 @@ fn get_expr_type(expr: &PreHirExpr, var_types: &HashMap<String, NirType>) -> Nir
                 signed: true,
             }))
         }
-        PreHirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+            NirType::Ptr(Box::new(NirType::Unknown))
+        }
         PreHirExpr::PtrOffset { base, .. } => {
             let base_ty = get_expr_type(base, var_types);
             if let NirType::Ptr(inner) = base_ty {
@@ -825,7 +831,10 @@ fn cast_mismatched_field_access_bases(
                 changed |= expr(base, var_types, field_accesses, surface_overrides);
                 changed |= expr(index, var_types, field_accesses, surface_overrides);
             }
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => {}
         }
         changed
     }

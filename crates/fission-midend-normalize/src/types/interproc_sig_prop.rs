@@ -219,7 +219,10 @@ fn scan_expr(
             scan_expr(then_expr, arity_map, summary_map);
             scan_expr(else_expr, arity_map, summary_map);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 

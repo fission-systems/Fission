@@ -17,7 +17,9 @@ pub fn eval_expr(expr: &PreHirExpr, env: &RangeEnv) -> CircleRange {
             let bits = nir_bits(ty).unwrap_or(64);
             CircleRange::singleton(*value as u64, bits)
         }
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => env
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => env
             .get(name.as_str())
             .copied()
             .unwrap_or_else(|| CircleRange::top(64)),

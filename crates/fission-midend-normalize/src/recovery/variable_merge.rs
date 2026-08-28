@@ -213,7 +213,10 @@ fn collect_cooccurring_var_pairs_in_expr(expr: &PreHirExpr, pairs: &mut HashSet<
             collect_cooccurring_var_pairs_in_expr(base, pairs);
             collect_cooccurring_var_pairs_in_expr(index, pairs);
         }
-        PreHirExpr::Var(_) | PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::Const(_, _)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => {}
     }
 }
 
@@ -392,7 +395,10 @@ impl CopyMergeBarrierCollector {
 
     fn visit_expr(&mut self, expr: &PreHirExpr) {
         match expr {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => {}
             PreHirExpr::Load { ptr, .. } => {
                 collect_vars_in_expr(ptr, &mut self.barrier_vars);
                 self.visit_expr(ptr);
@@ -460,14 +466,16 @@ impl CopyMergeBarrierCollector {
                     || self.expr_is_load_derived_barrier(then_expr)
                     || self.expr_is_load_derived_barrier(else_expr)
             }
-            PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => false,
+            PreHirExpr::Const(_, _)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_) => false,
         }
     }
 }
 
 fn collect_vars_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfLocal(name) => {
             vars.insert(name.clone());
         }
         PreHirExpr::Cast { expr, .. }
@@ -1193,7 +1201,9 @@ impl LiveRangeCollector {
                 self.visit_expr(base);
                 self.visit_expr(index);
             }
-            PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+            PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(_, _) => {}
         }
     }
 

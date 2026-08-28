@@ -92,6 +92,7 @@ pub enum PreHirLValue {
 pub enum PreHirExpr {
     Var(String),
     AddressOfGlobal(String),
+    AddressOfLocal(String),
     Const(i64, NirType),
     Cast {
         ty: NirType,

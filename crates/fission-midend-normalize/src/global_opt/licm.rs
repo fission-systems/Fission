@@ -242,9 +242,9 @@ fn is_invariant_stmt(stmt: &PreHirStmt, loop_defs: &HashSet<String>) -> bool {
 fn is_pure_and_invariant(expr: &PreHirExpr, loop_defs: &HashSet<String>) -> bool {
     match expr {
         PreHirExpr::Const(_, _) => true,
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
-            !loop_defs.contains(name.as_str())
-        }
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => !loop_defs.contains(name.as_str()),
         PreHirExpr::Cast { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
         PreHirExpr::Unary { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
         PreHirExpr::Binary { lhs, rhs, .. } => {

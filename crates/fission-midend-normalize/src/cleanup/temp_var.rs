@@ -801,7 +801,10 @@ fn stmt_uses_var_in_predicate_position(stmt: &PreHirStmt, name: &str) -> bool {
 
 fn expr_is_low_cost_inline_candidate(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => true,
         PreHirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
             args.iter().all(expr_is_low_cost_inline_candidate)
         }
@@ -835,7 +838,10 @@ fn expr_is_low_cost_inline_candidate(expr: &PreHirExpr) -> bool {
 
 fn expr_prefers_stable_materialization(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
         PreHirExpr::Cast { expr, .. } => expr_prefers_stable_materialization(expr),
         PreHirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
             args.iter().any(expr_prefers_stable_materialization)
@@ -1672,7 +1678,7 @@ pub fn rescue_undeclared_bindings(func: &mut PreHirFunction) -> bool {
 
 fn collect_all_body_names_expr(expr: &PreHirExpr, out: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfLocal(name) => {
             out.insert(name.clone());
         }
         PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}

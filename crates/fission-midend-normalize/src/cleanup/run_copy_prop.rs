@@ -174,7 +174,9 @@ fn walk_one(s: &PreHirStmt, out: &mut HashMap<String, usize>) {
 
 fn count_occurrences(e: &PreHirExpr, out: &mut HashMap<String, usize>) {
     match e {
-        PreHirExpr::Var(n) => *out.entry(n.clone()).or_insert(0) += 1,
+        PreHirExpr::Var(n) | PreHirExpr::AddressOfLocal(n) => {
+            *out.entry(n.clone()).or_insert(0) += 1
+        }
         PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => {}
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
@@ -211,7 +213,10 @@ fn count_occurrences(e: &PreHirExpr, out: &mut HashMap<String, usize>) {
 /// Is this expression safe to carry forward as an alias?
 fn is_pure_copyable(e: &PreHirExpr) -> bool {
     match e {
-        PreHirExpr::Var(_) | PreHirExpr::Const(..) | PreHirExpr::AddressOfGlobal(_) => true,
+        PreHirExpr::Var(_)
+        | PreHirExpr::Const(..)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => true,
         PreHirExpr::Cast { expr, .. } => is_pure_copyable(expr),
         _ => false,
     }
@@ -220,7 +225,10 @@ fn is_pure_copyable(e: &PreHirExpr) -> bool {
 fn expr_has_call(e: &PreHirExpr) -> bool {
     match e {
         PreHirExpr::Call { .. } => true,
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => false,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -255,7 +263,10 @@ fn subst_expr(e: &mut PreHirExpr, map: &HashMap<String, PreHirExpr>, changed: &m
         }
     }
     match e {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => {}
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }

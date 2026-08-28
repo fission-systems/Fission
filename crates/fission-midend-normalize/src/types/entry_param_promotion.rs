@@ -319,7 +319,9 @@ fn lvalue_address_contains_var(lvalue: &PreHirLValue, target: &str) -> bool {
 
 fn expr_contains_var(expr: &PreHirExpr, target: &str) -> bool {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => name == target,
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => name == target,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -603,7 +605,7 @@ fn collect_var_names_in_stmt(stmt: &PreHirStmt, vars: &mut HashSet<String>) {
 
 fn collect_var_names_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfLocal(name) => {
             vars.insert(name.clone());
         }
         PreHirExpr::Cast { expr: inner, .. }
@@ -745,10 +747,12 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
             continue;
         }
         let ty = match rhs {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => NirType::Int {
-                bits: 64,
-                signed: true,
-            },
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+                NirType::Int {
+                    bits: 64,
+                    signed: true,
+                }
+            }
             PreHirExpr::Cast { ty, .. } => ty.clone(),
             _ => NirType::Unknown,
         };

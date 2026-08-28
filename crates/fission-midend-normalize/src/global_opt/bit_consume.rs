@@ -325,7 +325,7 @@ fn seed_expr_fully(expr: &PreHirExpr, consumed: &mut HashMap<String, u64>) {
             seed_expr_fully(then_expr, consumed);
             seed_expr_fully(else_expr, consumed);
         }
-        PreHirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {}
     }
 }
 
@@ -510,6 +510,7 @@ fn backward_propagate_inner(expr: &PreHirExpr, out_consume: u64, result: &mut Ve
         | PreHirExpr::Load { .. }
         | PreHirExpr::Call { .. }
         | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
         | PreHirExpr::PtrOffset { .. }
         | PreHirExpr::AggregateCopy { .. }
         | PreHirExpr::Index { .. }

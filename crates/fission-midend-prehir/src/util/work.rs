@@ -116,6 +116,7 @@ fn pre_hir_expr_nodes_fit_budget<'a>(
                 match expr {
                     PreHirExpr::Var(_)
                     | PreHirExpr::AddressOfGlobal(_)
+                    | PreHirExpr::AddressOfLocal(_)
                     | PreHirExpr::Const(_, _) => {}
                     PreHirExpr::Cast { expr, .. }
                     | PreHirExpr::Unary { expr, .. }

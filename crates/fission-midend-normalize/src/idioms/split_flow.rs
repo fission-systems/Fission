@@ -571,7 +571,7 @@ fn stmt_defines_name(stmt: &PreHirStmt, name: &str) -> bool {
 
 fn expr_reads_name(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
-        PreHirExpr::Var(var) => var == name,
+        PreHirExpr::Var(var) | PreHirExpr::AddressOfLocal(var) => var == name,
         PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
@@ -725,7 +725,10 @@ fn expr_reads_name_as_address(expr: &PreHirExpr, name: &str) -> bool {
                 || expr_reads_name_as_address(then_expr, name)
                 || expr_reads_name_as_address(else_expr, name)
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
@@ -790,7 +793,10 @@ fn rename_expr_var(expr: &mut PreHirExpr, old: &str, new: &str) {
             rename_expr_var(then_expr, old, new);
             rename_expr_var(else_expr, old, new);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 

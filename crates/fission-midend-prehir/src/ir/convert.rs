@@ -121,6 +121,7 @@ pub fn prehir_expr_to_hir_expr(expr: PreHirExpr) -> HirExpr {
     match expr {
         PreHirExpr::Var(name) => HirExpr::Var(name),
         PreHirExpr::AddressOfGlobal(name) => HirExpr::AddressOfGlobal(name),
+        PreHirExpr::AddressOfLocal(name) => HirExpr::AddressOfLocal(name),
         PreHirExpr::Const(v, ty) => HirExpr::Const(v, ty),
         PreHirExpr::Cast { ty, expr } => HirExpr::Cast {
             ty,
@@ -330,6 +331,7 @@ pub fn hir_expr_to_prehir_expr(expr: HirExpr) -> PreHirExpr {
     match expr {
         HirExpr::Var(name) => PreHirExpr::Var(name),
         HirExpr::AddressOfGlobal(name) => PreHirExpr::AddressOfGlobal(name),
+        HirExpr::AddressOfLocal(name) => PreHirExpr::AddressOfLocal(name),
         HirExpr::Const(v, ty) => PreHirExpr::Const(v, ty),
         HirExpr::Cast { ty, expr } => PreHirExpr::Cast {
             ty,

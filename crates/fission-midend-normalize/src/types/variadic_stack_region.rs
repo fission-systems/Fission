@@ -30,7 +30,9 @@ fn home_slot_map(func: &PreHirFunction) -> HashMap<String, i64> {
 
 fn expr_uses_home_slot(expr: &PreHirExpr, home_slots: &HashMap<String, i64>) -> bool {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => home_slots.contains_key(name),
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => home_slots.contains_key(name),
         PreHirExpr::Load { ptr, .. } => expr_uses_home_slot(ptr, home_slots),
         PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             expr_uses_home_slot(base, home_slots)

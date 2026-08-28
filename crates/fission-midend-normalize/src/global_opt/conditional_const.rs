@@ -657,7 +657,9 @@ fn substitute_expr(expr: &mut PreHirExpr, env: &HashMap<String, PreHirExpr>) -> 
             changed |= substitute_expr(base, env);
             changed |= substitute_expr(index, env);
         }
-        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     changed
 }

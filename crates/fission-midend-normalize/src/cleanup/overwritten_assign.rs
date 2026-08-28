@@ -177,7 +177,10 @@ fn expr_mentions_var(expr: &PreHirExpr, name: &str) -> bool {
 fn walk(expr: &PreHirExpr, f: &mut impl FnMut(&PreHirExpr)) {
     f(expr);
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }

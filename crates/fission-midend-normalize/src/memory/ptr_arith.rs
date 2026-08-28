@@ -106,15 +106,15 @@ fn typed_pointer_base(
     binding_types: &HashMap<String, NirType>,
 ) -> Option<(PreHirExpr, NirType, bool)> {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
-            binding_types.get(name.as_str()).and_then(|ty| {
-                if matches!(ty, NirType::Ptr(_)) {
-                    Some((expr.clone(), ty.clone(), false))
-                } else {
-                    None
-                }
-            })
-        }
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => binding_types.get(name.as_str()).and_then(|ty| {
+            if matches!(ty, NirType::Ptr(_)) {
+                Some((expr.clone(), ty.clone(), false))
+            } else {
+                None
+            }
+        }),
         PreHirExpr::Cast {
             ty: NirType::Ptr(pointee),
             expr: inner,
@@ -949,15 +949,15 @@ fn try_recover_index_access(
         return None;
     };
     let ptr_ty = match lhs.as_ref() {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
-            binding_types.get(name.as_str()).and_then(|t| {
-                if matches!(t, NirType::Ptr(_)) {
-                    Some(t)
-                } else {
-                    None
-                }
-            })?
-        }
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => binding_types.get(name.as_str()).and_then(|t| {
+            if matches!(t, NirType::Ptr(_)) {
+                Some(t)
+            } else {
+                None
+            }
+        })?,
         _ => return None,
     };
     let mut elem_ty = pointee_ty(ptr_ty)
@@ -1261,7 +1261,10 @@ fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirTyp
             changed |= recover_in_expr(then_expr, binding_types);
             changed |= recover_in_expr(else_expr, binding_types);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     changed
 }
@@ -1793,7 +1796,10 @@ fn normalize_zero_index_expr(expr: &mut PreHirExpr) -> bool {
             changed |= normalize_zero_index_expr(then_expr);
             changed |= normalize_zero_index_expr(else_expr);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     changed
 }

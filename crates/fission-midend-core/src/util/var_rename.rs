@@ -80,7 +80,9 @@ fn rename_var_in_lvalue(lvalue: &mut HirLValue, renames: &[(String, String)]) {
 
 pub fn rename_var_in_expr(expr: &mut HirExpr, renames: &[(String, String)]) {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => rename_var_name(name, renames),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) | HirExpr::AddressOfLocal(name) => {
+            rename_var_name(name, renames)
+        }
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -244,7 +246,10 @@ fn rewrite_field_access_names_in_expr(
     renames: &std::collections::HashMap<(String, u32), String>,
 ) {
     match expr {
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }

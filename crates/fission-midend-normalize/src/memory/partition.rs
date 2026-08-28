@@ -230,7 +230,10 @@ fn collect_accesses_from_expr(expr: &PreHirExpr, accesses: &mut Vec<PartitionedM
             collect_accesses_from_expr(then_expr, accesses);
             collect_accesses_from_expr(else_expr, accesses);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -269,7 +272,9 @@ fn parse_partitioned_access(
 
 fn classify_base_object(base: &PreHirExpr) -> MemoryAccessClass {
     match base {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             if name.starts_with("stack_")
                 || name.starts_with("local_")
                 || name.starts_with("home_")

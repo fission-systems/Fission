@@ -146,7 +146,10 @@ fn check_expr(expr: &HirExpr, out: &mut HashMap<String, &'static str>) {
                 check_expr(a, out);
             }
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => check_expr(expr, out),
         HirExpr::Binary { lhs, rhs, .. } => {
             check_expr(lhs, out);

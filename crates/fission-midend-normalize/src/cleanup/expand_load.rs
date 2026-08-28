@@ -264,7 +264,10 @@ fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
             changed |= expand_load_in_expr(then_expr);
             changed |= expand_load_in_expr(else_expr);
         }
-        PreHirExpr::Var(_) | PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::Const(_, _)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => {}
     }
     changed
 }

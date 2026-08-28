@@ -107,6 +107,18 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) register_param_aliases: HashMap<u64, usize>,
     pub(crate) entry_arity: usize,
     pub(crate) suppress_entry_register_params: bool,
+    /// Varnodes some op reads for their value rather than to reach memory.
+    ///
+    /// Built once on first use; the p-code does not change after the build
+    /// starts.
+    pub(crate) value_used_varnodes: Option<crate::midend::HashSet<VarnodeKey>>,
+    /// Set while lowering the pointer operand of a `Load`/`Store`.
+    ///
+    /// Frame arithmetic used as a *value* is the address of a local and is
+    /// lowered as one. The same arithmetic used to reach memory is not: the
+    /// access itself already resolves to the slot, and rewriting the pointer
+    /// into `&local` only puts a dereference back around it.
+    pub(crate) lowering_memory_pointer: bool,
     pub(crate) stack_frame_size: i64,
     pub(crate) entry_frame_pointer_established: bool,
     /// Constant `K` when the prologue establishes `rbp`/`ebp` via

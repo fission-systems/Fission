@@ -157,7 +157,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
 
 fn collect_free_var_names(expr: &PreHirExpr, out: &mut crate::HashSet<String>) {
     match expr {
-        PreHirExpr::Var(n) => {
+        PreHirExpr::Var(n) | PreHirExpr::AddressOfLocal(n) => {
             out.insert(n.clone());
         }
         PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}

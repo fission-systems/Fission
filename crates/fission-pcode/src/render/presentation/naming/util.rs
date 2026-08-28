@@ -64,7 +64,7 @@ fn rename_var_in_expr(expr: &mut HirExpr, old: &str, new: &str) {
                 *n = new.to_string();
             }
         }
-        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
             rename_var_in_expr(expr, old, new)
         }

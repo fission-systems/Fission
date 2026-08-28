@@ -242,7 +242,10 @@ pub(super) fn is_builder_minted_temp(name: &str) -> bool {
 fn expr_contains_call(expr: &PreHirExpr) -> bool {
     match expr {
         PreHirExpr::Call { .. } => true,
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => false,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }

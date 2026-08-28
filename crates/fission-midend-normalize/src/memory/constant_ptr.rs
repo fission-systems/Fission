@@ -170,7 +170,10 @@ fn process_expr(expr: &mut PreHirExpr, context: &GlobalSymbolContext, changed: &
             process_expr(then_expr, context, changed);
             process_expr(else_expr, context, changed);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 
     // Rewrite constant pointers if applicable

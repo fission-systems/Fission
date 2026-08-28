@@ -241,7 +241,7 @@ impl<'a> PrintCtx<'a> {
 
     fn expr_is_pointer(&self, expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::AddressOfGlobal(_) => true,
+            HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => true,
             HirExpr::Var(name) => self
                 .var_types
                 .get(name.as_str())
@@ -338,7 +338,7 @@ impl<'a> PrintCtx<'a> {
                 self.pointer_decl_names.contains(name.as_str())
                     && !self.declared_pointee_is_void(name.as_str())
             }
-            HirExpr::AddressOfGlobal(_) => true,
+            HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => true,
             HirExpr::Cast {
                 ty: NirType::Ptr(_),
                 expr,
@@ -785,7 +785,9 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
                 format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
             } else {
                 match base.as_ref() {
-                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                    HirExpr::Var(name)
+                    | HirExpr::AddressOfGlobal(name)
+                    | HirExpr::AddressOfLocal(name) => {
                         format!("{name}[{index}]")
                     }
                     _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
@@ -815,6 +817,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
         return "0 /* [FISSION] RECURSION TOO DEEP (expression printer guard) */".to_string();
     }
     let (text, prec) = match expr {
+        HirExpr::AddressOfLocal(name) => (format!("&{name}"), 110),
         HirExpr::AddressOfGlobal(name) => {
             if name.starts_with('"') {
                 (name.clone(), 120)
@@ -959,7 +962,9 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
             } else {
                 match base.as_ref() {
-                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                    HirExpr::Var(name)
+                    | HirExpr::AddressOfGlobal(name)
+                    | HirExpr::AddressOfLocal(name) => {
                         format!("{name}[{index}]")
                     }
                     _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
@@ -993,7 +998,9 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
 
 fn peel_simple_deref_target(expr: &HirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) | HirExpr::AddressOfLocal(name) => {
+            Some(name)
+        }
         HirExpr::Cast { expr, .. } => peel_simple_deref_target(expr),
         HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_simple_deref_target(base),
         HirExpr::AggregateCopy { src, .. } => peel_simple_deref_target(src),
@@ -1250,6 +1257,7 @@ fn callable_arg_type_name(arg: &HirExpr, ctx: Option<&PrintCtx<'_>>) -> String {
         HirExpr::Index { elem_ty, .. } => print_type(elem_ty),
         HirExpr::Var(_)
         | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
         | HirExpr::PtrOffset { .. }
         | HirExpr::AggregateCopy { .. } => "uint".to_string(),
     }
@@ -1338,6 +1346,7 @@ fn print_expr_prec_ctx(
         return "0 /* [FISSION] RECURSION TOO DEEP (expression printer guard) */".to_string();
     }
     let (text, prec) = match expr {
+        HirExpr::AddressOfLocal(name) => (format!("&{name}"), 110),
         HirExpr::PtrOffset { base, offset } => {
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let text = if *offset == 0 {
@@ -1682,7 +1691,7 @@ fn is_integer_bitop(op: HirBinaryOp) -> bool {
 /// or a subtraction in practice.
 fn expr_prints_as_pointer_ctx_free(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::AddressOfGlobal(_) => true,
+        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => true,
         HirExpr::Cast { ty, .. } => matches!(ty, NirType::Ptr(_)),
         HirExpr::Load { ty, .. } | HirExpr::Index { elem_ty: ty, .. } => {
             matches!(ty, NirType::Ptr(_))

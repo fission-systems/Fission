@@ -178,7 +178,9 @@ fn stmt_list_contains_continue(stmts: &[PreHirStmt]) -> bool {
 
 fn collect_cond_vars(expr: &PreHirExpr, vars: &mut HashSet<String>) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             vars.insert(name.clone());
         }
         PreHirExpr::Cast { expr, .. }

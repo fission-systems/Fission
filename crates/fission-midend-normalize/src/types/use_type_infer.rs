@@ -179,7 +179,10 @@ fn collect_binding_use_roles_lvalue(lhs: &PreHirLValue, out: &mut HashMap<String
 
 fn collect_binding_use_roles_expr(expr: &PreHirExpr, out: &mut HashMap<String, BindingUseRole>) {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
         PreHirExpr::Cast { ty, expr } => {
             if matches!(ty, NirType::Int { .. } | NirType::Bool) {
                 mark_scalar_role(expr, out);
@@ -239,7 +242,8 @@ fn mark_address_role(expr: &PreHirExpr, out: &mut HashMap<String, BindingUseRole
         | PreHirExpr::Call { .. }
         | PreHirExpr::Load { .. }
         | PreHirExpr::Const(_, _)
-        | PreHirExpr::AddressOfGlobal(_) => collect_binding_use_roles_expr(expr, out),
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => collect_binding_use_roles_expr(expr, out),
     }
 }
 
@@ -277,7 +281,9 @@ fn mark_scalar_role(expr: &PreHirExpr, out: &mut HashMap<String, BindingUseRole>
             mark_scalar_role(index, out);
         }
         PreHirExpr::Load { ptr, .. } => mark_address_role(ptr, out),
-        PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => {}
     }
 }
 
@@ -433,7 +439,7 @@ fn collect_assignment_copy_constraints(
                 }
             }
 
-            if let PreHirExpr::AddressOfGlobal(_) = rhs {
+            if let PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(NirType::Unknown));
@@ -961,7 +967,10 @@ fn collect_constraints_expr(
             collect_constraints_expr(then_expr, return_type, known_binding_types, out);
             collect_constraints_expr(else_expr, return_type, known_binding_types, out);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1088,7 +1097,9 @@ fn is_byte_pointer_type(ty: &NirType) -> bool {
 
 fn is_byte_expr(expr: &PreHirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             known_binding_types.get(name).is_some_and(is_byte_int_type)
         }
         PreHirExpr::Const(value, ty) => is_byte_int_type(ty) || (0..=0xff).contains(value),
@@ -1104,7 +1115,9 @@ fn is_byte_expr(expr: &PreHirExpr, known_binding_types: &HashMap<String, NirType
 
 fn is_byte_pointer_expr(expr: &PreHirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => known_binding_types
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => known_binding_types
             .get(name)
             .is_some_and(is_byte_pointer_type),
         PreHirExpr::Cast { ty, expr } => {
@@ -1394,7 +1407,9 @@ fn collect_byte_index_accumulator_evidence_expr(
     evidence: &mut HashMap<String, ByteIndexAccumulatorEvidence>,
 ) {
     match expr {
-        PreHirExpr::Var(var_name) | PreHirExpr::AddressOfGlobal(var_name)
+        PreHirExpr::Var(var_name)
+        | PreHirExpr::AddressOfGlobal(var_name)
+        | PreHirExpr::AddressOfLocal(var_name)
             if candidates.contains(var_name) && Some(var_name.as_str()) != exclude =>
         {
             evidence
@@ -1532,7 +1547,10 @@ fn collect_byte_index_accumulator_evidence_expr(
                 evidence,
             );
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 }
 
@@ -1589,9 +1607,9 @@ fn narrow_byte_index_accumulators(func: &mut PreHirFunction) -> bool {
 
 fn expr_int_bits(expr: &PreHirExpr, known_binding_types: &HashMap<String, NirType>) -> Option<u32> {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
-            known_binding_types.get(name).and_then(nir_type_bits)
-        }
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => known_binding_types.get(name).and_then(nir_type_bits),
         PreHirExpr::Const(_, ty)
         | PreHirExpr::Unary { ty, .. }
         | PreHirExpr::Call { ty, .. }
@@ -1648,9 +1666,9 @@ fn return_expr_type(
     known_binding_types: &HashMap<String, NirType>,
 ) -> Option<NirType> {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
-            known_binding_types.get(name).cloned()
-        }
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => known_binding_types.get(name).cloned(),
         other => {
             let ty = expr_type(other);
             (ty != NirType::Unknown).then_some(ty)
@@ -1840,7 +1858,9 @@ fn is_unknown_call_result(expr: &PreHirExpr) -> bool {
 
 fn count_var_uses_expr(expr: &PreHirExpr, out: &mut HashMap<String, usize>) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             *out.entry(name.clone()).or_default() += 1;
         }
         PreHirExpr::Const(_, _) => {}
@@ -2169,7 +2189,9 @@ fn collect_wrapping_narrow_return_vars(
     seen: &mut Vec<String>,
 ) {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
             // `return rax` after `rax = (int)(param_1 + param_2)` constrains the
             // params exactly as `return (int)(param_1 + param_2)` does, but the
             // params are not in the return expression, so without following the

@@ -140,7 +140,10 @@ fn strip_redundant_casts_in_expr(
             changed |= strip_redundant_casts_in_expr(then_expr, type_map);
             changed |= strip_redundant_casts_in_expr(else_expr, type_map);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         if let PreHirExpr::Var(name) = inner.as_ref() {
@@ -328,18 +331,25 @@ fn expr_uses_var_as_index_base(expr: &PreHirExpr, name: &str) -> bool {
                 || expr_uses_var_as_index_base(then_expr, name)
                 || expr_uses_var_as_index_base(else_expr, name)
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
 fn pointer_alias_replacement(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => Some(expr.clone()),
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+            Some(expr.clone())
+        }
         PreHirExpr::Cast {
             ty: NirType::Ptr(_),
             expr,
         } => match expr.as_ref() {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => Some((**expr).clone()),
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+                Some((**expr).clone())
+            }
             _ => None,
         },
         _ => None,

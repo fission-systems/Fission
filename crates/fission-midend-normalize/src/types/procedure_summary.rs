@@ -31,7 +31,9 @@ pub fn summarize_wrapper_hir_function(func: &PreHirFunction) -> Option<Procedure
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+                    PreHirExpr::Var(name)
+                    | PreHirExpr::AddressOfGlobal(name)
+                    | PreHirExpr::AddressOfLocal(name) => {
                         func.params.iter().position(|param| param.name == *name)
                     }
                     _ => None,
@@ -54,7 +56,9 @@ pub fn summarize_wrapper_hir_function(func: &PreHirFunction) -> Option<Procedure
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+                    PreHirExpr::Var(name)
+                    | PreHirExpr::AddressOfGlobal(name)
+                    | PreHirExpr::AddressOfLocal(name) => {
                         func.params.iter().position(|param| param.name == *name)
                     }
                     _ => None,

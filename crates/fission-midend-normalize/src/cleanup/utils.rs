@@ -24,7 +24,10 @@ pub(super) fn is_abi_return_register_name(name: &str) -> bool {
 /// RHS safe to fold through `reg = rhs; return reg` → `return rhs`.
 pub(super) fn is_pure_return_collapse_rhs(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => true,
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_) => true,
         PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
             is_pure_return_collapse_rhs(expr)
         }
@@ -37,7 +40,10 @@ pub(super) fn is_pure_return_collapse_rhs(expr: &PreHirExpr) -> bool {
 
 pub fn expr_has_side_effects(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -221,7 +227,9 @@ pub(super) fn count_var_uses_in_lvalue(lhs: &PreHirLValue, name: &str) -> usize 
 
 pub(super) fn count_var_uses(expr: &PreHirExpr, name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(var) | PreHirExpr::AddressOfGlobal(var) => usize::from(var == name),
+        PreHirExpr::Var(var)
+        | PreHirExpr::AddressOfGlobal(var)
+        | PreHirExpr::AddressOfLocal(var) => usize::from(var == name),
         PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr, .. } => count_var_uses(expr, name),
         PreHirExpr::Unary { expr, .. } => count_var_uses(expr, name),
@@ -344,7 +352,9 @@ pub(super) fn lvalue_assigns_any_expr_var(lhs: &PreHirLValue, expr: &PreHirExpr)
 
 pub(super) fn expr_contains_var(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
-        PreHirExpr::Var(var) | PreHirExpr::AddressOfGlobal(var) => var == name,
+        PreHirExpr::Var(var)
+        | PreHirExpr::AddressOfGlobal(var)
+        | PreHirExpr::AddressOfLocal(var) => var == name,
         PreHirExpr::Const(_, _) => false,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
@@ -468,7 +478,10 @@ pub(super) fn replace_var_in_lvalue(lhs: &mut PreHirLValue, name: &str, replacem
 pub(super) fn replace_var_in_expr(expr: &mut PreHirExpr, name: &str, replacement: &PreHirExpr) {
     match expr {
         PreHirExpr::Var(var) if var == name => *expr = replacement.clone(),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
         PreHirExpr::Cast { expr, .. } => replace_var_in_expr(expr, name, replacement),
         PreHirExpr::Unary { expr, .. } => replace_var_in_expr(expr, name, replacement),
         PreHirExpr::Binary { lhs, rhs, .. } => {

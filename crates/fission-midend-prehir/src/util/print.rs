@@ -17,7 +17,9 @@ use crate::ir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirUnaryOp};
 pub fn format_expr_key(expr: &PreHirExpr) -> String {
     match expr {
         PreHirExpr::Var(name) => name.clone(),
-        PreHirExpr::AddressOfGlobal(name) => format!("&{name}"),
+        PreHirExpr::AddressOfGlobal(name) | PreHirExpr::AddressOfLocal(name) => {
+            format!("&{name}")
+        }
         PreHirExpr::Const(v, _) => v.to_string(),
         PreHirExpr::Cast { ty, expr } => format!("({ty:?}){}", format_expr_key(expr)),
         PreHirExpr::Unary { op, expr, .. } => match op {

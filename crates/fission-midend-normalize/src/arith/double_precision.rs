@@ -211,7 +211,10 @@ fn rewrite_expr(expr: &mut PreHirExpr, defs: &HashMap<String, PreHirExpr>) -> bo
             changed |= rewrite_expr(base, defs);
             changed |= rewrite_expr(index, defs);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 
     // Try to recombine hi/lo pairs at this node

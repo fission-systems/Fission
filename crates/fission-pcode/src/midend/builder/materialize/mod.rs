@@ -25,7 +25,7 @@ struct SameBlockRegisterJoinProof {
 impl<'a> PreviewBuilder<'a> {
     fn collect_var_names_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
         match expr {
-            PreHirExpr::Var(name) => {
+            PreHirExpr::Var(name) | PreHirExpr::AddressOfLocal(name) => {
                 vars.insert(name.clone());
             }
             PreHirExpr::Cast { expr, .. }
@@ -92,7 +92,9 @@ impl<'a> PreviewBuilder<'a> {
                     || self.rhs_is_load_derived_value(then_expr)
                     || self.rhs_is_load_derived_value(else_expr)
             }
-            PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => false,
+            PreHirExpr::Const(_, _)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_) => false,
         }
     }
 
@@ -132,7 +134,10 @@ impl<'a> PreviewBuilder<'a> {
                     visit(this, then_expr);
                     visit(this, else_expr);
                 }
-                PreHirExpr::Var(_) | PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
+                PreHirExpr::Var(_)
+                | PreHirExpr::Const(_, _)
+                | PreHirExpr::AddressOfGlobal(_)
+                | PreHirExpr::AddressOfLocal(_) => {}
             }
         }
 
@@ -729,8 +734,12 @@ impl<'a> PreviewBuilder<'a> {
                             } else {
                                 PreHirLValue::Deref {
                                     ptr: Box::new(
-                                        this.lower_varnode(&op.inputs[1], &mut HashSet::default())
-                                            .map_err(|err| {
+                                        this.lower_memory_pointer(
+                                            &op.inputs[1],
+                                            &mut HashSet::default(),
+                                        )
+                                        .map_err(
+                                            |err| {
                                                 this.debug_lowering_error(
                                                     "store_ptr",
                                                     block.start_address,
@@ -739,7 +748,8 @@ impl<'a> PreviewBuilder<'a> {
                                                     &err,
                                                 );
                                                 err
-                                            })?,
+                                            },
+                                        )?,
                                     ),
                                     ty: store_ty.clone(),
                                 }
@@ -1701,7 +1711,10 @@ impl<'a> PreviewBuilder<'a> {
 
     fn rhs_is_safe_scalar_live_register_merge(expr: &PreHirExpr) -> bool {
         match expr {
-            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => true,
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(..) => true,
             PreHirExpr::Cast { ty, expr } | PreHirExpr::Unary { ty, expr, .. } => {
                 Self::type_is_scalar_live_register_merge(ty)
                     && Self::rhs_is_safe_scalar_live_register_merge(expr)

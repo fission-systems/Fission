@@ -751,58 +751,73 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let resolved = match self.lookup_def_site(ptr).map(|(_, op)| op) {
-            Some(op) => match op.opcode {
-                PcodeOpcode::Copy
-                | PcodeOpcode::Cast
-                | PcodeOpcode::IntZExt
-                | PcodeOpcode::IntSExt => self.resolve_stack_address_inner(&op.inputs[0], visiting),
-                PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd => {
-                    if op.inputs.len() < 2 {
-                        None
-                    } else if let Some((base, offset)) =
-                        self.resolve_stack_address_inner(&op.inputs[0], visiting)
-                    {
-                        self.resolve_constant_operand(&op.inputs[1])
-                            .map(|delta| (base, offset + delta))
-                    } else if let Some((base, offset)) =
-                        self.resolve_stack_address_inner(&op.inputs[1], visiting)
-                    {
-                        self.resolve_constant_operand(&op.inputs[0])
-                            .map(|delta| (base, offset + delta))
-                    } else {
-                        None
-                    }
-                }
-                PcodeOpcode::IntSub => {
-                    if op.inputs.len() < 2 {
-                        None
-                    } else if let Some((base, offset)) =
-                        self.resolve_stack_address_inner(&op.inputs[0], visiting)
-                    {
-                        self.resolve_constant_operand(&op.inputs[1])
-                            .map(|delta| (base, offset - delta))
-                    } else {
-                        None
-                    }
-                }
-                PcodeOpcode::PtrSub => {
-                    if op.inputs.len() < 2 {
-                        None
-                    } else if let Some((base, offset)) =
-                        self.resolve_stack_address_inner(&op.inputs[0], visiting)
-                    {
-                        self.resolve_constant_operand(&op.inputs[1])
-                            .map(|delta| (base, offset + delta))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            },
+            Some(op) => self.resolve_stack_address_of_op(op, visiting),
             None => None,
         };
         visiting.remove(&key);
         resolved
+    }
+
+    /// The stack address `op` itself computes, if it computes one.
+    ///
+    /// Separate from `resolve_stack_address_inner` because a varnode does not
+    /// always identify the op that wrote it: SLEIGH reuses one `unique` slot
+    /// for every `lea` in a function, so resolving through the varnode picks
+    /// whichever definition the lookup happens to reach. `main` takes the
+    /// address of the same local twice and read as two different locals until
+    /// this asked the op directly.
+    fn resolve_stack_address_of_op(
+        &self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Option<(StackBase, i64)> {
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                self.resolve_stack_address_inner(op.inputs.first()?, visiting)
+            }
+            PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd => {
+                if op.inputs.len() < 2 {
+                    None
+                } else if let Some((base, offset)) =
+                    self.resolve_stack_address_inner(&op.inputs[0], visiting)
+                {
+                    self.resolve_constant_operand(&op.inputs[1])
+                        .map(|delta| (base, offset + delta))
+                } else if let Some((base, offset)) =
+                    self.resolve_stack_address_inner(&op.inputs[1], visiting)
+                {
+                    self.resolve_constant_operand(&op.inputs[0])
+                        .map(|delta| (base, offset + delta))
+                } else {
+                    None
+                }
+            }
+            PcodeOpcode::IntSub => {
+                if op.inputs.len() < 2 {
+                    None
+                } else if let Some((base, offset)) =
+                    self.resolve_stack_address_inner(&op.inputs[0], visiting)
+                {
+                    self.resolve_constant_operand(&op.inputs[1])
+                        .map(|delta| (base, offset - delta))
+                } else {
+                    None
+                }
+            }
+            PcodeOpcode::PtrSub => {
+                if op.inputs.len() < 2 {
+                    None
+                } else if let Some((base, offset)) =
+                    self.resolve_stack_address_inner(&op.inputs[0], visiting)
+                {
+                    self.resolve_constant_operand(&op.inputs[1])
+                        .map(|delta| (base, offset + delta))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Resolves a pointer to a byte offset from the x86 `FS_OFFSET`/
@@ -1069,6 +1084,96 @@ impl<'a> PreviewBuilder<'a> {
         };
         visiting.remove(&key);
         resolved
+    }
+
+    /// The address of an already-known stack local, when `op` computes one.
+    ///
+    /// `lea RAX,[RBP-6]` takes the address of a local, and nothing lowered it
+    /// as one: it stayed frame-pointer arithmetic and printed as `rbp - 6`,
+    /// naming a register the emitted C never declares. Across ten corpus
+    /// binaries the output held 235 bare `rsp`/`rbp` and not one `&local`.
+    ///
+    /// Only a slot the function already reaches some other way qualifies.
+    /// Inventing one from the address alone would have to invent its extent
+    /// too, and the address is usually taken precisely because a callee writes
+    /// through it -- `char buf[32]` declared as one byte would compile and then
+    /// smash the frame, which is worse than not compiling. So an offset with no
+    /// known slot keeps the arithmetic it has, and says so by failing to build.
+    pub(in crate::midend::builder) fn stack_local_address_expr(
+        &mut self,
+        op: &PcodeOp,
+    ) -> Option<PreHirExpr> {
+        // An address the function only ever dereferences is not a value: the
+        // access resolves to the slot on its own, and lowering the arithmetic
+        // as `&local` would leave a materialised assignment nothing reads.
+        if !self.output_is_used_as_a_value(op)
+            || self.lowering_memory_pointer
+            || !matches!(
+                op.opcode,
+                PcodeOpcode::IntAdd
+                    | PcodeOpcode::IntSub
+                    | PcodeOpcode::PtrAdd
+                    | PcodeOpcode::PtrSub
+            )
+        {
+            return None;
+        }
+        let (_, offset) = self.resolve_stack_address_of_op(op, &mut HashSet::default())?;
+        let (start, slot) = self.stack_slot_covering(offset)?;
+        let base = PreHirExpr::AddressOfLocal(slot.name.clone());
+        Some(if offset == start {
+            base
+        } else {
+            PreHirExpr::PtrOffset {
+                base: Box::new(base),
+                offset: offset - start,
+            }
+        })
+    }
+
+    /// Whether anything reads `op`'s output for its value.
+    ///
+    /// The pointer operand of a `Load`/`Store` is not such a read: it names
+    /// where to go, and the access itself already resolves the slot.
+    fn output_is_used_as_a_value(&mut self, op: &PcodeOp) -> bool {
+        let Some(output) = op.output.as_ref() else {
+            return false;
+        };
+        if self.value_used_varnodes.is_none() {
+            let mut used = crate::midend::HashSet::default();
+            for block in &self.pcode.blocks {
+                for candidate in &block.ops {
+                    let pointer_operand =
+                        matches!(candidate.opcode, PcodeOpcode::Load | PcodeOpcode::Store)
+                            .then_some(1usize);
+                    for (index, input) in candidate.inputs.iter().enumerate() {
+                        if Some(index) == pointer_operand || input.is_constant {
+                            continue;
+                        }
+                        used.insert(VarnodeKey::from(input));
+                    }
+                }
+            }
+            self.value_used_varnodes = Some(used);
+        }
+        self.value_used_varnodes
+            .as_ref()
+            .is_some_and(|used| used.contains(&VarnodeKey::from(output)))
+    }
+
+    /// The known stack slot whose bytes contain `offset`, with its start.
+    fn stack_slot_covering(&self, offset: i64) -> Option<(i64, &StackSlot)> {
+        if let Some(slot) = self.locals.get(&offset) {
+            return Some((offset, slot));
+        }
+        self.locals
+            .range(..offset)
+            .next_back()
+            .filter(|(start, slot)| {
+                stack_slot_byte_size(&slot.ty)
+                    .is_some_and(|size| offset - **start < i64::from(size))
+            })
+            .map(|(start, slot)| (*start, slot))
     }
 
     pub(in crate::midend::builder) fn ensure_stack_slot_binding(
@@ -1429,4 +1534,15 @@ fn x86_32_stack_purge_for_block(
     }
     let purge = total - i64::from(pointer_size);
     (purge > 0).then_some(purge)
+}
+
+/// The byte extent of a stack slot's recovered type, when it has one.
+fn stack_slot_byte_size(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } | NirType::Float { bits } => Some(bits / 8),
+        NirType::Ptr(_) => Some(8),
+        NirType::Aggregate { size, .. } => Some(*size),
+        NirType::Unknown => None,
+    }
 }

@@ -322,7 +322,10 @@ fn optimize_expr(
             changed |= optimize_expr(then_expr, type_map, nz_masks);
             changed |= optimize_expr(else_expr, type_map, nz_masks);
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
     }
 
     // 2. Apply current-level optimizations

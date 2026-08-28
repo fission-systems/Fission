@@ -4,7 +4,9 @@ use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
 
 pub fn expr_contains_var(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
-        PreHirExpr::Var(var) | PreHirExpr::AddressOfGlobal(var) => var == name,
+        PreHirExpr::Var(var)
+        | PreHirExpr::AddressOfGlobal(var)
+        | PreHirExpr::AddressOfLocal(var) => var == name,
         PreHirExpr::Const(_, _) => false,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
@@ -46,7 +48,10 @@ pub fn lvalue_contains_var(lhs: &PreHirLValue, name: &str) -> bool {
 pub fn replace_var_in_expr(expr: &mut PreHirExpr, name: &str, replacement: &PreHirExpr) {
     match expr {
         PreHirExpr::Var(var) if var == name => *expr = replacement.clone(),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -243,7 +248,9 @@ pub fn count_var_defs_stmt(stmt: &PreHirStmt, target: &str) -> usize {
 
 pub fn count_var_reads_expr(expr: &PreHirExpr, name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(var) | PreHirExpr::AddressOfGlobal(var) => usize::from(var == name),
+        PreHirExpr::Var(var)
+        | PreHirExpr::AddressOfGlobal(var)
+        | PreHirExpr::AddressOfLocal(var) => usize::from(var == name),
         PreHirExpr::Const(_, _) => 0,
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }

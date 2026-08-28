@@ -23,7 +23,9 @@ fn lhs_var(stmt: &PreHirStmt) -> Option<&str> {
 
 fn expr_var(expr: &PreHirExpr) -> Option<&str> {
     match expr {
-        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => Some(name.as_str()),
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => Some(name.as_str()),
         PreHirExpr::Cast { expr, .. } => expr_var(expr),
         _ => None,
     }
@@ -54,7 +56,10 @@ fn expr_contains_shr(expr: &PreHirExpr) -> bool {
         } => {
             expr_contains_shr(cond) || expr_contains_shr(then_expr) || expr_contains_shr(else_expr)
         }
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
