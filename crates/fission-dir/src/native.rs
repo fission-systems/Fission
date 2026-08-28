@@ -18,9 +18,10 @@ use fission_solver::{SatResult, Solver, SymExpr};
 use crate::product::{
     AssumptionKind, CallObservation, CandidateSemantics, CandidateSource, DirCandidate,
     DirCounterexample, DirReconstructor, DirVerifier, EvidenceStrength, ObservationScope,
-    ObservedLocation, PcodeFoundation, PcodeNativeBinaryOp, PcodeNativeExpr, PcodeNativeInput,
-    PcodeNativeRegion, PcodeRegionSelection, UnresolvedEffect, UnresolvedEffectKind,
-    ValidationAssumption, ValidationBudget, ValidationEvidence, ValidationVerdict,
+    ObservedLocation, PcodeFoundation, PcodeNativeBinaryOp, PcodeNativeConvertOp, PcodeNativeExpr,
+    PcodeNativeInput, PcodeNativeRegion, PcodeNativeUnaryOp, PcodeRegionSelection,
+    UnresolvedEffect, UnresolvedEffectKind, ValidationAssumption, ValidationBudget,
+    ValidationEvidence, ValidationVerdict,
 };
 
 /// Reconstructs one explicitly selected P-code region.
@@ -350,6 +351,87 @@ fn reconstruct_op(
                 _ => unreachable!(),
             })
         }
+        PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::SubPiece => {
+            let input_size = op.inputs[0].size;
+            validate_width(op_index, input_size)?;
+            let bits = bits_for_size(output.size);
+            let value = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
+            let convert = match op.opcode {
+                PcodeOpcode::IntZExt => PcodeNativeConvertOp::ZeroExtend,
+                PcodeOpcode::IntSExt => PcodeNativeConvertOp::SignExtend,
+                PcodeOpcode::SubPiece => {
+                    // input1 is the byte offset from the least significant end.
+                    let offset = op.inputs.get(1).filter(|vn| vn.is_constant).ok_or(
+                        PcodeNativeReconstructError::UnsupportedOpcode {
+                            op_index,
+                            opcode: op.opcode,
+                        },
+                    )?;
+                    let bytes = u32::try_from(offset.constant_val.max(0)).map_err(|_| {
+                        PcodeNativeReconstructError::UnsupportedOpcode {
+                            op_index,
+                            opcode: op.opcode,
+                        }
+                    })?;
+                    PcodeNativeConvertOp::Truncate {
+                        lsb_bits: bytes.saturating_mul(8),
+                    }
+                }
+                _ => unreachable!(),
+            };
+            Ok(PcodeNativeExpr::Convert {
+                op: convert,
+                value: Box::new(value),
+                bits,
+            })
+        }
+        PcodeOpcode::PopCount => {
+            let input_size = op.inputs[0].size;
+            validate_width(op_index, input_size)?;
+            require_widths(op, op_index, &[input_size])?;
+            let value = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
+            Ok(PcodeNativeExpr::Unary {
+                op: PcodeNativeUnaryOp::PopCount,
+                value: Box::new(value),
+                bits: bits_for_size(output.size),
+            })
+        }
+        PcodeOpcode::IntLeft | PcodeOpcode::IntRight => {
+            let value_size = op.inputs[0].size;
+            let amount_size = op.inputs[1].size;
+            validate_width(op_index, value_size)?;
+            validate_width(op_index, amount_size)?;
+            let bits = bits_for_size(output.size);
+            if bits != bits_for_size(value_size) {
+                return Err(PcodeNativeReconstructError::UnsupportedWidth {
+                    op_index,
+                    size: output.size,
+                });
+            }
+            let value = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
+            let amount = value_for(&op.inputs[1], op_index, value_space_ids, values, inputs)?;
+            // A shift amount may be narrower than the value it shifts, and the
+            // binary contract requires matching operand widths, so widen it.
+            let amount = if bits_for_size(amount_size) == bits {
+                amount
+            } else {
+                PcodeNativeExpr::Convert {
+                    op: PcodeNativeConvertOp::ZeroExtend,
+                    value: Box::new(amount),
+                    bits,
+                }
+            };
+            Ok(PcodeNativeExpr::Binary {
+                op: if op.opcode == PcodeOpcode::IntLeft {
+                    PcodeNativeBinaryOp::ShiftLeft
+                } else {
+                    PcodeNativeBinaryOp::ShiftRightLogical
+                },
+                left: Box::new(value),
+                right: Box::new(amount),
+                bits,
+            })
+        }
         opcode => Err(PcodeNativeReconstructError::UnsupportedOpcode { op_index, opcode }),
     }
 }
@@ -362,7 +444,9 @@ fn expression_bits(expr: &PcodeNativeExpr) -> u32 {
     match expr {
         PcodeNativeExpr::Input { bits, .. }
         | PcodeNativeExpr::Constant { bits, .. }
-        | PcodeNativeExpr::Binary { bits, .. } => *bits,
+        | PcodeNativeExpr::Binary { bits, .. }
+        | PcodeNativeExpr::Convert { bits, .. }
+        | PcodeNativeExpr::Unary { bits, .. } => *bits,
     }
 }
 
@@ -767,6 +851,32 @@ fn validate_expression_contract(
             }
             Ok(*bits)
         }
+        PcodeNativeExpr::Convert { op, value, bits } => {
+            validate_expression_bits(*bits)?;
+            let from = validate_expression_contract(value, inputs)?;
+            match op {
+                PcodeNativeConvertOp::ZeroExtend | PcodeNativeConvertOp::SignExtend => {
+                    if *bits < from {
+                        return Err(format!(
+                            "{op:?} widens to {bits} bits from {from}, which is narrower"
+                        ));
+                    }
+                }
+                PcodeNativeConvertOp::Truncate { lsb_bits } => {
+                    if lsb_bits.saturating_add(*bits) > from {
+                        return Err(format!(
+                            "truncation of {bits} bits at offset {lsb_bits} exceeds {from} bits"
+                        ));
+                    }
+                }
+            }
+            Ok(*bits)
+        }
+        PcodeNativeExpr::Unary { value, bits, .. } => {
+            validate_expression_bits(*bits)?;
+            validate_expression_contract(value, inputs)?;
+            Ok(*bits)
+        }
     }
 }
 
@@ -1057,6 +1167,73 @@ fn lower_candidate_symbolically(
                 }
             })
         }
+        PcodeNativeExpr::Convert { op, value, bits } => {
+            let from = expression_bits(value);
+            let inner = lower_candidate_symbolically(value, inputs)?;
+            Ok(match op {
+                PcodeNativeConvertOp::ZeroExtend => {
+                    if *bits <= from {
+                        inner
+                    } else {
+                        SymExpr::Concat(
+                            Box::new(SymExpr::new_const(0, *bits - from)),
+                            Box::new(inner),
+                        )
+                    }
+                }
+                PcodeNativeConvertOp::SignExtend => {
+                    if *bits <= from {
+                        inner
+                    } else {
+                        let width = *bits - from;
+                        let sign = SymExpr::Slt(
+                            Box::new(inner.clone()),
+                            Box::new(SymExpr::new_const(0, from)),
+                        );
+                        SymExpr::Concat(
+                            Box::new(SymExpr::Ite {
+                                cond: Box::new(sign),
+                                t: Box::new(SymExpr::new_const(mask_value(u64::MAX, width), width)),
+                                f: Box::new(SymExpr::new_const(0, width)),
+                            }),
+                            Box::new(inner),
+                        )
+                    }
+                }
+                PcodeNativeConvertOp::Truncate { lsb_bits } => SymExpr::Extract {
+                    expr: Box::new(inner),
+                    lsb: *lsb_bits,
+                    size: *bits,
+                },
+            })
+        }
+        PcodeNativeExpr::Unary { op, value, bits } => {
+            let from = expression_bits(value);
+            let inner = lower_candidate_symbolically(value, inputs)?;
+            Ok(match op {
+                // No solver primitive counts bits, so it expands to the sum of
+                // its extracted bits -- exact, and the operand widths here are
+                // small enough for that to stay tractable.
+                PcodeNativeUnaryOp::PopCount => {
+                    let mut sum: Option<SymExpr> = None;
+                    for bit in 0..from {
+                        let one = SymExpr::Concat(
+                            Box::new(SymExpr::new_const(0, bits.saturating_sub(1).max(1))),
+                            Box::new(SymExpr::Extract {
+                                expr: Box::new(inner.clone()),
+                                lsb: bit,
+                                size: 1,
+                            }),
+                        );
+                        sum = Some(match sum {
+                            None => one,
+                            Some(acc) => SymExpr::Add(Box::new(acc), Box::new(one)),
+                        });
+                    }
+                    sum.unwrap_or_else(|| SymExpr::new_const(0, *bits))
+                }
+            })
+        }
     }
 }
 
@@ -1127,6 +1304,30 @@ fn evaluate_expression(expression: &PcodeNativeExpr, inputs: &[u64]) -> u64 {
                 }
             };
             mask_value(value, *bits)
+        }
+        PcodeNativeExpr::Convert { op, value, bits } => {
+            let from = expression_bits(value);
+            let raw = evaluate_expression(value, inputs);
+            let converted = match op {
+                PcodeNativeConvertOp::ZeroExtend => mask_value(raw, from),
+                PcodeNativeConvertOp::SignExtend => sign_extend(mask_value(raw, from), from) as u64,
+                PcodeNativeConvertOp::Truncate { lsb_bits } => {
+                    if *lsb_bits >= 64 {
+                        0
+                    } else {
+                        mask_value(raw, from) >> lsb_bits
+                    }
+                }
+            };
+            mask_value(converted, *bits)
+        }
+        PcodeNativeExpr::Unary { op, value, bits } => {
+            let from = expression_bits(value);
+            let raw = mask_value(evaluate_expression(value, inputs), from);
+            let result = match op {
+                PcodeNativeUnaryOp::PopCount => u64::from(raw.count_ones()),
+            };
+            mask_value(result, *bits)
         }
     }
 }
@@ -1260,6 +1461,21 @@ fn render_expression(expression: &PcodeNativeExpr, inputs: &[PcodeNativeInput]) 
             .get(*index)
             .map_or_else(|| format!("input_{index}"), |input| input.name.clone()),
         PcodeNativeExpr::Constant { value, .. } => format!("0x{value:x}"),
+        PcodeNativeExpr::Unary { op, value, .. } => match op {
+            PcodeNativeUnaryOp::PopCount => {
+                format!("(popcount {})", render_expression(value, inputs))
+            }
+        },
+        PcodeNativeExpr::Convert { op, value, bits } => {
+            let inner = render_expression(value, inputs);
+            match op {
+                PcodeNativeConvertOp::ZeroExtend => format!("(zext{bits} {inner})"),
+                PcodeNativeConvertOp::SignExtend => format!("(sext{bits} {inner})"),
+                PcodeNativeConvertOp::Truncate { lsb_bits } => {
+                    format!("(trunc{bits}@{lsb_bits} {inner})")
+                }
+            }
+        }
         PcodeNativeExpr::Binary {
             op, left, right, ..
         } => {
@@ -1454,6 +1670,171 @@ mod tests {
                     };
                     assert_eq!(got, want, "{opcode:?} at a={a} b={b}");
                 }
+            }
+        }
+    }
+
+    /// Width conversions against their p-code definitions, exhaustively at
+    /// 8 -> 16 bits and at every truncation offset.
+    ///
+    /// These are the one place the region model cannot compose from what it
+    /// already has: operand and result differ in width, which the solver
+    /// tracks as different sorts. So the concrete side is checked directly
+    /// against the definition rather than against the symbolic side.
+    #[test]
+    /// `PopCount` and the shifts, against their definitions.
+    ///
+    /// x86 lowers its parity flag as `PopCount(x & 0xff) & 1`, so this is the
+    /// operation that unlocks parity-carrying comparison chains. It has no
+    /// solver primitive and expands to a sum of extracted bits; the concrete
+    /// side is checked against `count_ones` directly.
+    #[test]
+    fn popcount_and_shifts_match_their_pcode_definitions() {
+        fn region(opcode: PcodeOpcode, inputs: Vec<Varnode>, out: Varnode) -> PcodeNativeRegion {
+            let function = PcodeFunction {
+                blocks: vec![PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x401000,
+                    successors: Vec::new(),
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode,
+                        address: 0x401000,
+                        output: Some(out.clone()),
+                        inputs,
+                        asm_mnemonic: None,
+                    }],
+                }],
+            };
+            let selection = PcodeRegionSelection {
+                block_index: 0,
+                first_op: 0,
+                op_count: 1,
+                output: location_of(&out),
+            };
+            let foundation = PcodeFoundation::new(0x401000, function).unwrap();
+            match PcodeNativeReconstructor::new(selection, [1, 2])
+                .reconstruct(&foundation)
+                .expect("region reconstructs")
+                .into_iter()
+                .next()
+                .unwrap()
+                .semantics
+            {
+                CandidateSemantics::PcodeNativeRegion(region) => region,
+                other => panic!("unexpected candidate semantics: {other:?}"),
+            }
+        }
+
+        let pop = region(
+            PcodeOpcode::PopCount,
+            vec![varnode(2, 0, 1)],
+            varnode(2, 16, 1),
+        );
+        for a in 0u64..=0xff {
+            assert_eq!(
+                evaluate_expression(&pop.expression, &[a]),
+                u64::from(a.count_ones()),
+                "popcount {a}"
+            );
+        }
+
+        // A shift amount narrower than the value it shifts is widened, which
+        // is the only reason these need the conversion node at all.
+        let shl = region(
+            PcodeOpcode::IntLeft,
+            vec![varnode(2, 0, 4), varnode(2, 8, 1)],
+            varnode(2, 16, 4),
+        );
+        let shr = region(
+            PcodeOpcode::IntRight,
+            vec![varnode(2, 0, 4), varnode(2, 8, 1)],
+            varnode(2, 16, 4),
+        );
+        for a in [0u64, 1, 0x8000_0000, 0xdead_beef] {
+            for k in 0u64..34 {
+                let want_l = if k >= 32 { 0 } else { (a << k) & 0xffff_ffff };
+                let want_r = if k >= 32 { 0 } else { (a & 0xffff_ffff) >> k };
+                assert_eq!(
+                    evaluate_expression(&shl.expression, &[a, k]),
+                    want_l,
+                    "shl {a:#x}<<{k}"
+                );
+                assert_eq!(
+                    evaluate_expression(&shr.expression, &[a, k]),
+                    want_r,
+                    "shr {a:#x}>>{k}"
+                );
+            }
+        }
+    }
+
+    fn width_conversions_match_their_pcode_definitions() {
+        fn build(
+            opcode: PcodeOpcode,
+            in_size: u32,
+            out_size: u32,
+            offset: i64,
+        ) -> PcodeNativeRegion {
+            let a_in = varnode(2, 0, in_size);
+            let out = varnode(2, 16, out_size);
+            let mut inputs = vec![a_in];
+            if opcode == PcodeOpcode::SubPiece {
+                inputs.push(Varnode::constant(offset, 4));
+            }
+            let function = PcodeFunction {
+                blocks: vec![PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x401000,
+                    successors: Vec::new(),
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode,
+                        address: 0x401000,
+                        output: Some(out.clone()),
+                        inputs,
+                        asm_mnemonic: None,
+                    }],
+                }],
+            };
+            let selection = PcodeRegionSelection {
+                block_index: 0,
+                first_op: 0,
+                op_count: 1,
+                output: location_of(&out),
+            };
+            let foundation = PcodeFoundation::new(0x401000, function).unwrap();
+            let candidates = PcodeNativeReconstructor::new(selection, [1, 2])
+                .reconstruct(&foundation)
+                .expect("conversion region reconstructs");
+            match candidates.into_iter().next().unwrap().semantics {
+                CandidateSemantics::PcodeNativeRegion(region) => region,
+                other => panic!("unexpected candidate semantics: {other:?}"),
+            }
+        }
+
+        let zext = build(PcodeOpcode::IntZExt, 1, 2, 0);
+        let sext = build(PcodeOpcode::IntSExt, 1, 2, 0);
+        for a in 0u64..=0xff {
+            assert_eq!(evaluate_expression(&zext.expression, &[a]), a, "zext {a}");
+            let want = (((a << 56) as i64) >> 56) as u64 & 0xffff;
+            assert_eq!(
+                evaluate_expression(&sext.expression, &[a]),
+                want,
+                "sext {a}"
+            );
+        }
+
+        // SUBPIECE takes `out_size` bytes starting `offset` bytes up.
+        for offset in 0..3i64 {
+            let region = build(PcodeOpcode::SubPiece, 4, 1, offset);
+            for a in [0u64, 1, 0x1234_5678, 0xdead_beef, u32::MAX as u64] {
+                let want = (a >> (offset as u32 * 8)) & 0xff;
+                assert_eq!(
+                    evaluate_expression(&region.expression, &[a]),
+                    want,
+                    "subpiece offset {offset} of {a:#x}"
+                );
             }
         }
     }

@@ -117,6 +117,38 @@ pub enum PcodeNativeExpr {
         right: Box<PcodeNativeExpr>,
         bits: u32,
     },
+    /// A width change. Unlike the binary operations this cannot be composed
+    /// from them: the operand and the result have different widths, which the
+    /// solver tracks as different sorts.
+    Convert {
+        op: PcodeNativeConvertOp,
+        value: Box<PcodeNativeExpr>,
+        bits: u32,
+    },
+    Unary {
+        op: PcodeNativeUnaryOp,
+        value: Box<PcodeNativeExpr>,
+        bits: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcodeNativeUnaryOp {
+    /// Number of set bits in the operand. x86 lowers its parity flag this
+    /// way -- `PopCount(x & 0xff) & 1` -- so supporting it unlocks every
+    /// parity-carrying comparison chain.
+    PopCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcodeNativeConvertOp {
+    ZeroExtend,
+    SignExtend,
+    /// Keep `bits` starting at `lsb_bits` from the bottom -- p-code `SUBPIECE`,
+    /// whose byte offset this records in bits.
+    Truncate {
+        lsb_bits: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
