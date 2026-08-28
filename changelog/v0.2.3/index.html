@@ -10,9 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-08-23-deterministic-hir-semantic-naming/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/v0.2.3/">
       
       
+        <link rel="prev" href="../../RELEASE/">
+      
+      
+        <link rel="next" href="../v0.2.2/">
       
       
         
@@ -23,7 +27,7 @@
     
     
       
-        <title>Make HIR semantic naming deterministic - Fission</title>
+        <title>Fission 0.2.3 - Fission</title>
       
     
     
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#make-hir-semantic-naming-deterministic" class="md-skip">
+        <a href="#fission-v023" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Make HIR semantic naming deterministic
+              Fission 0.2.3
             
           </span>
         </div>
@@ -382,11 +386,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../changelog/v0.2.3/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   
@@ -781,28 +787,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
-        
-          
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -820,7 +829,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
@@ -835,10 +844,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -854,6 +890,136 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#release-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-emitted-c-was-losing-side-effects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The emitted C was losing side effects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#arguments-a-call-never-received" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Arguments a call never received
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-function-passed-as-data-is-a-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A function passed as data is a function
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#thumb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Thumb
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidras-no-return-lists-were-matching-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra's no-return lists were matching nothing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-and-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance and CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-defect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known defect
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -866,7 +1032,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+      <a href="../v0.2.2/" class="md-nav__link">
         
   
   
@@ -894,7 +1060,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+      <a href="../v0.2.1/" class="md-nav__link">
         
   
   
@@ -922,7 +1088,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+      <a href="../v0.2.0/" class="md-nav__link">
         
   
   
@@ -950,7 +1116,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+      <a href="../v0.1.9/" class="md-nav__link">
         
   
   
@@ -978,7 +1144,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+      <a href="../v0.1.8/" class="md-nav__link">
         
   
   
@@ -1006,7 +1172,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+      <a href="../v0.1.7/" class="md-nav__link">
         
   
   
@@ -1034,7 +1200,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+      <a href="../v0.1.6/" class="md-nav__link">
         
   
   
@@ -1062,7 +1228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+      <a href="../v0.1.5/" class="md-nav__link">
         
   
   
@@ -1090,7 +1256,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+      <a href="../v0.1.4/" class="md-nav__link">
         
   
   
@@ -1118,7 +1284,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+      <a href="../v0.1.3/" class="md-nav__link">
         
   
   
@@ -1146,7 +1312,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+      <a href="../v0.1.2/" class="md-nav__link">
         
   
   
@@ -1201,10 +1367,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-baseline-row-anchor" class="md-nav__link">
+  <a href="#release-summary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Baseline Row Anchor
+        Release summary
       
     </span>
   </a>
@@ -1212,10 +1378,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-owner-proof" class="md-nav__link">
+  <a href="#the-emitted-c-was-losing-side-effects" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Owner Proof
+        The emitted C was losing side effects
       
     </span>
   </a>
@@ -1223,10 +1389,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-generality-invariant-proof" class="md-nav__link">
+  <a href="#arguments-a-call-never-received" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Generality / Invariant Proof
+        Arguments a call never received
       
     </span>
   </a>
@@ -1234,10 +1400,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-risk-and-ownership-check" class="md-nav__link">
+  <a href="#a-function-passed-as-data-is-a-function" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Risk And Ownership Check
+        A function passed as data is a function
       
     </span>
   </a>
@@ -1245,10 +1411,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-validation-matrix" class="md-nav__link">
+  <a href="#thumb" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Validation Matrix
+        Thumb
       
     </span>
   </a>
@@ -1256,10 +1422,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-ai-review-prompt-firewall" class="md-nav__link">
+  <a href="#ghidras-no-return-lists-were-matching-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. AI Review / Prompt Firewall
+        Ghidra's no-return lists were matching nothing
       
     </span>
   </a>
@@ -1267,10 +1433,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-review-notes" class="md-nav__link">
+  <a href="#structure" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Review Notes
+        Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-and-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance and CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-defect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known defect
       
     </span>
   </a>
@@ -1297,136 +1496,150 @@
   
 
 
-<h1 id="make-hir-semantic-naming-deterministic">Make HIR semantic naming deterministic<a class="headerlink" href="#make-hir-semantic-naming-deterministic" title="Permanent link">&para;</a></h1>
-<h2 id="1-baseline-row-anchor">1. Baseline Row Anchor<a class="headerlink" href="#1-baseline-row-anchor" title="Permanent link">&para;</a></h2>
-<p>Measured on <code>main</code> at <code>7f0be19af</code> by decompiling each function five times
-with the release CLI and hashing <code>code_nir</code> and <code>code_hir</code> separately.</p>
+<h1 id="fission-v023">Fission v0.2.3<a class="headerlink" href="#fission-v023" title="Permanent link">&para;</a></h1>
+<p>The sample-set structure score went from 52 to 64 functions recovered exactly.
+The more consequential change is a class of defect no benchmark metric was
+looking at: the emitted C was, in several specific ways, not doing what the
+binary does. Those are fixed here.</p>
+<h2 id="release-summary">Release summary<a class="headerlink" href="#release-summary" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>sample</th>
-<th>project / optimization</th>
-<th style="text-align: right;">NIR hashes</th>
-<th style="text-align: right;">HIR hashes</th>
+<th>Area</th>
+<th>v0.2.2</th>
+<th>v0.2.3</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>bin_003.exe</code></td>
-<td>x0r-usb / O2</td>
-<td style="text-align: right;">1/5 unique</td>
-<td style="text-align: right;">5/5 unique</td>
+<td>Sample-set GED, exact matches (gate-enforced)</td>
+<td>52</td>
+<td><strong>64</strong></td>
 </tr>
 <tr>
-<td><code>bin_039.elf</code></td>
-<td>coreutils / O2-noinline</td>
-<td style="text-align: right;">1/5</td>
-<td style="text-align: right;">5/5</td>
+<td>Sample-set scorable rows</td>
+<td>232</td>
+<td>233</td>
 </tr>
 <tr>
-<td><code>bin_064.elf</code></td>
-<td>rsyslog / O0</td>
-<td style="text-align: right;">1/5</td>
-<td style="text-align: right;">5/5</td>
+<td>Writes to absolute-addressed globals present in the emitted C</td>
+<td>1 of 46</td>
+<td><strong>30 of 46</strong></td>
 </tr>
 <tr>
-<td><code>bin_093.elf</code></td>
-<td>gnutls / O2-noinline</td>
-<td style="text-align: right;">1/5</td>
-<td style="text-align: right;">5/5</td>
+<td>Call sites carrying the return address as an argument</td>
+<td>164, across 66 of 250 rows</td>
+<td><strong>0</strong></td>
 </tr>
 <tr>
-<td><code>bin_128.elf</code></td>
-<td>sysvinit / O2-noinline</td>
-<td style="text-align: right;">1/5</td>
-<td style="text-align: right;">3/5</td>
+<td>Calls assigning the result of a function that returns nothing</td>
+<td>56</td>
+<td>2</td>
 </tr>
 <tr>
-<td><code>bin_179.elf</code></td>
-<td>openssh-portable / O2-noinline</td>
-<td style="text-align: right;">1/5</td>
-<td style="text-align: right;">5/5</td>
+<td>Function addresses printed as bare integers</td>
+<td>84, across 20 rows</td>
+<td><strong>0</strong></td>
 </tr>
 </tbody>
 </table>
-<p>The differing HIR texts use different assignments of generated names such as
-<code>ptr</code>, <code>p</code>, <code>addr</code>, and <code>ptrN</code>; the NIR text is byte-identical. This is a
-determinism defect, not a semantic or structure-distance improvement claim.</p>
-<h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
-<ul>
-<li>[ ] SLEIGH/raw p-code</li>
-<li>[ ] Builder/materialize</li>
-<li>[ ] Normalize</li>
-<li>[ ] Structuring</li>
-<li>[ ] Type/data recovery</li>
-<li>[x] HIR presentation</li>
-<li>[ ] Printer</li>
-<li>[ ] Benchmark/automation</li>
-</ul>
-<p><code>render/presentation/naming/pointer_naming.rs</code> collects candidates in a
-<code>std::collections::HashMap</code>, converts it to a vector, and sorts only by score.
-Equal-score candidates retain the map's randomized iteration order before
-receiving <code>ptr</code>/<code>p</code>/<code>addr</code> names. <code>naming/mod.rs</code> repeats the same partial sort
-for candidates from all detectors; size candidates all carry the same score.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>same NIR tree
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  -&gt; randomized HashMap iteration among equal-score naming candidates
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  -&gt; different HIR-only alpha-renames on every process invocation
-</span></code></pre></div>
-<h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
-<p>Generalized rule:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Every HIR presentation candidate order must be a total order. Rank by the
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>existing semantic confidence score first and use the original binding name as
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>the deterministic tie-break. The same HirFunction must therefore produce the
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>same rename mapping independently of process hash seeds.
-</span></code></pre></div>
-<ul>
-<li>[x] No ISA, ABI, compiler, function, address, or corpus identity is used.</li>
-<li>[x] The rule changes only tie ordering between candidates already admitted
-      at exactly equal confidence.</li>
-<li>[x] The synthetic test uses two equal-score generic pointer bindings and
-      asserts the canonical mapping.</li>
-</ul>
-<p>Comparable coverage exceeds the row gate: six functions, six projects, and
-O0/O2/O2-noinline inputs all reproduce the same owner defect.</p>
-<h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Existing owner: <code>apply_semantic_naming</code> and its pointer detector.</li>
-<li>Shared substrate: none; this is owner-local ordering.</li>
-<li>No new pass, helper, dependency, telemetry, or semantic fact is required.</li>
-<li>Known cases that must not change: NIR output, candidate admission scores,
-  effects/evaluation order, types, control flow, and already meaningful names.</li>
-</ul>
-<h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
-<ul>
-<li>[x] Equal-score pointer naming invariant test.</li>
-<li>[x] Focused five-run hashes for all six measured sample rows: one NIR and one
-      HIR hash per row.</li>
-<li>[x] <code>cargo nextest run -p fission-pcode -- naming</code> (6/6 passed).</li>
-<li>[x] <code>cargo nextest run -p fission-pcode</code> (1011 passed, 1 skipped).</li>
-<li>[x] Full sample NIR/HIR coverage and goto comparison: 224/224 binaries and
-      250/250 functions; NIR remained at 1,079 gotos and HIR remained at 1,077.</li>
-<li>[x] <code>scripts/check/owner_boundaries.sh</code></li>
-<li>[x] <code>python3 scripts/audit/nir_boundary_scan.py --root .</code></li>
-</ul>
-<p>Measured result: all six rows changed from 3-5 distinct HIR hashes in five
-runs to one, while every row retained one NIR hash. This establishes
-reproducible HIR alpha-renaming without claiming a structure, type, or
-recompilation-score change.</p>
-<h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
-<ul>
-<li>No external or cross-model implementation advice was requested.</li>
-<li>Production code will contain no benchmark identity.</li>
-<li>The patch-validation evidence is the synthetic total-order invariant plus
-  the six multi-project, mixed-optimization real rows.</li>
-</ul>
-<h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
-<ul>
-<li>[x] Production code will contain no hardcoded row guards.</li>
-<li>[x] The justification is metric-independent: identical input producing a
-      different public HIR text is a reproducibility defect.</li>
-<li>[x] The change extends the existing naming owner and introduces no duplicate
-      presentation pass.</li>
-</ul>
+<h2 id="the-emitted-c-was-losing-side-effects">The emitted C was losing side effects<a class="headerlink" href="#the-emitted-c-was-losing-side-effects" title="Permanent link">&para;</a></h2>
+<p>SLEIGH lowers an absolute-addressed write (<code>mov dword ptr [rip+N], 0</code>) to an
+ordinary op whose <em>output varnode lives in ram space</em>, not to a <code>Store</code>. Such
+an output reached the generic materialization path and was judged by rules
+that all ask the same question -- does anything read this value back? Nothing
+reads a global inside the function that writes it, so the write was dropped.
+Measured over the sample set's own requested functions, one of 46 such writes
+survived into the emitted C, and the same one in <code>v0.1.9</code>. This was not a
+regression; it had always been there.</p>
+<p>Telling ram from unique needs the <em>engine</em>, not the varnode: the two lifters
+collide on space 3 -- the legacy engine's unique space is the runtime's ram --
+and offsets cannot break the tie either, because a PIE image maps its sections
+from a low base, so the runtime's own unique offsets look like mapped
+addresses. It is decided once per function from the space ids the whole op
+stream uses.</p>
+<p>Three passes then had to agree that the name meant memory, and each re-derived
+it from spelling or the symbol table; the first attempt at the presentation
+layer was silently half-effective for exactly that reason. A direct RAM output
+now carries <code>Deref { ptr: AddressOfGlobal(name) }</code>, the shape the <code>Store</code> path
+already used, so the representation proves what each pass previously guessed.</p>
+<h2 id="arguments-a-call-never-received">Arguments a call never received<a class="headerlink" href="#arguments-a-call-never-received" title="Permanent link">&para;</a></h2>
+<p>Three separate defects put values into argument lists that were not arguments.</p>
+<p>An x86 <code>call</code> lowers to <code>RSP = RSP - 8; STORE ram[RSP], &lt;next instruction&gt;;
+CALL target</code>, and that store lands at stack offset zero -- exactly where the
+first stack argument would be. Sixty-six of the sample set's 250 rows carried
+a trailing argument equal to the address of the instruction after the call:
+<code>__stack_chk_fail(16267)</code> on a function that takes none. The x86-32 recovery
+path had skipped these all along; the 64-bit one never did.</p>
+<p>Every argument register is caller-saved, so a call anywhere between a
+definition and a call site destroys the value. <code>check_ancestor_realistic</code>
+carried that rule from Ghidra but swept only the blocks strictly <em>between</em> the
+definition's block and the call's, and a call sits at an end of that path far
+more often than in the middle -- a block that ends in one, with the next block
+starting at the next call, is what two calls in a row look like. <code>setutent()</code>,
+which takes no parameters, came out as <code>setutent(14, __act, 0, xVar25)</code>: the
+preceding <code>sigaction</code>'s.</p>
+<p>A call clobbers the ABI's result register, so a later read of it that liveness
+cannot rule out made the call site materialize a receiver. On a function that
+returns nothing that produced <code>rax = free(ptr);</code> -- not valid C, and not true.</p>
+<h2 id="a-function-passed-as-data-is-a-function">A function passed as data is a function<a class="headerlink" href="#a-function-passed-as-data-is-a-function" title="Permanent link">&para;</a></h2>
+<p><code>global_names</code> resolved a constant to a symbol using the import table, the
+global symbols and the string literals, but never the functions. So a function
+handed to a callback printed as a bare integer: coreutils <code>ls</code> passes <code>strcmp</code>
+to a comparator and we emitted <code>sub_ad02(a, b, 46050, b)</code>; <code>signal(15, 41168)</code>
+instead of the handler's name.</p>
+<h2 id="thumb">Thumb<a class="headerlink" href="#thumb" title="Permanent link">&para;</a></h2>
+<p>Two defects, both found by disassembling <code>nuttx</code> against <code>objdump</code>.</p>
+<p>A branch to its own address is a genuine machine-level self-loop -- Thumb's
+<code>b .</code>, the idiom every Cortex-M <code>Default_Handler</code> ends in -- and the CFG
+builder was erasing it, because it decided on the resulting address rather
+than on how the target resolved. One block where there were two, no back edge,
+and a body that rendered as a bare <code>goto</code> to the function entry.</p>
+<p>Separately, <code>normalize_low_bit_code_address</code> can only speak for the address it
+is given, so every even-addressed function of a Cortex-M image -- which cannot
+execute ARM at all -- was disassembled in the language's default ARM mode.
+Misreading Thumb as ARM rarely fails outright: <code>80 b5</code>, a <code>push {r7,lr}</code>, reads
+as <code>addlt r11,r2,r0</code>. The decompile path already resolved this per address;
+the shared disassembly primitive, which the CLI and the server's <code>/api/disasm</code>
+both use, had no equivalent.</p>
+<h2 id="ghidras-no-return-lists-were-matching-nothing">Ghidra's no-return lists were matching nothing<a class="headerlink" href="#ghidras-no-return-lists-were-matching-nothing" title="Permanent link">&para;</a></h2>
+<p><code>NoReturnFunctionAnalyzer</code> normalises a name by stripping leading <code>'_'</code> chars
+in a loop. The port stripped exactly one, and a test pinned that. Not one entry
+in the shipped lists starts with an underscore, while the names they exist to
+match are <code>__stack_chk_fail</code>, <code>__assert_fail</code>, <code>_Unwind_Resume</code>,
+<code>__longjmp_chk</code> -- so the single most common no-return call in a glibc binary
+was never recognised as one.</p>
+<h2 id="structure">Structure<a class="headerlink" href="#structure" title="Permanent link">&para;</a></h2>
+<p>Beyond the correctness work, the sample-set structure score moved on four
+changes, each gated against the recorded floor: a branch that leaves the
+function no longer fabricates a block edge inside it; the stack-protector check
+is elided, because it is not in the source; a return is duplicated into the
+arms that fall into it; and the <code>else</code> behind an arm that leaves is unwrapped
+only when that arm actually leaves.</p>
+<p>Alternative structuring drivers gained experimental controls
+(<code>FISSION_EXPERIMENTAL_STRUCTURING_ORACLE</code>) and now report why a driver
+declined, which is how we established that the candidate space is not the
+bottleneck.</p>
+<h2 id="types">Types<a class="headerlink" href="#types" title="Permanent link">&para;</a></h2>
+<p>Nine changes to call-contract recovery: exact imported call arguments, gettext
+contracts, POSIX signatures, the ELF <code>main</code> callback prototype, x64 stack
+parameters, and direct-callee pointer evidence that survives a copy. Sample-set
+type accuracy is unchanged at 14 of 222; the dev-corpus work is where these
+show.</p>
+<h2 id="performance-and-ci">Performance and CI<a class="headerlink" href="#performance-and-ci" title="Permanent link">&para;</a></h2>
+<p>Several unbounded walks now carry budgets -- varnode lowering, the idom climb,
+a branchy region's reaching condition, the direct-callee prototype preview --
+and two hot paths cache what a block already answered. Formatting is checked
+across the workspace rather than only on changed files.</p>
+<h2 id="known-defect">Known defect<a class="headerlink" href="#known-defect" title="Permanent link">&para;</a></h2>
+<p>A loop-latch arm loses its body. Given a header, an arm whose statement is a
+write to a mapped global and whose terminator is an unconditional branch back
+to the header, and an exit, the write reaches <code>lower_block_stmts</code> and is absent
+from the body structuring assembles: <code>while (!rax) { }</code>, an empty loop. This
+owns the last 16 dropped global writes on the sample set, all in two
+option-parsing loops. Recorded as an ignored test,
+<code>backedge_arm_keeps_its_global_write</code>, which is a specification for the fix
+rather than the fix.</p>
 
 
 
