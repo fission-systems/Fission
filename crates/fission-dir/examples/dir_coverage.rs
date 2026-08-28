@@ -145,6 +145,24 @@ fn reason(e: &PcodeNativeReconstructError) -> String {
         PcodeNativeReconstructError::UnsupportedWidth { size, .. } => {
             format!("UnsupportedWidth {size}")
         }
+        PcodeNativeReconstructError::OverlappingVarnodes {
+            space_id,
+            left_offset,
+            left_size,
+            right_offset,
+            right_size,
+        } => {
+            // Same start, different width is a sub-register view (AL/AX/EAX);
+            // a different start is a genuine partial overlap.
+            let kind = if left_offset == right_offset {
+                "prefix"
+            } else {
+                "straddle"
+            };
+            format!(
+                "Overlap/{kind} space{space_id} {left_size}@{left_offset:#x} vs {right_size}@{right_offset:#x}"
+            )
+        }
         other => format!("{other:?}")
             .split(&[' ', '{'][..])
             .next()

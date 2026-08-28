@@ -507,6 +507,28 @@ fn sign_extend(value: u64, bits: u32) -> i64 {
     ((value << shift) as i64) >> shift
 }
 
+/// The value recorded at `location`'s offset under a *wider* size, if any.
+///
+/// Only a shared start counts: `AL`/`AX`/`EAX`/`RAX` all begin at the same
+/// offset, so a narrow read of one is a prefix of the wide value. A varnode
+/// that starts elsewhere and merely overlaps (x86's `AH`) is not a prefix and
+/// stays rejected -- across the sample set every overlap the reconstructor met
+/// was a prefix, and none straddled.
+fn widest_containing_prefix(
+    values: &HashMap<ObservedLocation, PcodeNativeExpr>,
+    location: ObservedLocation,
+) -> Option<PcodeNativeExpr> {
+    values
+        .iter()
+        .filter(|(candidate, _)| {
+            candidate.space_id == location.space_id
+                && candidate.offset == location.offset
+                && candidate.size > location.size
+        })
+        .max_by_key(|(candidate, _)| candidate.size)
+        .map(|(_, expression)| expression.clone())
+}
+
 fn require_widths(
     op: &PcodeOp,
     op_index: usize,
@@ -555,6 +577,21 @@ fn value_for(
     let location = location_of(varnode);
     if let Some(expression) = values.get(&location) {
         return Ok(expression.clone());
+    }
+    // A narrower read at the same offset is a sub-register view (`EAX` of
+    // `RAX`), not a separate location. SLEIGH emits the machine's own
+    // upper-bits rule as explicit ops -- an `IntZExt` back to the wide varnode
+    // after a 32-bit write -- so this only has to *see through* the view, never
+    // to reproduce the rule.
+    if let Some(wide) = widest_containing_prefix(values, location) {
+        let from = expression_bits(&wide);
+        if from > bits {
+            return Ok(PcodeNativeExpr::Convert {
+                op: PcodeNativeConvertOp::Truncate { lsb_bits: 0 },
+                value: Box::new(wide),
+                bits,
+            });
+        }
     }
     if let Some(index) = inputs
         .iter()
@@ -614,6 +651,12 @@ fn reject_overlapping_varnodes(
         for right in &locations[index + 1..] {
             if left.space_id != right.space_id {
                 break;
+            }
+            // A shared start is a sub-register view, which `value_for`
+            // resolves by truncating the wider value. Only a genuine straddle
+            // -- different starts, overlapping extents -- is still unmodelled.
+            if left.offset == right.offset {
+                continue;
             }
             let left_end = left.offset.saturating_add(u64::from(left.size));
             let right_end = right.offset.saturating_add(u64::from(right.size));
@@ -2104,43 +2147,86 @@ mod tests {
         assert!(evidence.detail.contains("pseudocode"));
     }
 
+    /// A sub-register view is resolved, and the resolution is checked against
+    /// the emulator rather than against itself.
+    ///
+    /// `EAX` and `RAX` share an offset, so a narrow read after a wide write is
+    /// a prefix of that value, not a second location. Letting the
+    /// reconstructor see through it is the whole change; the risk it carries
+    /// is proving a *wrong* value, so the assertion here is the verifier's own
+    /// verdict -- concrete execution of the original p-code through
+    /// `fission-emulator`, compared against the reconstructed expression.
     #[test]
-    fn rejects_overlapping_subregisters_in_the_first_slice() {
+    fn a_sub_register_view_resolves_and_the_emulator_agrees() {
         let wide = varnode(2, 0, 8);
-        let low = varnode(2, 0, 4);
-        let output = varnode(1, 0x100, 8);
+        let narrow = varnode(2, 0, 4);
+        let source = varnode(2, 64, 8);
+        let output = varnode(2, 128, 4);
         let function = PcodeFunction {
             blocks: vec![PcodeBasicBlock {
                 index: 0,
                 start_address: 0x1000,
                 successors: Vec::new(),
-                ops: vec![PcodeOp {
-                    seq_num: 0,
-                    opcode: PcodeOpcode::IntAdd,
-                    address: 0x1000,
-                    output: Some(output.clone()),
-                    inputs: vec![wide, low],
-                    asm_mnemonic: None,
-                }],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1000,
+                        output: Some(wide),
+                        inputs: vec![source],
+                        asm_mnemonic: None,
+                    },
+                    // Reads the low half of what op 0 wrote.
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1004,
+                        output: Some(output.clone()),
+                        inputs: vec![narrow],
+                        asm_mnemonic: None,
+                    },
+                ],
             }],
         };
+        let selection = PcodeRegionSelection {
+            block_index: 0,
+            first_op: 0,
+            op_count: 2,
+            output: location_of(&output),
+        };
         let foundation = PcodeFoundation::new(0x1000, function).unwrap();
-        let error = PcodeNativeReconstructor::new(
-            PcodeRegionSelection {
-                block_index: 0,
-                first_op: 0,
-                op_count: 1,
-                output: location_of(&output),
-            },
-            [1, 2],
-        )
-        .reconstruct(&foundation)
-        .unwrap_err();
 
-        assert!(matches!(
-            error,
-            PcodeNativeReconstructError::OverlappingVarnodes { .. }
-        ));
+        let artifacts = DirPipeline::new(
+            PcodeNativeReconstructor::new(selection, [1, 2]),
+            PcodeObservationVerifier::default(),
+        )
+        .run(
+            &foundation,
+            &ObservationScope::location_only(selection.output),
+            ValidationBudget::default(),
+        )
+        .expect("the sub-register region runs");
+
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(
+            artifacts[0].assurance.verdict(),
+            ValidationVerdict::Equivalent,
+            "reconstruction disagrees with the emulator: {:?}",
+            artifacts[0].assurance
+        );
+
+        // And the value really is the truncation, not the whole register.
+        let CandidateSemantics::PcodeNativeRegion(region) = &artifacts[0].candidate.semantics
+        else {
+            panic!("expected a native region");
+        };
+        for value in [0u64, 1, 0xffff_ffff, 0x1_0000_0000, u64::MAX] {
+            assert_eq!(
+                evaluate_expression(&region.expression, &[value]),
+                value & 0xffff_ffff,
+                "narrow view of {value:#x}"
+            );
+        }
     }
 
     #[test]
