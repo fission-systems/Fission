@@ -47,7 +47,11 @@ impl SignatureDatabase {
                 let path = fission_core::PATHS.get_die_signatures_path()?;
 
                 // Check disk cache
-                let cache_path = loader_cache_dir().map(|d| d.join("die_pe_json_cache.json"));
+                let cache_path = loader_cache_dir().map(|d| {
+                    d.join(format!(
+                        "die_pe_json_cache.v{SIGNATURE_PARSER_VERSION}.json"
+                    ))
+                });
                 if let Some(ref cache_p) = cache_path {
                     if cache_p.exists() {
                         if let (Ok(m_cache), Ok(m_src)) =
@@ -95,7 +99,11 @@ impl SignatureDatabase {
                 }
 
                 // Check disk cache
-                let cache_path = loader_cache_dir().map(|d| d.join("die_default_cache.json"));
+                let cache_path = loader_cache_dir().map(|d| {
+                    d.join(format!(
+                        "die_default_cache.v{SIGNATURE_PARSER_VERSION}.json"
+                    ))
+                });
                 if let Some(ref cache_p) = cache_path {
                     if cache_p.exists() {
                         if let Ok(m_cache) = fs::metadata(cache_p) {
@@ -201,9 +209,15 @@ impl SignatureDatabase {
 
         let mut added = 0usize;
         for line in &lines {
-            let Ok(sig) = serde_json::from_str::<Signature>(line) else {
+            let Ok(mut sig) = serde_json::from_str::<Signature>(line) else {
                 continue;
             };
+            // The packed corpus was parsed offline, so it carries whatever the
+            // extractor produced then -- including the debris this drops.
+            drop_uninformative_rules(&mut sig.rules, &mut sig.unsupported_rule_count);
+            if sig.rules.is_empty() {
+                continue;
+            }
             let key = (
                 sig.source_file.clone().unwrap_or_default(),
                 sig.sig_type.clone(),
@@ -314,6 +328,7 @@ fn parse_sg_signature(root: &Path, path: &Path, content: &str) -> Option<Signatu
     extract_section_rules(content, &mut rules);
     extract_string_rules(content, &mut rules);
     extract_import_rules(content, &mut rules);
+    drop_uninformative_rules(&mut rules, &mut unsupported_rule_count);
     dedup_rules(&mut rules);
 
     if rules.is_empty() {
@@ -727,50 +742,108 @@ fn extract_import_rules(content: &str, rules: &mut Vec<SignatureRule>) {
     }
 }
 
+/// A stable identity for one extracted primitive.
+///
+/// Used both to drop duplicates a script spells twice and to name the
+/// evidence behind a detection, so a partial match can be judged rather
+/// than just counted.
+fn rule_key(rule: &SignatureRule) -> String {
+    match rule {
+        SignatureRule::SectionName { name } => format!("section:{name}"),
+        SignatureRule::StringMatch { value } => format!("string:{value}"),
+        SignatureRule::EpPattern {
+            arch,
+            pattern,
+            offset,
+        } => {
+            format!("ep:{:?}:{pattern}:{:?}", arch, offset)
+        }
+        SignatureRule::FilePattern {
+            pattern,
+            offset,
+            from_end,
+        } => format!("file:{pattern}:{offset:?}:{from_end}"),
+        SignatureRule::OverlayPattern { pattern, offset } => {
+            format!("overlay:{pattern}:{offset:?}")
+        }
+        SignatureRule::OverlayPresent { present } => format!("overlay-present:{present}"),
+        SignatureRule::SectionCount { op, value } => {
+            format!("section-count:{op:?}:{value}")
+        }
+        SignatureRule::SectionNumeric {
+            selector,
+            field,
+            op,
+            value,
+        } => format!("section-numeric:{selector:?}:{field:?}:{op:?}:{value}"),
+        SignatureRule::SectionEntropy {
+            selector,
+            op,
+            value,
+        } => format!("section-entropy:{selector:?}:{op:?}:{value:.3}"),
+        SignatureRule::OverlayEntropy { op, value } => {
+            format!("overlay-entropy:{op:?}:{value:.3}")
+        }
+        SignatureRule::Import { function } => format!("import:{function}"),
+        SignatureRule::RichHeader { present } => format!("rich:{present}"),
+    }
+}
+
+/// Section names every PE carries, which say nothing about who built it.
+const UBIQUITOUS_SECTION_NAMES: &[&str] = &[
+    ".text",
+    ".data",
+    ".rdata",
+    ".bss",
+    ".idata",
+    ".edata",
+    ".pdata",
+    ".xdata",
+    ".reloc",
+    ".rsrc",
+    ".tls",
+    ".debug",
+    ".comment",
+    ".symtab",
+    ".strtab",
+    ".shstrtab",
+];
+
+/// Drop primitives that match almost any binary, counting them as unsupported.
+///
+/// A real DIE signature decides with logic this engine cannot run -- an
+/// overlay pattern *and* a specific string *and* a resource hash. What it
+/// extracts instead is the primitives that logic mentions, and the regexes
+/// that pull them out of multi-line script also pull out fragments: the
+/// one-character string `"."`, or `.rdata` from `PE.section[".rdata"]`.
+///
+/// Counted as evidence, those manufacture confidence out of nothing. On every
+/// one of twelve ordinary gcc-built binaries, `packer_PyInstaller` scored
+/// `2/4 (section:.rdata, string:.)` -- Medium, enough to warn the operator
+/// that the binary looked packed. `cryptor_PEUnion` scored the same way on
+/// `.idata` and `.text`.
+///
+/// They stay in `unsupported_rule_count` rather than vanishing: the signature
+/// really does have that many primitives, and dropping them from the
+/// denominator would raise the match ratio of whatever is left.
+fn drop_uninformative_rules(rules: &mut Vec<SignatureRule>, unsupported: &mut usize) {
+    let before = rules.len();
+    rules.retain(|rule| match rule {
+        // A section name shared by every binary of the format is not evidence.
+        SignatureRule::SectionName { name } => {
+            !UBIQUITOUS_SECTION_NAMES.contains(&name.to_ascii_lowercase().as_str())
+        }
+        // Too short to be a signature: `"."` and `"v"` are extraction debris,
+        // and any binary of a few kilobytes contains every short byte string.
+        SignatureRule::StringMatch { value } => value.trim().len() >= 4,
+        _ => true,
+    });
+    *unsupported += before - rules.len();
+}
+
 fn dedup_rules(rules: &mut Vec<SignatureRule>) {
     let mut seen = HashSet::new();
-    rules.retain(|rule| {
-        let key = match rule {
-            SignatureRule::SectionName { name } => format!("section:{name}"),
-            SignatureRule::StringMatch { value } => format!("string:{value}"),
-            SignatureRule::EpPattern {
-                arch,
-                pattern,
-                offset,
-            } => {
-                format!("ep:{:?}:{pattern}:{:?}", arch, offset)
-            }
-            SignatureRule::FilePattern {
-                pattern,
-                offset,
-                from_end,
-            } => format!("file:{pattern}:{offset:?}:{from_end}"),
-            SignatureRule::OverlayPattern { pattern, offset } => {
-                format!("overlay:{pattern}:{offset:?}")
-            }
-            SignatureRule::OverlayPresent { present } => format!("overlay-present:{present}"),
-            SignatureRule::SectionCount { op, value } => {
-                format!("section-count:{op:?}:{value}")
-            }
-            SignatureRule::SectionNumeric {
-                selector,
-                field,
-                op,
-                value,
-            } => format!("section-numeric:{selector:?}:{field:?}:{op:?}:{value}"),
-            SignatureRule::SectionEntropy {
-                selector,
-                op,
-                value,
-            } => format!("section-entropy:{selector:?}:{op:?}:{value:.3}"),
-            SignatureRule::OverlayEntropy { op, value } => {
-                format!("overlay-entropy:{op:?}:{value:.3}")
-            }
-            SignatureRule::Import { function } => format!("import:{function}"),
-            SignatureRule::RichHeader { present } => format!("rich:{present}"),
-        };
-        seen.insert(key)
-    });
+    rules.retain(|rule| seen.insert(rule_key(rule)));
 }
 
 /// DIE-compatible signature matcher
@@ -920,18 +993,18 @@ impl DieMatcher {
             return None;
         }
 
-        let mut matched_rules = 0;
         let total_rules = sig.rules.len() + sig.unsupported_rule_count;
 
         if total_rules == 0 {
             return None;
         }
 
-        for rule in &sig.rules {
-            if self.match_rule(binary, rule) {
-                matched_rules += 1;
-            }
-        }
+        let matched: Vec<&SignatureRule> = sig
+            .rules
+            .iter()
+            .filter(|rule| self.match_rule(binary, rule))
+            .collect();
+        let matched_rules = matched.len();
 
         // Require at least one rule match
         if matched_rules == 0 {
@@ -986,8 +1059,16 @@ impl DieMatcher {
         };
         Some(
             Detection::new(detection_type, &sig.name, None, confidence).with_details(format!(
-                "DIE: {}/{} primitives matched{}{}",
-                matched_rules, total_rules, ignored, source
+                "DIE: {}/{} primitives matched ({}){}{}",
+                matched_rules,
+                total_rules,
+                matched
+                    .iter()
+                    .map(|rule| rule_key(rule))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                ignored,
+                source
             )),
         )
     }
@@ -1412,6 +1493,17 @@ fn shannon_entropy(bytes: &[u8]) -> f64 {
         })
         .sum()
 }
+
+/// Bumped whenever signature extraction changes what it produces.
+///
+/// The parsed database is cached to disk and reused while it is newer than
+/// the signature source. The source is a shipped asset that never changes, so
+/// a cache written by an older parser is served forever -- a filter added to
+/// extraction had no effect at all until the file was deleted by hand, and
+/// the cache in the tree at the time was five weeks old. The version is part
+/// of the file name so an older build's cache is not overwritten, only
+/// ignored.
+const SIGNATURE_PARSER_VERSION: u32 = 2;
 
 fn loader_cache_dir() -> Option<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
