@@ -324,9 +324,14 @@ pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()
     Ok(())
 }
 
-pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()> {
+pub(super) fn print_imports(binary: &LoadedBinary, with_xrefs: bool, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     let imports: Vec<&FunctionInfo> = canonical_imports_sorted(binary);
+    let users = if with_xrefs {
+        import_users(binary, &imports)
+    } else {
+        std::collections::HashMap::new()
+    };
 
     if json {
         let funcs: Vec<serde_json::Value> = imports
@@ -341,6 +346,15 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
                     "external_library": f.external_library,
                     "is_thunk_like": f.is_thunk_like,
                     "thunk_target": f.thunk_target.map(|target| format!("0x{target:x}")),
+                    "used_by": users.get(&f.address).map(|callers| {
+                        callers
+                            .iter()
+                            .map(|addr| serde_json::json!({
+                                "address": format!("0x{addr:x}"),
+                                "name": function_label(binary, *addr),
+                            }))
+                            .collect::<Vec<_>>()
+                    }),
                 })
             })
             .collect();
@@ -352,6 +366,33 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
                 format!("JSON serialization failed: {}", e)
             ))?
         )?;
+    } else if with_xrefs {
+        writeln!(stdout, "Imported Functions ({}):", imports.len())?;
+        writeln!(stdout, "{:>18}  {:<46}  Used by", "Address", "Name")?;
+        writeln!(stdout, "{:─<100}", "")?;
+        for func in imports {
+            let callers = users
+                .get(&func.address)
+                .map(|callers| {
+                    let shown = callers
+                        .iter()
+                        .take(2)
+                        .map(|addr| function_label(binary, *addr))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if callers.len() > 2 {
+                        format!("{shown} +{}", callers.len() - 2)
+                    } else {
+                        shown
+                    }
+                })
+                .unwrap_or_default();
+            writeln!(
+                stdout,
+                "  0x{:012x}  {:<46}  {}",
+                func.address, func.name, callers
+            )?;
+        }
     } else {
         writeln!(stdout, "Imported Functions ({}):", imports.len())?;
         writeln!(stdout, "{:>18}  Name", "Address")?;
@@ -405,4 +446,89 @@ pub(super) fn print_exports(binary: &LoadedBinary, json: bool) -> io::Result<()>
         }
     }
     Ok(())
+}
+
+/// Which functions call each import.
+///
+/// The import list says what a binary is able to do -- `VirtualProtect`,
+/// `Sleep`, a crypto entry point -- and the next question is always which of
+/// its functions does it. The xref index has the calls and records the import
+/// slot as a reference to itself, so nothing joined the two.
+///
+/// A call can reach the slot directly or through a thunk that jumps via it,
+/// and the loader already recognises those and records the slot in
+/// `thunk_target`, so both are followed. On the binaries measured the thunk
+/// hop adds nothing -- every import whose thunk is recognised turns out to be
+/// called directly too -- but the hop costs one lookup and the shape it covers
+/// is real, so it stays.
+///
+/// Counting *every* reference instead is much worse: it picks up the thunk's
+/// own jump, which has no enclosing function, and the address then lands on
+/// whatever the range scan says covers it -- `__p__environ` claimed to use
+/// nearly every import in the binary. So a user is a call, from a function
+/// that could be named.
+///
+/// Eight imports of 39 get a caller on the fixture binary, nine of 36 on the
+/// corpus ones. The rest are reached only from code the discovery pass never
+/// made a function of, and saying nothing is the honest answer there.
+fn import_users(
+    binary: &LoadedBinary,
+    imports: &[&FunctionInfo],
+) -> std::collections::HashMap<u64, Vec<u64>> {
+    use fission_static::analysis::build_xref_index;
+    use fission_static::analysis::xref_index::{XrefKind, XrefSourceCategory};
+
+    let slots: std::collections::HashSet<u64> = imports.iter().map(|f| f.address).collect();
+    // Thunk entry -> the import slot it jumps through.
+    let thunks: std::collections::HashMap<u64, u64> = binary
+        .functions
+        .iter()
+        .filter_map(|f| {
+            f.thunk_target
+                .filter(|target| slots.contains(target))
+                .map(|target| (f.address, target))
+        })
+        .collect();
+
+    let mut users: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
+    let index = build_xref_index(binary, true);
+    for record in &index.refs {
+        if record.kind != XrefKind::Call {
+            continue;
+        }
+        let Some(target) = record.target.address else {
+            continue;
+        };
+        let slot = if slots.contains(&target) {
+            target
+        } else if let Some(&slot) = thunks.get(&target) {
+            slot
+        } else {
+            continue;
+        };
+        // Without an enclosing function there is no caller to name, and
+        // guessing from the instruction address misattributes it.
+        let XrefSourceCategory::Instruction {
+            enclosing_function: Some(user),
+        } = record.source.category
+        else {
+            continue;
+        };
+        let entry = users.entry(slot).or_default();
+        if !entry.contains(&user) {
+            entry.push(user);
+        }
+    }
+    for callers in users.values_mut() {
+        callers.sort_unstable();
+    }
+    users
+}
+
+/// A function's name, or its address when discovery never named it.
+fn function_label(binary: &LoadedBinary, address: u64) -> String {
+    match binary.function_at(address) {
+        Some(function) if !function.name.is_empty() => function.name.clone(),
+        _ => format!("0x{address:x}"),
+    }
 }

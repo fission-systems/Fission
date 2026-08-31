@@ -677,7 +677,7 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if cli.imports {
-        return Ok(print_imports(&binary, cli.json)?);
+        return Ok(print_imports(&binary, cli.info_xrefs, cli.json)?);
     }
 
     if cli.exports {
