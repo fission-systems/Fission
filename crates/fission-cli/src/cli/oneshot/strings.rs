@@ -1,54 +1,93 @@
+//! Extracted strings, addressed the way the rest of the tool addresses things.
+//!
+//! A string is a lead: you read one that looks interesting and then ask who
+//! uses it. That was not possible here. This listed a file offset and the text
+//! and nothing else, while `list`, `disasm`, `xrefs` and `decomp` all speak
+//! virtual addresses -- so a string could not be carried to any other command,
+//! and the most common move in reverse engineering had no starting point.
+//!
+//! The address and the section come from the loader and cost nothing. The
+//! referring function costs a disassembly pass, so it is behind `--xrefs`.
+
+use fission_loader::loader::{LoadedBinary, SectionInfo};
+use std::collections::HashMap;
 use std::io::{self, Write};
 
-pub(super) fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Result<()> {
+/// One extracted string with whatever the loader can say about where it lives.
+struct FoundString {
+    file_offset: usize,
+    text: String,
+    /// The mapped address, when the offset falls inside a section's file image.
+    ///
+    /// Bytes before the first section -- the PE header, where the section
+    /// *names* themselves are stored -- are never loaded at an address, which
+    /// is exactly what distinguishes `.rdata` the string from `.rdata` the
+    /// section.
+    address: Option<u64>,
+    section: Option<String>,
+    /// Function entry points whose code reads this string.
+    referrers: Vec<u64>,
+}
+
+pub(super) fn print_strings(
+    binary: &LoadedBinary,
+    data: &[u8],
+    min_len: usize,
+    with_xrefs: bool,
+    json: bool,
+) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    // Pre-allocate with a small data-size-based estimate.
-    let estimated_strings = data.len() / 1024;
-    let mut strings: Vec<(usize, String)> = Vec::with_capacity(estimated_strings.max(100));
-
-    // Pre-allocate buffer with reasonable capacity to reduce reallocations
-    let mut current_bytes: Vec<u8> = Vec::with_capacity(256);
-    let mut start_offset = 0;
-
-    for (i, &byte) in data.iter().enumerate() {
-        if (0x20..0x7f).contains(&byte) {
-            if current_bytes.is_empty() {
-                start_offset = i;
-            }
-            current_bytes.push(byte);
-        } else {
-            if current_bytes.len() >= min_len {
-                // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
-                let value =
-                    unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
-                strings.push((start_offset, value));
-            }
-            current_bytes.clear();
-        }
-    }
-    // Don't forget last string
-    if current_bytes.len() >= min_len {
-        let value = unsafe { String::from_utf8_unchecked(current_bytes) };
-        strings.push((start_offset, value));
+    let mut strings = scan(data, min_len);
+    locate(binary, &mut strings);
+    if with_xrefs {
+        attach_referrers(binary, &mut strings);
     }
 
     if json {
-        let str_json: Vec<serde_json::Value> = strings
+        let rows: Vec<serde_json::Value> = strings
             .iter()
-            .map(|(off, s)| {
-                serde_json::json!({
-                    "offset": format!("0x{:x}", off),
-                    "string": s,
-                })
+            .map(|found| {
+                let mut row = serde_json::json!({
+                    "file_offset": format!("0x{:x}", found.file_offset),
+                    "string": found.text,
+                });
+                if let Some(address) = found.address {
+                    row["address"] = serde_json::json!(format!("0x{address:x}"));
+                }
+                if let Some(section) = &found.section {
+                    row["section"] = serde_json::json!(section);
+                }
+                if with_xrefs {
+                    row["referrers"] = serde_json::json!(
+                        found
+                            .referrers
+                            .iter()
+                            .map(|addr| format!("0x{addr:x}"))
+                            .collect::<Vec<_>>()
+                    );
+                }
+                row
             })
             .collect();
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&str_json).map_err(|e| io::Error::new(
+            serde_json::to_string_pretty(&rows).map_err(|e| io::Error::new(
                 io::ErrorKind::Other,
                 format!("JSON serialization failed: {}", e)
             ))?
+        )?;
+        return Ok(());
+    }
+
+    let referenced = strings.iter().filter(|s| !s.referrers.is_empty()).count();
+    if with_xrefs {
+        writeln!(
+            stdout,
+            "Strings ({} found, min length {}; {} referenced by code):",
+            strings.len(),
+            min_len,
+            referenced
         )?;
     } else {
         writeln!(
@@ -57,16 +96,231 @@ pub(super) fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Resu
             strings.len(),
             min_len
         )?;
-        writeln!(stdout, "{:>12}  String", "Offset")?;
-        writeln!(stdout, "{:─<60}", "")?;
-        for (off, s) in &strings {
-            // Truncate long strings for display
-            if s.len() > 60 {
-                writeln!(stdout, "  0x{:08x}  {}...", off, &s[..57])?;
+    }
+    writeln!(
+        stdout,
+        "{:>18}  {:<8}  {:<24}  String",
+        "Address", "Section", "Referenced by"
+    )?;
+    writeln!(stdout, "{:─<100}", "")?;
+    for found in &strings {
+        let address = match found.address {
+            Some(address) => format!("0x{address:012x}"),
+            // Nothing maps it, so there is no address to give; the file offset
+            // is all there is and the column says so rather than inventing one.
+            None => format!("@{:<9x}", found.file_offset),
+        };
+        let section = found.section.as_deref().unwrap_or("-");
+        let referrers = if found.referrers.is_empty() {
+            String::new()
+        } else {
+            let shown = found
+                .referrers
+                .iter()
+                .take(2)
+                .map(|addr| format!("0x{addr:x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if found.referrers.len() > 2 {
+                format!("{shown} +{}", found.referrers.len() - 2)
             } else {
-                writeln!(stdout, "  0x{:08x}  {}", off, s)?;
+                shown
             }
-        }
+        };
+        let text = if found.text.len() > 60 {
+            format!("{}...", &found.text[..57])
+        } else {
+            found.text.clone()
+        };
+        writeln!(
+            stdout,
+            "{address:>18}  {section:<8}  {referrers:<24}  {text}"
+        )?;
     }
     Ok(())
+}
+
+/// Printable ASCII runs of at least `min_len` bytes.
+fn scan(data: &[u8], min_len: usize) -> Vec<FoundString> {
+    let mut strings = Vec::with_capacity((data.len() / 1024).max(100));
+    let mut current: Vec<u8> = Vec::with_capacity(256);
+    let mut start = 0usize;
+
+    let flush = |current: &mut Vec<u8>, start: usize, strings: &mut Vec<FoundString>| {
+        if current.len() >= min_len {
+            // SAFETY: only bytes in 0x20..0x7f were pushed, all valid UTF-8.
+            let text = unsafe { String::from_utf8_unchecked(std::mem::take(current)) };
+            strings.push(FoundString {
+                file_offset: start,
+                text,
+                address: None,
+                section: None,
+                referrers: Vec::new(),
+            });
+        }
+        current.clear();
+    };
+
+    for (i, &byte) in data.iter().enumerate() {
+        if (0x20..0x7f).contains(&byte) {
+            if current.is_empty() {
+                start = i;
+            }
+            current.push(byte);
+        } else {
+            flush(&mut current, start, &mut strings);
+        }
+    }
+    flush(&mut current, start, &mut strings);
+    strings
+}
+
+/// Map each string's file offset to the section that loads it, and its address.
+fn locate(binary: &LoadedBinary, strings: &mut [FoundString]) {
+    let mut sections: Vec<&SectionInfo> = binary
+        .sections
+        .iter()
+        .filter(|section| section.file_size > 0)
+        .collect();
+    sections.sort_by_key(|section| section.file_offset);
+
+    for found in strings.iter_mut() {
+        let offset = found.file_offset as u64;
+        let Ok(index) = sections.binary_search_by(|section| {
+            if offset < section.file_offset {
+                std::cmp::Ordering::Greater
+            } else if offset >= section.file_offset + section.file_size {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        }) else {
+            continue;
+        };
+        let section = sections[index];
+        found.section = Some(section.name.clone());
+        found.address = Some(section.virtual_address + (offset - section.file_offset));
+    }
+}
+
+/// Attach the entry points of functions whose code reads each string.
+///
+/// The xref index already resolves data references to their targets; what it
+/// does not do is relate them to string extents, because it records a string
+/// literal as a reference to itself. Joining the two is the whole feature:
+/// on the measurement binary it puts a referring function on 16 of 52 strings.
+fn attach_referrers(binary: &LoadedBinary, strings: &mut [FoundString]) {
+    use fission_static::analysis::build_xref_index;
+    use fission_static::analysis::xref_index::{XrefKind, XrefSourceCategory};
+
+    // Address -> index, for every byte a string covers, so a reference into
+    // the middle of one (a suffix pointer, or a `+ 4` past a prefix) still
+    // finds it.
+    let mut by_address: HashMap<u64, usize> = HashMap::new();
+    for (index, found) in strings.iter().enumerate() {
+        let Some(address) = found.address else {
+            continue;
+        };
+        for offset in 0..=found.text.len() as u64 {
+            by_address.entry(address + offset).or_insert(index);
+        }
+    }
+
+    let index = build_xref_index(binary, true);
+    for record in &index.refs {
+        // Only reads of the bytes count. A `call` whose target happens to
+        // begin with printable bytes -- `AWAVAUATUWVSH`, an x86-64 prologue
+        // pushing the callee-saved registers -- is control flow reaching a
+        // function, not code reading a string.
+        if !matches!(
+            record.kind,
+            XrefKind::DataRead | XrefKind::DataWrite | XrefKind::Relocation
+        ) {
+            continue;
+        }
+        let Some(target) = record.target.address else {
+            continue;
+        };
+        let Some(&string_index) = by_address.get(&target) else {
+            continue;
+        };
+        let XrefSourceCategory::Instruction { enclosing_function } = record.source.category else {
+            continue;
+        };
+        // Without an enclosing function the reference is still real, but there
+        // is no name to hand back, so the instruction address stands in.
+        let referrer = enclosing_function.unwrap_or(record.source.address);
+        let referrers = &mut strings[string_index].referrers;
+        if !referrers.contains(&referrer) {
+            referrers.push(referrer);
+        }
+    }
+    for found in strings.iter_mut() {
+        found.referrers.sort_unstable();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+
+    /// A PE whose header holds the section names and whose `.rdata` holds one
+    /// real string -- the shape that made the old listing unusable, since both
+    /// came back as bare file offsets with nothing to tell them apart.
+    fn binary_with_header_and_rdata() -> (LoadedBinary, Vec<u8>) {
+        let mut data = vec![0u8; 0x400];
+        data[0x100..0x106].copy_from_slice(b".rdata");
+        data[0x200..0x211].copy_from_slice(b"realworld-fixture");
+        let binary =
+            LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(data.clone()))
+                .image_base(0x140000000)
+                .entry_point(0x140001000)
+                .is_64bit(true)
+                .format("PE")
+                .add_section(SectionInfo {
+                    name: ".rdata".to_string(),
+                    virtual_address: 0x140004000,
+                    virtual_size: 0x200,
+                    file_offset: 0x200,
+                    file_size: 0x200,
+                    is_executable: false,
+                    is_writable: false,
+                    is_readable: true,
+                })
+                .build()
+                .expect("build test binary");
+        (binary, data)
+    }
+
+    #[test]
+    fn a_string_in_a_section_carries_the_address_it_loads_at() {
+        let (binary, data) = binary_with_header_and_rdata();
+        let mut strings = scan(&data, 6);
+        locate(&binary, &mut strings);
+        let found = strings
+            .iter()
+            .find(|s| s.text == "realworld-fixture")
+            .expect("string scanned");
+        // File offset 0x200 is the section's first byte, so it loads at the
+        // section's own address -- the one every other command speaks.
+        assert_eq!(found.address, Some(0x140004000));
+        assert_eq!(found.section.as_deref(), Some(".rdata"));
+    }
+
+    #[test]
+    fn a_string_in_the_header_has_no_address_to_give() {
+        let (binary, data) = binary_with_header_and_rdata();
+        let mut strings = scan(&data, 6);
+        locate(&binary, &mut strings);
+        let found = strings
+            .iter()
+            .find(|s| s.text == ".rdata")
+            .expect("string scanned");
+        // Nothing maps the header, so there is no address. Inventing one from
+        // the image base would put a section *name* at a plausible-looking
+        // address the loader never reads.
+        assert_eq!(found.address, None);
+        assert_eq!(found.section, None);
+    }
 }

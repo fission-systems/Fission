@@ -589,6 +589,10 @@ struct StringsArgs {
     #[arg(long = "min-len", default_value_t = 4)]
     min_len: usize,
 
+    /// Also report which functions reference each string (runs disassembly)
+    #[arg(long)]
+    xrefs: bool,
+
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
@@ -943,6 +947,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Strings(strings) => {
                     let mut args = OneShotArgs::with_binary(strings.binary);
                     args.strings = Some(strings.min_len);
+                    args.strings_xrefs = strings.xrefs;
                     args.json = strings.common.json;
                     args.verbose = strings.common.verbose;
                     args

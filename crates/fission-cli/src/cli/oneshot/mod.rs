@@ -725,7 +725,13 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if let Some(min_len) = cli.strings {
-        return Ok(print_strings(&binary_data, min_len.max(4), cli.json)?);
+        return Ok(print_strings(
+            &binary,
+            &binary_data,
+            min_len.max(4),
+            cli.strings_xrefs,
+            cli.json,
+        )?);
     }
 
     if let Some(addr) = cli.disasm {

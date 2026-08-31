@@ -229,6 +229,7 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         verbose: cli.verbose,
         no_header: cli.no_header,
         project: false,
+        strings_xrefs: false,
         ghidra_compat: cli.ghidra_compat,
         no_warnings: cli.no_warnings,
         benchmark: cli.benchmark,
