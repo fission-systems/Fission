@@ -381,8 +381,10 @@ fn hex_dump(data: &[u8], limit: usize, base_addr: u64, highlight_addr: Option<u6
             .iter()
             .enumerate()
             .map(|(j, b)| {
+                // The halfway space is *extra*: dropping the trailing one
+                // glues the pair together as `6c64 2d`.
                 if j == 8 {
-                    format!(" {:02x}", b)
+                    format!(" {:02x} ", b)
                 } else {
                     format!("{:02x} ", b)
                 }
@@ -398,7 +400,7 @@ fn hex_dump(data: &[u8], limit: usize, base_addr: u64, highlight_addr: Option<u6
                 }
             })
             .collect();
-        let row = html_escape(&format!("{row_addr:016x}  {hex:<49}  {ascii}"));
+        let row = html_escape(&format!("{row_addr:016x}  {hex:<50}  {ascii}"));
         let is_target =
             highlight_addr.is_some_and(|h| h >= row_addr && h < row_addr + chunk.len() as u64);
         if is_target {

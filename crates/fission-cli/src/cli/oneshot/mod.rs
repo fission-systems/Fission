@@ -12,6 +12,7 @@ mod debug_decomp;
 mod disasm;
 mod function_select;
 mod functions;
+mod hex;
 mod identify;
 mod inventory;
 mod nir_stats;
@@ -29,6 +30,7 @@ use binary_info::{print_binary_info, print_exports, print_imports, print_section
 use callgraph::run_callgraph;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
+use hex::print_hex;
 use identify::run_identify;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
 use nir_stats::emit_nir_stats;
@@ -722,6 +724,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.emit_program_metadata {
         return emit_program_metadata(cli, &binary);
+    }
+
+    if let Some(addr) = cli.hex_addr {
+        return Ok(print_hex(&binary, addr, cli.hex_count, cli.json)?);
     }
 
     if let Some(min_len) = cli.strings {

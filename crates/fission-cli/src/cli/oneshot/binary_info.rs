@@ -119,6 +119,27 @@ pub(super) fn print_binary_info(
             .unwrap_or_else(|| "unknown".to_string());
 
         writeln!(stdout, "║ Arch:       {:<46} ║", arch_display)?;
+
+        // What every later command actually decodes and decompiles with.
+        //
+        // The tool has three answers to "what compiled this": `--detections`
+        // says `GCC 15.2.0`, `--identity` says `MinGW`, and the pipeline picks
+        // a Ghidra compiler spec by yet another route. Only the last one
+        // changes any output, and it was the one nothing printed -- an
+        // operator seeing a wrong calling convention had no way to check what
+        // convention was chosen.
+        let language_display = match (binary.sleigh_language_id(), binary.get_ghidra_compiler_id())
+        {
+            (Some(language), Some(compiler)) => format!("{language}  /  {compiler}"),
+            (Some(language), None) => language.to_string(),
+            (None, Some(compiler)) => format!("(no language)  /  {compiler}"),
+            (None, None) => "unresolved".to_string(),
+        };
+        writeln!(
+            stdout,
+            "║ Language:   {:<46} ║",
+            truncate(&language_display, 46)
+        )?;
         writeln!(
             stdout,
             "║ Entry:      {:<46} ║",

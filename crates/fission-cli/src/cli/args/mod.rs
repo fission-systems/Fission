@@ -154,6 +154,8 @@ enum CliCommand {
     Decomp(DecompArgs),
     /// Extract binary strings
     Strings(StringsArgs),
+    /// Hex dump of the bytes at an address
+    Hex(HexArgs),
     /// Canonical cross-reference index (loader seeds + optional disassembly layer)
     Xrefs(XrefsArgs),
     /// Call graph (caller/callee relationships from xref analysis)
@@ -578,6 +580,27 @@ struct PcodeTopologyArgs {
 
 #[derive(Args, Debug)]
 #[command(
+    long_about = "Dump the bytes at a virtual address, with the section they belong to.\n\nEvery other command speaks virtual addresses; this is the one that shows what is actually there. Use it to read a table an instruction indexes into, check a struct's layout, or confirm what a data reference points at.",
+    after_help = "Examples:\n  fission_cli hex app.exe --addr 0x140004000\n  fission_cli hex app.exe --addr 0x140004000 --count 64\n  fission_cli hex app.exe --addr 0x140004000 --json"
+)]
+struct HexArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Virtual address to dump from
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    addr: u64,
+
+    /// Number of bytes to show
+    #[arg(long, default_value_t = 256)]
+    count: usize,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
     long_about = "Extract printable strings from the binary image.",
     after_help = "Examples:\n  fission_cli strings app.exe\n  fission_cli strings app.exe --min-len 8 --json"
 )]
@@ -759,6 +782,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "pcode-topology",
     "decomp",
     "strings",
+    "hex",
     "xrefs",
     "callgraph",
     "identify",
@@ -946,6 +970,14 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.debug_decomp = decomp.debug_decomp;
                     args.debug_decomp_bundle = decomp.debug_decomp_bundle;
                     args.format = decomp.format;
+                    args
+                }
+                CliCommand::Hex(hex) => {
+                    let mut args = OneShotArgs::with_binary(hex.binary);
+                    args.hex_addr = Some(hex.addr);
+                    args.hex_count = hex.count;
+                    args.json = hex.common.json;
+                    args.verbose = hex.common.verbose;
                     args
                 }
                 CliCommand::Strings(strings) => {
