@@ -28,8 +28,12 @@ fn collect_function_instructions(
     let instructions = rows
         .into_iter()
         .map(|row| {
-            let note = annotate(binary, &row);
-            (row.address, row.bytes_hex, row.text, note)
+            (
+                row.address,
+                row.bytes_hex,
+                row.text,
+                row.refers_to.unwrap_or_default(),
+            )
         })
         .collect();
 
@@ -239,68 +243,4 @@ pub(super) fn disassemble_function(
         )?;
     }
     Ok(())
-}
-
-/// What the addresses in one instruction refer to, for the comment column.
-///
-/// A listing that prints `call 0x140002870` and `lea RDX,[0x140004178]` makes
-/// the reader look up both by hand, and the second one -- a string -- is
-/// usually the line that says what the function is for. Every name here is
-/// already in the loader's tables; the listing just never asked.
-fn annotate(binary: &LoadedBinary, row: &fission_decompiler::disasm::InstructionRow) -> String {
-    // A branch target is the instruction's subject, so it wins over any
-    // address that happens to appear in the operands.
-    if let Some(target) = row.target_addr
-        && let Some(label) = describe_address(binary, target)
-    {
-        return label;
-    }
-    operand_addresses(&row.text)
-        .into_iter()
-        .filter(|address| Some(*address) != row.target_addr)
-        .find_map(|address| describe_address(binary, address))
-        .unwrap_or_default()
-}
-
-/// Hex literals appearing in an instruction's operand text.
-fn operand_addresses(text: &str) -> Vec<u64> {
-    let mut out = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while let Some(found) = text[i..].find("0x") {
-        let start = i + found + 2;
-        let mut end = start;
-        while end < bytes.len() && (bytes[end] as char).is_ascii_hexdigit() {
-            end += 1;
-        }
-        if end > start
-            && let Ok(value) = u64::from_str_radix(&text[start..end], 16)
-        {
-            out.push(value);
-        }
-        i = end.max(i + found + 2);
-    }
-    out
-}
-
-/// The most specific thing the loader can say about one address.
-fn describe_address(binary: &LoadedBinary, address: u64) -> Option<String> {
-    if let Some(symbol) = binary.iat_symbols.get(&address) {
-        return Some(symbol.clone());
-    }
-    if let Some(function) = binary.function_at_exact(address)
-        && !function.name.is_empty()
-    {
-        return Some(function.name.clone());
-    }
-    if let Some(text) = binary.string_map.get(&address) {
-        let escaped = text.escape_default().to_string();
-        let shown = if escaped.chars().count() > 48 {
-            format!("{}...", escaped.chars().take(45).collect::<String>())
-        } else {
-            escaped
-        };
-        return Some(format!("\"{shown}\""));
-    }
-    binary.global_symbols.get(&address).cloned()
 }

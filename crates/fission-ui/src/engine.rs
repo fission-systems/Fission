@@ -251,6 +251,8 @@ pub struct InstructionRow {
     pub bytes_hex: String,
     pub text: String,
     pub target_addr: Option<u64>,
+    /// What the addresses in this instruction name, when known.
+    pub refers_to: Option<String>,
 }
 
 /// Minimal batch result (native only, used by Analyse All worker).
@@ -513,6 +515,7 @@ mod native {
                     bytes_hex: row.bytes_hex,
                     text: row.text,
                     target_addr: row.target_addr,
+                    refers_to: row.refers_to,
                 })
                 .collect()
         })
@@ -853,6 +856,7 @@ mod wasm_api {
                 bytes_hex: r.bytes_hex,
                 text: r.text,
                 target_addr: r.target_addr,
+                refers_to: r.refers_to,
             })
             .collect())
     }

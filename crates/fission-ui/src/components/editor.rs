@@ -674,6 +674,7 @@ pub fn Editor() -> Element {
                                         let addr_str = format!("{:016x}", addr);
                                         let bytes_str = row.bytes_hex.clone();
                                         let text = row.text.clone();
+                                        let refers_to = row.refers_to.clone();
                                         let target = row.target_addr;
                                         let is_editing = editing_addr == Some(addr);
                                         let comment = state.read().comments.get(&addr).cloned().unwrap_or_default();
@@ -691,6 +692,9 @@ pub fn Editor() -> Element {
                                                 span { class: "disasm-addr", "{addr_str}" }
                                                 span { class: "disasm-bytes", "{bytes_str}" }
                                                 span { class: "disasm-text", "{text}" }
+                                                if let Some(refers_to) = refers_to {
+                                                    span { class: "disasm-refers-to", "; {refers_to}" }
+                                                }
                                                 if is_editing {
                                                     input {
                                                         class: "disasm-comment-input",

@@ -43,6 +43,7 @@ pub async fn handle_disasm(
                     bytes_hex: row.bytes_hex,
                     text: row.text,
                     target_addr: row.target_addr,
+                    refers_to: row.refers_to,
                 })
                 .collect();
             Json(DisasmResponse { rows }).into_response()

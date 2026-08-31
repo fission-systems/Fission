@@ -163,6 +163,11 @@ pub struct DisasmRow {
     pub bytes_hex: String,
     pub text: String,
     pub target_addr: Option<u64>,
+    /// What the addresses in this instruction name -- an import's symbol, a
+    /// function's name, the string at that address. Without it a listing shows
+    /// `call 0x140002870` and leaves the reader to look it up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refers_to: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
