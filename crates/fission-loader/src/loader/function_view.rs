@@ -23,7 +23,7 @@ pub fn prefer_function_name(candidate: &str, current: &str) -> bool {
     candidate.len() > current.len()
 }
 
-fn function_provenance_rank(func: &FunctionInfo) -> u8 {
+pub fn function_provenance_rank(func: &FunctionInfo) -> u8 {
     if func.is_import || func.is_thunk_like {
         return 0;
     }
@@ -35,6 +35,21 @@ fn function_provenance_rank(func: &FunctionInfo) -> u8 {
         _ if is_generic_function_name(&func.name) => 1,
         _ => 3,
     }
+}
+
+/// Whether `candidate` should answer for an address `current` also claims.
+///
+/// Several entries can share an address -- an ELF symtab name and a discovered
+/// code block, a PE export and its thunk. The canonical views resolve that in
+/// [`dedupe_exact_functions`]; the by-address index used to keep whichever was
+/// inserted last, so a lookup and a listing named the same address
+/// differently. `abort` in an AArch64 binary listed as `abort` and
+/// disassembled under a blank name.
+pub fn prefers_function_entry(candidate: &FunctionInfo, current: &FunctionInfo) -> bool {
+    let candidate_rank = function_provenance_rank(candidate);
+    let current_rank = function_provenance_rank(current);
+    candidate_rank > current_rank
+        || (candidate_rank == current_rank && prefer_function_name(&candidate.name, &current.name))
 }
 
 fn dedupe_exact_functions<'a>(functions: Vec<&'a FunctionInfo>) -> Vec<&'a FunctionInfo> {
@@ -190,6 +205,38 @@ mod tests {
             .add_functions(functions)
             .build()
             .expect("test binary builds")
+    }
+
+    /// A lookup by address and a listing must name the same function.
+    ///
+    /// Two entries can claim one address -- an ELF symtab symbol and a
+    /// discovered code block. The listing resolves that by provenance and
+    /// name; the by-address index used to keep whichever was inserted last, so
+    /// `abort` in an AArch64 binary listed as `abort` and disassembled under a
+    /// blank name, and every feature built on `function_at` inherited the
+    /// disagreement.
+    #[test]
+    fn a_lookup_by_address_names_what_the_listing_names() {
+        let named = func("abort", 0x1000, 0x40, Some("code"), Some("elf-symtab"));
+        let discovered = func("", 0x1000, 0x40, Some("code"), Some("scan"));
+        // The table sorts by address alone and the sort is stable, so this
+        // insertion order leaves the blank entry last -- which is the one the
+        // index used to keep.
+        let binary = test_binary(vec![named.clone(), discovered]);
+
+        let listed = canonical_functions_sorted(&binary);
+        let listed_name = listed
+            .iter()
+            .find(|f| f.address == 0x1000)
+            .map(|f| f.name.as_str())
+            .expect("listed");
+        let looked_up = binary
+            .function_at_exact(0x1000)
+            .map(|f| f.name.as_str())
+            .expect("looked up");
+
+        assert_eq!(listed_name, "abort");
+        assert_eq!(looked_up, listed_name);
     }
 
     #[test]

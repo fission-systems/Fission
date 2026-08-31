@@ -430,7 +430,22 @@ impl LoadedBinary {
         let mut name_index = std::collections::HashMap::new();
 
         for (idx, func) in inner.functions.iter().enumerate() {
-            addr_index.insert(func.address, idx);
+            // Several entries can share an address -- an ELF symtab name and a
+            // discovered code block, say. The canonical views resolve that with
+            // `dedupe_exact_functions`; this index used to keep whichever came
+            // last, so `function_at` disagreed with `list` and `decomp` about
+            // the same address. `abort` in an AArch64 binary listed as `abort`
+            // and disassembled under a blank name.
+            match addr_index.get(&func.address) {
+                Some(&current_idx)
+                    if !crate::loader::function_view::prefers_function_entry(
+                        func,
+                        &inner.functions[current_idx],
+                    ) => {}
+                _ => {
+                    addr_index.insert(func.address, idx);
+                }
+            }
             if !func.name.is_empty() {
                 name_index.insert(func.name.clone(), idx);
             }

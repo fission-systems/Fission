@@ -198,6 +198,9 @@ impl LoadedBinaryBuilder {
 
         let mut function_addr_index = std::collections::HashMap::new();
         let mut function_name_index = std::collections::HashMap::new();
+        // Collected first: choosing between two entries at one address needs
+        // to read both, and the loop above holds a mutable borrow.
+        let mut entry_order: Vec<(u64, usize)> = Vec::with_capacity(functions.len());
         for (idx, func) in functions.iter_mut().enumerate() {
             if !func.name.is_empty() {
                 let demangled = crate::loader::demangle::demangle(&func.name);
@@ -206,7 +209,19 @@ impl LoadedBinaryBuilder {
                 }
                 function_name_index.insert(func.name.clone(), idx);
             }
-            function_addr_index.insert(func.address, idx);
+            entry_order.push((func.address, idx));
+        }
+        for (address, idx) in entry_order {
+            match function_addr_index.get(&address) {
+                Some(&current)
+                    if !crate::loader::function_view::prefers_function_entry(
+                        &functions[idx],
+                        &functions[current],
+                    ) => {}
+                _ => {
+                    function_addr_index.insert(address, idx);
+                }
+            }
         }
 
         let mut iat_symbols = std::collections::HashMap::new();
