@@ -80,16 +80,43 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
         if !callers.is_empty() {
             writeln!(stdout, "    callers:")?;
             for edge in callers {
-                writeln!(stdout, "      0x{:012x}  x{}", edge.addr, edge.count)?;
+                writeln!(
+                    stdout,
+                    "      0x{:012x}  {:<32}  x{}",
+                    edge.addr,
+                    edge_label(binary, edge.addr),
+                    edge.count
+                )?;
             }
         }
         if !callees.is_empty() {
             writeln!(stdout, "    callees:")?;
             for edge in callees {
-                writeln!(stdout, "      0x{:012x}  x{}", edge.addr, edge.count)?;
+                writeln!(
+                    stdout,
+                    "      0x{:012x}  {:<32}  x{}",
+                    edge.addr,
+                    edge_label(binary, edge.addr),
+                    edge.count
+                )?;
             }
         }
     }
 
     Ok(())
+}
+
+/// What to call the function on the other end of an edge.
+///
+/// The node line has always carried a name; the edges under it were bare
+/// addresses, so reading `__tmainCRTStartup calls 0x1400027d0 twice` meant
+/// going back to `list` for every line. The name is in the same table the
+/// node's came from.
+fn edge_label(binary: &LoadedBinary, address: u64) -> String {
+    match binary.function_at_exact(address) {
+        Some(function) if !function.name.is_empty() => function.name.clone(),
+        // An edge can land on an import thunk or a block the discovery pass
+        // never made a function of; those genuinely have no name to give.
+        _ => "-".to_string(),
+    }
 }
