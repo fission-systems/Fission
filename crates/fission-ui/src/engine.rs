@@ -330,9 +330,11 @@ mod native {
                     offset: va,
                     value: val.clone(),
                     section: section_for(va),
+                    referrers: Vec::new(),
                 })
                 .collect();
             result.sort_by_key(|s| s.offset);
+            attach_string_referrers(binary, &mut result);
             result
         } else {
             // Fallback: raw ASCII scan over file bytes
@@ -355,6 +357,7 @@ mod native {
                             offset,
                             value: run.clone(),
                             section,
+                            referrers: Vec::new(),
                         });
                     }
                     run.clear();
@@ -363,6 +366,56 @@ mod native {
             }
             result.truncate(5000); // cap at 5000 to avoid UI overload
             result
+        }
+    }
+
+    /// Attach the functions whose code reads each string.
+    ///
+    /// The xref index is the cached one the Xrefs panel already builds, so
+    /// this costs a lookup rather than a second disassembly pass. It relates
+    /// data reads to string extents, which the index itself does not do --
+    /// it records a string literal as a reference to itself.
+    fn attach_string_referrers(binary: &LoadedBinary, strings: &mut [BinaryString]) {
+        use fission_static::analysis::xref_index::{XrefKind, XrefSourceCategory};
+
+        // Every byte a string covers maps back to it, so a pointer into the
+        // middle of one still finds it.
+        let mut by_address: std::collections::HashMap<u64, usize> =
+            std::collections::HashMap::new();
+        for (index, found) in strings.iter().enumerate() {
+            for offset in 0..=found.value.len() as u64 {
+                by_address.entry(found.offset + offset).or_insert(index);
+            }
+        }
+
+        let xrefs = xref_index_for(binary);
+        for record in &xrefs.refs {
+            // Only reads of the bytes count: a `call` whose target begins with
+            // printable bytes is control flow, not a string being read.
+            if !matches!(
+                record.kind,
+                XrefKind::DataRead | XrefKind::DataWrite | XrefKind::Relocation
+            ) {
+                continue;
+            }
+            let Some(target) = record.target.address else {
+                continue;
+            };
+            let Some(&string_index) = by_address.get(&target) else {
+                continue;
+            };
+            let XrefSourceCategory::Instruction { enclosing_function } = record.source.category
+            else {
+                continue;
+            };
+            let referrer = enclosing_function.unwrap_or(record.source.address);
+            let referrers = &mut strings[string_index].referrers;
+            if !referrers.contains(&referrer) {
+                referrers.push(referrer);
+            }
+        }
+        for found in strings.iter_mut() {
+            found.referrers.sort_unstable();
         }
     }
 

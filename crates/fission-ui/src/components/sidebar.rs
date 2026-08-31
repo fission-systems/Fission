@@ -572,6 +572,25 @@ pub fn Sidebar() -> Element {
                                     let va      = bs.offset;
                                     let val     = bs.value.clone();
                                     let section = bs.section.clone();
+                                    // The first function that reads it, named
+                                    // the way the function list names it. A
+                                    // string is a lead; this is where it leads.
+                                    let referrer_label = bs.referrers.first().map(|addr| {
+                                        let s = state.read();
+                                        let name = s
+                                            .rename_map
+                                            .get(addr)
+                                            .cloned()
+                                            .or_else(|| s.original_function_name(*addr))
+                                            .unwrap_or_default();
+                                        if name.is_empty() {
+                                            format!("0x{addr:x}")
+                                        } else if bs.referrers.len() > 1 {
+                                            format!("{name} +{}", bs.referrers.len() - 1)
+                                        } else {
+                                            name
+                                        }
+                                    });
                                     // Truncate by *character* count, not byte
                                     // index: `binary.string_map`-sourced values
                                     // can hold decoded non-ASCII text (e.g. a
@@ -603,6 +622,9 @@ pub fn Sidebar() -> Element {
                                                         span { class: "str-section", "{section}  " }
                                                     }
                                                     "0x{va:x}"
+                                                    if let Some(referrer) = referrer_label {
+                                                        span { class: "str-referrer", "  ← {referrer}" }
+                                                    }
                                                 }
                                             }
                                         }

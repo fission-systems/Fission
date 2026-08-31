@@ -93,6 +93,11 @@ pub struct BinaryString {
     pub value: String,
     /// Section name if known (e.g. ".rdata", ".rodata").
     pub section: String,
+    /// Entry points of functions whose code reads this string.
+    ///
+    /// Reading a string and then asking who uses it is the move the panel
+    /// exists to support; without this it could only offer the bytes.
+    pub referrers: Vec<u64>,
 }
 
 // ── Log entries ─────────────────────────────────────────────────────────────
