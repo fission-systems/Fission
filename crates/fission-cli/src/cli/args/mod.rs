@@ -593,6 +593,10 @@ struct StringsArgs {
     #[arg(long)]
     xrefs: bool,
 
+    /// Keep only strings in these sections (repeatable, e.g. --section .rdata)
+    #[arg(long = "section", value_name = "NAME")]
+    sections: Vec<String>,
+
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
@@ -948,6 +952,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     let mut args = OneShotArgs::with_binary(strings.binary);
                     args.strings = Some(strings.min_len);
                     args.strings_xrefs = strings.xrefs;
+                    args.strings_sections = strings.sections;
                     args.json = strings.common.json;
                     args.verbose = strings.common.verbose;
                     args

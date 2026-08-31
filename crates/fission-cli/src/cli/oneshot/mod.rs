@@ -729,7 +729,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             &binary,
             &binary_data,
             min_len.max(4),
-            cli.strings_xrefs,
+            &strings::StringsView {
+                with_xrefs: cli.strings_xrefs,
+                sections: cli.strings_sections.clone(),
+            },
             cli.json,
         )?);
     }

@@ -25,22 +25,45 @@ struct FoundString {
     /// section.
     address: Option<u64>,
     section: Option<String>,
+    /// Whether the section holding it is executable.
+    executable: bool,
     /// Function entry points whose code reads this string.
     referrers: Vec<u64>,
+}
+
+/// How the caller wants the listing narrowed.
+pub(super) struct StringsView {
+    /// Report the functions that read each string (runs disassembly).
+    pub with_xrefs: bool,
+    /// Keep only strings in these sections, when non-empty.
+    pub sections: Vec<String>,
 }
 
 pub(super) fn print_strings(
     binary: &LoadedBinary,
     data: &[u8],
     min_len: usize,
-    with_xrefs: bool,
+    view: &StringsView,
     json: bool,
 ) -> io::Result<()> {
+    let with_xrefs = view.with_xrefs;
     let mut stdout = io::stdout().lock();
     let mut strings = scan(data, min_len);
     locate(binary, &mut strings);
+    if !view.sections.is_empty() {
+        strings.retain(|found| {
+            found
+                .section
+                .as_deref()
+                .is_some_and(|name| view.sections.iter().any(|wanted| wanted == name))
+        });
+    }
     if with_xrefs {
         attach_referrers(binary, &mut strings);
+        // A referenced string is a lead; the rest are the haystack it was
+        // buried in. A 2.5MB Go binary yields 15,844 strings and 330 of them
+        // are read by code, and in address order those 330 are unfindable.
+        strings.sort_by_key(|found| (found.referrers.is_empty(), found.address, found.file_offset));
     }
 
     if json {
@@ -62,7 +85,10 @@ pub(super) fn print_strings(
                         found
                             .referrers
                             .iter()
-                            .map(|addr| format!("0x{addr:x}"))
+                            .map(|addr| serde_json::json!({
+                                "address": format!("0x{addr:x}"),
+                                "name": referrer_label(binary, *addr),
+                            }))
                             .collect::<Vec<_>>()
                     );
                 }
@@ -99,7 +125,7 @@ pub(super) fn print_strings(
     }
     writeln!(
         stdout,
-        "{:>18}  {:<8}  {:<24}  String",
+        "{:>18}  {:<10}  {:<28}  String",
         "Address", "Section", "Referenced by"
     )?;
     writeln!(stdout, "{:─<100}", "")?;
@@ -118,7 +144,7 @@ pub(super) fn print_strings(
                 .referrers
                 .iter()
                 .take(2)
-                .map(|addr| format!("0x{addr:x}"))
+                .map(|addr| referrer_label(binary, *addr))
                 .collect::<Vec<_>>()
                 .join(" ");
             if found.referrers.len() > 2 {
@@ -134,10 +160,23 @@ pub(super) fn print_strings(
         };
         writeln!(
             stdout,
-            "{address:>18}  {section:<8}  {referrers:<24}  {text}"
+            "{address:>18}  {section:<10}  {referrers:<28}  {text}"
         )?;
     }
     Ok(())
+}
+
+/// A referring function's name, or the address when there is no name for it.
+///
+/// The xref record often has no enclosing function -- on a Go binary most
+/// data references do not -- and the instruction address stands in. The loader
+/// can usually still say which function contains it, and a name is what makes
+/// the column readable, so ask before falling back to hex.
+fn referrer_label(binary: &LoadedBinary, address: u64) -> String {
+    match binary.function_at(address) {
+        Some(function) if !function.name.is_empty() => function.name.clone(),
+        _ => format!("0x{address:x}"),
+    }
 }
 
 /// Printable ASCII runs of at least `min_len` bytes.
@@ -155,6 +194,7 @@ fn scan(data: &[u8], min_len: usize) -> Vec<FoundString> {
                 text,
                 address: None,
                 section: None,
+                executable: false,
                 referrers: Vec::new(),
             });
         }
@@ -199,6 +239,7 @@ fn locate(binary: &LoadedBinary, strings: &mut [FoundString]) {
         };
         let section = sections[index];
         found.section = Some(section.name.clone());
+        found.executable = section.is_executable;
         found.address = Some(section.virtual_address + (offset - section.file_offset));
     }
 }
@@ -221,6 +262,13 @@ fn attach_referrers(binary: &LoadedBinary, strings: &mut [FoundString]) {
         let Some(address) = found.address else {
             continue;
         };
+        // A printable run inside code is a coincidence -- `AWAVAUATUWVSH` is
+        // the x86-64 prologue pushing the callee-saved registers -- and a
+        // reference to it is a pointer to the function, not a string read.
+        // Left in the listing, kept out of the leads.
+        if found.executable {
+            continue;
+        }
         for offset in 0..=found.text.len() as u64 {
             by_address.entry(address + offset).or_insert(index);
         }
@@ -306,6 +354,41 @@ mod tests {
         // section's own address -- the one every other command speaks.
         assert_eq!(found.address, Some(0x140004000));
         assert_eq!(found.section.as_deref(), Some(".rdata"));
+    }
+
+    #[test]
+    fn a_printable_run_inside_code_is_marked_as_such() {
+        let mut data = vec![0u8; 0x400];
+        // The x86-64 prologue that pushes the callee-saved registers reads as
+        // `AWAVAUATUWVSH`, and it is what put two code addresses at the top of
+        // the lead list until references to executable storage stopped
+        // counting.
+        data[0x000..0x00d].copy_from_slice(b"AWAVAUATUWVSH");
+        let binary =
+            LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(data.clone()))
+                .image_base(0x140000000)
+                .entry_point(0x140001000)
+                .is_64bit(true)
+                .format("PE")
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x140001000,
+                    virtual_size: 0x100,
+                    file_offset: 0,
+                    file_size: 0x100,
+                    is_executable: true,
+                    is_writable: false,
+                    is_readable: true,
+                })
+                .build()
+                .expect("build test binary");
+        let mut strings = scan(&data, 6);
+        locate(&binary, &mut strings);
+        let found = strings
+            .iter()
+            .find(|s| s.text == "AWAVAUATUWVSH")
+            .expect("string scanned");
+        assert!(found.executable, "a run in .text must be marked executable");
     }
 
     #[test]
