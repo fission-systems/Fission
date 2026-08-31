@@ -1963,8 +1963,17 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<PreHirExpr, MlilPreviewError> {
         if vn.is_constant {
-            if let Some(name) = self.options.global_names.get(&(vn.constant_val as u64)) {
+            let address = vn.constant_val as u64;
+            if let Some(name) = self.options.global_names.get(&address) {
                 return Ok(PreHirExpr::AddressOfGlobal(name.clone()));
+            }
+            // Short strings the load-time scan is right to skip -- see
+            // `read_c_string_from_binary`.
+            if let Some(text) = self.read_c_string_from_binary(address) {
+                return Ok(PreHirExpr::AddressOfGlobal(format!(
+                    "\"{}\"",
+                    text.escape_default()
+                )));
             }
             return Ok(PreHirExpr::Const(
                 vn.constant_val,
