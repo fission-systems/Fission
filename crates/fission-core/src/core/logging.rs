@@ -315,6 +315,25 @@ mod native {
         SpanTrace::capture()
     }
 
+    /// The span trace as error context, or `None` when there is nothing to say.
+    ///
+    /// Attaching it unconditionally made every ordinary failure read as a
+    /// diagnostic dump: an operator who typed a wrong address got
+    ///
+    /// ```text
+    ///   × span trace:
+    ///   │ : unable to read bytes at 0xdeadbeef
+    /// ```
+    ///
+    /// -- the heading first, the reason second, behind a colon standing in for
+    /// the empty trace. Most failures have no spans open, and those should
+    /// just say what went wrong.
+    pub fn span_trace_context() -> Option<String> {
+        let trace = capture_span_trace();
+        let rendered = trace.to_string();
+        (!rendered.trim().is_empty()).then(|| format!("span trace:\n{rendered}"))
+    }
+
     // Legacy wrappers kept for backward compatibility.
     #[track_caller]
     pub fn trace(message: &str) {

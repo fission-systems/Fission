@@ -201,8 +201,10 @@ fn run() -> Result<()> {
                 {
                     return Ok(());
                 }
-                let span_trace = fission_core::logging::capture_span_trace();
-                return Err(error.context(format!("span trace:\n{span_trace}")));
+                return Err(match fission_core::logging::span_trace_context() {
+                    Some(context) => error.context(context),
+                    None => error,
+                });
             }
             Ok(())
         }
@@ -220,8 +222,10 @@ fn run() -> Result<()> {
                 {
                     return Ok(());
                 }
-                let span_trace = fission_core::logging::capture_span_trace();
-                return Err(error.context(format!("span trace:\n{span_trace}")));
+                return Err(match fission_core::logging::span_trace_context() {
+                    Some(context) => error.context(context),
+                    None => error,
+                });
             }
             return Ok(());
         }
@@ -278,8 +282,10 @@ fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
         {
             return Ok(());
         }
-        let span_trace = fission_core::logging::capture_span_trace();
-        return Err(error.context(format!("span trace:\n{span_trace}")));
+        return Err(match fission_core::logging::span_trace_context() {
+            Some(context) => error.context(context),
+            None => error,
+        });
     }
     Ok(())
 }
