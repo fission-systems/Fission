@@ -120,6 +120,7 @@ benchmark_results/
 # Local benchmark scratch file
 /test_bench.json
 # Local agent/tooling and benchmark workspace state
+/workspace/
 /.cursor/
 /.claude/
 /.agent/
