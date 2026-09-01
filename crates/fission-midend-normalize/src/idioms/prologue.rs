@@ -95,6 +95,70 @@ fn is_entry_stack_scaffold_alias_binding(stmt: &PreHirStmt) -> Option<&str> {
     None
 }
 
+/// Whether `expr` computes a stack address, given the names already proven to
+/// hold one.
+///
+/// The name-based test above only knows the names this pass could anticipate.
+/// ARM's `push {r4,r5,r6,lr}` produces one it cannot: the instruction lifts to
+/// a single pointer copied out of `sp`, walked down four bytes per register,
+/// stored through, and copied back -- and that pointer is a register the ARM
+/// SLEIGH spec declares (`mult_addr`), so it survives naming as itself. What
+/// makes it scaffold is not its name but where it came from.
+fn expr_is_stack_alias(expr: &PreHirExpr, aliases: &HashSet<String>) -> bool {
+    match expr {
+        PreHirExpr::Var(name)
+        | PreHirExpr::AddressOfGlobal(name)
+        | PreHirExpr::AddressOfLocal(name) => {
+            looks_like_stack_scaffold_name(name) || aliases.contains(name)
+        }
+        PreHirExpr::PtrOffset { base, .. }
+        | PreHirExpr::Cast { expr: base, .. }
+        | PreHirExpr::Unary { expr: base, .. } => expr_is_stack_alias(base, aliases),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            expr_is_stack_alias(lhs, aliases) || expr_is_stack_alias(rhs, aliases)
+        }
+        _ => false,
+    }
+}
+
+/// `<name> = <expression over a stack address>`, which makes `<name>` one too.
+///
+/// Deliberately permissive about the left-hand name: this only records that a
+/// name holds a stack address. Nothing is removed on the strength of it --
+/// [`is_entry_walking_scaffold_store`] still requires the stored value to be a
+/// callee-saved register, and `prove` still refuses when the body reads the
+/// name afterwards.
+fn walking_scaffold_alias_binding<'a>(
+    stmt: &'a PreHirStmt,
+    aliases: &HashSet<String>,
+) -> Option<&'a str> {
+    let PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(lhs),
+        rhs,
+    } = stmt
+    else {
+        return None;
+    };
+    expr_is_stack_alias(rhs, aliases).then(|| lhs.as_str())
+}
+
+/// `*<stack alias> = <callee-saved register>`.
+///
+/// The callee-saved requirement is what separates a register save from an
+/// ordinary early store through a stack-derived pointer: the first is ABI
+/// scaffold whose only reader is the matching restore, the second is the
+/// function writing to one of its own locals.
+fn is_entry_walking_scaffold_store(stmt: &PreHirStmt, aliases: &HashSet<String>) -> bool {
+    let PreHirStmt::Assign {
+        lhs: PreHirLValue::Deref { ptr, .. },
+        rhs,
+    } = stmt
+    else {
+        return false;
+    };
+    expr_is_stack_alias(ptr, aliases) && var_name_through_cast(rhs).is_some_and(is_callee_saved)
+}
+
 fn looks_like_stack_slot_name(name: &str) -> bool {
     name.starts_with("home_") || name.starts_with("local_") || name.starts_with("ret_scaffold_")
 }
@@ -152,28 +216,53 @@ struct EntryStackScaffoldRemovalPlan {
 
 impl EntryStackScaffoldRemovalPlan {
     fn prove(body: &[PreHirStmt]) -> Option<Self> {
-        let prefix_len = body
-            .iter()
-            .take_while(|stmt| {
-                is_entry_stack_scaffold_store(stmt)
-                    || is_entry_stack_slot_scaffold_store(stmt)
-                    || is_entry_stack_scaffold_alias_binding(stmt).is_some()
-            })
-            .count();
+        // The prefix has to be walked with state, not filtered statement by
+        // statement: a pointer only counts as scaffold because an earlier
+        // statement in this same prefix bound it to a stack address. ARM's
+        // multi-register push is the whole reason -- one pointer out of `sp`,
+        // decremented and stored through once per saved register.
+        let mut aliases: HashSet<String> = HashSet::default();
+        let mut walking_evidence = false;
+        let mut prefix_len = 0;
+        for stmt in body {
+            if is_entry_stack_scaffold_store(stmt) || is_entry_stack_slot_scaffold_store(stmt) {
+                prefix_len += 1;
+                continue;
+            }
+            if is_entry_walking_scaffold_store(stmt, &aliases) {
+                walking_evidence = true;
+                prefix_len += 1;
+                continue;
+            }
+            if let Some(alias) = is_entry_stack_scaffold_alias_binding(stmt) {
+                aliases.insert(alias.to_string());
+                prefix_len += 1;
+                continue;
+            }
+            if let Some(alias) = walking_scaffold_alias_binding(stmt, &aliases) {
+                aliases.insert(alias.to_string());
+                prefix_len += 1;
+                continue;
+            }
+            break;
+        }
         if prefix_len == 0 {
             return None;
         }
 
         let prefix = &body[..prefix_len];
         let suffix = &body[prefix_len..];
-        let has_scaffold_evidence = prefix.iter().any(is_entry_stack_scaffold_store)
+        let has_scaffold_evidence = walking_evidence
+            || prefix.iter().any(is_entry_stack_scaffold_store)
             || prefix.iter().any(is_entry_stack_slot_callee_saved_store);
         if !has_scaffold_evidence {
             return None;
         }
-        let alias_escapes_prefix = prefix
+        // Every name the prefix bound to a stack address, not just the ones
+        // the name-based rule recognised: a walking pointer the body reads
+        // afterwards is a local the function uses, not scaffold to drop.
+        let alias_escapes_prefix = aliases
             .iter()
-            .filter_map(is_entry_stack_scaffold_alias_binding)
             .any(|alias| count_ptr_var_rvalue_uses(suffix, alias) > 0);
         if alias_escapes_prefix {
             return None;
@@ -1253,6 +1342,94 @@ mod tests {
     }
 
     /// `local_8 = rbp; local_8 = 0;` -- rbp is never defined, and the value it
+    /// ARM's `push {r4,r5,r6,lr}`: one pointer copied out of `sp`, walked
+    /// down four bytes per register, stored through, and copied back. The
+    /// pointer is a register the ARM SLEIGH spec declares, so it survives
+    /// naming as `mult_addr` -- a name this pass could never have listed,
+    /// which is why it matches on where the pointer came from instead.
+    fn arm_multi_push(saved: &[&str]) -> Vec<PreHirStmt> {
+        let mut body = vec![spill_assign("mult_addr", PreHirExpr::Var("sp".to_owned()))];
+        for reg in saved {
+            body.push(spill_assign(
+                "mult_addr",
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Sub,
+                    lhs: Box::new(PreHirExpr::Var("mult_addr".to_owned())),
+                    rhs: Box::new(PreHirExpr::Const(4, u32_ty())),
+                    ty: u32_ty(),
+                },
+            ));
+            body.push(PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("mult_addr".to_owned())),
+                    ty: u32_ty(),
+                },
+                rhs: PreHirExpr::Var((*reg).to_owned()),
+            });
+        }
+        body
+    }
+
+    #[test]
+    fn removes_an_arm_multi_register_push() {
+        let mut body = arm_multi_push(&["lr", "r6", "r5", "r4"]);
+        body.push(PreHirStmt::Return(Some(PreHirExpr::Var("r0".to_owned()))));
+        let mut func = PreHirFunction {
+            name: "memset".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("mult_addr"), reg_binding("sp")],
+            body,
+            ..Default::default()
+        };
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(
+            func.body.len(),
+            1,
+            "the whole push should be gone, leaving the return: {:?}",
+            func.body
+        );
+    }
+
+    /// `push {r0,r1,r2,r3}` is not a register save -- it is a varargs spill,
+    /// and the function reads those slots back as its `va_list`. Removing it
+    /// would delete the arguments, so a non-callee-saved register stops the
+    /// prefix rather than widening it.
+    #[test]
+    fn keeps_an_arm_push_of_argument_registers() {
+        let mut body = arm_multi_push(&["r3", "r2", "r1", "r0"]);
+        body.push(PreHirStmt::Return(Some(PreHirExpr::Var("r0".to_owned()))));
+        let before = body.len();
+        let mut func = PreHirFunction {
+            name: "vprintf".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("mult_addr"), reg_binding("sp")],
+            body,
+            ..Default::default()
+        };
+        assert!(!remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body.len(), before);
+    }
+
+    /// A walking pointer the body reads afterwards is a local the function
+    /// uses, not scaffold: the stores through it have a reader.
+    #[test]
+    fn keeps_a_walking_pointer_the_body_reads() {
+        let mut body = arm_multi_push(&["r4"]);
+        body.push(PreHirStmt::Return(Some(PreHirExpr::Var(
+            "mult_addr".to_owned(),
+        ))));
+        let before = body.len();
+        let mut func = PreHirFunction {
+            name: "escapes".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("mult_addr"), reg_binding("sp")],
+            body,
+            ..Default::default()
+        };
+        assert!(!remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body.len(), before);
+    }
+
     /// lands in is overwritten before any read. This is the clang -O0 frame
     /// pointer save that reached the corpus output as an undefined read.
     #[test]
