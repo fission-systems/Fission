@@ -3493,7 +3493,7 @@ The input binary is never modified.</p>
 </tr>
 <tr>
 <td><code>--nop &lt;N&gt;</code></td>
-<td>Replace <code>N</code> bytes with the architecture's NOP (<code>0x90</code> on x86, <code>1f 20 03 d5</code> on little-endian AArch64).</td>
+<td>Replace <code>N</code> bytes with the architecture's NOP (<code>0x90</code> on x86, <code>1f 20 03 d5</code> on little-endian AArch64). Refused on 32-bit ARM, where the language id does not say whether the address is ARM or Thumb and their NOPs are different widths -- use <code>--bytes</code> there.</td>
 </tr>
 <tr>
 <td><code>--output &lt;FILE&gt;</code></td>
@@ -3515,6 +3515,11 @@ The input binary is never modified.</p>
   to the file alignment; those bytes exist in the file but are never loaded, so
   writing there changes nothing that runs.</li>
 </ul>
+<p>The output is written to a temporary file next to it and renamed into place,
+so the result is never half-written, and an <code>--output</code> that is a <strong>hard link</strong>
+to the input has the link broken rather than followed -- writing through it
+would rewrite the input, and <code>canonicalize</code> cannot detect that case because
+both paths are genuinely distinct.</p>
 <p>The patched file keeps the original's checksum and invalidates any signature it
 carried; <code>patch</code> does not recompute either.</p>
 <hr />
