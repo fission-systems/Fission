@@ -273,6 +273,9 @@ fn apply_function_name_hints(
         if let Some(bits) = surface_integer_return_bits(return_type_name) {
             elide_surface_return_casts(&mut func.body, bits);
         }
+        if return_type_name != "void" {
+            recover_tail_call_return(&mut func.body);
+        }
     }
 
     stats
@@ -1218,4 +1221,56 @@ pub(super) fn refine_with_operand_metatype(ty: &NirType, meta: InputMetatype) ->
         (NirType::Unknown, InputMetatype::Bool) => Some(NirType::Bool),
         _ => None,
     }
+}
+
+/// Turn a trailing `f(x); return;` into `return f(x);`.
+///
+/// `return find_substring(str, "ol");` compiles to `call find_substring` and
+/// then straight to `ret`: nothing writes the return register afterwards,
+/// because the call already left the value there. Return-value recovery scans
+/// *after* the last call -- correctly, since a call clobbers that register --
+/// finds nothing, and emits a bare `return`. The value is dropped.
+///
+/// It cannot be recovered at that layer, because `void f() { g(); }` compiles
+/// to the same instructions. Only the declared return type separates them, and
+/// that arrives here with the debug info. So this runs only when the function
+/// is known to return something, and only on the statement immediately before
+/// the return.
+fn recover_tail_call_return(body: &mut Vec<HirStmt>) {
+    // Nested tails (a return inside an if arm) reach the same shape through
+    // their own block, so recurse rather than only looking at the top level.
+    for stmt in body.iter_mut() {
+        match stmt {
+            HirStmt::Block(inner)
+            | HirStmt::While { body: inner, .. }
+            | HirStmt::DoWhile { body: inner, .. } => recover_tail_call_return(inner),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                recover_tail_call_return(then_body);
+                recover_tail_call_return(else_body);
+            }
+            _ => {}
+        }
+    }
+    let Some(return_idx) = body
+        .iter()
+        .rposition(|stmt| matches!(stmt, HirStmt::Return(None)))
+    else {
+        return;
+    };
+    let Some(call_idx) = return_idx.checked_sub(1) else {
+        return;
+    };
+    // Only a call whose result nothing else consumes: an expression statement.
+    // A call already assigned to something has its value accounted for.
+    let HirStmt::Expr(HirExpr::Call { .. }) = &body[call_idx] else {
+        return;
+    };
+    let HirStmt::Expr(call) = body.remove(call_idx) else {
+        unreachable!("checked immediately above")
+    };
+    body[call_idx] = HirStmt::Return(Some(call));
 }
