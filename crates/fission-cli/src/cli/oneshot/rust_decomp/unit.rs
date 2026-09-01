@@ -68,6 +68,7 @@ pub(crate) fn assemble(renders: &[String]) -> String {
     // first spelling wins: a second one is a compile error, not extra
     // information, and nothing downstream can choose between them.
     let mut typedef_names: HashMap<&str, &str> = HashMap::new();
+    let mut extern_names: HashSet<&str> = HashSet::new();
     let mut seen: HashSet<&str> = HashSet::new();
 
     for render in &split {
@@ -77,7 +78,13 @@ pub(crate) fn assemble(renders: &[String]) -> String {
                 if defined.contains(name) {
                     continue;
                 }
-                if seen.insert(decl) {
+                // Keyed by name, not by text. Two renders can disagree about
+                // an undefined callee's return type -- a Go binary produced
+                // both `extern uchar __popcount();` and `extern unsigned long
+                // long __popcount();` -- and keeping both is a conflicting
+                // declaration, which is a compile error rather than extra
+                // information. Same rule the typedefs follow: first wins.
+                if extern_names.insert(name) {
                     externs.push(decl);
                 }
                 continue;
@@ -217,11 +224,18 @@ fn declared_function_name(line: &str) -> Option<&str> {
 }
 
 /// The trailing C identifier of `text`, if it ends in one.
+///
+/// The split point is the byte *after* the last non-identifier character, and
+/// that character is not always one byte: a Go symbol carries `·`, two bytes,
+/// and `index + 1` landed inside it. Assembling a Go binary's translation
+/// unit panicked with `start byte index 46 is not a char boundary`.
 fn identifier_before(text: &str) -> Option<&str> {
     let end = text.trim_end();
     let start = end
-        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .map(|i| i + 1)
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
+        .map(|(index, c)| index + c.len_utf8())
         .unwrap_or(0);
     let name = &end[start..];
     if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
@@ -234,6 +248,27 @@ fn identifier_before(text: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Go symbol carries `·`, which is two bytes.
+    ///
+    /// The identifier split used `index + 1` after the last non-identifier
+    /// character, which landed inside it: assembling a Go binary's unit
+    /// panicked with `start byte index 46 is not a char boundary`.
+    #[test]
+    fn a_multi_byte_character_before_a_name_does_not_split_it() {
+        let unit = assemble(&[
+            "void main·main(void)\n{\n    return;\n}\n".to_string(),
+            "extern unsigned long long main·main();\n\nvoid caller(void)\n{\n    main·main();\n}\n"
+                .to_string(),
+        ]);
+        // The extern is dropped because the unit defines the function -- which
+        // only works if the name was read past the `·`.
+        assert!(
+            !unit.contains("extern unsigned long long main·main();"),
+            "{unit}"
+        );
+        assert!(unit.contains("void main·main(void);"), "{unit}");
+    }
 
     #[test]
     fn unit_drops_an_extern_for_a_function_it_defines() {
@@ -248,6 +283,25 @@ mod tests {
         );
         // It still needs a declaration before the call -- the definition's own.
         assert!(unit.contains("void helper(void);"), "{unit}");
+    }
+
+    /// Two renders can disagree about an undefined callee's return type, and
+    /// keeping both declarations is a compile error rather than extra
+    /// information. A Go binary produced `extern uchar __popcount();` and
+    /// `extern unsigned long long __popcount();` in one unit.
+    #[test]
+    fn one_extern_survives_when_two_renders_declare_a_callee_differently() {
+        let unit = assemble(&[
+            "extern uchar helper();\n\nvoid a(void)\n{\n    helper();\n}\n".to_string(),
+            "extern unsigned long long helper();\n\nvoid b(void)\n{\n    helper();\n}\n"
+                .to_string(),
+        ]);
+        assert_eq!(unit.matches("helper();").count() - 2, 1, "{unit}");
+        assert!(unit.contains("extern uchar helper();"), "{unit}");
+        assert!(
+            !unit.contains("extern unsigned long long helper();"),
+            "{unit}"
+        );
     }
 
     #[test]
