@@ -181,8 +181,21 @@ fn render_hir_function_with_profile(
 /// itself already provide are left alone.
 fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String> {
     let mut names = BTreeMap::new();
-    for binding in hir.params.iter().chain(hir.locals.iter()) {
-        let Some(surface) = binding.surface_type_name.as_deref() else {
+    // The return type is not a binding, and leaving it out left every name
+    // that only ever appears there undefined: `BOOL __dyn_tls_dtor(...)` with
+    // no `BOOL`. Debug info supplies plenty of those.
+    let return_surface = hir
+        .surface_return_type_name
+        .as_ref()
+        .map(|name| (name.clone(), hir.return_type.clone()));
+    let bindings = hir
+        .params
+        .iter()
+        .chain(hir.locals.iter())
+        .map(|binding| (binding.surface_type_name.clone(), binding.ty.clone()))
+        .chain(return_surface.map(|(name, ty)| (Some(name), ty)));
+    for (surface, ty) in bindings {
+        let Some(surface) = surface.as_deref() else {
             continue;
         };
         let base = surface
@@ -195,7 +208,7 @@ fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String
         if base.starts_with("fission_agg") || KNOWN_C_TYPE_NAMES.contains(&base) {
             continue;
         }
-        let Some(source) = surface_type_definition_source(surface, &binding.ty) else {
+        let Some(source) = surface_type_definition_source(surface, &ty) else {
             continue;
         };
         names.insert(base.to_string(), print_type(source));

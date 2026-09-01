@@ -37,7 +37,17 @@ impl SectionData {
 
             if let Some(key) = canonical {
                 let file_offset = section.file_offset as usize;
-                let file_size = section.file_size as usize;
+                // PE rounds a section's on-disk size up to the file
+                // alignment, so `.debug_info` carries a few hundred zero bytes
+                // past its last unit. gimli's unit iterator walks into them,
+                // reads a zero unit length, and reports `Hit the end of input
+                // before it was expected` -- every PE with debug info failed
+                // to parse this way. ELF sizes match, which is why only PE saw
+                // it.
+                let file_size = match section.virtual_size {
+                    0 => section.file_size as usize,
+                    virtual_size => (virtual_size.min(section.file_size)) as usize,
+                };
                 if file_offset + file_size <= data_len {
                     sections.insert(key, (file_offset, file_size));
                 }
