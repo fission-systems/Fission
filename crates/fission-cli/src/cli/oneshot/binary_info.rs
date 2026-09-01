@@ -109,8 +109,8 @@ pub(super) fn print_binary_info(
             stdout,
             "\x1b[1;36m╠══════════════════════════════════════════════════════════╣\x1b[0m"
         )?;
-        writeln!(stdout, "║ Path:       {:<46} ║", truncate(&binary.path, 46))?;
-        writeln!(stdout, "║ Format:     {:<46} ║", &binary.format)?;
+        writeln!(stdout, "║ Path:       {} ║", fit(&binary.path, 46))?;
+        writeln!(stdout, "║ Format:     {} ║", fit(&binary.format, 46))?;
 
         let arch_display = binary
             .architecture
@@ -118,7 +118,7 @@ pub(super) fn print_binary_info(
             .map(|arch| format!("{} {}-bit ({})", arch.processor, arch.bitness, arch.variant))
             .unwrap_or_else(|| "unknown".to_string());
 
-        writeln!(stdout, "║ Arch:       {:<46} ║", arch_display)?;
+        writeln!(stdout, "║ Arch:       {} ║", fit(&arch_display, 46))?;
 
         // What every later command actually decodes and decompiles with.
         //
@@ -280,12 +280,43 @@ pub(super) fn print_binary_info(
     Ok(())
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("...{}", &s[s.len() - max + 3..])
+/// Fit `text` into exactly `width` terminal columns, keeping its tail.
+///
+/// The previous version indexed by *bytes* into a `&str`, so a path with any
+/// multi-byte character long enough to need truncating panicked outright:
+/// `start byte index 12 is not a char boundary`. `fission_cli info` crashed on
+/// its own `Path:` line for any non-ASCII path past about fifty bytes.
+///
+/// Columns rather than characters because the panel is a drawn box: a Hangul
+/// or CJK glyph occupies two, so counting characters left the right border
+/// short by one column per wide glyph.
+fn fit(text: &str, width: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+
+    let char_width = |c: char| UnicodeWidthChar::width(c).unwrap_or(0);
+    let total: usize = text.chars().map(char_width).sum();
+    if total <= width {
+        return format!("{text}{}", " ".repeat(width - total));
     }
+    // Keep the tail -- the file name matters more than the directories above
+    // it -- behind a leading ellipsis.
+    let mut kept: Vec<char> = Vec::new();
+    let mut used = 0usize;
+    for c in text.chars().rev() {
+        let w = char_width(c);
+        if used + w > width.saturating_sub(3) {
+            break;
+        }
+        used += w;
+        kept.push(c);
+    }
+    kept.reverse();
+    let tail: String = kept.into_iter().collect();
+    format!("...{tail}{}", " ".repeat(width - 3 - used))
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    fit(s, max).trim_end().to_string()
 }
 
 pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()> {
@@ -551,5 +582,35 @@ fn function_label(binary: &LoadedBinary, address: u64) -> String {
     match binary.function_at(address) {
         Some(function) if !function.name.is_empty() => function.name.clone(),
         _ => format!("0x{address:x}"),
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::fit;
+
+    /// The panel is a drawn box, so every field must occupy the same columns.
+    #[test]
+    fn a_wide_glyph_costs_two_columns() {
+        // Hangul renders double-width; counting characters left the border a
+        // column short for each one.
+        assert_eq!(fit("가나", 6), "가나  ");
+        assert_eq!(fit("ab", 6), "ab    ");
+    }
+
+    /// Byte indexing panicked here: `start byte index 12 is not a char
+    /// boundary`. `fission_cli info` crashed on its own `Path:` line for any
+    /// non-ASCII path long enough to need truncating.
+    #[test]
+    fn truncating_a_multi_byte_string_keeps_its_tail_and_does_not_panic() {
+        let path = format!("/tmp/{}/x.exe", "가".repeat(13));
+        let fitted = fit(&path, 20);
+        assert!(fitted.starts_with("..."), "{fitted}");
+        assert!(fitted.trim_end().ends_with("/x.exe"), "{fitted}");
+        let width: usize = fitted
+            .chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum();
+        assert_eq!(width, 20, "{fitted}");
     }
 }
