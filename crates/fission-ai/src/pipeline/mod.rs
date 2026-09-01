@@ -641,9 +641,15 @@ fn collect_binary_snapshot(
         return None;
     }
 
-    // Trim meta to a reasonable size
+    // Trim meta to a reasonable size.
+    //
+    // By characters, not bytes: this is `fission_cli info`'s panel, which is
+    // drawn with box characters that are three bytes each, so a byte cut lands
+    // inside one and panics. Today's output is just under the limit; a longer
+    // path or one more row in the panel puts it over.
     let meta = if meta.len() > 1500 {
-        format!("{}... [truncated]", &meta[..1500])
+        let kept: String = meta.chars().take(1500).collect();
+        format!("{kept}... [truncated]")
     } else {
         meta
     };

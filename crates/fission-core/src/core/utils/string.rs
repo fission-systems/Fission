@@ -52,13 +52,19 @@ pub fn parse_hex(s: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// Truncate a string with ellipsis if it exceeds max length
+/// Truncate a string with ellipsis if it exceeds max length.
+///
+/// Counted in characters, not bytes. Slicing a `&str` at a byte offset panics
+/// when the offset lands inside a multi-byte character, and the strings that
+/// reach a truncator here are binary-derived -- symbol names, paths,
+/// disassembly text -- so they are not reliably ASCII. A Go symbol carries
+/// `·`; a path can be in any script.
 pub fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+    if s.chars().count() <= max_len {
+        return s.to_string();
     }
+    let kept: String = s.chars().take(max_len.saturating_sub(3)).collect();
+    format!("{kept}...")
 }
 
 /// Normalize a symbol-like name into a stable decompiler-facing identifier.
@@ -120,6 +126,28 @@ pub fn normalize_named_type_identity(type_name: &str) -> Option<String> {
     }
 
     Some(tokens.join(" "))
+}
+
+#[cfg(test)]
+mod truncate_char_boundary_tests {
+    use super::truncate;
+
+    /// Byte slicing panicked here: the strings that reach a truncator are
+    /// binary-derived -- symbol names, paths, disassembly text -- and a Go
+    /// symbol carries `\u{b7}`, two bytes.
+    #[test]
+    fn a_multi_byte_string_truncates_without_panicking() {
+        let name = format!("main{}main{}", '\u{b7}', "x".repeat(60));
+        let cut = truncate(&name, 20);
+        assert!(cut.ends_with("..."), "{cut}");
+        assert_eq!(cut.chars().count(), 20, "{cut}");
+    }
+
+    #[test]
+    fn a_short_string_is_returned_whole() {
+        assert_eq!(truncate("abc", 20), "abc");
+        assert_eq!(truncate("가나다", 20), "가나다");
+    }
 }
 
 #[cfg(test)]

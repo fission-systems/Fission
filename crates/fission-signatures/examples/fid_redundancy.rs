@@ -121,7 +121,8 @@ fn main() {
     let mut top: Vec<_> = name_dbs.iter().collect();
     top.sort_by_key(|(_, v)| std::cmp::Reverse(**v));
     for (n, v) in top.iter().take(6) {
-        println!("   in {v:>3} dbs : {}", &n[..n.len().min(50)]);
+        let shown: String = n.chars().take(50).collect();
+        println!("   in {v:>3} dbs : {shown}");
     }
     println!();
 

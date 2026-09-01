@@ -96,28 +96,31 @@ impl ReversingFocus {
     }
 
     /// Store a decompiled snippet, truncating if necessary.
+    ///
+    /// By characters: a byte cut lands inside a multi-byte character and
+    /// panics, and these snippets carry binary-derived text -- a Go symbol's
+    /// `·` reaches disassembly listings through the operand annotations.
     pub fn set_decomp_snippet(&mut self, snippet: String) {
-        if snippet.len() > Self::MAX_DECOMP_SNIPPET_LEN {
-            self.decomp_snippet = Some(format!(
-                "{}... [truncated]",
-                &snippet[..Self::MAX_DECOMP_SNIPPET_LEN]
-            ));
-        } else {
-            self.decomp_snippet = Some(snippet);
-        }
+        self.decomp_snippet = Some(truncate_snippet(snippet, Self::MAX_DECOMP_SNIPPET_LEN));
     }
 
     /// Store a disassembled snippet, truncating if necessary.
     pub fn set_disasm_snippet(&mut self, snippet: String) {
-        if snippet.len() > Self::MAX_DISASM_SNIPPET_LEN {
-            self.disasm_snippet = Some(format!(
-                "{}... [truncated]",
-                &snippet[..Self::MAX_DISASM_SNIPPET_LEN]
-            ));
-        } else {
-            self.disasm_snippet = Some(snippet);
-        }
+        self.disasm_snippet = Some(truncate_snippet(snippet, Self::MAX_DISASM_SNIPPET_LEN));
     }
+}
+
+/// Cut a snippet to `max_chars` characters, marking that it was cut.
+///
+/// Characters rather than bytes: slicing a `&str` at a byte offset panics when
+/// the offset lands inside a multi-byte character, and these snippets carry
+/// binary-derived text.
+fn truncate_snippet(snippet: String, max_chars: usize) -> String {
+    if snippet.chars().count() <= max_chars {
+        return snippet;
+    }
+    let kept: String = snippet.chars().take(max_chars).collect();
+    format!("{kept}... [truncated]")
 }
 
 // ── Context Manager ───────────────────────────────────────────────────────────
