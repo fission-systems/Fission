@@ -265,3 +265,40 @@ impl ContextManager {
         }
     }
 }
+
+#[cfg(test)]
+mod snippet_truncation_tests {
+    use super::{ReversingFocus, truncate_snippet};
+
+    /// Disassembly listings carry symbol names, and a Go symbol's `·` is two
+    /// bytes -- so a byte cut can land inside one. Reviewed rather than
+    /// reproduced when it was fixed, so the behaviour past the limit is
+    /// pinned here.
+    #[test]
+    fn a_snippet_past_the_limit_is_cut_between_characters() {
+        // The real character: a Go symbol carries U+00B7, which is two
+        // bytes. Offset by one ASCII byte so the byte at the limit falls
+        // inside one rather than between two.
+        let separator = char::from_u32(0xb7).expect("valid scalar");
+        let listing = format!(
+            "|{}",
+            separator
+                .to_string()
+                .repeat(ReversingFocus::MAX_DISASM_SNIPPET_LEN + 100)
+        );
+        assert!(!listing.is_char_boundary(ReversingFocus::MAX_DISASM_SNIPPET_LEN));
+
+        let cut = truncate_snippet(listing, ReversingFocus::MAX_DISASM_SNIPPET_LEN);
+        assert!(cut.ends_with("... [truncated]"), "{cut}");
+    }
+
+    #[test]
+    fn the_setters_accept_multi_byte_text() {
+        let mut focus = ReversingFocus::default();
+        let go_symbol = format!("{}main·main\n", "call ".repeat(1200));
+        focus.set_disasm_snippet(go_symbol.clone());
+        focus.set_decomp_snippet(go_symbol);
+        assert!(focus.disasm_snippet.is_some());
+        assert!(focus.decomp_snippet.is_some());
+    }
+}

@@ -618,6 +618,26 @@ where
 
 // ── Binary Snapshot Collection ─────────────────────────────────────────────────
 
+/// How much of `fission_cli info`'s panel a snapshot keeps.
+const MAX_SNAPSHOT_META_CHARS: usize = 1500;
+
+/// Cut collected CLI output down to `max_chars`, marking that it was cut.
+///
+/// By characters, not bytes. The panel this holds is drawn with box characters
+/// that are three bytes each, so a byte cut lands inside one and panics.
+///
+/// It has not fired: the widest panel measured across the corpus is 1,403
+/// bytes -- a path of forty Hangul syllables, which is where the `fit`-padded
+/// rows cost the most -- leaving 97 bytes of headroom. That is one row in the
+/// panel, and a row was added to it this week.
+fn trim_snapshot_text(text: String, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+    let kept: String = text.chars().take(max_chars).collect();
+    format!("{kept}... [truncated]")
+}
+
 /// Blocking: run CLI subcommands to collect binary metadata, function list, and strings.
 /// Returns None on any failure (binary not found, CLI error, timeout propagated by caller).
 fn collect_binary_snapshot(
@@ -641,18 +661,7 @@ fn collect_binary_snapshot(
         return None;
     }
 
-    // Trim meta to a reasonable size.
-    //
-    // By characters, not bytes: this is `fission_cli info`'s panel, which is
-    // drawn with box characters that are three bytes each, so a byte cut lands
-    // inside one and panics. Today's output is just under the limit; a longer
-    // path or one more row in the panel puts it over.
-    let meta = if meta.len() > 1500 {
-        let kept: String = meta.chars().take(1500).collect();
-        format!("{kept}... [truncated]")
-    } else {
-        meta
-    };
+    let meta = trim_snapshot_text(meta, MAX_SNAPSHOT_META_CHARS);
 
     // 2. Function list via `fission_cli list <binary>`
     let functions: Vec<String> = Command::new(exe)
@@ -732,5 +741,41 @@ fn update_xrefs_from_output(focus: &mut crate::session::ReversingFocus, output: 
     }
     if !callees.is_empty() {
         focus.xrefs_callees = callees;
+    }
+}
+
+#[cfg(test)]
+mod snapshot_trim_tests {
+    use super::{MAX_SNAPSHOT_META_CHARS, trim_snapshot_text};
+
+    /// The panel this holds is drawn with three-byte box characters, so a byte
+    /// cut lands inside one and panics. Reviewed rather than reproduced when
+    /// it was fixed -- the widest panel measured is 1,403 bytes against a
+    /// 1,500 limit -- so the behaviour past the limit is pinned here instead.
+    #[test]
+    fn a_panel_past_the_limit_is_cut_between_characters() {
+        // One ASCII byte, then three-byte characters -- the shape the panel
+        // has, since `║` and a Hangul syllable are both three bytes. Long
+        // enough to pass the limit, and offset so that byte 1500 lands inside
+        // a character rather than between two, which is what panicked.
+        let panel = format!("|{}", "가".repeat(2000));
+        assert!(panel.chars().count() > MAX_SNAPSHOT_META_CHARS);
+        assert!(!panel.is_char_boundary(MAX_SNAPSHOT_META_CHARS));
+
+        let trimmed = trim_snapshot_text(panel, MAX_SNAPSHOT_META_CHARS);
+        assert!(trimmed.ends_with("... [truncated]"), "{trimmed}");
+        assert_eq!(
+            trimmed.chars().count(),
+            MAX_SNAPSHOT_META_CHARS + "... [truncated]".chars().count()
+        );
+    }
+
+    #[test]
+    fn a_panel_under_the_limit_is_kept_whole() {
+        let panel = "║ Path: /tmp/x.exe ║".to_string();
+        assert_eq!(
+            trim_snapshot_text(panel.clone(), MAX_SNAPSHOT_META_CHARS),
+            panel
+        );
     }
 }
