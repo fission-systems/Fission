@@ -156,6 +156,8 @@ enum CliCommand {
     Strings(StringsArgs),
     /// Hex dump of the bytes at an address
     Hex(HexArgs),
+    /// Find where a byte pattern, string, or value occurs
+    Search(SearchArgs),
     /// Canonical cross-reference index (loader seeds + optional disassembly layer)
     Xrefs(XrefsArgs),
     /// Call graph (caller/callee relationships from xref analysis)
@@ -592,6 +594,47 @@ struct PcodeTopologyArgs {
 
 #[derive(Args, Debug)]
 #[command(
+    long_about = "Find where a byte pattern, a string, or a value occurs.\n\nEvery other command starts from an address; this is the one that finds it. A magic constant, a crypto table, a signature's bytes, or a pointer to an address you already know.",
+    after_help = "Examples:\n  fission_cli search app.exe --bytes \"48 8b ?? 24\"\n  fission_cli search app.exe --text \"password\"\n  fission_cli search app.exe --value 0x140004000 --xrefs\n  fission_cli search app.exe --bytes 4889e5 --section .text --limit 20"
+)]
+struct SearchArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Hex bytes, `??` for any byte (e.g. "48 8b ?? 24" or 488b0424)
+    #[arg(long, value_name = "HEX")]
+    bytes: Option<String>,
+
+    /// Literal ASCII text
+    #[arg(long, value_name = "TEXT")]
+    text: Option<String>,
+
+    /// A value, matched as its little- and big-endian encodings
+    #[arg(long, value_parser = parse_hex_address, value_name = "VALUE")]
+    value: Option<u64>,
+
+    /// Width in bytes for --value (default: try both 4 and 8)
+    #[arg(long, value_name = "N")]
+    value_size: Option<usize>,
+
+    /// Restrict to these sections (repeatable)
+    #[arg(long = "section", value_name = "NAME")]
+    sections: Vec<String>,
+
+    /// Stop after this many matches
+    #[arg(long, default_value_t = 100)]
+    limit: usize,
+
+    /// Also report which functions reference each match (runs disassembly)
+    #[arg(long)]
+    xrefs: bool,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
     long_about = "Dump the bytes at a virtual address, with the section they belong to.\n\nEvery other command speaks virtual addresses; this is the one that shows what is actually there. Use it to read a table an instruction indexes into, check a struct's layout, or confirm what a data reference points at.",
     after_help = "Examples:\n  fission_cli hex app.exe --addr 0x140004000\n  fission_cli hex app.exe --addr 0x140004000 --count 64\n  fission_cli hex app.exe --addr 0x140004000 --json"
 )]
@@ -795,6 +838,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "decomp",
     "strings",
     "hex",
+    "search",
     "xrefs",
     "callgraph",
     "identify",
@@ -983,6 +1027,21 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.debug_decomp = decomp.debug_decomp;
                     args.debug_decomp_bundle = decomp.debug_decomp_bundle;
                     args.format = decomp.format;
+                    args
+                }
+                CliCommand::Search(search) => {
+                    let mut args = OneShotArgs::with_binary(search.binary);
+                    args.search = Some(crate::cli::oneshot::SearchQuery {
+                        bytes: search.bytes,
+                        text: search.text,
+                        value: search.value,
+                        value_size: search.value_size.unwrap_or(0),
+                        sections: search.sections,
+                        limit: search.limit,
+                        with_xrefs: search.xrefs,
+                    });
+                    args.json = search.common.json;
+                    args.verbose = search.common.verbose;
                     args
                 }
                 CliCommand::Hex(hex) => {

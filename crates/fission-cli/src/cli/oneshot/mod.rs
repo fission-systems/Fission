@@ -22,6 +22,7 @@ mod pcode_topology;
 mod raw_pcode;
 mod rust_decomp;
 mod script;
+mod search;
 mod similar;
 mod strings;
 mod xrefs;
@@ -38,6 +39,8 @@ use pcode_stages::emit_pcode_stages;
 use pcode_topology::emit_pcode_topology;
 use raw_pcode::emit_raw_pcode;
 use rust_decomp::run_decompilation_rust_sleigh;
+pub(crate) use search::SearchQuery;
+use search::run_search;
 use similar::run_similar;
 use strings::print_strings;
 use xrefs::run_xrefs;
@@ -730,6 +733,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.emit_program_metadata {
         return emit_program_metadata(cli, &binary);
+    }
+
+    if let Some(query) = &cli.search {
+        return Ok(run_search(&binary, query, cli.json)?);
     }
 
     if let Some(addr) = cli.hex_addr {
