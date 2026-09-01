@@ -20,10 +20,18 @@ pub(crate) fn collect_target_functions(
 
     if cli.decomp_all {
         if let Some(address_file) = &cli.addresses_file {
-            if let Ok(functions) = select_functions_from_addresses_file(binary, address_file) {
-                return select_explicit_functions(functions, cli.include_nonuser_functions);
+            // Swallowing the error here decompiled nothing, said nothing, and
+            // exited zero: a file holding one bad line among good addresses
+            // looked exactly like a binary with no functions.
+            match select_functions_from_addresses_file(binary, address_file) {
+                Ok(functions) => {
+                    return select_explicit_functions(functions, cli.include_nonuser_functions);
+                }
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    std::process::exit(1);
+                }
             }
-            return select_explicit_functions(vec![], cli.include_nonuser_functions);
         }
         return select_batch_functions(binary, cli.include_nonuser_functions, cli.decomp_limit);
     }

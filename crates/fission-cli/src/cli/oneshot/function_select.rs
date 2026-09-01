@@ -120,13 +120,23 @@ pub(crate) fn select_functions_from_addresses_file(
     let contents = fs::read_to_string(address_file)?;
     let canonical = canonical_functions_sorted(binary);
     let mut selected = Vec::new();
-    for line in contents.lines() {
+    for (line_number, line) in contents.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let address = parse_hex_address(trimmed)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        // Naming the line is the whole point: the file is written by hand or
+        // by a harness, and "one of these is wrong" is not actionable.
+        let address = parse_hex_address(trimmed).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{}:{}: `{trimmed}` is not an address ({e})",
+                    address_file.display(),
+                    line_number + 1
+                ),
+            )
+        })?;
         match canonical
             .iter()
             .copied()
