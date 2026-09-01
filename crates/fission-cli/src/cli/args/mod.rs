@@ -384,6 +384,18 @@ struct InfoArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
+    /// Function discovery profile (conservative|balanced|aggressive)
+    ///
+    /// Defaulted the same way `list` defaults it, so both commands count the
+    /// same functions. Without it `info` reported the loader's own total and
+    /// `list` reported the discovered one, under the same label.
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
     /// Run integrated detection (section/import/string rules plus Detect It Easy signatures)
     #[arg(long)]
     detections: bool,
@@ -880,6 +892,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.info_detections = info.detections;
                     args.info_identity = info.identity;
                     args.info_xrefs = info.xrefs;
+                    args.function_discovery_profile = info.function_discovery_profile;
                     args.info = !args.sections && !args.imports && !args.exports;
                     args
                 }
