@@ -91,6 +91,7 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                 min_arity: arity,
                 max_arity: arity,
                 locked_exact_arity: None,
+                returns_void: false,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown; arity],
                 param_surface_type_names: vec![None; arity],

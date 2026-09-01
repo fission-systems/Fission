@@ -429,4 +429,25 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             _ => Ok(None),
         }
     }
+
+    /// A subprogram's return type, where an absent `DW_AT_type` means `void`.
+    ///
+    /// DWARF spells "returns nothing" as the *absence* of the attribute, which
+    /// [`Self::resolve_type_ref`] cannot distinguish from "there is a type and
+    /// we failed to resolve it" -- both come back `None`. Collapsing the two
+    /// loses every void function: `void reverse_string(char*, size_t)` was
+    /// emitted as `unsigned long long reverse_string(...)` returning whatever
+    /// happened to be in the return register, which for one path was never
+    /// written at all.
+    pub(super) fn resolve_return_type_ref(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        type_cache: &HashMap<UnitOffset<usize>, String>,
+    ) -> Result<Option<String>, gimli::Error> {
+        if entry.attr_value(DwAt(0x49))?.is_none() {
+            return Ok(Some("void".to_string()));
+        }
+        self.resolve_type_ref(entry, unit, type_cache)
+    }
 }

@@ -273,7 +273,9 @@ fn apply_function_name_hints(
         if let Some(bits) = surface_integer_return_bits(return_type_name) {
             elide_surface_return_casts(&mut func.body, bits);
         }
-        if return_type_name != "void" {
+        if return_type_name == "void" {
+            drop_return_values(&mut func.body);
+        } else {
             recover_tail_call_return(&mut func.body);
         }
     }
@@ -1273,4 +1275,53 @@ fn recover_tail_call_return(body: &mut Vec<HirStmt>) {
         unreachable!("checked immediately above")
     };
     body[call_idx] = HirStmt::Return(Some(call));
+}
+
+/// Strip the value from every `return` in a function that returns nothing.
+///
+/// Return-value recovery reads the exit register, which a void function leaves
+/// holding whatever it last computed -- `void reverse_string(char*, size_t)`
+/// came out returning an `rax` that one path never writes. Once debug info
+/// says the function is void, that value is not a result and saying so is
+/// wrong in both directions: it invents a return, and it makes the emitted C
+/// invalid.
+///
+/// A call keeps its place as a statement. Dropping it would drop its effects,
+/// which is a different and worse mistake than printing its value.
+fn drop_return_values(body: &mut Vec<HirStmt>) {
+    for stmt in body.iter_mut() {
+        match stmt {
+            HirStmt::Block(inner)
+            | HirStmt::While { body: inner, .. }
+            | HirStmt::DoWhile { body: inner, .. } => drop_return_values(inner),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                drop_return_values(then_body);
+                drop_return_values(else_body);
+            }
+            _ => {}
+        }
+    }
+    let mut index = 0;
+    while index < body.len() {
+        let HirStmt::Return(Some(expr)) = &body[index] else {
+            index += 1;
+            continue;
+        };
+        if matches!(expr, HirExpr::Call { .. }) {
+            let HirStmt::Return(Some(call)) =
+                std::mem::replace(&mut body[index], HirStmt::Return(None))
+            else {
+                unreachable!("checked immediately above")
+            };
+            body.insert(index, HirStmt::Expr(call));
+            index += 2;
+            continue;
+        }
+        body[index] = HirStmt::Return(None);
+        index += 1;
+    }
 }

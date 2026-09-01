@@ -171,7 +171,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                     }
 
                     let name = crate::loader::demangle::demangle(&raw_name);
-                    let return_type = self.resolve_type_ref(entry, &unit, &type_cache)?;
+                    let return_type = self.resolve_return_type_ref(entry, &unit, &type_cache)?;
                     let size = self.subprogram_size(entry, address)?;
 
                     current_func = Some(FuncBuilder {

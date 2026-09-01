@@ -179,6 +179,7 @@ fn seed_callee_summaries_from_type_context(
                     min_arity: prototype.min_arity,
                     max_arity: prototype.max_arity,
                     locked_exact_arity: prototype.locked_exact_arity,
+                    returns_void: prototype.returns_void,
                     return_lattice: NirType::Unknown,
                     param_lattices,
                     param_surface_type_names,

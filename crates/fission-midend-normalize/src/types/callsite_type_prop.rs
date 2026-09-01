@@ -1625,7 +1625,8 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     if !rename_conflicts.is_empty() {
         add_typed_fact_conflicts(rename_conflicts.len());
     }
-    let void_receivers = drop_void_call_receivers(&mut func.body);
+    let callee_summaries = func.callee_summaries.clone();
+    let void_receivers = drop_void_call_receivers(&mut func.body, &callee_summaries);
     if void_receivers > 0 {
         add_call_signature_refinements(void_receivers);
         changed = true;
@@ -1722,13 +1723,19 @@ fn api_target_returns_void(target: &str) -> bool {
 /// statement, and the receiver stays declared, so a later use of it reads an
 /// uninitialized local -- which is exactly as defined as reading the
 /// register the callee never wrote.
-fn drop_void_call_receivers(stmts: &mut Vec<PreHirStmt>) -> usize {
+fn drop_void_call_receivers(
+    stmts: &mut Vec<PreHirStmt>,
+    summaries: &indexmap::IndexMap<String, fission_midend_core::CallSummary>,
+) -> usize {
     let mut dropped = 0usize;
     for stmt in stmts.iter_mut() {
         match stmt {
             PreHirStmt::Assign { rhs, .. } => {
                 if let PreHirExpr::Call { target, .. } = rhs
-                    && api_target_returns_void(target)
+                    && (api_target_returns_void(target)
+                        || summaries
+                            .get(target)
+                            .is_some_and(|summary| summary.prototype.returns_void))
                 {
                     *stmt = PreHirStmt::Expr(rhs.clone());
                     dropped += 1;
@@ -1738,26 +1745,36 @@ fn drop_void_call_receivers(stmts: &mut Vec<PreHirStmt>) -> usize {
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                dropped += drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                dropped += drop_void_call_receivers(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    summaries,
+                );
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                dropped +=
-                    drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                dropped +=
-                    drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                dropped += drop_void_call_receivers(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    summaries,
+                );
+                dropped += drop_void_call_receivers(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    summaries,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    dropped += drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
-                        &mut case.body,
-                    ));
+                    dropped += drop_void_call_receivers(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        summaries,
+                    );
                 }
-                dropped +=
-                    drop_void_call_receivers(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                dropped += drop_void_call_receivers(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    summaries,
+                );
             }
             _ => {}
         }
@@ -2172,6 +2189,7 @@ mod tests {
                 min_arity: 1,
                 max_arity: 1,
                 locked_exact_arity: Some(1),
+                returns_void: false,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![param_ty],
                 param_surface_type_names: vec![surface.map(str::to_string)],
@@ -2202,6 +2220,7 @@ mod tests {
                 min_arity: fixed_arity,
                 max_arity: fixed_arity,
                 locked_exact_arity: None,
+                returns_void: false,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown; fixed_arity],
                 param_surface_type_names: vec![None; fixed_arity],
@@ -2721,6 +2740,7 @@ mod tests {
                         min_arity: 0,
                         max_arity: 0,
                         locked_exact_arity: Some(0),
+                        returns_void: false,
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
                         param_surface_type_names: vec![],
@@ -2850,6 +2870,7 @@ mod tests {
                         min_arity: 4,
                         max_arity: 4,
                         locked_exact_arity: Some(4),
+                        returns_void: false,
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![NirType::Unknown; 4],
                         param_surface_type_names: vec![None; 4],
@@ -3137,6 +3158,7 @@ mod tests {
                         min_arity: 0,
                         max_arity: 0,
                         locked_exact_arity: Some(0),
+                        returns_void: false,
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
                         param_surface_type_names: vec![],
@@ -3213,6 +3235,7 @@ mod tests {
                         min_arity: 1,
                         max_arity: 1,
                         locked_exact_arity: Some(1),
+                        returns_void: false,
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![NirType::Unknown],
                         param_surface_type_names: vec![None],
@@ -3276,6 +3299,7 @@ mod tests {
                         min_arity: 0,
                         max_arity: 2,
                         locked_exact_arity: None,
+                        returns_void: false,
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
                         param_surface_type_names: vec![],

@@ -19,6 +19,7 @@ fn exact_import_context(target: u64, symbol: &str, arity: usize) -> PreviewTypeC
             min_arity: arity,
             max_arity: arity,
             locked_exact_arity: Some(arity),
+            returns_void: false,
             param_pointer_pointees: vec![None; arity],
             param_surface_type_names: vec![None; arity],
         },

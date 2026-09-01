@@ -231,7 +231,7 @@ pub(crate) fn build_nir_type_context(
         iat_target_refs: iat_target_refs.clone(),
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
-        call_prototype_summaries: build_nir_import_call_prototype_summaries(&all_target_refs),
+        call_prototype_summaries: build_nir_call_prototype_summaries(&all_target_refs, binary),
         call_result_is_source_value: build_nir_call_result_facts(&all_target_refs),
         call_param_rules: call_param_rules_for_binary(binary, &all_target_refs)
             .as_ref()
@@ -270,6 +270,46 @@ fn build_nir_call_result_facts(
 /// exist as ABI-slot values. Normalize already consumes the same signatures
 /// for types and pruning, but it is too late there to reconstruct a slot that
 /// builder recovery discarded because its definition lived in a predecessor.
+/// Prototype summaries for callees, from API signatures and from debug info.
+///
+/// Imports have always been covered, from the bundled Win32/libc signature
+/// tables. A binary's *own* functions were not, so nothing at a call site knew
+/// that `__mingw_setusermatherr` returns nothing -- and a call clobbers the
+/// result register, so the site materialises a receiver anyway and prints
+/// `rax = (uint *)(__mingw_setusermatherr(...))`, inventing a value.
+fn build_nir_call_prototype_summaries(
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+    binary: &LoadedBinary,
+) -> HashMap<String, NirCallPrototypeSummary> {
+    let mut summaries = build_nir_import_call_prototype_summaries(call_target_refs);
+    for debug in binary.dwarf_functions.values() {
+        if debug.name.is_empty() {
+            continue;
+        }
+        // Debug info spells "returns nothing" as an absent `DW_AT_type`, which
+        // the loader resolves to `void` for subprograms specifically.
+        let returns_void = debug
+            .return_type
+            .as_deref()
+            .is_some_and(|name| name.trim().eq_ignore_ascii_case("void"));
+        if !returns_void {
+            continue;
+        }
+        let arity = debug.params.len();
+        summaries
+            .entry(debug.name.clone())
+            .or_insert_with(|| NirCallPrototypeSummary {
+                min_arity: arity,
+                max_arity: arity,
+                locked_exact_arity: Some(arity),
+                param_pointer_pointees: vec![None; arity],
+                param_surface_type_names: vec![None; arity],
+                returns_void: true,
+            });
+    }
+    summaries
+}
+
 fn build_nir_import_call_prototype_summaries(
     call_target_refs: &HashMap<u64, CallTargetRef>,
 ) -> HashMap<String, NirCallPrototypeSummary> {
@@ -295,6 +335,7 @@ fn build_nir_import_call_prototype_summaries(
                 max_arity: arity,
                 locked_exact_arity: (!is_known_variadic_runtime_symbol(&target_ref.symbol))
                     .then_some(arity),
+                returns_void: signature.return_type.trim().eq_ignore_ascii_case("void"),
                 param_pointer_pointees: vec![None; arity],
                 param_surface_type_names: vec![None; arity],
             },
@@ -1024,6 +1065,7 @@ fn build_preview_callee_summaries(
                 min_arity: arity,
                 max_arity: arity,
                 locked_exact_arity: Some(arity),
+                returns_void: false,
                 param_pointer_pointees,
                 param_surface_type_names,
             }
@@ -1950,6 +1992,7 @@ mod tests {
             min_arity: 2,
             max_arity: 2,
             locked_exact_arity: Some(2),
+            returns_void: false,
             param_pointer_pointees: vec![None, Some(concrete.clone())],
             param_surface_type_names: vec![None, Some("long*".to_string())],
         };
@@ -1957,6 +2000,7 @@ mod tests {
             min_arity: 3,
             max_arity: 3,
             locked_exact_arity: Some(3),
+            returns_void: false,
             param_pointer_pointees: vec![
                 Some(NirCallPointerPointee::Unknown),
                 Some(NirCallPointerPointee::Unknown),

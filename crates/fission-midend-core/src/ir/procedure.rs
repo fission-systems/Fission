@@ -317,6 +317,9 @@ pub struct PrototypeSummary {
     pub min_arity: usize,
     pub max_arity: usize,
     pub locked_exact_arity: Option<usize>,
+    /// Debug info says this callee returns nothing -- see
+    /// [`NirCallPrototypeSummary::returns_void`].
+    pub returns_void: bool,
     pub return_lattice: NirType,
     pub param_lattices: Vec<NirType>,
     pub param_surface_type_names: Vec<Option<String>>,
@@ -379,6 +382,15 @@ pub struct NirCallPrototypeSummary {
     pub param_pointer_pointees: Vec<Option<NirCallPointerPointee>>,
     #[serde(default)]
     pub param_surface_type_names: Vec<Option<String>>,
+    /// Debug info says this callee returns nothing.
+    ///
+    /// A call clobbers the result register, so a later read of it that
+    /// liveness cannot rule out makes the call site materialise a receiver.
+    /// Without knowing the callee is void that receiver looks legitimate, and
+    /// `rax = (uint *)(__mingw_setusermatherr(...))` invents a value the
+    /// callee never produced.
+    #[serde(default)]
+    pub returns_void: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
