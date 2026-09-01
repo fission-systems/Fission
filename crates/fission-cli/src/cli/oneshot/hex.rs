@@ -27,13 +27,15 @@ pub(super) fn print_hex(
         // An address outside every mapped section has no bytes to show, and
         // guessing a file offset from the image base would print whatever
         // happened to sit there.
+        //
+        // Reported as a failure, the way `disasm` reports the same mistake:
+        // an operator who mistyped an address should not have to notice that
+        // the output was empty.
         let message = format!("0x{address:x} is not inside any mapped section");
         if json {
             writeln!(stdout, "{}", serde_json::json!({ "error": message }))?;
-        } else {
-            writeln!(stdout, "{message}")?;
         }
-        return Ok(());
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, message));
     };
 
     let offset_in_section = address - section.virtual_address;

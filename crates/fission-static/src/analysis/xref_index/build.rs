@@ -55,7 +55,24 @@ impl XrefIndexBuilder {
         });
     }
 
-    pub fn finish(self) -> XrefIndex {
+    pub fn finish(mut self) -> XrefIndex {
+        // Records arrive in whatever order the maps they were gathered from
+        // iterate in, so two runs over the same binary emitted the same set in
+        // a different order -- and `id` is the position, so the ids moved with
+        // it. Output nothing downstream can diff, cache or regression-test.
+        //
+        // Sorted before ids are assigned, so an id still indexes `refs` and
+        // the summaries that hold ids stay correct.
+        self.pending.sort_by(|left, right| {
+            left.source
+                .address
+                .cmp(&right.source.address)
+                .then_with(|| left.target.address.cmp(&right.target.address))
+                .then_with(|| left.kind.cmp(&right.kind))
+                .then_with(|| left.target.symbol.cmp(&right.target.symbol))
+                .then_with(|| left.evidence.symbol_name.cmp(&right.evidence.symbol_name))
+                .then_with(|| left.evidence.note.cmp(&right.evidence.note))
+        });
         let mut refs = Vec::with_capacity(self.pending.len());
         let mut by_source: FxHashMap<u64, Vec<XrefId>> = FxHashMap::default();
         let mut by_target: FxHashMap<u64, Vec<XrefId>> = FxHashMap::default();
