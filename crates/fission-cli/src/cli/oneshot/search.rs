@@ -14,7 +14,7 @@ use std::io::{self, Write};
 
 /// What to look for, and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SearchQuery {
+pub struct SearchQuery {
     /// Hex bytes, `??` for any byte: `48 8b ?? 24`.
     pub bytes: Option<String>,
     /// Literal text, matched as ASCII.

@@ -16,6 +16,7 @@ mod hex;
 mod identify;
 mod inventory;
 mod nir_stats;
+mod patch;
 mod pcode_diagnostics;
 mod pcode_stages;
 mod pcode_topology;
@@ -35,11 +36,13 @@ use hex::print_hex;
 use identify::run_identify;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
 use nir_stats::emit_nir_stats;
+pub use patch::PatchRequest;
+use patch::run_patch;
 use pcode_stages::emit_pcode_stages;
 use pcode_topology::emit_pcode_topology;
 use raw_pcode::emit_raw_pcode;
 use rust_decomp::run_decompilation_rust_sleigh;
-pub(crate) use search::SearchQuery;
+pub use search::SearchQuery;
 use search::run_search;
 use similar::run_similar;
 use strings::print_strings;
@@ -733,6 +736,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.emit_program_metadata {
         return emit_program_metadata(cli, &binary);
+    }
+
+    if let Some(request) = &cli.patch {
+        return Ok(run_patch(&mut binary, request, cli.json)?);
     }
 
     if let Some(query) = &cli.search {

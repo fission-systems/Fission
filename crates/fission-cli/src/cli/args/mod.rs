@@ -158,6 +158,8 @@ enum CliCommand {
     Hex(HexArgs),
     /// Find where a byte pattern, string, or value occurs
     Search(SearchArgs),
+    /// Change bytes at an address and write the result to a new file
+    Patch(PatchArgs),
     /// Canonical cross-reference index (loader seeds + optional disassembly layer)
     Xrefs(XrefsArgs),
     /// Call graph (caller/callee relationships from xref analysis)
@@ -594,6 +596,39 @@ struct PcodeTopologyArgs {
 
 #[derive(Args, Debug)]
 #[command(
+    long_about = "Change bytes at an address and write the result to a new file.\n\nWithout --output nothing is written: the change is reported so it can be checked first. The input is never modified, and an address the file does not actually store bytes for (a .bss, say) is refused rather than silently redirected into the header.\n\nA patched PE keeps its old checksum and invalidates any signature it carried.",
+    after_help = "Examples:\n  fission_cli patch app.exe --addr 0x140001760 --nop 5\n  fission_cli patch app.exe --addr 0x140001760 --bytes \"31 c0 c3\" --output patched.exe"
+)]
+struct PatchArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Virtual address to change
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    addr: u64,
+
+    /// Replacement bytes as hex (e.g. "31 c0 c3" or 31c0c3)
+    #[arg(long, value_name = "HEX", conflicts_with = "nop")]
+    bytes: Option<String>,
+
+    /// Replace this many bytes with the architecture's NOP
+    #[arg(long, value_name = "N", conflicts_with = "bytes")]
+    nop: Option<usize>,
+
+    /// Write the patched copy here; without it nothing is written
+    #[arg(long, value_name = "FILE")]
+    output: Option<PathBuf>,
+
+    /// Allow --output to overwrite a file that already exists
+    #[arg(long)]
+    force: bool,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
     long_about = "Find where a byte pattern, a string, or a value occurs.\n\nEvery other command starts from an address; this is the one that finds it. A magic constant, a crypto table, a signature's bytes, or a pointer to an address you already know.",
     after_help = "Examples:\n  fission_cli search app.exe --bytes \"48 8b ?? 24\"\n  fission_cli search app.exe --text \"password\"\n  fission_cli search app.exe --value 0x140004000 --xrefs\n  fission_cli search app.exe --bytes 4889e5 --section .text --limit 20"
 )]
@@ -839,6 +874,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "strings",
     "hex",
     "search",
+    "patch",
     "xrefs",
     "callgraph",
     "identify",
@@ -1027,6 +1063,19 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.debug_decomp = decomp.debug_decomp;
                     args.debug_decomp_bundle = decomp.debug_decomp_bundle;
                     args.format = decomp.format;
+                    args
+                }
+                CliCommand::Patch(patch) => {
+                    let mut args = OneShotArgs::with_binary(patch.binary);
+                    args.patch = Some(crate::cli::oneshot::PatchRequest {
+                        address: patch.addr,
+                        bytes: patch.bytes,
+                        nop: patch.nop,
+                        output: patch.output,
+                        force: patch.force,
+                    });
+                    args.json = patch.common.json;
+                    args.verbose = patch.common.verbose;
                     args
                 }
                 CliCommand::Search(search) => {

@@ -65,6 +65,9 @@ fission_cli list <binary>
 fission_cli disasm <binary> --addr <ADDR>
 fission_cli decomp <binary> --addr <ADDR>
 fission_cli strings <binary>
+fission_cli hex <binary> --addr <ADDR>
+fission_cli search <binary> --bytes <HEX>
+fission_cli patch <binary> --addr <ADDR> --bytes <HEX>
 ```
 
 ### Operator-oriented command
@@ -183,6 +186,44 @@ fission_cli strings app.exe
 fission_cli strings app.exe --min-len 8
 fission_cli strings app.exe --min-len 8 --json
 ```
+
+### Read the bytes at an address
+
+```bash
+fission_cli hex app.exe --addr 0x140001000
+fission_cli hex app.exe --addr 0x140001000 --count 128 --json
+```
+
+The address is a virtual address, the same one every other command speaks. An
+address outside every mapped section is reported as an error rather than
+guessed at from the image base.
+
+### Find where something is
+
+`search` answers the question that comes before an address: results are
+addresses, so they feed straight into `hex`, `disasm`, and `xrefs`.
+
+```bash
+fission_cli search app.exe --bytes "48 8b ?? 24"     # ?? matches any byte
+fission_cli search app.exe --text "license"
+fission_cli search app.exe --value 0x140001000        # the binary's endianness
+fission_cli search app.exe --bytes 5548 --section .text --limit 20
+```
+
+### Change bytes
+
+`patch` writes a modified **copy**; the input is never touched.
+
+```bash
+# Report the change and write nothing -- check it first
+fission_cli patch app.exe --addr 0x140001760 --nop 5
+
+# Write the patched copy
+fission_cli patch app.exe --addr 0x140001760 --nop 5 --output patched.exe
+fission_cli patch app.exe --addr 0x140001760 --bytes "31 c0 c3" --output patched.exe
+```
+
+See [Patch Command](#patch-command) for the flags and for what `patch` refuses.
 
 ---
 
@@ -429,6 +470,44 @@ fission_cli strings app.exe --min-len 8 --json
 ### Default threshold
 
 If `--min-len` is not provided, the current default is `4`.
+
+---
+
+## Patch Command
+
+`patch` changes bytes at an address and writes the result to a **new file**.
+The input binary is never modified.
+
+### Examples
+
+```bash
+fission_cli patch app.exe --addr 0x140001760 --nop 5
+fission_cli patch app.exe --addr 0x140001760 --nop 5 --output patched.exe
+fission_cli patch app.exe --addr 0x140001760 --bytes "31 c0 c3" --output patched.exe --json
+```
+
+### Options
+
+| Flag | Notes |
+|------|-------|
+| `--addr <ADDR>` | Virtual address of the first byte to change. |
+| `--bytes <HEX>` | Replacement bytes, `"31 c0 c3"` or `31c0c3`. No `??`: there is no byte to write. |
+| `--nop <N>` | Replace `N` bytes with the architecture's NOP (`0x90` on x86, `1f 20 03 d5` on little-endian AArch64). |
+| `--output <FILE>` | Where to write. **Without it nothing is written** -- the change is only reported. |
+| `--force` | Allow `--output` to overwrite a file that already exists. |
+
+Two things it refuses, both to keep a mistake from becoming a corrupted file:
+
+- **An address the file does not store bytes for.** A `.bss` has a virtual
+  extent but no file range, so the usual VA-to-offset arithmetic lands at the
+  start of the file -- inside the PE header. `patch` resolves the offset itself
+  and rejects the address instead.
+- **An address in a section's alignment padding.** The file range is padded up
+  to the file alignment; those bytes exist in the file but are never loaded, so
+  writing there changes nothing that runs.
+
+The patched file keeps the original's checksum and invalidates any signature it
+carried; `patch` does not recompute either.
 
 ---
 
