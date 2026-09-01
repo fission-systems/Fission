@@ -319,10 +319,10 @@ pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()
         writeln!(stdout, "Sections ({}):", binary.sections.len())?;
         writeln!(
             stdout,
-            "{:<12} {:>16} {:>10} {:>16} {:>10} {:>5}",
+            "{:<20} {:>16} {:>10} {:>16} {:>10} {:>5}",
             "Name", "VirtAddr", "VirtSize", "FileOffset", "FileSize", "Flags"
         )?;
-        writeln!(stdout, "{:─<75}", "")?;
+        writeln!(stdout, "{:─<83}", "")?;
         for sec in &binary.sections {
             let flags = format!(
                 "{}{}{}",
@@ -332,8 +332,8 @@ pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()
             );
             writeln!(
                 stdout,
-                "{:<12} {:>16} {:>10} {:>16} {:>10} {:>5}",
-                truncate(&sec.name, 12),
+                "{:<20} {:>16} {:>10} {:>16} {:>10} {:>5}",
+                truncate(&sec.name, 20),
                 format!("0x{:x}", sec.virtual_address),
                 sec.virtual_size,
                 format!("0x{:x}", sec.file_offset),

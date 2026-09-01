@@ -17,6 +17,7 @@ const IMAGE_DEBUG_TYPE_CODEVIEW: u32 = 2;
 const PE_SIGNATURE_SIZE: usize = 4;
 const PE_FILE_HEADER_SIZE: usize = 20;
 const PE_SECTION_HEADER_SIZE: usize = 40;
+const COFF_SYMBOL_SIZE: usize = 18;
 const PE32_MAGIC: u16 = 0x10b;
 const PE32_PLUS_MAGIC: u16 = 0x20b;
 const IMAGE_DEBUG_DIRECTORY_SIZE: usize = 28;
@@ -627,11 +628,27 @@ fn parse_pe_file(bytes: &[u8]) -> Result<RawPeFile> {
     let section_table_offset = optional_header_offset
         .checked_add(size_of_optional_header)
         .ok_or_else(|| err!(loader, "MalformedHeader: PE section table offset overflow"))?;
+    // A COFF section name longer than eight bytes is stored as `/N`, an offset
+    // into the string table that follows the symbol table. Without resolving
+    // it, a MinGW PE's DWARF sections are called `/19` and `/70` instead of
+    // `.debug_info` and `.debug_str` -- and everything that looks them up by
+    // name, the DWARF reader included, simply does not find them.
+    let string_table_offset = (pointer_to_symbol_table != 0 && number_of_symbols != 0)
+        .then(|| {
+            (number_of_symbols as usize)
+                .checked_mul(COFF_SYMBOL_SIZE)
+                .and_then(|symbols| (pointer_to_symbol_table as usize).checked_add(symbols))
+        })
+        .flatten();
     let mut section_headers = Vec::with_capacity(number_of_sections as usize);
     for idx in 0..number_of_sections as usize {
         let offset = section_table_offset + idx * PE_SECTION_HEADER_SIZE;
         section_headers.push(PeSectionHeader {
-            name: reader.fixed_string(offset, 8)?,
+            name: resolve_section_name(
+                &reader,
+                reader.fixed_string(offset, 8)?,
+                string_table_offset,
+            ),
             virtual_size: reader.u32(offset + 8)?,
             virtual_address: reader.u32(offset + 12)?,
             size_of_raw_data: reader.u32(offset + 16)?,
@@ -1996,5 +2013,100 @@ mod tests {
         assert_eq!(dp.address, 0x4010C0);
         assert_eq!(dp.is_import, false);
         assert_eq!(dp.kind, Some("delay_proxy".to_string()));
+    }
+}
+
+/// Resolve a COFF `/N` section name against the string table.
+///
+/// Names of eight bytes or fewer are stored inline; anything longer is `/N`,
+/// a byte offset from the start of the string table. MinGW puts every DWARF
+/// section past that limit, so an unresolved name leaves `.debug_info` called
+/// `/19` -- and `LoadedBinary::sections` is what the DWARF reader searches by
+/// name, so debug info in a PE was simply never found.
+///
+/// The offset is relative to the string table's own start, whose first four
+/// bytes are its size; an offset inside that field is not a name.
+fn resolve_section_name(
+    reader: &ByteReader<'_>,
+    raw: String,
+    string_table_offset: Option<usize>,
+) -> String {
+    let Some(table) = string_table_offset else {
+        return raw;
+    };
+    let Some(digits) = raw.strip_prefix('/') else {
+        return raw;
+    };
+    // `//` is a base64 form for offsets past 999999, which no linker in
+    // practice emits; leaving it raw is better than decoding it wrong.
+    let Ok(offset) = digits.trim().parse::<usize>() else {
+        return raw;
+    };
+    if offset < 4 {
+        return raw;
+    }
+    let Some(position) = table.checked_add(offset) else {
+        return raw;
+    };
+    let resolved = reader.cstring(position);
+    if resolved.is_empty() { raw } else { resolved }
+}
+
+#[cfg(test)]
+mod section_name_tests {
+    use super::*;
+
+    /// A COFF `/N` section name resolves against the string table.
+    ///
+    /// MinGW puts every DWARF section past the eight-byte inline limit, so
+    /// without this `.debug_info` is called `/19` -- and the DWARF reader
+    /// searches `LoadedBinary::sections` by name, so debug info in a PE was
+    /// never found at all.
+    #[test]
+    fn a_long_section_name_resolves_through_the_string_table() {
+        // A string table: four bytes of size, then the names it holds.
+        let mut bytes = vec![0u8; 4];
+        bytes.extend_from_slice(b".debug_info\0");
+        bytes.extend_from_slice(b".debug_str\0");
+        let size = bytes.len() as u32;
+        bytes[..4].copy_from_slice(&size.to_le_bytes());
+        let reader = ByteReader::little(&bytes);
+
+        assert_eq!(
+            resolve_section_name(&reader, "/4".to_string(), Some(0)),
+            ".debug_info"
+        );
+        assert_eq!(
+            resolve_section_name(&reader, "/16".to_string(), Some(0)),
+            ".debug_str"
+        );
+    }
+
+    #[test]
+    fn an_inline_name_and_an_unresolvable_one_are_left_alone() {
+        let bytes = vec![0u8; 64];
+        let reader = ByteReader::little(&bytes);
+
+        // Short names are stored inline and never carry a slash.
+        assert_eq!(
+            resolve_section_name(&reader, ".text".to_string(), Some(0)),
+            ".text"
+        );
+        // No symbol table means no string table to resolve against.
+        assert_eq!(
+            resolve_section_name(&reader, "/19".to_string(), None),
+            "/19"
+        );
+        // An offset inside the size field is not a name.
+        assert_eq!(
+            resolve_section_name(&reader, "/2".to_string(), Some(0)),
+            "/2"
+        );
+        // `//` is the base64 form for offsets past 999999; leaving it raw
+        // beats decoding it wrong.
+        assert_eq!(
+            resolve_section_name(&reader, "//AAAAA".to_string(), Some(0)),
+            "//AAAAA"
+        );
     }
 }
