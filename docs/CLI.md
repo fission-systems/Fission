@@ -492,7 +492,7 @@ fission_cli patch app.exe --addr 0x140001760 --bytes "31 c0 c3" --output patched
 |------|-------|
 | `--addr <ADDR>` | Virtual address of the first byte to change. |
 | `--bytes <HEX>` | Replacement bytes, `"31 c0 c3"` or `31c0c3`. No `??`: there is no byte to write. |
-| `--nop <N>` | Replace `N` bytes with the architecture's NOP (`0x90` on x86, `1f 20 03 d5` on little-endian AArch64). |
+| `--nop <N>` | Replace `N` bytes with the architecture's NOP (`0x90` on x86, `1f 20 03 d5` on little-endian AArch64). Refused on 32-bit ARM, where the language id does not say whether the address is ARM or Thumb and their NOPs are different widths -- use `--bytes` there. |
 | `--output <FILE>` | Where to write. **Without it nothing is written** -- the change is only reported. |
 | `--force` | Allow `--output` to overwrite a file that already exists. |
 
@@ -505,6 +505,12 @@ Two things it refuses, both to keep a mistake from becoming a corrupted file:
 - **An address in a section's alignment padding.** The file range is padded up
   to the file alignment; those bytes exist in the file but are never loaded, so
   writing there changes nothing that runs.
+
+The output is written to a temporary file next to it and renamed into place,
+so the result is never half-written, and an `--output` that is a **hard link**
+to the input has the link broken rather than followed -- writing through it
+would rewrite the input, and `canonicalize` cannot detect that case because
+both paths are genuinely distinct.
 
 The patched file keeps the original's checksum and invalidates any signature it
 carried; `patch` does not recompute either.

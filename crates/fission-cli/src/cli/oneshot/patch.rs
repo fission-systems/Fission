@@ -29,10 +29,35 @@ pub(super) fn run_patch(
     request: &PatchRequest,
     json: bool,
 ) -> io::Result<()> {
+    let outcome = patch_binary(binary, request, json);
+    // Under `--json` a caller parses stdout, and every refusal here is an
+    // ordinary result -- an address in a .bss, an output that already exists.
+    // Reporting those only on stderr leaves the parser with nothing to read,
+    // which is how `hex` already handles the same situation.
+    if let (true, Err(error)) = (json, &outcome) {
+        let mut stdout = io::stdout().lock();
+        writeln!(
+            stdout,
+            "{}",
+            serde_json::json!({ "error": error.to_string() })
+        )?;
+    }
+    outcome
+}
+
+fn patch_binary(binary: &mut LoadedBinary, request: &PatchRequest, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    let patch = match (&request.bytes, request.nop) {
-        (Some(spec), _) => parse_patch_bytes(spec)?,
-        (None, Some(count)) => nop_fill(binary.sleigh_language_id().unwrap_or_default(), count)?,
+
+    // How long the patch is, before there is a patch. `--nop N` takes N from
+    // the command line and would otherwise size an allocation with it: asking
+    // for forty billion NOPs spent four seconds and 2.9GB to reach a bounds
+    // check it was always going to fail, and asking for `usize::MAX` of them
+    // aborted on capacity overflow before reaching one at all. The length is
+    // all the bounds check needs, so it runs first and the bytes are built
+    // only once the section has room for them.
+    let length = match (&request.bytes, request.nop) {
+        (Some(spec), _) => parse_patch_bytes(spec)?.len(),
+        (None, Some(count)) => count,
         (None, None) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -40,7 +65,18 @@ pub(super) fn run_patch(
             ));
         }
     };
-    let offset = file_offset_for(&binary.sections, request.address, patch.len())?;
+    if length == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the patch is empty",
+        ));
+    }
+    let offset = file_offset_for(&binary.sections, request.address, length)?;
+
+    let patch = match &request.bytes {
+        Some(spec) => parse_patch_bytes(spec)?,
+        None => nop_fill(binary.sleigh_language_id().unwrap_or_default(), length)?,
+    };
 
     let before = binary
         .get_bytes_at_offset(offset as u64, patch.len())
@@ -80,9 +116,7 @@ pub(super) fn run_patch(
             "the patch runs past the end of the file",
         )
     })?;
-    binary
-        .save_as(output)
-        .map_err(|e| io::Error::other(format!("failed to write {}: {e}", output.display())))?;
+    write_atomically(output, binary.data.as_slice())?;
 
     report(
         &mut stdout,
@@ -119,7 +153,9 @@ fn file_offset_for(sections: &[SectionInfo], address: u64, length: usize) -> io:
         ));
     }
     let delta = address - section.virtual_address;
-    if delta + length as u64 > stored_size(section) {
+    // Saturating, because `length` comes from `--nop N` and N is whatever was
+    // typed: a plain add overflows and panics long before the comparison.
+    if delta.saturating_add(length as u64) > stored_size(section) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
@@ -131,14 +167,41 @@ fn file_offset_for(sections: &[SectionInfo], address: u64, length: usize) -> io:
     Ok((section.file_offset + delta) as usize)
 }
 
-/// The section `address` is mapped into.
+/// Write `data` to `path` by way of a neighbouring temporary file.
 ///
-/// Containment goes by the *virtual* extent, because that is what an address
-/// means. A section's file range is usually larger -- padded up to the file
-/// alignment -- and an address past the virtual size is in that padding: it
-/// exists in the file but is never loaded, so writing there changes nothing
-/// that runs. Bounding containment by the virtual size rejects it here rather
-/// than reporting a patch that has no effect.
+/// Writing to the path directly follows a hard link back to its inode, so an
+/// `--output` that is a hard link to the input rewrites the input in place --
+/// the one file this command must never touch. `canonicalize` cannot see it:
+/// the two paths are genuinely different and both real. Renaming a fresh file
+/// over the link breaks the link instead of following it, and as a bonus the
+/// result is atomic: a patched binary is never half-written.
+fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
+    let directory = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let mut temporary = match directory {
+        Some(directory) => directory.join(""),
+        None => Path::new(".").to_path_buf(),
+    };
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    temporary.push(format!(".{name}.fission-patch.{}", std::process::id()));
+
+    let cleanup = |error: io::Error| {
+        let _ = std::fs::remove_file(&temporary);
+        error
+    };
+    std::fs::write(&temporary, data).map_err(|e| {
+        cleanup(io::Error::other(format!(
+            "failed to write {}: {e}",
+            path.display()
+        )))
+    })?;
+    std::fs::rename(&temporary, path).map_err(|e| {
+        cleanup(io::Error::other(format!(
+            "failed to write {}: {e}",
+            path.display()
+        )))
+    })
+}
+
 /// Whether a section is loaded into memory at all.
 ///
 /// An ELF's `.debug_*`, `.symtab`, and `.comment` are in the file but never
@@ -162,6 +225,14 @@ fn stored_size(section: &SectionInfo) -> u64 {
     }
 }
 
+/// The section `address` is mapped into.
+///
+/// Containment goes by the *virtual* extent, because that is what an address
+/// means. A section's file range is usually larger -- padded up to the file
+/// alignment -- and an address past the virtual size is in that padding: it
+/// exists in the file but is never loaded, so writing there changes nothing
+/// that runs. Bounding containment by the virtual size rejects it here rather
+/// than reporting a patch that has no effect.
 fn containing_section(sections: &[SectionInfo], address: u64) -> Option<&SectionInfo> {
     sections
         .iter()
@@ -240,6 +311,16 @@ fn same_file(left: &Path, right: &Path) -> bool {
 fn parse_patch_bytes(spec: &str) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     for token in spec.split_whitespace() {
+        // Non-hex is rejected whole, by the token the operator actually typed.
+        // Splitting first and reporting the fragment names nothing useful: a
+        // four-byte character lands astride a `chunks(2)` boundary, and both
+        // halves are invalid UTF-8, so `--bytes 🔥` complained about ``.
+        if let Some(bad) = token.chars().find(|c| !c.is_ascii_hexdigit()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("`{token}` is not hex: `{bad}` is not a hex digit"),
+            ));
+        }
         if token.len() % 2 != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -286,6 +367,21 @@ fn nop_fill(language: &str, count: usize) -> io::Result<Vec<u8>> {
             [0x1f, 0x20, 0x03, 0xd5]
         };
         return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
+    // 32-bit ARM is deliberately not here. Which NOP is correct depends on
+    // whether the address is ARM or Thumb code, the language id does not say,
+    // and the two are different widths -- guessing writes a four-byte NOP over
+    // two Thumb instructions, or leaves half of one behind. Naming both
+    // encodings lets the operator pick the one they know applies.
+    if language.starts_with("ARM:") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "`{language}` does not say whether the address is ARM or Thumb code, and their \
+                 NOPs are different widths; pass --bytes \"00 f0 20 e3\" for ARM or \
+                 --bytes \"00 bf\" for Thumb (little-endian)"
+            ),
+        ));
     }
     Err(io::Error::new(
         io::ErrorKind::InvalidInput,
@@ -406,6 +502,39 @@ mod tests {
         assert!(nop_fill("AARCH64:LE:64:v8A", 6).is_err());
         // Better to say so than to invent an encoding.
         assert!(nop_fill("MIPS:BE:32:default", 4).is_err());
+        // 32-bit ARM is refused on purpose: ARM and Thumb NOPs are different
+        // widths and the language id does not say which the address holds.
+        // The refusal has to name both, or it is just a dead end.
+        let message = nop_fill("ARM:LE:32:v8", 4)
+            .expect_err("ARM/Thumb is ambiguous")
+            .to_string();
+        assert!(message.contains("00 f0 20 e3"), "{message}");
+        assert!(message.contains("00 bf"), "{message}");
+    }
+
+    #[test]
+    fn a_huge_length_is_refused_rather_than_overflowing() {
+        // `--nop N` takes N straight from the command line, and the bound is
+        // checked on the length alone so that N never sizes an allocation:
+        // forty billion NOPs used to spend 2.9GB reaching a check they were
+        // always going to fail. `usize::MAX` reaches the check itself, where
+        // a plain `delta + length` overflows and panics.
+        assert!(file_offset_for(&sections(), 0x140001010, 40_000_000_000).is_err());
+        // The address must be past the section start, or `delta` is zero and
+        // `0 + usize::MAX` is simply `usize::MAX` -- no overflow, and the
+        // guard this pins goes untested.
+        assert!(file_offset_for(&sections(), 0x140001010, usize::MAX).is_err());
+    }
+
+    #[test]
+    fn a_bad_byte_is_named_by_the_token_that_was_typed() {
+        // A four-byte character straddles a `chunks(2)` boundary and leaves
+        // two invalid-UTF-8 halves, so reporting the fragment named nothing:
+        // `--bytes 🔥` used to complain about ``.
+        let message = parse_patch_bytes("🔥")
+            .expect_err("an emoji is not hex")
+            .to_string();
+        assert!(message.contains('🔥'), "{message}");
     }
 
     #[test]
@@ -419,6 +548,8 @@ mod tests {
         assert!(parse_patch_bytes("90 ??").is_err());
         assert!(parse_patch_bytes("9 0").is_err());
         assert!(parse_patch_bytes("  ").is_err());
+        // `0x90` is one byte written the other way round, not two.
+        assert!(parse_patch_bytes("0x90").is_err());
     }
 
     #[test]
