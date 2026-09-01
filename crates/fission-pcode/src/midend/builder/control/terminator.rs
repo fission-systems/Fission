@@ -298,11 +298,14 @@ impl<'a> PreviewBuilder<'a> {
             .type_context
             .and_then(|ctx| ctx.call_target_refs.get(&target_addr))
             .map(|target_ref| target_ref.symbol.clone())?;
-        let args = if self.pcode.blocks.len() <= 2 {
-            self.recover_tail_call_args(block_idx, block, term_idx)
-        } else {
-            Vec::new()
-        };
+        // The tail call's arguments are set up before the epilogue, in this
+        // block or in the single predecessor that falls into it, and
+        // `recover_tail_call_args` checks for exactly that. It used to run
+        // only when the whole function had two blocks or fewer, which is not
+        // a property of the call site at all: `__do_global_ctors` ends in
+        // `jmp atexit` and has a loop, so it printed `return atexit()` with
+        // the argument dropped.
+        let args = self.recover_tail_call_args(block_idx, block, term_idx);
         Some(PreHirExpr::Call {
             target: resolved_target,
             args,
