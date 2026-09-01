@@ -499,6 +499,11 @@ impl FactStore {
             return Some(cached);
         }
         let address_state = frontend.normalize_low_bit_code_address(address);
+        let context_override = crate::analysis::decode_context_for_address(
+            binary,
+            frontend,
+            address_state.context_override,
+        );
         let max_bytes = function_max_bytes(binary, address_state.address, 4096);
         let bytes = binary.view_bytes(address_state.address, max_bytes)?;
         let memory_context = decode_memory_context_for(binary, address_state.address, max_bytes);
@@ -509,7 +514,7 @@ impl FactStore {
                     address_state.address,
                     DecodeContract::decomp_function(instruction_limit),
                     &memory_context,
-                    address_state.context_override,
+                    context_override,
                 )
                 .ok()?,
         );

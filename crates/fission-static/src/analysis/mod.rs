@@ -36,8 +36,8 @@ pub use external_symbol::{
     normalize_library_key, parse_external_identity_from_loader_string,
 };
 pub use function_discovery::{
-    FunctionDiscoveryProfile, FunctionDiscoveryReport, discover_functions_with_runtime,
-    image_executes_thumb,
+    FunctionDiscoveryProfile, FunctionDiscoveryReport, decode_context_for_address,
+    discover_functions_with_runtime, image_executes_thumb,
 };
 pub use function_provenance::{
     FunctionProvenanceIndex, FunctionProvenanceKind, FunctionProvenanceRecord,

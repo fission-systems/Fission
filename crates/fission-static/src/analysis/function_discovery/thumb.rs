@@ -10,6 +10,36 @@
 //! `push {r7}` (`80 b4`) reads as `addlt r11,r3,r0, lsl #0x9` that way.
 
 use fission_loader::loader::LoadedBinary;
+use fission_sleigh::runtime::{PackedContextOverride, RuntimeSleighFrontend};
+
+/// The decode context to lift an address with, once a Thumb-only image is
+/// accounted for.
+///
+/// `normalize_low_bit_code_address` can only speak for the *address*: it
+/// yields a Thumb context when the caller passed the ABI's bit-0 marker, and
+/// nothing when the address is even. Every path that stopped there lifted a
+/// Cortex-M image's even-addressed functions in the language's default ARM
+/// mode -- and those are all of them, because the marker went with the
+/// symbols. `disasm` and function discovery each grew their own copy of this
+/// fallback; `raw-pcode`, `similar`, and the decomp fact cache did not, so
+/// they failed to decode the very addresses `list` had just handed out.
+///
+/// One primitive, so a path cannot be written that forgets it.
+pub fn decode_context_for_address(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    from_address: Option<PackedContextOverride>,
+) -> Option<PackedContextOverride> {
+    // What the address itself says always wins: a mode switch encoded in the
+    // stream is more specific than a whole-image guess.
+    if from_address.is_some() {
+        return from_address;
+    }
+    if !image_executes_thumb(binary) {
+        return None;
+    }
+    frontend.low_bit_code_mode_override()
+}
 
 /// Number of exception-vector entries examined after the initial stack
 /// pointer. Cortex-M's table is longer, but the first handfulNMI, HardFault
@@ -93,4 +123,65 @@ fn vector_table_words(binary: &LoadedBinary) -> Option<Vec<u64>> {
             .map(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]) as u64)
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_context_for_address, image_executes_thumb};
+    use fission_core::architecture::ArchitectureDescriptor;
+    use fission_loader::loader::{DataBuffer, LoadedBinary, LoadedBinaryBuilder};
+    use fission_sleigh::runtime::RuntimeSleighFrontend;
+
+    fn arm32_image(entry_point: u64) -> LoadedBinary {
+        LoadedBinaryBuilder::new("unit.bin".to_string(), DataBuffer::Heap(vec![0; 0x100]))
+            .format("ELF")
+            .entry_point(entry_point)
+            .arch_spec("ARM:LE:32:v8")
+            .architecture(ArchitectureDescriptor {
+                processor: "ARM".to_string(),
+                endian: "little".to_string(),
+                bitness: 32,
+                variant: "v8".to_string(),
+                abi: None,
+                raw_machine: "EM_ARM".to_string(),
+            })
+            .build()
+            .expect("ARM32 shell")
+    }
+
+    #[test]
+    fn an_even_address_in_a_thumb_image_still_lifts_as_thumb() {
+        let frontend = RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime");
+
+        // A stripped Cortex-M image: the entry keeps the ABI's bit-0 marker,
+        // every other address lost it with the symbols. Passing `None` is
+        // what every even address produces, and the answer must still be
+        // Thumb -- `raw-pcode`, `similar`, and the decomp fact cache each
+        // stopped here and lifted ARM over Thumb bytes, failing to decode the
+        // very addresses `list` had just printed.
+        let thumb = arm32_image(0x4429);
+        assert!(image_executes_thumb(&thumb));
+        assert!(decode_context_for_address(&thumb, &frontend, None).is_some());
+
+        // And an ARM-mode image is not forced into Thumb by the same call.
+        let arm = arm32_image(0x4428);
+        assert!(!image_executes_thumb(&arm));
+        assert!(decode_context_for_address(&arm, &frontend, None).is_none());
+    }
+
+    #[test]
+    fn the_address_s_own_mode_outranks_the_image_s() {
+        let frontend = RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime");
+        let from_address = frontend
+            .low_bit_code_mode_override()
+            .expect("ARM has a Thumb context field");
+        // A mode the address carries is more specific than a whole-image
+        // guess, so it is returned unchanged -- including on an image the
+        // whole-image signal calls ARM.
+        let arm = arm32_image(0x4428);
+        assert_eq!(
+            decode_context_for_address(&arm, &frontend, Some(from_address)),
+            Some(from_address)
+        );
+    }
 }

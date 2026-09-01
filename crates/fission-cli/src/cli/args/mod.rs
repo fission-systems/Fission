@@ -462,6 +462,20 @@ struct DisasmArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
+    /// Function discovery profile (conservative|balanced|aggressive)
+    ///
+    /// Defaulted the same way `list` defaults it, so an address `list` prints
+    /// can be passed straight to this command. Without it a stripped binary
+    /// resolved to the loader's own function table -- one entry on a stripped
+    /// ARM image -- and every address `list` had just handed out was reported
+    /// as "no function found".
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
     /// Address to disassemble
     #[arg(long, value_parser = parse_hex_address, required = true)]
     addr: u64,
@@ -516,6 +530,20 @@ struct PcodeStagesArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
+    /// Function discovery profile (conservative|balanced|aggressive)
+    ///
+    /// Defaulted the same way `list` defaults it, so an address `list` prints
+    /// can be passed straight to this command. Without it a stripped binary
+    /// resolved to the loader's own function table -- one entry on a stripped
+    /// ARM image -- and every address `list` had just handed out was reported
+    /// as "no function found".
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
     /// Function entry address or an address inside the function
     #[arg(long, value_parser = parse_hex_address, required = true)]
     addr: u64,
@@ -545,6 +573,20 @@ struct NirStatsArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
+    /// Function discovery profile (conservative|balanced|aggressive)
+    ///
+    /// Defaulted the same way `list` defaults it, so an address `list` prints
+    /// can be passed straight to this command. Without it a stripped binary
+    /// resolved to the loader's own function table -- one entry on a stripped
+    /// ARM image -- and every address `list` had just handed out was reported
+    /// as "no function found".
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
     /// Function entry address or an address inside the function
     #[arg(long, value_parser = parse_hex_address, required = true)]
     addr: u64,
@@ -573,6 +615,20 @@ struct NirStatsArgs {
 struct PcodeTopologyArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
+
+    /// Function discovery profile (conservative|balanced|aggressive)
+    ///
+    /// Defaulted the same way `list` defaults it, so an address `list` prints
+    /// can be passed straight to this command. Without it a stripped binary
+    /// resolved to the loader's own function table -- one entry on a stripped
+    /// ARM image -- and every address `list` had just handed out was reported
+    /// as "no function found".
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Function entry address or an address inside the function
     #[arg(long, value_parser = parse_hex_address, required = true)]
@@ -988,6 +1044,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Disasm(disasm) => {
                     let mut args = OneShotArgs::with_binary(disasm.binary);
                     args.count = disasm.count;
+                    args.function_discovery_profile = disasm.function_discovery_profile;
                     args.json = disasm.common.json;
                     args.verbose = disasm.common.verbose;
                     if disasm.function {
@@ -1013,6 +1070,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.pcode_stages_max_bytes = stages.max_bytes;
                     args.pcode_stages_instruction_limit = stages.instruction_limit;
                     args.pcode_stages_strict_indirect_stop = stages.strict_indirect_stop;
+                    args.function_discovery_profile = stages.function_discovery_profile;
                     args.json = stages.common.json;
                     args.verbose = stages.common.verbose;
                     args
@@ -1023,6 +1081,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.nir_stats_max_bytes = stats.max_bytes;
                     args.nir_stats_instruction_limit = stats.instruction_limit;
                     args.nir_stats_strict_indirect_stop = stats.strict_indirect_stop;
+                    args.function_discovery_profile = stats.function_discovery_profile;
                     args.json = stats.common.json;
                     args.verbose = stats.common.verbose;
                     args
@@ -1033,6 +1092,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.pcode_topology_max_bytes = topology.max_bytes;
                     args.pcode_topology_instruction_limit = topology.instruction_limit;
                     args.pcode_topology_strict_indirect_stop = topology.strict_indirect_stop;
+                    args.function_discovery_profile = topology.function_discovery_profile;
                     args.json = topology.common.json;
                     args.verbose = topology.common.verbose;
                     args
@@ -1259,6 +1319,39 @@ mod tests {
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Serve { .. } => panic!("expected one-shot canonical parse"),
+        }
+    }
+
+    #[test]
+    fn every_command_that_resolves_a_function_runs_the_same_discovery_as_list() {
+        // `list` prints addresses that only SLEIGH discovery knows about. A
+        // command that resolves one of them against the loader's own table
+        // instead reports "no function found" -- on a stripped ARM image the
+        // loader has exactly one entry, so that was every address `list` had
+        // just printed. Whatever `list` counts, these must count too.
+        let baseline = parse_canonical(&["fission_cli", "list", "app.exe"])
+            .args
+            .function_discovery_profile;
+        assert!(baseline.is_some(), "list must default a profile");
+
+        for command in [
+            vec!["fission_cli", "disasm", "app.exe", "--addr", "0x1000"],
+            vec!["fission_cli", "pcode-stages", "app.exe", "--addr", "0x1000"],
+            vec!["fission_cli", "nir-stats", "app.exe", "--addr", "0x1000"],
+            vec![
+                "fission_cli",
+                "pcode-topology",
+                "app.exe",
+                "--addr",
+                "0x1000",
+            ],
+        ] {
+            let name = command[1];
+            assert_eq!(
+                parse_canonical(&command).args.function_discovery_profile,
+                baseline,
+                "{name} must discover the same functions `list` does"
+            );
         }
     }
 

@@ -67,10 +67,7 @@ fn image_decode_context(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
 ) -> Option<PackedContextOverride> {
-    if !super::thumb::image_executes_thumb(binary) {
-        return None;
-    }
-    frontend.low_bit_code_mode_override()
+    super::thumb::decode_context_for_address(binary, frontend, None)
 }
 
 pub fn discover_functions_with_runtime(

@@ -5,6 +5,7 @@ use fission_decompiler::similarity::{SimilarityCorpus, extract_function_features
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 use fission_static::analysis::control_flow_facts::decode_memory_context_for;
+use fission_static::analysis::decode_context_for_address;
 use serde_json::json;
 use std::io::Write;
 
@@ -91,6 +92,8 @@ fn lift_for_similarity(
 ) -> Option<(u64, fission_sleigh::runtime::DecodedPcodeFunction)> {
     let address_state = frontend.normalize_low_bit_code_address(addr);
     let decode_addr = address_state.address;
+    let context_override =
+        decode_context_for_address(binary, frontend, address_state.context_override);
     let max_bytes = binary
         .available_execution_bytes(decode_addr)
         .map(|available| MAX_BYTES.min(available).max(1))
@@ -104,7 +107,7 @@ fn lift_for_similarity(
             decode_addr,
             contract,
             &memory_context,
-            address_state.context_override,
+            context_override,
         )
         .ok()?;
     Some((decode_addr, lifted))

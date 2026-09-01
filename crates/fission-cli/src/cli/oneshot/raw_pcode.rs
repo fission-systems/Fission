@@ -4,6 +4,7 @@ use fission_sleigh::runtime::{
     DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
 };
 use fission_static::analysis::control_flow_facts::decode_memory_context_for;
+use fission_static::analysis::decode_context_for_address;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
@@ -67,6 +68,8 @@ pub(super) fn lift_raw_pcode(
     let frontend = runtime_frontend_for_binary(binary)?;
     let address_state = frontend.normalize_low_bit_code_address(addr);
     let decode_addr = address_state.address;
+    let context_override =
+        decode_context_for_address(binary, &frontend, address_state.context_override);
     let max_bytes = binary
         .available_execution_bytes(decode_addr)
         .map(|available| max_bytes.min(available).max(1))
@@ -89,7 +92,7 @@ pub(super) fn lift_raw_pcode(
             decode_addr,
             contract,
             &memory_context,
-            address_state.context_override,
+            context_override,
         )
         .map_err(to_io_error)?;
     Ok((decode_addr, lifted))
