@@ -225,20 +225,103 @@ fn parse_define_directive(rest: &str) -> Result<(String, String)> {
     Ok((name, value))
 }
 
+/// Evaluate a `@if`/`@elif` condition.
+///
+/// The grammar the checked-in specs actually use: `defined(NAME)`,
+/// `NAME == "value"`, `NAME != "value"`, joined by `||` and `&&`, with
+/// parentheses. Splitting on the first `==` and otherwise testing the whole
+/// string as a macro name -- which is what this did -- made every condition
+/// containing `defined(` false, since `"defined(VFPv2) || defined(VFPv3)"` is
+/// not the name of any macro. That silently dropped the guarded blocks: ARM's
+/// VFP and NEON register banks live behind exactly that condition, so `s0`,
+/// `d0`, `q0` and `fpscr` were absent from every ARM register model and any
+/// function touching a float lost the value entirely.
 fn evaluate_if_expression(expr: &str, defines: &BTreeMap<String, String>) -> bool {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return false;
+    }
+    // `||` binds loosest, then `&&`, so they are peeled in that order and
+    // only at paren depth zero.
+    if let Some(parts) = split_top_level(expr, "||") {
+        return parts
+            .iter()
+            .any(|part| evaluate_if_expression(part, defines));
+    }
+    if let Some(parts) = split_top_level(expr, "&&") {
+        return parts
+            .iter()
+            .all(|part| evaluate_if_expression(part, defines));
+    }
+    if let Some(inner) = strip_enclosing_parens(expr) {
+        return evaluate_if_expression(inner, defines);
+    }
+    if let Some(name) = expr
+        .strip_prefix("defined(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        return defines.contains_key(name.trim());
+    }
     if let Some((lhs, rhs)) = expr.split_once("==") {
-        let lhs = lhs.trim();
-        let rhs = rhs.trim().trim_matches('"');
-        let left_val = defines.get(lhs).map(String::as_str).unwrap_or("");
-        return left_val == rhs;
+        let left_val = defines.get(lhs.trim()).map(String::as_str).unwrap_or("");
+        return left_val == rhs.trim().trim_matches('"');
     }
     if let Some((lhs, rhs)) = expr.split_once("!=") {
-        let lhs = lhs.trim();
-        let rhs = rhs.trim().trim_matches('"');
-        let left_val = defines.get(lhs).map(String::as_str).unwrap_or("");
-        return left_val != rhs;
+        let left_val = defines.get(lhs.trim()).map(String::as_str).unwrap_or("");
+        return left_val != rhs.trim().trim_matches('"');
     }
-    defines.contains_key(expr.trim())
+    defines.contains_key(expr)
+}
+
+/// Split on `separator` where it sits outside every parenthesis, or `None`
+/// when it does not occur there -- so `(A == "1") || (B == "2")` splits and
+/// `((A == "1") || (B == "2"))` does not, leaving its outer parens to be
+/// stripped first.
+fn split_top_level<'a>(expr: &'a str, separator: &str) -> Option<Vec<&'a str>> {
+    let bytes = expr.as_bytes();
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && expr[index..].starts_with(separator) {
+            parts.push(expr[start..index].trim());
+            index += separator.len();
+            start = index;
+            continue;
+        }
+        index += 1;
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    parts.push(expr[start..].trim());
+    Some(parts)
+}
+
+/// The inside of `( ... )` when the whole expression is one parenthesised
+/// group, rather than two adjacent ones.
+fn strip_enclosing_parens(expr: &str) -> Option<&str> {
+    let inner = expr.strip_prefix('(')?.strip_suffix(')')?;
+    let mut depth = 0i32;
+    for byte in inner.bytes() {
+        match byte {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    (depth == 0).then_some(inner.trim())
 }
 
 fn substitute_macros(text: &str, defines: &BTreeMap<String, String>) -> String {
@@ -500,5 +583,86 @@ mod tests {
             parsed.len(),
             parsed.iter().take(5).collect::<Vec<_>>()
         );
+    }
+}
+
+#[cfg(test)]
+mod if_expression_tests {
+    use super::evaluate_if_expression;
+    use std::collections::BTreeMap;
+
+    fn defines(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn defined_is_a_call_not_a_macro_name() {
+        // The whole condition used to be looked up as if it were one macro
+        // name, so anything containing `defined(` was false. ARM's VFP and
+        // NEON banks sit behind exactly this condition, which is why `s0`,
+        // `d0` and `q0` were missing from every ARM register model.
+        let d = defines(&[("VFPv3", ""), ("VERSION_8", "")]);
+        assert!(evaluate_if_expression("defined(VFPv3)", &d));
+        assert!(!evaluate_if_expression("defined(VFPv2)", &d));
+        assert!(evaluate_if_expression(
+            "defined(VFPv2) || defined(VFPv3)",
+            &d
+        ));
+        assert!(!evaluate_if_expression(
+            "defined(VFPv2) || defined(NEON)",
+            &d
+        ));
+        assert!(!evaluate_if_expression(
+            "defined(VFPv2) && defined(VFPv3)",
+            &d
+        ));
+        assert!(evaluate_if_expression(
+            "defined(VFPv3) && defined(VERSION_8)",
+            &d
+        ));
+    }
+
+    #[test]
+    fn comparisons_still_work_and_combine() {
+        let d = defines(&[("ENDIAN", "little"), ("ADDRSIZE", "64")]);
+        assert!(evaluate_if_expression("ENDIAN == \"little\"", &d));
+        assert!(evaluate_if_expression("ENDIAN != \"big\"", &d));
+        assert!(evaluate_if_expression(
+            "ADDRSIZE == \"32\" || ADDRSIZE == \"64\"",
+            &d
+        ));
+        assert!(!evaluate_if_expression(
+            "ADDRSIZE == \"32\" || ADDRSIZE == \"128\"",
+            &d
+        ));
+    }
+
+    #[test]
+    fn parentheses_group_rather_than_split() {
+        // `((A) || (B))` is one group, not two adjacent ones: splitting it on
+        // the `||` inside would leave `((A` and `B))`.
+        let d = defines(&[("FPSIZE", "128")]);
+        assert!(evaluate_if_expression(
+            "((FPSIZE == \"64\") || (FPSIZE == \"128\"))",
+            &d
+        ));
+        assert!(!evaluate_if_expression(
+            "((FPSIZE == \"64\") || (FPSIZE == \"32\"))",
+            &d
+        ));
+        assert!(evaluate_if_expression(
+            "(ADDRSIZE == \"64\") || (FPSIZE == \"128\")",
+            &d
+        ));
+    }
+
+    #[test]
+    fn a_bare_macro_name_is_still_a_presence_test() {
+        let d = defines(&[("T_VARIANT", "")]);
+        assert!(evaluate_if_expression("T_VARIANT", &d));
+        assert!(!evaluate_if_expression("IA64", &d));
     }
 }
