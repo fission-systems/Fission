@@ -150,7 +150,7 @@ pub fn disassemble_function(
     addr: u64,
 ) -> Result<Vec<InstructionRow>, String> {
     let lifted = lift_function(binary, addr)?;
-    Ok(lifted
+    let mut rows = lifted
         .instructions
         .iter()
         .map(|instruction| InstructionRow {
@@ -165,11 +165,28 @@ pub fn disassemble_function(
             target_addr: instruction.direct_target,
             refers_to: None,
         })
-        .map(|row| {
-            let refers_to = annotate(binary, &row);
-            InstructionRow { refers_to, ..row }
-        })
-        .collect())
+        .collect::<Vec<_>>();
+    annotate_rows(binary, &mut rows);
+    Ok(rows)
+}
+
+/// Annotate a whole function's rows, carrying the state a pair needs.
+///
+/// AArch64 builds an address from two instructions -- `adrp` loads the page,
+/// a following `add`/`ldr`/`str` adds the offset -- so neither instruction
+/// alone names anything. Annotating row by row saw only the page, which is not
+/// an address anyone asked about: of sixty `adrp` in a test binary, four
+/// carried a note and none of the instructions that completed them did.
+fn annotate_rows(binary: &LoadedBinary, rows: &mut [InstructionRow]) {
+    let mut pages: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for row in rows.iter_mut() {
+        row.refers_to = annotate(binary, row).or_else(|| {
+            adrp_pair_target(&row.text, &pages).and_then(|target| {
+                describe_address(binary, target).or_else(|| Some(format!("0x{target:x}")))
+            })
+        });
+        update_adrp_pages(&row.text, &mut pages);
+    }
 }
 
 /// What the addresses in one instruction refer to, for the comment column.
@@ -233,4 +250,129 @@ fn describe_address(binary: &LoadedBinary, address: u64) -> Option<String> {
         return Some(format!("\"{shown}\""));
     }
     binary.global_symbols.get(&address).cloned()
+}
+
+/// The address an `adrp` page and this instruction's offset add up to.
+///
+/// Only the forms that really complete an address: `add rd, rn, #imm` and the
+/// load/store family's `[rn, #imm]`. `and`/`asr`/`ubfiz` take the same operand
+/// shape without meaning an address, and reading them as one invents targets.
+fn adrp_pair_target(text: &str, pages: &std::collections::HashMap<String, u64>) -> Option<u64> {
+    let mut words = text.split_whitespace();
+    let mnemonic = words.next()?;
+    let is_memory = matches!(
+        mnemonic,
+        "ldr" | "ldrb" | "ldrh" | "ldrsb" | "ldrsh" | "ldrsw" | "str" | "strb" | "strh"
+    );
+    if !is_memory && mnemonic != "add" {
+        return None;
+    }
+    let rest = text[mnemonic.len()..].trim();
+    // `add x21, x19, #0x9f0` and `ldr x0, [x0, #0xc18]` both put the base
+    // register immediately before the immediate.
+    let (base, offset) = rest.rsplit_once(",")?;
+    let base = base.rsplit(['[', ',']).next()?.trim().trim_matches(']');
+    let page = pages.get(base)?;
+    let offset = offset.trim().trim_matches(']').trim_matches('!').trim();
+    let offset = offset.strip_prefix('#')?;
+    let offset = if let Some(hex) = offset.strip_prefix("0x") {
+        u64::from_str_radix(hex, 16).ok()?
+    } else {
+        offset.parse::<u64>().ok()?
+    };
+    page.checked_add(offset)
+}
+
+/// Track which registers hold an `adrp` page, and forget ones overwritten.
+fn update_adrp_pages(text: &str, pages: &mut std::collections::HashMap<String, u64>) {
+    let mut words = text.split_whitespace();
+    let Some(mnemonic) = words.next() else {
+        return;
+    };
+    if mnemonic == "adrp" {
+        let rest = text[mnemonic.len()..].trim();
+        if let Some((register, page)) = rest.split_once(',')
+            && let Some(hex) = page.trim().strip_prefix("0x")
+            && let Ok(page) = u64::from_str_radix(hex, 16)
+        {
+            pages.insert(register.trim().to_string(), page);
+        }
+        return;
+    }
+    // A store writes memory, not its first operand; everything else here
+    // writes it, and whatever it writes is no longer a page.
+    if mnemonic.starts_with("str") {
+        return;
+    }
+    if let Some(destination) = text[mnemonic.len()..]
+        .trim()
+        .split(',')
+        .next()
+        .map(|word| word.trim().trim_matches('[').trim_matches(']'))
+    {
+        pages.remove(destination);
+    }
+}
+
+#[cfg(test)]
+mod adrp_pair_tests {
+    use super::{adrp_pair_target, update_adrp_pages};
+    use std::collections::HashMap;
+
+    fn pages_after(instructions: &[&str]) -> HashMap<String, u64> {
+        let mut pages = HashMap::new();
+        for text in instructions {
+            update_adrp_pages(text, &mut pages);
+        }
+        pages
+    }
+
+    /// AArch64 builds an address from two instructions, so neither alone names
+    /// anything: `adrp` carries the page, the next one the offset.
+    #[test]
+    fn a_page_and_an_offset_make_an_address() {
+        let pages = pages_after(&["adrp x19, 0x492000"]);
+        assert_eq!(
+            adrp_pair_target("add x21, x19, #0x9f0", &pages),
+            Some(0x4929f0)
+        );
+        let pages = pages_after(&["adrp x0, 0x48f000"]);
+        assert_eq!(
+            adrp_pair_target("ldr x0, [x0, #0xc18]", &pages),
+            Some(0x48fc18)
+        );
+    }
+
+    /// `and`, `asr` and `ubfiz` take the same operand shape without meaning an
+    /// address. Reading them as one invents targets -- they were 17 of the 300
+    /// instructions a first pass matched.
+    #[test]
+    fn operand_shape_alone_is_not_an_address() {
+        let pages = pages_after(&["adrp x19, 0x492000"]);
+        assert_eq!(adrp_pair_target("and x21, x19, #0xff", &pages), None);
+        assert_eq!(adrp_pair_target("asr x21, x19, #0x2", &pages), None);
+        assert_eq!(
+            adrp_pair_target("ubfiz x21, x19, #0x3, #0x20", &pages),
+            None
+        );
+    }
+
+    #[test]
+    fn a_register_stops_being_a_page_once_it_is_overwritten() {
+        let pages = pages_after(&["adrp x0, 0x48f000", "mov x0, sp"]);
+        assert_eq!(adrp_pair_target("ldr x1, [x0, #0x8]", &pages), None);
+        // A store writes memory, not its first operand, so the page survives.
+        let pages = pages_after(&["adrp x0, 0x48f000", "str x0, [sp, #0x20]"]);
+        assert_eq!(
+            adrp_pair_target("ldr x1, [x0, #0x8]", &pages),
+            Some(0x48f008)
+        );
+    }
+
+    #[test]
+    fn an_architecture_without_adrp_never_pairs() {
+        let pages = pages_after(&["mov RBP,RSP", "sub RSP,0x78"]);
+        assert!(pages.is_empty());
+        assert_eq!(adrp_pair_target("add RAX, RDX, #0x10", &pages), None);
+    }
 }
