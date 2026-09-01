@@ -278,11 +278,13 @@ pub fn discover_functions_with_runtime(
             validate_start.elapsed()
         );
     }
-    eprintln!(
-        "SCANNER_STATS: call_targets validated = {} / {}",
-        valid_call_targets.len(),
-        candidates.len()
-    );
+    if discovery_diag_enabled() {
+        eprintln!(
+            "SCANNER_STATS: call_targets validated = {} / {}",
+            valid_call_targets.len(),
+            candidates.len()
+        );
+    }
     candidates = valid_call_targets.clone();
     let tail_start = std::time::Instant::now();
 
@@ -336,7 +338,9 @@ pub fn discover_functions_with_runtime(
             Some(&all_references),
         );
         data_refs.retain(|&addr| !tracker.is_overlap(addr));
-        eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
+        if discovery_diag_enabled() {
+            eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
+        }
         tracker.add_functions_batch(binary, &frontend, &data_refs);
         candidates.extend(data_refs.clone());
         all_known.extend(data_refs.clone());
@@ -374,7 +378,9 @@ pub fn discover_functions_with_runtime(
             })
             .collect();
         eh_funcinfo_hits.sort_unstable();
-        eprintln!("SCANNER_STATS: msvc_eh_funcinfo={}", eh_funcinfo_hits.len());
+        if discovery_diag_enabled() {
+            eprintln!("SCANNER_STATS: msvc_eh_funcinfo={}", eh_funcinfo_hits.len());
+        }
         tracker.add_functions_batch(binary, &frontend, &eh_funcinfo_hits);
         candidates.extend(eh_funcinfo_hits.clone());
         all_known.extend(eh_funcinfo_hits);
@@ -398,7 +404,9 @@ pub fn discover_functions_with_runtime(
             })
             .collect();
         load_config_hits.sort_unstable();
-        eprintln!("SCANNER_STATS: load_config={}", load_config_hits.len());
+        if discovery_diag_enabled() {
+            eprintln!("SCANNER_STATS: load_config={}", load_config_hits.len());
+        }
         tracker.add_functions_batch(binary, &frontend, &load_config_hits);
         candidates.extend(load_config_hits.clone());
         all_known.extend(load_config_hits);
@@ -414,7 +422,9 @@ pub fn discover_functions_with_runtime(
             Some(&all_references),
         );
         xml_hits.retain(|&addr| !tracker.is_overlap(addr));
-        eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
+        if discovery_diag_enabled() {
+            eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
+        }
         tracker.add_functions_batch(binary, &frontend, &xml_hits);
         candidates.extend(xml_hits.clone());
         all_known.extend(xml_hits.clone());
@@ -439,7 +449,9 @@ pub fn discover_functions_with_runtime(
             Vec::new()
         };
         dynamic.retain(|&addr| !tracker.is_overlap(addr));
-        eprintln!("SCANNER_STATS: dynamic_prologues={}", dynamic.len());
+        if discovery_diag_enabled() {
+            eprintln!("SCANNER_STATS: dynamic_prologues={}", dynamic.len());
+        }
         tracker.add_functions_batch(binary, &frontend, &dynamic);
         candidates.extend(dynamic.clone());
         all_known.extend(dynamic.clone());
@@ -451,16 +463,6 @@ pub fn discover_functions_with_runtime(
                 valid_call_targets, data_refs, xml_hits, dynamic
             ),
         );
-
-        if candidates.contains(&0x10001000) {
-            eprintln!("FOUND 10001000 in scanners");
-        }
-        if jump_targets.contains(&0x10001000) {
-            eprintln!("FOUND 10001000 in jump_targets");
-        }
-        if binary.function_addr_index.contains_key(&0x10001000) {
-            eprintln!("FOUND 10001000 in binary functions");
-        }
 
         // Disabled thunks: causes a massive amount of FPs
         // let mut thunks = scan_jmp_thunks(binary, &frontend, &executable_ranges, &all_known);
@@ -576,10 +578,12 @@ pub fn discover_functions_with_runtime(
                 .collect();
             validated_shared_returns.sort_unstable();
 
-            eprintln!(
-                "SCANNER_STATS: tail_calls={}",
-                validated_shared_returns.len()
-            );
+            if discovery_diag_enabled() {
+                eprintln!(
+                    "SCANNER_STATS: tail_calls={}",
+                    validated_shared_returns.len()
+                );
+            }
             tracker.add_functions_batch(binary, &frontend, &validated_shared_returns);
             candidates.extend(validated_shared_returns.clone());
             all_known.extend(validated_shared_returns);
@@ -1198,10 +1202,12 @@ fn scan_ghidra_patterns(
         }
     }
 
-    eprintln!(
-        "[ghidra-patterns] {arch_tag}: raw hits = {}",
-        raw_hits.len()
-    );
+    if discovery_diag_enabled() {
+        eprintln!(
+            "[ghidra-patterns] {arch_tag}: raw hits = {}",
+            raw_hits.len()
+        );
+    }
 
     // Phase 2: SLEIGH validation — once per unique address
     let mut hits: Vec<u64> = raw_hits
@@ -1232,10 +1238,12 @@ fn scan_ghidra_patterns(
         })
         .collect();
 
-    eprintln!(
-        "[ghidra-patterns] after SLEIGH validation: {} hits",
-        hits.len()
-    );
+    if discovery_diag_enabled() {
+        eprintln!(
+            "[ghidra-patterns] after SLEIGH validation: {} hits",
+            hits.len()
+        );
+    }
 
     hits.sort_unstable();
     hits
