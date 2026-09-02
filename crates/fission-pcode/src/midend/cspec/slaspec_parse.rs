@@ -520,11 +520,22 @@ fn parse_u64_token(token: &str, defines: &BTreeMap<String, String>) -> Result<u6
     }
 }
 
+/// A `size=` token, which SLEIGH writes in either base just as it does
+/// `offset=`.
+///
+/// Only `offset=` was ever read that way. V850 writes `size=0x4`, so its whole
+/// spec failed to parse -- one bad token aborts the file, taking every
+/// register with it. BPF and eBPF write hex sizes too.
 fn parse_u32_token(token: &str, defines: &BTreeMap<String, String>) -> Result<u32> {
     let token = substitute_macros(token.trim(), defines);
-    token
-        .parse::<u32>()
-        .with_context(|| format!("bad size token {token}"))
+    let parsed = match token
+        .strip_prefix("0x")
+        .or_else(|| token.strip_prefix("0X"))
+    {
+        Some(hex) => u32::from_str_radix(hex, 16),
+        None => token.parse::<u32>(),
+    };
+    parsed.with_context(|| format!("bad size token {token}"))
 }
 
 #[cfg(test)]
@@ -583,6 +594,23 @@ mod tests {
             parsed.len(),
             parsed.iter().take(5).collect::<Vec<_>>()
         );
+    }
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::parse_u32_token;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn a_size_is_hex_or_decimal_the_way_an_offset_is() {
+        let none = BTreeMap::new();
+        assert_eq!(parse_u32_token("4", &none).expect("decimal"), 4);
+        // V850 writes `size=0x4`, and only `offset=` was read as hex. One bad
+        // token aborts the whole file, so its entire register set was lost.
+        assert_eq!(parse_u32_token("0x4", &none).expect("hex"), 4);
+        assert_eq!(parse_u32_token("0X10", &none).expect("upper hex"), 16);
+        assert!(parse_u32_token("zz", &none).is_err());
     }
 }
 
