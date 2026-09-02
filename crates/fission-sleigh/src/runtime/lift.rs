@@ -272,6 +272,249 @@ fn branchind_load_table_base(
     }
 }
 
+/// A jump table whose entries are *scaled offsets from a base*, rather than
+/// addresses or plain displacements.
+///
+/// ARM Thumb-2's `tbb`/`tbh` build one: the table sits immediately after the
+/// instruction, an entry is one or two bytes, and the target is
+/// `base + 2 * entry` -- halving the entry lets a byte reach 512 bytes and a
+/// halfword reach 128KB. `mspProcessInCommand` in betaflight dispatches 240
+/// cases this way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScaledOffsetTable {
+    /// Where the entries live.
+    table_base: u64,
+    /// What an entry is an offset from.
+    target_base: u64,
+    /// Bytes per entry: 1 for `tbb`, 2 for `tbh`.
+    entry_width: usize,
+    /// What an entry is multiplied by: 2, so the target stays halfword-aligned.
+    scale: u64,
+}
+
+/// Recognise `target = BASE + SCALE * load_W[TABLE + index * W]` inside one
+/// instruction's ops.
+///
+/// Position-aware on purpose. `collect_defs` keeps the *last* definition of
+/// each varnode, and `tbh` writes the same temporary three times in the one
+/// instruction -- the table address, the loaded entry, the scaled offset --
+/// so a last-write-wins lookup resolves the load's address operand to a
+/// definition that comes after it. Every step here asks for the nearest
+/// definition *before* the op doing the asking.
+fn def_before<'a>(ops: &'a [PcodeOp], index: usize, vn: &Varnode) -> Option<(usize, &'a PcodeOp)> {
+    ops[..index.min(ops.len())]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, op)| op.output.as_ref() == Some(vn))
+}
+
+fn branchind_scaled_offset_table(
+    ops: &[PcodeOp],
+    branch_target: &Varnode,
+) -> Option<ScaledOffsetTable> {
+    let (index, _) = def_before(ops, ops.len(), branch_target)?;
+    scaled_offset_target_expr(ops, index, 0)
+}
+
+fn scaled_offset_target_expr(
+    ops: &[PcodeOp],
+    index: usize,
+    depth: usize,
+) -> Option<ScaledOffsetTable> {
+    if depth > 12 {
+        return None;
+    }
+    let op = ops.get(index)?;
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            let (next, _) = def_before(ops, index, op.inputs.first()?)?;
+            scaled_offset_target_expr(ops, next, depth + 1)
+        }
+        PcodeOpcode::IntAnd if op.inputs.len() == 2 => {
+            // The Thumb bit is cleared on the way into the PC.
+            for (mask_side, value_side) in [(0usize, 1usize), (1, 0)] {
+                if clears_only_low_pointer_bit(&op.inputs[mask_side]) {
+                    if let Some((next, _)) = def_before(ops, index, &op.inputs[value_side]) {
+                        return scaled_offset_target_expr(ops, next, depth + 1);
+                    }
+                }
+            }
+            None
+        }
+        PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
+            for (base_side, scaled_side) in [(0usize, 1usize), (1, 0)] {
+                let Some(target_base) = const_value(&op.inputs[base_side]) else {
+                    continue;
+                };
+                let Some((next, _)) = def_before(ops, index, &op.inputs[scaled_side]) else {
+                    continue;
+                };
+                if let Some((table_base, entry_width, scale)) =
+                    scaled_table_load(ops, next, depth + 1)
+                {
+                    return Some(ScaledOffsetTable {
+                        table_base,
+                        target_base,
+                        entry_width,
+                        scale,
+                    });
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// The `SCALE * load_W[TABLE + index * W]` half, as `(table, width, scale)`.
+fn scaled_table_load(ops: &[PcodeOp], index: usize, depth: usize) -> Option<(u64, usize, u64)> {
+    if depth > 12 {
+        return None;
+    }
+    let op = ops.get(index)?;
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            let (next, _) = def_before(ops, index, op.inputs.first()?)?;
+            scaled_table_load(ops, next, depth + 1)
+        }
+        PcodeOpcode::IntMult if op.inputs.len() == 2 => {
+            for (scale_side, value_side) in [(0usize, 1usize), (1, 0)] {
+                let Some(scale) = const_value(&op.inputs[scale_side]) else {
+                    continue;
+                };
+                if scale == 0 || scale > 8 {
+                    continue;
+                }
+                let Some((next, _)) = def_before(ops, index, &op.inputs[value_side]) else {
+                    continue;
+                };
+                if let Some((table_base, width)) = table_entry_load(ops, next, depth + 1) {
+                    return Some((table_base, width, scale));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// A `load_W[TABLE + ...]`, as `(table, W)` -- the true load width, not
+/// clamped: `tbb` reads a byte and `tbh` a halfword.
+fn table_entry_load(ops: &[PcodeOp], index: usize, depth: usize) -> Option<(u64, usize)> {
+    if depth > 12 {
+        return None;
+    }
+    let op = ops.get(index)?;
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            let (next, _) = def_before(ops, index, op.inputs.first()?)?;
+            table_entry_load(ops, next, depth + 1)
+        }
+        PcodeOpcode::Load if op.inputs.len() == 2 => {
+            let width = op.output.as_ref()?.size as usize;
+            if !(width == 1 || width == 2 || width == 4) {
+                return None;
+            }
+            let (addr_index, _) = def_before(ops, index, &op.inputs[1])?;
+            let table_base = additive_const_before(ops, addr_index, depth + 1)?;
+            Some((table_base, width))
+        }
+        _ => None,
+    }
+}
+
+/// The constant part of an address computed by the ops before `index`.
+fn additive_const_before(ops: &[PcodeOp], index: usize, depth: usize) -> Option<u64> {
+    if depth > 12 {
+        return None;
+    }
+    let op = ops.get(index)?;
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            let (next, _) = def_before(ops, index, op.inputs.first()?)?;
+            additive_const_before(ops, next, depth + 1)
+        }
+        PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
+            for side in [0usize, 1] {
+                if let Some(value) = const_value(&op.inputs[side]) {
+                    return Some(value);
+                }
+            }
+            for side in [0usize, 1] {
+                if let Some((next, _)) = def_before(ops, index, &op.inputs[side]) {
+                    if let Some(value) = additive_const_before(ops, next, depth + 1) {
+                        return Some(value);
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Walk a scaled-offset table, stopping where it stops making sense.
+///
+/// There is no count in the instruction -- the bound lives in a compare the
+/// compiler emitted earlier -- so the table is read until an entry points
+/// outside the decode window or back into the table itself, the same rules
+/// the address-table walker uses.
+fn scaled_offset_table_targets(
+    table: ScaledOffsetTable,
+    entry_address: u64,
+    bytes: &[u8],
+    little_endian: bool,
+    max_cases: u64,
+) -> Vec<u64> {
+    let mut targets = Vec::new();
+    let width = table.entry_width as u64;
+    for ordinal in 0..max_cases {
+        let Some(entry_addr) = ordinal
+            .checked_mul(width)
+            .and_then(|delta| table.table_base.checked_add(delta))
+        else {
+            break;
+        };
+        let Some(offset) = internal_byte_offset(entry_address, bytes.len(), entry_addr) else {
+            break;
+        };
+        let Some(end) = checked_slice_end(offset, table.entry_width, bytes.len()) else {
+            break;
+        };
+        let raw = &bytes[offset..end];
+        let entry = match (table.entry_width, little_endian) {
+            (1, _) => u64::from(raw[0]),
+            (2, true) => u64::from(u16::from_le_bytes([raw[0], raw[1]])),
+            (2, false) => u64::from(u16::from_be_bytes([raw[0], raw[1]])),
+            (4, true) => u64::from(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]])),
+            (4, false) => u64::from(u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]])),
+            _ => break,
+        };
+        let Some(target) = entry
+            .checked_mul(table.scale)
+            .and_then(|delta| table.target_base.checked_add(delta))
+        else {
+            break;
+        };
+        if internal_byte_offset(entry_address, bytes.len(), target).is_none() {
+            break;
+        }
+        // An entry that lands inside the table is the table running out: the
+        // bytes after it are code, and reading them as entries walks off.
+        let Some(scan_end) = entry_addr.checked_add(width) else {
+            break;
+        };
+        if (table.table_base..scan_end).contains(&target) {
+            break;
+        }
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+    targets
+}
+
 fn read_unsigned_entry(bytes: &[u8], little_endian: bool) -> Option<u64> {
     match bytes.len() {
         4 => {
@@ -339,6 +582,24 @@ fn infer_branchind_jump_table_targets(
     const MAX_JUMP_TABLE_CASES: u64 = 256;
 
     let defs = collect_defs(decoded, current_ops);
+
+    // A scaled-offset table first: its shape starts with an `IntAdd`, which
+    // the address-table walker below does not descend, so ARM's `tbb`/`tbh`
+    // produced no targets at all and the decode stopped at the dispatch --
+    // 15 blocks of a 10KB function, and none of its 240 cases.
+    if let Some(table) = branchind_scaled_offset_table(current_ops, branch_target) {
+        let targets = scaled_offset_table_targets(
+            table,
+            entry_address,
+            bytes,
+            little_endian,
+            MAX_JUMP_TABLE_CASES,
+        );
+        if targets.len() >= 2 {
+            return targets;
+        }
+    }
+
     let Some((table_base, entry_width)) = branchind_load_table_base(branch_target, &defs, 0) else {
         return Vec::new();
     };
@@ -456,10 +717,10 @@ fn attach_inferred_indirect_edges(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
-    fn var(offset: u64, size: u32) -> Varnode {
+    pub(super) fn var(offset: u64, size: u32) -> Varnode {
         Varnode {
             space_id: 1,
             offset,
@@ -469,7 +730,7 @@ mod tests {
         }
     }
 
-    fn op(
+    pub(super) fn op(
         seq_num: u32,
         address: u64,
         opcode: PcodeOpcode,
@@ -1023,5 +1284,131 @@ impl RuntimeSleighFrontend {
             inferred_indirect_edges: retained_inferred_indirect_edges,
             indirect_targets: indirect_targets_for_snapshot,
         })
+    }
+}
+
+#[cfg(test)]
+mod scaled_offset_table_tests {
+    use super::tests::{op, var};
+    use super::{branchind_scaled_offset_table, scaled_offset_table_targets, ScaledOffsetTable};
+    use super::{PcodeOp, PcodeOpcode, Varnode};
+
+    /// ARM Thumb-2 `tbh [pc, r5]` at 0x8028164, as SLEIGH lifts it.
+    ///
+    /// The table sits at 0x8028190 -- the instruction's address plus four --
+    /// and the target is `base + 2 * halfword[base + 2 * index]`. Note that
+    /// `t` is written three times: the table address, the loaded entry, then
+    /// the scaled offset. A last-write-wins definition map resolves the
+    /// load's own address operand to the write that comes *after* it, which
+    /// is why this shape needs position-aware lookup.
+    fn tbh_ops() -> Vec<PcodeOp> {
+        let at = 0x8028164;
+        let t = var(0x1b1b00, 4);
+        let half = var(0x1b1f00, 2);
+        let scaled = var(0x1b2300, 4);
+        let pc = var(0x5c, 4);
+        let base = Varnode::constant(0x8028190, 4);
+        vec![
+            op(
+                0,
+                at,
+                PcodeOpcode::Copy,
+                Some(t.clone()),
+                vec![var(0x34, 4)],
+            ),
+            op(
+                1,
+                at,
+                PcodeOpcode::IntMult,
+                Some(var(0x1b1c00, 4)),
+                vec![t.clone(), Varnode::constant(2, 4)],
+            ),
+            op(
+                2,
+                at,
+                PcodeOpcode::IntAdd,
+                Some(t.clone()),
+                vec![base.clone(), var(0x1b1c00, 4)],
+            ),
+            op(
+                3,
+                at,
+                PcodeOpcode::Load,
+                Some(half.clone()),
+                vec![Varnode::constant(3, 8), t.clone()],
+            ),
+            op(4, at, PcodeOpcode::IntZExt, Some(t.clone()), vec![half]),
+            op(
+                5,
+                at,
+                PcodeOpcode::IntMult,
+                Some(scaled.clone()),
+                vec![t, Varnode::constant(2, 4)],
+            ),
+            op(
+                6,
+                at,
+                PcodeOpcode::IntAdd,
+                Some(pc.clone()),
+                vec![base, scaled],
+            ),
+            op(7, at, PcodeOpcode::BranchInd, None, vec![pc]),
+        ]
+    }
+
+    #[test]
+    fn a_tbh_dispatch_is_recognised_as_a_scaled_offset_table() {
+        let ops = tbh_ops();
+        let target = ops.last().expect("branchind").inputs[0].clone();
+        assert_eq!(
+            branchind_scaled_offset_table(&ops, &target),
+            Some(ScaledOffsetTable {
+                table_base: 0x8028190,
+                target_base: 0x8028190,
+                entry_width: 2,
+                scale: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn entries_are_halved_offsets_from_the_table_base() {
+        // Two entries, then a third that points back into the table itself --
+        // which is the table ending and code beginning, not a case.
+        let mut bytes = vec![0u8; 0x2000];
+        let table_at = 0x8028190 - 0x8028164;
+        let put = |bytes: &mut Vec<u8>, index: usize, value: u16| {
+            bytes[table_at + index * 2..table_at + index * 2 + 2]
+                .copy_from_slice(&value.to_le_bytes());
+        };
+        put(&mut bytes, 0, 0x10); // -> base + 0x20
+        put(&mut bytes, 1, 0x18); // -> base + 0x30
+        put(&mut bytes, 2, 0x02); // -> base + 4, inside the table
+        let table = ScaledOffsetTable {
+            table_base: 0x8028190,
+            target_base: 0x8028190,
+            entry_width: 2,
+            scale: 2,
+        };
+        assert_eq!(
+            scaled_offset_table_targets(table, 0x8028164, &bytes, true, 256),
+            vec![0x80281b0, 0x80281c0]
+        );
+    }
+
+    #[test]
+    fn a_target_outside_the_decode_window_ends_the_walk() {
+        // The window is what the caller can actually decode; an entry past it
+        // is not a case this pass can hand back.
+        let mut bytes = vec![0u8; 0x40];
+        let table_at = 0x8028190 - 0x8028164;
+        bytes[table_at..table_at + 2].copy_from_slice(&0x4000u16.to_le_bytes());
+        let table = ScaledOffsetTable {
+            table_base: 0x8028190,
+            target_base: 0x8028190,
+            entry_width: 2,
+            scale: 2,
+        };
+        assert!(scaled_offset_table_targets(table, 0x8028164, &bytes, true, 256).is_empty());
     }
 }
