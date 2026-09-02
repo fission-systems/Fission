@@ -135,7 +135,34 @@ def declared_name(text: str, addr: int) -> str:
     return f"sub_{addr:x}"
 
 
-def score(cli: Path, benchmark_root: Path, quick: bool) -> dict:
+def node_count(cfg) -> int | None:
+    """Nodes in a CFG, whichever shape the scoring API hands back.
+
+    GED here is purely topological, so node-count mismatch is the first thing
+    to look at when a function is far from perfect -- but the gate only ever
+    reported totals, which cannot say *which* function moved or why.
+    """
+    for attr in ("nodes", "blocks"):
+        value = getattr(cfg, attr, None)
+        if value is not None:
+            try:
+                return len(value)
+            except TypeError:
+                pass
+    if isinstance(cfg, dict):
+        for attr in ("nodes", "blocks"):
+            if attr in cfg:
+                try:
+                    return len(cfg[attr])
+                except TypeError:
+                    pass
+    try:
+        return cfg.number_of_nodes()
+    except Exception:
+        return None
+
+
+def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None) -> dict:
     api = load_scoring(benchmark_root)
     data = benchmark_root / "decbench-data"
     kit = json.load(open(KIT / "functions.json"))
@@ -254,6 +281,18 @@ def score(cli: Path, benchmark_root: Path, quick: bool) -> dict:
                         counts[f"ged_{layer}_scored"] += 1
                         if result["ged"] == 0:
                             counts[f"ged_{layer}_perfect"] += 1
+                        if dump is not None:
+                            dump.append({
+                                "anon": unit["anon"],
+                                "addr": f"0x{unit['addr']:x}",
+                                "fn": fn,
+                                "opt": unit["key"][0],
+                                "project": unit["key"][1],
+                                "layer": layer,
+                                "ged": result["ged"],
+                                "src_nodes": node_count(src[src_name]),
+                                "out_nodes": node_count(cfgs[layer][unique]),
+                            })
                 except Exception:
                     pass
             if gt.get(fn):
@@ -308,7 +347,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"error: baseline has no `{key}` entry -- run `update{' --quick' if args.quick else ''}`",
               file=sys.stderr)
         return 1
-    scores = score(cli, Path(args.benchmark_root), args.quick)
+    rows: list | None = [] if args.dump else None
+    scores = score(cli, Path(args.benchmark_root), args.quick, rows)
+    if args.dump and rows is not None:
+        Path(args.dump).write_text(json.dumps(rows, indent=1))
+        print(f"wrote {len(rows)} per-function rows to {args.dump}")
     print(f"[{key}] current ({scores['elapsed_sec']}s)")
     print(render(scores))
     print(f"[{key}] baseline")
@@ -360,6 +403,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"Score the first {QUICK_BINARIES} binaries only")
 
     p_check = sub.add_parser("check", parents=[common], help="Fail if a perfect count fell")
+    p_check.add_argument("--dump", default=None, metavar="FILE",
+                         help="Write per-function GED and node counts as JSON")
     p_check.set_defaults(func=cmd_check)
     p_update = sub.add_parser("update", parents=[common], help="Accept current scores as the floor")
     p_update.set_defaults(func=cmd_update)
