@@ -597,8 +597,15 @@ impl RegisterNamer {
         if !is_register_space_id(vn.space_id) {
             return false;
         }
-        if let Some((off, sz)) = self.return_target {
-            return vn.offset == off && vn.size == sz;
+        // The detected target is one register -- whichever of `lr`/`x30`/`ra`
+        // the model found -- so it can only ever add to what the ABI knows,
+        // never stand in for it. Returning on a miss here hid ARM's `pc`
+        // behind a successful detection of `lr`.
+        if let Some((off, sz)) = self.return_target
+            && vn.offset == off
+            && vn.size == sz
+        {
+            return true;
         }
         match self.abi {
             CallingConvention::AArch64 => self
@@ -610,7 +617,15 @@ impl RegisterNamer {
                         .and_then(|n| self.model.as_ref().and_then(|m| m.family_index(&n)))
                         == Some(fam)
                 }),
-            CallingConvention::Arm32 => vn.offset == 0x58,
+            // `lr` holds the address a `bx lr` returns to; `pc` is where a
+            // `pop {..., pc}` puts it. Only `lr` was listed, so the pop form
+            // fell through to being treated as a returned *value* -- ARM
+            // functions handed back their own return address, Thumb bit
+            // cleared, in place of `r0`.
+            CallingConvention::Arm32 => matches!(
+                self.hw_name_at(vn.offset, vn.size).as_deref(),
+                Some("lr") | Some("pc")
+            ),
             CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
                 self.hw_name_at(vn.offset, vn.size).as_deref() == Some("lr")
             }
@@ -880,6 +895,40 @@ mod tests {
                 "missing register at idx {i} offset 0x{off:x}"
             );
         }
+    }
+
+    #[test]
+    fn arm32_pc_is_a_return_target_not_a_returned_value() {
+        use crate::midend::cspec::RegisterNamer;
+        use crate::midend::{CallingConvention, NirRenderOptions, Varnode};
+
+        let options = NirRenderOptions {
+            calling_convention: CallingConvention::Arm32,
+            format: "ELF".to_string(),
+            is_64bit: false,
+            pointer_size: 4,
+            ..Default::default()
+        };
+        let namer = RegisterNamer::from_options(&options);
+        let reg = |offset: u64| Varnode {
+            space_id: crate::midend::RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        assert_eq!(namer.hw_name_at(0x58, 4).as_deref(), Some("lr"));
+        assert_eq!(namer.hw_name_at(0x5c, 4).as_deref(), Some("pc"));
+
+        // `bx lr` returns through `lr`; `pop {..., pc}` returns through `pc`.
+        // Both are control targets. Only `lr` was recognised, and detecting it
+        // short-circuited before the ABI could name `pc`, so the pop form was
+        // read as returning a value -- ARM functions handed back their own
+        // return address with the Thumb bit cleared, in place of `r0`.
+        assert!(namer.is_return_target_register(&reg(0x58)), "lr");
+        assert!(namer.is_return_target_register(&reg(0x5c)), "pc");
+        // r0 carries the value, and must not be mistaken for the target.
+        assert!(!namer.is_return_target_register(&reg(0x20)), "r0");
     }
 
     #[test]
