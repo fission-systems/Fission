@@ -437,7 +437,14 @@ impl<'a> PreviewBuilder<'a> {
                 .checked_add(section.file_size.min(section.virtual_size))
                 .is_some_and(|end| (start..end).contains(&address))
         })?;
-        if section.is_writable || section.is_executable {
+        // Allocated and read-only. Testing only "not writable, not executable"
+        // admits a section with no permissions at all, and an ELF's
+        // `.shstrtab`/`.strtab`/`.comment` are exactly that -- never mapped,
+        // and every one of them reports a virtual address of zero. Any small
+        // integer therefore "lands" in whichever comes first: the constant 11
+        // (SIGSEGV, to `raise`) read back as `".interp"`, which is the section
+        // name sitting at offset 11 of the section-name table.
+        if !section.is_readable || section.is_writable || section.is_executable {
             return None;
         }
         let offset_in_section = address.checked_sub(section.virtual_address)?;
@@ -487,6 +494,11 @@ impl<'a> PreviewBuilder<'a> {
                 .checked_add(section.file_size.min(section.virtual_size))
                 .is_some_and(|end| (start..end).contains(&address))
         })?;
+        // Same exposure as `read_c_string_from_binary`: an unmapped section
+        // reports virtual address zero, so a small constant resolves into it.
+        if !section.is_readable {
+            return None;
+        }
         if require_readonly && section.is_writable {
             return None;
         }

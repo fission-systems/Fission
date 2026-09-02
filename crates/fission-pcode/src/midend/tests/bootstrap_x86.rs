@@ -3516,3 +3516,97 @@ fn preview_leaves_non_exact_branch_shape_as_generic_value() {
     // register-space flag bits must still keep distinct SLA names.
     assert_eq!(print_prehir_expr(&cond), "zf ^ sf");
 }
+
+/// A small integer is a small integer, even when an unmapped section's bytes
+/// spell a word at that offset.
+///
+/// An ELF's `.shstrtab`, `.strtab` and `.comment` are never mapped, and every
+/// one of them reports a virtual address of zero -- so any small constant
+/// "lands" in whichever the loader lists first. Constant folding read it back
+/// as a C string and rendered `raise(11)` as `raise(".interp")`: offset 11 of
+/// the section-name table is where the name `.interp` happens to sit.
+///
+/// Rejecting only writable and executable sections was not enough. A section
+/// with no permissions at all is neither, and that is exactly what these are.
+#[test]
+fn a_constant_is_not_read_out_of_an_unmapped_section() {
+    let mut options = preview_options_win64();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001000,
+                    output: Some(runtime_reg(0x00, 8)),
+                    inputs: vec![cst(11, 8)],
+                    asm_mnemonic: Some("MOV RAX,11".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001008,
+                    output: None,
+                    inputs: vec![cst(0, 8), runtime_reg(0x00, 8)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    // Byte 11 onward spells `.interp`, preceded by a NUL so the run looks
+    // like the start of a literal rather than a suffix pointer.
+    let mut image = vec![0u8; 64];
+    image[11..19].copy_from_slice(b".interp\0");
+    let binary = LoadedBinaryBuilder::new("names.elf".to_string(), DataBuffer::Heap(image))
+        .format("ELF64")
+        .entry_point(0x140001000)
+        .image_base(0x140000000)
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".shstrtab".to_string(),
+            virtual_address: 0,
+            virtual_size: 64,
+            file_offset: 0,
+            file_size: 64,
+            is_executable: false,
+            is_readable: false,
+            is_writable: false,
+        })
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x140001000,
+            virtual_size: 0x1000,
+            file_offset: 0,
+            file_size: 0,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("test binary builds");
+
+    let code = render_mlil_preview_with_binary_and_context(
+        &func,
+        "signal_it",
+        0x140001000,
+        &options,
+        Some(&binary),
+        None,
+        None,
+    )
+    .expect("preview render");
+    assert!(!code.contains(".interp"), "{code}");
+    assert!(code.contains("11"), "{code}");
+}
