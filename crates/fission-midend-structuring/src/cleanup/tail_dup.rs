@@ -69,17 +69,43 @@ pub const MAX_TAIL_STMTS: usize = 6;
 /// Most `goto`s to one label this pass will rewrite.
 pub const MAX_TAIL_REFS: usize = 8;
 /// Per-function ceiling on total copied statements.
-pub const MAX_DUPLICATED_STMTS: usize = 160;
+///
+/// Derived from what one admissible application costs rather than assumed:
+/// the motivating shape is a tail of at most [`MAX_TAIL_STMTS`] copied into
+/// the two arms of one `if`, so 12 statements buys one, and this buys two.
+///
+/// The previous 160 was thirteen of them, and nothing spent it: the cleanup
+/// loop called this pass twice a round for up to eight rounds, each call
+/// creating its own budget, so the "per-function" ceiling was really sixteen
+/// ceilings. `sshbuf_fromb` reached eleven copies of a four-statement error
+/// tail -- a path its binary reaches four times and its source shares once.
+pub const MAX_DUPLICATED_STMTS: usize = 24;
 
 /// Duplicate shared terminal tails into their `goto` sites.
 ///
 /// Returns the rewritten body and the number of `goto` statements removed.
 pub fn duplicate_terminal_tails(
-    mut body: Vec<PreHirStmt>,
+    body: Vec<PreHirStmt>,
     protected: &HashSet<String>,
 ) -> (Vec<PreHirStmt>, usize) {
-    let mut gotoless_budget = MAX_DUPLICATED_STMTS;
-    let (next, split) = split_fallthrough_return_tails(body, &mut gotoless_budget);
+    let mut budget = MAX_DUPLICATED_STMTS;
+    duplicate_terminal_tails_within(body, protected, &mut budget)
+}
+
+/// [`duplicate_terminal_tails`], spending a budget the caller owns.
+///
+/// The growth bound is per *function*, and the cleanup loop calls this twice a
+/// round for up to eight rounds -- so a budget created here was really sixteen
+/// budgets, and the doc comment's "overall" was not true of anything. On
+/// `sshbuf_fromb` that let one four-statement error tail reach eleven copies
+/// where the binary itself has four.
+pub fn duplicate_terminal_tails_within(
+    mut body: Vec<PreHirStmt>,
+    protected: &HashSet<String>,
+    budget: &mut usize,
+) -> (Vec<PreHirStmt>, usize) {
+    let gotoless_budget = budget;
+    let (next, split) = split_fallthrough_return_tails(body, gotoless_budget);
     body = next;
     let counts = super::collect_referenced_label_counts(&body);
     if counts.is_empty() {
@@ -89,14 +115,13 @@ pub fn duplicate_terminal_tails(
     super::collect_defined_label_counts_in(&body, &mut definitions);
 
     let mut candidates: Vec<(String, Vec<PreHirStmt>)> = Vec::new();
-    let mut budget = MAX_DUPLICATED_STMTS;
     collect_candidates(
         &body,
         protected,
         &counts,
         &definitions,
         &mut candidates,
-        &mut budget,
+        gotoless_budget,
     );
     if candidates.is_empty() {
         return (body, 0);

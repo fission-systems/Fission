@@ -76,15 +76,22 @@ pub fn finalize_post_layout_body_with(
     // to survive simply because nothing looked again. Repeat until the body
     // stops changing.
     let mut body = body;
+    // One duplication budget for the whole function, not one per call. Each
+    // round calls the pass twice and there are up to eight rounds, so a
+    // budget created inside it bounded nothing: `sshbuf_fromb` reached eleven
+    // copies of a four-statement error tail against a binary that has four.
+    let mut tail_dup_budget = tail_dup::MAX_DUPLICATED_STMTS;
     for _ in 0..MAX_LAYOUT_ROUNDS {
         let before = crate::count_explicit_gotos(&body);
         let (next, _) = eliminate_nonfallthrough_label_aliases(body, protected);
-        let (next, _) = duplicate_terminal_tails(next, protected);
+        let (next, _) =
+            tail_dup::duplicate_terminal_tails_within(next, protected, &mut tail_dup_budget);
         let (next, _) = sink_span::sink_spans_into_if_arms(next, protected);
         let (next, _) = invert_forward_guard_gotos(next, protected);
         let (next, _) = relocate_jump_only_joins(next, protected);
         let next = finalize_structured_body(protected, next);
-        let (next, _) = duplicate_terminal_tails(next, protected);
+        let (next, _) =
+            tail_dup::duplicate_terminal_tails_within(next, protected, &mut tail_dup_budget);
         body = finalize_structured_body(protected, next);
         if crate::count_explicit_gotos(&body) == before {
             break;
