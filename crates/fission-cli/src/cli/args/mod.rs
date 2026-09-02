@@ -130,6 +130,16 @@ struct CliArgs {
     #[arg(long = "language", global = true, value_name = "LANG_ID")]
     language: Option<String>,
 
+    /// Which architecture of a Mach-O universal ("fat") binary to analyse
+    ///
+    /// A universal file holds several architectures and every command sees
+    /// only one of them. Without this the loader picks by preference --
+    /// `info` marks which -- and on an Apple Silicon system binary that is
+    /// `arm64e` beside an `x86_64` slice. Named the way `arch(1)` names
+    /// them: `x86_64`, `arm64`, `arm64e`, `i386`, `armv7`.
+    #[arg(long = "arch", global = true, value_name = "ARCH")]
+    arch: Option<String>,
+
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -978,10 +988,12 @@ where
         let cli = CliArgs::parse_from(argv);
         fission_core::resource_roots::set_cli_resource_bundle_root(cli.resource_root.clone());
         let language_override = cli.language.clone();
+        let arch = cli.arch.clone();
         let invocation = normalize_canonical(cli);
         match invocation {
             ParsedInvocation::OneShot(mut parsed) => {
                 parsed.args.language_override = language_override;
+                parsed.args.arch = arch;
                 ParsedInvocation::OneShot(parsed)
             }
             other => other,

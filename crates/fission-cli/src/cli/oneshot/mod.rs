@@ -636,6 +636,34 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     let binary_data = fs::read(&cli.binary)
         .with_context(|| format!("failed to read binary `{}`", cli.binary.display()))?;
 
+    // A universal file holds several architectures, and every later command
+    // sees only the one taken here. The inventory is read before slicing so
+    // `info` can report what the file carries, not just what was picked.
+    let universal = fission_loader::loader::macho::universal_slices(&binary_data);
+    let binary_data = match cli.arch.as_deref() {
+        Some(arch) => {
+            let range = fission_loader::loader::macho::universal_slice_range(&binary_data, arch)
+                .ok_or_else(|| {
+                    let carried: Vec<&str> =
+                        universal.iter().map(|slice| slice.arch.as_str()).collect();
+                    if carried.is_empty() {
+                        anyhow::anyhow!(
+                            "`{}` is not a universal binary; --arch has nothing to choose from",
+                            cli.binary.display()
+                        )
+                    } else {
+                        anyhow::anyhow!(
+                            "`{}` carries {}, not `{arch}`",
+                            cli.binary.display(),
+                            carried.join(", ")
+                        )
+                    }
+                })?;
+            binary_data[range].to_vec()
+        }
+        None => binary_data,
+    };
+
     let mut binary = LoadedBinary::from_bytes(
         binary_data.clone(),
         cli.binary.to_string_lossy().to_string(),
@@ -679,6 +707,7 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     if cli.info {
         return Ok(print_binary_info(
             &binary,
+            &universal,
             cli.json,
             cli.info_detections,
             cli.info_identity,

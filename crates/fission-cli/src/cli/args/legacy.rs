@@ -234,6 +234,7 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         hex_addr: None,
         search: None,
         patch: None,
+        arch: None,
         hex_count: 256,
         ghidra_compat: cli.ghidra_compat,
         no_warnings: cli.no_warnings,

@@ -27,7 +27,16 @@ impl MachoLoader {
         // Read Magic
         let bytes = data.as_slice();
         if let Some(slice) = select_fat_slice(bytes) {
-            return Self::parse(DataBuffer::Heap(bytes[slice].to_vec()), path);
+            // Back through the pipeline, not straight back into this loader:
+            // a universal file's slices are not all Mach-O. Xcode ships fat
+            // `.a`s whose every slice is a Unix archive, and recursing here
+            // reported them as `Not a Mach-O binary (magic: 213c6172)` --
+            // that magic is `!<ar`. Routing again gets the same
+            // `ContainerRequiresExtraction(UnixArchive)` a thin `.a` gets.
+            return crate::loader::pipeline::LoaderPipeline::load(
+                DataBuffer::Heap(bytes[slice].to_vec()),
+                path,
+            );
         }
         let magic = ByteReader::big(bytes).u32(0)?;
 
@@ -1166,44 +1175,221 @@ fn push_macho_import(
     });
 }
 
-fn select_fat_slice(bytes: &[u8]) -> Option<std::ops::Range<usize>> {
+/// One architecture inside a Mach-O universal ("fat") file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UniversalSlice {
+    /// `arch(1)`'s name for it -- `x86_64`, `arm64e`, and so on.
+    pub arch: String,
+    pub cputype: i32,
+    pub cpusubtype: i32,
+    pub offset: usize,
+    pub size: usize,
+}
+
+/// `arch(1)`'s name for a `(cputype, cpusubtype)` pair.
+///
+/// The subtype matters for exactly the case an operator is most likely to hit
+/// on this platform: `arm64` and `arm64e` are the same cputype, and an Apple
+/// Silicon system binary ships both that and an `x86_64` slice.
+fn macho_arch_name(cputype: i32, cpusubtype: i32) -> String {
+    let subtype = cpusubtype & 0x00ff_ffff;
+    match (cputype, subtype) {
+        (MACHO_CPU_TYPE_X86_64, _) => "x86_64".to_string(),
+        (MACHO_CPU_TYPE_X86, _) => "i386".to_string(),
+        (MACHO_CPU_TYPE_ARM64, 2) => "arm64e".to_string(),
+        (MACHO_CPU_TYPE_ARM64, _) => "arm64".to_string(),
+        (MACHO_CPU_TYPE_ARM, 9) => "armv7".to_string(),
+        (MACHO_CPU_TYPE_ARM, 11) => "armv7s".to_string(),
+        (MACHO_CPU_TYPE_ARM, _) => "arm".to_string(),
+        _ => format!("cputype{cputype}.{subtype}"),
+    }
+}
+
+/// Every architecture a universal file carries, in header order.
+///
+/// Empty for a file that is not universal, so a caller can use a non-empty
+/// result as the test for "this file holds more than one architecture".
+pub fn universal_slices(bytes: &[u8]) -> Vec<UniversalSlice> {
+    let mut out = Vec::new();
     if bytes.len() < 8 {
-        return None;
+        return out;
     }
-    let magic = u32::from_be_bytes(bytes[0..4].try_into().ok()?);
-    if !matches!(magic, MACHO_FAT_MAGIC | MACHO_FAT_CIGAM) {
-        return None;
+    let Ok(head) = bytes[0..4].try_into() else {
+        return out;
+    };
+    if !matches!(u32::from_be_bytes(head), MACHO_FAT_MAGIC | MACHO_FAT_CIGAM) {
+        return out;
     }
-    let nfat_arch = u32::from_be_bytes(bytes[4..8].try_into().ok()?) as usize;
-    let mut best = None;
+    let Ok(count) = bytes[4..8].try_into() else {
+        return out;
+    };
+    let nfat_arch = u32::from_be_bytes(count) as usize;
     let mut offset = 8usize;
     for _ in 0..nfat_arch {
         if offset + 20 > bytes.len() {
-            return best;
+            break;
         }
-        let cputype = i32::from_be_bytes(bytes[offset..offset + 4].try_into().ok()?);
-        let slice_offset =
-            u32::from_be_bytes(bytes[offset + 8..offset + 12].try_into().ok()?) as usize;
-        let slice_size =
-            u32::from_be_bytes(bytes[offset + 12..offset + 16].try_into().ok()?) as usize;
-        if slice_offset.checked_add(slice_size)? <= bytes.len() {
-            let candidate = slice_offset..slice_offset + slice_size;
-            if best.is_none()
-                || matches!(
-                    cputype,
-                    MACHO_CPU_TYPE_X86_64
-                        | MACHO_CPU_TYPE_ARM64
-                        | MACHO_CPU_TYPE_X86
-                        | MACHO_CPU_TYPE_ARM
-                )
-            {
-                best = Some(candidate);
-                if matches!(cputype, MACHO_CPU_TYPE_X86_64 | MACHO_CPU_TYPE_ARM64) {
-                    break;
-                }
-            }
+        let read = |at: usize| -> Option<u32> {
+            bytes[at..at + 4].try_into().ok().map(u32::from_be_bytes)
+        };
+        let (Some(cputype), Some(cpusubtype), Some(slice_offset), Some(slice_size)) = (
+            read(offset),
+            read(offset + 4),
+            read(offset + 8),
+            read(offset + 12),
+        ) else {
+            break;
+        };
+        let (cputype, cpusubtype) = (cputype as i32, cpusubtype as i32);
+        let (slice_offset, slice_size) = (slice_offset as usize, slice_size as usize);
+        if slice_offset.saturating_add(slice_size) <= bytes.len() {
+            out.push(UniversalSlice {
+                arch: macho_arch_name(cputype, cpusubtype),
+                cputype,
+                cpusubtype,
+                offset: slice_offset,
+                size: slice_size,
+            });
         }
         offset += 20;
     }
-    best
+    out
+}
+
+/// The byte range of the slice named `arch`, if the file carries it.
+///
+/// Matched against `arch(1)`'s names, and `arm64` also accepts `arm64e` when
+/// the file has only the latter -- asking for the 64-bit ARM code of a file
+/// that ships one flavour of it should not be a miss.
+pub fn universal_slice_range(bytes: &[u8], arch: &str) -> Option<std::ops::Range<usize>> {
+    let slices = universal_slices(bytes);
+    let exact = slices.iter().find(|slice| slice.arch == arch);
+    let fallback = || {
+        (arch == "arm64")
+            .then(|| {
+                slices
+                    .iter()
+                    .find(|slice| slice.cputype == MACHO_CPU_TYPE_ARM64)
+            })
+            .flatten()
+    };
+    exact
+        .or_else(fallback)
+        .map(|slice| slice.offset..slice.offset + slice.size)
+}
+
+/// The slice this loader analyses when the caller did not name one.
+///
+/// Preference order rather than header order: a universal file lists its
+/// slices in whatever order the linker wrote them, and taking the first
+/// recognised one means the answer depends on that. This still cannot know
+/// which architecture the operator wants -- `info` reports what was chosen so
+/// the choice is at least visible, and `--arch` overrides it.
+fn select_fat_slice(bytes: &[u8]) -> Option<std::ops::Range<usize>> {
+    let slices = universal_slices(bytes);
+    if slices.is_empty() {
+        return None;
+    }
+    const PREFERENCE: [i32; 4] = [
+        MACHO_CPU_TYPE_ARM64,
+        MACHO_CPU_TYPE_X86_64,
+        MACHO_CPU_TYPE_ARM,
+        MACHO_CPU_TYPE_X86,
+    ];
+    PREFERENCE
+        .iter()
+        .find_map(|wanted| slices.iter().find(|slice| slice.cputype == *wanted))
+        .or_else(|| slices.first())
+        .map(|slice| slice.offset..slice.offset + slice.size)
+}
+
+#[cfg(test)]
+mod universal_tests {
+    use super::{select_fat_slice, universal_slice_range, universal_slices};
+    use fission_core::constants::binary_format::{
+        MACHO_CPU_TYPE_ARM64, MACHO_CPU_TYPE_X86_64, MACHO_FAT_MAGIC,
+    };
+
+    /// A fat header carrying `slices` of `(cputype, cpusubtype)`, each with a
+    /// one-byte body, laid out the way `lipo` writes one.
+    fn fat(slices: &[(i32, i32)]) -> Vec<u8> {
+        let header = 8 + slices.len() * 20;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MACHO_FAT_MAGIC.to_be_bytes());
+        bytes.extend_from_slice(&(slices.len() as u32).to_be_bytes());
+        for (index, (cputype, cpusubtype)) in slices.iter().enumerate() {
+            bytes.extend_from_slice(&(*cputype as u32).to_be_bytes());
+            bytes.extend_from_slice(&(*cpusubtype as u32).to_be_bytes());
+            bytes.extend_from_slice(&((header + index) as u32).to_be_bytes()); // offset
+            bytes.extend_from_slice(&1u32.to_be_bytes()); // size
+            bytes.extend_from_slice(&0u32.to_be_bytes()); // align
+        }
+        bytes.resize(header + slices.len(), 0xcc);
+        bytes
+    }
+
+    #[test]
+    fn a_universal_file_reports_every_architecture_it_carries() {
+        let bytes = fat(&[(MACHO_CPU_TYPE_X86_64, 3), (MACHO_CPU_TYPE_ARM64, 2)]);
+        let names: Vec<String> = universal_slices(&bytes)
+            .into_iter()
+            .map(|slice| slice.arch)
+            .collect();
+        // `arm64` and `arm64e` share a cputype; only the subtype tells them
+        // apart, and an Apple Silicon system binary is exactly this pair.
+        assert_eq!(names, ["x86_64", "arm64e"]);
+        assert!(universal_slices(b"not a fat file at all").is_empty());
+    }
+
+    #[test]
+    fn the_default_slice_is_a_preference_not_the_header_order() {
+        // `/bin/ls` lists x86_64 first. Taking the first recognised slice
+        // meant an Apple Silicon host analysed the x86_64 code of every
+        // system binary, which is not the code that runs there.
+        let x86_first = fat(&[(MACHO_CPU_TYPE_X86_64, 3), (MACHO_CPU_TYPE_ARM64, 2)]);
+        let arm_first = fat(&[(MACHO_CPU_TYPE_ARM64, 2), (MACHO_CPU_TYPE_X86_64, 3)]);
+        let arm_offset = |bytes: &[u8]| {
+            universal_slices(bytes)
+                .iter()
+                .find(|slice| slice.cputype == MACHO_CPU_TYPE_ARM64)
+                .map(|slice| slice.offset)
+                .expect("arm64 slice")
+        };
+        assert_eq!(
+            select_fat_slice(&x86_first).expect("slice").start,
+            arm_offset(&x86_first)
+        );
+        assert_eq!(
+            select_fat_slice(&arm_first).expect("slice").start,
+            arm_offset(&arm_first)
+        );
+    }
+
+    #[test]
+    fn a_slice_can_be_named_and_arm64_accepts_arm64e() {
+        let bytes = fat(&[(MACHO_CPU_TYPE_X86_64, 3), (MACHO_CPU_TYPE_ARM64, 2)]);
+        let slices = universal_slices(&bytes);
+        let offset_of = |arch: &str| {
+            slices
+                .iter()
+                .find(|slice| slice.arch == arch)
+                .map(|slice| slice.offset)
+                .expect(arch)
+        };
+        assert_eq!(
+            universal_slice_range(&bytes, "x86_64")
+                .expect("x86_64")
+                .start,
+            offset_of("x86_64")
+        );
+        // The file carries `arm64e`, not a plain `arm64`. Asking for the
+        // 64-bit ARM code of a file that ships one flavour of it is not a
+        // miss -- `lipo -thin arm64` on such a file is the same request.
+        assert_eq!(
+            universal_slice_range(&bytes, "arm64").expect("arm64").start,
+            offset_of("arm64e")
+        );
+        assert!(universal_slice_range(&bytes, "ppc").is_none());
+        assert!(universal_slice_range(b"thin file", "arm64").is_none());
+    }
 }

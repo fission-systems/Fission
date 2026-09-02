@@ -9,6 +9,7 @@ use std::io::{self, Write};
 
 pub(super) fn print_binary_info(
     binary: &LoadedBinary,
+    universal: &[fission_loader::loader::macho::UniversalSlice],
     json: bool,
     include_detections: bool,
     include_identity: bool,
@@ -119,6 +120,29 @@ pub(super) fn print_binary_info(
             .unwrap_or_else(|| "unknown".to_string());
 
         writeln!(stdout, "║ Arch:       {} ║", fit(&arch_display, 46))?;
+
+        // Which architectures the file carries, and which one everything
+        // below is about. A universal binary silently analysed as whichever
+        // slice the loader preferred is an operator reading the wrong
+        // machine code with nothing on screen to say so.
+        if !universal.is_empty() {
+            let carried = universal
+                .iter()
+                .map(|slice| {
+                    if binary.data.as_slice().len() == slice.size {
+                        format!("{} *", slice.arch)
+                    } else {
+                        slice.arch.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(
+                stdout,
+                "║ Universal:  {} ║",
+                fit(&format!("{carried}  (* = analysed)"), 46)
+            )?;
+        }
 
         // What every later command actually decodes and decompiles with.
         //
