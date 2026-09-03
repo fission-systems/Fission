@@ -407,6 +407,22 @@ pub(crate) fn print_hir_function_with_profile(
     print_hir_function_impl(func, ctx)
 }
 
+/// Whether a body is nothing but an indirect jump through an import slot.
+///
+/// This is what the midend synthesises for a PE import thunk: the real callee
+/// lives in another module, so the body has no parameter uses to recover an
+/// arity from. Distinguishing it from a function that genuinely takes nothing
+/// is the difference between "unknown" and "none".
+fn is_import_thunk_body(body: &[HirStmt]) -> bool {
+    let [HirStmt::Expr(HirExpr::Call { target, .. })] = body else {
+        return false;
+    };
+    matches!(
+        target.as_str(),
+        "__fission_branchind" | "__fission_dispatcher_indirect" | "__fission_callind_opaque"
+    )
+}
+
 fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
     let mut out = String::new();
     let return_type = func
@@ -415,7 +431,18 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
         .unwrap_or_else(|| print_return_type(&func.return_type));
     out.push_str(&format!("{return_type} {}(", func.name));
     if func.params.is_empty() {
-        out.push_str("void");
+        // `(void)` asserts the function takes nothing. For an import thunk
+        // that is false and provably so: its whole body is one indirect jump
+        // through the import slot, which carries no evidence of arity either
+        // way, while the call sites pass arguments. Six of the sixteen thunks
+        // in a mingw-built PE are called with arguments and every one of them
+        // was an error. `(...)` is the C23 spelling for "arity unknown", and
+        // is legal on a definition as well as a declaration.
+        out.push_str(if is_import_thunk_body(&func.body) {
+            "..."
+        } else {
+            "void"
+        });
     } else {
         for (idx, param) in func.params.iter().enumerate() {
             if idx > 0 {
