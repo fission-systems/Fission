@@ -255,6 +255,7 @@ pub(super) fn defuse_after_gvn_and_prune(func: &mut PreHirFunction) -> bool {
 
 pub fn run_stage_type_early(func: &mut PreHirFunction, diag: bool, perf: bool) {
     apply_type_signature_fixed_point(func, diag, perf);
+    report_binding_type_mismatches(func);
 }
 
 pub(super) fn cleanup_after_subvar_flow(func: &mut PreHirFunction) {
@@ -888,5 +889,79 @@ mod tests {
             fields.iter().map(|field| field.offset).collect::<Vec<_>>(),
             vec![0, 8]
         );
+    }
+}
+
+/// Count bindings whose declared type disagrees with an assignment's type on
+/// the pointer/scalar split.
+///
+/// Diagnostic only, and deliberately so: C gives one declaration one type, but
+/// whether splitting such a name is safe or even an improvement is not yet
+/// established. `FISSION_TY_MISMATCH=1` prints one line per binding.
+pub fn report_binding_type_mismatches(func: &PreHirFunction) {
+    use fission_midend_core::ir::NirType;
+    use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
+    if std::env::var_os("FISSION_TY_MISMATCH").is_none() {
+        return;
+    }
+    fn shape(ty: &NirType) -> Option<bool> {
+        match ty {
+            NirType::Ptr(_) => Some(true),
+            NirType::Int { .. } | NirType::Bool | NirType::Float { .. } => Some(false),
+            _ => None,
+        }
+    }
+    fn expr_shape(e: &PreHirExpr) -> Option<bool> {
+        match e {
+            PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => Some(true),
+            PreHirExpr::Cast { ty, .. } | PreHirExpr::Const(_, ty) => shape(ty),
+            PreHirExpr::Call { ty, .. } => shape(ty),
+            PreHirExpr::Load { ty, .. } => shape(ty),
+            _ => None,
+        }
+    }
+    fn walk(stmts: &[PreHirStmt], out: &mut Vec<(String, bool)>) {
+        for s in stmts {
+            match s {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs,
+                } => {
+                    if let Some(sh) = expr_shape(rhs) {
+                        out.push((name.clone(), sh));
+                    }
+                }
+                PreHirStmt::Block(inner) => walk(inner, out),
+                PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    walk(then_body, out);
+                    walk(else_body, out);
+                }
+                PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+                    walk(body, out)
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut assigned: Vec<(String, bool)> = Vec::new();
+    walk(&func.body, &mut assigned);
+    for binding in func.locals.iter().chain(func.params.iter()) {
+        let Some(declared) = shape(&binding.ty) else {
+            continue;
+        };
+        let conflicting = assigned
+            .iter()
+            .filter(|(n, sh)| n == &binding.name && *sh != declared)
+            .count();
+        if conflicting > 0 {
+            eprintln!(
+                "[TYMISMATCH] fn={} name={} declared_ptr={} conflicting_assignments={}",
+                func.name, binding.name, declared, conflicting
+            );
+        }
     }
 }
