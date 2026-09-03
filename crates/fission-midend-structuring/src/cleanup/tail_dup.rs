@@ -62,7 +62,7 @@
 
 use crate::HashMap;
 use crate::HashSet;
-use fission_midend_prehir::PreHirStmt;
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
 
 /// Longest tail this pass will copy, in statements (recursive count).
 pub const MAX_TAIL_STMTS: usize = 6;
@@ -79,7 +79,7 @@ pub const MAX_TAIL_REFS: usize = 8;
 /// creating its own budget, so the "per-function" ceiling was really sixteen
 /// ceilings. `sshbuf_fromb` reached eleven copies of a four-statement error
 /// tail -- a path its binary reaches four times and its source shares once.
-pub const MAX_DUPLICATED_STMTS: usize = 24;
+pub const MAX_DUPLICATED_STMTS: usize = 160;
 
 /// Duplicate shared terminal tails into their `goto` sites.
 ///
@@ -196,7 +196,9 @@ fn split_fallthrough_return_tails(
             && region_leaves(&tail)
             && region_is_relocatable(&tail, false)
             && cost <= MAX_TAIL_STMTS
-            && cost <= *budget;
+            && cost <= *budget
+            // Both arms take a copy, so this is the refs >= 2 case above.
+            && region_free_reads(&tail) > 0;
         if !admissible {
             let stmt = std::mem::replace(&mut rest[idx], PreHirStmt::Break);
             out.push(recurse_split(stmt, budget, &mut split));
@@ -320,6 +322,16 @@ fn collect_candidates(
                 duplicable_region_at(stmts, idx, label, protected, counts, definitions, droppable)
             {
                 let refs = counts.get(label).copied().unwrap_or(0);
+                // A tail that reads nothing from its context computes the same
+                // thing wherever it is reached, so several sites reaching it is
+                // what a tail the *source* shared looks like -- not a merge to
+                // undo. LLVM decides the same question from the other side:
+                // `sinkCommonCodeFromPredecessors` merges when two or more
+                // unconditional predecessors need at most one PHI, and a
+                // context-free tail needs none.
+                if refs >= 2 && region_free_reads(&region) == 0 {
+                    continue;
+                }
                 let cost = region.len().saturating_mul(refs);
                 if cost <= *budget {
                     *budget -= cost;
@@ -335,6 +347,93 @@ fn collect_candidates(
 
 /// The statements after `Label(L)` at `idx`, when they form a duplicable
 /// terminal region under the admission rules in the module docs.
+
+/// Names a region reads without defining them first.
+///
+/// LLVM decides whether to *merge* a shared tail by asking how many PHI nodes
+/// the merge would need (`NumPHIInsts <= 1` in `sinkCommonCodeFromPredecessors`)
+/// -- that is, how many values differ between the predecessors. A tail that
+/// needs none computes the same thing wherever it is reached, which is what a
+/// tail the source itself shared looks like. This is the AST-level reading of
+/// that question: a closed region depends on nothing from its context.
+fn region_free_reads(region: &[PreHirStmt]) -> usize {
+    let mut defined: HashSet<String> = HashSet::default();
+    let mut free: HashSet<String> = HashSet::default();
+    for stmt in region {
+        collect_reads_and_defs(stmt, &mut defined, &mut free);
+    }
+    free.len()
+}
+
+fn collect_reads_and_defs(
+    stmt: &PreHirStmt,
+    defined: &mut HashSet<String>,
+    free: &mut HashSet<String>,
+) {
+    let note_expr = |expr: &PreHirExpr, defined: &HashSet<String>, free: &mut HashSet<String>| {
+        let mut seen: HashSet<String> = HashSet::default();
+        collect_expr_names(expr, &mut seen);
+        for name in seen {
+            if !defined.contains(&name) {
+                free.insert(name);
+            }
+        }
+    };
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            note_expr(rhs, defined, free);
+            match lhs {
+                PreHirLValue::Var(name) => {
+                    defined.insert(name.clone());
+                }
+                PreHirLValue::Deref { ptr, .. } => note_expr(ptr, defined, free),
+                _ => {}
+            }
+        }
+        PreHirStmt::Expr(expr) => note_expr(expr, defined, free),
+        PreHirStmt::Return(Some(expr)) => note_expr(expr, defined, free),
+        PreHirStmt::Block(inner) => {
+            for s in inner.iter() {
+                collect_reads_and_defs(s, defined, free);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_expr_names(expr: &PreHirExpr, out: &mut HashSet<String>) {
+    match expr {
+        PreHirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
+            collect_expr_names(expr, out)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_expr_names(lhs, out);
+            collect_expr_names(rhs, out);
+        }
+        PreHirExpr::Load { ptr, .. } => collect_expr_names(ptr, out),
+        PreHirExpr::PtrOffset { base, .. } => collect_expr_names(base, out),
+        PreHirExpr::Call { args, .. } => {
+            for a in args.iter() {
+                collect_expr_names(a, out);
+            }
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_expr_names(cond, out);
+            collect_expr_names(then_expr, out);
+            collect_expr_names(else_expr, out);
+        }
+        _ => {}
+    }
+}
+
 fn duplicable_region_at(
     stmts: &[PreHirStmt],
     idx: usize,
