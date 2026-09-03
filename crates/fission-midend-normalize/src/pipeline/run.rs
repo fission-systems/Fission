@@ -731,6 +731,8 @@ mod tests {
             body: Vec::new(),
             calling_convention: Default::default(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             is_64bit: true,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),

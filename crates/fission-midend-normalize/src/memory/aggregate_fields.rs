@@ -630,6 +630,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "test".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
@@ -674,6 +676,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "shape".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_u8(),
@@ -743,6 +747,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "homogeneous_scalar_offsets".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "values".to_string(),
                 ty: NirType::Ptr(Box::new(u32_ty.clone())),
@@ -782,6 +788,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "rect_shape".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
@@ -862,6 +870,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "process_info_infer".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
@@ -951,6 +961,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "process_info_hint".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),

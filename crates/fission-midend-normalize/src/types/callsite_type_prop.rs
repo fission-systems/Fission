@@ -2242,6 +2242,8 @@ mod tests {
         PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![
                 unsigned_binding("param_name", 64, Some(NirBindingOrigin::ParamIndex(0))),
                 unsigned_binding("param_count", 64, Some(NirBindingOrigin::ParamIndex(1))),
@@ -2448,6 +2450,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![unknown_binding(
                 "param_1",
                 Some(NirBindingOrigin::ParamIndex(0)),
@@ -2497,6 +2501,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![unknown_binding(
                 "param_1",
                 Some(NirBindingOrigin::ParamIndex(0)),
@@ -2713,6 +2719,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -2780,6 +2788,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -2836,6 +2846,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -2926,6 +2938,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![
                 PreHirBinding {
                     name: "param_1".to_string(),
@@ -3079,6 +3093,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "fib".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Int {
@@ -3125,6 +3141,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -3204,6 +3222,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -3269,6 +3289,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,

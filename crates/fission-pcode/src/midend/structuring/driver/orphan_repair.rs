@@ -30,6 +30,8 @@ mod tests {
             calling_convention: Default::default(),
             userops: Default::default(),
             cspec_param_offsets: None,
+            cspec_float_param_offsets: None,
+            cspec_float_shares_int_slots: false,
             cspec_stack_arg_base: None,
             cspec_stack_pointer_offset: None,
             cspec_unaffected_offsets: Vec::new(),

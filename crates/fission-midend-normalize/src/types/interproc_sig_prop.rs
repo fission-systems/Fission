@@ -421,6 +421,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -446,6 +448,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "wrapper".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![empty_binding("param_1")],
             locals: vec![],
             return_type: NirType::Unknown,

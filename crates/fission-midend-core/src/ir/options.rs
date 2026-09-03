@@ -42,6 +42,19 @@ pub struct NirRenderOptions {
     /// Order matches the prototype `<input>` pentry order (float slots excluded).
     #[serde(default)]
     pub cspec_param_offsets: Option<Vec<u64>>,
+    /// Ghidra-style .cspec-resolved *float* parameter register offsets
+    /// (REGISTER-space) -- the `metatype="float"` pentries
+    /// `cspec_param_offsets` excludes.
+    ///
+    /// Pairs with `cspec_float_shares_int_slots`, which says whether index i
+    /// here names the same parameter slot as index i in `cspec_param_offsets`.
+    #[serde(default)]
+    pub cspec_float_param_offsets: Option<Vec<u64>>,
+    /// True when the prototype's `<group>` elements pair each float parameter
+    /// register with an integer one, making the two offset lists alternatives
+    /// for one slot (Win64) rather than independent sequences (SysV).
+    #[serde(default)]
+    pub cspec_float_shares_int_slots: bool,
     /// Stack base offset where stack arguments begin (from .cspec `<addr space="stack" offset=...>`).
     #[serde(default)]
     pub cspec_stack_arg_base: Option<i64>,
@@ -500,6 +513,8 @@ impl NirRenderOptions {
             calling_convention,
             userops: HashMap::new(),
             cspec_param_offsets: None,
+            cspec_float_param_offsets: None,
+            cspec_float_shares_int_slots: false,
             cspec_stack_arg_base: None,
             cspec_stack_pointer_offset: None,
             cspec_unaffected_offsets: Vec::new(),

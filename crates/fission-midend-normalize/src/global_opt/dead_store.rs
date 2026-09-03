@@ -349,6 +349,8 @@ mod tests {
         PreHirFunction {
             name: "f".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: Vec::new(),
             locals,
             return_type: NirType::Unknown,

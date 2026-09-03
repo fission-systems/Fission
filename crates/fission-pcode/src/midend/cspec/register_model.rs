@@ -247,6 +247,8 @@ pub fn register_namer_for_abi(abi: CallingConvention) -> RegisterNamer {
         sla_map,
         sla_map_by_offset,
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         return_offset: model.as_ref().and_then(|m| m.return_offset()),
         float_return_offset: None,
         return_target: model.as_ref().and_then(|m| m.return_target_offset()),
@@ -292,6 +294,11 @@ pub struct RegisterNamer {
     /// turns that into an O(variants at this offset) scan instead.
     sla_map_by_offset: Option<HashMap<u64, Vec<(u32, String)>>>,
     pub int_param_offsets: Vec<u64>,
+    /// Float parameter register offsets from `.cspec`. See
+    /// `ResolvedPrototype::float_param_offsets`.
+    pub float_param_offsets: Vec<u64>,
+    /// True when `<group>` pairs the float and integer lists slot-for-slot.
+    pub float_shares_int_slots: bool,
     pub return_offset: Option<u64>,
     /// Float/double return register offset (e.g. x86's `ST0`) from `.cspec`,
     /// when the active prototype declares one. See
@@ -317,6 +324,11 @@ impl RegisterNamer {
             sla_map,
             sla_map_by_offset,
             int_param_offsets: super::apply::int_param_offsets(options).to_vec(),
+            float_param_offsets: options
+                .cspec_float_param_offsets
+                .clone()
+                .unwrap_or_default(),
+            float_shares_int_slots: options.cspec_float_shares_int_slots,
             return_offset: options.cspec_return_offset,
             float_return_offset: options.cspec_float_return_offset,
             return_target: model
@@ -1051,6 +1063,7 @@ mod tests {
                     name,
                     metatype,
                     storage,
+                    ..
                 } = pentry
                 {
                     if metatype.as_deref() == Some("float")

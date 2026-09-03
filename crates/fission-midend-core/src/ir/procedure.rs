@@ -682,6 +682,11 @@ pub struct HirFunction {
     pub calling_convention: CallingConvention,
     /// Integer param register offsets from `.cspec` (mirrors preview options at HIR build).
     pub int_param_offsets: Vec<u64>,
+    /// Float param register offsets from `.cspec`; `float_shares_int_slots`
+    /// says whether index i names the same slot as `int_param_offsets[i]`.
+    pub float_param_offsets: Vec<u64>,
+    /// True when `<group>` pairs the float and integer lists slot-for-slot.
+    pub float_shares_int_slots: bool,
     /// When false, x64-only normalize passes (entry param promotion, etc.) are skipped.
     pub is_64bit: bool,
     /// When true, entry-register reads should stay as hardware registers rather than ABI params.
@@ -705,6 +710,8 @@ impl Default for HirFunction {
             body: Vec::new(),
             calling_convention: CallingConvention::default(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             is_64bit: true,
             suppress_entry_register_params: false,
             callee_observed_max_arity: IndexMap::new(),

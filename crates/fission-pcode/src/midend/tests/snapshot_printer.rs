@@ -9,6 +9,8 @@ fn snapshot_print_hir_function_minimal() {
     let func = HirFunction {
         name: "f_snapshot".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         params: vec![],
         locals: vec![],
         return_type: NirType::Int {

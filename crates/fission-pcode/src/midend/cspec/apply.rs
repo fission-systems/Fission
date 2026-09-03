@@ -73,6 +73,10 @@ pub fn apply_resolved_proto_to_options(options: &mut NirRenderOptions, proto: &R
     if !proto.int_param_offsets.is_empty() {
         options.cspec_param_offsets = Some(proto.int_param_offsets.clone());
     }
+    if !proto.float_param_offsets.is_empty() {
+        options.cspec_float_param_offsets = Some(proto.float_param_offsets.clone());
+        options.cspec_float_shares_int_slots = proto.float_shares_int_slots;
+    }
     if let Some(base) = proto.stack_arg_base {
         options.cspec_stack_arg_base = Some(base);
     }

@@ -1738,6 +1738,8 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
     let mut func = PreHirFunction {
         name: "test_subfloat".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         params: vec![
             PreHirBinding {
                 name: "x".to_string(),
@@ -1824,6 +1826,8 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     let mut func = PreHirFunction {
         name: "test_or_compare".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         params: vec![],
         locals: vec![
             PreHirBinding {

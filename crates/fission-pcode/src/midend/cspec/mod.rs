@@ -52,6 +52,12 @@ pub enum CspecPentry {
         metatype: Option<String>,
         /// Optional `storage` from parent `<pentry>` (e.g. `"hiddenret"`).
         storage: Option<String>,
+        /// Index of the enclosing `<group>`, if any. Pentries sharing a group
+        /// are alternative storage for the *same* parameter slot -- the Win64
+        /// shape, where slot 0 is `XMM0_Qa` for a float and `RCX` otherwise.
+        /// `None` on an ungrouped pentry (SysV), where each class advances its
+        /// own independent sequence.
+        group: Option<usize>,
     },
     /// `<pentry><addr space="stack" offset="8"/></pentry>` — a stack slot.
     Stack { offset: i64 },
@@ -134,6 +140,19 @@ pub struct ResolvedPrototype {
     pub name: String,
     /// Ordered integer (non-float) parameter register offsets, in REGISTER space.
     pub int_param_offsets: Vec<u64>,
+    /// Ordered float parameter register offsets, in REGISTER space. These are
+    /// the `metatype="float"` `<pentry>` registers the integer list drops.
+    ///
+    /// How the two lists line up is `float_shares_int_slots`: under Win64 the
+    /// `<group>` element pairs `XMM0_Qa` with `RCX` as the *one* first
+    /// parameter, so index i here and index i there name the same slot. SysV
+    /// groups nothing -- an SSE argument and an INTEGER argument each advance
+    /// their own counter, so the lists are independent sequences.
+    pub float_param_offsets: Vec<u64>,
+    /// True when `<group>` pairs each float entry with an integer entry, so
+    /// the two offset lists are alternatives for one slot rather than two
+    /// independent sequences.
+    pub float_shares_int_slots: bool,
     /// Integer return register offset in REGISTER space (primary slot).
     pub return_offset: Option<u64>,
     /// Float/double return register offset in REGISTER space (e.g. x86's
@@ -246,6 +265,7 @@ fn resolve_prototype(
                 name,
                 metatype,
                 storage,
+                ..
             } = pentry
             {
                 if metatype.as_deref() == Some("float") || storage.as_deref() == Some("float") {
@@ -260,6 +280,35 @@ fn resolve_prototype(
             }
         })
         .collect();
+
+    // Float alternatives, dropped from `int_param_offsets` above. When the
+    // prototype uses `<group>`, order them by group index so slot i lines up
+    // with `int_param_offsets[i]`; otherwise keep document order.
+    let mut grouped_floats: Vec<(Option<usize>, u64)> = proto
+        .input
+        .iter()
+        .filter_map(|pentry| {
+            let CspecPentry::Register {
+                name,
+                metatype,
+                storage,
+                group,
+            } = pentry
+            else {
+                return None;
+            };
+            if metatype.as_deref() != Some("float") && storage.as_deref() != Some("float") {
+                return None;
+            }
+            resolve_reg_offset(name, reg_map).map(|off| (*group, off))
+        })
+        .collect();
+    let float_shares_int_slots =
+        !grouped_floats.is_empty() && grouped_floats.iter().all(|(g, _)| g.is_some());
+    if float_shares_int_slots {
+        grouped_floats.sort_by_key(|(g, _)| g.unwrap_or(usize::MAX));
+    }
+    let float_param_offsets: Vec<u64> = grouped_floats.into_iter().map(|(_, off)| off).collect();
 
     let stack_arg_base = proto.input.iter().find_map(|pentry| {
         if let CspecPentry::Stack { offset } = pentry {
@@ -312,6 +361,8 @@ fn resolve_prototype(
     ResolvedPrototype {
         name: proto.name.clone(),
         int_param_offsets,
+        float_param_offsets,
+        float_shares_int_slots,
         return_offset,
         float_return_offset,
         stack_pointer_offset: sp_offset,
@@ -362,6 +413,8 @@ struct CspecParser<'a> {
     cur_pentry_metatype: Option<String>,
     cur_pentry_storage: Option<String>,
     cur_io: Option<IoKind>,
+    cur_group: Option<usize>,
+    next_group_id: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -385,6 +438,8 @@ impl<'a> CspecParser<'a> {
             cur_pentry_metatype: None,
             cur_pentry_storage: None,
             cur_io: None,
+            cur_group: None,
+            next_group_id: 0,
         }
     }
 
@@ -448,6 +503,12 @@ impl<'a> CspecParser<'a> {
             "killedbycall" if self.state == ParseState::Prototype => {
                 self.push(ParseState::KilledByCall);
             }
+            "group" if matches!(self.state, ParseState::Input | ParseState::Output) => {
+                // Not a parse state of its own: `<pentry>` children still match
+                // on Input/Output. We only need the slot index it stamps.
+                self.cur_group = Some(self.next_group_id);
+                self.next_group_id += 1;
+            }
             "pentry" if matches!(self.state, ParseState::Input | ParseState::Output) => {
                 self.cur_pentry_metatype = attrs.get("metatype").cloned();
                 self.cur_pentry_storage = attrs.get("storage").cloned();
@@ -459,6 +520,7 @@ impl<'a> CspecParser<'a> {
                         name: reg_name.clone(),
                         metatype: self.cur_pentry_metatype.clone(),
                         storage: self.cur_pentry_storage.clone(),
+                        group: self.cur_group,
                     };
                     if let Some(proto) = self.cur_proto.as_mut() {
                         match self.cur_io {
@@ -543,12 +605,19 @@ impl<'a> CspecParser<'a> {
                     self.prototypes.push(proto);
                 }
             }
+            "group" if matches!(self.state, ParseState::Input | ParseState::Output) => {
+                self.cur_group = None;
+            }
             "input" if self.state == ParseState::Input => {
                 self.cur_io = None;
+                self.cur_group = None;
+                self.next_group_id = 0;
                 self.pop();
             }
             "output" if self.state == ParseState::Output => {
                 self.cur_io = None;
+                self.cur_group = None;
+                self.next_group_id = 0;
                 self.pop();
             }
             "unaffected" if self.state == ParseState::Unaffected => {
@@ -882,5 +951,60 @@ mod tests {
         reg_map.insert("RAX".into(), (0x00, 8));
         assert_eq!(resolve_reg_offset("rax", &reg_map), Some(0x00));
         assert_eq!(resolve_reg_offset("RAX", &reg_map), Some(0x00));
+    }
+}
+
+#[cfg(test)]
+mod group_slot_tests {
+    use super::*;
+    use std::path::Path;
+
+    fn specs_dir() -> Option<std::path::PathBuf> {
+        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../utils/sleigh-specs/languages/x86");
+        d.is_dir().then(|| d)
+    }
+
+    /// Win64 pairs each float pentry with an integer pentry via `<group>`, so
+    /// the slot lists line up index-for-index.
+    #[test]
+    fn win64_groups_pair_xmm_with_int_per_slot() {
+        let Some(dir) = specs_dir() else { return };
+        let doc = CspecDocument::parse_file(&dir.join("x86-64-win.cspec")).expect("parse");
+        let proto = doc.default_proto.expect("default_proto");
+        let floats: Vec<_> = proto
+            .input
+            .iter()
+            .filter_map(|p| match p {
+                CspecPentry::Register { name, metatype, group, .. }
+                    if metatype.as_deref() == Some("float") =>
+                {
+                    Some((name.clone(), *group))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            floats,
+            vec![
+                ("XMM0_Qa".to_string(), Some(0)),
+                ("XMM1_Qa".to_string(), Some(1)),
+                ("XMM2_Qa".to_string(), Some(2)),
+                ("XMM3_Qa".to_string(), Some(3)),
+            ],
+        );
+    }
+
+    /// SysV groups nothing: the classes are independent sequences, so a float
+    /// pentry carries no group and must not be read as slot 0's alternative.
+    #[test]
+    fn sysv_leaves_float_pentries_ungrouped() {
+        let Some(dir) = specs_dir() else { return };
+        let doc = CspecDocument::parse_file(&dir.join("x86-64-gcc.cspec")).expect("parse");
+        let proto = doc.default_proto.expect("default_proto");
+        assert!(proto.input.iter().all(|p| matches!(
+            p,
+            CspecPentry::Stack { .. } | CspecPentry::Register { group: None, .. }
+        )));
     }
 }

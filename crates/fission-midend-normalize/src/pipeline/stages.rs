@@ -808,6 +808,8 @@ mod tests {
         let mut func = PreHirFunction {
             name: "loop_object_shape".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![PreHirBinding {
                 name: "head".to_string(),
                 ty: NirType::Ptr(Box::new(int(8))),

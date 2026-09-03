@@ -450,6 +450,12 @@ impl<'a> PreviewBuilder<'a> {
             body: Vec::new(),
             calling_convention: self.options.calling_convention,
             int_param_offsets: self.options.cspec_param_offsets.clone().unwrap_or_default(),
+            float_param_offsets: self
+                .options
+                .cspec_float_param_offsets
+                .clone()
+                .unwrap_or_default(),
+            float_shares_int_slots: self.options.cspec_float_shares_int_slots,
             is_64bit: self.options.is_64bit,
             suppress_entry_register_params: self.suppress_entry_register_params,
             ..PreHirFunction::default()
@@ -726,6 +732,12 @@ impl<'a> PreviewBuilder<'a> {
             body,
             calling_convention: self.options.calling_convention,
             int_param_offsets: self.options.cspec_param_offsets.clone().unwrap_or_default(),
+            float_param_offsets: self
+                .options
+                .cspec_float_param_offsets
+                .clone()
+                .unwrap_or_default(),
+            float_shares_int_slots: self.options.cspec_float_shares_int_slots,
             is_64bit: self.options.is_64bit,
             suppress_entry_register_params: self.suppress_entry_register_params,
             callee_observed_max_arity: IndexMap::new(),

@@ -124,6 +124,8 @@ mod tests {
         let func = PreHirFunction {
             name: "wrapper".to_string(),
             int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
             params: vec![empty_binding("param_1")],
             locals: vec![],
             return_type: NirType::Unknown,

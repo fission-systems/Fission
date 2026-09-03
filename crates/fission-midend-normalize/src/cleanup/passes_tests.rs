@@ -1636,6 +1636,8 @@ fn switch_norm_folds_range_check_guard() {
     let mut func = PreHirFunction {
         name: "test_switch_norm".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         body: vec![PreHirStmt::If {
             cond: PreHirExpr::Binary {
                 op: PreHirBinaryOp::Lt,
@@ -1706,6 +1708,8 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
     let mut func = PreHirFunction {
         name: "test_constant_ptr".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         body: vec![
             // Exact match
             PreHirStmt::Assign {
@@ -1770,6 +1774,8 @@ fn condexe_folding_merges_sequential_siblings() {
     let mut func = PreHirFunction {
         name: "test_condexe_siblings".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         body: vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("a".to_string()),
@@ -1823,6 +1829,8 @@ fn condexe_folding_merges_nested_ifs() {
     let mut func = PreHirFunction {
         name: "test_condexe_nested".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         body: vec![PreHirStmt::If {
             cond: PreHirExpr::Var("a".to_string()),
             then_body: vec![PreHirStmt::If {
@@ -1875,6 +1883,8 @@ fn condexe_folding_preserves_safety_on_assignment() {
     let mut func = PreHirFunction {
         name: "test_condexe_safety".to_string(),
         int_param_offsets: Vec::new(),
+        float_param_offsets: Vec::new(),
+        float_shares_int_slots: false,
         body: vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("a".to_string()),
