@@ -919,7 +919,9 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                     }
                 };
                 (
-                    format!("(({ret_ty} (*)())({fn_ptr}))({remaining_args})"),
+                    // `(*)()` asserts an arity of zero since C23; the arity of an
+                    // indirect call is exactly what is not known here.
+                    format!("(({ret_ty} (*)(...))({fn_ptr}))({remaining_args})"),
                     120,
                 )
             } else {
@@ -1520,7 +1522,9 @@ fn print_expr_prec_ctx(
                     }
                 };
                 (
-                    format!("(({ret_ty} (*)())({fn_ptr}))({remaining_args})"),
+                    // `(*)()` asserts an arity of zero since C23; the arity of an
+                    // indirect call is exactly what is not known here.
+                    format!("(({ret_ty} (*)(...))({fn_ptr}))({remaining_args})"),
                     120,
                 )
             } else {
