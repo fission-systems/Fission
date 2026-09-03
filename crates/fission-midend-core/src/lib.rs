@@ -36,7 +36,7 @@ pub use ir::*;
 /// Switch fallthrough sentinel used by structuring and print.
 pub use labels::SWITCH_FALLTHROUGH_SENTINEL;
 
-pub use abi_param::AbiState;
+pub use abi_param::{float_param_bits_for_name, AbiState};
 pub use fission_core::CallingConvention;
 /// Pure HIR helpers.
 pub use util::{

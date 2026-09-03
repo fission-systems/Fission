@@ -168,3 +168,77 @@ fn loongarch32_existing_param_local_becomes_function_param_before_self_call_prun
         "expected self-call argument to survive arity pruning:\n{rendered}"
     );
 }
+
+/// Win64 `<group>` makes `XMM1_Qa` the *second* parameter, not the second
+/// float: it is the alternative storage for the slot `RDX` also serves.
+#[test]
+fn win64_xmm_slot_becomes_the_param_at_its_group_index() {
+    let (float_offsets, shares) = float_params_for(CallingConvention::WindowsX64);
+    let mut func = PreHirFunction {
+        name: "scaled".into(),
+        int_param_offsets: int_params_for(CallingConvention::WindowsX64),
+        float_param_offsets: float_offsets,
+        float_shares_int_slots: shares,
+        params: vec![],
+        locals: vec![binding_temp("prod")],
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("prod".into()),
+                rhs: PreHirExpr::Var("xmm1_qa".into()),
+            },
+            PreHirStmt::Return(Some(PreHirExpr::Var("prod".into()))),
+        ],
+        calling_convention: CallingConvention::WindowsX64,
+        is_64bit: true,
+        ..Default::default()
+    };
+    normalize_hir_function(&mut func);
+    let rendered = print_prehir_function(&func);
+    assert!(
+        rendered.contains("param_2"),
+        "expected XMM1_Qa to promote to slot 2's param, got:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("xmm1_qa"),
+        "expected xmm1_qa to be replaced by its param, got:\n{rendered}"
+    );
+}
+
+/// SysV groups nothing, so a float register's index is not its C parameter
+/// position and there is no slot to promote it into.
+#[test]
+fn sysv_xmm_read_is_not_claimed_as_a_param_slot() {
+    let (float_offsets, shares) = float_params_for(CallingConvention::SystemVAmd64);
+    assert!(
+        !shares,
+        "SysV must not report shared slots; its classes are independent"
+    );
+    let mut func = PreHirFunction {
+        name: "sse".into(),
+        int_param_offsets: int_params_for(CallingConvention::SystemVAmd64),
+        float_param_offsets: float_offsets,
+        float_shares_int_slots: shares,
+        params: vec![],
+        locals: vec![binding_temp("v")],
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("v".into()),
+                rhs: PreHirExpr::Var("xmm1_qa".into()),
+            },
+            PreHirStmt::Return(Some(PreHirExpr::Var("v".into()))),
+        ],
+        calling_convention: CallingConvention::SystemVAmd64,
+        is_64bit: true,
+        ..Default::default()
+    };
+    normalize_hir_function(&mut func);
+    let rendered = print_prehir_function(&func);
+    assert!(
+        !rendered.contains("param_"),
+        "SysV XMM1 is not slot 2; expected no param promotion, got:\n{rendered}"
+    );
+}

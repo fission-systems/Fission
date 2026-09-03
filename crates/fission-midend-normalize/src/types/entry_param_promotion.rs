@@ -6,7 +6,7 @@
 
 use crate::HashSet;
 use fission_midend_core::ir::{NirBindingOrigin, NirType};
-use fission_midend_core::{AbiState, CallingConvention};
+use fission_midend_core::{float_param_bits_for_name, AbiState, CallingConvention};
 use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
 use std::collections::BTreeSet;
@@ -474,7 +474,13 @@ fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
             if only_used_as_bare_store_value(&func.body, &hw) {
                 continue;
             }
-            ensure_param_binding(func, slot, param_ty_for_abi(func));
+            let ty = match float_param_bits_for_name(&hw) {
+                Some(bits) if abi_state_for_func(func).float_param_slot_for_name(&hw).is_some() => {
+                    NirType::Float { bits }
+                }
+                _ => param_ty_for_abi(func),
+            };
+            ensure_param_binding(func, slot, ty);
             renames.push((hw, param_name.clone()));
             promoted = true;
         }
@@ -552,6 +558,10 @@ fn abi_state_for_func(func: &PreHirFunction) -> AbiState {
         None,
         None,
     )
+    .with_float_params(
+        Some(func.float_param_offsets.clone()),
+        func.float_shares_int_slots,
+    )
 }
 
 fn hw_name_for_slot(func: &PreHirFunction, slot: usize) -> Option<String> {
@@ -564,12 +574,15 @@ fn hardware_names_for_slot(func: &PreHirFunction, slot: usize) -> Vec<String> {
     if let Some(hw) = abi.param_hw_name(slot) {
         names.insert(hw);
     }
+    names.extend(abi.float_param_hw_names(slot));
     let mut body_vars = HashSet::default();
     for stmt in &func.body {
         collect_var_names_in_stmt(stmt, &mut body_vars);
     }
     for name in body_vars {
-        if abi.param_slot_for_name(&name) == Some(slot) {
+        if abi.param_slot_for_name(&name) == Some(slot)
+            || abi.float_param_slot_for_name(&name) == Some(slot)
+        {
             names.insert(name);
         }
     }

@@ -13,6 +13,11 @@ pub struct AbiState {
     pub pointer_size: u32,
     pub stack_frame_size: i64,
     pub cspec_param_offsets: Option<Vec<u64>>,
+    /// Float parameter register offsets, parallel to `cspec_param_offsets`
+    /// when `float_shares_int_slots` (Win64's `<group>` pairing).
+    pub cspec_float_param_offsets: Option<Vec<u64>>,
+    /// True when float slot i and integer slot i are the same C parameter.
+    pub float_shares_int_slots: bool,
     pub cspec_stack_arg_base: Option<i64>,
     pub cspec_extrapop: Option<i64>,
     pub frame_pointer_established: bool,
@@ -31,6 +36,8 @@ impl AbiState {
             pointer_size,
             stack_frame_size,
             cspec_param_offsets: None,
+            cspec_float_param_offsets: None,
+            float_shares_int_slots: false,
             cspec_stack_arg_base: None,
             cspec_extrapop: None,
             frame_pointer_established: false,
@@ -52,6 +59,8 @@ impl AbiState {
             pointer_size,
             stack_frame_size,
             cspec_param_offsets,
+            cspec_float_param_offsets: None,
+            float_shares_int_slots: false,
             cspec_stack_arg_base,
             cspec_extrapop,
             frame_pointer_established: false,
@@ -92,6 +101,105 @@ impl AbiState {
 
     pub fn param_name(&self, slot: usize) -> String {
         format!("param_{}", slot + 1)
+    }
+
+    /// Set the float parameter registers and how they line up with the
+    /// integer ones. See `AbiState::float_param_hw_names`.
+    pub fn with_float_params(mut self, offsets: Option<Vec<u64>>, shares_int_slots: bool) -> Self {
+        self.cspec_float_param_offsets = offsets;
+        self.float_shares_int_slots = shares_int_slots;
+        self
+    }
+
+    /// Hardware names of the float register that can carry parameter `slot`.
+    ///
+    /// Only answers when the prototype pairs the classes slot-for-slot -- the
+    /// Win64 `<group>` shape, where the first parameter is `XMM0_Qa` if it is
+    /// floating point and `RCX` otherwise. Under SysV the two classes advance
+    /// independent counters, so a float register's index is *not* its C
+    /// parameter position and there is nothing to answer here.
+    pub fn float_param_hw_names(&self, slot: usize) -> Vec<String> {
+        if !self.float_shares_int_slots {
+            return Vec::new();
+        }
+        let Some(offset) = self
+            .cspec_float_param_offsets
+            .as_deref()
+            .and_then(|offs| offs.get(slot))
+            .copied()
+        else {
+            return Vec::new();
+        };
+        float_hw_names_for_offset(self.abi, offset, self.pointer_size)
+    }
+
+    /// The float slot, if any, whose register is spelled `name`.
+    pub fn float_param_slot_for_name(&self, name: &str) -> Option<usize> {
+        if !self.float_shares_int_slots {
+            return None;
+        }
+        let want = name.to_ascii_lowercase();
+        let offsets = self.cspec_float_param_offsets.as_deref()?;
+        offsets.iter().position(|&off| {
+            float_hw_names_for_offset(self.abi, off, self.pointer_size)
+                .iter()
+                .any(|candidate| candidate.to_ascii_lowercase() == want)
+        })
+    }
+}
+
+/// x86 `REGISTER`-space names for the low lane of an XMM register.
+///
+/// `ia.sinc` lays XMM out at `offset=0x1200` in rows of 16 bytes, so lane `a`
+/// of `XMMn` sits at `0x1200 + 0x40 * n` under every size decomposition.
+/// `.cspec` names the 8-byte spelling (`XMMn_Qa`) and declares `minsize="4"`,
+/// so a `float` argument arrives at the same offset under the 4-byte spelling
+/// (`XMMn_Da`) instead. Both are returned: they are aliases of one location,
+/// and which one a body mentions is just the width of the argument it carries.
+/// Only lane `a` is a parameter slot -- the high lanes never carry a scalar.
+fn float_hw_names_for_offset(abi: CallingConvention, offset: u64, pointer_size: u32) -> Vec<String> {
+    let is_x86 = matches!(
+        abi,
+        CallingConvention::X86_32
+            | CallingConvention::WindowsX64
+            | CallingConvention::SystemVAmd64
+    ) || pointer_size == 8;
+    if !is_x86 {
+        return Vec::new();
+    }
+    const XMM_QA_BASE: u64 = 0x1200;
+    const XMM_STRIDE: u64 = 0x40;
+    if offset < XMM_QA_BASE {
+        return Vec::new();
+    }
+    let delta = offset - XMM_QA_BASE;
+    if delta % XMM_STRIDE != 0 {
+        return Vec::new();
+    }
+    let index = delta / XMM_STRIDE;
+    if index > 15 {
+        return Vec::new();
+    }
+    vec![
+        format!("XMM{index}_Qa"),
+        format!("xmm{index}_qa"),
+        format!("XMM{index}_Da"),
+        format!("xmm{index}_da"),
+    ]
+}
+
+/// Width in bits of the float a parameter register spelled `name` carries:
+/// 64 for the `_Qa` (double) spelling, 32 for `_Da` (float). `None` when the
+/// name is not an XMM parameter lane.
+pub fn float_param_bits_for_name(name: &str) -> Option<u32> {
+    let lowered = name.to_ascii_lowercase();
+    if !lowered.starts_with("xmm") {
+        return None;
+    }
+    match lowered.rsplit_once('_') {
+        Some((_, "qa")) => Some(64),
+        Some((_, "da")) => Some(32),
+        _ => None,
     }
 }
 

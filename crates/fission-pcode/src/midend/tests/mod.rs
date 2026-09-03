@@ -190,6 +190,16 @@ pub(super) fn int_params_for(abi: CallingConvention) -> Vec<u64> {
         .unwrap_or_default()
 }
 
+/// Float param register offsets from the ABI's `.cspec`, and whether its
+/// `<group>` elements pair them with the integer list slot-for-slot.
+pub(super) fn float_params_for(abi: CallingConvention) -> (Vec<u64>, bool) {
+    let options = preview_options_for(abi);
+    (
+        options.cspec_float_param_offsets.unwrap_or_default(),
+        options.cspec_float_shares_int_slots,
+    )
+}
+
 pub(super) fn abi_state_for(abi: CallingConvention, stack_frame_size: i64) -> AbiState {
     let options = preview_options_for(abi);
     AbiState::new_with_cspec(
