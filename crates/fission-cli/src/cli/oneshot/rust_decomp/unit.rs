@@ -196,11 +196,17 @@ fn definition_line(body: &str) -> Option<&str> {
         .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with("//"))
 }
 
-/// The name a `extern <type> <name>();` declaration declares.
+/// The name a `extern <type> <name>(...);` declaration declares.
+///
+/// The parameter list is `(...)` -- "arity unknown" -- and used to be `()`,
+/// which said the same thing until C23 made it mean `(void)`. Matching only
+/// the old spelling silently stopped recognising these as externs, so the
+/// "the unit defines it, skip the extern" rule below never fired and the unit
+/// declared 60 of its own definitions a second time.
 fn extern_function_name(decl: &str) -> Option<&str> {
     let rest = decl.trim().strip_prefix("extern ")?;
     let open = rest.find('(')?;
-    if !rest[open..].starts_with("()") {
+    if !(rest[open..].starts_with("()") || rest[open..].starts_with("(...)")) {
         return None;
     }
     identifier_before(&rest[..open])

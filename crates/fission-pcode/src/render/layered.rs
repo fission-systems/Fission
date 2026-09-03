@@ -543,15 +543,21 @@ fn merge_opaque_pcodeop_return_type(existing: &NirType, next: &NirType) -> NirTy
 /// differently from the original, and for a rebuild that is worse than not
 /// compiling. The parameter list is left open because the call sites are the
 /// only evidence of arity, and they disagree often enough not to be trusted.
+///
+/// "Open" has to be written `(...)`, not `()`. An empty list once meant
+/// "unspecified"; since C23 it means `(void)`, so `extern T f();` now asserts
+/// the arity is zero and every call with arguments is an error rather than a
+/// warning. On a mingw-built PE that single spelling produced 68 of the unit's
+/// 170 errors -- 28 from `__fission_branchind` alone.
 fn render_called_extern(target: &str, return_ty: &NirType) -> String {
     let return_type = opaque_pcodeop_return_type_name(return_ty);
-    format!("extern {return_type} {target}();\n")
+    format!("extern {return_type} {target}(...);\n")
 }
 
 fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
     let return_type = opaque_pcodeop_return_type_name(return_ty);
     let return_stmt = opaque_pcodeop_default_return(return_ty);
-    format!("static inline {return_type} {target}() {{ {return_stmt} }}\n")
+    format!("static inline {return_type} {target}(...) {{ {return_stmt} }}\n")
 }
 
 fn opaque_pcodeop_return_type_name(return_ty: &NirType) -> String {
@@ -1828,7 +1834,7 @@ mod global_decl_tests {
         );
         assert!(
             rendered.contains(
-                "static inline fission_agg16 __pcodeop_294() { fission_agg16 out = {0}; return out; }"
+                "static inline fission_agg16 __pcodeop_294(...) { fission_agg16 out = {0}; return out; }"
             ),
             "{rendered}"
         );
