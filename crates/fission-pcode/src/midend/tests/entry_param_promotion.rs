@@ -242,3 +242,69 @@ fn sysv_xmm_read_is_not_claimed_as_a_param_slot() {
         "SysV XMM1 is not slot 2; expected no param promotion, got:\n{rendered}"
     );
 }
+
+/// The ARM32 `push {rN, lr}` padding idiom: a register spilled once to the
+/// *frame* and never read back is alignment padding, not an argument.
+#[test]
+fn arm32_frame_spilled_register_is_still_not_a_param() {
+    let mut func = PreHirFunction {
+        name: "pad".into(),
+        int_param_offsets: int_params_for(CallingConvention::Arm32),
+        params: vec![],
+        locals: vec![],
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("sp".into())),
+                    ty: NirType::Unknown,
+                },
+                rhs: PreHirExpr::Var("r3".into()),
+            },
+            PreHirStmt::Return(None),
+        ],
+        calling_convention: CallingConvention::Arm32,
+        is_64bit: false,
+        ..Default::default()
+    };
+    normalize_hir_function(&mut func);
+    let rendered = print_prehir_function(&func);
+    assert!(
+        !rendered.contains("param_"),
+        "frame-spilled padding must not promote, got:\n{rendered}"
+    );
+}
+
+/// ... but the same one-store-no-read shape through an *incoming pointer* is
+/// `void store(T *out, T v)`, whose stored value is a genuine argument.
+#[test]
+fn arm32_store_through_param_pointer_is_a_param() {
+    let mut func = PreHirFunction {
+        name: "out".into(),
+        int_param_offsets: int_params_for(CallingConvention::Arm32),
+        params: vec![],
+        locals: vec![],
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("r0".into())),
+                    ty: NirType::Unknown,
+                },
+                rhs: PreHirExpr::Var("r1".into()),
+            },
+            PreHirStmt::Return(None),
+        ],
+        calling_convention: CallingConvention::Arm32,
+        is_64bit: false,
+        ..Default::default()
+    };
+    normalize_hir_function(&mut func);
+    let rendered = print_prehir_function(&func);
+    assert!(
+        rendered.contains("param_2"),
+        "value stored through an incoming pointer is a param, got:\n{rendered}"
+    );
+}

@@ -149,6 +149,35 @@ fn only_used_as_bare_store_value(stmts: &[PreHirStmt], target: &str) -> bool {
         .any(|addr| stmts_read_through_address(stmts, addr))
 }
 
+/// True when every bare store of `target` writes through a *parameter*
+/// pointer rather than the frame.
+///
+/// `only_used_as_bare_store_value` exists for the ARM32 `push {rN, lr}`
+/// padding idiom, where the register is spilled to its home slot and never
+/// read back. That idiom is about the *frame*: `void store(double *out,
+/// double v) { *out = v; }` has the same one-store-no-read shape, but the
+/// address is the incoming out-pointer, so the store is the whole point of
+/// the function and its value register is a genuine argument.
+fn stored_through_param_pointer(func: &PreHirFunction, target: &str) -> bool {
+    let mut spilled_to = Vec::new();
+    collect_spill_addresses(&func.body, target, &mut spilled_to);
+    if spilled_to.is_empty() {
+        return false;
+    }
+    let abi = abi_state_for_func(func);
+    spilled_to.iter().all(|addr| {
+        let mut names = HashSet::default();
+        collect_var_names_in_expr(addr, &mut names);
+        !names.is_empty()
+            && names.iter().all(|name| {
+                abi.param_slot_for_name(name).is_some()
+                    || abi.float_param_slot_for_name(name).is_some()
+                    || func.params.iter().any(|p| &p.name == name)
+                    || name.starts_with("param_")
+            })
+    })
+}
+
 /// Addresses `target` was stored to as a bare value (`*addr = target;`).
 fn collect_spill_addresses<'a>(
     stmts: &'a [PreHirStmt],
@@ -471,7 +500,9 @@ fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
             {
                 continue;
             }
-            if only_used_as_bare_store_value(&func.body, &hw) {
+            if only_used_as_bare_store_value(&func.body, &hw)
+                && !stored_through_param_pointer(func, &hw)
+            {
                 continue;
             }
             let ty = match float_param_bits_for_name(&hw) {
