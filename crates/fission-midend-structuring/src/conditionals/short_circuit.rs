@@ -1,6 +1,6 @@
 //! Short-circuit and/or conditional-chain free functions.
 
-use super::{is_trivial_structuring_stmt, log_short_circuit_cache, shared_forward_linear_exit};
+use super::{fold_prefix_into_cond, is_trivial_structuring_stmt, log_short_circuit_cache, shared_forward_linear_exit};
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
 use fission_midend_core::ir::MlilPreviewError;
@@ -37,6 +37,7 @@ pub fn try_lower_short_circuit_and(
 
     loop {
         let cond_prefix = host.lower_block_stmts(current_idx)?;
+        let mut chain_prefix: Vec<PreHirStmt> = Vec::new();
         if current_idx == idx {
             if !cond_prefix.iter().all(is_trivial_structuring_stmt) {
                 host.bump_condition_fold_rejected_side_effect();
@@ -44,8 +45,15 @@ pub fn try_lower_short_circuit_and(
             }
             first_prefix = cond_prefix;
         } else if !cond_prefix.is_empty() {
-            host.bump_condition_fold_rejected_side_effect();
-            return Ok(None);
+            // Not automatically fatal: statements that only define this
+            // block's own condition fold back into it (see
+            // `fold_prefix_into_cond`). Anything else really does have to run
+            // between the tests, and cannot be hoisted above them.
+            if !cond_prefix.iter().all(is_trivial_structuring_stmt) {
+                host.bump_condition_fold_rejected_side_effect();
+                return Ok(None);
+            }
+            chain_prefix = cond_prefix;
         }
 
         let Some(next_idx) = host.fallthrough_index(current_idx) else {
@@ -58,6 +66,15 @@ pub fn try_lower_short_circuit_and(
         } = host.lower_block_terminator(current_idx)?
         else {
             return Ok(None);
+        };
+        let cond = if chain_prefix.is_empty() {
+            cond
+        } else {
+            let Some(folded) = fold_prefix_into_cond(&chain_prefix, &cond) else {
+                host.bump_condition_fold_rejected_side_effect();
+                return Ok(None);
+            };
+            folded
         };
         if false_target != Some(host.block_target_key(next_idx)) {
             return Ok(None);
@@ -133,6 +150,7 @@ pub fn try_lower_short_circuit_and_else(
 
     loop {
         let cond_prefix = host.lower_block_stmts(current_idx)?;
+        let mut chain_prefix: Vec<PreHirStmt> = Vec::new();
         if current_idx == idx {
             if !cond_prefix.iter().all(is_trivial_structuring_stmt) {
                 host.bump_condition_fold_rejected_side_effect();
@@ -140,8 +158,11 @@ pub fn try_lower_short_circuit_and_else(
             }
             first_prefix = cond_prefix;
         } else if !cond_prefix.is_empty() {
-            host.bump_condition_fold_rejected_side_effect();
-            return Ok(None);
+            if !cond_prefix.iter().all(is_trivial_structuring_stmt) {
+                host.bump_condition_fold_rejected_side_effect();
+                return Ok(None);
+            }
+            chain_prefix = cond_prefix;
         }
 
         let Some(next_idx) = host.fallthrough_index(current_idx) else {
@@ -154,6 +175,15 @@ pub fn try_lower_short_circuit_and_else(
         } = host.lower_block_terminator(current_idx)?
         else {
             return Ok(None);
+        };
+        let cond = if chain_prefix.is_empty() {
+            cond
+        } else {
+            let Some(folded) = fold_prefix_into_cond(&chain_prefix, &cond) else {
+                host.bump_condition_fold_rejected_side_effect();
+                return Ok(None);
+            };
+            folded
         };
         if false_target != Some(host.block_target_key(next_idx)) {
             return Ok(None);
@@ -349,7 +379,7 @@ pub fn try_lower_short_circuit_or(
         }
 
         let next_prefix = host.lower_block_stmts(next_idx)?;
-        if !next_prefix.is_empty() {
+        if !next_prefix.is_empty() && !next_prefix.iter().all(is_trivial_structuring_stmt) {
             host.bump_condition_fold_rejected_side_effect();
             return Ok(None);
         }
@@ -359,6 +389,15 @@ pub fn try_lower_short_circuit_or(
         } = host.lower_block_terminator(next_idx)?
         else {
             return Ok(None);
+        };
+        let cond = if next_prefix.is_empty() {
+            cond
+        } else {
+            let Some(folded) = fold_prefix_into_cond(&next_prefix, &cond) else {
+                host.bump_condition_fold_rejected_side_effect();
+                return Ok(None);
+            };
+            folded
         };
         conds.push(cond);
         let Some(chain_next_idx) = host.fallthrough_index(next_idx) else {

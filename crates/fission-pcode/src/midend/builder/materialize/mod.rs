@@ -989,6 +989,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
             let mut set = std::collections::HashSet::new();
+
             for phis in self.scalar_ssa.phis.values() {
                 for phi in phis {
                     if !needed.contains(&phi.output) {

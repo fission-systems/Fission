@@ -49,6 +49,131 @@ pub fn is_trivial_structuring_stmt(stmt: &PreHirStmt) -> bool {
     )
 }
 
+/// Fold a short-circuit chain block's own statements back into its condition.
+///
+/// A chain block must contribute nothing of its own: `b` in `a && b` runs only
+/// when `a` held, so hoisting its computation above the `if` would run it
+/// unconditionally. A block whose statements are only pure `t = <expr>;`
+/// definitions feeding that same block's condition *does* contribute nothing --
+/// substituting them back into the condition reproduces the short circuit's own
+/// evaluation order exactly, and the names disappear with the block.
+///
+/// Returns `None` unless every statement qualifies: a plain `Var = rhs` with no
+/// call in `rhs` (a call is a side effect, and evaluating it inside a condition
+/// moves when it happens), and a target read at most once in what has been
+/// folded so far, so nothing is duplicated.
+pub fn fold_prefix_into_cond(prefix: &[PreHirStmt], cond: &PreHirExpr) -> Option<PreHirExpr> {
+    let mut folded = cond.clone();
+    for stmt in prefix.iter().rev() {
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } = stmt
+        else {
+            return None;
+        };
+        if expr_contains_call(rhs) {
+            return None;
+        }
+        if count_var_reads(&folded, name) != 1 {
+            return None;
+        }
+        folded = substitute_var(&folded, name, rhs);
+    }
+    Some(folded)
+}
+
+fn expr_contains_call(e: &PreHirExpr) -> bool {
+    match e {
+        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => false,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => expr_contains_call(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_contains_call(lhs) || expr_contains_call(rhs),
+        PreHirExpr::Index { base, index, .. } => {
+            expr_contains_call(base) || expr_contains_call(index)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_call(cond)
+                || expr_contains_call(then_expr)
+                || expr_contains_call(else_expr)
+        }
+    }
+}
+
+fn count_var_reads(e: &PreHirExpr, name: &str) -> usize {
+    match e {
+        PreHirExpr::Var(n) => usize::from(n == name),
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) | PreHirExpr::Const(..) => 0,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => count_var_reads(expr, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            count_var_reads(lhs, name) + count_var_reads(rhs, name)
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            count_var_reads(base, name) + count_var_reads(index, name)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_reads(cond, name)
+                + count_var_reads(then_expr, name)
+                + count_var_reads(else_expr, name)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().map(|a| count_var_reads(a, name)).sum(),
+    }
+}
+
+fn substitute_var(e: &PreHirExpr, name: &str, value: &PreHirExpr) -> PreHirExpr {
+    let sub = |x: &PreHirExpr| Box::new(substitute_var(x, name, value));
+    match e {
+        PreHirExpr::Var(n) if n == name => value.clone(),
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(..) => e.clone(),
+        PreHirExpr::Cast { expr, ty } => PreHirExpr::Cast {
+            expr: sub(expr),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Unary { op, expr, ty } => PreHirExpr::Unary {
+            op: *op,
+            expr: sub(expr),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Load { ptr, ty } => PreHirExpr::Load {
+            ptr: sub(ptr),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Binary { op, lhs, rhs, ty } => PreHirExpr::Binary {
+            op: *op,
+            lhs: sub(lhs),
+            rhs: sub(rhs),
+            ty: ty.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
 fn forward_join_idx_from_address(
     host: &impl StructuringHost,
     origin_idx: usize,
