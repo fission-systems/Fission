@@ -1190,6 +1190,20 @@ pub fn resolve_terminal_tail_exit_stmt(
     let mut current = target_label.to_string();
     let mut seen = HashSet::default();
 
+    // Both per-hop questions -- how many gotos target this label, and where is
+    // its `Label` statement -- are answered for *every* label by one pass, so
+    // index once instead of walking the body once per hop. This function is
+    // called from six sites and is one of the three roughly equal shares of
+    // `openssh-portable/ssh`'s `main`.
+    let mut goto_counts: HashMap<String, usize> = HashMap::default();
+    let mut label_positions: HashMap<String, usize> = HashMap::default();
+    for (idx, stmt) in body.iter().enumerate() {
+        collect_stmt_goto_counts(stmt, &mut goto_counts);
+        if let PreHirStmt::Label(label) = stmt {
+            label_positions.entry(label.clone()).or_insert(idx);
+        }
+    }
+
     loop {
         if !seen.insert(current.clone()) {
             return None;
@@ -1197,17 +1211,12 @@ pub fn resolve_terminal_tail_exit_stmt(
 
         // Safe subcase guard: no external re-entry into any hop label.
         // The only allowed predecessor is the unique previous hop goto.
-        let ref_count = body
-            .iter()
-            .map(|stmt| stmt_contains_goto_label(stmt, &current))
-            .sum::<usize>();
+        let ref_count = goto_counts.get(&current).copied().unwrap_or(0);
         if ref_count != 1 {
             return None;
         }
 
-        let label_idx = body
-            .iter()
-            .position(|stmt| matches!(stmt, PreHirStmt::Label(label) if label == &current))?;
+        let label_idx = label_positions.get(&current).copied()?;
         let next_label_idx = body[label_idx + 1..]
             .iter()
             .position(|stmt| matches!(stmt, PreHirStmt::Label(_)))
