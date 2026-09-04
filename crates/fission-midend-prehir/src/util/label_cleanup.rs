@@ -16,7 +16,17 @@ pub fn cleanup_redundant_labels(
         // adjacent local alias here.
         aliases.retain(|alias, _| !referenced.contains(alias));
     }
-    let body = rewrite_stmt_labels(body, &aliases);
+    // `rewrite_stmt_labels` deep-copies the whole subtree (`Rc::unwrap_or_clone`
+    // at every nesting level), so running it with nothing to rewrite is a full
+    // clone for no change. Cleanup is called per normalize pass and recurses
+    // into every nested body, so on a large function those identity copies are
+    // most of the work: `openssh-portable/ssh`'s `main` (1,606 block lowerings)
+    // spent its time in here, not in lowering.
+    let body = if aliases.is_empty() {
+        body
+    } else {
+        rewrite_stmt_labels(body, &aliases)
+    };
     let local_refs = if global_refs.is_none() {
         Some(collect_referenced_labels(&body))
     } else {
