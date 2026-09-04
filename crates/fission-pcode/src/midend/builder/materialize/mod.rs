@@ -579,7 +579,24 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let stage_started = diag.then(std::time::Instant::now);
-        body.extend(self.lower_block_ops_range(block, 0, block.ops.len(), terminator_index)?);
+        let lowered = self.lower_block_ops_range(block, 0, block.ops.len(), terminator_index)?;
+        if diag {
+            // Which *statement* carries a runaway expression, so a blow-up can
+            // be attributed to one op rather than to the block as a whole.
+            for (i, stmt) in lowered.iter().enumerate() {
+                let size = diag_stmt_expr_size(stmt);
+                if size > 200 {
+                    eprintln!(
+                        "[DIAG] huge stmt: block={} stmt={} expr_nodes={} target={}",
+                        block_idx,
+                        i,
+                        size,
+                        diag_stmt_target(stmt)
+                    );
+                }
+            }
+        }
+        body.extend(lowered);
         if let Some(started) = stage_started {
             eprintln!(
                 "[DIAG] lower_block_stmts ops: block={} ops={} elapsed_ms={:.3}",
@@ -4608,4 +4625,29 @@ mod materialize_tests;
 
 pub(super) fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     self::incremental::refine_partitions(accesses)
+}
+
+
+/// Expression nodes carried by one statement -- diagnostics only, so a runaway
+/// expression can be attributed to the statement that carries it.
+#[allow(dead_code)]
+fn diag_stmt_expr_size(stmt: &PreHirStmt) -> usize {
+    use fission_midend_structuring::structuring_quality::expr_size;
+    match stmt {
+        PreHirStmt::Assign { rhs, .. } => expr_size(rhs),
+        PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => expr_size(e),
+        PreHirStmt::If { cond, .. } => expr_size(cond),
+        PreHirStmt::While { cond, .. } | PreHirStmt::DoWhile { cond, .. } => expr_size(cond),
+        PreHirStmt::Switch { expr, .. } => expr_size(expr),
+        _ => 0,
+    }
+}
+
+/// The name a statement writes to, for the runaway-expression diagnostic.
+#[allow(dead_code)]
+fn diag_stmt_target(stmt: &PreHirStmt) -> String {
+    match stmt {
+        PreHirStmt::Assign { lhs, .. } => format!("{lhs:?}"),
+        other => format!("{:?}", std::mem::discriminant(other)),
+    }
 }

@@ -17,6 +17,57 @@ use fission_midend_core::ir::{SsaUseSite, SsaValueDefinition};
 /// normalization, so keep the fallback well below that measured output cliff.
 const VARNODE_LOWERING_WORK_BUDGET: u64 = 20_000;
 
+/// Node ceiling for one lowered varnode expression.
+///
+/// The work budget above bounds how many times `lower_varnode_inner` is
+/// *entered*; it does not bound how large the expression that comes back is.
+/// Those are different quantities once `visiting` is path-scoped: a
+/// loop-carried accumulator resolves through its own phi on every path, and
+/// 20,000 units of work still produced a **31,522-node** right-hand side for
+/// `lhblFlashWaitComplete` (4 source CFG nodes; every other decompiler scores
+/// it perfectly) and a 201,839-character line for `coreutils/sort`'s `merge`.
+/// Those two shapes are about a third of Fission's excess structure distance
+/// on the full DecBench sweep.
+///
+/// So bound the output too, and fall back to the same named binding the work
+/// budget already falls back to -- a variable reference is what the source had
+/// there anyway.
+const VARNODE_LOWERING_EXPR_NODE_CAP: usize = 256;
+
+/// Whether `e` has more than `cap` nodes, counted with an early exit so the
+/// check costs O(cap) rather than O(size of e).
+fn expr_exceeds_node_cap(e: &PreHirExpr, cap: usize) -> bool {
+    fn walk(e: &PreHirExpr, left: &mut usize) -> bool {
+        if *left == 0 {
+            return true;
+        }
+        *left -= 1;
+        match e {
+            PreHirExpr::Var(_)
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(..) => false,
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. } => walk(expr, left),
+            PreHirExpr::Binary { lhs, rhs, .. } => walk(lhs, left) || walk(rhs, left),
+            PreHirExpr::Index { base, index, .. } => walk(base, left) || walk(index, left),
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => walk(cond, left) || walk(then_expr, left) || walk(else_expr, left),
+            PreHirExpr::Call { args, .. } => args.iter().any(|a| walk(a, left)),
+        }
+    }
+    let mut left = cap;
+    walk(e, &mut left)
+}
+
 const CALL_TARGET_CONST_FOLD_BUDGET: usize = 16;
 const CALL_TARGET_DESCRIPTOR_RECOVERY_BUDGET: usize = 16;
 
@@ -2254,6 +2305,14 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(PreHirExpr::Var(cycle_name));
         }
 
+        let fallback_name = || -> Option<String> {
+            if is_unique_space_id(vn.space_id) {
+                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size).map(ToString::to_string)
+            } else {
+                None
+            }
+        };
+
         let result = match def_site {
             Some((site, op)) => self
                 .with_lowering_site(site, |this| this.lower_def_op(op, visiting))
@@ -2296,6 +2355,18 @@ impl<'a> PreviewBuilder<'a> {
             }
         };
         visiting.remove(&key);
+        // Bound the *output*, not just the work spent producing it. Anything
+        // past the cap becomes the named binding for this storage, which is
+        // what the register was called before it was inlined.
+        if let Ok(expr) = &result
+            && expr_exceeds_node_cap(expr, VARNODE_LOWERING_EXPR_NODE_CAP)
+        {
+            let name = fallback_name().unwrap_or_else(|| {
+                let name = format!("tmp_{:x}", vn.offset);
+                self.ensure_live_register_binding(&name, vn.size)
+            });
+            return Ok(PreHirExpr::Var(name));
+        }
         result
     }
 
