@@ -950,6 +950,66 @@ impl<'a> PreviewBuilder<'a> {
         runtime
     }
 
+    fn output_is_read_by_phi(&mut self, block_idx: Option<usize>, op_idx: usize) -> bool {
+        let Some(block_idx) = block_idx else { return false };
+        if self.phi_operand_values.is_none() {
+            // Only phis whose own output is actually consumed. Ghidra places
+            // `MULTIEQUAL` on a liveness-pruned frontier, so a value that dies
+            // at the merge is never a phi operand there; ours places one for
+            // every storage crossing the merge, so a pure branch condition --
+            // read by its own CBranch and dead after -- looks like a phi
+            // operand and would be forced explicit for nothing, which costs
+            // short-circuit folding.
+            // A phi is *needed* when a real op reads its output, or when a
+            // needed phi has it as an operand. Seeded from real reads and run
+            // to a fixpoint: counting phi operands as "consumed" up front lets
+            // a dead phi keep another dead phi alive, which is how a pure
+            // branch condition kept looking live.
+            let mut needed: std::collections::HashSet<SsaValueId> =
+                std::collections::HashSet::new();
+            for pieces in self.scalar_ssa.operation_inputs.values() {
+                for piece in pieces {
+                    needed.insert(piece.value);
+                }
+            }
+            loop {
+                let mut grew = false;
+                for phis in self.scalar_ssa.phis.values() {
+                    for phi in phis {
+                        if !needed.contains(&phi.output) {
+                            continue;
+                        }
+                        for operand in &phi.operands {
+                            grew |= needed.insert(operand.value);
+                        }
+                    }
+                }
+                if !grew {
+                    break;
+                }
+            }
+            let mut set = std::collections::HashSet::new();
+            for phis in self.scalar_ssa.phis.values() {
+                for phi in phis {
+                    if !needed.contains(&phi.output) {
+                        continue;
+                    }
+                    for operand in &phi.operands {
+                        set.insert(operand.value);
+                    }
+                }
+            }
+            self.phi_operand_values = Some(set);
+        }
+        let Some(values) = self.phi_operand_values.as_ref() else { return false };
+        if values.is_empty() { return false; }
+        let key = fission_midend_core::ir::SsaOpSite { block: block_idx as u32, op: op_idx as u32 };
+        self.scalar_ssa
+            .operation_outputs
+            .get(&key)
+            .is_some_and(|pieces| pieces.iter().any(|piece| values.contains(&piece.value)))
+    }
+
     fn maybe_materialize_output_stmt(
         &mut self,
         block_addr: u64,
@@ -1107,6 +1167,7 @@ impl<'a> PreviewBuilder<'a> {
         if replacement_plan.is_complete()
             && loop_carried_lhs_name.is_none()
             && merge_lhs_name.is_none()
+            && !self.output_is_read_by_phi(block_idx_for_rhs, op_idx)
             // SLEIGH Return inputs are control/stack targets, so same-block
             // consumer analysis under-counts ABI live-out. Preserve the
             // binding only when this exact definition has a kill-free path to

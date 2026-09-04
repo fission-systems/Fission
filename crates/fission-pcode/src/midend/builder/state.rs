@@ -230,4 +230,5 @@ pub(crate) struct PreviewBuilder<'a> {
     /// `lower_varnode_inner` was entered more than 14 million times and the
     /// function never finished, holding 1.4GB.
     pub(crate) varnode_lowering_work: u64,
+    pub(crate) phi_operand_values: Option<std::collections::HashSet<SsaValueId>>,
 }
