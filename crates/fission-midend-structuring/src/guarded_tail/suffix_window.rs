@@ -134,6 +134,7 @@ pub fn classify_suffix_stmt_with_diag(
     current_label_idx: usize,
     terminal_label_idx: usize,
     next_label: &str,
+    owned_safe_memo: &mut OwnedSafeMemo,
 ) -> Result<(), SuffixTailRejection> {
     if is_ignorable_discovery_stmt(stmt)
         || matches!(stmt, PreHirStmt::Block(inner) if inner.is_empty())
@@ -260,7 +261,9 @@ pub fn classify_suffix_stmt_with_diag(
     if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
         let call_kind = classify_suffix_call_effect_shape(stmt);
         if call_kind == SuffixCallEffectShapeKind::PureKnownHelperCall
-            && suffix_known_pure_helper_call_is_owned_safe(body, stmt_idx, terminal_label_idx)
+            && *owned_safe_memo.entry(stmt_idx).or_insert_with(|| {
+                suffix_known_pure_helper_call_is_owned_safe(body, stmt_idx, terminal_label_idx)
+            })
         {
             if guarded_tail_diag_enabled() {
                 eprintln!(
@@ -318,6 +321,7 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
     start_label_idx: usize,
     terminal_label_idx: usize,
     referenced: &HashMap<String, usize>,
+    owned_safe_memo: &mut OwnedSafeMemo,
 ) -> Result<(), SuffixTailRejection> {
     if start_label_idx >= terminal_label_idx {
         return Err(SuffixTailRejection::SuffixHasLabelCrossing {
@@ -433,6 +437,7 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
                 current_label_idx,
                 terminal_label_idx,
                 next_label,
+                owned_safe_memo,
             )?;
         }
 
@@ -452,6 +457,7 @@ pub fn candidate_window_can_shrink_to_label_with_diag(
     candidate_label_idx: usize,
     terminal_label_idx: usize,
     referenced: &HashMap<String, usize>,
+    owned_safe_memo: &mut OwnedSafeMemo,
 ) -> Result<(), SuffixTailRejection> {
     if candidate_label_idx >= terminal_label_idx {
         return Err(SuffixTailRejection::SuffixHasLabelCrossing {
@@ -467,6 +473,7 @@ pub fn candidate_window_can_shrink_to_label_with_diag(
         candidate_label_idx,
         terminal_label_idx,
         referenced,
+        owned_safe_memo,
     );
     if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
         return match suffix_result {
@@ -480,6 +487,16 @@ pub fn candidate_window_can_shrink_to_label_with_diag(
     suffix_result
 }
 
+/// Memo for `suffix_known_pure_helper_call_is_owned_safe`, keyed by statement
+/// index.
+///
+/// That proof walks the rest of the body three times and is asked about the
+/// same statement once per candidate label, so on a body with many labels it
+/// is the dominant cost. `body` and `terminal_label_idx` are fixed for the
+/// whole of `find_earliest_owned_join_label_with_diag`, which is what makes
+/// the statement index a complete key.
+pub type OwnedSafeMemo = HashMap<usize, bool>;
+
 pub fn find_earliest_owned_join_label_with_diag(
     host: &mut impl StructuringHost,
     body: &[PreHirStmt],
@@ -491,6 +508,7 @@ pub fn find_earliest_owned_join_label_with_diag(
     if anchor_idx + 1 >= terminal_label_idx {
         return None;
     }
+    let mut owned_safe_memo = OwnedSafeMemo::default();
 
     for candidate_label_idx in anchor_idx + 1..terminal_label_idx {
         let PreHirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
@@ -505,6 +523,7 @@ pub fn find_earliest_owned_join_label_with_diag(
             candidate_label_idx,
             terminal_label_idx,
             referenced,
+            &mut owned_safe_memo,
         );
         let suffix_safe = suffix_result.is_ok();
         if trace_enabled {

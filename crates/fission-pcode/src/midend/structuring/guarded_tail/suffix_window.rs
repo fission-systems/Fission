@@ -27,6 +27,10 @@ impl<'a> PreviewBuilder<'a> {
             current_label_idx,
             terminal_label_idx,
             next_label,
+            // The trait adapter has no candidate loop above it, so each call
+            // gets its own memo; the sharing that matters happens inside
+            // `find_earliest_owned_join_label_with_diag`.
+            &mut fission_midend_structuring::guarded_tail::OwnedSafeMemo::default(),
         )
     }
 
@@ -47,6 +51,7 @@ impl<'a> PreviewBuilder<'a> {
             start_label_idx,
             terminal_label_idx,
             referenced,
+            &mut fission_midend_structuring::guarded_tail::OwnedSafeMemo::default(),
         )
     }
 
@@ -67,6 +72,7 @@ impl<'a> PreviewBuilder<'a> {
             candidate_label_idx,
             terminal_label_idx,
             referenced,
+            &mut fission_midend_structuring::guarded_tail::OwnedSafeMemo::default(),
         )
     }
 
