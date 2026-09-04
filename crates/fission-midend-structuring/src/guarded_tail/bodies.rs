@@ -58,6 +58,10 @@ pub fn canonicalize_interleaved_local_aliases(
     referenced: &HashMap<String, usize>,
 ) -> Result<(Vec<PreHirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
     let local_refs = crate::guarded_tail::pure_hir::local_goto_positions_by_label(body);
+    // One pass for every label, instead of `classify_alias_ref_sites` walking
+    // the whole body again per label: this loop is over labels, so that was
+    // O(labels x body) and it is what a 361-block function spends its time in.
+    let ref_sites = crate::guarded_tail::pure_hir::label_ref_sites(body);
     let mut alias_redirects = HashMap::default();
     let mut canonicalized_local_nonfallthrough = 0usize;
     let mut external_safe_redirect_labels = Vec::new();
@@ -72,7 +76,9 @@ pub fn canonicalize_interleaved_local_aliases(
         };
         let total_refs = referenced.get(label).copied().unwrap_or(0);
         let (top_level_before, nested_before, refs_after) =
-            crate::guarded_tail::pure_hir::classify_alias_ref_sites(body, idx, label);
+            crate::guarded_tail::pure_hir::classify_alias_ref_sites_indexed(
+                &ref_sites, idx, label,
+            );
         let local_ref_count = top_level_before + nested_before + refs_after;
         let external_ref_count = total_refs.saturating_sub(local_ref_count);
         let top_level_after_positions: Vec<usize> = goto_positions

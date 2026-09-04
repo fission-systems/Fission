@@ -178,6 +178,95 @@ pub fn build_nested_before_alias_ownership_proof(
     }
 }
 
+/// Every label a statement's subtree `goto`s, with counts -- one traversal for
+/// all labels rather than one per label.
+fn collect_stmt_goto_counts(stmt: &PreHirStmt, out: &mut HashMap<String, usize>) {
+    match stmt {
+        PreHirStmt::Goto(target) => {
+            *out.entry(target.clone()).or_insert(0) += 1;
+        }
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for s in then_body.iter().chain(else_body.iter()) {
+                collect_stmt_goto_counts(s, out);
+            }
+        }
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
+            for s in body.iter() {
+                collect_stmt_goto_counts(s, out);
+            }
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            for s in cases
+                .iter()
+                .flat_map(|case| case.body.iter())
+                .chain(default.iter())
+            {
+                collect_stmt_goto_counts(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Where each label is referenced from, built in a single pass over `body`.
+///
+/// Each entry is `(statement index, references in that statement, whether the
+/// statement is itself a top-level `goto` to it)` -- exactly what
+/// `classify_alias_ref_sites` recomputes, and the callers of that function run
+/// it once per label, so a body with L labels walked itself L times.
+pub type LabelRefSites = HashMap<String, Vec<(usize, usize, bool)>>;
+
+pub fn label_ref_sites(body: &[PreHirStmt]) -> LabelRefSites {
+    let mut sites: LabelRefSites = HashMap::default();
+    let mut counts: HashMap<String, usize> = HashMap::default();
+    for (idx, stmt) in body.iter().enumerate() {
+        counts.clear();
+        collect_stmt_goto_counts(stmt, &mut counts);
+        if counts.is_empty() {
+            continue;
+        }
+        let top_level_goto = matches!(stmt, PreHirStmt::Goto(_));
+        for (label, n) in counts.drain() {
+            sites
+                .entry(label)
+                .or_default()
+                .push((idx, n, top_level_goto));
+        }
+    }
+    sites
+}
+
+/// [`classify_alias_ref_sites`] answered from a prebuilt index.
+pub fn classify_alias_ref_sites_indexed(
+    sites: &LabelRefSites,
+    label_idx: usize,
+    label: &str,
+) -> (usize, usize, usize) {
+    let Some(refs) = sites.get(label) else {
+        return (0, 0, 0);
+    };
+    let mut top_level_before = 0usize;
+    let mut nested_before = 0usize;
+    let mut refs_after = 0usize;
+    for &(idx, count, top_level_goto) in refs {
+        if idx >= label_idx {
+            refs_after += count;
+        } else if top_level_goto {
+            top_level_before += 1;
+        } else {
+            nested_before += count;
+        }
+    }
+    (top_level_before, nested_before, refs_after)
+}
+
 pub fn classify_alias_ref_sites(
     body: &[PreHirStmt],
     label_idx: usize,
