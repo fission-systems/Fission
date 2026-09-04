@@ -3324,6 +3324,14 @@ pub fn suffix_known_pure_helper_call_is_owned_safe(
 
     let args_pure = args.iter().all(expr_is_pure_value);
     let target_known_pure = call_target_is_known_pure_helper(target);
+    // The three proofs below each walk the rest of the body, and `let` binds
+    // them eagerly -- so a call that is not a known-pure helper (nearly all of
+    // them) paid three full traversals to reach a `&&` that was already false.
+    // The diagnostic under this only prints when both cheap tests hold, so
+    // stopping here reports exactly what it did before.
+    if !(target_known_pure && args_pure) {
+        return false;
+    }
     let no_redefine = body[stmt_idx + 1..]
         .iter()
         .map(|stmt| count_var_defs_stmt(stmt, binding_name))
