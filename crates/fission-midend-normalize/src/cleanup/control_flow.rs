@@ -4,7 +4,7 @@ use crate::prelude::{
     HashMap, HashSet, PreHirBinaryOp, PreHirExpr, PreHirStmt, fold_logical_chain, negate_expr,
     simplify_logical_expr,
 };
-use fission_midend_prehir::util::label_cleanup::cleanup_redundant_labels;
+use fission_midend_prehir::util::label_cleanup::cleanup_redundant_labels_reporting;
 
 /// `global_refs`, when given, is the whole-function referenced-label set
 /// (as opposed to `stmts`-local `collect_referenced_labels`, which only sees
@@ -634,9 +634,8 @@ pub fn cleanup_redundant_boundary_labels(
     // of this crate's own label bookkeeping on the deterministic hasher.
     let std_refs: Option<std::collections::HashSet<String>> =
         global_refs.map(|refs| refs.iter().cloned().collect());
-    let original = stmts.clone();
-    let cleaned = cleanup_redundant_labels(std::mem::take(stmts), std_refs.as_ref());
-    let changed = cleaned != original;
+    let (cleaned, changed) =
+        cleanup_redundant_labels_reporting(std::mem::take(stmts), std_refs.as_ref());
     *stmts = cleaned;
     changed
 }

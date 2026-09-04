@@ -8,6 +8,20 @@ pub fn cleanup_redundant_labels(
     body: Vec<PreHirStmt>,
     global_refs: Option<&HashSet<String>>,
 ) -> Vec<PreHirStmt> {
+    cleanup_redundant_labels_reporting(body, global_refs).0
+}
+
+/// As [`cleanup_redundant_labels`], and also reports whether anything changed.
+///
+/// Callers drive a fixpoint on that answer and used to get it by cloning the
+/// body, cleaning, and comparing the two deeply -- three full traversals per
+/// call, on every nested body, on every pass. Cleanup already knows: the only
+/// mutations it makes are rewriting a label through an alias and dropping a
+/// label statement.
+pub fn cleanup_redundant_labels_reporting(
+    body: Vec<PreHirStmt>,
+    global_refs: Option<&HashSet<String>>,
+) -> (Vec<PreHirStmt>, bool) {
     let mut aliases = adjacent_label_aliases(&body);
     if let Some(referenced) = global_refs {
         // Recursive callers clean one nested statement list at a time.  They
@@ -22,10 +36,11 @@ pub fn cleanup_redundant_labels(
     // into every nested body, so on a large function those identity copies are
     // most of the work: `openssh-portable/ssh`'s `main` (1,606 block lowerings)
     // spent its time in here, not in lowering.
+    let mut changed = false;
     let body = if aliases.is_empty() {
         body
     } else {
-        rewrite_stmt_labels(body, &aliases)
+        rewrite_stmt_labels(body, &aliases, &mut changed)
     };
     let local_refs = if global_refs.is_none() {
         Some(collect_referenced_labels(&body))
@@ -40,17 +55,20 @@ pub fn cleanup_redundant_labels(
         match stmt {
             PreHirStmt::Label(label) => {
                 if !seen_labels.insert(label.clone()) {
+                    changed = true;
                     continue;
                 }
                 if cleaned.is_empty() || referenced.contains(&label) {
                     cleaned.push(PreHirStmt::Label(label));
+                } else {
+                    changed = true;
                 }
             }
             other => cleaned.push(other),
         }
     }
 
-    cleaned
+    (cleaned, changed)
 }
 
 #[cfg(test)]
@@ -117,17 +135,23 @@ fn canonicalize_label(label: &str, aliases: &HashMap<String, String>) -> String 
 fn rewrite_stmt_labels(
     body: Vec<PreHirStmt>,
     aliases: &HashMap<String, String>,
+    changed: &mut bool,
 ) -> Vec<PreHirStmt> {
     body.into_iter()
-        .map(|stmt| rewrite_stmt_label(stmt, aliases))
+        .map(|stmt| rewrite_stmt_label(stmt, aliases, changed))
         .collect()
 }
 
-fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> PreHirStmt {
+fn rewrite_stmt_label(
+    stmt: PreHirStmt,
+    aliases: &HashMap<String, String>,
+    changed: &mut bool,
+) -> PreHirStmt {
     match stmt {
         PreHirStmt::Block(body) => PreHirStmt::Block(Rc::new(rewrite_stmt_labels(
             Rc::unwrap_or_clone(body),
             aliases,
+            changed,
         ))),
         PreHirStmt::Switch {
             expr,
@@ -139,10 +163,10 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
                 .into_iter()
                 .map(|case| PreHirSwitchCase {
                     values: case.values,
-                    body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(case.body), aliases)),
+                    body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(case.body), aliases, changed)),
                 })
                 .collect(),
-            default: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(default), aliases)),
+            default: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(default), aliases, changed)),
         },
         PreHirStmt::If {
             cond,
@@ -150,15 +174,15 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
             else_body,
         } => PreHirStmt::If {
             cond,
-            then_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(then_body), aliases)),
-            else_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(else_body), aliases)),
+            then_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(then_body), aliases, changed)),
+            else_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(else_body), aliases, changed)),
         },
         PreHirStmt::While { cond, body } => PreHirStmt::While {
             cond,
-            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases)),
+            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases, changed)),
         },
         PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
-            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases)),
+            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases, changed)),
             cond,
         },
         PreHirStmt::For {
@@ -169,7 +193,7 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
         } => PreHirStmt::For {
             init: init.map(|s| {
                 Box::new(
-                    rewrite_stmt_labels(vec![*s], aliases)
+                    rewrite_stmt_labels(vec![*s], aliases, changed)
                         .into_iter()
                         .next()
                         .unwrap(),
@@ -178,16 +202,24 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
             cond,
             update: update.map(|s| {
                 Box::new(
-                    rewrite_stmt_labels(vec![*s], aliases)
+                    rewrite_stmt_labels(vec![*s], aliases, changed)
                         .into_iter()
                         .next()
                         .unwrap(),
                 )
             }),
-            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases)),
+            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases, changed)),
         },
-        PreHirStmt::Label(label) => PreHirStmt::Label(canonicalize_label(&label, aliases)),
-        PreHirStmt::Goto(label) => PreHirStmt::Goto(canonicalize_label(&label, aliases)),
+        PreHirStmt::Label(label) => {
+            let canonical = canonicalize_label(&label, aliases);
+            *changed |= canonical != label;
+            PreHirStmt::Label(canonical)
+        }
+        PreHirStmt::Goto(label) => {
+            let canonical = canonicalize_label(&label, aliases);
+            *changed |= canonical != label;
+            PreHirStmt::Goto(canonical)
+        }
         other => other,
     }
 }
