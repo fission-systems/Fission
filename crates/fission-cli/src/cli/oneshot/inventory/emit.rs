@@ -9,6 +9,7 @@ use crate::cli::oneshot::function_select::{
 };
 use fission_decompiler::{NirEngineMode, NirSurfaceKind, auto_nir_eligible};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_static::analysis::decode_context_for_address;
 use fission_static::analysis::decomp::FactStore;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -23,7 +24,7 @@ use fission_decompiler::{
     IndirectControlClassification, NirBuildStats, NirHintStats, PcodeFunction,
 };
 use fission_decompiler::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
-use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleighFrontend};
 
 fn select_inventory_functions<'a>(
     cli: &OneShotArgs,
@@ -313,10 +314,6 @@ fn decode_rust_sleigh_pcode(
     continue_past_indirect_branch: bool,
     retry_on_decode_error: bool,
 ) -> Result<PcodeFunction, String> {
-    let bytes = binary.view_bytes(entry_address, max_bytes).ok_or_else(|| {
-        format!("rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}")
-    })?;
-
     let load_spec = binary.load_spec().ok_or_else(|| {
         format!(
             "rust_sleigh: missing Ghidra load spec for '{}'",
@@ -326,25 +323,46 @@ fn decode_rust_sleigh_pcode(
 
     let lifter = RuntimeSleighFrontend::new_for_load_spec(load_spec)
         .map_err(|e| format!("rust_sleigh: {e:#}"))?;
+    // Same decode-mode fact every other lift path consults: an even address
+    // in a Thumb-only image is still Thumb. `_with_decode_contract` carries
+    // no context at all, so this path had no way to say so.
+    let address_state = lifter.normalize_low_bit_code_address(entry_address);
+    let decode_address = address_state.address;
+    let context_override =
+        decode_context_for_address(binary, &lifter, address_state.context_override);
+    let bytes = binary.view_bytes(decode_address, max_bytes).ok_or_else(|| {
+        format!("rust_sleigh: unable to read bytes at 0x{decode_address:x} for {name}")
+    })?;
+    let memory_context = DecodeMemoryContext::default();
     let lift_contract = if continue_past_indirect_branch {
         DecodeContract::decomp_function(instruction_limit)
     } else {
         DecodeContract::strict_function(instruction_limit)
     };
-    let result =
-        lifter.lift_raw_pcode_function_with_decode_contract(&bytes, entry_address, lift_contract);
+    let result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
+        &bytes,
+        decode_address,
+        lift_contract,
+        &memory_context,
+        context_override,
+    );
     match result {
         Ok(lifted) => Ok(lifted.function),
         Err(first_err) => {
             if retry_on_decode_error {
                 let err_str = format!("{first_err:#}");
-                if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, entry_address) {
+                if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, decode_address)
+                {
                     if safe > 0 && safe < bytes.len() {
-                        if let Ok(retry) = lifter.lift_raw_pcode_function_with_decode_contract(
-                            &bytes[..safe],
-                            entry_address,
-                            lift_contract,
-                        ) {
+                        if let Ok(retry) = lifter
+                            .lift_raw_pcode_function_with_context_and_memory_context(
+                                &bytes[..safe],
+                                decode_address,
+                                lift_contract,
+                                &memory_context,
+                                context_override,
+                            )
+                        {
                             return Ok(retry.function);
                         }
                     }
