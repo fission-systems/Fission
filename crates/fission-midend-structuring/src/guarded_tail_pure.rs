@@ -45,6 +45,70 @@ pub fn lvalue_contains_var(lhs: &PreHirLValue, name: &str) -> bool {
     }
 }
 
+/// Every variable name `expr_contains_var` would answer `true` for.
+///
+/// Mirrors that function arm for arm so the two cannot drift; it exists so a
+/// caller asking about many names walks the expression once.
+pub fn expr_var_names(expr: &PreHirExpr) -> std::collections::HashSet<&str> {
+    let mut out = std::collections::HashSet::new();
+    collect_expr_var_names(expr, &mut out);
+    out
+}
+
+fn collect_expr_var_names<'a>(expr: &'a PreHirExpr, out: &mut std::collections::HashSet<&'a str>) {
+    match expr {
+        PreHirExpr::Var(var)
+        | PreHirExpr::AddressOfGlobal(var)
+        | PreHirExpr::AddressOfLocal(var) => {
+            out.insert(var.as_str());
+        }
+        PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => collect_expr_var_names(expr, out),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_expr_var_names(lhs, out);
+            collect_expr_var_names(rhs, out);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_expr_var_names(arg, out);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_expr_var_names(base, out);
+            collect_expr_var_names(index, out);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_expr_var_names(cond, out);
+            collect_expr_var_names(then_expr, out);
+            collect_expr_var_names(else_expr, out);
+        }
+    }
+}
+
+/// Every variable name `lvalue_contains_var` would answer `true` for.
+pub fn lvalue_var_names(lhs: &PreHirLValue) -> std::collections::HashSet<&str> {
+    match lhs {
+        PreHirLValue::Var(_) => std::collections::HashSet::new(),
+        PreHirLValue::Deref { ptr, .. } => expr_var_names(ptr),
+        PreHirLValue::Index { base, index, .. } => {
+            let mut out = expr_var_names(base);
+            out.extend(expr_var_names(index));
+            out
+        }
+        PreHirLValue::FieldAccess { base, .. } => expr_var_names(base),
+    }
+}
+
 pub fn replace_var_in_expr(expr: &mut PreHirExpr, name: &str, replacement: &PreHirExpr) {
     match expr {
         PreHirExpr::Var(var) if var == name => *expr = replacement.clone(),
@@ -178,6 +242,60 @@ pub fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement: &PreH
         | PreHirStmt::Return(None)
         | PreHirStmt::Break
         | PreHirStmt::Continue => {}
+    }
+}
+
+/// Every variable a statement assigns, with the count `count_var_defs_stmt`
+/// would report -- one traversal for all names instead of one per name.
+///
+/// Mirrors that function arm for arm; only `Assign` to a plain `Var` counts,
+/// and nested bodies sum.
+pub fn collect_stmt_var_defs<'a>(stmt: &'a PreHirStmt, out: &mut crate::HashMap<&'a str, usize>) {
+    match stmt {
+        PreHirStmt::Assign { lhs, .. } => {
+            if let PreHirLValue::Var(name) = lhs {
+                *out.entry(name.as_str()).or_insert(0) += 1;
+            }
+        }
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. } => {
+            for stmt in stmts.iter() {
+                collect_stmt_var_defs(stmt, out);
+            }
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            for stmt in cases
+                .iter()
+                .flat_map(|case| case.body.iter())
+                .chain(default.iter())
+            {
+                collect_stmt_var_defs(stmt, out);
+            }
+        }
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for stmt in then_body.iter().chain(else_body.iter()) {
+                collect_stmt_var_defs(stmt, out);
+            }
+        }
+        PreHirStmt::For {
+            init, update, body, ..
+        } => {
+            for stmt in init.iter() {
+                collect_stmt_var_defs(stmt, out);
+            }
+            for stmt in update.iter() {
+                collect_stmt_var_defs(stmt, out);
+            }
+            for stmt in body.iter() {
+                collect_stmt_var_defs(stmt, out);
+            }
+        }
+        _ => {}
     }
 }
 

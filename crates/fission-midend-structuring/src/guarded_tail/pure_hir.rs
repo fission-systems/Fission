@@ -404,6 +404,107 @@ pub fn classify_nested_before_nonlocal_payload(stmt: &PreHirStmt, label: &str) -
     stmt_contains_goto_label(stmt, label) > 0
 }
 
+/// Every variable a statement reads, with the kind `classify_stmt_read_kind`
+/// would report for it -- one traversal for all names instead of one per name.
+///
+/// `collect_guarded_tail_exported_bindings` asks that function about every
+/// binding across the whole follow-tail, which is O(bindings x tail x subtree)
+/// and is the top of `openssh-portable/ssh`'s `main` in `sample`.
+///
+/// The arms below mirror `classify_stmt_read_kind`'s exactly, in the same
+/// order, and insert with `or_insert` so the first kind found wins the way
+/// `find_map` does. Any divergence changes output, so keep the two in step.
+pub fn collect_stmt_read_kinds<'a>(
+    stmt: &'a PreHirStmt,
+    out: &mut HashMap<&'a str, GuardedTailReadKind>,
+) {
+    fn note<'a>(
+        out: &mut HashMap<&'a str, GuardedTailReadKind>,
+        vars: std::collections::HashSet<&'a str>,
+        kind: GuardedTailReadKind,
+    ) {
+        for name in vars {
+            out.entry(name).or_insert(kind);
+        }
+    }
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            note(out, crate::guarded_tail_pure::expr_var_names(rhs), GuardedTailReadKind::AssignRhs);
+            note(out, crate::guarded_tail_pure::lvalue_var_names(lhs), GuardedTailReadKind::NestedExpr);
+        }
+        PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => {
+            let mut vars: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for arg in args {
+                vars.extend(crate::guarded_tail_pure::expr_var_names(arg));
+            }
+            note(out, vars, GuardedTailReadKind::CallArg);
+        }
+        PreHirStmt::Expr(expr) => note(out, crate::guarded_tail_pure::expr_var_names(expr), GuardedTailReadKind::NestedExpr),
+        PreHirStmt::Return(Some(expr)) => {
+            note(out, crate::guarded_tail_pure::expr_var_names(expr), GuardedTailReadKind::ReturnExpr)
+        }
+        PreHirStmt::Return(_) => {}
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            note(out, crate::guarded_tail_pure::expr_var_names(cond), GuardedTailReadKind::ConditionExpr);
+            for stmt in then_body.iter().chain(else_body.iter()) {
+                collect_stmt_read_kinds(stmt, out);
+            }
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            note(out, crate::guarded_tail_pure::expr_var_names(expr), GuardedTailReadKind::SwitchSelector);
+            for stmt in cases
+                .iter()
+                .flat_map(|case| case.body.iter())
+                .chain(default.iter())
+            {
+                collect_stmt_read_kinds(stmt, out);
+            }
+        }
+        PreHirStmt::Block(stmts) | PreHirStmt::While { body: stmts, .. } => {
+            for stmt in stmts.iter() {
+                collect_stmt_read_kinds(stmt, out);
+            }
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            for stmt in body.iter() {
+                collect_stmt_read_kinds(stmt, out);
+            }
+            note(out, crate::guarded_tail_pure::expr_var_names(cond), GuardedTailReadKind::ConditionExpr);
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            for stmt in init.iter() {
+                collect_stmt_read_kinds(stmt, out);
+            }
+            if let Some(cond) = cond {
+                note(out, crate::guarded_tail_pure::expr_var_names(cond), GuardedTailReadKind::ConditionExpr);
+            }
+            for stmt in update.iter() {
+                collect_stmt_read_kinds(stmt, out);
+            }
+            for stmt in body.iter() {
+                collect_stmt_read_kinds(stmt, out);
+            }
+        }
+        PreHirStmt::VaStart { va_list, .. } => {
+            note(out, crate::guarded_tail_pure::expr_var_names(va_list), GuardedTailReadKind::NestedExpr)
+        }
+        PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {}
+    }
+}
+
 pub fn classify_stmt_read_kind(stmt: &PreHirStmt, name: &str) -> Option<GuardedTailReadKind> {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
@@ -3434,4 +3535,106 @@ pub fn suffix_window_has_terminal_guard_family_match(
         None,
     )
     .is_some()
+}
+
+#[cfg(test)]
+mod read_kind_index_tests {
+    use super::*;
+    use fission_midend_core::ir::NirType;
+
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
+    }
+
+    fn assign(lhs: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs.to_string()),
+            rhs,
+        }
+    }
+
+    /// The index must answer exactly what the per-name walk answers, for every
+    /// name in the statement -- including the ones it does *not* read.
+    fn agrees(stmt: &PreHirStmt, names: &[&str]) {
+        let mut indexed = HashMap::default();
+        collect_stmt_read_kinds(stmt, &mut indexed);
+        for name in names {
+            assert_eq!(
+                classify_stmt_read_kind(stmt, name),
+                indexed.get(*name).copied(),
+                "disagreement on {name} in {stmt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn assign_rhs_beats_lhs_deref_the_way_find_map_does() {
+        // `a` is in both the rhs and the lhs pointer: `find_map` checks rhs
+        // first, so AssignRhs must win over NestedExpr.
+        let stmt = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(var("a")),
+                ty: NirType::Unknown,
+            },
+            rhs: var("a"),
+        };
+        agrees(&stmt, &["a", "b"]);
+        assert_eq!(
+            classify_stmt_read_kind(&stmt, "a"),
+            Some(GuardedTailReadKind::AssignRhs)
+        );
+    }
+
+    #[test]
+    fn if_condition_beats_a_read_in_the_body() {
+        let stmt = PreHirStmt::If {
+            cond: var("a"),
+            then_body: std::rc::Rc::new(vec![assign("t", var("a"))]),
+            else_body: std::rc::Rc::new(Vec::new()),
+        };
+        agrees(&stmt, &["a", "t", "z"]);
+        assert_eq!(
+            classify_stmt_read_kind(&stmt, "a"),
+            Some(GuardedTailReadKind::ConditionExpr)
+        );
+    }
+
+    #[test]
+    fn do_while_body_beats_its_condition() {
+        let stmt = PreHirStmt::DoWhile {
+            body: std::rc::Rc::new(vec![assign("t", var("a"))]),
+            cond: var("a"),
+        };
+        agrees(&stmt, &["a", "t"]);
+        assert_eq!(
+            classify_stmt_read_kind(&stmt, "a"),
+            Some(GuardedTailReadKind::AssignRhs)
+        );
+    }
+
+    #[test]
+    fn call_args_and_plain_expr_keep_their_distinct_kinds() {
+        let call = PreHirStmt::Expr(PreHirExpr::Call {
+            target: "f".to_string(),
+            args: vec![var("a")],
+            ty: NirType::Unknown,
+        });
+        agrees(&call, &["a", "f"]);
+        assert_eq!(
+            classify_stmt_read_kind(&call, "a"),
+            Some(GuardedTailReadKind::CallArg)
+        );
+        let plain = PreHirStmt::Expr(var("a"));
+        agrees(&plain, &["a"]);
+        assert_eq!(
+            classify_stmt_read_kind(&plain, "a"),
+            Some(GuardedTailReadKind::NestedExpr)
+        );
+    }
+
+    #[test]
+    fn nothing_read_reports_nothing() {
+        let stmt = PreHirStmt::Goto("L".to_string());
+        agrees(&stmt, &["a", "L"]);
+    }
 }

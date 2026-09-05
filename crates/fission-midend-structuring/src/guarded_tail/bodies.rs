@@ -1543,6 +1543,30 @@ pub fn collect_guarded_tail_exported_bindings(
     follow_tail: &[PreHirStmt],
 ) -> Result<Vec<GuardedTailExportedBinding>, GuardedTailExecutionRejection> {
     let mut bindings = Vec::new();
+    // The loop below asks the whole follow-tail about every binding, so both
+    // questions -- what kind of read is this, and does it redefine the binding
+    // -- were being re-derived once per (binding, tail statement) pair. Index
+    // the tail once instead: `collect_stmt_read_kinds` reproduces
+    // `classify_stmt_read_kind`'s answer for every name in one traversal (the
+    // two are pinned together by `read_kind_index_tests`).
+    let tail_read_kinds: Vec<HashMap<&str, crate::guarded_tail::types::GuardedTailReadKind>> =
+        follow_tail
+            .iter()
+            .map(|stmt| {
+                let mut kinds = HashMap::default();
+                crate::guarded_tail::pure_hir::collect_stmt_read_kinds(stmt, &mut kinds);
+                kinds
+            })
+            .collect();
+    let tail_def_counts: Vec<HashMap<&str, usize>> = follow_tail
+        .iter()
+        .map(|stmt| {
+            let mut defs = HashMap::default();
+            crate::guarded_tail_pure::collect_stmt_var_defs(stmt, &mut defs);
+            defs
+        })
+        .collect();
+
     for (def_stmt_idx, stmt) in middle.iter().enumerate() {
         let PreHirStmt::Assign {
             lhs: PreHirLValue::Var(binding_name),
@@ -1564,9 +1588,12 @@ pub fn collect_guarded_tail_exported_bindings(
         }
         if !always_terminates {
             for (stmt_idx, stmt) in follow_tail.iter().enumerate() {
-                let reads_here =
-                    crate::guarded_tail::pure_hir::classify_stmt_read_kind(stmt, binding_name);
-                let defs_here = crate::guarded_tail_pure::count_var_defs_stmt(stmt, binding_name);
+                let _ = stmt;
+                let reads_here = tail_read_kinds[stmt_idx].get(binding_name.as_str()).copied();
+                let defs_here = tail_def_counts[stmt_idx]
+                    .get(binding_name.as_str())
+                    .copied()
+                    .unwrap_or(0);
                 if follow_redefined {
                     if reads_here.is_some() {
                         nondominated_reads += 1;
