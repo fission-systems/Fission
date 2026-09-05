@@ -16,7 +16,14 @@ name = "fission_cli"
 path = "src/lib.rs"
 
 [features]
-default = []
+# mimalloc by default: a profile of `decomp` over a whole binary put ~25% of
+# non-idle self time in the system allocator (`_xzm_free`, `_xzm_xzone_malloc_
+# tiny`, `_malloc_zone_malloc`), more than any single Fission function. The
+# feature and the `#[global_allocator]` wiring already existed and were simply
+# never switched on. Measured, same machine, interleaved runs, output byte
+# identical: `coreutils/[` 155 functions 2.77s -> 1.66s (-40%),
+# `crazyflie/cf2` 2,838 functions 56.7s -> 37.6s (-34%).
+default = ["allocator-mimalloc"]
 debugger = ["dep:fission-dynamic"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]
