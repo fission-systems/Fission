@@ -152,10 +152,10 @@ impl ElfLoader {
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
-                if strtab_shdr.sh_offset as usize + strtab_shdr.sh_size as usize <= bytes.len() {
-                    strtab_data = bytes[strtab_shdr.sh_offset as usize
-                        ..(strtab_shdr.sh_offset + strtab_shdr.sh_size) as usize]
-                        .to_vec();
+                if let Some(section) =
+                    section_bytes(bytes, strtab_shdr.sh_offset, strtab_shdr.sh_size)
+                {
+                    strtab_data = section.to_vec();
                 }
             }
             let section_names: Vec<String> = shdrs
@@ -451,10 +451,10 @@ impl ElfLoader {
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
-                if strtab_shdr.sh_offset as usize + strtab_shdr.sh_size as usize <= bytes.len() {
-                    strtab_data = bytes[strtab_shdr.sh_offset as usize
-                        ..(strtab_shdr.sh_offset + strtab_shdr.sh_size) as usize]
-                        .to_vec();
+                if let Some(section) =
+                    section_bytes(bytes, strtab_shdr.sh_offset, strtab_shdr.sh_size)
+                {
+                    strtab_data = section.to_vec();
                 }
             }
             let section_names: Vec<String> = shdrs
@@ -985,6 +985,21 @@ impl ElfLoader {
 /// twenty on every x86-64 program.
 ///
 /// Only function symbols. For data, bit 0 is address, not state.
+/// The bytes a section header claims, or `None` if it does not fit the file.
+///
+/// `sh_offset` and `sh_size` come straight out of the file, and a fuzzer will
+/// hand you a pair whose sum is past `u64::MAX`. Added directly that wraps --
+/// in release the wrapped sum makes the bounds test pass or fail by accident,
+/// and with overflow checks on (which is how `cargo fuzz` builds) it panics.
+/// `crash-ad595e24` on `fuzz_elf_parser` was exactly this.
+fn section_bytes(data: &[u8], sh_offset: impl Into<u64>, sh_size: impl Into<u64>) -> Option<&[u8]> {
+    let sh_offset: u64 = sh_offset.into();
+    let end = sh_offset.checked_add(sh_size.into())?;
+    let start = usize::try_from(sh_offset).ok()?;
+    let end = usize::try_from(end).ok()?;
+    data.get(start..end)
+}
+
 fn elf32_symbol_entry_address(address: u64, is_arm: bool, sym_type: u8) -> u64 {
     if is_arm && sym_type == STT_FUNC {
         address & !1
@@ -2877,15 +2892,16 @@ fn parse_gnu_versions_64(
         let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else {
             continue;
         };
-        let strtab_offset = strtab_shdr.sh_offset as usize;
-        let strtab_size = strtab_shdr.sh_size as usize;
-        if strtab_offset + strtab_size > full_data.len() {
+        let Some(strtab_data) =
+            section_bytes(full_data, strtab_shdr.sh_offset, strtab_shdr.sh_size)
+        else {
             continue;
-        }
-        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+        };
 
         let mut offset = shdr.sh_offset as usize;
-        let end = offset + shdr.sh_size as usize;
+        let Some(end) = offset.checked_add(shdr.sh_size as usize) else {
+            continue;
+        };
 
         while offset + 20 <= end {
             let Ok(vd_version) = reader.u16(offset) else {
@@ -2927,15 +2943,16 @@ fn parse_gnu_versions_64(
         let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else {
             continue;
         };
-        let strtab_offset = strtab_shdr.sh_offset as usize;
-        let strtab_size = strtab_shdr.sh_size as usize;
-        if strtab_offset + strtab_size > full_data.len() {
+        let Some(strtab_data) =
+            section_bytes(full_data, strtab_shdr.sh_offset, strtab_shdr.sh_size)
+        else {
             continue;
-        }
-        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+        };
 
         let mut offset = shdr.sh_offset as usize;
-        let end = offset + shdr.sh_size as usize;
+        let Some(end) = offset.checked_add(shdr.sh_size as usize) else {
+            continue;
+        };
 
         while offset + 16 <= end {
             let Ok(vn_version) = reader.u16(offset) else {
@@ -3053,15 +3070,16 @@ fn parse_gnu_versions_32(
         let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else {
             continue;
         };
-        let strtab_offset = strtab_shdr.sh_offset as usize;
-        let strtab_size = strtab_shdr.sh_size as usize;
-        if strtab_offset + strtab_size > full_data.len() {
+        let Some(strtab_data) =
+            section_bytes(full_data, strtab_shdr.sh_offset, strtab_shdr.sh_size)
+        else {
             continue;
-        }
-        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+        };
 
         let mut offset = shdr.sh_offset as usize;
-        let end = offset + shdr.sh_size as usize;
+        let Some(end) = offset.checked_add(shdr.sh_size as usize) else {
+            continue;
+        };
 
         while offset + 20 <= end {
             let Ok(vd_version) = reader.u16(offset) else {
@@ -3103,15 +3121,16 @@ fn parse_gnu_versions_32(
         let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else {
             continue;
         };
-        let strtab_offset = strtab_shdr.sh_offset as usize;
-        let strtab_size = strtab_shdr.sh_size as usize;
-        if strtab_offset + strtab_size > full_data.len() {
+        let Some(strtab_data) =
+            section_bytes(full_data, strtab_shdr.sh_offset, strtab_shdr.sh_size)
+        else {
             continue;
-        }
-        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+        };
 
         let mut offset = shdr.sh_offset as usize;
-        let end = offset + shdr.sh_size as usize;
+        let Some(end) = offset.checked_add(shdr.sh_size as usize) else {
+            continue;
+        };
 
         while offset + 16 <= end {
             let Ok(vn_version) = reader.u16(offset) else {
