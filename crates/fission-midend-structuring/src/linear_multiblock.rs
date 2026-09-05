@@ -168,9 +168,23 @@ pub fn build_linear_multiblock_body(
             idx += 1;
             continue;
         }
+        // `skip_to` is where the recovered switch's arms rejoin, and the loop
+        // resumes there. A join that is not *past* this block makes the walk
+        // stand still: `idx` goes backwards or stays, the same chain is
+        // recovered again, and another `Switch` is pushed -- forever. It is
+        // not slow, it never ends, and the body grows without bound until the
+        // OS kills the process. `coreutils/seq` `main` recovered a switch at
+        // block 19 whose join was block 16 and pushed 1.75 million `Switch`
+        // statements in 60 seconds; no work budget can see this, because each
+        // individual step is cheap and legitimate.
+        //
+        // Require forward progress. Without it the chain is simply not a
+        // switch we can lay out linearly, and the block lowers the ordinary
+        // way below.
         if try_switch_recovery
             && switch_recovery_cfg_admitted(host, idx)
             && let Some((switch_stmt, skip_to)) = try_lower_switch(host, idx)?
+            && skip_to > idx
         {
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 body.push(PreHirStmt::Label(block_label(block_key)));

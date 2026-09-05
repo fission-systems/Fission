@@ -1494,6 +1494,19 @@ impl<'a> PreviewBuilder<'a> {
                 rhs,
             ));
         }
+        // Register the name so uses resolve to it instead of rebuilding the
+        // definition. `lookup_def_site` decides which definition reaches a
+        // use, so keying on this exact def site makes the lookup precise
+        // without any reaching-definition analysis of our own.
+        if Self::use_count_explicit_rule_enabled() {
+            let key = (
+                self.lowering_block_index(block),
+                op_idx,
+                VarnodeKey::from(output),
+            );
+            self.materialized_output_names
+                .insert(key, lhs_name.clone());
+        }
         let lhs = PreHirLValue::Var(lhs_name);
         Ok(Some(PreHirStmt::Assign { lhs, rhs }))
     }

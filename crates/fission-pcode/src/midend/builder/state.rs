@@ -34,6 +34,16 @@ pub(crate) struct PreviewBuilder<'a> {
     /// values over-counts. That direction is safe: it forces a name where a
     /// duplicate would otherwise be inlined.
     pub(crate) use_counts: HashMap<VarnodeKey, usize>,
+    /// Name given to a definition that was materialized as its own statement,
+    /// keyed by the exact def site that produced it.
+    ///
+    /// The other half of Ghidra's explicit/implied rule: marking a value
+    /// explicit is only half of it, the uses have to *refer to* it. Keying on
+    /// the def site rather than on storage means no reaching-definition
+    /// analysis is needed here -- `lookup_def_site` has already resolved
+    /// which definition reaches a given use, so a hit is by construction the
+    /// name of that value.
+    pub(crate) materialized_output_names: HashMap<(usize, usize, VarnodeKey), String>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
     pub(crate) lookup_site_cache:
         RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,

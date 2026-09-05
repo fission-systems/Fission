@@ -2086,6 +2086,19 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let def_site = self.lookup_def_site(vn);
+        // If the definition that reaches this use already ships as its own
+        // statement, refer to it. Rebuilding it here is what duplicates a
+        // value once per path -- the thing Ghidra's explicit marking exists
+        // to prevent, and the reason Fission needs work budgets without it.
+        if let Some((site, _)) = def_site
+            && let Some(name) = self.materialized_output_names.get(&(
+                site.block_idx,
+                site.op_idx,
+                key.clone(),
+            ))
+        {
+            return Ok(PreHirExpr::Var(name.clone()));
+        }
         if let Some((site, def)) = def_site.map(|(site, def)| (site, def.clone()))
             && let Some(expr) =
                 self.lower_covering_passthrough_register_lane(vn, site, &def, visiting)?

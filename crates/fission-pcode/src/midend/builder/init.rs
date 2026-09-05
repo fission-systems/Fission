@@ -229,6 +229,7 @@ impl<'a> PreviewBuilder<'a> {
             defs,
             def_sites,
             use_counts,
+            materialized_output_names: HashMap::default(),
             block_defs,
             lookup_site_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             peel_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
