@@ -308,6 +308,7 @@ impl<'a> PreviewBuilder<'a> {
             varnode_redirect_depth: 0,
             varnode_lowering_work: 0,
             phi_operand_values: None,
+            explicit_def_sites: None,
             diamond_select_depth: 0,
         };
         b

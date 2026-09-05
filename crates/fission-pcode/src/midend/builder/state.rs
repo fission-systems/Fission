@@ -254,4 +254,19 @@ pub(crate) struct PreviewBuilder<'a> {
     /// function never finished, holding 1.4GB.
     pub(crate) varnode_lowering_work: u64,
     pub(crate) phi_operand_values: Option<std::collections::HashSet<SsaValueId>>,
+    /// Def sites whose SSA value is read more than `MAX_IMPLIED_REF` times.
+    ///
+    /// Ghidra's `ActionMarkExplicit` runs as a pass *before* printing
+    /// (`coreaction.cc:5776`), so explicit/implied is settled for every
+    /// varnode up front and each expression is built once. Deciding it during
+    /// lowering, as this builder otherwise does, is too late -- the recursion
+    /// has already started.
+    ///
+    /// Counted over `scalar_ssa.operation_inputs`, so this is per **SSA
+    /// value**, not per storage. That distinction is the whole point: a
+    /// register holding two hundred different values across a function reads
+    /// as "used two hundred times" by storage and would force every
+    /// definition explicit.
+    pub(crate) explicit_def_sites:
+        Option<std::collections::HashSet<fission_midend_core::ir::SsaOpSite>>,
 }

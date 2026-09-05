@@ -2086,16 +2086,18 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let def_site = self.lookup_def_site(vn);
-        // If the definition that reaches this use already ships as its own
-        // statement, refer to it. Rebuilding it here is what duplicates a
-        // value once per path -- the thing Ghidra's explicit marking exists
-        // to prevent, and the reason Fission needs work budgets without it.
-        if let Some((site, _)) = def_site
-            && let Some(name) =
-                self.materialized_output_names
-                    .get(&(site.block_idx, site.op_idx, key.clone()))
+        // The definition reaching this use was settled as explicit before any
+        // lowering began, so it ships as its own statement and this use is a
+        // reference to it. Returning here is the point of the whole exercise:
+        // rebuilding the definition is what duplicates a value once per path,
+        // which is what Ghidra's explicit marking prevents and what Fission's
+        // work budgets exist to survive without it.
+        if let Some((site, def_op)) = def_site.map(|(site, def)| (site, def.clone()))
+            && let Some(output) = def_op.output.clone()
+            && self.def_site_is_explicit(site.block_idx, site.op_idx)
         {
-            return Ok(PreHirExpr::Var(name.clone()));
+            let name = self.explicit_binding_name(site.block_idx, site.op_idx, &output);
+            return Ok(PreHirExpr::Var(name));
         }
         if let Some((site, def)) = def_site.map(|(site, def)| (site, def.clone()))
             && let Some(expr) =

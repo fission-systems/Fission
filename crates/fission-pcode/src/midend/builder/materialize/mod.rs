@@ -1025,24 +1025,103 @@ impl<'a> PreviewBuilder<'a> {
     /// name; below it, it may be inlined into its uses.
     const MAX_IMPLIED_REF: usize = 2;
 
-    /// Whether this definition must keep a statement purely because too many
-    /// places read it.
+    /// Whether the definition at this site must keep a statement purely
+    /// because too many places read the value it produces.
     ///
     /// This is the half of Ghidra's explicit/implied rule Fission never had.
-    /// The existing completeness proofs count uses *inside one block*, so a
-    /// value used once where it is defined and read by every successor looks
-    /// inlineable -- and `lower_varnode`, whose `visiting` set is scoped to
-    /// one path, then rebuilds it once per path. That is the duplication the
-    /// work budgets exist to survive.
-    fn output_exceeds_implied_ref_limit(&self, output: &Varnode) -> bool {
+    /// The existing completeness proofs count uses *inside one block*
+    /// (`output_use_sites_in_block`), so a value used once where it is defined
+    /// and read by every successor looks inlineable -- and `lower_varnode`,
+    /// whose `visiting` set is scoped to one path, then rebuilds it once per
+    /// path. That is the duplication the work budgets exist to survive.
+    ///
+    /// The set is computed once, before any of it is needed, from the SSA
+    /// def-use graph -- which is what makes it equivalent to Ghidra's rule.
+    /// An earlier attempt counted uses by *storage* (`use_counts`), and a
+    /// register holding two hundred values across a function reads as "used
+    /// two hundred times" there, which would force every definition explicit.
+    fn output_exceeds_implied_ref_limit(&mut self, block_idx: usize, op_idx: usize) -> bool {
         if !Self::use_count_explicit_rule_enabled() {
             return false;
         }
-        self.use_counts
-            .get(&VarnodeKey::from(output))
-            .copied()
-            .unwrap_or(0)
-            > Self::MAX_IMPLIED_REF
+        self.ensure_explicit_def_sites();
+        let site = fission_midend_core::ir::SsaOpSite {
+            block: block_idx as u32,
+            op: op_idx as u32,
+        };
+        self.explicit_def_sites
+            .as_ref()
+            .is_some_and(|sites| sites.contains(&site))
+    }
+
+    /// The name an explicit definition ships under, deriving and recording it
+    /// if this is the first side to ask.
+    ///
+    /// Lowering reaches a use before the defining block is materialized
+    /// whenever control flows backwards, so the name cannot be left for the
+    /// materializer to choose.
+    pub(in crate::midend) fn explicit_binding_name(
+        &mut self,
+        block_idx: usize,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> String {
+        let key = (block_idx, op_idx, VarnodeKey::from(output));
+        if let Some(name) = self.materialized_output_names.get(&key) {
+            return name.clone();
+        }
+        let base = self
+            .sla_hw_name(output.offset, output.size)
+            .unwrap_or_else(|| format!("tmp_{:x}", output.offset));
+        let name = self.ensure_live_register_binding(&base, output.size);
+        self.materialized_output_names.insert(key, name.clone());
+        name
+    }
+
+    /// Whether the definition at this site was settled as explicit.
+    pub(in crate::midend) fn def_site_is_explicit(
+        &mut self,
+        block_idx: usize,
+        op_idx: usize,
+    ) -> bool {
+        if !Self::use_count_explicit_rule_enabled() {
+            return false;
+        }
+        self.ensure_explicit_def_sites();
+        let site = fission_midend_core::ir::SsaOpSite {
+            block: block_idx as u32,
+            op: op_idx as u32,
+        };
+        self.explicit_def_sites
+            .as_ref()
+            .is_some_and(|sites| sites.contains(&site))
+    }
+
+    /// Ghidra's `ActionMarkExplicit`, as a pass rather than a question asked
+    /// mid-lowering: every SSA value's readers are counted once, and the
+    /// definitions that exceed `MAX_IMPLIED_REF` are settled before the first
+    /// expression is built.
+    fn ensure_explicit_def_sites(&mut self) {
+        if self.explicit_def_sites.is_some() {
+            return;
+        }
+        let mut reads: HashMap<fission_midend_core::ir::SsaValueId, usize> = HashMap::default();
+        for pieces in self.scalar_ssa.operation_inputs.values() {
+            for piece in pieces {
+                *reads.entry(piece.value).or_insert(0) += 1;
+            }
+        }
+        let mut sites = std::collections::HashSet::new();
+        for value in &self.scalar_ssa.values {
+            let fission_midend_core::ir::SsaValueDefinition::Operation(site) = value.definition
+            else {
+                continue;
+            };
+            if reads.get(&value.id).copied().unwrap_or(0) > Self::MAX_IMPLIED_REF {
+                sites.insert(site);
+            }
+        }
+        self.explicit_def_sites = Some(sites);
     }
 
     fn use_count_explicit_rule_enabled() -> bool {
@@ -1210,7 +1289,8 @@ impl<'a> PreviewBuilder<'a> {
                 self.primary_return_name_from_live_out_proof(output, block_idx, op_idx, proof)
             });
         if replacement_plan.is_complete()
-            && !self.output_exceeds_implied_ref_limit(output)
+            && !block_idx_for_rhs
+                .is_some_and(|block_idx| self.output_exceeds_implied_ref_limit(block_idx, op_idx))
             && loop_carried_lhs_name.is_none()
             && merge_lhs_name.is_none()
             && !self.output_is_read_by_phi(block_idx_for_rhs, op_idx)
@@ -1503,17 +1583,24 @@ impl<'a> PreviewBuilder<'a> {
                 rhs,
             ));
         }
-        // Register the name so uses resolve to it instead of rebuilding the
-        // definition. `lookup_def_site` decides which definition reaches a
-        // use, so keying on this exact def site makes the lookup precise
-        // without any reaching-definition analysis of our own.
+        // One name per def site, first writer wins. A use lowered before this
+        // block reaches materialization derives the name itself
+        // (`explicit_binding_name`); whichever side is first, both must spell
+        // the value the same way or the definition ships under one name and
+        // its readers reference another.
+        let mut lhs_name = lhs_name;
         if Self::use_count_explicit_rule_enabled() {
             let key = (
                 self.lowering_block_index(block),
                 op_idx,
                 VarnodeKey::from(output),
             );
-            self.materialized_output_names.insert(key, lhs_name.clone());
+            match self.materialized_output_names.get(&key) {
+                Some(existing) => lhs_name = existing.clone(),
+                None => {
+                    self.materialized_output_names.insert(key, lhs_name.clone());
+                }
+            }
         }
         let lhs = PreHirLValue::Var(lhs_name);
         Ok(Some(PreHirStmt::Assign { lhs, rhs }))
