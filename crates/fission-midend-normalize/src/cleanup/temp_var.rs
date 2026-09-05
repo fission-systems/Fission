@@ -1412,6 +1412,10 @@ pub fn prune_unused_temp_bindings(func: &mut PreHirFunction) -> bool {
     // stages that call this pass. A single whole-body use-count map makes
     // each binding's check O(1) instead.
     let use_map = DefUseMap::build(&func.body);
+    // Same reason, one predicate lower: `stmt_list_assigns_var_from_side_
+    // effecting_expr` walked the whole body again for every binding.
+    let mut side_effect_assigned = std::collections::HashSet::new();
+    collect_names_assigned_from_side_effecting_exprs(&func.body, &mut side_effect_assigned);
     let mut changed = false;
     func.locals.retain(|binding| {
         let used = use_map
@@ -1465,8 +1469,7 @@ pub fn prune_unused_temp_bindings(func: &mut PreHirFunction) -> bool {
             changed = true;
             return false;
         }
-        let assigned_side_effect =
-            stmt_list_assigns_var_from_side_effecting_expr(&func.body, &binding.name);
+        let assigned_side_effect = side_effect_assigned.contains(binding.name.as_str());
         let keep = should_keep_unused_temp_binding(
             is_prunable_unused_temp_binding(binding),
             used || assigned_side_effect,
@@ -1480,6 +1483,75 @@ pub fn prune_unused_temp_bindings(func: &mut PreHirFunction) -> bool {
 
 fn is_prunable_unused_temp_binding(binding: &PreHirBinding) -> bool {
     is_trivial_temp_name(&binding.name) || binding.is_temp_like()
+}
+
+/// Every name assigned from a side-effecting expression anywhere in `stmts`.
+///
+/// Mirrors `stmt_assigns_var_from_side_effecting_expr`'s traversal exactly,
+/// collecting instead of answering about one name. The predicate walked the
+/// whole body once *per binding*, which is the same O(locals * body) shape the
+/// `DefUseMap` in `prune_unused_temp_bindings` was introduced to remove -- it
+/// was simply left behind one predicate lower.
+fn collect_names_assigned_from_side_effecting_exprs<'a>(
+    stmts: &'a [PreHirStmt],
+    out: &mut std::collections::HashSet<&'a str>,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(lhs_name),
+                rhs,
+            } => {
+                if expr_has_side_effects(rhs) {
+                    out.insert(lhs_name.as_str());
+                }
+            }
+            PreHirStmt::Block(stmts)
+            | PreHirStmt::While { body: stmts, .. }
+            | PreHirStmt::DoWhile { body: stmts, .. } => {
+                collect_names_assigned_from_side_effecting_exprs(stmts, out);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_names_assigned_from_side_effecting_exprs(then_body, out);
+                collect_names_assigned_from_side_effecting_exprs(else_body, out);
+            }
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init.as_deref() {
+                    collect_names_assigned_from_side_effecting_exprs(
+                        std::slice::from_ref(init),
+                        out,
+                    );
+                }
+                if let Some(update) = update.as_deref() {
+                    collect_names_assigned_from_side_effecting_exprs(
+                        std::slice::from_ref(update),
+                        out,
+                    );
+                }
+                collect_names_assigned_from_side_effecting_exprs(body, out);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_names_assigned_from_side_effecting_exprs(&case.body, out);
+                }
+                collect_names_assigned_from_side_effecting_exprs(default, out);
+            }
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
 }
 
 fn stmt_list_assigns_var_from_side_effecting_expr(stmts: &[PreHirStmt], name: &str) -> bool {
