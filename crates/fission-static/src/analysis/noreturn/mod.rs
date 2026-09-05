@@ -136,17 +136,28 @@ fn compute_no_return_functions(binary: &LoadedBinary) -> BTreeSet<u64> {
         .par_iter()
         .filter(|f| !f.is_import)
         .filter_map(|f| {
-            let max_bytes = no_return_scan_max_bytes(binary, f.address, 4096);
-            let bytes = binary.view_bytes(f.address, max_bytes)?;
+            // Thumb-only images decode as Thumb whatever bit 0 of the
+            // address says -- lifting with `None` here read every Cortex-M
+            // function as ARM, so the no-return set was derived from a CFG
+            // that is not the program's.
+            let address_state = frontend.normalize_low_bit_code_address(f.address);
+            let decode_address = address_state.address;
+            let context_override = crate::analysis::decode_context_for_address(
+                binary,
+                &frontend,
+                address_state.context_override,
+            );
+            let max_bytes = no_return_scan_max_bytes(binary, decode_address, 4096);
+            let bytes = binary.view_bytes(decode_address, max_bytes)?;
             let memory_context = DecodeMemoryContext::default();
             let contract = DecodeContract::decomp_function(NORETURN_INSTRUCTION_LIMIT);
             let decoded = frontend
                 .lift_raw_pcode_function_with_context_and_memory_context(
                     bytes,
-                    f.address,
+                    decode_address,
                     contract,
                     &memory_context,
-                    None,
+                    context_override,
                 )
                 .ok()?;
             Some((f.address, decoded.function))

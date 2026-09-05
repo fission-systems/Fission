@@ -710,18 +710,32 @@ impl FactStore {
             })
             .filter_map(|func| {
                 let diag_start = std::time::Instant::now();
-                let max_bytes = function_max_bytes(binary, func.address, 4096);
-                let bytes = binary.view_bytes(func.address, max_bytes)?;
-                let memory_context = decode_memory_context_for(binary, func.address, max_bytes);
+                // Same decode-mode question every other path answers with
+                // `decode_context_for_address`: a bare even address in a
+                // Thumb-only image is still Thumb. Lifting with `None` here
+                // read every Cortex-M function as ARM -- and because this
+                // sweep *caches* its decode for the decompile pipeline, the
+                // misread became what got decompiled, whatever context the
+                // pipeline had computed for itself.
+                let address_state = frontend.normalize_low_bit_code_address(func.address);
+                let decode_address = address_state.address;
+                let context_override = crate::analysis::decode_context_for_address(
+                    binary,
+                    &frontend,
+                    address_state.context_override,
+                );
+                let max_bytes = function_max_bytes(binary, decode_address, 4096);
+                let bytes = binary.view_bytes(decode_address, max_bytes)?;
+                let memory_context = decode_memory_context_for(binary, decode_address, max_bytes);
                 let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
                 let decoded = Arc::new(
                     frontend
                         .lift_raw_pcode_function_with_context_and_memory_context(
                             bytes,
-                            func.address,
+                            decode_address,
                             contract,
                             &memory_context,
-                            None,
+                            context_override,
                         )
                         .ok()?,
                 );
@@ -1693,5 +1707,39 @@ mod tests {
 
         let _ = fs::remove_file(binary_path);
         let _ = fs::remove_file(sidecar_path);
+    }
+
+    /// The FID sweep decodes every discovered function and *caches* that
+    /// decode for the decompile pipeline, so its decode-mode choice is not
+    /// local to FID -- it becomes what gets decompiled. It lifted with a
+    /// hardcoded `None` context, which on a Thumb-only image (`testdata/
+    /// armv7m_thumb_leaf.elf`: Cortex-M vector table, even entry, one leaf
+    /// function with no `push` prologue) reads every function as ARM and
+    /// silently succeeds.
+    #[test]
+    fn the_fid_decode_cache_holds_thumb_for_a_thumb_only_image() {
+        use std::path::PathBuf;
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/armv7m_thumb_leaf.elf");
+        let binary = LoadedBinary::from_file(&path).expect("load ARMv7-M fixture");
+        let store = FactStore::from_binary(&binary);
+
+        let Some(decoded) = store.get_cached_decoded_function(0x0800_0020) else {
+            // No bundled ARM FID database on this checkout: the sweep returns
+            // before decoding anything, so there is nothing to assert about.
+            eprintln!("skipping: FID sweep cached nothing for the ARM fixture");
+            return;
+        };
+        let addresses: Vec<u64> = decoded.instructions.iter().map(|i| i.address).collect();
+        assert_eq!(
+            addresses,
+            vec![0x0800_0020, 0x0800_0022, 0x0800_0024, 0x0800_0026],
+            "FID cached an ARM decode of Thumb bytes: {:?}",
+            decoded
+                .instructions
+                .iter()
+                .map(|i| (i.address, i.mnemonic.clone()))
+                .collect::<Vec<_>>()
+        );
     }
 }
