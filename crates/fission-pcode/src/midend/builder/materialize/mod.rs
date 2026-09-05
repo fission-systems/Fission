@@ -1011,6 +1011,41 @@ impl<'a> PreviewBuilder<'a> {
             .is_some_and(|pieces| pieces.iter().any(|piece| values.contains(&piece.value)))
     }
 
+    /// Ghidra's `max_implied_ref` (`architecture.cc`: "2 is best"). A value
+    /// read more times than this gets its own statement and is referred to by
+    /// name; below it, it may be inlined into its uses.
+    const MAX_IMPLIED_REF: usize = 2;
+
+    /// Whether this definition must keep a statement purely because too many
+    /// places read it.
+    ///
+    /// This is the half of Ghidra's explicit/implied rule Fission never had.
+    /// The existing completeness proofs count uses *inside one block*, so a
+    /// value used once where it is defined and read by every successor looks
+    /// inlineable -- and `lower_varnode`, whose `visiting` set is scoped to
+    /// one path, then rebuilds it once per path. That is the duplication the
+    /// work budgets exist to survive.
+    fn output_exceeds_implied_ref_limit(&self, output: &Varnode) -> bool {
+        if !Self::use_count_explicit_rule_enabled() {
+            return false;
+        }
+        self.use_counts
+            .get(&VarnodeKey::from(output))
+            .copied()
+            .unwrap_or(0)
+            > Self::MAX_IMPLIED_REF
+    }
+
+    fn use_count_explicit_rule_enabled() -> bool {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_USE_COUNT_EXPLICIT"),
+                Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
+    }
+
     fn maybe_materialize_output_stmt(
         &mut self,
         block_addr: u64,
@@ -1166,6 +1201,7 @@ impl<'a> PreviewBuilder<'a> {
                 self.primary_return_name_from_live_out_proof(output, block_idx, op_idx, proof)
             });
         if replacement_plan.is_complete()
+            && !self.output_exceeds_implied_ref_limit(output)
             && loop_carried_lhs_name.is_none()
             && merge_lhs_name.is_none()
             && !self.output_is_read_by_phi(block_idx_for_rhs, op_idx)

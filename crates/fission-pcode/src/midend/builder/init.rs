@@ -77,6 +77,17 @@ impl<'a> PreviewBuilder<'a> {
         let mut defs = HashMap::default();
         let mut def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>> = HashMap::default();
         let mut block_defs = Vec::with_capacity(pcode.blocks.len());
+        let mut use_counts: HashMap<VarnodeKey, usize> = HashMap::default();
+        for block in &pcode.blocks {
+            for op in &block.ops {
+                for input in &op.inputs {
+                    if input.is_constant {
+                        continue;
+                    }
+                    *use_counts.entry(VarnodeKey::from(input)).or_insert(0) += 1;
+                }
+            }
+        }
         // SLEIGH models a call as a transfer, not a definition: `Call` carries
         // the target and declares no output. Which register holds the result
         // is a fact of the calling convention, and until it is stated here a
@@ -217,6 +228,7 @@ impl<'a> PreviewBuilder<'a> {
             operand_metatypes: HashMap::default(),
             defs,
             def_sites,
+            use_counts,
             block_defs,
             lookup_site_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             peel_cache: std::cell::RefCell::new(BuilderCacheMap::default()),

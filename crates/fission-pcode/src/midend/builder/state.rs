@@ -21,6 +21,19 @@ pub(crate) struct PreviewBuilder<'a> {
         HashMap<String, crate::midend::support::pcode_util::InputMetatype>,
     pub(crate) defs: HashMap<VarnodeKey, DefSite<'a>>,
     pub(crate) def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>>,
+    /// How many op inputs across the whole function read each storage key.
+    ///
+    /// The symmetric counterpart to `def_sites`, and the fact Ghidra's
+    /// `ActionMarkExplicit` decides on (`desccount > max_implied_ref`).
+    /// Everything else here counts uses *within one block*
+    /// (`output_use_sites_in_block`), which cannot see that a value used once
+    /// where it is defined is read by twenty successors -- and it is exactly
+    /// those that `lower_varnode` re-derives once per path.
+    ///
+    /// Keyed by storage, not by SSA value, so a register reused for many
+    /// values over-counts. That direction is safe: it forces a name where a
+    /// duplicate would otherwise be inlined.
+    pub(crate) use_counts: HashMap<VarnodeKey, usize>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
     pub(crate) lookup_site_cache:
         RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,
