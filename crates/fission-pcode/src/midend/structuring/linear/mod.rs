@@ -27,7 +27,13 @@ impl<'a> PreviewBuilder<'a> {
         if idx >= next_idx {
             return false;
         }
-        let block = self.pcode_block(idx).clone();
+        // Borrowed, not cloned: this is a predicate. Cloning the block --
+        // every op, every op's input `Vec<Varnode>` -- to read `ops.len()`
+        // and `split_last()` cost a full copy per call, and the copy
+        // happened *before* the length and successor tests, so blocks that
+        // fail immediately paid for it too. `OrphanGotoRepairPass` asks this
+        // once per candidate per repair round.
+        let block = self.pcode_block(idx);
         if block.ops.len() > 8 {
             return false;
         }
@@ -191,7 +197,8 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(crate) fn is_trivial_linear_tail(&self, idx: usize) -> bool {
-        let block = self.pcode_block(idx).clone();
+        // Borrowed, not cloned -- same reason as `is_trivial_forwarding_block`.
+        let block = self.pcode_block(idx);
         if block.ops.len() > 24 {
             return false;
         }
