@@ -2,6 +2,7 @@ use crate::{PcodeFunction, Varnode};
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleighFrontend};
 use fission_static::analysis::control_flow_facts::decode_memory_context_for;
+use fission_static::analysis::function_discovery::decode_context_for_address;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DecodeDiag {
@@ -103,7 +104,18 @@ pub(crate) fn decode_rust_sleigh_pcode(
         .unwrap_or_default();
     let address_state = lifter.normalize_low_bit_code_address(entry_address);
     let decode_entry_address = address_state.address;
-    let initial_context_override = address_state.context_override;
+    // A Thumb-only image (Cortex-M/ARMv7-M) is a *fact*, not a guess: it has
+    // no ARM-mode execution at all, so every address in it decodes as Thumb
+    // whatever its bit 0 says. `decode_context_for_address` is the one
+    // primitive that owns that -- `raw-pcode`, `disasm`, `similar` and
+    // function discovery all consult it, and this path did not, so it alone
+    // fell through to the per-address heuristic below and lifted ARM over
+    // Thumb bytes on exactly the functions the heuristic has no pattern for
+    // (crazyflie `cf2.elf`'s leaf `invSqrt` opens `sub sp,#0x18`, no `push`,
+    // and read as `stc p0,cr11,[sp,#536]`). The heuristic still owns genuine
+    // interworking images, where this returns `None`.
+    let initial_context_override =
+        decode_context_for_address(binary, lifter, address_state.context_override);
     let bytes = binary
         .view_bytes(decode_entry_address, max_bytes)
         .ok_or_else(|| DecodeFailure {
@@ -182,7 +194,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
         super::arm_thumb_heuristic::record_direct_call_targets(
             &binary.hash,
             true,
-            &thumb_first.function,
+            &thumb_first.instructions,
         );
         return Ok((
             thumb_first.function,
@@ -206,8 +218,8 @@ pub(crate) fn decode_rust_sleigh_pcode(
             let template_source_counts = lifted.template_source_counts.clone();
             super::arm_thumb_heuristic::record_direct_call_targets(
                 &binary.hash,
-                entry_address % 2 == 1,
-                &lifted.function,
+                initial_context_override.is_some(),
+                &lifted.instructions,
             );
             Ok((
                 lifted.function,
@@ -520,4 +532,51 @@ pub(crate) fn render_pcode_text(name: &str, pcode: &PcodeFunction) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod thumb_only_image_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// `testdata/armv7m_thumb_leaf.elf`: a Cortex-M image (vector table with
+    /// an SRAM stack pointer and Thumb-marked handlers) whose entry is even,
+    /// holding one leaf function that opens `sub sp,#0x18` -- no `push`, so
+    /// no Thumb prologue pattern matches it, and 4-byte-aligned, so the
+    /// alignment rule says nothing either. Read as ARM the same 12 bytes are
+    /// three perfectly valid instructions (`andcs`, `ldrmi`, `bx lr`), so the
+    /// misread raises no error at all; it just decompiles the wrong program.
+    fn fixture() -> LoadedBinary {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../fission-static/testdata/armv7m_thumb_leaf.elf");
+        LoadedBinary::from_file(&path).expect("load ARMv7-M fixture")
+    }
+
+    #[test]
+    fn a_thumb_only_image_decodes_thumb_at_an_even_address() {
+        let binary = fixture();
+        let (pcode, diag, _) = decode_rust_sleigh_pcode(
+            &binary, "leaf", 0x0800_0020, 0x40, 64, true, true, None,
+        )
+        .expect("decode");
+
+        // Thumb decodes these 12 bytes as four 2-byte instructions at
+        // 0x20/0x22/0x24/0x26 and stops at `bx lr`; ARM as three 4-byte ones
+        // at 0x20/0x24/0x28. The instruction *grid* is the discriminator --
+        // and both readings terminate cleanly, which is exactly why nothing
+        // downstream can catch the wrong one.
+        let mut addresses: Vec<u64> = pcode
+            .blocks
+            .iter()
+            .flat_map(|b| b.ops.iter())
+            .map(|op| op.address)
+            .collect();
+        addresses.dedup();
+        assert_eq!(
+            addresses,
+            vec![0x0800_0020, 0x0800_0022, 0x0800_0024, 0x0800_0026],
+            "expected a Thumb instruction grid (stop={})",
+            diag.stop_reason
+        );
+    }
 }

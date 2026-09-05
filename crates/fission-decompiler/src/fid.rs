@@ -82,17 +82,28 @@ impl<'a> FidIdentifier<'a> {
     /// or decode failure) or hashes but doesn't clear the acceptance
     /// threshold against every loaded database.
     pub fn identify(&self, address: u64) -> Option<FidIdentification> {
-        let bytes = self.binary.view_bytes(address, FID_MAX_BYTES)?;
-        let memory_context = decode_memory_context_for(self.binary, address, FID_MAX_BYTES);
+        // A signature hash is only as good as the decode under it: lifting
+        // with `None` hashed an ARM misreading of Thumb bytes, which is why
+        // ARM images matched nothing at all.
+        let address_state = self.lifter.normalize_low_bit_code_address(address);
+        let decode_address = address_state.address;
+        let context_override = fission_static::analysis::decode_context_for_address(
+            self.binary,
+            &self.lifter,
+            address_state.context_override,
+        );
+        let bytes = self.binary.view_bytes(decode_address, FID_MAX_BYTES)?;
+        let memory_context =
+            decode_memory_context_for(self.binary, decode_address, FID_MAX_BYTES);
         let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
         let decoded = self
             .lifter
             .lift_raw_pcode_function_with_context_and_memory_context(
                 bytes,
-                address,
+                decode_address,
                 contract,
                 &memory_context,
-                None,
+                context_override,
             )
             .ok()?;
 

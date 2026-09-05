@@ -28,8 +28,7 @@
 //! 4. Whole-binary entry-point Thumb-bit, as a last-resort weak prior when
 //!    none of the above applies (this session's earlier fix).
 
-use crate::PcodeFunction;
-use fission_pcode::PcodeOpcode;
+use fission_sleigh::runtime::DecodedInstruction;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
@@ -55,46 +54,33 @@ static THUMB_CALL_TARGETS: LazyLock<Mutex<HashMap<(String, u64), bool>>> =
 pub(crate) fn record_direct_call_targets(
     binary_hash: &str,
     caller_was_thumb: bool,
-    pcode: &PcodeFunction,
+    instructions: &[DecodedInstruction],
 ) {
     let mut targets: Vec<(u64, bool)> = Vec::new();
-    for block in &pcode.blocks {
-        for op in &block.ops {
-            if op.opcode != PcodeOpcode::Call {
-                continue;
-            }
-            let Some(target_vn) = op.inputs.first() else {
-                continue;
-            };
-            if !target_vn.is_constant {
-                continue;
-            }
-            let target = if target_vn.offset != 0 {
-                target_vn.offset
-            } else if target_vn.constant_val >= 0 {
-                target_vn.constant_val as u64
-            } else {
-                continue;
-            };
-            let is_blx = op
-                .asm_mnemonic
-                .as_deref()
-                .is_some_and(|m| m.eq_ignore_ascii_case("blx") || m.eq_ignore_ascii_case("blx.w"));
-            let is_bl = op
-                .asm_mnemonic
-                .as_deref()
-                .is_some_and(|m| m.eq_ignore_ascii_case("bl") || m.eq_ignore_ascii_case("bl.w"));
-            if !is_bl && !is_blx {
-                continue;
-            }
-            // BLX always flips mode across the call; BL always preserves it.
-            let target_is_thumb = if is_blx {
-                !caller_was_thumb
-            } else {
-                caller_was_thumb
-            };
-            targets.push((target & !1, target_is_thumb));
+    // Read the *assembly* mnemonic off the decoded instruction, not
+    // `PcodeOp::asm_mnemonic` -- the compiled-table lifter fills that field
+    // with the p-code template's own opcode name (`CALL`, `COPY`, ...), so a
+    // `bl`/`blx` comparison against it never matched anything outside this
+    // module's hand-built unit test, and the registry -- the one *certain*
+    // tier of the ladder below -- never held a single entry in production.
+    for insn in instructions {
+        let mnemonic = insn.mnemonic.to_ascii_lowercase();
+        let base = mnemonic.strip_suffix(".w").unwrap_or(mnemonic.as_str());
+        let is_blx = base == "blx";
+        let is_bl = base == "bl";
+        if !is_bl && !is_blx {
+            continue;
         }
+        let Some(target) = insn.direct_target else {
+            continue;
+        };
+        // BLX always flips mode across the call; BL always preserves it.
+        let target_is_thumb = if is_blx {
+            !caller_was_thumb
+        } else {
+            caller_was_thumb
+        };
+        targets.push((target & !1, target_is_thumb));
     }
     if targets.is_empty() {
         return;
@@ -228,25 +214,21 @@ mod tests {
     fn direct_call_registry_takes_priority_over_everything_else() {
         let bytes = [0xffu8, 0xff, 0xff, 0xff]; // matches no Thumb prologue pattern
         let hash = "test-bin-registry";
-        // Simulate an ARM-mode caller doing `blx 0x8000250` -- BLX always
-        // flips mode, so the target must be recorded as Thumb even though
-        // neither the alignment fact nor the prologue bytes say so.
-        let pcode = PcodeFunction {
-            blocks: vec![fission_pcode::PcodeBasicBlock {
-                index: 0,
-                start_address: 0x1000,
-                successors: vec![],
-                ops: vec![fission_pcode::PcodeOp {
-                    seq_num: 0,
-                    opcode: PcodeOpcode::Call,
-                    address: 0x1000,
-                    output: None,
-                    inputs: vec![fission_pcode::Varnode::constant(0x8000250, 4)],
-                    asm_mnemonic: Some("blx".to_string()),
-                }],
-            }],
-        };
-        record_direct_call_targets(hash, /* caller_was_thumb */ false, &pcode);
+        // An ARM-mode caller doing `blx 0x8000250` -- BLX always flips mode,
+        // so the target must be recorded as Thumb even though neither the
+        // alignment fact nor the prologue bytes say so.
+        let instructions = vec![DecodedInstruction {
+            address: 0x1000,
+            bytes: vec![],
+            length: 4,
+            mnemonic: "blx".to_string(),
+            operands_text: "0x8000250".to_string(),
+            flow_kind: fission_sleigh::runtime::DecodedFlowKind::Call,
+            direct_target: Some(0x8000250),
+            references: vec![],
+            pending_context_commits: vec![],
+        }];
+        record_direct_call_targets(hash, /* caller_was_thumb */ false, &instructions);
         assert!(should_prefer_thumb_decode(0x8000250, &bytes, 0, hash));
     }
 }
