@@ -789,6 +789,14 @@ struct XrefsArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
+    /// Function discovery profile (conservative|balanced|aggressive)
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
     /// Skip Sleigh xref extraction (loader seeds only)
     #[arg(long)]
     no_disassembly: bool,
@@ -810,6 +818,14 @@ struct CallgraphArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
+    /// Function discovery profile (conservative|balanced|aggressive)
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
@@ -822,6 +838,14 @@ struct CallgraphArgs {
 struct IdentifyArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
+
+    /// Function discovery profile (conservative|balanced|aggressive)
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Identify only this function entry VA instead of every discovered function
     #[arg(long, value_parser = parse_hex_address)]
@@ -1187,6 +1211,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.xrefs_cmd = true;
                     args.xref_no_disassembly = xrefs.no_disassembly;
                     args.xref_function = xrefs.function;
+                    args.function_discovery_profile = xrefs.function_discovery_profile;
                     args.json = xrefs.common.json;
                     args.verbose = xrefs.common.verbose;
                     args
@@ -1194,6 +1219,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Callgraph(callgraph) => {
                     let mut args = OneShotArgs::with_binary(callgraph.binary);
                     args.callgraph_cmd = true;
+                    args.function_discovery_profile = callgraph.function_discovery_profile;
                     args.json = callgraph.common.json;
                     args.verbose = callgraph.common.verbose;
                     args
@@ -1202,6 +1228,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     let mut args = OneShotArgs::with_binary(identify.binary);
                     args.identify_cmd = true;
                     args.identify_function = identify.function;
+                    args.function_discovery_profile = identify.function_discovery_profile;
                     args.json = identify.common.json;
                     args.verbose = identify.common.verbose;
                     args
