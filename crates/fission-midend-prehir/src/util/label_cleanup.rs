@@ -163,10 +163,18 @@ fn rewrite_stmt_label(
                 .into_iter()
                 .map(|case| PreHirSwitchCase {
                     values: case.values,
-                    body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(case.body), aliases, changed)),
+                    body: Rc::new(rewrite_stmt_labels(
+                        Rc::unwrap_or_clone(case.body),
+                        aliases,
+                        changed,
+                    )),
                 })
                 .collect(),
-            default: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(default), aliases, changed)),
+            default: Rc::new(rewrite_stmt_labels(
+                Rc::unwrap_or_clone(default),
+                aliases,
+                changed,
+            )),
         },
         PreHirStmt::If {
             cond,
@@ -174,15 +182,31 @@ fn rewrite_stmt_label(
             else_body,
         } => PreHirStmt::If {
             cond,
-            then_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(then_body), aliases, changed)),
-            else_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(else_body), aliases, changed)),
+            then_body: Rc::new(rewrite_stmt_labels(
+                Rc::unwrap_or_clone(then_body),
+                aliases,
+                changed,
+            )),
+            else_body: Rc::new(rewrite_stmt_labels(
+                Rc::unwrap_or_clone(else_body),
+                aliases,
+                changed,
+            )),
         },
         PreHirStmt::While { cond, body } => PreHirStmt::While {
             cond,
-            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases, changed)),
+            body: Rc::new(rewrite_stmt_labels(
+                Rc::unwrap_or_clone(body),
+                aliases,
+                changed,
+            )),
         },
         PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
-            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases, changed)),
+            body: Rc::new(rewrite_stmt_labels(
+                Rc::unwrap_or_clone(body),
+                aliases,
+                changed,
+            )),
             cond,
         },
         PreHirStmt::For {
@@ -208,7 +232,11 @@ fn rewrite_stmt_label(
                         .unwrap(),
                 )
             }),
-            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases, changed)),
+            body: Rc::new(rewrite_stmt_labels(
+                Rc::unwrap_or_clone(body),
+                aliases,
+                changed,
+            )),
         },
         PreHirStmt::Label(label) => {
             let canonical = canonicalize_label(&label, aliases);

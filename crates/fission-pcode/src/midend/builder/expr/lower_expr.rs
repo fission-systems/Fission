@@ -2091,11 +2091,9 @@ impl<'a> PreviewBuilder<'a> {
         // value once per path -- the thing Ghidra's explicit marking exists
         // to prevent, and the reason Fission needs work budgets without it.
         if let Some((site, _)) = def_site
-            && let Some(name) = self.materialized_output_names.get(&(
-                site.block_idx,
-                site.op_idx,
-                key.clone(),
-            ))
+            && let Some(name) =
+                self.materialized_output_names
+                    .get(&(site.block_idx, site.op_idx, key.clone()))
         {
             return Ok(PreHirExpr::Var(name.clone()));
         }
@@ -2320,7 +2318,8 @@ impl<'a> PreviewBuilder<'a> {
 
         let fallback_name = || -> Option<String> {
             if is_unique_space_id(vn.space_id) {
-                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size).map(ToString::to_string)
+                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                    .map(ToString::to_string)
             } else {
                 None
             }

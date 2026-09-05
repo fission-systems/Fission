@@ -1,6 +1,9 @@
 //! Short-circuit and/or conditional-chain free functions.
 
-use super::{fold_prefix_into_cond, is_trivial_structuring_stmt, log_short_circuit_cache, shared_forward_linear_exit};
+use super::{
+    fold_prefix_into_cond, is_trivial_structuring_stmt, log_short_circuit_cache,
+    shared_forward_linear_exit,
+};
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
 use fission_midend_core::ir::MlilPreviewError;

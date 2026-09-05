@@ -76,9 +76,7 @@ pub fn canonicalize_interleaved_local_aliases(
         };
         let total_refs = referenced.get(label).copied().unwrap_or(0);
         let (top_level_before, nested_before, refs_after) =
-            crate::guarded_tail::pure_hir::classify_alias_ref_sites_indexed(
-                &ref_sites, idx, label,
-            );
+            crate::guarded_tail::pure_hir::classify_alias_ref_sites_indexed(&ref_sites, idx, label);
         let local_ref_count = top_level_before + nested_before + refs_after;
         let external_ref_count = total_refs.saturating_sub(local_ref_count);
         let top_level_after_positions: Vec<usize> = goto_positions
@@ -1589,7 +1587,9 @@ pub fn collect_guarded_tail_exported_bindings(
         if !always_terminates {
             for (stmt_idx, stmt) in follow_tail.iter().enumerate() {
                 let _ = stmt;
-                let reads_here = tail_read_kinds[stmt_idx].get(binding_name.as_str()).copied();
+                let reads_here = tail_read_kinds[stmt_idx]
+                    .get(binding_name.as_str())
+                    .copied();
                 let defs_here = tail_def_counts[stmt_idx]
                     .get(binding_name.as_str())
                     .copied()

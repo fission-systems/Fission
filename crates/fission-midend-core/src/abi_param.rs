@@ -157,12 +157,14 @@ impl AbiState {
 /// (`XMMn_Da`) instead. Both are returned: they are aliases of one location,
 /// and which one a body mentions is just the width of the argument it carries.
 /// Only lane `a` is a parameter slot -- the high lanes never carry a scalar.
-fn float_hw_names_for_offset(abi: CallingConvention, offset: u64, pointer_size: u32) -> Vec<String> {
+fn float_hw_names_for_offset(
+    abi: CallingConvention,
+    offset: u64,
+    pointer_size: u32,
+) -> Vec<String> {
     let is_x86 = matches!(
         abi,
-        CallingConvention::X86_32
-            | CallingConvention::WindowsX64
-            | CallingConvention::SystemVAmd64
+        CallingConvention::X86_32 | CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
     ) || pointer_size == 8;
     if !is_x86 {
         return Vec::new();

@@ -330,9 +330,11 @@ fn decode_rust_sleigh_pcode(
     let decode_address = address_state.address;
     let context_override =
         decode_context_for_address(binary, &lifter, address_state.context_override);
-    let bytes = binary.view_bytes(decode_address, max_bytes).ok_or_else(|| {
-        format!("rust_sleigh: unable to read bytes at 0x{decode_address:x} for {name}")
-    })?;
+    let bytes = binary
+        .view_bytes(decode_address, max_bytes)
+        .ok_or_else(|| {
+            format!("rust_sleigh: unable to read bytes at 0x{decode_address:x} for {name}")
+        })?;
     let memory_context = DecodeMemoryContext::default();
     let lift_contract = if continue_past_indirect_branch {
         DecodeContract::decomp_function(instruction_limit)
@@ -351,8 +353,7 @@ fn decode_rust_sleigh_pcode(
         Err(first_err) => {
             if retry_on_decode_error {
                 let err_str = format!("{first_err:#}");
-                if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, decode_address)
-                {
+                if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, decode_address) {
                     if safe > 0 && safe < bytes.len() {
                         if let Ok(retry) = lifter
                             .lift_raw_pcode_function_with_context_and_memory_context(

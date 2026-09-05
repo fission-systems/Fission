@@ -951,7 +951,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn output_is_read_by_phi(&mut self, block_idx: Option<usize>, op_idx: usize) -> bool {
-        let Some(block_idx) = block_idx else { return false };
+        let Some(block_idx) = block_idx else {
+            return false;
+        };
         if self.phi_operand_values.is_none() {
             // Only phis whose own output is actually consumed. Ghidra places
             // `MULTIEQUAL` on a liveness-pruned frontier, so a value that dies
@@ -1002,9 +1004,16 @@ impl<'a> PreviewBuilder<'a> {
             }
             self.phi_operand_values = Some(set);
         }
-        let Some(values) = self.phi_operand_values.as_ref() else { return false };
-        if values.is_empty() { return false; }
-        let key = fission_midend_core::ir::SsaOpSite { block: block_idx as u32, op: op_idx as u32 };
+        let Some(values) = self.phi_operand_values.as_ref() else {
+            return false;
+        };
+        if values.is_empty() {
+            return false;
+        }
+        let key = fission_midend_core::ir::SsaOpSite {
+            block: block_idx as u32,
+            op: op_idx as u32,
+        };
         self.scalar_ssa
             .operation_outputs
             .get(&key)
@@ -1504,8 +1513,7 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx,
                 VarnodeKey::from(output),
             );
-            self.materialized_output_names
-                .insert(key, lhs_name.clone());
+            self.materialized_output_names.insert(key, lhs_name.clone());
         }
         let lhs = PreHirLValue::Var(lhs_name);
         Ok(Some(PreHirStmt::Assign { lhs, rhs }))
@@ -4737,7 +4745,6 @@ mod materialize_tests;
 pub(super) fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     self::incremental::refine_partitions(accesses)
 }
-
 
 /// Expression nodes carried by one statement -- diagnostics only, so a runaway
 /// expression can be attributed to the statement that carries it.

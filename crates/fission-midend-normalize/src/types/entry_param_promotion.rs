@@ -6,7 +6,7 @@
 
 use crate::HashSet;
 use fission_midend_core::ir::{NirBindingOrigin, NirType};
-use fission_midend_core::{float_param_bits_for_name, AbiState, CallingConvention};
+use fission_midend_core::{AbiState, CallingConvention, float_param_bits_for_name};
 use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
 use std::collections::BTreeSet;
@@ -506,7 +506,11 @@ fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
                 continue;
             }
             let ty = match float_param_bits_for_name(&hw) {
-                Some(bits) if abi_state_for_func(func).float_param_slot_for_name(&hw).is_some() => {
+                Some(bits)
+                    if abi_state_for_func(func)
+                        .float_param_slot_for_name(&hw)
+                        .is_some() =>
+                {
                     NirType::Float { bits }
                 }
                 _ => param_ty_for_abi(func),

@@ -1719,8 +1719,7 @@ mod tests {
     #[test]
     fn the_fid_decode_cache_holds_thumb_for_a_thumb_only_image() {
         use std::path::PathBuf;
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("testdata/armv7m_thumb_leaf.elf");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/armv7m_thumb_leaf.elf");
         let binary = LoadedBinary::from_file(&path).expect("load ARMv7-M fixture");
         let store = FactStore::from_binary(&binary);
 

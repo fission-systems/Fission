@@ -93,8 +93,7 @@ impl<'a> FidIdentifier<'a> {
             address_state.context_override,
         );
         let bytes = self.binary.view_bytes(decode_address, FID_MAX_BYTES)?;
-        let memory_context =
-            decode_memory_context_for(self.binary, decode_address, FID_MAX_BYTES);
+        let memory_context = decode_memory_context_for(self.binary, decode_address, FID_MAX_BYTES);
         let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
         let decoded = self
             .lifter

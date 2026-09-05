@@ -960,8 +960,8 @@ mod group_slot_tests {
     use std::path::Path;
 
     fn specs_dir() -> Option<std::path::PathBuf> {
-        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../utils/sleigh-specs/languages/x86");
+        let d =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils/sleigh-specs/languages/x86");
         d.is_dir().then(|| d)
     }
 
@@ -976,11 +976,12 @@ mod group_slot_tests {
             .input
             .iter()
             .filter_map(|p| match p {
-                CspecPentry::Register { name, metatype, group, .. }
-                    if metatype.as_deref() == Some("float") =>
-                {
-                    Some((name.clone(), *group))
-                }
+                CspecPentry::Register {
+                    name,
+                    metatype,
+                    group,
+                    ..
+                } if metatype.as_deref() == Some("float") => Some((name.clone(), *group)),
                 _ => None,
             })
             .collect();

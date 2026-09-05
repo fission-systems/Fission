@@ -555,10 +555,9 @@ mod thumb_only_image_tests {
     #[test]
     fn a_thumb_only_image_decodes_thumb_at_an_even_address() {
         let binary = fixture();
-        let (pcode, diag, _) = decode_rust_sleigh_pcode(
-            &binary, "leaf", 0x0800_0020, 0x40, 64, true, true, None,
-        )
-        .expect("decode");
+        let (pcode, diag, _) =
+            decode_rust_sleigh_pcode(&binary, "leaf", 0x0800_0020, 0x40, 64, true, true, None)
+                .expect("decode");
 
         // Thumb decodes these 12 bytes as four 2-byte instructions at
         // 0x20/0x22/0x24/0x26 and stops at `bx lr`; ARM as three 4-byte ones

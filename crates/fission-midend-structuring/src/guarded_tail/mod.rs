@@ -22,8 +22,7 @@ pub use promote::{
 };
 pub use pure_hir::*;
 pub use suffix_window::{
-    OwnedSafeMemo,
-    SuffixCallProvenanceFacts, candidate_window_can_shrink_to_label_with_diag,
+    OwnedSafeMemo, SuffixCallProvenanceFacts, candidate_window_can_shrink_to_label_with_diag,
     classify_suffix_stmt_with_diag, emit_suffix_unknown_call_provenance_trace,
     find_earliest_owned_join_label_with_diag, preview_unsafe_callee_target,
     suffix_is_nonowned_terminal_tail_with_diag,

@@ -429,8 +429,16 @@ pub fn collect_stmt_read_kinds<'a>(
     }
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
-            note(out, crate::guarded_tail_pure::expr_var_names(rhs), GuardedTailReadKind::AssignRhs);
-            note(out, crate::guarded_tail_pure::lvalue_var_names(lhs), GuardedTailReadKind::NestedExpr);
+            note(
+                out,
+                crate::guarded_tail_pure::expr_var_names(rhs),
+                GuardedTailReadKind::AssignRhs,
+            );
+            note(
+                out,
+                crate::guarded_tail_pure::lvalue_var_names(lhs),
+                GuardedTailReadKind::NestedExpr,
+            );
         }
         PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => {
             let mut vars: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -439,17 +447,27 @@ pub fn collect_stmt_read_kinds<'a>(
             }
             note(out, vars, GuardedTailReadKind::CallArg);
         }
-        PreHirStmt::Expr(expr) => note(out, crate::guarded_tail_pure::expr_var_names(expr), GuardedTailReadKind::NestedExpr),
-        PreHirStmt::Return(Some(expr)) => {
-            note(out, crate::guarded_tail_pure::expr_var_names(expr), GuardedTailReadKind::ReturnExpr)
-        }
+        PreHirStmt::Expr(expr) => note(
+            out,
+            crate::guarded_tail_pure::expr_var_names(expr),
+            GuardedTailReadKind::NestedExpr,
+        ),
+        PreHirStmt::Return(Some(expr)) => note(
+            out,
+            crate::guarded_tail_pure::expr_var_names(expr),
+            GuardedTailReadKind::ReturnExpr,
+        ),
         PreHirStmt::Return(_) => {}
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            note(out, crate::guarded_tail_pure::expr_var_names(cond), GuardedTailReadKind::ConditionExpr);
+            note(
+                out,
+                crate::guarded_tail_pure::expr_var_names(cond),
+                GuardedTailReadKind::ConditionExpr,
+            );
             for stmt in then_body.iter().chain(else_body.iter()) {
                 collect_stmt_read_kinds(stmt, out);
             }
@@ -459,7 +477,11 @@ pub fn collect_stmt_read_kinds<'a>(
             cases,
             default,
         } => {
-            note(out, crate::guarded_tail_pure::expr_var_names(expr), GuardedTailReadKind::SwitchSelector);
+            note(
+                out,
+                crate::guarded_tail_pure::expr_var_names(expr),
+                GuardedTailReadKind::SwitchSelector,
+            );
             for stmt in cases
                 .iter()
                 .flat_map(|case| case.body.iter())
@@ -477,7 +499,11 @@ pub fn collect_stmt_read_kinds<'a>(
             for stmt in body.iter() {
                 collect_stmt_read_kinds(stmt, out);
             }
-            note(out, crate::guarded_tail_pure::expr_var_names(cond), GuardedTailReadKind::ConditionExpr);
+            note(
+                out,
+                crate::guarded_tail_pure::expr_var_names(cond),
+                GuardedTailReadKind::ConditionExpr,
+            );
         }
         PreHirStmt::For {
             init,
@@ -489,7 +515,11 @@ pub fn collect_stmt_read_kinds<'a>(
                 collect_stmt_read_kinds(stmt, out);
             }
             if let Some(cond) = cond {
-                note(out, crate::guarded_tail_pure::expr_var_names(cond), GuardedTailReadKind::ConditionExpr);
+                note(
+                    out,
+                    crate::guarded_tail_pure::expr_var_names(cond),
+                    GuardedTailReadKind::ConditionExpr,
+                );
             }
             for stmt in update.iter() {
                 collect_stmt_read_kinds(stmt, out);
@@ -498,9 +528,11 @@ pub fn collect_stmt_read_kinds<'a>(
                 collect_stmt_read_kinds(stmt, out);
             }
         }
-        PreHirStmt::VaStart { va_list, .. } => {
-            note(out, crate::guarded_tail_pure::expr_var_names(va_list), GuardedTailReadKind::NestedExpr)
-        }
+        PreHirStmt::VaStart { va_list, .. } => note(
+            out,
+            crate::guarded_tail_pure::expr_var_names(va_list),
+            GuardedTailReadKind::NestedExpr,
+        ),
         PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {}
     }
 }
