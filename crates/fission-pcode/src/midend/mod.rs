@@ -140,11 +140,11 @@ pub use fission_midend_normalize::{
 
 // Top-level preview/NIR entrypoints (builder → normalize → structure → print).
 pub use self::orchestrate::{
-    build_raw_hir, render_mlil_preview, render_mlil_preview_with_binary_and_context,
-    render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
-    render_nir_with_context, take_last_hir_function_snapshot, take_last_layered_pseudocode,
-    take_last_prehir_snapshot, take_last_raw_hir_snapshot, take_last_recovered_variables,
-    test_refine_partitions,
+    build_raw_hir, render_mlil_preview, render_mlil_preview_dual_layer,
+    render_mlil_preview_with_binary_and_context, render_mlil_preview_with_context, render_nir,
+    render_nir_with_binary_and_context, render_nir_with_context, take_last_hir_function_snapshot,
+    take_last_layered_pseudocode, take_last_prehir_snapshot, take_last_raw_hir_snapshot,
+    take_last_recovered_variables, test_refine_partitions,
 };
 
 /// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.

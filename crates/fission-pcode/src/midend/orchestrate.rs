@@ -93,6 +93,72 @@ pub fn render_mlil_preview_with_context(
     )
 }
 
+/// Build each layer from its own structuring, then stitch them.
+///
+/// The two layers want different things from a structuring and the
+/// difference is not cosmetic: `SelectionAxis::NodeEstimate` keeps a jump
+/// when removing it would cost more CFG nodes than it saves, and
+/// `fission_midend_core::ir::SelectionAxis::Jumps` never does. Sharing one tree meant one of them was
+/// always getting the other's answer.
+///
+/// This runs the pipeline twice, so it is behind
+/// `NirRenderOptions::dual_layer_structuring` and off by default. The layer
+/// DecBench scores already receives the accuracy objective through
+/// `selection_axis`; what the second run adds is the *readable* variant, for
+/// a person rather than for the metric.
+///
+/// Returns the accuracy surface, which is what every existing caller of
+/// `render_mlil_preview_with_binary_and_context` expects back.
+pub fn render_mlil_preview_dual_layer(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+    binary: Option<&LoadedBinary>,
+    type_context: Option<&PreviewTypeContext>,
+) -> Result<String, MlilPreviewError> {
+    let scored = render_mlil_preview_with_binary_and_context(
+        pcode,
+        name,
+        address,
+        options,
+        binary,
+        type_context,
+        None,
+    )?;
+    if !options.dual_layer_structuring
+        || options.selection_axis == fission_midend_core::ir::SelectionAxis::Jumps
+    {
+        return Ok(scored);
+    }
+    let Some(scored_layers) = take_last_layered_pseudocode() else {
+        return Ok(scored);
+    };
+    let mut readable_options = options.clone();
+    readable_options.selection_axis = fission_midend_core::ir::SelectionAxis::Jumps;
+    // A failure here is not a failure of the decompilation -- the scored
+    // surface is already built. Fall back to sharing its tree, which is what
+    // every caller got before this existed.
+    let readable = render_mlil_preview_with_binary_and_context(
+        pcode,
+        name,
+        address,
+        &readable_options,
+        binary,
+        type_context,
+        None,
+    );
+    let hir = match readable.ok().and_then(|_| take_last_layered_pseudocode()) {
+        Some(readable_layers) => readable_layers.hir,
+        None => scored_layers.hir.clone(),
+    };
+    store_last_layered_pseudocode(LayeredPseudocode {
+        nir: scored_layers.nir,
+        hir,
+    });
+    Ok(scored)
+}
+
 pub fn render_mlil_preview_with_binary_and_context(
     pcode: &PcodeFunction,
     name: &str,

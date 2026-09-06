@@ -44,13 +44,14 @@ pub use midend::{
     StructuringFailureKind, StructuringOutcome, StructuringReasonFamily, TargetProfile,
     WrapperClass, build_raw_hir, infer_entry_register_param_arity, nir_admission_facts_from_pcode,
     parse_call_target_address, print_prehir_function, render_contracted_wrapper_summary,
-    render_mlil_preview, render_mlil_preview_with_binary_and_context,
-    render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
-    render_nir_with_context, seed_nir_render_options, structuring_outcome_for_signature,
-    summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
-    take_last_hir_function_snapshot, take_last_layered_pseudocode, take_last_nir_build_stats,
-    take_last_nir_hint_stats, take_last_prehir_snapshot, take_last_preview_build_stats,
-    take_last_preview_hint_stats, take_last_raw_hir_snapshot, take_last_recovered_variables,
+    render_mlil_preview, render_mlil_preview_dual_layer,
+    render_mlil_preview_with_binary_and_context, render_mlil_preview_with_context, render_nir,
+    render_nir_with_binary_and_context, render_nir_with_context, seed_nir_render_options,
+    structuring_outcome_for_signature, summarize_direct_tail_wrapper_from_ops,
+    summarize_direct_tail_wrapper_from_pcode, take_last_hir_function_snapshot,
+    take_last_layered_pseudocode, take_last_nir_build_stats, take_last_nir_hint_stats,
+    take_last_prehir_snapshot, take_last_preview_build_stats, take_last_preview_hint_stats,
+    take_last_raw_hir_snapshot, take_last_recovered_variables,
 };
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};
 pub use render::{RecoveredVariable, recovered_variables};

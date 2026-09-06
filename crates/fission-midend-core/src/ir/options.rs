@@ -43,6 +43,16 @@ pub struct NirRenderOptions {
     /// Which objective alternative structurings are judged against.
     #[serde(default)]
     pub selection_axis: SelectionAxis,
+    /// Build each layer from its own structuring instead of sharing one.
+    ///
+    /// Off by default, and deliberately: the scored layer already gets the
+    /// accuracy objective through [`Self::selection_axis`], so the second
+    /// build buys a *readability* variant and nothing else. It costs a full
+    /// second pipeline run on the functions where the two objectives
+    /// disagree -- measured at 19% (x86) to 33% (ARM) of the functions that
+    /// reach alternative structuring -- so it is opt-in.
+    #[serde(default)]
+    pub dual_layer_structuring: bool,
     #[serde(default)]
     pub conservative_irreducible_fallback: bool,
     #[serde(default)]
@@ -561,6 +571,7 @@ impl NirRenderOptions {
             // passes, which is what makes the split per-layer rather than
             // per-process.
             selection_axis: SelectionAxis::from_env(),
+            dual_layer_structuring: false,
         };
         // SLA register map seeding lives in `fission-pcode` (cspec / register model)
         // so this crate does not depend on SLEIGH language resources. Callers that
@@ -819,5 +830,36 @@ mod sanitize_identifier_tests {
     #[test]
     fn an_empty_name_still_yields_an_identifier() {
         assert_eq!(sanitize_c_identifier(""), "_");
+    }
+}
+
+#[cfg(test)]
+mod selection_axis_tests {
+    use super::*;
+
+    /// The two output modes exist because accuracy and readability are not
+    /// proportional, so they must be able to disagree. Sharing one objective
+    /// -- which is what a process-wide switch forces -- makes one of them a
+    /// relabelling of the other.
+    #[test]
+    fn the_two_modes_can_be_asked_for_independently() {
+        let mut scored = NirRenderOptions::default();
+        let mut readable = NirRenderOptions::default();
+        scored.selection_axis = SelectionAxis::NodeEstimate;
+        readable.selection_axis = SelectionAxis::Jumps;
+        assert_ne!(scored.selection_axis, readable.selection_axis);
+    }
+
+    /// Accuracy is what ships unless something asks otherwise.
+    #[test]
+    fn the_default_objective_is_the_scored_one() {
+        assert_eq!(SelectionAxis::default(), SelectionAxis::NodeEstimate);
+    }
+
+    /// And the second build is opt-in, because the scored layer already gets
+    /// the accuracy objective without it.
+    #[test]
+    fn dual_layer_structuring_is_off_by_default() {
+        assert!(!NirRenderOptions::default().dual_layer_structuring);
     }
 }
