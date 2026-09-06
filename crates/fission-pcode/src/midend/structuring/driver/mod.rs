@@ -173,6 +173,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         conservative_irreducible_fallback: false,
         is_data_ref_origin: false,
         structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        selection_axis: Default::default(),
         global_names: Default::default(),
         global_sizes: Default::default(),
         relocation_names: Default::default(),
@@ -193,6 +194,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         pspec_programcounter: None,
         pspec_tracked_context: Vec::new(),
         pspec_hidden_registers: Default::default(),
+        selection_axis: Default::default(),
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     builder.promote_guarded_tail_regions_until_stable(body);
@@ -219,6 +221,7 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[PreHirStmt]) ->
         conservative_irreducible_fallback: false,
         is_data_ref_origin: false,
         structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        selection_axis: Default::default(),
         global_names: Default::default(),
         global_sizes: Default::default(),
         relocation_names: Default::default(),

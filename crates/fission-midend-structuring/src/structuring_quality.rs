@@ -45,32 +45,7 @@
 
 use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt};
 
-/// What a structuring is being selected *for*.
-///
-/// The NIR/HIR split is not a printing difference; it is this choice. Until
-/// it existed, `improves_on` made `gotos < baseline.gotos` a hard
-/// precondition, so every layer was selected for readability whether or not
-/// that was what it was scored on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SelectionAxis {
-    /// Fewest CFG nodes as Joern will count them -- the axis VJ-GED scores.
-    /// Keeps a jump when removing it would cost more than it saves.
-    #[default]
-    NodeEstimate,
-    /// Fewest jumps. What a person reads more easily, and what this pipeline
-    /// optimised for everywhere before the node model was fitted.
-    Jumps,
-}
-
-impl SelectionAxis {
-    /// `FISSION_SELECT_BY_NODE_ESTIMATE=0` restores the pre-2026-09-06 rule.
-    pub fn from_env() -> Self {
-        match std::env::var("FISSION_SELECT_BY_NODE_ESTIMATE") {
-            Ok(v) if matches!(v.as_str(), "0" | "false" | "FALSE" | "no" | "NO") => Self::Jumps,
-            _ => Self::NodeEstimate,
-        }
-    }
-}
+pub use fission_midend_core::ir::SelectionAxis;
 
 /// What a structuring is worth, on every axis measurement has shown to matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -259,6 +259,7 @@ fn try_alternative_structurings(
     baseline: Vec<PreHirStmt>,
     diag: bool,
     admission: AlternativeAdmission,
+    axis: fission_midend_structuring::structuring_quality::SelectionAxis,
 ) -> Vec<PreHirStmt> {
     use fission_midend_structuring::structuring_quality::measure;
 
@@ -391,7 +392,7 @@ fn try_alternative_structurings(
         // still goes through the same isolated commit rerun below.
         let forced = forced_driver().is_some_and(|want| want.eq_ignore_ascii_case(name));
         if forced
-            || (quality.improves_on(best_quality)
+            || (quality.improves_on_axis(best_quality, axis)
                 && candidate_normalized.gotos <= best_normalized.gotos
                 && post_layout_pair
                     .as_ref()
@@ -719,8 +720,13 @@ impl NirPass for SeseStructuringPass {
                 // while giving up nothing else. Running first was tried for
                 // both of them and lost `switch` recovery and short-circuit
                 // `&&` folding -- losses the goto count scores as wins.
-                let body =
-                    try_alternative_structurings(ir, body, diag, AlternativeAdmission::Established);
+                let body = try_alternative_structurings(
+                    ir,
+                    body,
+                    diag,
+                    AlternativeAdmission::Established,
+                    ir.builder.options.selection_axis,
+                );
                 let elapsed = ir
                     .builder
                     .structuring_start
@@ -904,6 +910,7 @@ impl NirPass for OrphanGotoRepairPass {
                     fallback_result,
                     diag,
                     AlternativeAdmission::LinearFallback,
+                    ir.builder.options.selection_axis,
                 )
             } else {
                 fallback_result

@@ -1,5 +1,31 @@
 use super::*;
 
+/// What a structuring is being selected *for*.
+///
+/// The NIR/HIR split is this choice, not a printing difference. It lives on
+/// the render options rather than in an environment variable so the two
+/// layers can ask for different structurings of the same function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum SelectionAxis {
+    /// Fewest CFG nodes as Joern counts them -- the axis VJ-GED scores.
+    /// Keeps a jump when removing it would cost more than it saves.
+    #[default]
+    NodeEstimate,
+    /// Fewest jumps. Easier to read, and what this pipeline optimised for
+    /// everywhere before the node model was fitted.
+    Jumps,
+}
+
+impl SelectionAxis {
+    /// `FISSION_SELECT_BY_NODE_ESTIMATE=0` restores the pre-2026-09-06 rule.
+    pub fn from_env() -> Self {
+        match std::env::var("FISSION_SELECT_BY_NODE_ESTIMATE") {
+            Ok(v) if matches!(v.as_str(), "0" | "false" | "FALSE" | "no" | "NO") => Self::Jumps,
+            _ => Self::NodeEstimate,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct NirRenderOptions {
     pub pe_x64_only: bool,
@@ -14,6 +40,9 @@ pub struct NirRenderOptions {
     pub force_linear_structuring: bool,
     #[serde(default)]
     pub structuring_engine: StructuringEngineKind,
+    /// Which objective alternative structurings are judged against.
+    #[serde(default)]
+    pub selection_axis: SelectionAxis,
     #[serde(default)]
     pub conservative_irreducible_fallback: bool,
     #[serde(default)]
@@ -527,6 +556,11 @@ impl NirRenderOptions {
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: std::collections::HashSet::new(),
+            // The scored objective by default; a caller wanting the
+            // readable layer sets `SelectionAxis::Jumps` on the options it
+            // passes, which is what makes the split per-layer rather than
+            // per-process.
+            selection_axis: SelectionAxis::from_env(),
         };
         // SLA register map seeding lives in `fission-pcode` (cspec / register model)
         // so this crate does not depend on SLEIGH language resources. Callers that
