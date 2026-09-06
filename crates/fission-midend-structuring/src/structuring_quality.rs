@@ -45,6 +45,33 @@
 
 use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt};
 
+/// What a structuring is being selected *for*.
+///
+/// The NIR/HIR split is not a printing difference; it is this choice. Until
+/// it existed, `improves_on` made `gotos < baseline.gotos` a hard
+/// precondition, so every layer was selected for readability whether or not
+/// that was what it was scored on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelectionAxis {
+    /// Fewest CFG nodes as Joern will count them -- the axis VJ-GED scores.
+    /// Keeps a jump when removing it would cost more than it saves.
+    #[default]
+    NodeEstimate,
+    /// Fewest jumps. What a person reads more easily, and what this pipeline
+    /// optimised for everywhere before the node model was fitted.
+    Jumps,
+}
+
+impl SelectionAxis {
+    /// `FISSION_SELECT_BY_NODE_ESTIMATE=0` restores the pre-2026-09-06 rule.
+    pub fn from_env() -> Self {
+        match std::env::var("FISSION_SELECT_BY_NODE_ESTIMATE") {
+            Ok(v) if matches!(v.as_str(), "0" | "false" | "FALSE" | "no" | "NO") => Self::Jumps,
+            _ => Self::NodeEstimate,
+        }
+    }
+}
+
 /// What a structuring is worth, on every axis measurement has shown to matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StructuringQuality {
@@ -145,28 +172,20 @@ impl StructuringQuality {
             + 65
     }
 
-    /// Whether `FISSION_SELECT_BY_NODE_ESTIMATE` is on: accept a structuring
-    /// when it lowers [`Self::estimated_cfg_nodes_x100`], instead of requiring
-    /// it to remove a jump.
-    ///
-    /// The existing rule makes `gotos < baseline.gotos` a hard precondition,
-    /// so the whole selection machinery is built around removing jumps. The
-    /// fitted model says a jump carries a *negative* node coefficient, i.e.
-    /// removing one costs on the axis DecBench scores. This switch is what
-    /// turns "accuracy over readability" from a stated direction into a
-    /// measurable one.
-    fn select_by_node_estimate() -> bool {
-        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ON.get_or_init(|| {
-            matches!(
-                std::env::var("FISSION_SELECT_BY_NODE_ESTIMATE"),
-                Ok(v) if matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-            )
-        })
+    /// Accept under the layer's own objective.
+    pub fn improves_on(&self, baseline: &Self) -> bool {
+        self.improves_on_axis(baseline, SelectionAxis::default())
     }
 
-    pub fn improves_on(&self, baseline: &Self) -> bool {
-        if Self::select_by_node_estimate() {
+    /// Accept under a named objective.
+    ///
+    /// This is where the NIR/HIR boundary is decided. The two layers want
+    /// different things from a structuring and the difference is not
+    /// cosmetic: [`SelectionAxis::NodeEstimate`] keeps a jump when removing
+    /// it would cost more CFG nodes than it saves, and
+    /// [`SelectionAxis::Jumps`] never does.
+    pub fn improves_on_axis(&self, baseline: &Self, axis: SelectionAxis) -> bool {
+        if axis == SelectionAxis::NodeEstimate {
             return self.estimated_cfg_nodes_x100() < baseline.estimated_cfg_nodes_x100()
                 && self.switches >= baseline.switches
                 && self.empty_if_shells <= baseline.empty_if_shells;
@@ -572,7 +591,7 @@ mod tests {
     fn fewer_gotos_alone_is_enough_when_nothing_else_moves() {
         let baseline = measure(&[goto("a"), goto("b")]);
         let candidate = measure(&[goto("a")]);
-        assert!(candidate.improves_on(&baseline));
+        assert!(candidate.improves_on_axis(&baseline, SelectionAxis::Jumps));
     }
 
     #[test]
@@ -612,12 +631,12 @@ mod tests {
         let baseline = measure(&[goto("a"), goto("b")]);
         let affordable = measure(&[if_stmt(vec![goto("a")], vec![])]);
         assert_eq!(affordable.nesting_depth, 1);
-        assert!(affordable.improves_on(&baseline));
+        assert!(affordable.improves_on_axis(&baseline, SelectionAxis::Jumps));
 
         // The same one-jump saving does not buy two levels.
         let overdrawn = measure(&[if_stmt(vec![if_stmt(vec![goto("a")], vec![])], vec![])]);
         assert_eq!(overdrawn.nesting_depth, 2);
-        assert!(!overdrawn.improves_on(&baseline));
+        assert!(!overdrawn.improves_on_axis(&baseline, SelectionAxis::Jumps));
         assert!(
             overdrawn
                 .regressions_against(&baseline)
@@ -638,7 +657,7 @@ mod tests {
         let candidate = measure(&deep);
         assert_eq!(candidate.nesting_depth, 6);
         assert_eq!(candidate.gotos, 1);
-        assert!(candidate.improves_on(&baseline));
+        assert!(candidate.improves_on_axis(&baseline, SelectionAxis::Jumps));
     }
 
     #[test]
@@ -747,14 +766,14 @@ mod tests {
             else_body: Rc::new(Vec::new()),
         }]);
         assert_eq!(inside_envelope.guard_branch_terms, 0);
-        assert!(inside_envelope.improves_on(&baseline));
+        assert!(inside_envelope.improves_on_axis(&baseline, SelectionAxis::Jumps));
 
         let over_budget = measure(&[PreHirStmt::If {
             cond: doubled_arith(14), // 32,767 nodes for the same one-jump saving.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
-        assert!(!over_budget.improves_on(&baseline));
+        assert!(!over_budget.improves_on_axis(&baseline, SelectionAxis::Jumps));
         assert!(
             over_budget
                 .regressions_against(&baseline)
@@ -773,7 +792,7 @@ mod tests {
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
-        assert!(concentrated.improves_on(&baseline));
+        assert!(concentrated.improves_on_axis(&baseline, SelectionAxis::Jumps));
         assert!(concentrated.has_proportional_max_guard_growth(&baseline));
 
         // A formula large enough to cost more downstream than the jump was
@@ -802,7 +821,7 @@ mod tests {
             goto("b"),
         ]);
         assert_eq!(folded.guard_branch_terms, 1);
-        assert!(folded.improves_on(&baseline));
+        assert!(folded.improves_on_axis(&baseline, SelectionAxis::Jumps));
 
         // The reaching-condition shape: the jumps do disappear, and every
         // other axis reports a win, but the branches they were made of come
@@ -816,7 +835,7 @@ mod tests {
         }]);
         assert_eq!(path_conditions.gotos, 0);
         assert!(path_conditions.guard_formula_size <= 8_000);
-        assert!(!path_conditions.improves_on(&baseline));
+        assert!(!path_conditions.improves_on_axis(&baseline, SelectionAxis::Jumps));
         assert!(
             path_conditions
                 .regressions_against(&baseline)
@@ -829,7 +848,7 @@ mod tests {
         let baseline = measure(&[goto("a"), goto("b")]);
         let candidate = measure(&[if_stmt(vec![goto("a")], vec![])]);
         assert_eq!(baseline.guard_formula_size, 0);
-        assert!(candidate.improves_on(&baseline));
+        assert!(candidate.improves_on_axis(&baseline, SelectionAxis::Jumps));
     }
     /// The blind spot this axis exists to close: a body whose only branching
     /// lives inside an assignment used to measure as perfectly clean.
@@ -887,5 +906,41 @@ mod tests {
         with_goto.gotos = 1;
         let bare = StructuringQuality::default();
         assert!(with_goto.estimated_cfg_nodes_x100() < bare.estimated_cfg_nodes_x100());
+    }
+    /// The boundary, stated as a test: the two layers disagree about the same
+    /// candidate, and they disagree in the direction each is scored on.
+    ///
+    /// A structuring that removes a jump by adding two conditionals is better
+    /// to read and worse to score -- `Jumps` takes it, `NodeEstimate` does
+    /// not. Before `SelectionAxis` existed there was only the first answer.
+    #[test]
+    fn the_two_layers_want_different_structurings() {
+        let baseline = StructuringQuality {
+            gotos: 1,
+            conditionals: 1,
+            statements: 10,
+            ..StructuringQuality::default()
+        };
+        let jump_removed_by_branching = StructuringQuality {
+            gotos: 0,
+            conditionals: 3,
+            statements: 10,
+            ..StructuringQuality::default()
+        };
+        assert!(
+            jump_removed_by_branching.improves_on_axis(&baseline, SelectionAxis::Jumps),
+            "the readable layer takes it: one fewer jump"
+        );
+        assert!(
+            !jump_removed_by_branching.improves_on_axis(&baseline, SelectionAxis::NodeEstimate),
+            "the scored layer refuses it: two conditionals cost more nodes than the jump saved"
+        );
+    }
+
+    /// And the default is the scored one -- accuracy is what ships unless
+    /// something asks otherwise.
+    #[test]
+    fn the_default_axis_is_the_scored_one() {
+        assert_eq!(SelectionAxis::default(), SelectionAxis::NodeEstimate);
     }
 }

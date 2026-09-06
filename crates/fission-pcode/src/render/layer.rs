@@ -1,6 +1,10 @@
 //! NIR vs HIR pseudocode layer contracts.
 //!
-//! - **NIR**: semantic-faithful mechanical C (oracle / quality-loop input)
+//! - **NIR**: the structured tree as chosen, printed mechanically. Structuring
+//!   selects for the CFG node count Joern assigns (see
+//!   `StructuringQuality::estimated_cfg_nodes_x100`), which is what VJ-GED
+//!   scores -- so this layer is where *accuracy* is decided, and it will keep
+//!   a jump when removing it would cost more nodes than it saves.
 //! - **HIR**: human-readable presentation over the same structured tree
 //!
 //! Semantics live in normalize/structuring; this module only selects presentation.
@@ -84,7 +88,7 @@ impl LayeredPseudocode {
             PseudocodeLayer::Both => {
                 if include_section_headers {
                     format!(
-                        "// === NIR (semantic-faithful) ===\n{}\n\n// === HIR (readable) ===\n{}",
+                        "// === NIR (accuracy-selected) ===\n{}\n\n// === HIR (readable) ===\n{}",
                         self.nir.trim_end(),
                         self.hir.trim_end()
                     )
