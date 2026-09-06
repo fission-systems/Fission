@@ -143,8 +143,38 @@ impl StructuringQuality {
     /// Scaled by 100 so this stays integer arithmetic.
     pub fn estimated_cfg_nodes_x100(&self) -> i64 {
         213 * self.conditionals as i64 + 161 * self.select_terms as i64 + 164 * self.loops as i64
-            - 111 * self.gotos as i64
+            - Self::goto_weight() * self.gotos as i64
             + 65
+    }
+
+    /// The fitted `goto` coefficient, overridable for measurement.
+    ///
+    /// **Do not lower it to "match" the source's node count.** Tested, on
+    /// `bash` (2,474 scored rows), because after the axis landed our node
+    /// total sat 1.1% *below* the source's and under-noding had overtaken
+    /// over-noding in the 11-50-node band that carries 47% of all distance:
+    ///
+    /// ```text
+    ///   weight 111   perfect 882   distance 35,209   nodes 36,193
+    ///   weight  55   perfect 867   distance 39,108   nodes 37,757
+    ///   weight   0   perfect 866   distance 39,535   nodes 37,890
+    ///   source                                       nodes 38,035
+    /// ```
+    ///
+    /// Lowering it moves the node *total* toward the source and makes GED
+    /// **worse**, by 12%. Matching the aggregate node count and minimising
+    /// graph edit distance are not the same objective: removing a jump
+    /// usually duplicates a block, and VJ-GED charges far more for the
+    /// duplicate than the node count alone suggests. The fitted value is
+    /// carrying that, not just arithmetic.
+    fn goto_weight() -> i64 {
+        static W: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+        *W.get_or_init(|| {
+            std::env::var("FISSION_GOTO_WEIGHT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(111)
+        })
     }
 
     /// Accept under the layer's own objective.
