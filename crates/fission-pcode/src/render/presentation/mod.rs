@@ -59,6 +59,7 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
         changed |= flatten_redundant_blocks(&mut func.body);
         changed |= propagate_pure_var_aliases(func);
         changed |= fold_self_update_after_seed(&mut func.body);
+        changed |= fold_seed_transform(&mut func.body);
         // Shared `goto L; ... L: return e` → direct returns (enables if-else recovery).
         changed |= expand_goto_shared_returns(&mut func.body);
         changed |= collapse_trivial_assign_returns(&mut func.body);
@@ -738,6 +739,203 @@ fn remove_copy_assigns(stmts: &mut Vec<HirStmt>, copy_map: &HashMap<String, Stri
         }
     }
     changed
+}
+
+/// Occurrences of `name` in `expr`.
+fn count_var_mentions(expr: &HirExpr, name: &str) -> usize {
+    match expr {
+        HirExpr::Var(n) => usize::from(n == name),
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => count_var_mentions(expr, name),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            count_var_mentions(lhs, name) + count_var_mentions(rhs, name)
+        }
+        HirExpr::Index { base, index, .. } => {
+            count_var_mentions(base, name) + count_var_mentions(index, name)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_mentions(cond, name)
+                + count_var_mentions(then_expr, name)
+                + count_var_mentions(else_expr, name)
+        }
+        HirExpr::Call { args, .. } => args.iter().map(|a| count_var_mentions(a, name)).sum(),
+        _ => 0,
+    }
+}
+
+/// Replace every `Var(name)` in `expr` with `value`.
+fn substitute_var(expr: &mut HirExpr, name: &str, value: &HirExpr) {
+    match expr {
+        HirExpr::Var(n) if n == name => *expr = value.clone(),
+        HirExpr::Var(_) => {}
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. } => substitute_var(inner, name, value),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            substitute_var(lhs, name, value);
+            substitute_var(rhs, name, value);
+        }
+        HirExpr::Index { base, index, .. } => {
+            substitute_var(base, name, value);
+            substitute_var(index, name, value);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            substitute_var(cond, name, value);
+            substitute_var(then_expr, name, value);
+            substitute_var(else_expr, name, value);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                substitute_var(a, name, value);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Fold `x = seed; x = f(x)` into `x = f(seed)`.
+///
+/// The generalisation of [`fold_self_update_after_seed`], which only matched
+/// `x = x ⊕ rhs`. `iVar6 = ptr[1]; iVar6 = *(uint *)(iVar6 + ..)` is the
+/// shape left over, and it was 6.4% of the readable layer's body lines --
+/// the largest single pattern still unfolded, and the reason a temp stays
+/// visible even after `inline_single_use_pure_assigns`, which refuses any
+/// name defined more than once.
+///
+/// Requires exactly one mention of `x` in `f`: substituting into two would
+/// duplicate the seed rather than compress it.
+fn fold_seed_transform(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i + 1 < stmts.len() {
+        // The redefinition need not be the next statement --
+        // `iVar6 = ptr[1]; uVar8 = ..; iVar6 = *(iVar6 + ..)` is the common
+        // shape. Scan forward to it, and only across a span that neither
+        // reads `x`, redefines what the seed depends on, nor writes memory.
+        let Some(j) = next_redefinition_of_seed(stmts, i) else {
+            i += 1;
+            continue;
+        };
+        let folded = match (&stmts[i], &stmts[j]) {
+            (
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(x1),
+                    rhs: seed,
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(x2),
+                    rhs: transform,
+                },
+            ) if x1 == x2
+                && (expr_is_presentation_pure(seed) || expr_is_movable_read(seed))
+                && !expr_mentions_var(seed, x1)
+                && count_var_mentions(transform, x1) == 1
+                && (expr_is_presentation_pure(transform) || expr_is_movable_read(transform)) =>
+            {
+                let mut folded = transform.clone();
+                substitute_var(&mut folded, x1, seed);
+                Some(HirStmt::Assign {
+                    lhs: HirLValue::Var(x1.clone()),
+                    rhs: folded,
+                })
+            }
+            _ => None,
+        };
+        if let Some(stmt) = folded {
+            stmts[j] = stmt;
+            stmts.remove(i);
+            changed = true;
+            continue;
+        }
+        i += 1;
+    }
+    for stmt in stmts.iter_mut() {
+        changed |= fold_seed_transform_in_children(stmt);
+    }
+    changed
+}
+
+/// The index of the statement that redefines the variable `stmts[i]` assigns,
+/// if the span between is safe to fold across.
+fn next_redefinition_of_seed(stmts: &[HirStmt], i: usize) -> Option<usize> {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(name),
+        rhs: seed,
+    } = &stmts[i]
+    else {
+        return None;
+    };
+    let seed_is_pure = expr_is_presentation_pure(seed);
+    for j in i + 1..stmts.len() {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(target),
+            ..
+        } = &stmts[j]
+            && target == name
+        {
+            if pure_expr_free_var_redefined_before(stmts, i + 1, j, seed) {
+                return None;
+            }
+            if !seed_is_pure && memory_clobbered_between(stmts, i + 1, j) {
+                return None;
+            }
+            return Some(j);
+        }
+        // Any earlier read of `x`, or anything that is not a plain local
+        // assignment, ends the search: this fold moves the seed forward past
+        // the span, and both would make that observable.
+        if count_uses_in_stmt(&stmts[j], name) > 0
+            || !matches!(
+                &stmts[j],
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(_),
+                    ..
+                }
+            )
+        {
+            return None;
+        }
+    }
+    None
+}
+
+fn fold_seed_transform_in_children(stmt: &mut HirStmt) -> bool {
+    match stmt {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            fold_seed_transform(body)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => fold_seed_transform(then_body) | fold_seed_transform(else_body),
+        HirStmt::For { body, .. } => fold_seed_transform(body),
+        HirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases.iter_mut() {
+                changed |= fold_seed_transform(&mut case.body);
+            }
+            changed | fold_seed_transform(default)
+        }
+        _ => false,
+    }
 }
 
 /// Fold `x = seed; x = x ⊕ rhs` into `x = seed ⊕ rhs` when pure.
