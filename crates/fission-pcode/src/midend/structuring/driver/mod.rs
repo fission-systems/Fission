@@ -195,8 +195,6 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         pspec_programcounter: None,
         pspec_tracked_context: Vec::new(),
         pspec_hidden_registers: Default::default(),
-        selection_axis: Default::default(),
-        dual_layer_structuring: false,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     builder.promote_guarded_tail_regions_until_stable(body);
@@ -319,6 +317,8 @@ mod tests {
             conservative_irreducible_fallback: false,
             is_data_ref_origin: false,
             structuring_engine: engine,
+            selection_axis: Default::default(),
+            dual_layer_structuring: false,
             global_names: Default::default(),
             global_sizes: Default::default(),
             relocation_names: Default::default(),
