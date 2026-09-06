@@ -16,6 +16,27 @@ pub enum SelectionAxis {
     Jumps,
 }
 
+/// The axis does the driver assignment on its own. Measured by recording
+/// which alternative structurer wins under each, over two binaries:
+///
+/// ```text
+///                          libopencm3   crazyflie
+///   Jumps          DREAM            12          14
+///                  DREAM-hier        6           7
+///                  MatchFold        10          13
+///                  baseline kept     1           5
+///
+///   NodeEstimate   baseline kept    24          35
+///                  DREAM             2           3
+///                  MatchFold         3           1
+/// ```
+///
+/// DREAM exists to eliminate jumps, so it wins where jumps are what is
+/// counted. Under `NodeEstimate` the baseline linear/SESE structuring is
+/// already the fewest-node answer 83-90% of the time and the alternatives
+/// are refused. Assigning drivers to layers by hand would only restate
+/// this.
+
 impl SelectionAxis {
     /// `FISSION_SELECT_BY_NODE_ESTIMATE=0` restores the pre-2026-09-06 rule.
     pub fn from_env() -> Self {
