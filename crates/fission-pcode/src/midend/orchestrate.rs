@@ -158,8 +158,17 @@ pub fn render_mlil_preview_dual_layer(
         Some(readable_layers) => readable_layers.hir,
         None => scored_layers.hir.clone(),
     };
+    // Both surfaces are presented. The two modes differ in *structuring* --
+    // which is the difference that exists -- not in whether they went
+    // through the presentation pass, which was never a readability/accuracy
+    // distinction: measured, presentation improves the score too, so making
+    // the accuracy layer skip it cost 27 GED distance for nothing.
+    //
+    // Under this flag NIR is therefore the *accuracy* surface rather than
+    // the mechanical one. The mechanical surface is what you get with the
+    // flag off, which is the default.
     store_last_layered_pseudocode(LayeredPseudocode {
-        nir: scored_layers.nir,
+        nir: scored_layers.hir,
         hir,
     });
     Ok(scored)
