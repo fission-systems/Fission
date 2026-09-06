@@ -1,4 +1,5 @@
 use super::*;
+use fission_midend_core::ir::SelectionAxis;
 use fission_midend_core::ir::{
     SsaGuardRangePrecision, SsaMemoryRegion, SsaMemoryValueId, SsaOpSite, SsaValueDefinition,
 };
@@ -751,7 +752,15 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<(StackBase, i64)> {
         if is_register_space_id(ptr.space_id) {
-            return match self.options.calling_convention {
+            // The whitelist below names the registers an ABI *guarantees* are
+            // stack bases. On x86 that is the whole story: rsp and rbp are
+            // architectural. On ARM the frame register is a convention, not a
+            // fact -- ARM mode uses r11, Thumb uses r7 -- and the definition
+            // chain already says which: `r7 = sp + 8` is right there in the
+            // p-code. So a miss here falls through to the def-site recursion
+            // instead of giving up, and a register that genuinely holds a
+            // stack address resolves whatever its number.
+            let whitelisted = match self.options.calling_convention {
                 CallingConvention::Arm32 => match ptr.offset {
                     0x54 => Some((StackBase::Rsp, 0)),
                     0x4c => Some((StackBase::Rbp, 0)),
@@ -810,6 +819,23 @@ impl<'a> PreviewBuilder<'a> {
                     _ => None,
                 },
             };
+            if whitelisted.is_some() {
+                return whitelisted;
+            }
+            // Falling through to the def chain resolves any register that
+            // *holds* a stack address, which on Thumb is r7 and is how most
+            // ARM locals get named at all: measured on libopencm3/msc, raw
+            // `*(uint *)(sp + k)` 251 -> 31 and named locals 273 -> 1,000.
+            //
+            // It also resolves registers that held one only once, and the
+            // score says that costs more than it recovers: perfect 641 -> 605
+            // and distance 7,399 -> 7,663 over 1,095 ARM rows. So it is the
+            // readable layer's trade, not the scored layer's -- which is what
+            // the two output modes are for. x86 never reaches here: rsp and
+            // rbp are architectural and always hit the whitelist above.
+            if self.options.selection_axis != SelectionAxis::Jumps {
+                return None;
+            }
         }
         if ptr.space_id == UNIQUE_SPACE_ID
             && let Some(name) = crate::arch::x86::unique_x86_register_name(ptr.offset, ptr.size)
