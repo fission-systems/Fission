@@ -770,8 +770,52 @@ fn build_sese_region_body_impl(
         diag,
         allowed_members,
     )?;
+    // A region whose body would print past the ceiling is refused here, at the
+    // one point every collapse tier's result passes through, and the caller
+    // falls back to linearising the region -- the same recovery it already
+    // runs when a region cannot be structured at all.
+    let expansion = fission_midend_prehir::stmt_dag::expanded_stmt_count(&body);
+    if expansion > REGION_EXPANSION_CEILING {
+        if diag {
+            eprintln!(
+                "[DIAG] build_sese_region_body: refusing region {entry}..{exit}, body expands to {expansion} statements (ceiling {REGION_EXPANSION_CEILING})"
+            );
+        }
+        return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+    }
     Ok((body, achieved_exit, region_extra_members))
 }
+
+/// Printed statements a structured region body may expand to before the region
+/// is refused and linearised instead.
+///
+/// A region body is a graph, not a tree: collapse tiers share a subtree between
+/// parents by cloning the `Rc` that owns it, so the memory a body occupies says
+/// nothing about how large it prints. On `openssh-portable` `ssh` `main`, one
+/// virtual-exit lowering turned two children totalling 493 statements into a
+/// body that expands to **61,041,454** while still fitting in about 6,400
+/// nodes. Nothing downstream reported it as large; what they showed instead was
+/// that every later pass walks a body by path, so each one ran for the rest of
+/// the process's life. That single function consumed the whole hour its
+/// binary's other 1,479 functions had to share, and the binary alone was 95 of
+/// a 260-minute corpus sweep.
+///
+/// Past this ceiling a body is not a worse structuring of the region, it is not
+/// a structuring of it: a million statements is already tens of megabytes of C
+/// for one function, which no consumer of this output can use. The ceiling is
+/// therefore set to catch the bug, not to tune the result, and the gap it sits
+/// in is wide. Measured over 3,954 functions of the DecBench corpus:
+///
+/// ```text
+/// largest legitimate region       11,928   (bzip2)
+/// this ceiling                 1,000,000   84x above it
+/// ssh main                    61,041,358   61x above the ceiling
+/// ```
+///
+/// Asking the question is cheap because `expanded_stmt_count` is itself
+/// computed over the graph: it costs the size of the body, not the size of the
+/// expansion it reports.
+const REGION_EXPANSION_CEILING: usize = 1_000_000;
 
 /// Promote guarded-tail regions to a fixed point (free entry).
 pub fn promote_guarded_tails(host: &mut impl StructuringHost, body: &mut Vec<PreHirStmt>) {

@@ -56,6 +56,7 @@ pub mod sese_discovery;
 pub mod sese_driver;
 pub mod structuring_quality;
 pub mod switch;
+pub use fission_midend_prehir::stmt_dag;
 
 pub use admission::{
     StructuringAdmissionInput, StructuringAdmissionReason, blockgraph_collapse_admission_enabled,

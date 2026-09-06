@@ -15,24 +15,49 @@ use fission_midend_prehir::util::negate_expr;
 /// Count the explicit control-flow debt retained by a structured candidate.
 /// Nested scopes count because both NIR and HIR render each retained goto.
 pub fn count_explicit_gotos(stmts: &[PreHirStmt]) -> usize {
-    fn count_stmt(stmt: &PreHirStmt) -> usize {
+    // The bodies below are `Rc`-shared, so this is a DAG walk; see
+    // [`crate::stmt_dag`] for why an unmemoised one costs 9,524x here.
+    let mut memo: crate::stmt_dag::StmtMemo<usize> = Default::default();
+    count_explicit_gotos_memo(stmts, &mut memo)
+}
+
+fn count_explicit_gotos_memo(
+    stmts: &[PreHirStmt],
+    memo: &mut crate::stmt_dag::StmtMemo<usize>,
+) -> usize {
+    fn count_stmt(stmt: &PreHirStmt, memo: &mut crate::stmt_dag::StmtMemo<usize>) -> usize {
+        let key = crate::stmt_dag::stmt_key(stmt);
+        if let Some(cached) = memo.get(&key) {
+            return *cached;
+        }
+        let answer = count_stmt_uncached(stmt, memo);
+        memo.insert(key, answer);
+        answer
+    }
+    fn count_stmt_uncached(
+        stmt: &PreHirStmt,
+        memo: &mut crate::stmt_dag::StmtMemo<usize>,
+    ) -> usize {
         match stmt {
             PreHirStmt::Goto(_) => 1,
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
-            | PreHirStmt::For { body, .. } => count_explicit_gotos(body),
+            | PreHirStmt::For { body, .. } => count_explicit_gotos_memo(body, memo),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
-            } => count_explicit_gotos(then_body) + count_explicit_gotos(else_body),
+            } => {
+                count_explicit_gotos_memo(then_body, memo)
+                    + count_explicit_gotos_memo(else_body, memo)
+            }
             PreHirStmt::Switch { cases, default, .. } => {
                 cases
                     .iter()
-                    .map(|case| count_explicit_gotos(&case.body))
+                    .map(|case| count_explicit_gotos_memo(&case.body, memo))
                     .sum::<usize>()
-                    + count_explicit_gotos(default)
+                    + count_explicit_gotos_memo(default, memo)
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::Expr(_)
@@ -44,7 +69,7 @@ pub fn count_explicit_gotos(stmts: &[PreHirStmt]) -> usize {
         }
     }
 
-    stmts.iter().map(count_stmt).sum()
+    stmts.iter().map(|stmt| count_stmt(stmt, memo)).sum()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

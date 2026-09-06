@@ -251,6 +251,37 @@ pub fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement: &PreH
 /// Mirrors that function arm for arm; only `Assign` to a plain `Var` counts,
 /// and nested bodies sum.
 pub fn collect_stmt_var_defs<'a>(stmt: &'a PreHirStmt, out: &mut crate::HashMap<&'a str, usize>) {
+    // DAG, not a tree -- see [`crate::stmt_dag`]. Definition counts
+    // accumulate, so adding a cached sub-count matches the inline walk.
+    let mut memo: crate::stmt_dag::StmtMemo<crate::HashMap<&'a str, usize>> = Default::default();
+    collect_stmt_var_defs_memo(stmt, out, &mut memo);
+}
+
+fn collect_stmt_var_defs_memo<'a>(
+    stmt: &'a PreHirStmt,
+    out: &mut crate::HashMap<&'a str, usize>,
+    memo: &mut crate::stmt_dag::StmtMemo<crate::HashMap<&'a str, usize>>,
+) {
+    let key = crate::stmt_dag::stmt_key(stmt);
+    if let Some(cached) = memo.get(&key) {
+        for (name, n) in cached {
+            *out.entry(name).or_insert(0) += n;
+        }
+        return;
+    }
+    let mut local: crate::HashMap<&'a str, usize> = Default::default();
+    collect_stmt_var_defs_uncached(stmt, &mut local, memo);
+    for (name, n) in &local {
+        *out.entry(name).or_insert(0) += n;
+    }
+    memo.insert(key, local);
+}
+
+fn collect_stmt_var_defs_uncached<'a>(
+    stmt: &'a PreHirStmt,
+    out: &mut crate::HashMap<&'a str, usize>,
+    memo: &mut crate::stmt_dag::StmtMemo<crate::HashMap<&'a str, usize>>,
+) {
     match stmt {
         PreHirStmt::Assign { lhs, .. } => {
             if let PreHirLValue::Var(name) = lhs {
@@ -261,7 +292,7 @@ pub fn collect_stmt_var_defs<'a>(stmt: &'a PreHirStmt, out: &mut crate::HashMap<
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. } => {
             for stmt in stmts.iter() {
-                collect_stmt_var_defs(stmt, out);
+                collect_stmt_var_defs_memo(stmt, out, memo);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
@@ -270,7 +301,7 @@ pub fn collect_stmt_var_defs<'a>(stmt: &'a PreHirStmt, out: &mut crate::HashMap<
                 .flat_map(|case| case.body.iter())
                 .chain(default.iter())
             {
-                collect_stmt_var_defs(stmt, out);
+                collect_stmt_var_defs_memo(stmt, out, memo);
             }
         }
         PreHirStmt::If {
@@ -279,27 +310,57 @@ pub fn collect_stmt_var_defs<'a>(stmt: &'a PreHirStmt, out: &mut crate::HashMap<
             ..
         } => {
             for stmt in then_body.iter().chain(else_body.iter()) {
-                collect_stmt_var_defs(stmt, out);
+                collect_stmt_var_defs_memo(stmt, out, memo);
             }
         }
         PreHirStmt::For {
             init, update, body, ..
         } => {
             for stmt in init.iter() {
-                collect_stmt_var_defs(stmt, out);
+                collect_stmt_var_defs_memo(stmt, out, memo);
             }
             for stmt in update.iter() {
-                collect_stmt_var_defs(stmt, out);
+                collect_stmt_var_defs_memo(stmt, out, memo);
             }
             for stmt in body.iter() {
-                collect_stmt_var_defs(stmt, out);
+                collect_stmt_var_defs_memo(stmt, out, memo);
             }
         }
         _ => {}
     }
 }
 
+/// How many times `target` is assigned inside `stmt`.
+///
+/// The bodies are `Rc`-shared, so this is a DAG walk -- see
+/// [`crate::stmt_dag`]. A shared subtree is emitted once per parent that names
+/// it, so its definitions count once per parent: the memo caches the subtree's
+/// total and adds that total on each visit, which is the sum the naive walk
+/// produced, reached in DAG time instead of path time.
 pub fn count_var_defs_stmt(stmt: &PreHirStmt, target: &str) -> usize {
+    let mut memo: crate::stmt_dag::StmtMemo<usize> = Default::default();
+    count_var_defs_stmt_memo(stmt, target, &mut memo)
+}
+
+fn count_var_defs_stmt_memo(
+    stmt: &PreHirStmt,
+    target: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<usize>,
+) -> usize {
+    let key = crate::stmt_dag::stmt_key(stmt);
+    if let Some(cached) = memo.get(&key) {
+        return *cached;
+    }
+    let answer = count_var_defs_stmt_uncached(stmt, target, memo);
+    memo.insert(key, answer);
+    answer
+}
+
+fn count_var_defs_stmt_uncached(
+    stmt: &PreHirStmt,
+    target: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<usize>,
+) -> usize {
     match stmt {
         PreHirStmt::Assign { lhs, .. } => {
             usize::from(matches!(lhs, PreHirLValue::Var(name) if name == target))
@@ -308,7 +369,7 @@ pub fn count_var_defs_stmt(stmt: &PreHirStmt, target: &str) -> usize {
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. } => stmts
             .iter()
-            .map(|stmt| count_var_defs_stmt(stmt, target))
+            .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
             .sum(),
         PreHirStmt::Switch { cases, default, .. } => {
             cases
@@ -316,13 +377,13 @@ pub fn count_var_defs_stmt(stmt: &PreHirStmt, target: &str) -> usize {
                 .map(|case| {
                     case.body
                         .iter()
-                        .map(|stmt| count_var_defs_stmt(stmt, target))
+                        .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
                         .sum::<usize>()
                 })
                 .sum::<usize>()
                 + default
                     .iter()
-                    .map(|stmt| count_var_defs_stmt(stmt, target))
+                    .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
                     .sum::<usize>()
         }
         PreHirStmt::If {
@@ -332,26 +393,26 @@ pub fn count_var_defs_stmt(stmt: &PreHirStmt, target: &str) -> usize {
         } => {
             then_body
                 .iter()
-                .map(|stmt| count_var_defs_stmt(stmt, target))
+                .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
                 .sum::<usize>()
                 + else_body
                     .iter()
-                    .map(|stmt| count_var_defs_stmt(stmt, target))
+                    .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
                     .sum::<usize>()
         }
         PreHirStmt::For {
             init, update, body, ..
         } => {
             init.iter()
-                .map(|stmt| count_var_defs_stmt(stmt, target))
+                .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
                 .sum::<usize>()
                 + update
                     .iter()
-                    .map(|stmt| count_var_defs_stmt(stmt, target))
+                    .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
                     .sum::<usize>()
                 + body
                     .iter()
-                    .map(|stmt| count_var_defs_stmt(stmt, target))
+                    .map(|stmt| count_var_defs_stmt_memo(stmt, target, memo))
                     .sum::<usize>()
         }
         PreHirStmt::VaStart { .. }
@@ -409,7 +470,35 @@ pub fn count_var_reads_lvalue(lhs: &PreHirLValue, name: &str) -> usize {
     }
 }
 
+/// How many times `name` is read inside `stmt`.
+///
+/// Memoised over the statement DAG on the same terms as
+/// [`count_var_defs_stmt`]; `name` is fixed for the whole walk, so a
+/// statement's address identifies its answer.
 pub fn count_var_reads_stmt(stmt: &PreHirStmt, name: &str) -> usize {
+    let mut memo: crate::stmt_dag::StmtMemo<usize> = Default::default();
+    count_var_reads_stmt_memo(stmt, name, &mut memo)
+}
+
+fn count_var_reads_stmt_memo(
+    stmt: &PreHirStmt,
+    name: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<usize>,
+) -> usize {
+    let key = crate::stmt_dag::stmt_key(stmt);
+    if let Some(cached) = memo.get(&key) {
+        return *cached;
+    }
+    let answer = count_var_reads_stmt_uncached(stmt, name, memo);
+    memo.insert(key, answer);
+    answer
+}
+
+fn count_var_reads_stmt_uncached(
+    stmt: &PreHirStmt,
+    name: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<usize>,
+) -> usize {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
             count_var_reads_lvalue(lhs, name) + count_var_reads_expr(rhs, name)
@@ -418,11 +507,11 @@ pub fn count_var_reads_stmt(stmt: &PreHirStmt, name: &str) -> usize {
         PreHirStmt::Expr(expr) => count_var_reads_expr(expr, name),
         PreHirStmt::Block(stmts) | PreHirStmt::While { body: stmts, .. } => stmts
             .iter()
-            .map(|stmt| count_var_reads_stmt(stmt, name))
+            .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
             .sum(),
         PreHirStmt::DoWhile { body, cond } => {
             body.iter()
-                .map(|stmt| count_var_reads_stmt(stmt, name))
+                .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                 .sum::<usize>()
                 + count_var_reads_expr(cond, name)
         }
@@ -437,13 +526,13 @@ pub fn count_var_reads_stmt(stmt: &PreHirStmt, name: &str) -> usize {
                     .map(|case| {
                         case.body
                             .iter()
-                            .map(|stmt| count_var_reads_stmt(stmt, name))
+                            .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                             .sum::<usize>()
                     })
                     .sum::<usize>()
                 + default
                     .iter()
-                    .map(|stmt| count_var_reads_stmt(stmt, name))
+                    .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                     .sum::<usize>()
         }
         PreHirStmt::If {
@@ -454,11 +543,11 @@ pub fn count_var_reads_stmt(stmt: &PreHirStmt, name: &str) -> usize {
             count_var_reads_expr(cond, name)
                 + then_body
                     .iter()
-                    .map(|stmt| count_var_reads_stmt(stmt, name))
+                    .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                     .sum::<usize>()
                 + else_body
                     .iter()
-                    .map(|stmt| count_var_reads_stmt(stmt, name))
+                    .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                     .sum::<usize>()
         }
         PreHirStmt::For {
@@ -468,7 +557,7 @@ pub fn count_var_reads_stmt(stmt: &PreHirStmt, name: &str) -> usize {
             body,
         } => {
             init.iter()
-                .map(|stmt| count_var_reads_stmt(stmt, name))
+                .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                 .sum::<usize>()
                 + cond
                     .as_ref()
@@ -476,11 +565,11 @@ pub fn count_var_reads_stmt(stmt: &PreHirStmt, name: &str) -> usize {
                     .unwrap_or(0)
                 + update
                     .iter()
-                    .map(|stmt| count_var_reads_stmt(stmt, name))
+                    .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                     .sum::<usize>()
                 + body
                     .iter()
-                    .map(|stmt| count_var_reads_stmt(stmt, name))
+                    .map(|stmt| count_var_reads_stmt_memo(stmt, name, memo))
                     .sum::<usize>()
         }
         PreHirStmt::Return(Some(expr)) => count_var_reads_expr(expr, name),
@@ -489,5 +578,64 @@ pub fn count_var_reads_stmt(stmt: &PreHirStmt, name: &str) -> usize {
         | PreHirStmt::Return(None)
         | PreHirStmt::Break
         | PreHirStmt::Continue => 0,
+    }
+}
+
+#[cfg(test)]
+mod dag_walk_tests {
+    use super::*;
+    use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
+    use std::rc::Rc;
+
+    /// `levels` nested `if`s whose two arms name one shared body -- the shape a
+    /// collapse tier produces when it gives both branches the same tail.
+    ///
+    /// Every walk below returns the answer for the *printed* program, in which
+    /// the innermost statement appears `2^levels` times. Twenty levels is a
+    /// million appearances stored in twenty-one statements, so a walker that
+    /// recurses per path rather than per node does not return from any of
+    /// these tests -- which is the regression they exist to catch.
+    fn both_arms_share_one_body(levels: usize, leaf: PreHirStmt) -> Vec<PreHirStmt> {
+        let mut body = vec![leaf];
+        for _ in 0..levels {
+            let shared = Rc::new(body);
+            body = vec![PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: Rc::clone(&shared),
+                else_body: shared,
+            }];
+        }
+        body
+    }
+
+    fn assign(lhs: &str, rhs: &str) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs.to_string()),
+            rhs: PreHirExpr::Var(rhs.to_string()),
+        }
+    }
+
+    #[test]
+    fn definitions_in_a_shared_body_count_once_per_parent() {
+        let body = both_arms_share_one_body(20, assign("x", "y"));
+        assert_eq!(count_var_defs_stmt(&body[0], "x"), 1 << 20);
+        assert_eq!(count_var_defs_stmt(&body[0], "y"), 0);
+    }
+
+    #[test]
+    fn reads_in_a_shared_body_count_once_per_parent() {
+        let body = both_arms_share_one_body(20, assign("x", "y"));
+        assert_eq!(count_var_reads_stmt(&body[0], "y"), 1 << 20);
+        // `c` is read by every guard on the way down, and each guard is itself
+        // shared, so this is the whole tree of conditions rather than 20.
+        assert_eq!(count_var_reads_stmt(&body[0], "c"), (1 << 20) - 1);
+    }
+
+    #[test]
+    fn a_shared_bodys_definitions_are_indexed_once_per_parent() {
+        let body = both_arms_share_one_body(20, assign("x", "y"));
+        let mut defs = crate::HashMap::default();
+        collect_stmt_var_defs(&body[0], &mut defs);
+        assert_eq!(defs.get("x").copied(), Some(1 << 20));
     }
 }

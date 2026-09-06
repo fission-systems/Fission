@@ -306,31 +306,80 @@ fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut HashSet<St
 }
 
 pub fn collect_referenced_label_counts(body: &[PreHirStmt]) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
+    // One memo for the whole body: the sharing is *between* top-level
+    // statements as much as inside any one of them, so a memo scoped to a
+    // single statement would rebuild the shared pool once per statement.
+    let mut memo: crate::stmt_dag::StmtMemo<HashMap<&str, usize>> = Default::default();
+    let mut borrowed: HashMap<&str, usize> = HashMap::default();
     for stmt in body {
-        collect_stmt_referenced_label_counts(stmt, &mut counts);
+        collect_stmt_referenced_label_counts_memo(stmt, &mut borrowed, &mut memo);
     }
-    counts
+    borrowed
+        .into_iter()
+        .map(|(label, n)| (label.to_string(), n))
+        .collect()
 }
 
 fn collect_stmt_referenced_label_counts(stmt: &PreHirStmt, counts: &mut HashMap<String, usize>) {
+    let mut memo: crate::stmt_dag::StmtMemo<HashMap<&str, usize>> = Default::default();
+    let mut borrowed: HashMap<&str, usize> = HashMap::default();
+    collect_stmt_referenced_label_counts_memo(stmt, &mut borrowed, &mut memo);
+    for (label, n) in borrowed {
+        *counts.entry(label.to_string()).or_insert(0) += n;
+    }
+}
+
+/// Label references contributed by `stmt`, added into `counts`.
+///
+/// The bodies are `Rc`-shared, so this is a DAG walk -- see
+/// [`crate::stmt_dag`]. A shared subtree really is emitted once per parent
+/// that names it, so its references must be counted once per parent too: the
+/// memo caches the subtree's *aggregate* and adds that aggregate on every
+/// visit, which is the same total the naive walk produced, in DAG time rather
+/// than path time. Keys stay borrowed until the caller converts them, because
+/// cloning a `String` per label per merge was itself 80% of the walk.
+fn collect_stmt_referenced_label_counts_memo<'a>(
+    stmt: &'a PreHirStmt,
+    counts: &mut HashMap<&'a str, usize>,
+    memo: &mut crate::stmt_dag::StmtMemo<HashMap<&'a str, usize>>,
+) {
+    let key = crate::stmt_dag::stmt_key(stmt);
+    if let Some(cached) = memo.get(&key) {
+        for (label, n) in cached {
+            *counts.entry(label).or_insert(0) += n;
+        }
+        return;
+    }
+    let mut local: HashMap<&'a str, usize> = HashMap::default();
+    collect_stmt_referenced_label_counts_uncached(stmt, &mut local, memo);
+    for (label, n) in &local {
+        *counts.entry(label).or_insert(0) += n;
+    }
+    memo.insert(key, local);
+}
+
+fn collect_stmt_referenced_label_counts_uncached<'a>(
+    stmt: &'a PreHirStmt,
+    counts: &mut HashMap<&'a str, usize>,
+    memo: &mut crate::stmt_dag::StmtMemo<HashMap<&'a str, usize>>,
+) {
     match stmt {
         PreHirStmt::Block(body)
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
             for stmt in body.iter() {
-                collect_stmt_referenced_label_counts(stmt, counts);
+                collect_stmt_referenced_label_counts_memo(stmt, counts, memo);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for stmt in case.body.iter() {
-                    collect_stmt_referenced_label_counts(stmt, counts);
+                    collect_stmt_referenced_label_counts_memo(stmt, counts, memo);
                 }
             }
             for stmt in default.iter() {
-                collect_stmt_referenced_label_counts(stmt, counts);
+                collect_stmt_referenced_label_counts_memo(stmt, counts, memo);
             }
         }
         PreHirStmt::If {
@@ -339,14 +388,14 @@ fn collect_stmt_referenced_label_counts(stmt: &PreHirStmt, counts: &mut HashMap<
             ..
         } => {
             for stmt in then_body.iter() {
-                collect_stmt_referenced_label_counts(stmt, counts);
+                collect_stmt_referenced_label_counts_memo(stmt, counts, memo);
             }
             for stmt in else_body.iter() {
-                collect_stmt_referenced_label_counts(stmt, counts);
+                collect_stmt_referenced_label_counts_memo(stmt, counts, memo);
             }
         }
         PreHirStmt::Goto(label) => {
-            *counts.entry(label.clone()).or_insert(0) += 1;
+            *counts.entry(label.as_str()).or_insert(0) += 1;
         }
         _ => {}
     }

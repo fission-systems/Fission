@@ -181,6 +181,37 @@ pub fn build_nested_before_alias_ownership_proof(
 /// Every label a statement's subtree `goto`s, with counts -- one traversal for
 /// all labels rather than one per label.
 fn collect_stmt_goto_counts(stmt: &PreHirStmt, out: &mut HashMap<String, usize>) {
+    // DAG, not a tree -- see [`crate::stmt_dag`]. Counts accumulate, so
+    // merging a cached sub-count by addition is what walking it inline did.
+    let mut memo: crate::stmt_dag::StmtMemo<HashMap<String, usize>> = Default::default();
+    collect_stmt_goto_counts_memo(stmt, out, &mut memo);
+}
+
+fn collect_stmt_goto_counts_memo(
+    stmt: &PreHirStmt,
+    out: &mut HashMap<String, usize>,
+    memo: &mut crate::stmt_dag::StmtMemo<HashMap<String, usize>>,
+) {
+    let key = crate::stmt_dag::stmt_key(stmt);
+    if let Some(cached) = memo.get(&key) {
+        for (label, n) in cached {
+            *out.entry(label.clone()).or_insert(0) += n;
+        }
+        return;
+    }
+    let mut local: HashMap<String, usize> = HashMap::default();
+    collect_stmt_goto_counts_uncached(stmt, &mut local, memo);
+    for (label, n) in &local {
+        *out.entry(label.clone()).or_insert(0) += n;
+    }
+    memo.insert(key, local);
+}
+
+fn collect_stmt_goto_counts_uncached(
+    stmt: &PreHirStmt,
+    out: &mut HashMap<String, usize>,
+    memo: &mut crate::stmt_dag::StmtMemo<HashMap<String, usize>>,
+) {
     match stmt {
         PreHirStmt::Goto(target) => {
             *out.entry(target.clone()).or_insert(0) += 1;
@@ -191,7 +222,7 @@ fn collect_stmt_goto_counts(stmt: &PreHirStmt, out: &mut HashMap<String, usize>)
             ..
         } => {
             for s in then_body.iter().chain(else_body.iter()) {
-                collect_stmt_goto_counts(s, out);
+                collect_stmt_goto_counts_memo(s, out, memo);
             }
         }
         PreHirStmt::Block(body)
@@ -199,7 +230,7 @@ fn collect_stmt_goto_counts(stmt: &PreHirStmt, out: &mut HashMap<String, usize>)
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
             for s in body.iter() {
-                collect_stmt_goto_counts(s, out);
+                collect_stmt_goto_counts_memo(s, out, memo);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
@@ -208,7 +239,7 @@ fn collect_stmt_goto_counts(stmt: &PreHirStmt, out: &mut HashMap<String, usize>)
                 .flat_map(|case| case.body.iter())
                 .chain(default.iter())
             {
-                collect_stmt_goto_counts(s, out);
+                collect_stmt_goto_counts_memo(s, out, memo);
             }
         }
         _ => {}
@@ -414,9 +445,54 @@ pub fn classify_nested_before_nonlocal_payload(stmt: &PreHirStmt, label: &str) -
 /// The arms below mirror `classify_stmt_read_kind`'s exactly, in the same
 /// order, and insert with `or_insert` so the first kind found wins the way
 /// `find_map` does. Any divergence changes output, so keep the two in step.
+/// Read kinds for one statement, merged into `out` with first-writer-wins.
+///
+/// `then_body` / `else_body` and the other bodies are `Rc`-shared, so the
+/// statement graph is a DAG: structuring duplicates a tail by cloning the
+/// `Rc`, not the statements. Walking it as a tree revisits a shared subtree
+/// once per path that reaches it, which on `openssh-portable` `ssh` `main`
+/// meant **61,041,035 visits over 358 distinct bodies** -- the function did
+/// not finish inside an hour. The answer for a statement depends only on that
+/// statement, so memoising by its address collapses the walk back to the DAG
+/// and leaves the output byte-identical.
 pub fn collect_stmt_read_kinds<'a>(
     stmt: &'a PreHirStmt,
     out: &mut HashMap<&'a str, GuardedTailReadKind>,
+) {
+    let mut memo: ReadKindMemo<'a> = HashMap::default();
+    collect_stmt_read_kinds_memo(stmt, out, &mut memo);
+}
+
+/// Address of a statement -> the read kinds its subtree contributes.
+///
+/// Keyed by address, which is stable because nothing mutates the body while a
+/// walk is in flight, and unique because two live statements cannot share one.
+type ReadKindMemo<'a> = HashMap<usize, HashMap<&'a str, GuardedTailReadKind>>;
+
+fn collect_stmt_read_kinds_memo<'a>(
+    stmt: &'a PreHirStmt,
+    out: &mut HashMap<&'a str, GuardedTailReadKind>,
+    memo: &mut ReadKindMemo<'a>,
+) {
+    let key = stmt as *const PreHirStmt as usize;
+    if let Some(cached) = memo.get(&key) {
+        for (name, kind) in cached {
+            out.entry(name).or_insert(*kind);
+        }
+        return;
+    }
+    let mut local: HashMap<&'a str, GuardedTailReadKind> = HashMap::default();
+    collect_stmt_read_kinds_uncached(stmt, &mut local, memo);
+    for (name, kind) in &local {
+        out.entry(name).or_insert(*kind);
+    }
+    memo.insert(key, local);
+}
+
+fn collect_stmt_read_kinds_uncached<'a>(
+    stmt: &'a PreHirStmt,
+    out: &mut HashMap<&'a str, GuardedTailReadKind>,
+    memo: &mut ReadKindMemo<'a>,
 ) {
     fn note<'a>(
         out: &mut HashMap<&'a str, GuardedTailReadKind>,
@@ -469,7 +545,7 @@ pub fn collect_stmt_read_kinds<'a>(
                 GuardedTailReadKind::ConditionExpr,
             );
             for stmt in then_body.iter().chain(else_body.iter()) {
-                collect_stmt_read_kinds(stmt, out);
+                collect_stmt_read_kinds_memo(stmt, out, memo);
             }
         }
         PreHirStmt::Switch {
@@ -487,17 +563,17 @@ pub fn collect_stmt_read_kinds<'a>(
                 .flat_map(|case| case.body.iter())
                 .chain(default.iter())
             {
-                collect_stmt_read_kinds(stmt, out);
+                collect_stmt_read_kinds_memo(stmt, out, memo);
             }
         }
         PreHirStmt::Block(stmts) | PreHirStmt::While { body: stmts, .. } => {
             for stmt in stmts.iter() {
-                collect_stmt_read_kinds(stmt, out);
+                collect_stmt_read_kinds_memo(stmt, out, memo);
             }
         }
         PreHirStmt::DoWhile { body, cond } => {
             for stmt in body.iter() {
-                collect_stmt_read_kinds(stmt, out);
+                collect_stmt_read_kinds_memo(stmt, out, memo);
             }
             note(
                 out,
@@ -512,7 +588,7 @@ pub fn collect_stmt_read_kinds<'a>(
             body,
         } => {
             for stmt in init.iter() {
-                collect_stmt_read_kinds(stmt, out);
+                collect_stmt_read_kinds_memo(stmt, out, memo);
             }
             if let Some(cond) = cond {
                 note(
@@ -522,10 +598,10 @@ pub fn collect_stmt_read_kinds<'a>(
                 );
             }
             for stmt in update.iter() {
-                collect_stmt_read_kinds(stmt, out);
+                collect_stmt_read_kinds_memo(stmt, out, memo);
             }
             for stmt in body.iter() {
-                collect_stmt_read_kinds(stmt, out);
+                collect_stmt_read_kinds_memo(stmt, out, memo);
             }
         }
         PreHirStmt::VaStart { va_list, .. } => note(
@@ -1001,25 +1077,60 @@ pub fn goto_ref_counts(body: &[PreHirStmt]) -> HashMap<String, usize> {
 }
 
 pub fn guarded_tail_middle_is_execution_safe(middle: &[PreHirStmt], label: &str) -> bool {
+    // DAG, not a tree -- see [`crate::stmt_dag`].
+    let mut memo: crate::stmt_dag::StmtMemo<bool> = Default::default();
     middle
         .iter()
-        .all(|stmt| guarded_tail_stmt_is_execution_safe(stmt, label))
+        .all(|stmt| execution_safe_memo(stmt, label, &mut memo))
 }
 
 pub fn guarded_tail_stmt_is_execution_safe(stmt: &PreHirStmt, label: &str) -> bool {
+    let mut memo: crate::stmt_dag::StmtMemo<bool> = Default::default();
+    execution_safe_memo(stmt, label, &mut memo)
+}
+
+fn execution_safe_memo(
+    stmt: &PreHirStmt,
+    label: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<bool>,
+) -> bool {
+    let key = crate::stmt_dag::stmt_key(stmt);
+    if let Some(cached) = memo.get(&key) {
+        return *cached;
+    }
+    let answer = execution_safe_uncached(stmt, label, memo);
+    memo.insert(key, answer);
+    answer
+}
+
+fn middle_execution_safe_memo(
+    middle: &[PreHirStmt],
+    label: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<bool>,
+) -> bool {
+    middle
+        .iter()
+        .all(|stmt| execution_safe_memo(stmt, label, memo))
+}
+
+fn execution_safe_uncached(
+    stmt: &PreHirStmt,
+    label: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<bool>,
+) -> bool {
     match stmt {
         PreHirStmt::Assign { .. } => true,
         PreHirStmt::VaStart { .. } => true,
         PreHirStmt::Expr(_) => true,
         PreHirStmt::Goto(_) => true,
-        PreHirStmt::Block(body) => guarded_tail_middle_is_execution_safe(body, label),
+        PreHirStmt::Block(body) => middle_execution_safe_memo(body, label, memo),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            guarded_tail_middle_is_execution_safe(then_body, label)
-                && guarded_tail_middle_is_execution_safe(else_body, label)
+            middle_execution_safe_memo(then_body, label, memo)
+                && middle_execution_safe_memo(else_body, label, memo)
         }
         PreHirStmt::Label(_)
         | PreHirStmt::Switch { .. }
@@ -1711,6 +1822,31 @@ pub fn stmt_always_terminates(stmt: &PreHirStmt) -> bool {
 }
 
 pub fn stmt_contains_goto_label(stmt: &PreHirStmt, label: &str) -> usize {
+    // DAG, not a tree -- see [`crate::stmt_dag`]. `label` is fixed for the
+    // whole walk, so the address alone identifies the answer.
+    let mut memo: crate::stmt_dag::StmtMemo<usize> = Default::default();
+    stmt_contains_goto_label_memo(stmt, label, &mut memo)
+}
+
+fn stmt_contains_goto_label_memo(
+    stmt: &PreHirStmt,
+    label: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<usize>,
+) -> usize {
+    let key = crate::stmt_dag::stmt_key(stmt);
+    if let Some(cached) = memo.get(&key) {
+        return *cached;
+    }
+    let answer = stmt_contains_goto_label_uncached(stmt, label, memo);
+    memo.insert(key, answer);
+    answer
+}
+
+fn stmt_contains_goto_label_uncached(
+    stmt: &PreHirStmt,
+    label: &str,
+    memo: &mut crate::stmt_dag::StmtMemo<usize>,
+) -> usize {
     match stmt {
         PreHirStmt::Goto(target) => usize::from(target == label),
         PreHirStmt::If {
@@ -1720,11 +1856,11 @@ pub fn stmt_contains_goto_label(stmt: &PreHirStmt, label: &str) -> usize {
         } => {
             then_body
                 .iter()
-                .map(|stmt| stmt_contains_goto_label(stmt, label))
+                .map(|stmt| stmt_contains_goto_label_memo(stmt, label, memo))
                 .sum::<usize>()
                 + else_body
                     .iter()
-                    .map(|stmt| stmt_contains_goto_label(stmt, label))
+                    .map(|stmt| stmt_contains_goto_label_memo(stmt, label, memo))
                     .sum::<usize>()
         }
         PreHirStmt::Block(body)
@@ -1732,7 +1868,7 @@ pub fn stmt_contains_goto_label(stmt: &PreHirStmt, label: &str) -> usize {
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => body
             .iter()
-            .map(|stmt| stmt_contains_goto_label(stmt, label))
+            .map(|stmt| stmt_contains_goto_label_memo(stmt, label, memo))
             .sum(),
         PreHirStmt::Switch { cases, default, .. } => {
             cases
@@ -1740,13 +1876,13 @@ pub fn stmt_contains_goto_label(stmt: &PreHirStmt, label: &str) -> usize {
                 .map(|case| {
                     case.body
                         .iter()
-                        .map(|stmt| stmt_contains_goto_label(stmt, label))
+                        .map(|stmt| stmt_contains_goto_label_memo(stmt, label, memo))
                         .sum::<usize>()
                 })
                 .sum::<usize>()
                 + default
                     .iter()
-                    .map(|stmt| stmt_contains_goto_label(stmt, label))
+                    .map(|stmt| stmt_contains_goto_label_memo(stmt, label, memo))
                     .sum::<usize>()
         }
         PreHirStmt::Assign { .. }

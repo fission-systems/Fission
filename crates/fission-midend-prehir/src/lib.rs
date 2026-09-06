@@ -25,6 +25,7 @@
 
 pub mod action_pipeline;
 pub mod ir;
+pub mod stmt_dag;
 pub mod util;
 pub mod vsa;
 
