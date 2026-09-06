@@ -145,7 +145,32 @@ impl StructuringQuality {
             + 65
     }
 
+    /// Whether `FISSION_SELECT_BY_NODE_ESTIMATE` is on: accept a structuring
+    /// when it lowers [`Self::estimated_cfg_nodes_x100`], instead of requiring
+    /// it to remove a jump.
+    ///
+    /// The existing rule makes `gotos < baseline.gotos` a hard precondition,
+    /// so the whole selection machinery is built around removing jumps. The
+    /// fitted model says a jump carries a *negative* node coefficient, i.e.
+    /// removing one costs on the axis DecBench scores. This switch is what
+    /// turns "accuracy over readability" from a stated direction into a
+    /// measurable one.
+    fn select_by_node_estimate() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_SELECT_BY_NODE_ESTIMATE"),
+                Ok(v) if matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
+    }
+
     pub fn improves_on(&self, baseline: &Self) -> bool {
+        if Self::select_by_node_estimate() {
+            return self.estimated_cfg_nodes_x100() < baseline.estimated_cfg_nodes_x100()
+                && self.switches >= baseline.switches
+                && self.empty_if_shells <= baseline.empty_if_shells;
+        }
         let removed = baseline.gotos.saturating_sub(self.gotos);
         let guard_budget = guard_budget(baseline.guard_formula_size, removed);
         self.gotos < baseline.gotos
