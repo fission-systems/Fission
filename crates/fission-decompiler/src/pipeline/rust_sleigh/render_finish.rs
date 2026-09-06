@@ -105,6 +105,14 @@ pub(crate) fn finish_rust_sleigh_render(
     options.pe_x64_only = config.pe_x64_only;
     options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
     options.userops = userops;
+    // Two output modes, two structurings -- wired and measured, but not on
+    // by default. See `NirRenderOptions::dual_layer_structuring`: splitting
+    // the trees makes HIR genuinely readable (goto 17 -> 5, -21% lines) and
+    // costs the scored layer 6,221 -> 6,248 in GED distance, because NIR is
+    // the mechanical surface and does not receive the HIR presentation pass
+    // that helps accuracy as well as readability.
+    options.dual_layer_structuring =
+        std::env::var("FISSION_DUAL_LAYER").is_ok_and(|v| v != "0" && v != "false");
     apply_spec_overrides(binary, &mut options);
 
     let (selection, learned_facts) = select_nir_output_from_prebuilt_pcode_with_learned_facts(

@@ -82,6 +82,9 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
+    if options.dual_layer_structuring {
+        return render_mlil_preview_dual_layer(pcode, name, address, options, None, type_context);
+    }
     render_mlil_preview_with_binary_and_context(
         pcode,
         name,
@@ -117,11 +120,13 @@ pub fn render_mlil_preview_dual_layer(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
+    let mut scored_options = options.clone();
+    scored_options.dual_layer_structuring = false;
     let scored = render_mlil_preview_with_binary_and_context(
         pcode,
         name,
         address,
-        options,
+        &scored_options,
         binary,
         type_context,
         None,
@@ -135,6 +140,7 @@ pub fn render_mlil_preview_dual_layer(
         return Ok(scored);
     };
     let mut readable_options = options.clone();
+    readable_options.dual_layer_structuring = false;
     readable_options.selection_axis = fission_midend_core::ir::SelectionAxis::Jumps;
     // A failure here is not a failure of the decompilation -- the scored
     // surface is already built. Fall back to sharing its tree, which is what
@@ -169,6 +175,12 @@ pub fn render_mlil_preview_with_binary_and_context(
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
     let _ = decomp_facts;
+    // Two output modes, two structurings. Handled here rather than in a
+    // wrapper because the pipeline calls this entry point directly; the
+    // recursive calls below clear the flag so each is a single-tree build.
+    if options.dual_layer_structuring {
+        return render_mlil_preview_dual_layer(pcode, name, address, options, binary, type_context);
+    }
     let debug = RenderDebugFlags::from_env();
     telemetry::reset_preview_telemetry();
     let debug_log = |stage: &str| {
