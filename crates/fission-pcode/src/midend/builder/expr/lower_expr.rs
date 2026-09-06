@@ -2121,7 +2121,15 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(expr) = self.try_lower_zero_extended_partial_register(vn, visiting)? {
             return Ok(expr);
         }
-        if let Some(expr) = self.try_lower_diamond_select_for_varnode(vn, visiting)? {
+        // The diamond path reconstructs a merge from the CFG shape, and it
+        // runs even when a definite reaching definition was already found
+        // above. Probed on `TIM_OC4Init`: every input at the sites it fires
+        // on resolves to `Operation(SsaOpSite { .. })` in the same block --
+        // SSA has an answer and this rebuilds it anyway, once per use, which
+        // is where the ternaries come from.
+        if !(def_site.is_some() && !std::env::var("FISSION_DIAMOND_ALWAYS").is_ok())
+            && let Some(expr) = self.try_lower_diamond_select_for_varnode(vn, visiting)?
+        {
             return Ok(expr);
         }
         if def_site.is_none() {
