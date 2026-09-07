@@ -127,13 +127,30 @@ fn compute_no_return_functions(binary: &LoadedBinary) -> BTreeSet<u64> {
         return no_return;
     };
 
-    // Decode every non-import function once, in parallel (same
-    // parallel-decode-then-sequential-merge shape as the FID-matching fix
-    // earlier this session) -- the fixpoint below only re-walks these
-    // already-decoded, in-memory CFGs, never re-decodes.
+    // Decoded sequentially, and it must stay that way: this runs inside the
+    // `OnceLock` initialiser in `control_flow_facts_for`, and callers reach
+    // that from inside a rayon parallel iterator of their own
+    // (`FactStore::from_program`). A rayon worker that blocks waiting for its
+    // own sub-jobs goes looking for work to steal, so the thread holding the
+    // `Once` open would pick up one of those outer `control_flow_facts_for`
+    // jobs, arrive at the same `Once`, and park -- on itself. Every other
+    // worker then waits on an initialiser that can never finish.
+    //
+    // Observed as a `fission_cli` that never exits: fourteen workers in
+    // `Once::wait`, the main thread in `LockLatch::wait_and_reset`, and no
+    // thread running. It reproduced in roughly 1 run in 20 under load and
+    // never on an idle machine, because whether the holder steals such a job
+    // is up to the scheduler.
+    //
+    // Parallelising this back is not worth the invariant: measured over the
+    // whole decompile it costs 0.7% on `bash` (2,878 functions, 87.3 s ->
+    // 87.9 s) and 2.6% on `ssh`, because this pass is a small share of the
+    // work it sits inside. If it ever does need parallelism, the fix is to
+    // stop calling `control_flow_facts_for` from inside a parallel iterator,
+    // not to make the initialiser block again.
     let decoded: StdHashMap<u64, PcodeFunction> = binary
         .functions
-        .par_iter()
+        .iter()
         .filter(|f| !f.is_import)
         .filter_map(|f| {
             // Thumb-only images decode as Thumb whatever bit 0 of the
