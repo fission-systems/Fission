@@ -3415,6 +3415,24 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn materializes_const_address(&self, vn: &Varnode) -> bool {
+        self.materializes_const_address_within(vn, PASSTHROUGH_PEEL_MAX_STEPS)
+    }
+
+    /// Walk a chain of pass-through definitions looking for a constant, with a
+    /// budget.
+    ///
+    /// Bounded because the definition graph this walks can contain a cycle:
+    /// `lookup_def_site` answers block-locally, and SLEIGH reuses one unique
+    /// offset many times inside a block, so a temporary's "definition" can be
+    /// an op that reads the same temporary. `peel_passthrough_varnode` has
+    /// always guarded against exactly this; this walk did not, and once jump
+    /// tables started resolving it was the first caller to reach such a chain
+    /// -- `bash`'s `unwind_frame_discard_internal` stopped terminating, with
+    /// 91% of its time inside `lookup_def_site`.
+    fn materializes_const_address_within(&self, vn: &Varnode, budget: usize) -> bool {
+        let Some(budget) = budget.checked_sub(1) else {
+            return false;
+        };
         let Some((_, op)) = self.lookup_def_site(vn) else {
             return false;
         };
@@ -3422,7 +3440,8 @@ impl<'a> PreviewBuilder<'a> {
             PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
                 if op.inputs.len() == 1 =>
             {
-                op.inputs[0].is_constant || self.materializes_const_address(&op.inputs[0])
+                op.inputs[0].is_constant
+                    || self.materializes_const_address_within(&op.inputs[0], budget)
             }
             PcodeOpcode::IntAdd | PcodeOpcode::IntSub if op.inputs.len() == 2 => {
                 op.inputs[0].is_constant && op.inputs[1].is_constant

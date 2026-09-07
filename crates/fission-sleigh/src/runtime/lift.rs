@@ -241,6 +241,45 @@ fn additive_const_component(
     }
 }
 
+/// Every `(table address, entry width)` the branch target could be reading.
+///
+/// More than one, because a displacement-table dispatch adds the table's base
+/// back to the loaded entry, and the walk cannot tell which side of that add
+/// leads to the table without trying to read both -- the other side is often a
+/// stack slot, whose "base" is a small negative number. The caller keeps the
+/// first candidate it can actually read.
+fn branchind_load_table_bases(
+    vn: &Varnode,
+    defs: &HashMap<Varnode, &PcodeOp>,
+    depth: usize,
+) -> Vec<(u64, usize)> {
+    if depth > 12 {
+        return Vec::new();
+    }
+    let Some(op) = defs.get(vn) else {
+        return Vec::new();
+    };
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => op
+            .inputs
+            .first()
+            .map(|input| branchind_load_table_bases(input, defs, depth + 1))
+            .unwrap_or_default(),
+        PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
+            let mut out = branchind_load_table_bases(&op.inputs[0], defs, depth + 1);
+            for candidate in branchind_load_table_bases(&op.inputs[1], defs, depth + 1) {
+                if !out.contains(&candidate) {
+                    out.push(candidate);
+                }
+            }
+            out
+        }
+        _ => branchind_load_table_base(vn, defs, depth)
+            .into_iter()
+            .collect(),
+    }
+}
+
 fn branchind_load_table_base(
     vn: &Varnode,
     defs: &HashMap<Varnode, &PcodeOp>,
@@ -267,6 +306,30 @@ fn branchind_load_table_base(
             let table_base = additive_const_component(&op.inputs[1], defs, depth + 1)?;
             let width = op.output.as_ref().map_or(vn.size, |out| out.size);
             Some((table_base, width.clamp(4, 8) as usize))
+        }
+        // `target = table_base + sign_extend(entry)`: the branch target is the
+        // add, not the load. x86-64 GCC at `-O0` emits exactly this -- the
+        // table holds signed displacements from its own address, so the
+        // dispatch reloads the base and adds it back:
+        //
+        // ```text
+        // lea    rdx,[rax*4]
+        // lea    rax,[rip+X]          ; table
+        // mov    eax,DWORD PTR [rdx+rax*1]
+        // cdqe
+        // lea    rdx,[rip+X]          ; table again, as the displacement base
+        // add    rax,rdx
+        // jmp    rax
+        // ```
+        //
+        // Without this arm the walk stopped at the `add` and returned nothing,
+        // so every case of every such `switch` stayed undecoded. Recursing
+        // finds the `Load` underneath and yields the table's address; the
+        // caller already tries `Some(table_base)` as a displacement base,
+        // which is the base this shape adds back.
+        PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
+            branchind_load_table_base(&op.inputs[0], defs, depth + 1)
+                .or_else(|| branchind_load_table_base(&op.inputs[1], defs, depth + 1))
         }
         _ => None,
     }
@@ -570,6 +633,41 @@ fn add_signed_base(base: u64, displacement: i128) -> Option<u64> {
         .then_some(target as u64)
 }
 
+/// Bytes at `addr`, from the decoded function's own window or, failing that,
+/// from a read-only image window.
+///
+/// The table a `BranchInd` reads is not necessarily inside the function that
+/// reads it -- see `DecodeMemoryContext::readonly_windows`. Targets are still
+/// required to land inside the function; only the table itself may be
+/// elsewhere.
+fn table_bytes_at<'a>(
+    entry_address: u64,
+    bytes: &'a [u8],
+    memory_context: &'a DecodeMemoryContext,
+    addr: u64,
+    len: usize,
+) -> Option<&'a [u8]> {
+    if let Some(offset) = internal_byte_offset(entry_address, bytes.len(), addr) {
+        let end = checked_slice_end(offset, len, bytes.len())?;
+        return Some(&bytes[offset..end]);
+    }
+    for (base, window) in &memory_context.readonly_windows {
+        if addr < *base {
+            continue;
+        }
+        let Ok(offset) = usize::try_from(addr - *base) else {
+            continue;
+        };
+        let Some(end) = offset.checked_add(len) else {
+            continue;
+        };
+        if end <= window.len() {
+            return Some(&window[offset..end]);
+        }
+    }
+    None
+}
+
 fn infer_branchind_jump_table_targets(
     branch_target: &Varnode,
     decoded: &BTreeMap<u64, Vec<PcodeOp>>,
@@ -582,7 +680,35 @@ fn infer_branchind_jump_table_targets(
     const MAX_JUMP_TABLE_CASES: u64 = 256;
 
     let defs = collect_defs(decoded, current_ops);
+    jump_table_targets_from(
+        branch_target,
+        &defs,
+        entry_address,
+        bytes,
+        memory_context,
+        little_endian,
+        current_ops,
+    )
+}
 
+/// Targets a `BranchInd` reads out of a jump table, given the definitions that
+/// reach it.
+///
+/// Split out from [`infer_branchind_jump_table_targets`] so the same reader can
+/// run again *after* a function is decoded, against block-local definitions --
+/// see [`resolve_indirect_branch_targets`]. During the lift the only
+/// definitions available are "the last write to this varnode anywhere decoded
+/// so far", which at a dispatch is frequently some other block's write.
+fn jump_table_targets_from(
+    branch_target: &Varnode,
+    defs: &HashMap<Varnode, &PcodeOp>,
+    entry_address: u64,
+    bytes: &[u8],
+    memory_context: &DecodeMemoryContext,
+    little_endian: bool,
+    current_ops: &[PcodeOp],
+) -> Vec<u64> {
+    const MAX_JUMP_TABLE_CASES: u64 = 256;
     // A scaled-offset table first: its shape starts with an `IntAdd`, which
     // the address-table walker below does not descend, so ARM's `tbb`/`tbh`
     // produced no targets at all and the decode stopped at the dispatch --
@@ -600,15 +726,13 @@ fn infer_branchind_jump_table_targets(
         }
     }
 
-    let Some((table_base, entry_width)) = branchind_load_table_base(branch_target, &defs, 0) else {
+    let candidates = branchind_load_table_bases(branch_target, defs, 0);
+    let Some((table_base, entry_width)) = candidates.into_iter().find(|(base, width)| {
+        (*width == 4 || *width == 8)
+            && table_bytes_at(entry_address, bytes, memory_context, *base, *width).is_some()
+    }) else {
         return Vec::new();
     };
-    if entry_width != 4 && entry_width != 8 {
-        return Vec::new();
-    }
-    if internal_byte_offset(entry_address, bytes.len(), table_base).is_none() {
-        return Vec::new();
-    }
 
     let mut mode_targets = Vec::<Vec<u64>>::new();
     let mut mode_bases = vec![None, Some(table_base)];
@@ -630,13 +754,15 @@ fn infer_branchind_jump_table_targets(
             let Some(entry_addr) = table_base.checked_add(entry_delta) else {
                 break;
             };
-            let Some(offset) = internal_byte_offset(entry_address, bytes.len(), entry_addr) else {
+            let Some(raw) = table_bytes_at(
+                entry_address,
+                bytes,
+                memory_context,
+                entry_addr,
+                entry_width,
+            ) else {
                 break;
             };
-            let Some(end) = checked_slice_end(offset, entry_width, bytes.len()) else {
-                break;
-            };
-            let raw = &bytes[offset..end];
             let target = if let Some(base) = base {
                 read_signed_entry(raw, little_endian).and_then(|disp| add_signed_base(base, disp))
             } else {
@@ -667,6 +793,263 @@ fn infer_branchind_jump_table_targets(
         .into_iter()
         .max_by_key(|targets| targets.len())
         .unwrap_or_default()
+}
+
+/// Bytes at `addr`, from a read-only image window only.
+///
+/// A jump table is data, and the post-decode resolver requires it to live in a
+/// section that is not executable. Accepting a table inside the function's own
+/// bytes sounds harmless and is not: "two 4-byte values that happen to land
+/// inside this function" is a test a 764-byte function's own instruction
+/// stream passes by accident, and `bash`'s `unwind_frame_discard_internal`
+/// did -- the resolver fed the decoder addresses in the middle of
+/// instructions, which decoded to more garbage with more indirect branches,
+/// and the fixed point never converged.
+///
+/// Architectures that really do put a table between instructions (ARM's
+/// `tbb`/`tbh`) are matched during the lift instead, by shape rather than by
+/// guess -- see `branchind_scaled_offset_table`.
+fn readonly_bytes_at<'a>(
+    memory_context: &'a DecodeMemoryContext,
+    addr: u64,
+    len: usize,
+) -> Option<&'a [u8]> {
+    for (base, window) in &memory_context.readonly_windows {
+        if addr < *base {
+            continue;
+        }
+        let Ok(offset) = usize::try_from(addr - *base) else {
+            continue;
+        };
+        let Some(end) = offset.checked_add(len) else {
+            continue;
+        };
+        if end <= window.len() {
+            return Some(&window[offset..end]);
+        }
+    }
+    None
+}
+
+/// What a varnode holds at a point in a block, as far as a jump table needs.
+///
+/// Two constants, not an expression tree. A tree is the obvious way to write
+/// this and it is exponential: every read of a value clones it, so a block
+/// with a long chain of adds doubles the term count per link. It survived
+/// `BZ2_decompress`'s eight-deep dispatcher and made a 20-function batch of
+/// `bash` take longer than two minutes where the whole binary used to take
+/// eighty seconds.
+///
+/// A dispatch only ever needs two facts, and both are constants: which address
+/// the table was read from, and what the loaded entry is a displacement from.
+/// Carrying just those makes each p-code op O(1) and the whole scan linear.
+#[derive(Debug, Clone, Copy, Default)]
+struct Dispatch {
+    /// Constants added into this value. `None` once anything unknown is mixed
+    /// in -- an index, a register the block did not write.
+    added_const: Option<u64>,
+    /// If this value was loaded from memory, the constant in the address it
+    /// was loaded from: the table's own address.
+    table: Option<u64>,
+    /// What an unknown value was multiplied by on the way into this one -- the
+    /// stride of an index.
+    index_scale: Option<u64>,
+    /// The stride the table load was indexed by, carried past the load so the
+    /// reader can insist it matches the entry width.
+    table_scale: Option<u64>,
+}
+
+/// Symbolically evaluate a block forward and report what its `BranchInd` jumps
+/// through, as `(table address, displacement base)`.
+///
+/// Forward evaluation rather than a definition map, because a definition map
+/// cannot express this: SLEIGH's unique space reuses the same offset many
+/// times inside one block, so a map keyed by `(space, offset)` makes an
+/// instruction's temporary alias every other instruction's temporary -- on
+/// `BZ2_decompress`'s dispatcher the branch target's "definition" was an
+/// `IntAdd` whose own input resolved back to itself, and the walk spun until
+/// its depth limit. Evaluating in order resolves each temporary at the moment
+/// it is written, so the aliasing never arises.
+fn dispatch_at_branch(ops: &[PcodeOp]) -> Option<Dispatch> {
+    let mut env: HashMap<Varnode, Dispatch> = HashMap::new();
+    let read = |env: &HashMap<Varnode, Dispatch>, vn: &Varnode| -> Dispatch {
+        if let Some(value) = const_value(vn) {
+            return Dispatch {
+                added_const: Some(value),
+                ..Dispatch::default()
+            };
+        }
+        env.get(vn).copied().unwrap_or_default()
+    };
+
+    for op in ops {
+        if op.opcode == PcodeOpcode::BranchInd {
+            return op.inputs.first().map(|target| read(&env, target));
+        }
+        let Some(output) = &op.output else {
+            continue;
+        };
+        let value = match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                op.inputs
+                    .first()
+                    .map(|input| read(&env, input))
+                    .unwrap_or_default()
+            }
+            PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
+                let lhs = read(&env, &op.inputs[0]);
+                let rhs = read(&env, &op.inputs[1]);
+                Dispatch {
+                    added_const: match (lhs.added_const, rhs.added_const) {
+                        (Some(a), Some(b)) => Some(a.wrapping_add(b)),
+                        (Some(a), None) => Some(a),
+                        (None, Some(b)) => Some(b),
+                        (None, None) => None,
+                    },
+                    table: lhs.table.or(rhs.table),
+                    index_scale: lhs.index_scale.or(rhs.index_scale),
+                    table_scale: lhs.table_scale.or(rhs.table_scale),
+                }
+            }
+            // Scaling appears even when it scales by one: an `[base + index*1]`
+            // address lifts to an `IntMult` by the constant 1, and treating
+            // that as opaque hid the table's address behind an unknown -- which
+            // is what it did on `BZ2_decompress`.
+            PcodeOpcode::IntMult if op.inputs.len() == 2 => {
+                let lhs = read(&env, &op.inputs[0]);
+                let rhs = read(&env, &op.inputs[1]);
+                match (lhs.added_const, rhs.added_const) {
+                    (Some(a), Some(b)) => Dispatch {
+                        added_const: Some(a.wrapping_mul(b)),
+                        ..Dispatch::default()
+                    },
+                    // An unknown scaled by a constant is an index, and its
+                    // stride is what tells a table read apart from a plain
+                    // pointer load: `mov rax,[rip+X]; jmp rax` has a constant
+                    // address and no index at all, and used to pass as a
+                    // two-case table whenever `.rodata` at X happened to hold
+                    // two values pointing into the function.
+                    (Some(scale), None) | (None, Some(scale)) => Dispatch {
+                        index_scale: Some(scale),
+                        ..Dispatch::default()
+                    },
+                    (None, None) => Dispatch::default(),
+                }
+            }
+            // `Load`'s first input is the space id, the second the address.
+            PcodeOpcode::Load if op.inputs.len() == 2 => {
+                let addr = read(&env, &op.inputs[1]);
+                Dispatch {
+                    table: addr.added_const,
+                    table_scale: addr.index_scale,
+                    ..Dispatch::default()
+                }
+            }
+            _ => Dispatch::default(),
+        };
+        env.insert(output.clone(), value);
+    }
+    None
+}
+
+/// Indirect-branch targets recoverable from an already-decoded function.
+///
+/// This is the analysis half of the decode fixpoint. Recursive descent cannot
+/// enumerate the successors of a computed jump, so a `switch` dispatch leaves
+/// every case unreachable and undecoded -- on `bzip2`'s `BZ2_decompress` that
+/// was 232 of ~6,000 instructions, and the emitted C had no control flow at
+/// all. The decoder is not wrong about what it reaches; it simply cannot know
+/// where to go. Only an analysis over decoded code can say, so the caller
+/// feeds what this returns back into `additional_decode_entries` and lifts
+/// again, to a fixed point.
+///
+/// Definitions are taken **per block**, which is what makes this answer
+/// trustworthy where the in-lift reader is not: during the lift the only
+/// available definition of a varnode is the last write to it anywhere decoded
+/// so far, and at a dispatch that is routinely a write from an unrelated
+/// block -- on `BZ2_decompress` it resolved the jump register to a stack slot
+/// 376 bytes into the frame. A compiler-generated dispatch computes its target
+/// inside one basic block, and nothing can branch into the middle of a block,
+/// so the block's own writes are exactly the definitions that reach its
+/// terminator.
+pub fn resolve_indirect_branch_targets(
+    function: &PcodeFunction,
+    entry_address: u64,
+    bytes: &[u8],
+    memory_context: &DecodeMemoryContext,
+    little_endian: bool,
+) -> Vec<u64> {
+    const MAX_JUMP_TABLE_CASES: u64 = 256;
+    let mut found = Vec::new();
+
+    for block in &function.blocks {
+        let Some(value) = dispatch_at_branch(&block.ops) else {
+            continue;
+        };
+        // The table's own address, from the load the dispatch reads it with.
+        let Some(table_base) = value.table else {
+            continue;
+        };
+        // What entries are displacements *from*: the constant the dispatch adds
+        // back, when it adds one. GCC uses the table's own address. Absent
+        // means the entries are absolute addresses.
+        let displacement_base = value.added_const;
+
+        // The stride the dispatch indexed by *is* the entry width. Trying
+        // both widths and keeping whichever produced two plausible targets is
+        // how a run of unrelated `.rodata` gets accepted as a table.
+        let Some(entry_width) = value
+            .table_scale
+            .filter(|scale| *scale == 4 || *scale == 8)
+            .and_then(|scale| usize::try_from(scale).ok())
+        else {
+            continue;
+        };
+        for entry_width in [entry_width] {
+            let Some(entry_width_u64) = u64_from_usize(entry_width) else {
+                continue;
+            };
+            let mut targets = Vec::new();
+            for ordinal in 0..MAX_JUMP_TABLE_CASES {
+                let Some(entry_addr) = ordinal
+                    .checked_mul(entry_width_u64)
+                    .and_then(|delta| table_base.checked_add(delta))
+                else {
+                    break;
+                };
+                let Some(raw) = readonly_bytes_at(memory_context, entry_addr, entry_width) else {
+                    break;
+                };
+                let target = match displacement_base {
+                    Some(base) => read_signed_entry(raw, little_endian)
+                        .and_then(|disp| add_signed_base(base, disp)),
+                    None => read_unsigned_entry(raw, little_endian),
+                };
+                let Some(target) = target else {
+                    break;
+                };
+                // A target outside the function is how a table ends: the bytes
+                // after it are some other table, or not a table at all.
+                if internal_byte_offset(entry_address, bytes.len(), target).is_none() {
+                    break;
+                }
+                if !targets.contains(&target) {
+                    targets.push(target);
+                }
+            }
+            // One entry proves nothing -- any four readable bytes that happen
+            // to point into the function would pass.
+            if targets.len() >= 2 {
+                for target in targets {
+                    if !found.contains(&target) {
+                        found.push(target);
+                    }
+                }
+                break;
+            }
+        }
+    }
+    found
 }
 
 fn attach_inferred_indirect_edges(
@@ -1410,5 +1793,160 @@ mod scaled_offset_table_tests {
             scale: 2,
         };
         assert!(scaled_offset_table_targets(table, 0x8028164, &bytes, true, 256).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    fn vn(space_id: u64, offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn konst(value: u64) -> Varnode {
+        Varnode {
+            space_id: 0,
+            offset: value,
+            size: 8,
+            is_constant: true,
+            constant_val: value as i64,
+        }
+    }
+
+    fn op(opcode: PcodeOpcode, output: Option<Varnode>, inputs: Vec<Varnode>) -> PcodeOp {
+        PcodeOp {
+            seq_num: 0,
+            opcode,
+            address: 0,
+            output,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    /// The x86-64 GCC `-O0` dispatch, as p-code:
+    ///
+    /// ```text
+    /// lea    rdx,[rax*4]          ; index * 4
+    /// lea    rax,[rip+TABLE]
+    /// mov    eax,DWORD PTR [rdx+rax*1]
+    /// cdqe
+    /// lea    rdx,[rip+TABLE]
+    /// add    rax,rdx
+    /// jmp    rax
+    /// ```
+    fn gcc_displacement_dispatch(table: u64) -> Vec<PcodeOp> {
+        let index = vn(2, 0x100, 8);
+        let scaled = vn(4, 0x10, 8);
+        let base = vn(4, 0x20, 8);
+        let addr = vn(4, 0x30, 8);
+        let entry = vn(4, 0x40, 8);
+        let target = vn(4, 0x50, 8);
+        vec![
+            op(
+                PcodeOpcode::IntMult,
+                Some(scaled.clone()),
+                vec![index, konst(4)],
+            ),
+            op(PcodeOpcode::Copy, Some(base.clone()), vec![konst(table)]),
+            op(
+                PcodeOpcode::IntAdd,
+                Some(addr.clone()),
+                vec![scaled, base.clone()],
+            ),
+            op(PcodeOpcode::Load, Some(entry.clone()), vec![konst(3), addr]),
+            op(
+                PcodeOpcode::IntSExt,
+                Some(entry.clone()),
+                vec![entry.clone()],
+            ),
+            op(PcodeOpcode::IntAdd, Some(target.clone()), vec![entry, base]),
+            op(PcodeOpcode::BranchInd, None, vec![target]),
+        ]
+    }
+
+    #[test]
+    fn a_displacement_dispatch_names_its_table_and_its_base() {
+        let value = dispatch_at_branch(&gcc_displacement_dispatch(0x1e494))
+            .expect("the block ends in BranchInd");
+        assert_eq!(value.table, Some(0x1e494), "table address");
+        assert_eq!(value.added_const, Some(0x1e494), "displacement base");
+        assert_eq!(
+            value.table_scale,
+            Some(4),
+            "entry width, from the index stride"
+        );
+    }
+
+    /// `mov rax,[rip+X]; jmp rax` -- a pointer, not a table. It has a constant
+    /// address and no index, and accepting it as a two-case table is how
+    /// `.rodata` that happens to hold two in-function values sent the decoder
+    /// into the middle of an instruction.
+    #[test]
+    fn a_plain_pointer_load_is_not_a_table() {
+        let slot = vn(4, 0x10, 8);
+        let ops = vec![
+            op(
+                PcodeOpcode::Load,
+                Some(slot.clone()),
+                vec![konst(3), konst(0x20e90)],
+            ),
+            op(PcodeOpcode::BranchInd, None, vec![slot]),
+        ];
+        let value = dispatch_at_branch(&ops).expect("the block ends in BranchInd");
+        assert_eq!(value.table, Some(0x20e90), "the address is still visible");
+        assert_eq!(
+            value.table_scale, None,
+            "but with no index the reader must refuse it"
+        );
+    }
+
+    /// A block with no computed jump has nothing to say.
+    #[test]
+    fn a_block_without_an_indirect_branch_reports_nothing() {
+        let out = vn(4, 0x10, 8);
+        let ops = vec![op(PcodeOpcode::Copy, Some(out), vec![konst(7)])];
+        assert!(dispatch_at_branch(&ops).is_none());
+    }
+
+    /// Scaling by one is still scaling: `[base + index*1]` lifts to an
+    /// `IntMult` by the constant 1, and treating that as opaque hid the table.
+    #[test]
+    fn a_stride_of_one_still_leaves_the_base_visible() {
+        let index = vn(2, 0x100, 8);
+        let scaled = vn(4, 0x10, 8);
+        let base = vn(4, 0x20, 8);
+        let addr = vn(4, 0x30, 8);
+        let entry = vn(4, 0x40, 8);
+        let ops = vec![
+            op(PcodeOpcode::Copy, Some(base.clone()), vec![konst(0x1000)]),
+            op(
+                PcodeOpcode::IntMult,
+                Some(scaled.clone()),
+                vec![base, konst(1)],
+            ),
+            op(
+                PcodeOpcode::IntMult,
+                Some(addr.clone()),
+                vec![index, konst(8)],
+            ),
+            op(
+                PcodeOpcode::IntAdd,
+                Some(addr.clone()),
+                vec![addr.clone(), scaled],
+            ),
+            op(PcodeOpcode::Load, Some(entry.clone()), vec![konst(3), addr]),
+            op(PcodeOpcode::BranchInd, None, vec![entry]),
+        ];
+        let value = dispatch_at_branch(&ops).expect("the block ends in BranchInd");
+        assert_eq!(value.table, Some(0x1000));
+        assert_eq!(value.table_scale, Some(8));
     }
 }

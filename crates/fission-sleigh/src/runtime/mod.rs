@@ -5,6 +5,7 @@ mod engine;
 mod frontend;
 mod function;
 mod lift;
+pub use lift::resolve_indirect_branch_targets;
 mod registry;
 mod spine;
 
@@ -226,6 +227,21 @@ pub struct DecodeMemoryContext {
     /// pass that runs after it -- both are required for a block to survive
     /// into the final `PcodeFunction`.
     pub additional_decode_entries: Vec<u64>,
+    /// Read-only image windows the jump-table reader may consult, as
+    /// `(virtual address, bytes)`.
+    ///
+    /// A switch table does not have to live inside the function that jumps
+    /// through it. On x86-64 GCC at `-O0` it sits in `.rodata` as signed
+    /// 32-bit displacements from the table's own address, and the function
+    /// only holds the `lea`/`jmp` that reads it. The jump-table reader used
+    /// to look for the table in the decoded function's own bytes and give up
+    /// when it was not there, which left every case of every such `switch`
+    /// undecoded -- `bzip2`'s `BZ2_decompress` reached 232 of its ~6,000
+    /// instructions.
+    ///
+    /// Shared rather than copied: these are whole sections, and a decode
+    /// context is built per function.
+    pub readonly_windows: Vec<(u64, std::sync::Arc<[u8]>)>,
 }
 
 /// Merged instruction-level CFG hints consumed by `build_instruction_cfg_snapshot`.

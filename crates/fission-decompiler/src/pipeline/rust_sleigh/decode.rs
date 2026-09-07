@@ -141,6 +141,22 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // that's required, not just a budget check. Skips the (expensive) lift
     // call entirely; everything downstream reads the same `DecodedPcodeFunction`
     // shape either way.
+    // A cached decode is reused only when there is nothing left to resolve in
+    // it. The cache is filled by the FID sweep, which decodes under the same
+    // contract and therefore stops at the same computed jumps -- so taking it
+    // unconditionally handed the decompiler a function that had already given
+    // up on every `switch`, and the fixed point below never got to run.
+    let cached_decoded = cached_decoded.filter(|cached| {
+        !continue_past_indirect_branch
+            || fission_sleigh::runtime::resolve_indirect_branch_targets(
+                &cached.function,
+                decode_entry_address,
+                bytes,
+                &memory_context,
+                !binary.inner().arch_spec.contains("BE"),
+            )
+            .is_empty()
+    });
     if let Some(cached) = cached_decoded.filter(|_| continue_past_indirect_branch) {
         let template_source_counts = cached.template_source_counts.clone();
         return Ok((
@@ -206,13 +222,64 @@ pub(crate) fn decode_rust_sleigh_pcode(
             userops,
         ));
     }
-    let result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
+    // ── Decode/analyse fixed point ────────────────────────────────────────
+    // Recursive descent cannot enumerate the successors of a computed jump, so
+    // a `switch` dispatch leaves every case unreachable and the function is
+    // decoded only as far as its dispatcher. `bzip2`'s `BZ2_decompress`
+    // reached 232 of ~6,000 instructions that way and rendered as
+    // straight-line C; the same shape accounts for a third of our whole
+    // distance to `kuna` on DecBench, across 769 functions.
+    //
+    // Only an analysis over *decoded* code can name those successors, and that
+    // analysis needs the decode that needs its answer. So run them alternately:
+    // lift what is reachable, resolve the indirect branches in the result, feed
+    // the new targets back as decode entries, and lift again until nothing new
+    // appears. `additional_decode_entries` already seeds both the decode
+    // worklist and the reachability pass, which is what makes the feedback a
+    // few lines rather than a new pipeline.
+    let mut memory_context = memory_context;
+    let mut result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
         bytes,
         decode_entry_address,
         lift_contract,
         &memory_context,
         initial_context_override,
     );
+    if continue_past_indirect_branch {
+        // Each round can only add entries, and a round that adds none stops
+        // the loop, so this bound is a guard against a pathological input
+        // rather than the usual exit: a `switch` inside a `switch` converges
+        // in three.
+        const MAX_DECODE_ROUNDS: usize = 8;
+        let little_endian = !binary.inner().arch_spec.contains("BE");
+        for _ in 0..MAX_DECODE_ROUNDS {
+            let Ok(lifted) = result.as_ref() else {
+                break;
+            };
+            let discovered = fission_sleigh::runtime::resolve_indirect_branch_targets(
+                &lifted.function,
+                decode_entry_address,
+                bytes,
+                &memory_context,
+                little_endian,
+            );
+            let fresh: Vec<u64> = discovered
+                .into_iter()
+                .filter(|target| !memory_context.additional_decode_entries.contains(target))
+                .collect();
+            if fresh.is_empty() {
+                break;
+            }
+            memory_context.additional_decode_entries.extend(fresh);
+            result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
+                decode_entry_address,
+                lift_contract,
+                &memory_context,
+                initial_context_override,
+            );
+        }
+    }
     match result {
         Ok(lifted) => {
             let template_source_counts = lifted.template_source_counts.clone();

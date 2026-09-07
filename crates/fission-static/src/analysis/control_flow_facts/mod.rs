@@ -246,6 +246,7 @@ impl ControlFlowFacts {
             flow_edges,
             noreturn_callsites,
             additional_decode_entries,
+            readonly_windows: readonly_windows_for(binary),
         }
     }
 
@@ -369,6 +370,66 @@ fn read_reloc_target_at_use_site(
         }
     }
     None
+}
+
+static READONLY_WINDOWS_CACHE: OnceLock<
+    Mutex<LruCache<String, std::sync::Arc<Vec<(u64, std::sync::Arc<[u8]>)>>>>,
+> = OnceLock::new();
+
+/// Non-executable readable sections, for the jump-table reader.
+///
+/// A switch table is data, not code, so on x86-64 GCC `-O0` it lives in
+/// `.rodata` while the `jmp` that reads it lives in `.text`. The reader used
+/// to look only inside the function being decoded and gave up when the table
+/// was not there, so every case of every such `switch` stayed undecoded.
+///
+/// Executable sections are excluded: those bytes already reach the reader as
+/// the function's own window, and offering them twice would let a run of
+/// instructions be read as a table. Cached and `Arc`-shared because a decode
+/// context is built per function and these are whole sections.
+fn readonly_windows_for(binary: &LoadedBinary) -> Vec<(u64, std::sync::Arc<[u8]>)> {
+    let cache = READONLY_WINDOWS_CACHE.get_or_init(|| {
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(FACTS_CACHE_CAPACITY).expect("non-zero cache capacity"),
+        ))
+    });
+    if let Some(hit) = cache
+        .lock()
+        .expect("readonly-window cache poisoned")
+        .get(&binary.hash)
+        .cloned()
+    {
+        return (*hit).clone();
+    }
+    let mut windows: Vec<(u64, std::sync::Arc<[u8]>)> = Vec::new();
+    for section in &binary.sections {
+        // Not executable, and not writable: a jump table is immutable data.
+        // Allowing every readable section let `.got`, `.data` and `.bss` be
+        // read as tables, and a page of function pointers passes "two entries
+        // that land inside this function" easily enough to send the decoder
+        // into the middle of an instruction.
+        if section.is_executable || section.is_writable || !section.is_readable {
+            continue;
+        }
+        let size = section
+            .file_size
+            .min(section.virtual_size.max(section.file_size));
+        let Ok(size) = usize::try_from(size) else {
+            continue;
+        };
+        if size == 0 || section.virtual_address == 0 {
+            continue;
+        }
+        if let Some(bytes) = binary.view_bytes(section.virtual_address, size) {
+            windows.push((section.virtual_address, std::sync::Arc::from(bytes)));
+        }
+    }
+    let shared = std::sync::Arc::new(windows);
+    cache
+        .lock()
+        .expect("readonly-window cache poisoned")
+        .put(binary.hash.clone(), shared.clone());
+    (*shared).clone()
 }
 
 fn collect_function_extents(binary: &LoadedBinary) -> HashMap<u64, u64> {
