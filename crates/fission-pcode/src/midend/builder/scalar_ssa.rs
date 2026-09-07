@@ -1867,6 +1867,22 @@ fn build_out_of_ssa_facts(
     member_groups.sort_unstable_by_key(|members| members[0]);
 
     let reachability = guard_reachability(ssa, successors);
+    // Collected once, not re-walked per congruence class. `dynamic_guards` is
+    // a `BTreeMap` and the class loop below asks it for every guard, so the
+    // tree traversal alone was 27% of a `bash` decompile -- more than any
+    // analysis in the profile. Pairing each guard with its reachability set
+    // here also lifts a second map lookup out of the same loop.
+    let guards: Vec<(SsaOpSite, &BTreeSet<usize>)> = ssa
+        .dynamic_guards
+        .keys()
+        .copied()
+        .map(|guard| {
+            let reachable = reachability
+                .get(&guard.block)
+                .expect("every guard block has a reachability set");
+            (guard, reachable)
+        })
+        .collect();
     let mut high_variables = Vec::with_capacity(member_groups.len());
     let mut value_high_variables = vec![SsaHighVariableId(0); ssa.values.len()];
     for members in member_groups {
@@ -1877,11 +1893,9 @@ fn build_out_of_ssa_facts(
             .collect::<Vec<_>>();
         storage_family.sort_unstable();
         storage_family.dedup();
-        let crossing_guards = ssa
-            .dynamic_guards
-            .keys()
-            .copied()
-            .filter(|guard| {
+        let crossing_guards = guards
+            .iter()
+            .filter(|(guard, reachable)| {
                 members.iter().any(|member| {
                     value_crosses_guard(
                         ssa,
@@ -1889,12 +1903,11 @@ fn build_out_of_ssa_facts(
                         *member,
                         *guard,
                         uses.get(member).map_or(&[], Vec::as_slice),
-                        reachability
-                            .get(&guard.block)
-                            .expect("every guard block has a reachability set"),
+                        reachable,
                     )
                 })
             })
+            .map(|(guard, _)| *guard)
             .collect();
         let cover = merge_covers(
             members
@@ -2323,6 +2336,13 @@ fn collect_memory_value_uses(
     uses
 }
 
+/// Blocks reachable after each guard.
+///
+/// Deliberately a `BTreeSet` and not a per-block bitmap: the set holds only
+/// the blocks actually reachable, and swapping it for a `vec![false; blocks]`
+/// per guard block measured *slower* on `bash` (93.9 s -> 97.8 s), because
+/// allocating and filling a dense array per guard costs more than the tree
+/// descents it saves.
 fn guard_reachability(
     ssa: &NirScalarSsa,
     successors: &[Vec<usize>],

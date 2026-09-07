@@ -238,10 +238,59 @@ fn group_sla_map_by_offset(map: &HashMap<(u64, u32), String>) -> HashMap<u64, Ve
     by_offset
 }
 
+type SlaMaps = (
+    Option<std::sync::Arc<HashMap<(u64, u32), String>>>,
+    Option<std::sync::Arc<HashMap<u64, Vec<(u32, String)>>>>,
+);
+
+/// The two register-name maps for an ABI, built once per ABI.
+///
+/// They depend on nothing but the `CallingConvention`, and this used to
+/// rebuild both on every call -- `to_offset_map` clones the whole map and
+/// `group_sla_map_by_offset` clones every name again. `register_namer` is
+/// called from varnode lowering, down the SESE-region recursion, so on a
+/// `bash` decompile `group_sla_map_by_offset` alone was 7.6% of the profile
+/// before counting the allocator traffic its `String` clones caused.
+///
+/// Shared by `Arc`: both maps are read-only after construction (`sla_map` is
+/// only ever reached through `as_ref`). The per-namer fields that do get
+/// written -- parameter offsets, pointer size -- stay owned per instance.
+fn sla_maps_for_abi(abi: CallingConvention) -> SlaMaps {
+    // A `Vec`, not a map: `CallingConvention` has a handful of variants and
+    // does not derive `Hash`, and a linear scan over five entries is not worth
+    // widening a core type's derives for.
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Vec<(CallingConvention, SlaMaps)>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+    if let Some(hit) = cache
+        .lock()
+        .expect("register-namer cache poisoned")
+        .iter()
+        .find(|(cached, _)| *cached == abi)
+        .map(|(_, maps)| maps.clone())
+    {
+        return hit;
+    }
+    // Built outside the lock: two callers racing here build the same maps from
+    // the same static model, and the loser's copy is dropped.
+    let model = register_model_for_abi(abi);
+    let sla_map = model
+        .as_ref()
+        .map(|m| std::sync::Arc::new(m.to_offset_map()));
+    let sla_map_by_offset = sla_map
+        .as_ref()
+        .map(|map| std::sync::Arc::new(group_sla_map_by_offset(map)));
+    let maps = (sla_map, sla_map_by_offset);
+    cache
+        .lock()
+        .expect("register-namer cache poisoned")
+        .push((abi, maps.clone()));
+    maps
+}
+
 pub fn register_namer_for_abi(abi: CallingConvention) -> RegisterNamer {
     let model = register_model_for_abi(abi);
-    let sla_map = model.as_ref().map(|m| m.to_offset_map());
-    let sla_map_by_offset = sla_map.as_ref().map(group_sla_map_by_offset);
+    let (sla_map, sla_map_by_offset) = sla_maps_for_abi(abi);
     RegisterNamer {
         abi,
         sla_map,
@@ -285,14 +334,14 @@ pub fn apply_register_model_for_options(options: &mut crate::midend::NirRenderOp
 #[derive(Debug, Clone)]
 pub struct RegisterNamer {
     pub abi: CallingConvention,
-    pub sla_map: Option<HashMap<(u64, u32), String>>,
+    pub sla_map: Option<std::sync::Arc<HashMap<(u64, u32), String>>>,
     /// `sla_map` grouped by offset, built once alongside it. `hw_name_at`'s
     /// "any size >= prefer_size at this offset" fallback used to do
     /// `sla_map.iter().find(...)` -- an O(map size) scan on every call, and
     /// this is one of the hottest functions in varnode lowering (called on
     /// the deep SESE-region-search recursion). Grouping by offset up front
     /// turns that into an O(variants at this offset) scan instead.
-    sla_map_by_offset: Option<HashMap<u64, Vec<(u32, String)>>>,
+    sla_map_by_offset: Option<std::sync::Arc<HashMap<u64, Vec<(u32, String)>>>>,
     pub int_param_offsets: Vec<u64>,
     /// Float parameter register offsets from `.cspec`. See
     /// `ResolvedPrototype::float_param_offsets`.
@@ -314,11 +363,13 @@ impl RegisterNamer {
     pub fn from_options(options: &crate::midend::NirRenderOptions) -> Self {
         let model = super::apply::default_cspec_pair(options)
             .and_then(|(lang, _)| register_model_for_language(&lang));
-        let sla_map = options
+        let sla_map: Option<std::sync::Arc<HashMap<(u64, u32), String>>> = options
             .sla_register_map
             .as_ref()
-            .map(|m| m.iter().map(|(&k, v)| (k, v.clone())).collect());
-        let sla_map_by_offset = sla_map.as_ref().map(group_sla_map_by_offset);
+            .map(|m| std::sync::Arc::new(m.iter().map(|(&k, v)| (k, v.clone())).collect()));
+        let sla_map_by_offset = sla_map
+            .as_ref()
+            .map(|map| std::sync::Arc::new(group_sla_map_by_offset(map)));
         Self {
             abi: options.calling_convention,
             sla_map,
