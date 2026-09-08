@@ -17,6 +17,7 @@ name = "fission_decompiler"
 default = []
 
 [dependencies]
+lru = "0.18"
 fission-core = { path = "../fission-core" }
 fission-analysis-db = { path = "../fission-analysis-db" }
 fission-loader = { path = "../fission-loader" }

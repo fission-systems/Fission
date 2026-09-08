@@ -929,6 +929,73 @@ fn collect_direct_internal_callee_targets(pcode: &PcodeFunction) -> BTreeSet<u64
     callees
 }
 
+type CalleeSummary = Option<(NirCallEffectSummary, Option<NirCallPrototypeSummary>)>;
+
+/// Callee summaries already computed, keyed by what they can actually depend
+/// on.
+///
+/// `refine_nir_type_context_with_callee_effect_summaries` runs for every
+/// function being decompiled and summarises each of its direct callees, so a
+/// popular callee is rebuilt once per caller: on `bash`, 8,331 summaries for
+/// 2,307 distinct targets, with one callee rebuilt **442 times**. Each rebuild
+/// decodes the callee and, for small ones, builds its raw HIR -- which is
+/// 22-33% of a decompile (measured by disabling the prototype half: `bash`
+/// 77.4 s -> 60.7 s, `ssh` 41.8 s -> 27.8 s).
+///
+/// The key is the address plus the prototype summaries of the callee's *own*
+/// direct callees. Those are the only context entries that can reach the
+/// result -- `build_raw_hir` uses the context to type the calls inside the
+/// callee, and nothing else in it is consulted. Keying on the whole context
+/// instead is sound but useless: it accumulates as the caller's loop runs, so
+/// it hits 26% where this hits **69%**, against 72% for an address-only key
+/// that would not be sound at all.
+/// Entries kept. Both caches are bounded because `fission-serve` is long
+/// lived and would otherwise hold every callee of every binary it ever opened;
+/// the p-code cache is the smaller of the two because it stores decoded
+/// bodies, not summaries.
+const CALLEE_SUMMARY_CACHE_CAPACITY: usize = 8192;
+const CALLEE_PCODE_CACHE_CAPACITY: usize = 2048;
+
+static CALLEE_SUMMARY_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64, u64), CalleeSummary>>> =
+    LazyLock::new(|| {
+        Mutex::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(CALLEE_SUMMARY_CACHE_CAPACITY).expect("non-zero capacity"),
+        ))
+    });
+
+/// Callee decodes, keyed by address alone.
+///
+/// The decode depends on the binary and the address and nothing else, so
+/// unlike the summary above it needs no context in its key. It is cached
+/// separately because the summary key cannot be built without it: the key
+/// names the callee's own callees, which only the decoded body knows.
+static CALLEE_PCODE_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64), Arc<PcodeFunction>>>> =
+    LazyLock::new(|| {
+        Mutex::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(CALLEE_PCODE_CACHE_CAPACITY).expect("non-zero capacity"),
+        ))
+    });
+
+/// Hash of the context entries a callee's summary can depend on.
+fn callee_context_key(callee_pcode: &PcodeFunction, type_context: &NirTypeContext) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut entries: Vec<String> = Vec::new();
+    for inner in collect_direct_internal_callee_targets(callee_pcode) {
+        let symbol = type_context
+            .call_target_refs
+            .get(&inner)
+            .map(|reference| reference.symbol.clone())
+            .unwrap_or_else(|| format!("sub_{inner:x}"));
+        if let Some(summary) = type_context.call_prototype_summaries.get(&symbol) {
+            entries.push(format!("{symbol}={summary:?}"));
+        }
+    }
+    entries.sort_unstable();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    entries.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn build_preview_callee_summaries(
     binary: &LoadedBinary,
     target_addr: u64,
@@ -942,17 +1009,84 @@ fn build_preview_callee_summaries(
     let max_bytes = direct_callee_max_bytes(binary, target_addr)?;
     let instruction_limit = direct_callee_instruction_limit(max_bytes);
     let next_function = binary.function_after(target_addr).map(|func| func.address);
-    let pcode = decode_rust_sleigh_pcode(
-        binary,
-        target_name,
+    let pcode_key = (binary.hash.clone(), target_addr);
+    let cached_pcode = CALLEE_PCODE_CACHE
+        .lock()
+        .expect("callee pcode cache poisoned")
+        .get(&pcode_key)
+        .cloned();
+    let pcode = match cached_pcode {
+        Some(hit) => hit,
+        None => {
+            // Decoded outside the lock: two callers racing on the same callee
+            // each decode it and one copy is dropped, which is cheaper than
+            // serialising every callee decode in the binary behind one mutex.
+            let decoded = Arc::new(
+                decode_rust_sleigh_pcode(
+                    binary,
+                    target_name,
+                    target_addr,
+                    max_bytes,
+                    instruction_limit,
+                    true,
+                    true,
+                )
+                .ok()?,
+            );
+            CALLEE_PCODE_CACHE
+                .lock()
+                .expect("callee pcode cache poisoned")
+                .put(pcode_key, decoded.clone());
+            decoded
+        }
+    };
+    // The decode above is a pure function of the binary and the address, so it
+    // is repeated work too -- but it is also what tells us which inner callees
+    // the key needs, so it happens before the lookup rather than after it.
+    let cache_key = (
+        binary.hash.clone(),
         target_addr,
+        callee_context_key(&pcode, type_context),
+    );
+    if let Some(hit) = CALLEE_SUMMARY_CACHE
+        .lock()
+        .expect("callee summary cache poisoned")
+        .get(&cache_key)
+        .cloned()
+    {
+        return hit;
+    }
+    let computed = build_preview_callee_summaries_uncached(
+        binary,
+        target_addr,
+        target_name,
+        type_context,
+        function,
         max_bytes,
         instruction_limit,
-        true,
-        true,
-    )
-    .ok()?;
-    let (summary, detail) = summarize_preview_callee_effects(&pcode);
+        next_function,
+        &pcode,
+    );
+    CALLEE_SUMMARY_CACHE
+        .lock()
+        .expect("callee summary cache poisoned")
+        .put(cache_key, computed.clone());
+    computed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_preview_callee_summaries_uncached(
+    binary: &LoadedBinary,
+    target_addr: u64,
+    target_name: &str,
+    type_context: &NirTypeContext,
+    function: &fission_loader::loader::types::FunctionInfo,
+    max_bytes: usize,
+    instruction_limit: usize,
+    next_function: Option<u64>,
+    pcode: &PcodeFunction,
+) -> Option<(NirCallEffectSummary, Option<NirCallPrototypeSummary>)> {
+    let (summary, detail) = summarize_preview_callee_effects(pcode);
     trace_preview_callee_effect_detail(
         target_name,
         target_addr,
