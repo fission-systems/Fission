@@ -2626,6 +2626,7 @@ dependencies = [
  "fission-signatures",
  "fission-sleigh",
  "fission-static",
+ "lru",
  "once_cell",
  "rayon",
  "regex",
