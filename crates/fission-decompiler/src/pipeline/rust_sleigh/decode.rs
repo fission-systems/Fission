@@ -146,6 +146,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // contract and therefore stops at the same computed jumps -- so taking it
     // unconditionally handed the decompiler a function that had already given
     // up on every `switch`, and the fixed point below never got to run.
+    // Kept even when the bypass below rejects it: bypassing means "there is
+    // something left to resolve here", not "this decode is unusable". If the
+    // fresh lift then fails outright, the cached decode is still a real decode
+    // of the function -- 14 functions lost their decompilation on a corpus
+    // sweep because the bypass threw it away and nothing caught the fall.
+    let cached_fallback = cached_decoded.clone();
     let cached_decoded = cached_decoded.filter(|cached| {
         !continue_past_indirect_branch
             || fission_sleigh::runtime::resolve_indirect_branch_targets(
@@ -238,6 +244,9 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // worklist and the reachability pass, which is what makes the feedback a
     // few lines rather than a new pipeline.
     let mut memory_context = memory_context;
+    // The best decode any round of the fixed point produced, kept so a round
+    // that fails cannot leave the function worse off than before it ran.
+    let mut last_good: Option<fission_sleigh::runtime::DecodedPcodeFunction> = None;
     let mut result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
         bytes,
         decode_entry_address,
@@ -246,6 +255,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
         initial_context_override,
     );
     if continue_past_indirect_branch {
+        last_good = result.as_ref().ok().cloned();
         // Each round can only add entries, and a round that adds none stops
         // the loop, so this bound is a guard against a pathological input
         // rather than the usual exit: a `switch` inside a `switch` converges
@@ -270,14 +280,34 @@ pub(crate) fn decode_rust_sleigh_pcode(
             if fresh.is_empty() {
                 break;
             }
+            // Entries are read out of a table and believed on four structural
+            // grounds, not proven, so one can land somewhere that is not an
+            // instruction, and a single `DecodeNoMatch` fails the whole lift.
+            //
+            // The failure is *not* swallowed here. The error path below knows
+            // how to recover from a bad byte -- `success_after_truncated_retry`
+            // re-lifts up to the offending offset, keeping the entries -- and
+            // on `bzip2` `BZ2_decompress` that path is what turns a truncated
+            // dispatcher into 3,541 lines. Stopping the loop and keeping the
+            // last good round instead produced 65.
+            //
+            // What is remembered is the last round that *did* lift, so that a
+            // function the error path cannot rescue falls back to it rather
+            // than to an error: taking the failure as final cost 14 functions
+            // their decompilation on a corpus sweep (`coreutils` `head`
+            // `main`: 195 lines, then "no match at 0x4c38").
             memory_context.additional_decode_entries.extend(fresh);
-            result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
+            let next = lifter.lift_raw_pcode_function_with_context_and_memory_context(
                 bytes,
                 decode_entry_address,
                 lift_contract,
                 &memory_context,
                 initial_context_override,
             );
+            if let Ok(better) = &next {
+                last_good = Some(better.clone());
+            }
+            result = next;
         }
     }
     match result {
@@ -384,6 +414,22 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                 userops.clone(),
                             ));
                         }
+                        // The truncated retry is the last thing tried on this
+                        // path, so the fixed point's last good round is the
+                        // fallback here too -- not only at the end of the
+                        // outer error path.
+                        if let Some(fallback) = last_good {
+                            let template_source_counts = fallback.template_source_counts.clone();
+                            return Ok((
+                                fallback.function,
+                                DecodeDiag {
+                                    attempts: 2,
+                                    stop_reason: "success_from_decode_fixpoint_fallback".into(),
+                                    template_source_counts,
+                                },
+                                userops.clone(),
+                            ));
+                        }
                         return Err(DecodeFailure {
                             message: format!(
                                 "rust_sleigh: function lift failed for {name} at 0x{entry_address:x}: {first_err:#}"
@@ -428,6 +474,25 @@ pub(crate) fn decode_rust_sleigh_pcode(
                         userops.clone(),
                     ));
                 }
+            }
+            // Every retry failed. If the decode fixed point had a round that
+            // lifted before a later one failed, that round is a real decode of
+            // this function; returning it beats returning an error, and it is
+            // exactly the function this call would have produced had the loop
+            // stopped one round earlier.
+            if let Some(fallback) =
+                last_good.or_else(|| cached_fallback.map(|cached| (*cached).clone()))
+            {
+                let template_source_counts = fallback.template_source_counts.clone();
+                return Ok((
+                    fallback.function,
+                    DecodeDiag {
+                        attempts: 2,
+                        stop_reason: "success_from_decode_fixpoint_fallback".into(),
+                        template_source_counts,
+                    },
+                    userops.clone(),
+                ));
             }
             Err(DecodeFailure {
                 message: format!(

@@ -241,45 +241,6 @@ fn additive_const_component(
     }
 }
 
-/// Every `(table address, entry width)` the branch target could be reading.
-///
-/// More than one, because a displacement-table dispatch adds the table's base
-/// back to the loaded entry, and the walk cannot tell which side of that add
-/// leads to the table without trying to read both -- the other side is often a
-/// stack slot, whose "base" is a small negative number. The caller keeps the
-/// first candidate it can actually read.
-fn branchind_load_table_bases(
-    vn: &Varnode,
-    defs: &HashMap<Varnode, &PcodeOp>,
-    depth: usize,
-) -> Vec<(u64, usize)> {
-    if depth > 12 {
-        return Vec::new();
-    }
-    let Some(op) = defs.get(vn) else {
-        return Vec::new();
-    };
-    match op.opcode {
-        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => op
-            .inputs
-            .first()
-            .map(|input| branchind_load_table_bases(input, defs, depth + 1))
-            .unwrap_or_default(),
-        PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
-            let mut out = branchind_load_table_bases(&op.inputs[0], defs, depth + 1);
-            for candidate in branchind_load_table_bases(&op.inputs[1], defs, depth + 1) {
-                if !out.contains(&candidate) {
-                    out.push(candidate);
-                }
-            }
-            out
-        }
-        _ => branchind_load_table_base(vn, defs, depth)
-            .into_iter()
-            .collect(),
-    }
-}
-
 fn branchind_load_table_base(
     vn: &Varnode,
     defs: &HashMap<Varnode, &PcodeOp>,
@@ -306,30 +267,6 @@ fn branchind_load_table_base(
             let table_base = additive_const_component(&op.inputs[1], defs, depth + 1)?;
             let width = op.output.as_ref().map_or(vn.size, |out| out.size);
             Some((table_base, width.clamp(4, 8) as usize))
-        }
-        // `target = table_base + sign_extend(entry)`: the branch target is the
-        // add, not the load. x86-64 GCC at `-O0` emits exactly this -- the
-        // table holds signed displacements from its own address, so the
-        // dispatch reloads the base and adds it back:
-        //
-        // ```text
-        // lea    rdx,[rax*4]
-        // lea    rax,[rip+X]          ; table
-        // mov    eax,DWORD PTR [rdx+rax*1]
-        // cdqe
-        // lea    rdx,[rip+X]          ; table again, as the displacement base
-        // add    rax,rdx
-        // jmp    rax
-        // ```
-        //
-        // Without this arm the walk stopped at the `add` and returned nothing,
-        // so every case of every such `switch` stayed undecoded. Recursing
-        // finds the `Load` underneath and yields the table's address; the
-        // caller already tries `Some(table_base)` as a displacement base,
-        // which is the base this shape adds back.
-        PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
-            branchind_load_table_base(&op.inputs[0], defs, depth + 1)
-                .or_else(|| branchind_load_table_base(&op.inputs[1], defs, depth + 1))
         }
         _ => None,
     }
@@ -726,13 +663,28 @@ fn jump_table_targets_from(
         }
     }
 
-    let candidates = branchind_load_table_bases(branch_target, defs, 0);
-    let Some((table_base, entry_width)) = candidates.into_iter().find(|(base, width)| {
-        (*width == 4 || *width == 8)
-            && table_bytes_at(entry_address, bytes, memory_context, *base, *width).is_some()
-    }) else {
+    // Deliberately the single-candidate walk, and deliberately reading only
+    // the function's own bytes.
+    //
+    // This runs *during* the lift, where the only definitions available are
+    // "the last write to this varnode anywhere decoded so far" -- at a
+    // dispatch that is frequently an unrelated block's write. Letting it
+    // descend an `IntAdd` and read `.rodata` on top of that guessed
+    // definition finds tables that are not there: `coreutils` `head` `main`
+    // decoded 195 lines before, and afterwards failed outright with
+    // "no match at 0x4c38", one of 14 functions lost that way on a corpus
+    // sweep. The displacement-table shape those changes exist for is
+    // recovered by `resolve_indirect_branch_targets` instead, which runs
+    // after the decode and has real per-block definitions to work from.
+    let Some((table_base, entry_width)) = branchind_load_table_base(branch_target, defs, 0) else {
         return Vec::new();
     };
+    if entry_width != 4 && entry_width != 8 {
+        return Vec::new();
+    }
+    if internal_byte_offset(entry_address, bytes.len(), table_base).is_none() {
+        return Vec::new();
+    }
 
     let mut mode_targets = Vec::<Vec<u64>>::new();
     let mut mode_bases = vec![None, Some(table_base)];
@@ -754,15 +706,13 @@ fn jump_table_targets_from(
             let Some(entry_addr) = table_base.checked_add(entry_delta) else {
                 break;
             };
-            let Some(raw) = table_bytes_at(
-                entry_address,
-                bytes,
-                memory_context,
-                entry_addr,
-                entry_width,
-            ) else {
+            let Some(offset) = internal_byte_offset(entry_address, bytes.len(), entry_addr) else {
                 break;
             };
+            let Some(end) = checked_slice_end(offset, entry_width, bytes.len()) else {
+                break;
+            };
+            let raw = &bytes[offset..end];
             let target = if let Some(base) = base {
                 read_signed_entry(raw, little_endian).and_then(|disp| add_signed_base(base, disp))
             } else {
