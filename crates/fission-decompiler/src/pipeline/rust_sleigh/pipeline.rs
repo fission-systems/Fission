@@ -50,9 +50,18 @@ pub fn decompile_with_rust_sleigh_with_facts(
         .map(|f| usize::try_from(f.size).unwrap_or(0))
         .unwrap_or(0);
 
+    // Absent a caller-supplied limit the limit is the *cap*, not the default
+    // size. `default_decode_bytes` answers "how much to read when the
+    // function's size is unknown" (that is `fallback_default_bytes`, below);
+    // using it here answered "how much to read at most", which is a different
+    // question with a 4x smaller answer. Every function over 16 KB was
+    // silently cut to 16 KB -- `openssh` `process_config_line_depth` is
+    // 19,586 bytes, and its jump table's first target lands at 0x1dae6, past
+    // a window that ended at 0x1cf1d, so the table was read, believed, and
+    // then rejected entry by entry.
     let max_bytes_limit = max_function_size
         .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or(config.default_decode_bytes)
+        .unwrap_or(config.decode_max_bytes_cap)
         .max(1)
         .min(config.decode_max_bytes_cap.max(1));
     let fallback_default_bytes = config.default_decode_bytes.max(1).min(max_bytes_limit);
