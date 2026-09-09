@@ -44,6 +44,11 @@ pub struct Emulator {
     pub max_inst: Option<u64>,
     /// P-Code ops retired (intra-insn loops); used with `max_inst` as a soft fuse.
     pub pcode_ops: u64,
+    /// Entry PC of the translation block that exhausted the p-code fuse.
+    ///
+    /// Recorded where it trips rather than where the run notices, because by
+    /// then the PC has already moved on to the next block.
+    pub pcode_budget_pc: Option<u64>,
     /// Optional buffer to mock standard input (`stdin`).
     pub stdin_buffer: Option<Vec<u8>>,
 
@@ -280,6 +285,7 @@ impl Emulator {
             inst_count: 0,
             max_inst: None,
             pcode_ops: 0,
+            pcode_budget_pc: None,
             stdin_buffer: None,
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,
@@ -953,6 +959,7 @@ impl Emulator {
         tracing::info!("Sandbox execution started at PC=0x{:X}", self.pc);
         self.halt_requested = false;
         self.chain_depth = 0;
+        self.pcode_budget_pc = None;
         let outcome = loop {
             if IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::warn!("Execution interrupted by Ctrl+C (SIGINT). Halting safely.");
@@ -979,6 +986,32 @@ impl Emulator {
                 if self.inst_count >= limit {
                     tracing::warn!("Instruction limit ({}) reached. Halting.", limit);
                     break RunOutcome::HitBudget;
+                }
+                // The p-code fuse (`jit_count_pcode`) only ends the *block* it
+                // fires in, and every later block then exits at its own first
+                // op and returns its fall-through -- so the run walks forward
+                // through memory until it decodes something that is not code
+                // and blames that address. A real one put 21 KB between the
+                // symptom and the cause.
+                //
+                // Ending the run is not enough on its own: ending it *quietly*
+                // turns a loud wrong answer into no answer, and this fuse only
+                // trips on a defect. `max_inst` is a bound the caller asked
+                // for; spending 2048 p-code ops per instruction of it is a
+                // lifter or emulator bug -- so it is an error, and it names the
+                // block, which is the thing worth knowing.
+                if let Some(at) = self.pcode_budget_pc {
+                    if self.metrics.exit_reason.is_none() {
+                        self.metrics.exit_reason = Some("pcode_budget".into());
+                    }
+                    self.metrics.stop_pc = at;
+                    anyhow::bail!(
+                        "p-code budget ({}) exhausted in the block at 0x{:X} after \
+                         {} guest instructions -- one instruction is looping",
+                        crate::jit::callbacks::pcode_budget(limit),
+                        at,
+                        self.inst_count
+                    );
                 }
             }
 

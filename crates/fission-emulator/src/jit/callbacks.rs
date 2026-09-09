@@ -167,6 +167,15 @@ pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator) {
     }
 }
 
+/// P-code ops a budgeted run may execute before the livelock fuse trips.
+///
+/// Generous per guest instruction, because one instruction legitimately can be
+/// a loop -- the `REP` string forms, and the bit-scan family's own
+/// `<loopbegin>`/`<loopend>` walk.
+pub(crate) fn pcode_budget(max_inst: u64) -> u64 {
+    max_inst.saturating_mul(2048).max(16_384)
+}
+
 /// Count one p-code op (detects infinite relative CBRANCH loops inside a TB).
 ///
 /// Returns 1 when the TB should exit early (guest insn budget or pcode fuse).
@@ -186,11 +195,14 @@ pub extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
             return 1;
         }
         // Tight fuse: pcode ops under a budgeted run (livelock protection).
-        let cap = m.saturating_mul(2048).max(16_384);
-        if emu.pcode_ops >= cap {
+        if emu.pcode_ops >= pcode_budget(m) {
             if emu.metrics.exit_reason.is_none() {
                 emu.metrics.exit_reason = Some("pcode_budget".into());
             }
+            // `emu.pc` is still this block's entry -- it only advances when a
+            // block returns -- so this names the block that livelocked, not
+            // the one the run happens to reach when it notices.
+            emu.pcode_budget_pc.get_or_insert(emu.pc);
             return 1;
         }
     }
