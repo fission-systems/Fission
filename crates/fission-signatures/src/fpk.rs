@@ -728,8 +728,22 @@ mod tests {
         out
     }
 
+    /// A path per *call*, not per process.
+    ///
+    /// The reader mmaps what it opens, and `fs::write` truncates before it
+    /// writes. Eleven tests share this helper and the harness runs them on
+    /// threads, so one process-wide name meant a test could truncate the file
+    /// another test still had mapped -- a SIGBUS that killed the whole binary
+    /// and reported whichever tests had not finished as failures, a different
+    /// set each run.
     fn write_temp(bytes: &[u8]) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("fpk_test_{}.fpk", std::process::id()));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "fpk_test_{}_{}.fpk",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&path, bytes).unwrap();
         path
     }
@@ -798,10 +812,12 @@ mod tests {
             .map(str::to_owned)
             .collect();
 
-        let ours_path = std::env::temp_dir().join("fpk_ours.fpk");
+        let ours_path = std::env::temp_dir()
+            .join(format!("fpk_ours_{}.fpk", std::process::id()));
         std::fs::write(&ours_path, super::pack(&records, 1)).unwrap();
 
-        let theirs_path = std::env::temp_dir().join("fpk_theirs.fpk");
+        let theirs_path = std::env::temp_dir()
+            .join(format!("fpk_theirs_{}.fpk", std::process::id()));
         let Ok(run) = std::process::Command::new("python3")
             .args([
                 "/Users/sjkim1127/Fission/scripts/fpk_pack.py",
