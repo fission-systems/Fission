@@ -23,8 +23,16 @@ pub fn expr_type(expr: &HirExpr) -> NirType {
     }
 }
 
+/// `__isnan` is here for the same reason the flag intrinsics are: it is a
+/// predicate over its argument and observes nothing. x86 `fucompe` writes it
+/// into `PF` on every float compare, and once the unordered-compare fold has
+/// rewritten the flags that read `PF`, the `PF` store is dead -- but only if
+/// dead-store elimination is allowed to see the call as pure.
 pub fn is_pure_intrinsic_call(target: &str) -> bool {
-    matches!(target, "__carry" | "__scarry" | "__sborrow" | "__popcount")
+    matches!(
+        target,
+        "__carry" | "__scarry" | "__sborrow" | "__popcount" | "__isnan"
+    )
 }
 
 pub fn expr_has_side_effecting_call(expr: &HirExpr) -> bool {

@@ -44,6 +44,117 @@ fn get_negated_isnan_var(expr: &PreHirExpr) -> Option<&str> {
     }
 }
 
+/// The unordered half of an x86 floating-point compare.
+///
+/// `fucompe` (x86 `ia.sinc`) is what `ucomisd`/`comiss` and friends expand to,
+/// and it defines the three flags a conditional jump can read as:
+///
+/// ```text
+/// PF = nan(a) || nan(b)
+/// ZF = PF | ( a f== b )
+/// CF = PF | ( a f<  b )
+/// ```
+///
+/// `PF` has one use in each of the other two, so it inlines, and every
+/// comparison that survives to the emitted C carries its own
+/// `__isnan(a) || __isnan(b)`.  A five-node source range check comes out
+/// holding eleven `||`s.  Ghidra, IDA and Binary Ninja all drop the unordered
+/// case at exactly this point and print the bare comparison; so do we.
+///
+/// `PF` read on its own is left alone -- that is a real `jp`/`jnp` NaN test,
+/// not this idiom.
+fn nan_guard_args(expr: &PreHirExpr, out: &mut Vec<PreHirExpr>) -> bool {
+    match expr {
+        PreHirExpr::Call { target, args, .. } if target == "__isnan" && args.len() == 1 => {
+            out.push(strip_casts(&args[0]).clone());
+            true
+        }
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalOr | PreHirBinaryOp::Or,
+            lhs,
+            rhs,
+            ..
+        } => nan_guard_args(lhs, out) && nan_guard_args(rhs, out),
+        PreHirExpr::Cast { expr: inner, .. } => nan_guard_args(inner, out),
+        _ => false,
+    }
+}
+
+fn strip_casts(expr: &PreHirExpr) -> &PreHirExpr {
+    match expr {
+        PreHirExpr::Cast { expr: inner, .. } => strip_casts(inner),
+        _ => expr,
+    }
+}
+
+fn is_comparison_op(op: PreHirBinaryOp) -> bool {
+    matches!(
+        op,
+        PreHirBinaryOp::Eq
+            | PreHirBinaryOp::Ne
+            | PreHirBinaryOp::Lt
+            | PreHirBinaryOp::Le
+            | PreHirBinaryOp::Gt
+            | PreHirBinaryOp::Ge
+            | PreHirBinaryOp::SLt
+            | PreHirBinaryOp::SLe
+            | PreHirBinaryOp::SGt
+            | PreHirBinaryOp::SGe
+    )
+}
+
+/// Structural match that ignores the width a cast claims and the type a
+/// constant carries.  `nan(0)` and the `0` in `x f> 0` are the same operand
+/// even though the guard reads it as a double and the compare as a float.
+fn same_operand(a: &PreHirExpr, b: &PreHirExpr) -> bool {
+    match (strip_casts(a), strip_casts(b)) {
+        (PreHirExpr::Const(x, _), PreHirExpr::Const(y, _)) => x == y,
+        (x, y) => x == y,
+    }
+}
+
+/// `(nan(a) || nan(b)) | (a CMP b)` -> `a CMP b`.
+///
+/// Every operand the guard tests has to appear in the comparison, so a genuine
+/// `isnan(x) || (y < z)` over unrelated values is left alone.
+fn fold_unordered_compare(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::LogicalOr | PreHirBinaryOp::Or,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    for (guard, other) in [(lhs, rhs), (rhs, lhs)] {
+        let mut args = Vec::new();
+        if !nan_guard_args(guard, &mut args) || args.is_empty() {
+            continue;
+        }
+        let PreHirExpr::Binary {
+            op: cmp_op,
+            lhs: cmp_lhs,
+            rhs: cmp_rhs,
+            ..
+        } = &**other
+        else {
+            continue;
+        };
+        if !is_comparison_op(*cmp_op) {
+            continue;
+        }
+        let operands = [&**cmp_lhs, &**cmp_rhs];
+        if args
+            .iter()
+            .all(|arg| operands.iter().any(|o| same_operand(arg, o)))
+        {
+            return Some((**other).clone());
+        }
+    }
+    None
+}
+
 fn contains_comparison_involving(expr: &PreHirExpr, var_name: &str) -> bool {
     match expr {
         PreHirExpr::Binary { op, lhs, rhs, .. } => {
@@ -172,6 +283,13 @@ fn visit_expr(expr: &mut PreHirExpr) -> bool {
             changed |= visit_expr(index);
         }
         _ => {}
+    }
+
+    // The unordered-compare idiom first: it rewrites the operand the
+    // And/Or rules below want to look at.
+    if let Some(folded) = fold_unordered_compare(expr) {
+        *expr = folded;
+        return true;
     }
 
     // Now try optimizing the current expression
