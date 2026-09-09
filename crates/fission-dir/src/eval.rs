@@ -168,7 +168,27 @@ macro_rules! define_interp {
                 values: HashMap<String, Value>,
                 types: HashMap<String, NirType>,
                 mem: Memory,
+                /// Statements left to execute before this call gives up.
+                ///
+                /// A decompiled body is not a program anyone has checked
+                /// terminates, and grounding runs it on invented arguments: a
+                /// list walk handed a buffer that is not a well-formed list
+                /// never reaches its null. The emulator side already bounds
+                /// itself (`STEP_BUDGET`); without the same bound here one
+                /// sample of one function can hang the caller indefinitely,
+                /// which is exactly what `advanced_patterns`' `list_sum` did.
+                ///
+                /// Running out is an error, not a verdict: the caller counts
+                /// it as "this tier said nothing", never as agreement.
+                fuel: u64,
             }
+
+            /// Statements one grounding call may execute.
+            ///
+            /// Well above anything the corpus's own functions need -- the
+            /// bodies that ground here run in the low thousands -- and low
+            /// enough that a non-terminating one is noticed in milliseconds.
+            const STEP_FUEL: u64 = 2_000_000;
 
             impl Env {
                 fn get(&self, name: &str) -> Result<Value> {
@@ -481,6 +501,11 @@ macro_rules! define_interp {
             }
 
             fn exec_stmt(stmt: &$Stmt, env: &mut Env) -> Result<Flow> {
+                env.fuel = env.fuel.checked_sub(1).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "interp: body did not finish within {STEP_FUEL} statements"
+                    )
+                })?;
                 match stmt {
                     $Stmt::Assign { lhs, rhs } => {
                         // Stores go to memory; only a plain variable falls
@@ -739,6 +764,7 @@ macro_rules! define_interp {
                     values: HashMap::new(),
                     types: HashMap::new(),
                     mem,
+                    fuel: STEP_FUEL,
                 };
                 // Machine state first, so a real declaration below wins.
                 for (name, v) in bound {

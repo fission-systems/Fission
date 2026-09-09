@@ -86,6 +86,38 @@ fn attempt_budget() -> usize {
     }
 }
 
+/// Wall-clock backstop, because the attempt budget bounds attempts, not work.
+///
+/// One attempt is up to `default_samples` emulator calls -- 49 at `MAX_ARITY`
+/// -- and two interpreter runs each, so nothing about 250 attempts caps the
+/// time. It used to be unbounded in practice: a single `list_sum` sample ran
+/// past twenty minutes, because the concrete interpreter had no step budget
+/// and a list walk over an invented pointer never reaches its null. That is
+/// fixed at the source (`eval`'s `STEP_FUEL`), and the whole 250 now run in
+/// about twelve seconds -- this stays as the guard against the next such
+/// body, since a suite nobody can finish is a suite nobody runs, and that is
+/// how seven real `fission-emulator` failures sat unnoticed for three weeks.
+///
+/// Stopping on the clock keeps both assertions honest: whatever was reached is
+/// still checked for divergence, and reaching nothing at all is still a
+/// failure. Selection stays deterministic in order, so a machine that gets
+/// further checks a superset, never a different set.
+const DEFAULT_TIME_BUDGET_SECS: u64 = 120;
+
+fn time_budget() -> Option<std::time::Duration> {
+    if matches!(
+        std::env::var("FISSION_DIR_FULL_CORPUS").as_deref(),
+        Ok("1" | "true" | "on" | "yes")
+    ) {
+        return None;
+    }
+    let secs = std::env::var("FISSION_DIR_TIME_BUDGET_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_TIME_BUDGET_SECS);
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}
+
 /// Whether `name` is a function the corpus was built to exercise, rather
 /// than runtime support linked in beside it.
 ///
@@ -111,7 +143,16 @@ struct Tally {
     diverged: Vec<String>,
 }
 
-fn check_binary(path: &PathBuf, tally: &mut Tally, budget: usize) {
+fn out_of_time(deadline: Option<std::time::Instant>) -> bool {
+    deadline.is_some_and(|d| std::time::Instant::now() >= d)
+}
+
+fn check_binary(
+    path: &PathBuf,
+    tally: &mut Tally,
+    budget: usize,
+    deadline: Option<std::time::Instant>,
+) {
     let Ok(binary) = LoadedBinary::from_file(path) else {
         return;
     };
@@ -125,7 +166,7 @@ fn check_binary(path: &PathBuf, tally: &mut Tally, budget: usize) {
     let mut functions: Vec<FunctionInfo> = binary.functions.clone();
     functions.sort_by_key(|f| f.address);
     for func in functions {
-        if tally.attempted >= budget {
+        if tally.attempted >= budget || out_of_time(deadline) {
             return;
         }
         if func.address == 0 || func.name.is_empty() || !is_corpus_function(&func.name) {
@@ -183,22 +224,31 @@ fn corpus_decompilations_match_real_machine_code() {
     paths.sort();
 
     let budget = attempt_budget();
+    let started = std::time::Instant::now();
+    let deadline = time_budget().map(|d| started + d);
     let mut tally = Tally::default();
     for path in &paths {
-        if tally.attempted >= budget {
+        if tally.attempted >= budget || out_of_time(deadline) {
             break;
         }
         if path.is_file() {
-            check_binary(path, &mut tally, budget);
+            check_binary(path, &mut tally, budget, deadline);
         }
     }
 
     eprintln!(
-        "ground truth: {} attempted, {} equivalent, {} not checkable at this tier, {} diverged",
+        "ground truth: {} attempted, {} equivalent, {} not checkable at this tier, \
+         {} diverged, {:.1}s{}",
         tally.attempted,
         tally.equivalent,
         tally.unsupported,
-        tally.diverged.len()
+        tally.diverged.len(),
+        started.elapsed().as_secs_f64(),
+        if out_of_time(deadline) {
+            " (stopped on the clock; FISSION_DIR_FULL_CORPUS=1 for the whole corpus)"
+        } else {
+            ""
+        }
     );
     assert!(
         tally.diverged.is_empty(),
