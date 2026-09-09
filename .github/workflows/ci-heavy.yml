@@ -30,7 +30,15 @@ jobs:
       os: ubuntu-latest
       # Decompiler / CLI stack + midend free-fn owners + static facts.
       # Single nextest process (reusable-run-tests multi -p) — no separate static job.
-      crates: "fission-core,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-loader,fission-pcode,fission-static,fission-decompiler,fission-automation,fission-cli,fission-analysis-db,fission-signatures"
+      #
+      # fission-sleigh, -emulator, -solver and -dir were added 2026-09-09.
+      # They were in no push gate at all, only the nightly "Full Tests"
+      # job below (`if: github.event_name != 'push'`), and seven real
+      # fission-emulator failures rode main for at least three weeks —
+      # a SLEIGH intra-instruction label never resolved, which is the
+      # lifter, not a corner. Measured cost: sleigh 253s, emulator 189s,
+      # dir 12s, solver 5s.
+      crates: "fission-core,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-loader,fission-pcode,fission-sleigh,fission-static,fission-decompiler,fission-automation,fission-cli,fission-analysis-db,fission-signatures,fission-emulator,fission-solver,fission-dir"
       profile: debug
 
   build-windows-heavy:
