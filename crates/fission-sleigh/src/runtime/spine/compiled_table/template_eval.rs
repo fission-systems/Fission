@@ -62,6 +62,21 @@ fn build_operand_index_from_op(op: &CompiledOpTpl) -> Result<usize> {
     usize::try_from(*value).map_err(|_| anyhow!("BUILD operand index {value} exceeds usize"))
 }
 
+/// The p-code-internal label a branch destination template names, if it names
+/// one at all.
+///
+/// `goto <label>` compiles to a destination whose offset is a
+/// `CompiledConstTpl::Relative`; every other destination is an address.
+fn relative_label_target(template: &CompiledVarnodeTpl) -> Option<u64> {
+    match template {
+        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
+            CompiledConstTpl::Relative { value } => Some(*value),
+            _ => None,
+        },
+        CompiledVarnodeTpl::HandleTpl(_) => None,
+    }
+}
+
 fn label_id_from_op_tpl(op: &CompiledOpTpl) -> Result<u64> {
     if op.output.is_some() || op.inputs.len() != 1 {
         bail!("LABEL template shape is unsupported");
@@ -236,6 +251,16 @@ fn decode_relative_sentinel(sentinel: u64) -> Option<u64> {
     }
 }
 
+/// Ghidra masks a patched branch destination to the destination varnode's own
+/// width; a wider value would not survive a round trip through it.
+fn mask_to_varnode_width(value: u64, size: u32) -> u64 {
+    match size {
+        0 => 0,
+        s if s >= 8 => value,
+        s => value & ((1u64 << (s * 8)) - 1),
+    }
+}
+
 fn nonnegative_i64_to_u64(value: i64) -> Option<u64> {
     if value < 0 {
         None
@@ -263,6 +288,16 @@ pub(super) struct CompiledTableEmitter<'c> {
     /// Label positions: `label_num` → emitter op count at the time the Label was seen.
     /// Used for `resolveRelatives()` post-processing.
     label_positions: std::collections::BTreeMap<u64, u32>,
+    /// Branch ops whose destination is a p-code-internal label: `(op index,
+    /// label_num)`.
+    ///
+    /// Ghidra's `PcodeCacher` keeps the same list (`label_refs`) and patches
+    /// each site in `resolveRelatives()`. Recording the site is the only way
+    /// that works: the sentinel it writes into the varnode meanwhile is
+    /// truncated to the varnode's own width on the way in, so `-1` for
+    /// `label 0` comes back out as `0xFFFFFFFF` in a 4-byte destination and no
+    /// longer looks like a sentinel at all.
+    pending_label_refs: Vec<(u32, u64)>,
     /// Pre-computed delay slot instruction length in bytes (first slot only).
     /// Used for `InstNext2 = inst_next + delay_slot_length`.
     delay_slot_length: Option<u32>,
@@ -302,6 +337,7 @@ impl<'c> CompiledTableEmitter<'c> {
             unique_space_index: compiled.sla_unique_space_index,
             sla_spaces: compiled.sla_spaces.clone(),
             label_positions: std::collections::BTreeMap::new(),
+            pending_label_refs: Vec::new(),
             delay_slot_length: None,
             flow,
             pcode_build_secnum: -1,
@@ -392,34 +428,61 @@ impl<'c> CompiledTableEmitter<'c> {
         })
     }
 
+    /// Remember that the branch just emitted targets a p-code-internal label.
+    ///
+    /// Called immediately after the emit, so the op index is the last one.
+    fn note_label_ref(&mut self, label: Option<u64>) -> Result<()> {
+        let Some(label_num) = label else {
+            return Ok(());
+        };
+        let op_index = self
+            .emitter
+            .op_count()?
+            .checked_sub(1)
+            .ok_or_else(|| anyhow!("branch emitted no op to attach a label reference to"))?;
+        self.pending_label_refs.push((op_index, label_num));
+        Ok(())
+    }
+
     fn finish(self) -> Result<Vec<PcodeOp>> {
         let label_positions = self.label_positions;
+        let pending = self.pending_label_refs;
         let mut ops = self.emitter.finish();
-        // resolveRelatives: replace sentinel branch targets with actual relative offsets.
-        // Follows Ghidra's PcodeCacher::resolveRelatives() convention.
-        for i in 0..ops.len() {
-            let opcode = ops[i].opcode;
-            if !matches!(opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
-                continue;
+        // resolveRelatives: turn each internal-label branch destination into the
+        // signed op distance to its label. Ghidra's PcodeCacher does the same
+        // from its own `label_refs` list, and patches the destination varnode's
+        // *offset* in place, leaving space and size alone -- so a consumer that
+        // reads the destination as an address still sees the same shape.
+        for (op_index, label_num) in pending {
+            let i = usize::try_from(op_index)
+                .map_err(|_| anyhow!("branch op index {op_index} exceeds usize"))?;
+            let Some(op) = ops.get_mut(i) else {
+                bail!("label reference names op {i}, past the {} emitted", ops.len());
+            };
+            if !matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
+                bail!(
+                    "label reference names op {i}, which is {:?}, not a branch",
+                    op.opcode
+                );
             }
-            // Branch: input[0] is the target. CBranch: input[0] is target, input[1] is cond.
-            if let Some(target_vn) = ops[i].inputs.first() {
-                if !target_vn.is_constant {
-                    continue;
-                }
-                let raw = i64_to_u64_bits(target_vn.constant_val);
-                if let Some(label_num) = decode_relative_sentinel(raw) {
-                    if let Some(&label_op_count) = label_positions.get(&label_num) {
-                        // Relative offset = label_op_count - (branch_op_index + 1)
-                        // Ghidra convention: positive = forward, negative = backward.
-                        let branch_op =
-                            i64::try_from(i).map_err(|_| anyhow!("branch op index exceeds i64"))?;
-                        let label_pos = i64::try_from(label_op_count)
-                            .map_err(|_| anyhow!("label op index exceeds i64"))?;
-                        let relative = label_pos - branch_op;
-                        ops[i].inputs[0] = Varnode::constant(relative, target_vn.size);
-                    }
-                }
+            let &label_op_count = label_positions.get(&label_num).ok_or_else(|| {
+                anyhow!("branch at op {i} targets label {label_num}, which was never placed")
+            })?;
+            let branch_op =
+                i64::try_from(i).map_err(|_| anyhow!("branch op index exceeds i64"))?;
+            let label_pos = i64::try_from(label_op_count)
+                .map_err(|_| anyhow!("label op index exceeds i64"))?;
+            // Positive = forward, negative = backward, both measured in ops from
+            // the branch itself -- the convention every consumer here applies as
+            // `target_index = branch_index + relative`.
+            let relative = label_pos - branch_op;
+            let target = ops[i]
+                .inputs
+                .first_mut()
+                .ok_or_else(|| anyhow!("branch at op {i} has no destination"))?;
+            target.offset = mask_to_varnode_width(i64_to_u64_bits(relative), target.size);
+            if target.is_constant {
+                target.constant_val = relative;
             }
         }
         Ok(ops)
@@ -499,9 +562,12 @@ impl<'c> CompiledTableEmitter<'c> {
                 // SLA template opcode, NOT by the target's address space. A direct
                 // jmp with a RAM-space absolute target is still a BRANCH.
                 // Use size 0: address size is architecture-dependent.
+                let label = relative_label_target(target_tpl);
                 let target = self.read_template_varnode(target_tpl, state, 0)?;
                 let target = self.normalize_direct_control_target(target)?;
-                self.emitter.emit_branch(target, mnemonic)
+                self.emitter.emit_branch(target, mnemonic)?;
+                self.note_label_ref(label)?;
+                Ok(())
             }
             CompiledOpTplOpcode::BranchInd => {
                 let target_tpl = op
@@ -712,10 +778,13 @@ impl<'c> CompiledTableEmitter<'c> {
                         bail!("CBRANCH template requires two inputs and no output");
                     }
                     // Target size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                    let label = relative_label_target(&op.inputs[0]);
                     let target = self.read_template_varnode(&op.inputs[0], state, 0)?;
                     let target = self.normalize_direct_control_target(target)?;
                     let cond = self.read_template_varnode(&op.inputs[1], state, 1)?;
-                    self.emitter.emit_cbranch(target, cond, mnemonic)
+                    self.emitter.emit_cbranch(target, cond, mnemonic)?;
+                    self.note_label_ref(label)?;
+                    Ok(())
                 } else {
                     let out_tpl =
                         out_tpl.ok_or_else(|| anyhow!("{} template requires output", mnemonic))?;
