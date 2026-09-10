@@ -499,12 +499,12 @@ impl SimProcedure for SysArchPrctl {
         match code {
             0x1001 => {
                 // ARCH_SET_GS
-                emu.gs_base = addr;
+                emu.set_gs_base(addr);
                 emu.write_register_u64("RAX", 0)?;
             }
             0x1002 => {
                 // ARCH_SET_FS — TLS thread pointer
-                emu.fs_base = addr;
+                emu.set_fs_base(addr);
                 emu.write_register_u64("RAX", 0)?;
             }
             0x1003 => {

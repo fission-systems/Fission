@@ -807,6 +807,28 @@ impl JitCompiler {
                 let val = $val;
                 if !vn.is_constant {
                     let v = ensure_var!(vn.space_id, vn.offset, vn.size.min(8));
+                    // Every value in here is an I64, whatever the varnode's
+                    // width, so a narrow varnode has to be truncated on the way
+                    // in. The host_reg_file copy below was already size-correct
+                    // -- `istore32` and friends drop the high half -- but the
+                    // SSA variable was not, so a value read back *within the
+                    // same block* still carried bits the guest cannot hold.
+                    //
+                    // `lea esp, [ebp-0xc]` is the shape that finds it: p-code
+                    // for it is `ESP = EBP + 0xFFFFFFF4`, which in 64 bits is
+                    // 0x1_FFFFDF4C rather than 0xFFFFDF4C. The following `pop`
+                    // then loads from an address 4 GiB too high. Across a block
+                    // boundary it read back correctly from host_reg_file, so
+                    // this only ever went wrong inside one block -- which is
+                    // why 64-bit binaries never showed it and every 32-bit PE
+                    // died in its first epilogue.
+                    let size = vn.size.min(8);
+                    let val = if size < 8 {
+                        let mask = (1u64 << (size as u64 * 8)) - 1;
+                        builder.ins().band_imm(val, mask as i64)
+                    } else {
+                        val
+                    };
                     builder.def_var(v, val);
                     // Zero-callout register store into host_reg_file (size-correct).
                     let rsz = vn.size.min(8) as u32;

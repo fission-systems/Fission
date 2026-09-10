@@ -457,7 +457,10 @@ impl<'c> CompiledTableEmitter<'c> {
             let i = usize::try_from(op_index)
                 .map_err(|_| anyhow!("branch op index {op_index} exceeds usize"))?;
             let Some(op) = ops.get_mut(i) else {
-                bail!("label reference names op {i}, past the {} emitted", ops.len());
+                bail!(
+                    "label reference names op {i}, past the {} emitted",
+                    ops.len()
+                );
             };
             if !matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
                 bail!(
@@ -468,10 +471,9 @@ impl<'c> CompiledTableEmitter<'c> {
             let &label_op_count = label_positions.get(&label_num).ok_or_else(|| {
                 anyhow!("branch at op {i} targets label {label_num}, which was never placed")
             })?;
-            let branch_op =
-                i64::try_from(i).map_err(|_| anyhow!("branch op index exceeds i64"))?;
-            let label_pos = i64::try_from(label_op_count)
-                .map_err(|_| anyhow!("label op index exceeds i64"))?;
+            let branch_op = i64::try_from(i).map_err(|_| anyhow!("branch op index exceeds i64"))?;
+            let label_pos =
+                i64::try_from(label_op_count).map_err(|_| anyhow!("label op index exceeds i64"))?;
             // Positive = forward, negative = backward, both measured in ops from
             // the branch itself -- the convention every consumer here applies as
             // `target_index = branch_index + relative`.

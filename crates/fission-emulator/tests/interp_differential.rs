@@ -60,7 +60,7 @@ use fission_emulator::MachineState;
 use fission_emulator::arch::ArchInfo;
 use fission_emulator::core::Emulator;
 use fission_emulator::observe::{BehaviorEvent, BehaviorLog, Coverage};
-use fission_emulator::os::LinuxEnv;
+use fission_emulator::os::{LinuxEnv, WindowsEnv};
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
@@ -97,6 +97,33 @@ fn build_from(fixture: &str, max_inst: u64, interpret: bool) -> Emulator {
     emu.force_interpreter = interpret;
     emu.apply_linux_image(info).expect("image");
     emu
+}
+
+/// A 32-bit PE, from the dev corpus rather than `testdata` -- there is no
+/// 32-bit fixture in the crate, and this shape needs a real CRT to exercise.
+fn build_pe32(max_inst: u64, interpret: bool) -> Option<Emulator> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fission-benchmark/corpus/dev/binaries/control_flow_gcc-m32_O0.exe");
+    if !path.is_file() {
+        return None;
+    }
+    let binary = LoadedBinary::from_file(&path).expect("load");
+    let mut state = MachineState::new();
+    let info = fission_emulator::os::windows::loader::load_pe(&mut state, &binary).expect("pe");
+    let load_spec = binary.load_spec().expect("spec").clone();
+    let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)
+        .expect("frontend")
+        .into_iter()
+        .next()
+        .expect("sleigh");
+    let arch = ArchInfo::from_language_id(load_spec.pair.language_id.as_str(), Some(&binary))
+        .expect("arch");
+    let mut emu = Emulator::new(state, binary, sleigh, arch, Box::new(WindowsEnv::new()))
+        .expect("emulator")
+        .with_max_inst(Some(max_inst));
+    emu.force_interpreter = interpret;
+    emu.apply_windows_image(info).expect("image");
+    Some(emu)
 }
 
 /// Ordered PC trace. A sorted coverage set can only say *that* two runs
@@ -330,4 +357,68 @@ fn the_engines_agree_exactly_on_a_binary_without_simd() {
     );
     assert_eq!(jitted.inst_count, interpreted.inst_count);
     assert_eq!(jitted.pc, interpreted.pc);
+}
+
+/// The engines agree on a 32-bit process too.
+///
+/// This is the fixture that found the fourth bug in the list at the top:
+/// `store_vn!` put an untruncated 64-bit value into the SSA variable while
+/// writing the correct narrow one to `host_reg_file`. `lea esp, [ebp-0xc]`
+/// lifts to `ESP = EBP + 0xFFFFFFF4`, which overflows 32 bits, so the
+/// following `pop` in the *same block* loaded from an address 4 GiB too high
+/// and read zero -- while the interpreter, which masks, returned normally.
+/// Every 32-bit PE in the dev corpus died in its first epilogue.
+///
+/// Nothing about the defect was 32-bit specific: any narrow arithmetic whose
+/// result overflows and is read back inside one block was wrong. It took a
+/// 32-bit process to *notice*, because there the stack pointer is narrow.
+#[test]
+fn the_engines_agree_on_a_32_bit_process() {
+    let (Some(mut jitted), Some(mut interpreted)) =
+        (build_pe32(500_000, false), build_pe32(500_000, true))
+    else {
+        eprintln!("skipping: dev corpus not present");
+        return;
+    };
+
+    jitted.add_observer(Box::new(PcTrace::default()));
+    let jit_run = jitted.run();
+    interpreted.add_observer(Box::new(PcTrace::default()));
+    let int_run = interpreted.run();
+
+    assert_eq!(
+        jit_run.is_ok(),
+        int_run.is_ok(),
+        "engines disagree on success: jit={jit_run:?} interp={int_run:?}"
+    );
+    assert!(
+        jitted.halt_requested && interpreted.halt_requested,
+        "the process should exit under both engines: jit={} interp={}",
+        jitted.metrics.summary_line(),
+        interpreted.metrics.summary_line()
+    );
+
+    let jit_obs = jitted.take_observers();
+    let int_obs = interpreted.take_observers();
+    let jit_pcs = &jit_obs
+        .iter()
+        .find_map(|o| o.as_any().downcast_ref::<PcTrace>())
+        .unwrap()
+        .pcs;
+    let int_pcs = &int_obs
+        .iter()
+        .find_map(|o| o.as_any().downcast_ref::<PcTrace>())
+        .unwrap()
+        .pcs;
+    assert!(!jit_pcs.is_empty(), "no trace recorded");
+    if let Some((i, a, b)) = first_divergence(jit_pcs, int_pcs) {
+        panic!(
+            "engines diverge at step {i}\n  after: {}\n  jit:    {a:X?}\n  interp: {b:X?}",
+            jit_pcs[i.saturating_sub(6)..i]
+                .iter()
+                .map(|pc| format!("0x{pc:X}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
 }

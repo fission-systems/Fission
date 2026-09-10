@@ -113,6 +113,10 @@ pub struct Emulator {
 
     /// Set by HLE/CallOther when guest requests process exit.
     pub halt_requested: bool,
+    /// The trampoline region, cached from the OS environment at construction.
+    /// The run loop compares every PC against it, so it is a field and not a
+    /// virtual call.
+    magic_range: (u64, u64),
 
     /// Linux ELF process image metadata (stack/auxv/brk) when loaded via ELF loader.
     pub image_info: Option<crate::os::linux::image_info::ImageInfo>,
@@ -200,8 +204,11 @@ impl Emulator {
     ) -> Result<Self> {
         let pc = binary.inner().entry_point;
 
-        // Patch imports (IAT/PLT/MMIO) before execution starts.
+        // Patch imports (IAT/PLT/MMIO) before execution starts. Only after
+        // that does the environment know how wide this process is, and so
+        // where it put the trampolines.
         os.patch_imports(&mut state, &binary)?;
+        let magic_range = os.magic_range();
 
         let register_map = if let Some(spec) = binary.load_spec() {
             fission_sleigh::runtime::register_map_for_load_spec(spec).unwrap_or_default()
@@ -330,6 +337,7 @@ impl Emulator {
             jit_cache: crate::jit::cache::JitCache::new(),
             chain_depth: 0,
             halt_requested: false,
+            magic_range,
             image_info: None,
             pe_image_info: None,
             signals: crate::os::linux::signal::SignalState::default(),
@@ -421,6 +429,25 @@ impl Emulator {
     }
 
     /// Attach PE image metadata and apply stack pointer / PC from it.
+    /// Set the FS segment base, in both places that can be asked for it.
+    ///
+    /// Ghidra's x86 spec resolves `fs:[x]` in 32/64-bit mode by adding the
+    /// `FS_OFFSET` *register*, not by calling the `segment` userop -- the
+    /// userop is the 16-bit path. So a base kept only in `self.fs_base` is
+    /// invisible to lifted code, which is how every 32-bit PE ended up
+    /// reading `fs:[0x18]` as address 0x18.
+    pub fn set_fs_base(&mut self, base: u64) {
+        self.fs_base = base;
+        let _ = self.write_register_u64("FS_OFFSET", base);
+    }
+
+    /// The same for GS, which is where 64-bit Windows keeps the TEB and
+    /// 64-bit Linux keeps the thread pointer.
+    pub fn set_gs_base(&mut self, base: u64) {
+        self.gs_base = base;
+        let _ = self.write_register_u64("GS_OFFSET", base);
+    }
+
     pub fn apply_windows_image(
         &mut self,
         info: crate::os::windows::image_info::PeImageInfo,
@@ -1216,7 +1243,7 @@ impl Emulator {
             }
 
             // ── HLE Trap Check (before fetch/compile — magic is not code) ────
-            if self.pc >= 0xFFFFFFF000000000 {
+            if self.pc >= self.magic_range.0 && self.pc < self.magic_range.1 {
                 let magic = self.pc;
                 let func_name = {
                     let opt = self.os.resolve_stub(&self.binary, magic);

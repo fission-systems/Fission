@@ -67,6 +67,39 @@ pub fn load_pe_image(
         is_64bit
     );
 
+    // The headers are part of the mapped image, not just a file prefix, and
+    // programs read them: mingw's `__mingw_GetSectionCount` walks from the
+    // `MZ` at the image base to the section table to find out how much stack
+    // its relocator needs. Without them it reads zeros and gets a count of
+    // none.
+    //
+    // The first section's virtual address is where the headers stop, which is
+    // `SizeOfHeaders` rounded up to a page -- and taking it from the sections
+    // avoids having to re-parse the optional header for a field the loader
+    // already accounted for.
+    if let Some(first_section) = inner
+        .sections
+        .iter()
+        .filter(|s| s.virtual_size > 0)
+        .map(|s| s.virtual_address)
+        .min()
+        && first_section > image_base
+    {
+        let len = (first_section - image_base).min(0x10_000) as usize;
+        let file = inner.data.as_slice();
+        let headers = &file[..len.min(file.len())];
+        state
+            .write_space(state.ram_space(), image_base, headers)
+            .context("map PE headers")?;
+        state
+            .page_map
+            .map_region(image_base, len as u64, prot::VALID | prot::READ, false);
+        tracing::debug!(
+            "  PE headers 0x{image_base:X}..0x{:X}",
+            image_base + len as u64
+        );
+    }
+
     let mut start_code = u64::MAX;
     let mut end_code = 0u64;
     let mut start_data = u64::MAX;
@@ -155,6 +188,31 @@ pub fn load_pe_image(
         .page_map
         .map_region(teb_addr & !0xFFF, 0x2000, prot::RW | prot::ANON, true);
 
+    // The Thread Information Block -- the first fields of the TEB, which the
+    // CRT reads directly rather than through an API. mingw's start-up walks
+    // `fs:[0x18]` to the TIB and then reads `StackBase` out of it, so a TEB
+    // with only a PEB pointer in it is not enough to reach `main`.
+    //
+    // Field offsets differ by bitness, and only by bitness: ExceptionList,
+    // StackBase, StackLimit, then Self at the end of the block.
+    {
+        let ram = state.ram_space();
+        let (exception_list, stack_base, stack_limit_off, self_off) = if is_64bit {
+            (0x00u64, 0x08u64, 0x10u64, 0x30u64)
+        } else {
+            (0x00, 0x04, 0x08, 0x18)
+        };
+        let word = |v: u64| -> Vec<u8> {
+            let b = v.to_le_bytes();
+            b[..if is_64bit { 8 } else { 4 }].to_vec()
+        };
+        // No SEH frame yet: the list terminator is all-ones, not zero.
+        state.write_space(ram, teb_addr + exception_list, &word(u64::MAX))?;
+        state.write_space(ram, teb_addr + stack_base, &word(stack_top))?;
+        state.write_space(ram, teb_addr + stack_limit_off, &word(stack_limit))?;
+        state.write_space(ram, teb_addr + self_off, &word(teb_addr))?;
+    }
+
     // Write PEB/TEB fields (BeingDebugged = 0 for clean sandbox).
     if is_64bit {
         state.write_space(state.ram_space(), teb_addr + 0x60, &peb_addr.to_le_bytes())?;
@@ -225,6 +283,15 @@ pub fn apply_stack_and_entry(emu: &mut crate::core::Emulator, info: &PeImageInfo
     emu.pc = info.entry;
     let sp_reg = emu.arch.sp_reg;
     emu.write_register_u64(sp_reg, info.start_stack)?;
+    // Windows reaches the TEB through a segment register, and which one
+    // depends on the bitness: FS in 32 bits, GS in 64. mingw's start-up reads
+    // `fs:[0x18]` -- the TEB's own address -- in its fifth instruction, so a
+    // process without this does not get as far as `main`.
+    if info.is_64bit {
+        emu.set_gs_base(info.teb_addr);
+    } else {
+        emu.set_fs_base(info.teb_addr);
+    }
     Ok(())
 }
 

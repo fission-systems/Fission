@@ -36,6 +36,18 @@ pub trait OsEnvironment: Send + Sync {
     /// not a known stub (the emulator should treat this as a fatal error).
     fn resolve_stub(&self, binary: &LoadedBinary, magic_addr: u64) -> Option<String>;
 
+    /// The half-open address range this environment's trampolines occupy.
+    ///
+    /// The run loop tests every PC against it, so it has to be somewhere the
+    /// guest can never map -- and *where* that is depends on the process. In
+    /// 64 bits it is above the canonical hole; a 32-bit process has no such
+    /// address, so its region has to sit in the part of its own address space
+    /// the loader leaves empty. Read after `patch_imports`, which is where an
+    /// implementation learns which of the two it is looking at.
+    fn magic_range(&self) -> (u64, u64) {
+        (0xFFFF_FFF0_0000_0000, u64::MAX)
+    }
+
     /// Dispatch an HLE call for `func_name`.
     ///
     /// Implementations should:

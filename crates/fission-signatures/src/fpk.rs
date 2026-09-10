@@ -812,12 +812,11 @@ mod tests {
             .map(str::to_owned)
             .collect();
 
-        let ours_path = std::env::temp_dir()
-            .join(format!("fpk_ours_{}.fpk", std::process::id()));
+        let ours_path = std::env::temp_dir().join(format!("fpk_ours_{}.fpk", std::process::id()));
         std::fs::write(&ours_path, super::pack(&records, 1)).unwrap();
 
-        let theirs_path = std::env::temp_dir()
-            .join(format!("fpk_theirs_{}.fpk", std::process::id()));
+        let theirs_path =
+            std::env::temp_dir().join(format!("fpk_theirs_{}.fpk", std::process::id()));
         let Ok(run) = std::process::Command::new("python3")
             .args([
                 "/Users/sjkim1127/Fission/scripts/fpk_pack.py",

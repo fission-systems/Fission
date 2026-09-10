@@ -1,5 +1,6 @@
 use crate::core::Emulator;
 use crate::os::env::{HleResult, OsEnvironment};
+use crate::os::windows::crt_data::CrtGlobals;
 use crate::os::windows::heap::DummyHeap;
 use crate::os::windows::imports::{ImportTable, SharedImportTable};
 use crate::pcode::state::MachineState;
@@ -47,6 +48,8 @@ pub struct WindowsEnv {
     imports: SharedImportTable,
     /// `_initterm` calls in progress, innermost last.
     initterm: Mutex<Vec<InitTermCall>>,
+    /// Built when imports are patched, because the IAT points into it.
+    crt_globals: Mutex<Option<CrtGlobals>>,
 }
 
 impl WindowsEnv {
@@ -55,6 +58,7 @@ impl WindowsEnv {
             heap: Mutex::new(DummyHeap::new(0x20000000)), // Dummy heap base
             imports: Mutex::new(ImportTable::default()),
             initterm: Mutex::new(Vec::new()),
+            crt_globals: Mutex::new(None),
         }
     }
 }
@@ -67,10 +71,14 @@ impl Default for WindowsEnv {
 
 impl OsEnvironment for WindowsEnv {
     fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
+        // The data page has to exist before the IAT is written, because some
+        // of those slots point into it.
+        let globals = CrtGlobals::build(state, binary.inner().is_64bit)?;
+        *self.crt_globals.lock().unwrap_or_else(|e| e.into_inner()) = Some(globals);
         self.imports
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .patch_iat(state, binary)
+            .patch_iat(state, binary, &globals)
     }
 
     fn resolve_stub(&self, _binary: &LoadedBinary, magic_addr: u64) -> Option<String> {
@@ -78,6 +86,13 @@ impl OsEnvironment for WindowsEnv {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .resolve(magic_addr)
+    }
+
+    fn magic_range(&self) -> (u64, u64) {
+        self.imports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .magic_range()
     }
 
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult> {
@@ -335,6 +350,15 @@ impl OsEnvironment for WindowsEnv {
             // Registration of an at-exit handler. Nothing here runs at exit --
             // `Halt` ends the run -- so this reports success by handing the
             // function back, which is what `_onexit` returns on success.
+            // libgcc's exception tables. Nothing here unwinds, so registering
+            // one is a no-op -- but it has to *answer*, because mingw's
+            // start-up calls it before `main`.
+            "__register_frame_info"
+            | "__deregister_frame_info"
+            | "__register_frame_info_bases"
+            | "__deregister_frame_info_bases" => {
+                emu.write_return_val(0)?;
+            }
             "_onexit" | "atexit" | "__dllonexit" => {
                 let func = emu.read_arg(0).unwrap_or(0);
                 emu.write_return_val(if func_name == "atexit" { 0 } else { func })?;
@@ -352,6 +376,54 @@ impl OsEnvironment for WindowsEnv {
                 emu.write_return_val(0)?;
             }
             "__getmainargs" | "__wgetmainargs" => handle_getmainargs(emu, self)?,
+            // The `__p_*` family: each returns the *address* of a CRT global.
+            // A stub that returned zero here is why every UCRT binary in the
+            // dev corpus died -- the start-up assigns through the pointer
+            // before `main` is reached.
+            "__p___argc" | "__p___argv" | "__p___wargv" | "__p__environ" | "__p__wenviron"
+            | "__p__commode" | "__p__fmode" | "__p__acmdln" | "__p__wcmdln" => {
+                let g = crt_globals(emu, self)?;
+                let addr = match func_name {
+                    "__p___argc" => g.argc,
+                    // The wide forms get the narrow storage. Nothing here
+                    // reads it as text, and an empty wide vector would still
+                    // be a lie about the encoding -- this way there is one
+                    // argv, and it is the one `main` was given.
+                    "__p___argv" | "__p___wargv" => g.argv,
+                    "__p__environ" | "__p__wenviron" => g.environ,
+                    "__p__commode" => g.commode,
+                    "__p__acmdln" | "__p__wcmdln" => g.acmdln,
+                    _ => g.fmode,
+                };
+                emu.write_return_val(addr)?;
+            }
+            // UCRT's own accessors for the same two vectors, which hand back
+            // the vector rather than its address.
+            "_get_initial_narrow_environment" | "_get_initial_wide_environment" => {
+                let g = crt_globals(emu, self)?;
+                emu.write_return_val(g.environ_vector)?;
+            }
+            // At-exit registration, UCRT spelling. Nothing runs at exit here,
+            // so this is the same answer `atexit` gives: registered fine.
+            "_crt_atexit"
+            | "_crt_at_quick_exit"
+            | "_register_onexit_function"
+            | "_initialize_onexit_table"
+            | "_register_thread_local_exe_atexit_callback" => {
+                emu.write_return_val(0)?;
+            }
+            // Policy knobs. Each returns the *previous* setting, and the
+            // previous setting is always the default, because nothing here
+            // ever changes behaviour on them.
+            "_set_invalid_parameter_handler"
+            | "_set_thread_local_invalid_parameter_handler"
+            | "_set_new_mode"
+            | "_set_error_mode"
+            | "_configthreadlocale"
+            | "_controlfp_s"
+            | "__setusermatherr_ucrt" => {
+                emu.write_return_val(0)?;
+            }
             "ExitThread" => {
                 let code = emu.read_arg(0).unwrap_or(0) as u32;
                 return Ok(HleResult::Halt(code));
@@ -425,18 +497,24 @@ impl OsEnvironment for WindowsEnv {
 
     fn dispatch_userop(
         &self,
-        _emu: &mut Emulator,
+        emu: &mut Emulator,
         userop_name: &str,
         inputs: &[u64],
         _output_size: u32,
     ) -> Result<HleResult> {
         match userop_name {
-            "segment_gs" | "segment_fs" => {
-                let offset = inputs.get(0).copied().unwrap_or(0);
-                tracing::debug!("Win32 HLE: {} (offset=0x{:X})", userop_name, offset);
-                // TEB is at fs/gs. We don't have a full TEB mapped yet,
-                // but we could set an output varnode if we extended the architecture.
-                // For now, logging it handles the requirement.
+            // `fs:[x]` in 32 bits and `gs:[x]` in 64 both mean the TEB, which
+            // the loader maps and `apply_stack_and_entry` records the address
+            // of. This used to log the offset and return nothing, back when
+            // there was no TEB to point at; a zero here reads address 0x18 and
+            // the CRT walks off into nothing.
+            "segment_fs" | "segment_gs" | "segment" => {
+                let (base, offset) = segment_base(emu, userop_name, inputs);
+                emu.callother_result = base.wrapping_add(offset);
+                tracing::debug!(
+                    "Win32 HLE: {userop_name} base=0x{base:X} off=0x{offset:X} -> 0x{:X}",
+                    emu.callother_result
+                );
             }
             "lock" | "rep" | "repne" | "repe" => {
                 tracing::debug!("Win32 HLE: Prefix userop '{}'", userop_name);
@@ -904,43 +982,36 @@ fn heap_alloc_mapped(emu: &mut Emulator, env: &WindowsEnv, bytes: usize) -> u64 
     addr
 }
 
+/// The CRT variables, which `patch_imports` built.
+fn crt_globals(_emu: &mut Emulator, env: &WindowsEnv) -> Result<CrtGlobals> {
+    env.crt_globals
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .ok_or_else(|| anyhow::anyhow!("the CRT data page was never built"))
+}
+
 /// `__getmainargs(&argc, &argv, &env, doWildCard, startupinfo)` -- mingw's CRT
 /// asks msvcrt for the command line before it calls `main`.
 ///
-/// The vectors have to exist in *guest* memory, because `main` is about to
-/// read them, so they are built on the emulated heap rather than described.
-/// One argument, the module path, and an empty environment: enough for a
-/// `main(argc, argv)` to be entered with something coherent.
+/// The vectors live in the CRT data page, which is the same storage
+/// `__p___argv` hands out and the same storage the IAT's `__argv` slot points
+/// at -- there is one argv, and this is a third window onto it.
 fn handle_getmainargs(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let ptr = u64::from(emu.arch.pointer_size);
     let argc_out = emu.read_arg(0)?;
     let argv_out = emu.read_arg(1)?;
     let envp_out = emu.read_arg(2)?;
+    let g = crt_globals(emu, env)?;
 
-    let name = b"program.exe\0";
-    let block = heap_alloc_mapped(emu, env, name.len() + (ptr as usize) * 4);
-    if block == 0 {
-        emu.write_return_val(u64::MAX)?;
-        return Ok(());
-    }
     let ram = emu.state.ram_space();
-    emu.state.write_space(ram, block, name)?;
-
-    // argv[0] = the name, argv[1] = NULL, then a NULL environment block.
-    let argv = block + name.len() as u64;
-    write_ptr(emu, argv, block, ptr)?;
-    write_ptr(emu, argv + ptr, 0, ptr)?;
-    let envp = argv + ptr * 2;
-    write_ptr(emu, envp, 0, ptr)?;
-
     if argc_out != 0 {
         emu.state.write_space(ram, argc_out, &1u32.to_le_bytes())?;
     }
     if argv_out != 0 {
-        write_ptr(emu, argv_out, argv, ptr)?;
+        write_ptr(emu, argv_out, g.argv_vector, ptr)?;
     }
     if envp_out != 0 {
-        write_ptr(emu, envp_out, envp, ptr)?;
+        write_ptr(emu, envp_out, g.environ_vector, ptr)?;
     }
     emu.write_return_val(0)?;
     Ok(())
@@ -1025,6 +1096,29 @@ fn handle_initterm(emu: &mut Emulator, env: &WindowsEnv, func_name: &str) -> Res
     // fail, so it reports none.
     emu.write_return_val(0)?;
     Ok(HleResult::Continue)
+}
+
+/// Which segment base a `segment*` userop meant, and the offset into it.
+///
+/// The bare `segment` form carries the selector as its first input, so a small
+/// first value is a selector and not an address -- the same reading the Linux
+/// side takes, because it is the same SLEIGH.
+fn segment_base(emu: &Emulator, userop_name: &str, inputs: &[u64]) -> (u64, u64) {
+    let default_base = if emu.arch.pointer_size >= 8 {
+        emu.gs_base
+    } else {
+        emu.fs_base
+    };
+    match userop_name {
+        "segment_fs" => (emu.fs_base, inputs.last().copied().unwrap_or(0)),
+        "segment_gs" => (emu.gs_base, inputs.last().copied().unwrap_or(0)),
+        _ => match inputs {
+            [] => (default_base, 0),
+            [offset] => (default_base, *offset),
+            [selector, offset, ..] if *selector <= 0x100 => (default_base, *offset),
+            [base, offset, ..] => (*base, *offset),
+        },
+    }
 }
 
 fn read_ptr(emu: &mut Emulator, addr: u64, ptr: u64) -> Result<u64> {
