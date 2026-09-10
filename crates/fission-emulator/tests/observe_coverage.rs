@@ -138,6 +138,18 @@ fn a_behavior_log_records_the_calls_a_run_makes_outward() {
         "a finished run should end at exit_group, got {numbers:?}"
     );
 
+    // Every event renders to a line an analyst reads, not a row of numbers.
+    for e in &log.events {
+        eprintln!("  {}", e.render());
+    }
+    let rendered: Vec<String> = log.events.iter().map(|e| e.render()).collect();
+    assert!(
+        rendered
+            .iter()
+            .any(|l| l.starts_with("arch_prctl(ARCH_SET_FS,")),
+        "arch_prctl's code should be named, got {rendered:?}"
+    );
+
     // Ordering is the other half of a behaviour log: TLS is set up before the
     // allocator asks the kernel for anything.
     let first_prctl = numbers.iter().position(|n| *n == 158).expect("arch_prctl");

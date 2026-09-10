@@ -541,9 +541,16 @@ impl Emulator {
         }
     }
 
-    pub(crate) fn notify_syscall(&mut self, pc: u64, number: u64, args: &[u64; 6]) {
+    pub(crate) fn notify_syscall_detailed(
+        &mut self,
+        pc: u64,
+        number: u64,
+        name: Option<&'static str>,
+        args: &[u64; 6],
+        detail: Vec<crate::observe::SyscallArg>,
+    ) {
         for o in &mut self.observers {
-            o.on_syscall(pc, number, args);
+            o.on_syscall_detailed(pc, number, name, args, detail.clone());
         }
     }
 

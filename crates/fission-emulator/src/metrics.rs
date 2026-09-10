@@ -292,6 +292,45 @@ pub struct BudgetReport {
 /// Use `u64::MAX` / large kinds to disable a sub-gate.
 pub type QualityBudget = (u64, usize, u64, u64);
 
+/// One thing the run did to the outside world.
+///
+/// Both a rendered line and the pieces it was rendered from: the line is what
+/// a person reads, the fields are what a tool matches on.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehaviorEventReport {
+    pub pc: u64,
+    /// `"syscall"` or `"hle"`.
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub line: String,
+}
+
+/// What the run did, and how much of the binary it touched.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BehaviorReport {
+    pub events: Vec<BehaviorEventReport>,
+    /// Events past the log's cap. Non-zero means `events` is a prefix.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub dropped: u64,
+    /// Present only when coverage was asked for -- it costs a call per block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<CoverageReport>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CoverageReport {
+    pub blocks_executed: usize,
+    pub instructions_executed: usize,
+    pub bytes_covered: u64,
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+
 /// Serializable sandbox run summary for CLI `--json` / automation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SandboxMetricsReport {
@@ -302,6 +341,10 @@ pub struct SandboxMetricsReport {
     pub metrics: EmulatorMetrics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget: Option<BudgetReport>,
+    /// What the run did, when anything was watching. Absent keeps the report
+    /// byte-identical to what it was before observation existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<BehaviorReport>,
 }
 
 impl SandboxMetricsReport {
@@ -365,7 +408,53 @@ impl SandboxMetricsReport {
             pc,
             metrics,
             budget,
+            behavior: None,
         }
+    }
+
+    /// Attach what the observers saw. Built from the observers rather than
+    /// from the emulator, so it is available after the run has ended.
+    pub fn with_behavior(
+        mut self,
+        log: &crate::observe::BehaviorLog,
+        coverage: Option<&crate::observe::Coverage>,
+    ) -> Self {
+        use crate::observe::BehaviorEvent;
+        let events = log
+            .events
+            .iter()
+            .map(|e| {
+                let line = e.render();
+                match e {
+                    BehaviorEvent::Syscall {
+                        pc, number, name, ..
+                    } => BehaviorEventReport {
+                        pc: *pc,
+                        kind: "syscall".into(),
+                        number: Some(*number),
+                        name: name.map(|n| n.to_string()),
+                        line,
+                    },
+                    BehaviorEvent::Hle { pc, name } => BehaviorEventReport {
+                        pc: *pc,
+                        kind: "hle".into(),
+                        number: None,
+                        name: Some(name.clone()),
+                        line,
+                    },
+                }
+            })
+            .collect();
+        self.behavior = Some(BehaviorReport {
+            events,
+            dropped: log.dropped,
+            coverage: coverage.map(|c| CoverageReport {
+                blocks_executed: c.blocks.len(),
+                instructions_executed: c.executed_instructions().len(),
+                bytes_covered: c.bytes_covered(),
+            }),
+        });
+        self
     }
 
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {

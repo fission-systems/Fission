@@ -291,6 +291,13 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub sym_explore: bool,
 
+    /// Also report which code the run reached (blocks, instructions, bytes)
+    ///
+    /// Costs one callback per translation block. The behaviour log -- syscalls
+    /// and HLE calls, with arguments -- is always on and costs nothing extra.
+    #[arg(long)]
+    pub coverage: bool,
+
     /// Print sandbox metrics report as JSON on stdout
     #[arg(long)]
     pub json: bool,

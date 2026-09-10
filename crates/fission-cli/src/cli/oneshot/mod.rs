@@ -511,6 +511,14 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         emu.trace.enabled = true;
     }
 
+    // The behaviour log needs no instrumentation in compiled code -- syscalls
+    // and HLE stubs dispatch outside the JIT -- so it is always on. Coverage
+    // costs a callback per block, so it is asked for.
+    emu.add_observer(Box::new(fission_emulator::observe::BehaviorLog::new()));
+    if args.coverage {
+        emu.add_observer(Box::new(fission_emulator::observe::Coverage::new()));
+    }
+
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
 
     if args.sym_explore {
@@ -573,6 +581,20 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
             None,
         )
     };
+    let observers = emu.take_observers();
+    let behavior_log = observers.iter().find_map(|o| {
+        o.as_any()
+            .downcast_ref::<fission_emulator::observe::BehaviorLog>()
+    });
+    let coverage = observers.iter().find_map(|o| {
+        o.as_any()
+            .downcast_ref::<fission_emulator::observe::Coverage>()
+    });
+    let report = match behavior_log {
+        Some(log) => report.with_behavior(log, coverage),
+        None => report,
+    };
+
     if let Some(path) = args.metrics_out {
         let json = report
             .to_json_pretty()

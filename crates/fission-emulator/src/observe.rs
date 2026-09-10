@@ -94,7 +94,26 @@ pub trait Observer: Send {
     fn on_mem(&mut self, _addr: u64, _size: u32, _write: bool, _value: u64) {}
 
     /// A guest syscall, with the ABI's argument registers already read.
+    ///
+    /// The OS layer calls [`Observer::on_syscall_detailed`] when it can name
+    /// the call; that default forwards here, so an observer that only wants
+    /// numbers implements this one and gets both.
     fn on_syscall(&mut self, _pc: u64, _number: u64, _args: &[u64; 6]) {}
+
+    /// The same call, with its arguments read the way its ABI says to.
+    ///
+    /// Pointer arguments are resolved here, at call time, because the buffer
+    /// they point at is the guest's to reuse the moment the call returns.
+    fn on_syscall_detailed(
+        &mut self,
+        pc: u64,
+        number: u64,
+        _name: Option<&'static str>,
+        args: &[u64; 6],
+        _detail: Vec<SyscallArg>,
+    ) {
+        self.on_syscall(pc, number, args);
+    }
 
     /// A high-level-emulation stub stood in for a real call.
     fn on_hle(&mut self, _pc: u64, _name: &str) {}
@@ -166,6 +185,74 @@ impl Observer for Coverage {
     }
 }
 
+/// One syscall argument, read the way its ABI says to read it.
+///
+/// Captured **when the call happens**, not when a report is written: a path
+/// name lives in a buffer the guest is free to reuse the moment the call
+/// returns, so resolving it later reads whatever happens to be there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyscallArg {
+    Int(i64),
+    Hex(u64),
+    Fd(i64),
+    Ptr(u64),
+    Str {
+        ptr: u64,
+        text: String,
+        truncated: bool,
+    },
+    Buf {
+        ptr: u64,
+        len: u64,
+        preview: Vec<u8>,
+    },
+    Flags {
+        raw: u64,
+        decoded: String,
+    },
+}
+
+impl std::fmt::Display for SyscallArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int(v) => write!(f, "{v}"),
+            Self::Hex(v) => write!(f, "0x{v:X}"),
+            Self::Fd(v) => write!(f, "{v}"),
+            Self::Ptr(0) => write!(f, "NULL"),
+            Self::Ptr(v) => write!(f, "0x{v:X}"),
+            Self::Str {
+                text, truncated, ..
+            } => {
+                write!(
+                    f,
+                    "\"{}\"{}",
+                    text.escape_debug(),
+                    if *truncated { "..." } else { "" }
+                )
+            }
+            Self::Buf { len, preview, .. } => {
+                let shown: String = preview
+                    .iter()
+                    .map(|b| {
+                        if b.is_ascii_graphic() || *b == b' ' {
+                            (*b as char).to_string()
+                        } else {
+                            format!("\\x{b:02x}")
+                        }
+                    })
+                    .collect();
+                let more = if (preview.len() as u64) < *len {
+                    "..."
+                } else {
+                    ""
+                };
+                write!(f, "\"{shown}\"{more} ({len})")
+            }
+            Self::Flags { decoded, .. } => write!(f, "{decoded}"),
+        }
+    }
+}
+
 /// What the run did to the outside world, in order.
 ///
 /// Needs no compiled-code instrumentation at all: syscalls and HLE stubs are
@@ -175,12 +262,47 @@ pub enum BehaviorEvent {
     Syscall {
         pc: u64,
         number: u64,
+        /// The ABI name, when the table knows this number. `None` is not a
+        /// failure -- a report shows `syscall_<n>` rather than guessing.
+        name: Option<&'static str>,
+        /// The raw argument registers, always. The faithful record: `detail`
+        /// is an interpretation of these, and an interpretation can be wrong.
         args: [u64; 6],
+        detail: Vec<SyscallArg>,
     },
     Hle {
         pc: u64,
         name: String,
     },
+}
+
+impl BehaviorEvent {
+    /// One line, the way an analyst reads it.
+    pub fn render(&self) -> String {
+        match self {
+            Self::Syscall {
+                number,
+                name,
+                args,
+                detail,
+                ..
+            } => {
+                let name = name
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| format!("syscall_{number}"));
+                if detail.is_empty() {
+                    // No spec: show the registers rather than an empty call,
+                    // since an unknown syscall is exactly what wants looking at.
+                    let raw: Vec<String> = args.iter().map(|a| format!("0x{a:X}")).collect();
+                    format!("{name}({})", raw.join(", "))
+                } else {
+                    let rendered: Vec<String> = detail.iter().map(|a| a.to_string()).collect();
+                    format!("{name}({})", rendered.join(", "))
+                }
+            }
+            Self::Hle { name, .. } => format!("{name}()"),
+        }
+    }
 }
 
 /// Ordered log of [`BehaviorEvent`]s, bounded so a long run cannot exhaust
@@ -226,7 +348,26 @@ impl Observer for BehaviorLog {
         self.push(BehaviorEvent::Syscall {
             pc,
             number,
+            name: None,
             args: *args,
+            detail: Vec::new(),
+        });
+    }
+
+    fn on_syscall_detailed(
+        &mut self,
+        pc: u64,
+        number: u64,
+        name: Option<&'static str>,
+        args: &[u64; 6],
+        detail: Vec<SyscallArg>,
+    ) {
+        self.push(BehaviorEvent::Syscall {
+            pc,
+            number,
+            name,
+            args: *args,
+            detail,
         });
     }
 

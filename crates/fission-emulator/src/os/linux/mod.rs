@@ -5,6 +5,7 @@ pub mod libc;
 pub mod loader;
 pub mod signal;
 pub mod syscall;
+pub mod syscall_abi;
 
 pub use dynlink::{DynlinkInfo, DynlinkMode};
 pub use image_info::{ImageInfo, ProcessArgs};
@@ -270,7 +271,11 @@ impl OsEnvironment for LinuxEnv {
                     *slot = emu.read_register_u64(name).unwrap_or(0);
                 }
                 let pc = emu.pc;
-                emu.notify_syscall(pc, sys_num, &args);
+                let spec = syscall_abi::spec(sys_num);
+                let detail = spec
+                    .map(|spec| decode_syscall_args(emu, spec, &args))
+                    .unwrap_or_default();
+                emu.notify_syscall_detailed(pc, sys_num, spec.map(|s| s.name), &args, detail);
             }
             if let Some(proc) = self.simos.syscalls.get(&sys_num) {
                 return proc.run(emu);
@@ -362,4 +367,77 @@ impl OsEnvironment for LinuxEnv {
         }
         Ok(HleResult::Continue)
     }
+}
+
+/// Read a syscall's arguments the way its ABI says to, at the moment it is
+/// made.
+///
+/// Bounded on purpose: a string argument is capped and a buffer preview is
+/// capped, because the guest chooses these lengths and a report should not be
+/// something the guest can make arbitrarily large. An unreadable pointer
+/// degrades to `Ptr` rather than failing the call -- the syscall itself is
+/// still about to run, and the report is not allowed to change that.
+fn decode_syscall_args(
+    emu: &mut Emulator,
+    spec: &'static syscall_abi::SyscallSpec,
+    args: &[u64; 6],
+) -> Vec<crate::observe::SyscallArg> {
+    use crate::observe::SyscallArg;
+    use syscall_abi::ArgKind;
+
+    /// Longest string a report will quote.
+    const STR_CAP: usize = 256;
+    /// Longest buffer prefix a report will quote.
+    const BUF_CAP: usize = 64;
+
+    let mut out = Vec::with_capacity(spec.args.len());
+    for (i, kind) in spec.args.iter().enumerate() {
+        let raw = args.get(i).copied().unwrap_or(0);
+        out.push(match kind {
+            ArgKind::Unused => continue,
+            ArgKind::Int => SyscallArg::Int(raw as i64),
+            ArgKind::Hex => SyscallArg::Hex(raw),
+            ArgKind::Fd => SyscallArg::Fd(raw as i64),
+            ArgKind::Ptr => SyscallArg::Ptr(raw),
+            ArgKind::Flags(set) => SyscallArg::Flags {
+                raw,
+                decoded: syscall_abi::decode_flags(*set, raw),
+            },
+            ArgKind::Str => {
+                if raw == 0 {
+                    SyscallArg::Ptr(0)
+                } else {
+                    match libc::read_string(emu, raw) {
+                        Ok(text) => {
+                            let truncated = text.len() > STR_CAP;
+                            SyscallArg::Str {
+                                ptr: raw,
+                                text: text.chars().take(STR_CAP).collect(),
+                                truncated,
+                            }
+                        }
+                        Err(_) => SyscallArg::Ptr(raw),
+                    }
+                }
+            }
+            ArgKind::Buf(len_index) => {
+                let len = args.get(*len_index).copied().unwrap_or(0);
+                let want = (len as usize).min(BUF_CAP);
+                let ram = emu.state.ram_space();
+                let preview = if raw == 0 || want == 0 {
+                    Vec::new()
+                } else {
+                    emu.state
+                        .read_space_readonly(ram, raw, want)
+                        .unwrap_or_default()
+                };
+                SyscallArg::Buf {
+                    ptr: raw,
+                    len,
+                    preview,
+                }
+            }
+        });
+    }
+    out
 }
