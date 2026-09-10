@@ -44,6 +44,11 @@ pub struct Emulator {
     pub max_inst: Option<u64>,
     /// P-Code ops retired (intra-insn loops); used with `max_inst` as a soft fuse.
     pub pcode_ops: u64,
+    /// What the per-byte shadow layer carries. See [`crate::observe::ShadowMode`].
+    ///
+    /// Not `pub`: changing it has to flush the block cache, so it goes through
+    /// [`Emulator::set_shadow_mode`].
+    pub(crate) shadow_mode: crate::observe::ShadowMode,
     /// Force every block through the interpreter, never the JIT.
     ///
     /// Exists so the two engines can be run against each other on the same
@@ -302,6 +307,7 @@ impl Emulator {
             inst_count: 0,
             max_inst: None,
             pcode_ops: 0,
+            shadow_mode: crate::observe::ShadowMode::Off,
             force_interpreter: std::env::var_os("FISSION_EMU_INTERP").is_some(),
             interpreted_blocks: 0,
             observers: Vec::new(),
@@ -523,6 +529,22 @@ impl Emulator {
         self.observe
     }
 
+    /// Turn the per-byte shadow layer on or off.
+    ///
+    /// Flushes the block cache: whether a block carries shadow callbacks is
+    /// decided when it is compiled, so blocks compiled under the old mode
+    /// carry the old decision.
+    pub fn set_shadow_mode(&mut self, mode: crate::observe::ShadowMode) {
+        if mode != self.shadow_mode {
+            self.shadow_mode = mode;
+            self.jit_cache.flush_all();
+        }
+    }
+
+    pub fn shadow_mode(&self) -> crate::observe::ShadowMode {
+        self.shadow_mode
+    }
+
     pub(crate) fn notify_translate(&mut self, entry_pc: u64, insns: &[(u64, u32)]) {
         for o in &mut self.observers {
             o.on_translate(entry_pc, insns);
@@ -591,8 +613,18 @@ impl Emulator {
     }
 
     /// Enable run-loop stops on tainted CBranch (for `SimulationManager` / explore).
+    /// Stop the run at the first tainted `CBRANCH`.
+    ///
+    /// Turns the shadow layer on, because there is no such thing as a tainted
+    /// branch without it. Shadow is off by default now -- asking for a
+    /// behaviour that depends on it is what asks for it.
     pub fn with_concolic_stop(mut self, enabled: bool) -> Self {
         self.concolic_stop_on_branch = enabled;
+        if enabled {
+            // Builder, so nothing is compiled yet and the cache flush that
+            // `set_shadow_mode` exists for has nothing to flush.
+            self.shadow_mode = crate::observe::ShadowMode::Symbolic;
+        }
         self
     }
 
@@ -1000,8 +1032,10 @@ impl Emulator {
         }
 
         let observe = self.observe;
+        let shadow = self.shadow_mode;
         let jit = self.jit.as_mut().expect("checked above");
         jit.observe = observe;
+        jit.shadow = shadow;
 
         let reg_sp = self.state.register_space();
         let func_ptr = match jit.compile_translation_block(&insns, reg_sp) {

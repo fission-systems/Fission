@@ -28,8 +28,11 @@ impl SimulationManager {
     }
 
     pub fn with_initial_state(mut emu: Emulator, initial_state: SimState) -> Self {
-        // Exploration needs the JIT symbolic gate to stop at tainted branches.
+        // Exploration needs the JIT symbolic gate to stop at tainted branches,
+        // and it needs the shadow layer to be there to taint them with. Shadow
+        // is off by default now, so asking for it is the explorer's job.
         emu.concolic_stop_on_branch = true;
+        emu.set_shadow_mode(crate::observe::ShadowMode::Symbolic);
         let mut stashes = HashMap::new();
         stashes.insert("active".to_string(), vec![initial_state]);
         stashes.insert("deadended".to_string(), Vec::new());

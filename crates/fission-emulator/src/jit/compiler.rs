@@ -35,6 +35,8 @@ pub struct JitCompiler {
     pub ctx: Context,
     pub builder_ctx: FunctionBuilderContext,
     compile_seq: u64,
+    /// What the shadow layer carries in blocks compiled from now on.
+    pub shadow: crate::observe::ShadowMode,
     /// What to instrument in blocks compiled from now on.
     ///
     /// Read here rather than passed per call because it is the same for every
@@ -176,6 +178,7 @@ impl JitCompiler {
             builder_ctx,
             compile_seq: 0,
             observe: crate::observe::ObserveMask::NONE,
+            shadow: crate::observe::ShadowMode::Off,
         })
     }
 
@@ -545,6 +548,7 @@ impl JitCompiler {
             .module
             .declare_func_in_func(observe_insn_fn, builder.func);
         let observe = self.observe;
+        let shadow = self.shadow;
         let count_pcode_ref = self
             .module
             .declare_func_in_func(count_pcode_fn, builder.func);
@@ -643,6 +647,9 @@ impl JitCompiler {
             }};
         }
 
+        // `shadow.is_on()` here rather than at the callback: whether a block
+        // carries shadow propagation at all is a translation-time decision, so
+        // a run with no shadow compiles to code with none in it.
         macro_rules! emit_shadow_binop {
             ($out:expr, $a:expr, $b:expr, $a_val:expr, $b_val:expr, $kind:expr) => {{
                 let out: &Varnode = $out;
@@ -651,7 +658,7 @@ impl JitCompiler {
                 let a_val = $a_val;
                 let b_val = $b_val;
                 let kind: u32 = $kind;
-                if !out.is_constant {
+                if shadow.is_on() && !out.is_constant {
                     let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
                     let doff = builder.ins().iconst(types::I64, out.offset as i64);
                     let dsz = builder.ins().iconst(types::I64, out.size as i64);
@@ -693,7 +700,7 @@ impl JitCompiler {
                 let a: &Varnode = $a;
                 let a_val = $a_val;
                 let kind: u32 = $kind;
-                if !out.is_constant {
+                if shadow.is_on() && !out.is_constant {
                     let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
                     let doff = builder.ins().iconst(types::I64, out.offset as i64);
                     let dsz = builder.ins().iconst(types::I64, out.size as i64);
@@ -914,9 +921,12 @@ impl JitCompiler {
                                         src.offset as i64
                                     },
                                 );
-                                builder
-                                    .ins()
-                                    .call(shadow_copy_ref, &[emu_ptr, dsp, doff, dsz, ssp, soff]);
+                                if shadow.is_on() {
+                                    builder.ins().call(
+                                        shadow_copy_ref,
+                                        &[emu_ptr, dsp, doff, dsz, ssp, soff],
+                                    );
+                                }
                             }
                         }
                     }
@@ -953,13 +963,15 @@ impl JitCompiler {
                                 store_vn!(out, val);
                             }
                             // Taint from loaded memory bytes → dest varnode
-                            let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
-                            let doff = builder.ins().iconst(types::I64, out.offset as i64);
-                            let dsz = builder.ins().iconst(types::I64, out.size as i64);
-                            let msp = builder.ins().iconst(types::I64, space_id as i64);
-                            builder
-                                .ins()
-                                .call(shadow_load_ref, &[emu_ptr, dsp, doff, dsz, msp, addr]);
+                            if shadow.is_on() {
+                                let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
+                                let doff = builder.ins().iconst(types::I64, out.offset as i64);
+                                let dsz = builder.ins().iconst(types::I64, out.size as i64);
+                                let msp = builder.ins().iconst(types::I64, space_id as i64);
+                                builder
+                                    .ins()
+                                    .call(shadow_load_ref, &[emu_ptr, dsp, doff, dsz, msp, addr]);
+                            }
                         }
                     }
                 }
@@ -1016,9 +1028,11 @@ impl JitCompiler {
                                 val_vn.offset as i64
                             },
                         );
-                        builder
-                            .ins()
-                            .call(shadow_store_ref, &[emu_ptr, msp, addr, sz, vsp, voff]);
+                        if shadow.is_on() {
+                            builder
+                                .ins()
+                                .call(shadow_store_ref, &[emu_ptr, msp, addr, sz, vsp, voff]);
+                        }
                     }
                 }
 

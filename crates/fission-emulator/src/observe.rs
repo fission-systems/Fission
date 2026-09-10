@@ -69,6 +69,32 @@ impl ObserveMask {
     }
 }
 
+/// What the per-byte shadow layer carries, if anything.
+///
+/// The shadow callbacks (`jit_shadow_copy`/`_load`/`_store`/`_binop`/`_unop`)
+/// were emitted into every compiled block unconditionally, so every arithmetic
+/// op in every run paid a host call that almost always looked up two empty
+/// shadow bytes and returned. Same decision as [`ObserveMask`], same place to
+/// make it: at translation, so a run that wants none carries none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShadowMode {
+    /// No shadow at all. Compiled blocks carry no shadow callbacks.
+    #[default]
+    Off,
+    /// Per-byte labels, unioned when values combine. No solver: a label says
+    /// *that* a byte derives from a source, not what expression produced it.
+    Taint,
+    /// Full symbolic expressions -- what the concolic explorer needs, and far
+    /// more than taint needs.
+    Symbolic,
+}
+
+impl ShadowMode {
+    pub fn is_on(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
 /// One watcher of a run.
 ///
 /// Every method has a default, so an observer implements only the events it
