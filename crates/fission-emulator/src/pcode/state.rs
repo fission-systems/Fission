@@ -59,10 +59,12 @@ impl AddressSpace {
     fn get_page_mut(&mut self, addr: u64) -> &mut MemoryPage {
         let page_addr = addr & !(self.page_size - 1);
         let ps = self.page_size as usize;
-        if !self.pages.contains_key(&page_addr) {
-            self.pages.insert(page_addr, MemoryPage::new_concrete(ps));
-        }
-        self.pages.get_mut(&page_addr).unwrap()
+        // One lookup, not two. `pages` is a persistent HAMT keyed with SipHash
+        // -- chosen so a snapshot is a cheap clone -- so `contains_key` then
+        // `get_mut` hashed the same address twice on every access.
+        self.pages
+            .entry(page_addr)
+            .or_insert_with(|| MemoryPage::new_concrete(ps))
     }
 
     fn get_page(&self, addr: u64) -> Option<&MemoryPage> {
@@ -70,40 +72,67 @@ impl AddressSpace {
         self.pages.get(&page_addr)
     }
 
+    /// Read `size` bytes, a page span at a time.
+    ///
+    /// Not byte at a time: each byte used to cost its own page lookup, and a
+    /// lookup is a SipHash into a persistent HAMT, so an eight-byte guest load
+    /// hashed the same page address eight times. Accesses that stay inside one
+    /// page -- nearly all of them -- now hash once.
     pub fn read(&self, addr: u64, size: usize) -> Result<Vec<u8>> {
-        let mut result = Vec::with_capacity(size);
-        for i in 0..size as u64 {
-            let current_addr = addr + i;
-            let offset = (current_addr & (self.page_size - 1)) as usize;
-            let byte = match self.get_page(current_addr) {
-                Some(MemoryPage::Concrete(data)) => data[offset],
-                Some(MemoryPage::Symbolic { concrete, .. }) => concrete[offset],
-                Some(MemoryPage::ArrayTheory { .. }) => 0, // Fallback for pure concrete read
-                None => 0,                                 // Uninitialized memory reads as 0
-            };
-            result.push(byte);
+        // Unmapped memory reads as zero, so start there and fill in what
+        // exists.
+        let mut result = vec![0u8; size];
+        let ps = self.page_size as usize;
+        let mut done = 0usize;
+        while done < size {
+            let current = addr.wrapping_add(done as u64);
+            let offset = (current & (self.page_size - 1)) as usize;
+            let take = (size - done).min(ps - offset);
+            match self.get_page(current) {
+                Some(MemoryPage::Concrete(data)) => {
+                    result[done..done + take].copy_from_slice(&data[offset..offset + take]);
+                }
+                Some(MemoryPage::Symbolic { concrete, .. }) => {
+                    result[done..done + take].copy_from_slice(&concrete[offset..offset + take]);
+                }
+                // ArrayTheory has no concrete bytes to give, and an absent
+                // page has none either. Both stay zero.
+                Some(MemoryPage::ArrayTheory { .. }) | None => {}
+            }
+            done += take;
         }
         Ok(result)
     }
 
+    /// Write `data`, a page span at a time.
+    ///
+    /// Same reason as [`AddressSpace::read`], plus one more: `Arc::make_mut`
+    /// is an atomic refcount check, and the byte loop ran it once per byte of
+    /// every store.
     pub fn write(&mut self, addr: u64, data: &[u8]) -> Result<()> {
-        for (i, &byte) in data.iter().enumerate() {
-            let current_addr = addr + i as u64;
-            let offset = (current_addr & (self.page_size - 1)) as usize;
-            let page = self.get_page_mut(current_addr);
-            match page {
+        let ps = self.page_size as usize;
+        let page_mask = self.page_size - 1;
+        let mut done = 0usize;
+        while done < data.len() {
+            let current = addr.wrapping_add(done as u64);
+            let offset = (current & page_mask) as usize;
+            let take = (data.len() - done).min(ps - offset);
+            let chunk = &data[done..done + take];
+            match self.get_page_mut(current) {
                 MemoryPage::Concrete(page_data) => {
-                    Arc::make_mut(page_data)[offset] = byte;
+                    Arc::make_mut(page_data)[offset..offset + take].copy_from_slice(chunk);
                 }
                 MemoryPage::Symbolic { concrete, shadow } => {
-                    Arc::make_mut(concrete)[offset] = byte;
-                    Arc::make_mut(shadow)[offset] = None;
+                    Arc::make_mut(concrete)[offset..offset + take].copy_from_slice(chunk);
+                    // Concrete bytes replace whatever the shadow said about
+                    // them, byte for byte.
+                    Arc::make_mut(shadow)[offset..offset + take].fill(None);
                 }
-                MemoryPage::ArrayTheory { .. } => {
-                    // For now, if we do a concrete write to an ArrayTheory page, we might just ignore the array part
-                    // or convert it back. We will handle ArrayTheory separately later.
-                }
+                // A concrete write to an array-theory page is not modelled;
+                // it was ignored before this and still is.
+                MemoryPage::ArrayTheory { .. } => {}
             }
+            done += take;
         }
         Ok(())
     }

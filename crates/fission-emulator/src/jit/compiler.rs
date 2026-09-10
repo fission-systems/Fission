@@ -234,6 +234,28 @@ impl JitCompiler {
             }
         }
 
+        // Does any op jump *backwards* inside this block?
+        //
+        // The per-op fuse below exists to break a loop inside one
+        // instruction's semantics -- `tzcnt`'s bit scan, the `rep` forms --
+        // and nothing else can loop here: ops run in order and a forward
+        // branch only skips ahead, so a block with no backward intra-block
+        // branch finishes in at most `n_ops` steps. Emitting the fuse anyway
+        // cost a host call *per p-code op*, which is ten to twenty calls per
+        // guest instruction, on every block, for a hazard almost none of them
+        // can have.
+        let needs_pcode_fuse = flat.iter().enumerate().any(|(index, op)| {
+            if !matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
+                return false;
+            }
+            op.inputs.first().is_some_and(|dest| {
+                dest.is_constant && {
+                    let target = dest.constant_val;
+                    target >= 0 && (target as usize) < flat.len() && target as usize <= index
+                }
+            })
+        });
+
         let fallthrough_pc = {
             let last = insns.last().unwrap();
             last.pc.wrapping_add(last.len as u64)
@@ -842,7 +864,7 @@ impl JitCompiler {
             builder.switch_to_block(op_blocks[idx]);
 
             // Per-pcode-op fuse (breaks relative CBRANCH livelocks under max_inst).
-            {
+            if needs_pcode_fuse {
                 let tick = builder.ins().call(count_pcode_ref, &[emu_ptr]);
                 let stop = builder.inst_results(tick)[0];
                 let is_stop = builder.ins().icmp_imm(IntCC::NotEqual, stop, 0);
