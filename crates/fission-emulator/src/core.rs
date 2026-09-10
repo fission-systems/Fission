@@ -44,6 +44,15 @@ pub struct Emulator {
     pub max_inst: Option<u64>,
     /// P-Code ops retired (intra-insn loops); used with `max_inst` as a soft fuse.
     pub pcode_ops: u64,
+    /// Dynamic-analysis watchers. See [`crate::observe`].
+    ///
+    /// Not `pub`: registering one has to be able to flush the block cache, so
+    /// it goes through [`Emulator::add_observer`].
+    pub(crate) observers: Vec<Box<dyn crate::observe::Observer>>,
+    /// Union of what `observers` asked for, read by the compiler once per
+    /// block. Kept beside the list rather than recomputed, because the
+    /// compiler reads it on every translation.
+    pub(crate) observe: crate::observe::ObserveMask,
     /// Entry PC of the translation block that exhausted the p-code fuse.
     ///
     /// Recorded where it trips rather than where the run notices, because by
@@ -285,6 +294,8 @@ impl Emulator {
             inst_count: 0,
             max_inst: None,
             pcode_ops: 0,
+            observers: Vec::new(),
+            observe: crate::observe::ObserveMask::NONE,
             pcode_budget_pc: None,
             stdin_buffer: None,
             ttd: TTDRecorder::new(),
@@ -470,6 +481,54 @@ impl Emulator {
             self.write_register_u64(reg, signo)?;
         }
         Ok(())
+    }
+
+    /// Register a dynamic-analysis watcher.
+    ///
+    /// Flushes the block cache whenever this widens what needs instrumenting:
+    /// blocks compiled before now were compiled against the older mask and
+    /// carry none of the newly-wanted callbacks. QEMU does the same on plugin
+    /// load, and for the same reason.
+    pub fn add_observer(&mut self, observer: Box<dyn crate::observe::Observer>) {
+        let widened = self.observe.union(observer.interest());
+        self.observers.push(observer);
+        if widened != self.observe {
+            self.observe = widened;
+            self.jit_cache.flush_all();
+        }
+    }
+
+    /// Hand back everything registered, in registration order.
+    ///
+    /// Observers are owned by the emulator while it runs -- the JIT reaches
+    /// them through a raw pointer -- so a caller reads its results out
+    /// afterwards rather than keeping a handle across the run.
+    pub fn take_observers(&mut self) -> Vec<Box<dyn crate::observe::Observer>> {
+        self.observe = crate::observe::ObserveMask::NONE;
+        self.jit_cache.flush_all();
+        std::mem::take(&mut self.observers)
+    }
+
+    pub fn observe_mask(&self) -> crate::observe::ObserveMask {
+        self.observe
+    }
+
+    pub(crate) fn notify_translate(&mut self, entry_pc: u64, insns: &[(u64, u32)]) {
+        for o in &mut self.observers {
+            o.on_translate(entry_pc, insns);
+        }
+    }
+
+    pub(crate) fn notify_syscall(&mut self, pc: u64, number: u64, args: &[u64; 6]) {
+        for o in &mut self.observers {
+            o.on_syscall(pc, number, args);
+        }
+    }
+
+    pub(crate) fn notify_hle(&mut self, pc: u64, name: &str) {
+        for o in &mut self.observers {
+            o.on_hle(pc, name);
+        }
     }
 
     pub fn with_max_inst(mut self, max: Option<u64>) -> Self {
@@ -899,10 +958,17 @@ impl Emulator {
             last.pc.wrapping_add(last.len as u64)
         };
 
+        if !self.observers.is_empty() {
+            let shape: Vec<(u64, u32)> = insns.iter().map(|i| (i.pc, i.len)).collect();
+            self.notify_translate(start_pc, &shape);
+        }
+
+        let observe = self.observe;
         let jit = self
             .jit
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("JIT compiler unavailable (host ISA unsupported)"))?;
+        jit.observe = observe;
 
         let reg_sp = self.state.register_space();
         let func_ptr = jit.compile_translation_block(&insns, reg_sp).map_err(|e| {
@@ -1027,6 +1093,9 @@ impl Emulator {
                     pc: magic,
                     func_name: func_name.clone(),
                 });
+                if !self.observers.is_empty() {
+                    self.notify_hle(magic, &func_name);
+                }
 
                 let result = {
                     let os_ptr = &*self.os as *const dyn OsEnvironment;

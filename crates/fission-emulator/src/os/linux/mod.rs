@@ -257,6 +257,21 @@ impl OsEnvironment for LinuxEnv {
         if func_name == "syscall" {
             let sys_num = emu.read_register_u64("RAX").unwrap_or(0);
             emu.metrics.note_syscall(sys_num);
+            if !emu.observers.is_empty() {
+                // Linux x86-64 syscall ABI: RDI, RSI, RDX, R10, R8, R9 --
+                // deliberately not the SysV *call* ABI, which uses RCX where
+                // this uses R10. Read here rather than in the observer: the
+                // observer never gets the emulator.
+                let mut args = [0u64; 6];
+                for (slot, name) in args
+                    .iter_mut()
+                    .zip(["RDI", "RSI", "RDX", "R10", "R8", "R9"])
+                {
+                    *slot = emu.read_register_u64(name).unwrap_or(0);
+                }
+                let pc = emu.pc;
+                emu.notify_syscall(pc, sys_num, &args);
+            }
             if let Some(proc) = self.simos.syscalls.get(&sys_num) {
                 return proc.run(emu);
             } else {

@@ -130,6 +130,27 @@ impl JitCache {
         }
     }
 
+    /// Drop every compiled block and unpublish every chain slot.
+    ///
+    /// QEMU's `tb_flush`, and needed for the same reason: instrumentation is
+    /// decided when a block is translated, so a block compiled before an
+    /// observer subscribed carries no callbacks and would keep running
+    /// uninstrumented for as long as it stays cached.
+    pub fn flush_all(&self) {
+        let mut blks = self.blocks.write().unwrap();
+        let mut ptb = self.page_to_blocks.write().unwrap();
+        let table = self.chain_table.read().unwrap();
+        for slot in table.values() {
+            slot.store(0, Ordering::Release);
+        }
+        let dropped = blks.len();
+        blks.clear();
+        ptb.clear();
+        if dropped > 0 {
+            tracing::info!("JIT cache: flushed {dropped} blocks (instrumentation changed)");
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.blocks.read().unwrap().len()
     }

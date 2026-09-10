@@ -167,6 +167,27 @@ pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator) {
     }
 }
 
+/// A translation block was entered.
+///
+/// Emitted at the block's own entry, and only when some observer asked for
+/// `block` -- a run nobody watches compiles without this call at all.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_observe_block(emu_ptr: *mut Emulator, pc: u64) {
+    let emu = unsafe { &mut *emu_ptr };
+    for o in &mut emu.observers {
+        o.on_block(pc);
+    }
+}
+
+/// One guest instruction is about to execute.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_observe_insn(emu_ptr: *mut Emulator, pc: u64) {
+    let emu = unsafe { &mut *emu_ptr };
+    for o in &mut emu.observers {
+        o.on_insn(pc);
+    }
+}
+
 /// P-code ops a budgeted run may execute before the livelock fuse trips.
 ///
 /// Generous per guest instruction, because one instruction legitimately can be

@@ -35,6 +35,12 @@ pub struct JitCompiler {
     pub ctx: Context,
     pub builder_ctx: FunctionBuilderContext,
     compile_seq: u64,
+    /// What to instrument in blocks compiled from now on.
+    ///
+    /// Read here rather than passed per call because it is the same for every
+    /// block until an observer is registered, and registering one flushes the
+    /// cache anyway ([`crate::observe`]).
+    pub observe: crate::observe::ObserveMask,
 }
 
 impl JitCompiler {
@@ -90,6 +96,14 @@ impl JitCompiler {
             (
                 "jit_count_insn",
                 crate::jit::callbacks::jit_count_insn as *const u8,
+            ),
+            (
+                "jit_observe_block",
+                crate::jit::callbacks::jit_observe_block as *const u8,
+            ),
+            (
+                "jit_observe_insn",
+                crate::jit::callbacks::jit_observe_insn as *const u8,
             ),
             (
                 "jit_count_pcode",
@@ -161,6 +175,7 @@ impl JitCompiler {
             ctx,
             builder_ctx,
             compile_seq: 0,
+            observe: crate::observe::ObserveMask::NONE,
         })
     }
 
@@ -340,6 +355,19 @@ impl JitCompiler {
             .declare_function("jit_count_insn", Linkage::Import, &sig_count)
             .unwrap();
 
+        // (emu, pc)
+        let mut sig_observe = self.module.make_signature();
+        sig_observe.params.push(AbiParam::new(types::I64));
+        sig_observe.params.push(AbiParam::new(types::I64));
+        let observe_block_fn = self
+            .module
+            .declare_function("jit_observe_block", Linkage::Import, &sig_observe)
+            .unwrap();
+        let observe_insn_fn = self
+            .module
+            .declare_function("jit_observe_insn", Linkage::Import, &sig_observe)
+            .unwrap();
+
         let mut sig_pcode = self.module.make_signature();
         sig_pcode.params.push(AbiParam::new(types::I64));
         sig_pcode.returns.push(AbiParam::new(types::I64));
@@ -510,6 +538,13 @@ impl JitCompiler {
             .module
             .declare_func_in_func(callother_result_fn, builder.func);
         let count_ref = self.module.declare_func_in_func(count_fn, builder.func);
+        let observe_block_ref = self
+            .module
+            .declare_func_in_func(observe_block_fn, builder.func);
+        let observe_insn_ref = self
+            .module
+            .declare_func_in_func(observe_insn_fn, builder.func);
+        let observe = self.observe;
         let count_pcode_ref = self
             .module
             .declare_func_in_func(count_pcode_fn, builder.func);
@@ -555,6 +590,9 @@ impl JitCompiler {
         // Map insn start op-index → guest len for count call emission.
         let insn_start_set: HashMap<usize, ()> =
             insn_starts.iter().map(|(i, _, _)| (*i, ())).collect();
+        // Same keys, carrying the guest PC, for the observer call.
+        let insn_start_pc: HashMap<usize, u64> =
+            insn_starts.iter().map(|(i, pc, _)| (*i, *pc)).collect();
 
         macro_rules! ensure_var {
             ($space:expr, $offset:expr, $size:expr) => {{
@@ -756,6 +794,11 @@ impl JitCompiler {
             }};
         }
 
+        if observe.block {
+            let pc = builder.ins().iconst(types::I64, start_pc as i64);
+            builder.ins().call(observe_block_ref, &[emu_ptr, pc]);
+        }
+
         if n_ops == 0 {
             // Still count guest insns and exit.
             for _ in insns {
@@ -790,6 +833,11 @@ impl JitCompiler {
             // Guest-insn boundary accounting.
             if insn_start_set.contains_key(&idx) {
                 builder.ins().call(count_ref, &[emu_ptr]);
+                if observe.insn {
+                    let pc = insn_start_pc[&idx];
+                    let pc = builder.ins().iconst(types::I64, pc as i64);
+                    builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
+                }
             }
 
             let fallthrough = if idx + 1 < n_ops {
