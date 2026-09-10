@@ -8,9 +8,9 @@ pub mod observe;
 pub mod os;
 pub mod pcode;
 pub mod snapshot;
+pub mod srd;
 pub mod sym;
 pub mod trace;
-pub mod srd;
 
 pub use arch::{ArchInfo, Endianness};
 pub use core::{Emulator, RunOutcome};

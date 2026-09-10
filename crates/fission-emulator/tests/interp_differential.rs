@@ -15,21 +15,41 @@
 //! two instructions and `inst_count` had been under-reporting every
 //! p-code-less instruction in every run.
 //!
-//! The second is open. With that fixed the traces agree for 1,060 steps and
-//! then split on a flag:
+//! The second is diagnosed, and it is in the **JIT**. Comparing register state
+//! at *block boundaries* -- mid-block is meaningless, since the JIT keeps
+//! registers in Cranelift variables and flushes at TB exit, so an observer
+//! reading them part-way through sees stale values -- puts the first
+//! difference at the block after `0x10067FB`, in one register:
 //!
 //! ```text
-//! after: 0x10034B0 0x10034B2 0x10034B5 0x10034A0 0x10034A2 0x10034A5
-//! jit:    0x10034A7   (fell through)
-//! interp: 0x10034B7   (took the branch)
+//! jit:    RDI=0x0
+//! interp: RDI=0x7FFFFFFFEE20    <- continues 0xEE10, 0xEE18, 0xEE20
 //! ```
 //!
-//! `0x10034A5` is `jnz`, `0x10034A2` is `test CL, 0x1`, and the block is a
-//! loop whose first iteration both engines agreed on. So the disagreement is
-//! over `CL` or over the `EDX` that `0x10034A0` copies into it -- one engine's
-//! sub-register read or its `movzx` from `[RCX + 0x1000280]` is wrong. Not yet
-//! diagnosed, and until it is, the interpreter is a fallback for blocks the
-//! JIT declines, not an engine to trust on its own.
+//! `0x10067FB` is `rep stosq`. Its p-code leaves via `CBRANCH -> 0x10067FE`
+//! when `RCX == 0`, *before* the ops that touch RDI, so on the exiting
+//! iteration RDI is never written. But `ensure_var!` emits its seeding
+//! `def_var` wherever the varnode is first mentioned -- inside a block that
+//! path skips -- and the exit writeback's `use_var` then reads an undefined
+//! value and flushes **zero over a live pointer**. Everything downstream ran
+//! on rubble; that the program still reached `exit_group` in 967 instructions
+//! was the symptom, not health.
+//!
+//! ## The obvious fix is wrong, and measuring said so
+//!
+//! Hoisting the seeds into the entry block so they dominate takes the JIT from
+//! 852 to 18,248 blocks -- it starts doing musl's real start-up -- and then
+//! hangs at `0x100270C`. `var_map` is keyed by `(space, offset, **size**)`, so
+//! `EAX` and `RAX` are *different variables*, and their coherence depends on
+//! the later, wider access seeding itself from `host_reg_file` **after** the
+//! narrower `store_vn!` wrote it. Lazy seeding is load-bearing; hoisting it
+//! reads the pre-write value. Reverted.
+//!
+//! The sound fix is one variable per `(space, offset)` at register
+//! granularity, with sub-register writes doing read-modify-write on it --
+//! which removes the aliasing the size key was invented to work around in the
+//! first place (see `jit::compiler`'s own `var_map` comment). Not attempted
+//! here.
 //!
 //! Run them with `cargo test -p fission-emulator --test interp_differential
 //! -- --ignored`.
