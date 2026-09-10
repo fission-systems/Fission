@@ -182,3 +182,69 @@ fn an_unobserved_run_matches_an_observed_one() {
         "observing changed why the run stopped"
     );
 }
+
+/// Memory observation reports what the guest actually read and wrote.
+///
+/// `ObserveMask.mem` existed, `Observer::on_mem` existed, and nothing ever
+/// called it: an observer that asked to watch memory was told, in silence,
+/// that the program touched none. That is worse than an unimplemented
+/// feature, because the answer looks like data.
+#[test]
+fn memory_observation_reports_the_accesses_a_run_makes() {
+    /// Every RAM access, in order.
+    #[derive(Default)]
+    struct MemLog {
+        events: Vec<(u64, u32, bool, u64)>,
+    }
+
+    impl fission_emulator::observe::Observer for MemLog {
+        fn interest(&self) -> fission_emulator::observe::ObserveMask {
+            fission_emulator::observe::ObserveMask {
+                mem: true,
+                ..fission_emulator::observe::ObserveMask::NONE
+            }
+        }
+        fn on_mem(&mut self, addr: u64, size: u32, write: bool, value: u64) {
+            self.events.push((addr, size, write, value));
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    for interpret in [false, true] {
+        let mut emu = build(4096);
+        emu.force_interpreter = interpret;
+        emu.add_observer(Box::new(MemLog::default()));
+        let _ = emu.run();
+
+        let observers = emu.take_observers();
+        let log = observers
+            .iter()
+            .find_map(|o| o.as_any().downcast_ref::<MemLog>())
+            .expect("memory log");
+        let engine = if interpret { "interpreter" } else { "jit" };
+
+        assert!(
+            !log.events.is_empty(),
+            "{engine}: a run that pushes a stack frame reported no memory access"
+        );
+        assert!(
+            log.events.iter().any(|(_, _, write, _)| *write),
+            "{engine}: reads only -- a call pushes a return address"
+        );
+        assert!(
+            log.events.iter().any(|(_, _, write, _)| !*write),
+            "{engine}: writes only -- a return pops one back"
+        );
+        // Every access has to name a plausible guest address and a width a
+        // varnode can have. A zero-size access is a report of nothing.
+        for (addr, size, _, _) in &log.events {
+            assert!(*addr != 0, "{engine}: an access at address zero");
+            assert!(
+                *size > 0 && *size <= 16,
+                "{engine}: implausible access width {size}"
+            );
+        }
+    }
+}

@@ -822,6 +822,15 @@ impl JitCompiler {
                     // this only ever went wrong inside one block -- which is
                     // why 64-bit binaries never showed it and every 32-bit PE
                     // died in its first epilogue.
+                    //
+                    // It is free. Measured three runs each way on the
+                    // throughput fixture: 39.6-39.7M inst/s without the mask,
+                    // 40.4-42.2M with it, because Cranelift folds the `band`
+                    // into the 32-bit machine op. (A single sample first said
+                    // this cost 14%, which is what one sample is worth.) So
+                    // there is no performance case for holding narrow
+                    // varnodes as native I32 values the way TCG does -- only
+                    // a tidiness one.
                     let size = vn.size.min(8);
                     let val = if size < 8 {
                         let mask = (1u64 << (size as u64 * 8)) - 1;

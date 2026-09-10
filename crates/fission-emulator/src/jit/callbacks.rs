@@ -39,6 +39,9 @@ pub extern "C" fn jit_read_space(
             for (i, &b) in bytes[..size].iter().enumerate() {
                 val |= (b as u64) << (i * 8);
             }
+            if emu.observe.mem && emu.state.spaces_layout.is_ram(space_id) {
+                emu.notify_mem(offset, size as u32, false, val);
+            }
             val
         }
         Err(_) => 0,
@@ -72,6 +75,9 @@ pub extern "C" fn jit_write_space(
     };
 
     let _ = emu.state.write_space(space_id, offset, &bytes);
+    if emu.observe.mem && emu.state.spaces_layout.is_ram(space_id) {
+        emu.notify_mem(offset, size as u32, true, val);
+    }
 
     for page in smc_pages {
         emu.jit_cache.invalidate_page(page_align_down(page));

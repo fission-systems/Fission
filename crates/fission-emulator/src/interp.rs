@@ -25,7 +25,7 @@
 //! offset means would only ever be testing the disagreement.
 
 use anyhow::{Result, bail};
-use fission_pcode::ir::PcodeOp;
+use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::core::Emulator;
 use crate::jit::compiler::{GuestInsn, remap_relative_branches};
@@ -47,6 +47,15 @@ impl Emulator {
     /// Advances `inst_count` at each guest-instruction boundary and notifies
     /// observers there too, so a block that falls back is indistinguishable
     /// from a compiled one in the metrics and in anything watching.
+    /// One varnode's value, for reporting a memory access. Reporting is
+    /// best-effort: a varnode that cannot be read is reported as zero rather
+    /// than failing the run, because an observer must never change what the
+    /// guest does.
+    fn varnode_value(&mut self, vn: &Varnode) -> u64 {
+        let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
+        evaluator.read_varnode_u64(vn).unwrap_or(0)
+    }
+
     pub fn interpret_translation_block(&mut self, insns: &[GuestInsn]) -> Result<InterpExit> {
         if insns.is_empty() {
             bail!("interpreter: empty translation block");
@@ -127,10 +136,48 @@ impl Emulator {
             }
 
             let op = &flat[idx];
+
+            // A memory access, for anything watching. The JIT reports these
+            // from its read/write callbacks; the interpreter has to read the
+            // operands itself, because the evaluator holds the state but not
+            // the observers.
+            //
+            // The address is read *before* the op, since a load may write its
+            // output over the varnode holding its own address (`RAX = *RAX`);
+            // the loaded value has to be read after.
+            let pending_mem = if self.observe.mem {
+                match op.opcode {
+                    PcodeOpcode::Load => Some((
+                        self.varnode_value(&op.inputs[1]),
+                        op.output.as_ref().map_or(0, |o| o.size),
+                        false,
+                        0,
+                    )),
+                    PcodeOpcode::Store => Some((
+                        self.varnode_value(&op.inputs[1]),
+                        op.inputs[2].size,
+                        true,
+                        self.varnode_value(&op.inputs[2]),
+                    )),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
             let step = {
                 let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
                 evaluator.step(op)?
             };
+
+            if let Some((addr, size, write, stored)) = pending_mem {
+                let value = if write {
+                    stored
+                } else {
+                    op.output.as_ref().map_or(0, |o| self.varnode_value(o))
+                };
+                self.notify_mem(addr, size, write, value);
+            }
 
             match step {
                 StepResult::Next => idx += 1,

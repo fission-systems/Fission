@@ -629,6 +629,16 @@ impl Emulator {
         }
     }
 
+    /// A guest read or write of RAM.
+    ///
+    /// Only RAM: a register access is not what an observer asking about
+    /// "memory" means, and every p-code op touches registers.
+    pub(crate) fn notify_mem(&mut self, addr: u64, size: u32, write: bool, value: u64) {
+        for o in &mut self.observers {
+            o.on_mem(addr, size, write, value);
+        }
+    }
+
     pub(crate) fn notify_syscall_detailed(
         &mut self,
         pc: u64,
