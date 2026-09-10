@@ -20,9 +20,33 @@ const LEGACY_STDOUT: u64 = 0x77777777;
 /// - Stub resolution: maps magic address back to import name (O(1) table).
 /// - GetProcAddress allocates new magic stubs into the same table.
 /// - HLE dispatch: emulates Win32 API functions by name.
+/// One `_initterm` call in progress.
+///
+/// `_initterm` walks a table of function pointers and calls each one, so the
+/// stub cannot answer in a single step: it has to hand control back to the
+/// guest and be re-entered when that constructor returns. This is the cursor
+/// it resumes from.
+#[derive(Debug, Clone, Copy)]
+struct InitTermCall {
+    /// Next table slot to call.
+    cursor: u64,
+    /// One past the last slot.
+    end: u64,
+    /// Where the guest's own `call _initterm` wanted to return to. The stub
+    /// overwrites the return slot with its own address to get re-entered, so
+    /// this is the only copy.
+    caller_return: u64,
+    /// Stack pointer at entry, which is what tells a re-entry (SP is one slot
+    /// higher, the constructor having popped our address) from a fresh
+    /// nested call.
+    entry_sp: u64,
+}
+
 pub struct WindowsEnv {
     pub heap: Mutex<DummyHeap>,
     imports: SharedImportTable,
+    /// `_initterm` calls in progress, innermost last.
+    initterm: Mutex<Vec<InitTermCall>>,
 }
 
 impl WindowsEnv {
@@ -30,6 +54,7 @@ impl WindowsEnv {
         Self {
             heap: Mutex::new(DummyHeap::new(0x20000000)), // Dummy heap base
             imports: Mutex::new(ImportTable::default()),
+            initterm: Mutex::new(Vec::new()),
         }
     }
 }
@@ -250,6 +275,83 @@ impl OsEnvironment for WindowsEnv {
                 tracing::info!("ExitProcess({}). Emulation finished.", code);
                 return Ok(HleResult::Halt(code));
             }
+
+            // ── msvcrt: what a mingw binary imports before it reaches main ──
+            //
+            // These are imports, not code in the image: mingw links against
+            // msvcrt.dll, so the CRT's own start-up runs through the PLT and
+            // ends up here. Without them `exit` did not exit, and start-up
+            // looped for as long as the instruction budget allowed.
+            "exit" | "_exit" | "_Exit" | "quick_exit" | "abort" => {
+                let code = if func_name == "abort" {
+                    3
+                } else {
+                    emu.read_arg(0).unwrap_or(0) as u32
+                };
+                tracing::info!("{func_name}({code}). Emulation finished.");
+                return Ok(HleResult::Halt(code));
+            }
+            "malloc" => {
+                let bytes = emu.read_arg(0)? as usize;
+                let addr = heap_alloc_mapped(emu, self, bytes);
+                tracing::debug!("malloc({bytes}) -> 0x{addr:X}");
+                emu.write_return_val(addr)?;
+            }
+            "calloc" => {
+                let count = emu.read_arg(0)? as usize;
+                let size = emu.read_arg(1)? as usize;
+                let bytes = count.saturating_mul(size);
+                let addr = heap_alloc_mapped(emu, self, bytes);
+                if addr != 0 && bytes > 0 {
+                    let zeros = vec![0u8; bytes];
+                    emu.state.write_space(emu.state.ram_space(), addr, &zeros)?;
+                }
+                emu.write_return_val(addr)?;
+            }
+            "free" => {
+                let addr = emu.read_arg(0)?;
+                if addr != 0 {
+                    self.heap.lock().unwrap().free(addr);
+                }
+                emu.write_return_val(0)?;
+            }
+            "realloc" => {
+                let old = emu.read_arg(0)?;
+                let bytes = emu.read_arg(1)? as usize;
+                let addr = heap_alloc_mapped(emu, self, bytes);
+                if old != 0 && addr != 0 && bytes > 0 {
+                    // The old block's length is not tracked, so copy what was
+                    // asked for and let the guest's own bookkeeping decide
+                    // what of it is meaningful. Copying less would lose data
+                    // that was there; copying more cannot be justified.
+                    let ram = emu.state.ram_space();
+                    if let Ok(prev) = emu.state.read_space(ram, old, bytes) {
+                        emu.state.write_space(ram, addr, &prev)?;
+                    }
+                    self.heap.lock().unwrap().free(old);
+                }
+                emu.write_return_val(addr)?;
+            }
+            // Registration of an at-exit handler. Nothing here runs at exit --
+            // `Halt` ends the run -- so this reports success by handing the
+            // function back, which is what `_onexit` returns on success.
+            "_onexit" | "atexit" | "__dllonexit" => {
+                let func = emu.read_arg(0).unwrap_or(0);
+                emu.write_return_val(if func_name == "atexit" { 0 } else { func })?;
+            }
+            "_initterm" | "_initterm_e" => {
+                return handle_initterm(emu, self, func_name);
+            }
+            // Console vs GUI. Nothing here behaves differently, so recording
+            // it would be recording a number nobody reads.
+            "__set_app_type"
+            | "_set_app_type"
+            | "__setusermatherr"
+            | "_configure_narrow_argv"
+            | "_initialize_narrow_environment" => {
+                emu.write_return_val(0)?;
+            }
+            "__getmainargs" | "__wgetmainargs" => handle_getmainargs(emu, self)?,
             "ExitThread" => {
                 let code = emu.read_arg(0).unwrap_or(0) as u32;
                 return Ok(HleResult::Halt(code));
@@ -779,11 +881,170 @@ fn handle_get_command_line_w(emu: &mut Emulator) -> Result<()> {
     Ok(())
 }
 
+/// Allocate on the emulated heap **and make the pages exist**.
+///
+/// `DummyHeap` only hands out addresses; nothing mapped them. That went
+/// unnoticed for as long as every caller merely returned the pointer to the
+/// guest -- `HeapAlloc` writes only when asked to zero -- and surfaced the
+/// moment something built a structure there: "page not mapped at 0x20000000".
+/// A pointer the guest cannot write to is not an allocation.
+fn heap_alloc_mapped(emu: &mut Emulator, env: &WindowsEnv, bytes: usize) -> u64 {
+    use crate::pcode::page_map::prot;
+    let addr = env.heap.lock().unwrap().alloc(bytes);
+    if addr == 0 {
+        return 0;
+    }
+    let len = (bytes as u64).max(1);
+    emu.state.page_map.map_region(
+        addr & !0xFFF,
+        (len + (addr & 0xFFF)).div_ceil(0x1000) * 0x1000,
+        prot::VALID | prot::READ | prot::WRITE,
+        true,
+    );
+    addr
+}
+
+/// `__getmainargs(&argc, &argv, &env, doWildCard, startupinfo)` -- mingw's CRT
+/// asks msvcrt for the command line before it calls `main`.
+///
+/// The vectors have to exist in *guest* memory, because `main` is about to
+/// read them, so they are built on the emulated heap rather than described.
+/// One argument, the module path, and an empty environment: enough for a
+/// `main(argc, argv)` to be entered with something coherent.
+fn handle_getmainargs(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
+    let ptr = u64::from(emu.arch.pointer_size);
+    let argc_out = emu.read_arg(0)?;
+    let argv_out = emu.read_arg(1)?;
+    let envp_out = emu.read_arg(2)?;
+
+    let name = b"program.exe\0";
+    let block = heap_alloc_mapped(emu, env, name.len() + (ptr as usize) * 4);
+    if block == 0 {
+        emu.write_return_val(u64::MAX)?;
+        return Ok(());
+    }
+    let ram = emu.state.ram_space();
+    emu.state.write_space(ram, block, name)?;
+
+    // argv[0] = the name, argv[1] = NULL, then a NULL environment block.
+    let argv = block + name.len() as u64;
+    write_ptr(emu, argv, block, ptr)?;
+    write_ptr(emu, argv + ptr, 0, ptr)?;
+    let envp = argv + ptr * 2;
+    write_ptr(emu, envp, 0, ptr)?;
+
+    if argc_out != 0 {
+        emu.state.write_space(ram, argc_out, &1u32.to_le_bytes())?;
+    }
+    if argv_out != 0 {
+        write_ptr(emu, argv_out, argv, ptr)?;
+    }
+    if envp_out != 0 {
+        write_ptr(emu, envp_out, envp, ptr)?;
+    }
+    emu.write_return_val(0)?;
+    Ok(())
+}
+
+/// `_initterm(start, end)` -- call every non-null function pointer in
+/// `[start, end)`.
+///
+/// This is the one stub that has to run *guest* code, so it cannot answer in
+/// one step. It works as a trampoline: overwrite the return slot with this
+/// stub's own address, jump to the constructor, and get re-entered when the
+/// constructor returns. `emu.pc` is that address -- the HLE trap fires on the
+/// magic PC and leaves it in place -- so the stub does not need to look itself
+/// up.
+///
+/// Stack bookkeeping, which is the part that has to be exactly right:
+///
+/// ```text
+/// entry            SP = S,   [S] = caller's return address
+/// call ctor[i]     [S] = this stub; jump to ctor        SP = S
+/// ctor returns     ret pops our address                 SP = S+8
+/// call ctor[i+1]   push our address again               SP = S
+/// finished         push the caller's address, Continue  SP = S+8 after the pop
+/// ```
+///
+/// which is the same net effect as the guest's own `call`/`ret` pair.
+fn handle_initterm(emu: &mut Emulator, env: &WindowsEnv, func_name: &str) -> Result<HleResult> {
+    let ptr = u64::from(emu.arch.pointer_size);
+    let sp_reg = emu.arch.sp_reg;
+    let sp = emu.read_register_u64(sp_reg)?;
+    let stub = emu.pc;
+
+    let mut stack = env.initterm.lock().unwrap();
+
+    // A re-entry leaves SP one slot above where this call started, because the
+    // constructor popped the address we planted. Anything else is a new call --
+    // including a genuinely nested `_initterm`, which is why this is a stack.
+    let resuming = matches!(stack.last(), Some(top) if sp == top.entry_sp + ptr);
+    if !resuming {
+        let caller_return = read_ptr(emu, sp, ptr)?;
+        let start = emu.read_arg(0)?;
+        let end = emu.read_arg(1)?;
+        tracing::debug!("{func_name}(0x{start:X}, 0x{end:X})");
+        stack.push(InitTermCall {
+            cursor: start,
+            end,
+            caller_return,
+            entry_sp: sp,
+        });
+    }
+
+    let call = stack.last_mut().expect("pushed above");
+
+    // Skip null slots -- the tables are padded with them.
+    let mut target = 0u64;
+    while call.cursor < call.end {
+        let slot = call.cursor;
+        call.cursor = call.cursor.saturating_add(ptr);
+        let value = read_ptr(emu, slot, ptr).unwrap_or(0);
+        if value != 0 {
+            target = value;
+            break;
+        }
+    }
+
+    if target != 0 {
+        let entry_sp = call.entry_sp;
+        drop(stack);
+        // Plant our own address as the constructor's return address.
+        write_ptr(emu, entry_sp, stub, ptr)?;
+        emu.write_register_u64(sp_reg, entry_sp)?;
+        return Ok(HleResult::JumpTo(target));
+    }
+
+    // Table exhausted: put the caller's address back where a `ret` will find
+    // it, and return the ordinary way.
+    let finished = stack.pop().expect("pushed above");
+    drop(stack);
+    write_ptr(emu, finished.entry_sp, finished.caller_return, ptr)?;
+    emu.write_register_u64(sp_reg, finished.entry_sp)?;
+    // `_initterm_e` reports the first failing initialiser; nothing here can
+    // fail, so it reports none.
+    emu.write_return_val(0)?;
+    Ok(HleResult::Continue)
+}
+
+fn read_ptr(emu: &mut Emulator, addr: u64, ptr: u64) -> Result<u64> {
+    let ram = emu.state.ram_space();
+    let bytes = emu.state.read_space(ram, addr, ptr as usize)?;
+    Ok(crate::arch::calling_convention::le_bytes_to_u64(&bytes))
+}
+
+fn write_ptr(emu: &mut Emulator, addr: u64, value: u64, ptr: u64) -> Result<()> {
+    let ram = emu.state.ram_space();
+    let bytes = value.to_le_bytes();
+    emu.state.write_space(ram, addr, &bytes[..ptr as usize])?;
+    Ok(())
+}
+
 fn handle_heap_alloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let _h_heap = emu.read_arg(0)?;
     let flags = emu.read_arg(1)?;
     let bytes = emu.read_arg(2)? as usize;
-    let addr = env.heap.lock().unwrap().alloc(bytes);
+    let addr = heap_alloc_mapped(emu, env, bytes);
     if (flags & 8) != 0 {
         // HEAP_ZERO_MEMORY
         let zeros = vec![0u8; bytes];

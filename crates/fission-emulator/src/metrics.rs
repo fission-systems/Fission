@@ -346,6 +346,14 @@ pub struct CoverageReport {
     pub blocks_executed: usize,
     pub instructions_executed: usize,
     pub bytes_covered: u64,
+    /// Entry addresses of the blocks that ran, in address order.
+    ///
+    /// Counts say how much ran; only addresses say *what*. Anything that acts
+    /// on a run -- deciding a check was never reached, or where to patch --
+    /// needs the addresses, and a caller that only wants the totals can ignore
+    /// the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<u64>,
 }
 
 fn is_zero_u64(v: &u64) -> bool {
@@ -473,6 +481,7 @@ impl SandboxMetricsReport {
                 blocks_executed: c.blocks.len(),
                 instructions_executed: c.executed_instructions().len(),
                 bytes_covered: c.bytes_covered(),
+                blocks: c.blocks.keys().copied().collect(),
             }),
             taint: None,
         });
