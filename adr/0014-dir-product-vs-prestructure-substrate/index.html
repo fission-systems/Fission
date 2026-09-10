@@ -1404,12 +1404,12 @@ strategy</strong> beside HIR, both rooted in the same low-level semantic IR:</p>
 <ul>
 <li>“Structure on DIR” used to be read as “structure on the product path” when
   code meant “structure on the flat pre-HIR AST”.</li>
-<li>Emulator / selfjit / solver work could be mis-owned under a static midend
+<li>Emulator / solver work could be mis-owned under a static midend
   substrate instead of the validated product crate.</li>
 </ul>
 <p>A second overload is <strong>NIR</strong>: dual-layer <strong>print profile</strong> (ADR 0011), historical
-midend module name, and informal “low-level IR” in product writing. Emulator and
-selfjit today step <strong><code>PcodeOp</code> / <code>PcodeOpcode</code></strong>, not <code>PreHir*</code> / <code>HirFunction</code> /
+midend module name, and informal “low-level IR” in product writing. Both of the
+emulator's engines today step <strong><code>PcodeOp</code> / <code>PcodeOpcode</code></strong>, not <code>PreHir*</code> / <code>HirFunction</code> /
 print-NIR text. Hybrid decompile+emu+solver designs must not treat those as
 interchangeable.</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
@@ -1515,7 +1515,7 @@ may be called “NIR” in product language <strong>if and only if</strong>:</p>
 </tbody>
 </table>
 <p>Shipped reality (normative for ownership):</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>        ┌── emulator / selfjit   (step / JIT PcodeOp)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>        ┌── emulator             (interpret / JIT PcodeOp)
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>p-code ─┼── solver experiments   (same op / BV / memory model)
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        └── decompiler builder   (raise → pre-structure → structure → HIR)
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>                  ↑
@@ -1626,7 +1626,7 @@ dominance, post-dominance, SCC / SESE), not from a late HIR-only rewrite.</p>
 <td><strong>Not</strong> foundation; <strong>not</strong> DIR product</td>
 </tr>
 <tr>
-<td>Emulator / selfjit differential</td>
+<td>Emulator interpreter / JIT differential</td>
 <td><code>fission-emulator</code></td>
 <td>Executes foundation (<code>PcodeOp</code>); DIR-product oracle</td>
 </tr>
