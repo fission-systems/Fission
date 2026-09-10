@@ -57,8 +57,19 @@ impl<'a> Evaluator<'a> {
 
     pub(crate) fn read_varnode_u64(&mut self, vn: &Varnode) -> Result<u64> {
         if vn.is_constant {
-            Ok(vn.constant_val as u64)
-        } else {
+            // Same masking the JIT applies: a constant is a value of its
+            // declared size, and `constant_val` holds the signed form.
+            // Unmasked, `const(-1:4)` is 0xFFFF_FFFF_FFFF_FFFF next to a
+            // 4-byte register, and the subtraction that x86 `cmp` lowers to
+            // overflows its declared width.
+            let raw = vn.constant_val as u64;
+            return Ok(if vn.size >= 8 || vn.size == 0 {
+                raw
+            } else {
+                raw & ((1u64 << ((vn.size as u32) * 8)) - 1)
+            });
+        }
+        {
             let data = self
                 .state
                 .read_space(vn.space_id, vn.offset, vn.size as usize)?;

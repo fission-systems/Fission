@@ -26,13 +26,7 @@ impl LoadedBinary {
 
         if let Ok(idx) = idx {
             let section = &self.sections[idx];
-            let offset_in_section = address - section.virtual_address;
-            let file_offset = section.file_offset as usize + offset_in_section as usize;
-
-            if file_offset + size <= self.data.as_slice().len() {
-                let res = &self.data.as_slice()[file_offset..file_offset + size];
-                return Some(res);
-            }
+            return self.view_section_bytes(section, address, size);
         }
         None
     }
@@ -73,9 +67,29 @@ impl LoadedBinary {
             return None;
         }
         let offset_in_section = address - section.virtual_address;
+        // A section can be larger in memory than in the file -- `.bss` is the
+        // extreme case, `virtual_size` bytes against `file_size` of zero -- and
+        // the bytes past `file_size` are not in the file at all. They must not
+        // be read from wherever `file_offset + offset` happens to land: for
+        // `.bss`, `file_offset` is 0, so every read returned the start of the
+        // image. A PE's `.bss` came back holding "This program cannot be run in
+        // DOS mode", which is how mingw's CRT ended up spinning for ever on a
+        // once-lock whose zero it never saw.
+        if offset_in_section >= section.file_size {
+            return None;
+        }
+        // Short reads are normal -- a decoder asks for a window and takes what
+        // it gets -- so hand back what the section actually holds rather than
+        // refusing. What must never happen is reading *past* `file_size` into
+        // whatever follows in the file.
+        let available = (section.file_size - offset_in_section) as usize;
+        let take = size.min(available);
+        if take == 0 {
+            return None;
+        }
         let file_offset = section.file_offset as usize + offset_in_section as usize;
-        if file_offset + size <= self.data.as_slice().len() {
-            Some(&self.data.as_slice()[file_offset..file_offset + size])
+        if file_offset + take <= self.data.as_slice().len() {
+            Some(&self.data.as_slice()[file_offset..file_offset + take])
         } else {
             None
         }

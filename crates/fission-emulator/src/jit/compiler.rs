@@ -727,7 +727,22 @@ impl JitCompiler {
             ($vn:expr) => {{
                 let vn: &Varnode = $vn;
                 if vn.is_constant {
-                    builder.ins().iconst(types::I64, vn.constant_val as i64)
+                    // Mask to the varnode's own width. A p-code constant is a
+                    // value *of a declared size*, and `constant_val` keeps the
+                    // signed form: `const(-1:4)` came through as
+                    // 0xFFFF_FFFF_FFFF_FFFF while the register beside it was
+                    // masked to four bytes, so `EAX - (-1)` produced
+                    // 0x1_0000_0000 and the `IntEqual` against zero that
+                    // follows every x86 `cmp` said "not equal". mingw's CRT
+                    // reads its constructor list terminator with
+                    // `cmp EAX, -1`, so it never terminated.
+                    let masked = if vn.size >= 8 || vn.size == 0 {
+                        vn.constant_val as i64
+                    } else {
+                        let bits = (vn.size as u32) * 8;
+                        ((vn.constant_val as u64) & ((1u64 << bits) - 1)) as i64
+                    };
+                    builder.ins().iconst(types::I64, masked)
                 } else if vn.size > 8 {
                     // Wide: load low 8 bytes only for scalar ops; bulk path for Copy/Load/Store.
                     let v = ensure_var!(vn.space_id, vn.offset, 8);
