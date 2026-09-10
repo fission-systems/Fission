@@ -51,12 +51,12 @@ Using one name for both A and B causes design and review failures:
 
 - “Structure on DIR” used to be read as “structure on the product path” when
   code meant “structure on the flat pre-HIR AST”.
-- Emulator / selfjit / solver work could be mis-owned under a static midend
+- Emulator / solver work could be mis-owned under a static midend
   substrate instead of the validated product crate.
 
 A second overload is **NIR**: dual-layer **print profile** (ADR 0011), historical
-midend module name, and informal “low-level IR” in product writing. Emulator and
-selfjit today step **`PcodeOp` / `PcodeOpcode`**, not `PreHir*` / `HirFunction` /
+midend module name, and informal “low-level IR” in product writing. Both of the
+emulator's engines today step **`PcodeOp` / `PcodeOpcode`**, not `PreHir*` / `HirFunction` /
 print-NIR text. Hybrid decompile+emu+solver designs must not treat those as
 interchangeable.
 
@@ -116,7 +116,7 @@ may be called “NIR” in product language **if and only if**:
 Shipped reality (normative for ownership):
 
 ```text
-        ┌── emulator / selfjit   (step / JIT PcodeOp)
+        ┌── emulator             (interpret / JIT PcodeOp)
 p-code ─┼── solver experiments   (same op / BV / memory model)
         └── decompiler builder   (raise → pre-structure → structure → HIR)
                   ↑
@@ -193,7 +193,7 @@ The rename changes ownership vocabulary, not static decompiler semantics.
 | Pre-structure IR types & static normalize helpers | `fission-midend-prehir` / normalize | No assurance or emulator coupling |
 | Static structuring free functions | `fission-midend-structuring` | Prefer CFG facts from foundation over HIR-only repair |
 | HIR presentation / dual-layer print (incl. NIR profile) | `render` + ADR 0011 | **Not** foundation; **not** DIR product |
-| Emulator / selfjit differential | `fission-emulator` | Executes foundation (`PcodeOp`); DIR-product oracle |
+| Emulator interpreter / JIT differential | `fission-emulator` | Executes foundation (`PcodeOp`); DIR-product oracle |
 | Constraint / solver experiments | dedicated solver surface (existing or future) | Same foundation model; must not silently alter print-NIR oracle text |
 | DIR-product foundation, candidate, scope, evidence, assurance, pipeline | `fission-dir` | Experimental public Rust contract; P-code identity is mandatory |
 | First native region reconstruction and observation verification | `fission-dir::native` | Pure single-block integer regions; emulator traces plus solver proof/counterexample |

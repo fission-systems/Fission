@@ -581,9 +581,9 @@ impl JitCompiler {
         // one TB (e.g. a 32-bit sub-register access followed by a full
         // 64-bit access to the same base register); a size-less key would
         // let a narrower access's masked value get wrongly reused by a
-        // later wider access to the same offset. Found via a real
-        // register-copy divergence between this backend and `selfjit` at
-        // TB 0x10067e4 in a real corpus binary -- see PROJECT.md.
+        // later wider access to the same offset. Found by a differential
+        // against a second backend at TB 0x10067e4 -- the reason the
+        // emulator keeps two engines at all.
         let mut var_map: HashMap<(u64, u64, u64), Variable> = HashMap::new();
         let mut dirty: Vec<(u64, u64, u32, Variable)> = Vec::new();
 
@@ -1976,10 +1976,10 @@ fn space_const(vn: &Varnode) -> u64 {
 /// vec) -- used to validate a candidate relative delta, not to bound the
 /// search.
 ///
-/// `pub(crate)`, not private: pure `PcodeOp`/`Varnode` manipulation, no
-/// Cranelift dependency, so `crate::selfjit::compiler` reuses this exact
-/// function for its own intra-instruction relative-branch support rather
-/// than re-deriving the same logic.
+/// `pub(crate)`, not private: pure `PcodeOp`/`Varnode` manipulation with no
+/// Cranelift dependency, so `crate::interp` uses this exact function rather
+/// than re-deriving it. Both engines must read a relative destination the
+/// same way or a differential between them tests only that disagreement.
 pub(crate) fn remap_relative_branches(
     op: &mut PcodeOp,
     base: usize,
@@ -2110,10 +2110,9 @@ mod tests {
         }
     }
 
-    /// Real `Emulator` construction, same pattern as `selfjit::compiler`'s
-    /// own tests -- a real loaded ELF is the simplest way to get a
-    /// fully-formed `MachineState`/register space, even though these
-    /// tests' compiled code never touches the binary's own instructions.
+    /// A real loaded ELF is the simplest way to get a fully-formed
+    /// `MachineState`/register space, even though these tests' compiled code
+    /// never touches the binary's own instructions.
     fn make_emu() -> crate::core::Emulator {
         use crate::core::Emulator;
         use crate::os::LinuxEnv;
@@ -2143,11 +2142,9 @@ mod tests {
     }
 
     /// Compiles `ops` as a single-instruction TB via the real Cranelift
-    /// `JitCompiler` (the backend `run_instruction` actually dispatches to
-    /// -- unlike `selfjit`, which is scaffolding, not the live execution
-    /// path), executes it against a real `Emulator`, and returns that
-    /// emulator so the caller can read out whichever register-space
-    /// offsets it cares about.
+    /// `JitCompiler`, executes it against a real `Emulator`, and returns that
+    /// emulator so the caller can read out whichever register-space offsets
+    /// it cares about.
     fn compile_and_run(ops: Vec<PcodeOp>) -> crate::core::Emulator {
         let insns = [GuestInsn {
             pc: 0x1000,
