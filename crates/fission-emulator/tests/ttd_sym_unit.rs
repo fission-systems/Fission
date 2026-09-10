@@ -44,25 +44,37 @@ fn sym_cbranch_gate_noop_when_untainted() {
     assert!(state.get_shadow_memory(space, 0x200).is_none());
 }
 
-/// Register cache hits after full 8-byte write.
+/// A register write reads back, and invalidating clears it.
+///
+/// This used to assert on a slot cache in front of `host_reg_file`. There is no
+/// cache any more -- `host_reg_file` *is* register space, so the cache was
+/// paying a SipHash to save an eight-byte copy -- so the test now asserts the
+/// property that survives the mechanism: what was written comes back, at full
+/// width and in part, and `invalidate_reg_cache` really does clear it.
 #[test]
-fn reg_cache_hits_after_write() {
+fn a_register_write_reads_back_and_invalidating_clears_it() {
     let mut state = MachineState::new();
     let reg = state.register_space();
-    let off = 0x00u64; // RAX-ish offset in layout varies; any 8-aligned slot
+    let off = 0x00u64;
     state
         .write_space(reg, off, &0x1122_3344_5566_7788u64.to_le_bytes())
         .unwrap();
-    assert!(state.reg_cache.contains_key(&off));
-    let hits_before = state.reg_cache_hits;
+
     let v = state.read_space(reg, off, 8).unwrap();
     assert_eq!(
         u64::from_le_bytes(v.try_into().unwrap()),
         0x1122_3344_5566_7788
     );
-    assert!(state.reg_cache_hits > hits_before);
+    // A narrower read of the same slot sees the low bytes of it, which is what
+    // a sub-register access is.
+    assert_eq!(state.read_space(reg, off, 2).unwrap(), vec![0x88, 0x77]);
+    // And `read_into` -- the path the JIT actually takes -- agrees.
+    let mut buf = [0u8; 8];
+    state.read_into(reg, off, &mut buf).unwrap();
+    assert_eq!(u64::from_le_bytes(buf), 0x1122_3344_5566_7788);
+
     state.invalidate_reg_cache();
-    assert!(state.reg_cache.is_empty());
+    assert_eq!(state.read_space(reg, off, 8).unwrap(), vec![0u8; 8]);
 }
 
 /// TTD recompute path is reachable when snapshots exist (smoke via fixture).

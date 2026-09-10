@@ -72,6 +72,33 @@ impl AddressSpace {
         self.pages.get(&page_addr)
     }
 
+    /// Read into a caller's buffer.
+    ///
+    /// `read` allocates a `Vec` for its result, and the JIT's memory callback
+    /// wants eight bytes at most -- so the allocator was showing up as the
+    /// single largest cost in a loop that reads one register slot. This is the
+    /// primitive; `read` is a thin wrapper that allocates once at the boundary.
+    pub fn read_into(&self, addr: u64, buf: &mut [u8]) {
+        buf.fill(0);
+        let ps = self.page_size as usize;
+        let mut done = 0usize;
+        while done < buf.len() {
+            let current = addr.wrapping_add(done as u64);
+            let offset = (current & (self.page_size - 1)) as usize;
+            let take = (buf.len() - done).min(ps - offset);
+            match self.get_page(current) {
+                Some(MemoryPage::Concrete(data)) => {
+                    buf[done..done + take].copy_from_slice(&data[offset..offset + take]);
+                }
+                Some(MemoryPage::Symbolic { concrete, .. }) => {
+                    buf[done..done + take].copy_from_slice(&concrete[offset..offset + take]);
+                }
+                Some(MemoryPage::ArrayTheory { .. }) | None => {}
+            }
+            done += take;
+        }
+    }
+
     /// Read `size` bytes, a page span at a time.
     ///
     /// Not byte at a time: each byte used to cost its own page lookup, and a
@@ -79,28 +106,8 @@ impl AddressSpace {
     /// hashed the same page address eight times. Accesses that stay inside one
     /// page -- nearly all of them -- now hash once.
     pub fn read(&self, addr: u64, size: usize) -> Result<Vec<u8>> {
-        // Unmapped memory reads as zero, so start there and fill in what
-        // exists.
         let mut result = vec![0u8; size];
-        let ps = self.page_size as usize;
-        let mut done = 0usize;
-        while done < size {
-            let current = addr.wrapping_add(done as u64);
-            let offset = (current & (self.page_size - 1)) as usize;
-            let take = (size - done).min(ps - offset);
-            match self.get_page(current) {
-                Some(MemoryPage::Concrete(data)) => {
-                    result[done..done + take].copy_from_slice(&data[offset..offset + take]);
-                }
-                Some(MemoryPage::Symbolic { concrete, .. }) => {
-                    result[done..done + take].copy_from_slice(&concrete[offset..offset + take]);
-                }
-                // ArrayTheory has no concrete bytes to give, and an absent
-                // page has none either. Both stay zero.
-                Some(MemoryPage::ArrayTheory { .. }) | None => {}
-            }
-            done += take;
-        }
+        self.read_into(addr, &mut result);
         Ok(result)
     }
 
@@ -232,11 +239,9 @@ pub struct MachineState {
     #[serde(skip)]
     pub trace_shadow_writes: Vec<(u64, u64, Option<u32>, Option<u32>)>, // (space_id, address, old_node, new_node)
 
-    /// Persistent register-space cache (offset → u64) across TBs.
-    /// Reduces page-map walk cost for hot GPRs; invalidated on bulk restore.
-    #[serde(skip)]
-    pub reg_cache: std::collections::HashMap<u64, u64>,
-    /// Hit/miss counters for telemetry.
+    /// Vestigial: the register slot cache is gone (`host_reg_file` is the
+    /// register file, so a cache in front of it cost a SipHash to save an
+    /// eight-byte copy). Kept at zero so the metrics shape does not change.
     #[serde(skip)]
     pub reg_cache_hits: u64,
     #[serde(skip)]
@@ -285,16 +290,14 @@ impl MachineState {
             trace_mem_reads: Vec::new(),
             trace_mem_writes: Vec::new(),
             trace_shadow_writes: Vec::new(),
-            reg_cache: std::collections::HashMap::new(),
             reg_cache_hits: 0,
             reg_cache_misses: 0,
             host_reg_file: vec![0u8; HOST_REG_FILE_SIZE].into_boxed_slice(),
         }
     }
 
-    /// Drop persistent register cache (TTD restore / snapshot).
+    /// Clear the host register file (TTD restore / snapshot).
     pub fn invalidate_reg_cache(&mut self) {
-        self.reg_cache.clear();
         self.host_reg_file.fill(0);
     }
 
@@ -344,35 +347,26 @@ impl MachineState {
         space.theory_array_id = Some(id);
     }
 
-    pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
+    /// Read into a caller's buffer, without allocating.
+    ///
+    /// The JIT's memory callback wants at most eight bytes and used to get a
+    /// freshly allocated `Vec` for every one, which put `malloc`/`free` at the
+    /// top of the profile in a loop that reads a single register slot.
+    ///
+    /// The register slot cache went at the same time. `host_reg_file` *is*
+    /// register space -- a flat array -- so the cache was paying a SipHash to
+    /// avoid an eight-byte copy, and every block exit then paid another
+    /// callback to invalidate it.
+    pub fn read_into(&mut self, space_id: u64, addr: u64, buf: &mut [u8]) -> Result<()> {
         if space_id == 0 {
-            // const space: we shouldn't really read from it this way, but just in case
             bail!("Attempted to read from const space via memory read");
         }
-        // Hot path: register space via host_reg_file mirror / slot cache.
+        let size = buf.len();
+        // Hot path: register space is the host register file, directly.
         if space_id == self.spaces_layout.register && self.host_reg_in_range(addr, size) {
-            if (1..=8).contains(&size) && addr % 8 == 0 {
-                let key = addr;
-                if let Some(&cached) = self.reg_cache.get(&key) {
-                    self.reg_cache_hits = self.reg_cache_hits.saturating_add(1);
-                    let mut out = vec![0u8; size];
-                    for i in 0..size {
-                        out[i] = ((cached >> (i * 8)) & 0xff) as u8;
-                    }
-                    return Ok(out);
-                }
-                self.reg_cache_misses = self.reg_cache_misses.saturating_add(1);
-            }
             let start = addr as usize;
-            let data = self.host_reg_file[start..start + size].to_vec();
-            if size == 8 && addr % 8 == 0 {
-                let mut val = 0u64;
-                for (i, &b) in data.iter().enumerate() {
-                    val |= (b as u64) << (i * 8);
-                }
-                self.reg_cache.insert(addr, val);
-            }
-            return Ok(data);
+            buf.copy_from_slice(&self.host_reg_file[start..start + size]);
+            return Ok(());
         }
         if self.enforce_page_faults && space_id == self.spaces_layout.ram {
             use crate::pcode::page_map::AccessKind;
@@ -380,29 +374,24 @@ impl MachineState {
                 .check_range(addr, size, AccessKind::Read)
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-        if !self.spaces.contains_key(&space_id) {
-            self.spaces
-                .insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
-        }
-        let space = self.spaces.get_mut(&space_id).unwrap();
-        let data = space.read(addr, size)?;
-
-        if space_id == self.spaces_layout.register && (1..=8).contains(&size) && addr % 8 == 0 {
-            let mut val = 0u64;
-            for (i, &b) in data.iter().enumerate() {
-                val |= (b as u64) << (i * 8);
-            }
-            // Cache full 8-byte window (partial reads still seed the slot).
-            if size == 8 {
-                self.reg_cache.insert(addr, val);
-            }
-        }
+        // One lookup, not `contains_key` then `get_mut`: `spaces` is a HAMT
+        // too, so the pair hashed the space id twice on every access.
+        let space = self
+            .spaces
+            .entry(space_id)
+            .or_insert_with(|| AddressSpace::new(format!("space_{space_id}")));
+        space.read_into(addr, buf);
 
         if self.tracing_memory && space_id == self.spaces_layout.ram {
-            self.trace_mem_reads.push((addr, data.clone()));
+            self.trace_mem_reads.push((addr, buf.to_vec()));
         }
+        Ok(())
+    }
 
-        Ok(data)
+    pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
+        let mut out = vec![0u8; size];
+        self.read_into(space_id, addr, &mut out)?;
+        Ok(out)
     }
 
     pub fn read_space_readonly(&self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
@@ -461,27 +450,12 @@ impl MachineState {
             }
         }
 
-        // Keep host register file + slot cache coherent with writes.
-        if is_reg {
-            if host_ok {
-                let start = addr as usize;
-                self.host_reg_file[start..start + data.len()].copy_from_slice(data);
-            }
-            if data.len() == 8 && addr % 8 == 0 {
-                let mut val = 0u64;
-                for (i, &b) in data.iter().enumerate() {
-                    val |= (b as u64) << (i * 8);
-                }
-                self.reg_cache.insert(addr, val);
-            } else {
-                let start = addr & !7;
-                let end = addr.saturating_add(data.len() as u64);
-                let mut k = start;
-                while k < end {
-                    self.reg_cache.remove(&k);
-                    k = k.saturating_add(8);
-                }
-            }
+        // The host register file *is* register space, so keeping it current is
+        // the whole of the bookkeeping -- there is no cache in front of it to
+        // invalidate any more.
+        if is_reg && host_ok {
+            let start = addr as usize;
+            self.host_reg_file[start..start + data.len()].copy_from_slice(data);
         }
 
         Ok(())
