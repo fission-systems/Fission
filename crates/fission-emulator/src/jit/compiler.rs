@@ -588,11 +588,17 @@ impl JitCompiler {
         let mut dirty: Vec<(u64, u64, u32, Variable)> = Vec::new();
 
         // Map insn start op-index → guest len for count call emission.
-        let insn_start_set: HashMap<usize, ()> =
-            insn_starts.iter().map(|(i, _, _)| (*i, ())).collect();
-        // Same keys, carrying the guest PC, for the observer call.
-        let insn_start_pc: HashMap<usize, u64> =
-            insn_starts.iter().map(|(i, pc, _)| (*i, *pc)).collect();
+        // Op index → the guest PCs of every instruction starting there, in
+        // order. A *list*, not a map entry, because an instruction can lift to
+        // no p-code at all -- x86 `nop dword ptr [rax]` does -- and then it
+        // shares its start index with whatever follows. Keyed by index alone,
+        // one of the two silently disappeared: `jit_count_insn` fired once for
+        // the pair, so `inst_count` under-reported every p-code-less
+        // instruction in the run, and `max_inst` budgets counted low with it.
+        let mut insn_starts_at: Vec<Vec<u64>> = vec![Vec::new(); n_ops + 1];
+        for (i, pc, _) in &insn_starts {
+            insn_starts_at[(*i).min(n_ops)].push(*pc);
+        }
 
         macro_rules! ensure_var {
             ($space:expr, $offset:expr, $size:expr) => {{
@@ -830,12 +836,12 @@ impl JitCompiler {
                 builder.seal_block(cont_b);
             }
 
-            // Guest-insn boundary accounting.
-            if insn_start_set.contains_key(&idx) {
+            // Guest-insn boundary accounting: one per instruction starting
+            // here, in order, so a zero-op instruction still counts.
+            for start_pc in &insn_starts_at[idx] {
                 builder.ins().call(count_ref, &[emu_ptr]);
                 if observe.insn {
-                    let pc = insn_start_pc[&idx];
-                    let pc = builder.ins().iconst(types::I64, pc as i64);
+                    let pc = builder.ins().iconst(types::I64, *start_pc as i64);
                     builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
                 }
             }
@@ -1841,6 +1847,18 @@ impl JitCompiler {
                 if let Some(ft) = fallthrough {
                     builder.ins().jump(ft, &[]);
                 } else {
+                    // Instructions that lift to nothing and sit at the end of
+                    // the block have no op to hang their accounting on. They
+                    // run only if the block is left by falling out of it --
+                    // an early branch skips them -- so this is the one edge
+                    // they belong on.
+                    for start_pc in &insn_starts_at[n_ops] {
+                        builder.ins().call(count_ref, &[emu_ptr]);
+                        if observe.insn {
+                            let pc = builder.ins().iconst(types::I64, *start_pc as i64);
+                            builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
+                        }
+                    }
                     builder
                         .ins()
                         .jump(exit_block, &[BlockArg::from(default_next)]);

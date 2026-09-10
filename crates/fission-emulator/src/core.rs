@@ -44,6 +44,14 @@ pub struct Emulator {
     pub max_inst: Option<u64>,
     /// P-Code ops retired (intra-insn loops); used with `max_inst` as a soft fuse.
     pub pcode_ops: u64,
+    /// Force every block through the interpreter, never the JIT.
+    ///
+    /// Exists so the two engines can be run against each other on the same
+    /// binary: a fallback that is only ever reached by accident is a fallback
+    /// nobody has tested.
+    pub force_interpreter: bool,
+    /// Blocks the JIT declined, and the interpreter ran instead.
+    pub interpreted_blocks: u64,
     /// Dynamic-analysis watchers. See [`crate::observe`].
     ///
     /// Not `pub`: registering one has to be able to flush the block cache, so
@@ -294,6 +302,8 @@ impl Emulator {
             inst_count: 0,
             max_inst: None,
             pcode_ops: 0,
+            force_interpreter: std::env::var_os("FISSION_EMU_INTERP").is_some(),
+            interpreted_blocks: 0,
             observers: Vec::new(),
             observe: crate::observe::ObserveMask::NONE,
             pcode_budget_pc: None,
@@ -516,6 +526,18 @@ impl Emulator {
     pub(crate) fn notify_translate(&mut self, entry_pc: u64, insns: &[(u64, u32)]) {
         for o in &mut self.observers {
             o.on_translate(entry_pc, insns);
+        }
+    }
+
+    pub(crate) fn notify_block(&mut self, pc: u64) {
+        for o in &mut self.observers {
+            o.on_block(pc);
+        }
+    }
+
+    pub(crate) fn notify_insn(&mut self, pc: u64) {
+        for o in &mut self.observers {
+            o.on_insn(pc);
         }
     }
 
@@ -904,25 +926,27 @@ impl Emulator {
 
         tracing::debug!("Executing PC=0x{:X}", self.pc);
 
-        // ─── JIT-only multi-instruction TB path ───────────────────────────────
+        // ─── Multi-instruction TB path ────────────────────────────────────────
         //
         //   1. Cache hit  → run host TB (counts insns + soft-chains internally).
         //   2. Cache miss → collect TB → compile → insert → run.
-        //   3. Compile fail → hard error (no interpreter).
+        //   3. Compile fail, or no JIT at all → interpret the block.
 
-        if let Some(block) = self.jit_cache.lookup(self.pc) {
-            tracing::debug!(
-                "JIT: cache hit TB@0x{:X} ({} guest insns)",
-                self.pc,
-                block.guest_insns
-            );
-            self.metrics.tbs_cache_hits += 1;
-            let func: extern "C" fn(*mut Emulator) -> u64 =
-                unsafe { std::mem::transmute(block.host_func_ptr) };
-            // inst_count is advanced inside the TB via jit_count_insn.
-            let next_pc = func(self as *mut _);
-            self.pc = next_pc;
-            return Ok(!self.halt_requested);
+        if !self.force_interpreter {
+            if let Some(block) = self.jit_cache.lookup(self.pc) {
+                tracing::debug!(
+                    "JIT: cache hit TB@0x{:X} ({} guest insns)",
+                    self.pc,
+                    block.guest_insns
+                );
+                self.metrics.tbs_cache_hits += 1;
+                let func: extern "C" fn(*mut Emulator) -> u64 =
+                    unsafe { std::mem::transmute(block.host_func_ptr) };
+                // inst_count is advanced inside the TB via jit_count_insn.
+                let next_pc = func(self as *mut _);
+                self.pc = next_pc;
+                return Ok(!self.halt_requested);
+            }
         }
 
         let insns = self.collect_translation_block().map_err(|e| {
@@ -963,22 +987,29 @@ impl Emulator {
             self.notify_translate(start_pc, &shape);
         }
 
+        // Interpret when asked to, when there is no JIT for this host, or when
+        // the JIT declines this particular block. Compiling is the fast path,
+        // not the only one.
+        if self.force_interpreter || self.jit.is_none() {
+            return self.run_block_interpreted(&insns);
+        }
+
         let observe = self.observe;
-        let jit = self
-            .jit
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("JIT compiler unavailable (host ISA unsupported)"))?;
+        let jit = self.jit.as_mut().expect("checked above");
         jit.observe = observe;
 
         let reg_sp = self.state.register_space();
-        let func_ptr = jit.compile_translation_block(&insns, reg_sp).map_err(|e| {
-            anyhow::anyhow!(
-                "JIT compile failed at TB@0x{:X} ({} insns): {:#}",
-                start_pc,
-                guest_insns,
-                e
-            )
-        })?;
+        let func_ptr = match jit.compile_translation_block(&insns, reg_sp) {
+            Ok(ptr) => ptr,
+            Err(e) => {
+                // Not fatal any more. An opcode Cranelift cannot lower is a
+                // slower block, not a dead run.
+                tracing::debug!(
+                    "JIT declined TB@0x{start_pc:X} ({guest_insns} insns): {e:#} -- interpreting"
+                );
+                return self.run_block_interpreted(&insns);
+            }
+        };
         self.metrics.tbs_compiled += 1;
 
         let block = std::sync::Arc::new(crate::jit::cache::JitBlock {
@@ -1003,6 +1034,20 @@ impl Emulator {
         let next_pc = func(self as *mut _);
         self.pc = next_pc;
         Ok(!self.halt_requested)
+    }
+
+    /// Interpret one block and settle `pc`, matching `run_instruction`'s
+    /// contract: `Ok(false)` means the run should stop.
+    fn run_block_interpreted(&mut self, insns: &[crate::jit::compiler::GuestInsn]) -> Result<bool> {
+        use crate::interp::InterpExit;
+        self.interpreted_blocks = self.interpreted_blocks.saturating_add(1);
+        match self.interpret_translation_block(insns)? {
+            InterpExit::Branch(pc) | InterpExit::FallThrough(pc) => {
+                self.pc = pc;
+                Ok(!self.halt_requested)
+            }
+            InterpExit::Halt => Ok(false),
+        }
     }
 
     pub fn run(&mut self) -> Result<()> {

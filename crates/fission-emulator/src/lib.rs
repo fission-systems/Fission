@@ -1,5 +1,6 @@
 pub mod arch;
 pub mod core;
+pub mod interp;
 pub mod jit;
 pub mod loader;
 pub mod metrics;

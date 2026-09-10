@@ -36,7 +36,7 @@ impl<'a> Evaluator<'a> {
 
     // ── Varnode I/O ───────────────────────────────────────────────────────────
 
-    fn read_varnode_u64(&mut self, vn: &Varnode) -> Result<u64> {
+    pub(crate) fn read_varnode_u64(&mut self, vn: &Varnode) -> Result<u64> {
         if vn.is_constant {
             Ok(vn.constant_val as u64)
         } else {
@@ -47,7 +47,7 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn write_varnode_u64(&mut self, vn: &Varnode, val: u64) -> Result<()> {
+    pub(crate) fn write_varnode_u64(&mut self, vn: &Varnode, val: u64) -> Result<()> {
         let bytes = val.to_le_bytes();
         // Clamp to 8 bytes — SIMD varnodes (XMM = 16B, YMM = 32B) are wider than u64
         let size = (vn.size as usize).min(8);
@@ -439,6 +439,47 @@ impl<'a> Evaluator<'a> {
                 let lo_bits = (op.inputs[1].size * 8) as u64;
                 let out = op.output.as_ref().expect("PIECE must have output");
                 let res = (hi << lo_bits) | lo;
+                self.write_varnode_u64(out, res)?;
+            }
+            // EXTRACT: `size` bits of input[0] starting at bit `input[1]`.
+            // Mirrors `jit::compiler`'s arm so the two engines agree on the
+            // width the result is masked to (the output varnode's, not the
+            // input's).
+            PcodeOpcode::Extract => {
+                let val = self.read_varnode_u64(&op.inputs[0])?;
+                let pos = if op.inputs.len() > 1 {
+                    self.read_varnode_u64(&op.inputs[1])?
+                } else {
+                    0
+                };
+                let out = op.output.as_ref().expect("EXTRACT must have output");
+                let shifted = if pos >= 64 { 0 } else { val >> pos };
+                let res = shifted & size_mask_u64(out.size);
+                self.write_varnode_u64(out, res)?;
+            }
+            // INSERT: input[1]'s low `input[3]` bits placed into input[0] at
+            // bit `input[2]`.
+            PcodeOpcode::Insert => {
+                let dest = self.read_varnode_u64(&op.inputs[0])?;
+                let src = self.read_varnode_u64(&op.inputs[1])?;
+                let pos = if op.inputs.len() > 2 {
+                    self.read_varnode_u64(&op.inputs[2])? as u32
+                } else {
+                    0
+                };
+                let nbits = if op.inputs.len() > 3 {
+                    self.read_varnode_u64(&op.inputs[3])? as u32
+                } else {
+                    (op.inputs[1].size * 8).min(64)
+                }
+                .min(64);
+                let out = op.output.as_ref().expect("INSERT must have output");
+                let mask = if nbits >= 64 {
+                    u64::MAX
+                } else {
+                    (1u64 << nbits) - 1
+                };
+                let res = (dest & !mask.wrapping_shl(pos)) | ((src & mask).wrapping_shl(pos));
                 self.write_varnode_u64(out, res)?;
             }
             PcodeOpcode::PopCount => {
