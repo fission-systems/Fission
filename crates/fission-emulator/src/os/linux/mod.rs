@@ -277,8 +277,19 @@ impl OsEnvironment for LinuxEnv {
                     .unwrap_or_default();
                 emu.notify_syscall_detailed(pc, sys_num, spec.map(|s| s.name), &args, detail);
             }
+            // Sink: a syscall argument carrying data derived from an
+            // untrusted source. Checked before the call, because the call is
+            // what the tainted value is about to be used for.
+            if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+                check_syscall_taint(emu, sys_num);
+            }
             if let Some(proc) = self.simos.syscalls.get(&sys_num) {
-                return proc.run(emu);
+                let result = proc.run(emu);
+                // Source: a syscall that fills a guest buffer from outside.
+                if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+                    taint_syscall_output(emu, sys_num);
+                }
+                return result;
             } else {
                 tracing::warn!("Unimplemented Linux x64 syscall: {}", sys_num);
                 emu.metrics.note_unknown_syscall(sys_num);
@@ -440,4 +451,100 @@ fn decode_syscall_args(
         });
     }
     out
+}
+
+/// Report a syscall argument that carries tainted data.
+///
+/// Two different findings, and the second is the common one:
+///
+/// - a tainted *value* in an argument register -- an fd, a length, or worse an
+///   address computed from untrusted input;
+/// - a tainted *buffer* an argument points at, which is what `write(fd, buf,
+///   n)` looks like when `buf` holds something the run read from outside.
+///   The pointer itself is clean there; only what it points at is not, so
+///   checking registers alone misses the canonical case entirely.
+fn check_syscall_taint(emu: &mut Emulator, number: u64) {
+    use syscall_abi::ArgKind;
+
+    let spec = syscall_abi::spec(number);
+    let name = spec
+        .map(|s| s.name.to_string())
+        .unwrap_or_else(|| format!("syscall_{number}"));
+    let pc = emu.pc;
+
+    let regs = ["RDI", "RSI", "RDX", "R10", "R8", "R9"];
+    let mut args = [0u64; 6];
+    for (slot, reg) in args.iter_mut().zip(regs) {
+        *slot = emu.read_register_u64(reg).unwrap_or(0);
+    }
+
+    for (index, reg) in regs.iter().enumerate() {
+        if let Some(set) = emu.register_taint(reg) {
+            emu.taint
+                .hit(pc, "syscall arg", format!("{name} arg{index}"), set);
+        }
+    }
+
+    let Some(spec) = spec else { return };
+    let ram = emu.state.ram_space();
+    for (index, kind) in spec.args.iter().enumerate() {
+        // How far to look. A string's length is not known until it is read, so
+        // scan a bounded window; a buffer says how long it is.
+        let (addr, span) = match kind {
+            ArgKind::Str => (args[index], 256u64),
+            ArgKind::Buf(len_index) => (
+                args[index],
+                args.get(*len_index).copied().unwrap_or(0).min(4096),
+            ),
+            _ => continue,
+        };
+        if addr == 0 || span == 0 {
+            continue;
+        }
+        // First tainted byte is enough: the finding is that the buffer carries
+        // untrusted data, not how much of it does.
+        if let Some(set) = (0..span).find_map(|i| emu.state.get_shadow_memory(ram, addr + i)) {
+            emu.taint.hit(
+                pc,
+                "syscall buffer",
+                format!("{name} arg{index} at 0x{addr:X}"),
+                set,
+            );
+        }
+    }
+}
+
+/// Mark what a syscall just read in from outside the guest.
+///
+/// After the call, not before: the buffer holds the data only once the call
+/// has run, and the length that matters is what it actually returned, not what
+/// was asked for.
+fn taint_syscall_output(emu: &mut Emulator, number: u64) {
+    // (buffer argument register, length: from the return value or an argument)
+    let (buf_reg, len_from_ret) = match number {
+        // read(fd, buf, count) / recvfrom(fd, buf, len, ...) -> bytes read
+        0 | 45 => ("RSI", true),
+        // getrandom(buf, buflen, flags) -> bytes written
+        318 => ("RDI", true),
+        _ => return,
+    };
+    let Ok(addr) = emu.read_register_u64(buf_reg) else {
+        return;
+    };
+    if addr == 0 {
+        return;
+    }
+    let len = if len_from_ret {
+        let ret = emu.read_register_u64("RAX").unwrap_or(0) as i64;
+        if ret <= 0 {
+            return;
+        }
+        ret as u64
+    } else {
+        return;
+    };
+    let label = syscall_abi::spec(number)
+        .map(|s| s.name.to_string())
+        .unwrap_or_else(|| format!("syscall_{number}"));
+    emu.taint_range(addr, len.min(1 << 20), label);
 }

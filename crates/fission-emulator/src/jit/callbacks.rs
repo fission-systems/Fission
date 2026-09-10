@@ -562,6 +562,25 @@ pub extern "C" fn jit_shadow_binop(
         return;
     }
 
+    // Taint asks only which sources a byte derives from, so combining two
+    // values is a set union -- no solver, no expression to allocate. The
+    // symbolic domain below answers a harder question and pays for it.
+    if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+        let merged = emu.taint.union(a_node, b_node);
+        let n = (dst_sz as usize).min(64) as u64;
+        for i in 0..n {
+            match merged {
+                Some(id) => {
+                    emu.state.set_shadow_memory(dst_sp, dst_off + i, id);
+                }
+                None => {
+                    emu.state.clear_shadow_memory(dst_sp, dst_off + i);
+                }
+            }
+        }
+        return;
+    }
+
     use fission_solver::SymExpr;
     let a_sz = (a_size as u32).max(1).min(8);
     let b_sz = (b_size as u32).max(1).min(8);
@@ -636,6 +655,17 @@ pub extern "C" fn jit_shadow_unop(
         let n = (dst_sz as usize).min(64) as u64;
         for i in 0..n {
             emu.state.clear_shadow_memory(dst_sp, dst_off + i);
+        }
+        return;
+    }
+    // A unary op cannot add a source, so under taint the label passes through
+    // unchanged -- `~x` derives from whatever `x` derived from.
+    if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+        if let Some(id) = a_node {
+            let n = (dst_sz as usize).min(64) as u64;
+            for i in 0..n {
+                emu.state.set_shadow_memory(dst_sp, dst_off + i, id);
+            }
         }
         return;
     }

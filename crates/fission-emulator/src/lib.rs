@@ -10,12 +10,13 @@ pub mod pcode;
 pub mod snapshot;
 pub mod srd;
 pub mod sym;
+pub mod taint;
 pub mod trace;
 
 pub use arch::{ArchInfo, Endianness};
 pub use core::{Emulator, RunOutcome};
 pub use metrics::{BudgetReport, EmulatorMetrics, SandboxMetricsReport};
-pub use observe::{BehaviorEvent, BehaviorLog, Coverage, ObserveMask, Observer};
+pub use observe::{BehaviorEvent, BehaviorLog, Coverage, ObserveMask, Observer, ShadowMode};
 pub use os::{BareMetalEnv, HleResult, LinuxEnv, OsEnvironment, WindowsEnv};
 pub use pcode::eval::Evaluator;
 pub use pcode::state::MachineState;
@@ -23,3 +24,4 @@ pub use snapshot::EmulatorSnapshot;
 pub use srd::{
     CaptureOpts, FieldDelta, MallocngProbe, OwnerLayer, SemanticReplayDelta, SemanticReplaySnapshot,
 };
+pub use taint::{TaintHit, TaintSource, TaintState};

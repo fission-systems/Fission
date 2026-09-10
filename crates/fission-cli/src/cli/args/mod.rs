@@ -291,6 +291,14 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub sym_explore: bool,
 
+    /// Track where untrusted input flows
+    ///
+    /// Marks what the run reads from outside (`read`, `recvfrom`,
+    /// `getrandom`) and reports when that data reaches a syscall. Data flow
+    /// only: a value that merely *decides* a branch is not carried across it.
+    #[arg(long)]
+    pub taint: bool,
+
     /// Also report which code the run reached (blocks, instructions, bytes)
     ///
     /// Costs one callback per translation block. The behaviour log -- syscalls

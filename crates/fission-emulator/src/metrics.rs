@@ -318,6 +318,27 @@ pub struct BehaviorReport {
     /// Present only when coverage was asked for -- it costs a call per block.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage: Option<CoverageReport>,
+    /// Present only when taint was asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taint: Option<TaintReport>,
+}
+
+/// Untrusted input reaching somewhere worth reporting.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TaintReport {
+    /// What the run treated as untrusted input.
+    pub sources: Vec<String>,
+    pub hits: Vec<TaintHitReport>,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub hits_dropped: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaintHitReport {
+    pub pc: u64,
+    pub sink: String,
+    pub detail: String,
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -453,7 +474,36 @@ impl SandboxMetricsReport {
                 instructions_executed: c.executed_instructions().len(),
                 bytes_covered: c.bytes_covered(),
             }),
+            taint: None,
         });
+        self
+    }
+
+    /// Attach what the taint layer saw, when it was on.
+    pub fn with_taint(mut self, taint: &crate::taint::TaintState) -> Self {
+        let report = TaintReport {
+            sources: taint.sources().iter().map(|s| s.label.clone()).collect(),
+            hits: taint
+                .hits
+                .iter()
+                .map(|h| TaintHitReport {
+                    pc: h.pc,
+                    sink: h.sink.clone(),
+                    detail: h.detail.clone(),
+                    sources: h.sources.clone(),
+                })
+                .collect(),
+            hits_dropped: taint.hits_dropped,
+        };
+        match self.behavior.as_mut() {
+            Some(behavior) => behavior.taint = Some(report),
+            None => {
+                self.behavior = Some(BehaviorReport {
+                    taint: Some(report),
+                    ..Default::default()
+                })
+            }
+        }
         self
     }
 

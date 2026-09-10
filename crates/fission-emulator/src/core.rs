@@ -49,6 +49,9 @@ pub struct Emulator {
     /// Not `pub`: changing it has to flush the block cache, so it goes through
     /// [`Emulator::set_shadow_mode`].
     pub(crate) shadow_mode: crate::observe::ShadowMode,
+    /// Taint sources, interned label sets, and what reached a sink. Only
+    /// meaningful under [`crate::observe::ShadowMode::Taint`].
+    pub taint: crate::taint::TaintState,
     /// Force every block through the interpreter, never the JIT.
     ///
     /// Exists so the two engines can be run against each other on the same
@@ -308,6 +311,7 @@ impl Emulator {
             max_inst: None,
             pcode_ops: 0,
             shadow_mode: crate::observe::ShadowMode::Off,
+            taint: crate::taint::TaintState::new(),
             force_interpreter: std::env::var_os("FISSION_EMU_INTERP").is_some(),
             interpreted_blocks: 0,
             observers: Vec::new(),
@@ -543,6 +547,41 @@ impl Emulator {
 
     pub fn shadow_mode(&self) -> crate::observe::ShadowMode {
         self.shadow_mode
+    }
+
+    /// Declare a range of guest memory as untrusted input.
+    ///
+    /// Turns the shadow layer on if it is off: marking a source and then not
+    /// propagating it would report nothing and look like a clean run, which is
+    /// the worst answer available.
+    pub fn taint_range(&mut self, addr: u64, len: u64, label: impl Into<String>) {
+        if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
+            self.set_shadow_mode(crate::observe::ShadowMode::Taint);
+        }
+        let set = self.taint.add_source(crate::taint::TaintSource {
+            label: label.into(),
+            pc: self.pc,
+            addr,
+            len,
+        });
+        let ram = self.state.ram_space();
+        for i in 0..len {
+            self.state.set_shadow_memory(ram, addr.wrapping_add(i), set);
+        }
+    }
+
+    /// The taint set on a register's first byte, if any.
+    ///
+    /// First byte, not all of them: a tainted value reaching a sink is the
+    /// finding, and a register whose low byte is clean while a higher one is
+    /// tainted is still a tainted register.
+    pub fn register_taint(&mut self, name: &str) -> Option<u32> {
+        let (space_id, offset, size) = self
+            .register_map
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| *v)?;
+        (0..u64::from(size).min(8)).find_map(|i| self.state.get_shadow_memory(space_id, offset + i))
     }
 
     pub(crate) fn notify_translate(&mut self, entry_pc: u64, insns: &[(u64, u32)]) {

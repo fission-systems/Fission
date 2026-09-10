@@ -518,6 +518,9 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     if args.coverage {
         emu.add_observer(Box::new(fission_emulator::observe::Coverage::new()));
     }
+    if args.taint {
+        emu.set_shadow_mode(fission_emulator::observe::ShadowMode::Taint);
+    }
 
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
 
@@ -593,6 +596,11 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     let report = match behavior_log {
         Some(log) => report.with_behavior(log, coverage),
         None => report,
+    };
+    let report = if args.taint {
+        report.with_taint(&emu.taint)
+    } else {
+        report
     };
 
     if let Some(path) = args.metrics_out {
