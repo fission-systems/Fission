@@ -1077,7 +1077,8 @@ impl Emulator {
         jit.shadow = shadow;
 
         let reg_sp = self.state.register_space();
-        let func_ptr = match jit.compile_translation_block(&insns, reg_sp) {
+        let uniq_sp = self.state.unique_space();
+        let func_ptr = match jit.compile_translation_block(&insns, reg_sp, uniq_sp) {
             Ok(ptr) => ptr,
             Err(e) => {
                 // Not fatal any more. An opcode Cranelift cannot lower is a

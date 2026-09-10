@@ -287,10 +287,12 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     if emu.ttd_snapshot_interval > 0 && emu.ttd.is_recording() {
         return next_pc;
     }
-    // Budgeted runs: return to the outer loop every TB so `max_inst` is checked.
-    if emu.max_inst.is_some() {
-        return next_pc;
-    }
+    // A budget does *not* mean returning to the dispatcher after every block.
+    // `max_inst_reached` is checked on the way in above and again before each
+    // hard-chain dive, so the budget is honoured either way -- but returning
+    // unconditionally meant every analysis run, which always sets `--max-inst`,
+    // paid a full dispatcher round trip and a `jit_cache` hash lookup per
+    // translation block. QEMU chains block to block precisely to avoid that.
     if emu.chain_depth >= MAX_CHAIN_DEPTH {
         return next_pc;
     }

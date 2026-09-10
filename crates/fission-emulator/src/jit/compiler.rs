@@ -189,6 +189,7 @@ impl JitCompiler {
         inst_len: u32,
         ops: &[PcodeOp],
         register_space: u64,
+        unique_space: u64,
     ) -> Result<*const u8> {
         self.compile_translation_block(
             &[GuestInsn {
@@ -197,6 +198,7 @@ impl JitCompiler {
                 ops: ops.to_vec(),
             }],
             register_space,
+            unique_space,
         )
     }
 
@@ -211,6 +213,7 @@ impl JitCompiler {
         &mut self,
         insns: &[GuestInsn],
         register_space: u64,
+        unique_space: u64,
     ) -> Result<*const u8> {
         anyhow::ensure!(!insns.is_empty(), "empty translation block");
         use crate::pcode::state::HOST_REG_FILE_SIZE;
@@ -255,6 +258,11 @@ impl JitCompiler {
                 }
             })
         });
+
+        // Ops whose result nothing reads. They keep their block -- branch
+        // targets are indices into `flat`, so the numbering has to stay -- and
+        // simply emit nothing into it; Cranelift folds the empty blocks away.
+        let dead_ops = dead_value_ops(&flat);
 
         let fallthrough_pc = {
             let last = insns.last().unwrap();
@@ -839,7 +847,17 @@ impl JitCompiler {
                             }
                         }
                     }
-                    dirty.push((vn.space_id, vn.offset, vn.size.min(8), v));
+                    // Unique space is per-instruction scratch: SLEIGH scopes a
+                    // temporary to one instruction's semantics, and a
+                    // translation block never splits an instruction, so nothing
+                    // outside this block can read one. Flushing them at exit
+                    // was two SipHashes, an `Arc::make_mut` and often a malloc
+                    // *each*, ten or so per block, for values nobody would ever
+                    // look at. It was the single largest cost in a loop that
+                    // touches no memory at all.
+                    if vn.space_id != unique_space {
+                        dirty.push((vn.space_id, vn.offset, vn.size.min(8), v));
+                    }
                 }
             }};
         }
@@ -897,7 +915,16 @@ impl JitCompiler {
             };
             let mut branched = false;
 
-            match op.opcode {
+            // `Unknown` is the match's "emit nothing" arm, and standing in
+            // for a dead op is how its block keeps its index -- branch targets
+            // are indices into `flat` -- without keeping its work.
+            let emit_opcode = if dead_ops[idx] {
+                PcodeOpcode::Unknown
+            } else {
+                op.opcode
+            };
+
+            match emit_opcode {
                 PcodeOpcode::Copy | PcodeOpcode::Cast => {
                     if let Some(out) = op.output.as_ref() {
                         if !op.inputs.is_empty() {
@@ -1882,6 +1909,7 @@ impl JitCompiler {
                     }
                 }
 
+                _ if dead_ops[idx] => {}
                 _ => {
                     tracing::warn!(
                         "JIT: unimplemented opcode {:?} in TB@0x{:X} (no-op)",
@@ -2026,6 +2054,96 @@ fn space_const(vn: &Varnode) -> u64 {
 /// Cranelift dependency, so `crate::interp` uses this exact function rather
 /// than re-deriving it. Both engines must read a relative destination the
 /// same way or a differential between them tests only that disagreement.
+/// Which ops in a block compute a value nothing will ever read.
+///
+/// SLEIGH lifts every x86 arithmetic instruction with all six flags -- parity
+/// included, which costs a `PopCount` -- and in a run of arithmetic almost all
+/// of them are overwritten by the next instruction before anything looks at
+/// them. `add eax,1; sub ecx,1; jnz` reads exactly one flag and computes
+/// twelve. QEMU's TCG never computes them at all until something asks
+/// (`cc_op`/`cc_src`/`cc_dst`); this is the same saving arrived at from the
+/// other end, by deleting rather than deferring.
+///
+/// Backward liveness over the block, with three rules that keep it sound:
+///
+/// - **Leaving the block makes everything live again.** A branch, a call, a
+///   return, or a userop can be followed by anything, so the walk forgets what
+///   it knew at each of them. A `CBRANCH` counts even though it may fall
+///   through -- if it is taken, whatever it left behind is live.
+/// - **A write kills an earlier write only at the exact same varnode.** The
+///   key is `(space, offset, size)`, and a 4-byte write to `EAX` does not
+///   cover the 8-byte `RAX` beside it. Requiring an exact match gives up some
+///   opportunities and cannot invent one.
+/// - **A read revives every varnode it overlaps**, not just its own key --
+///   reading `RAX` has to keep a pending `EAX` write alive.
+///
+/// Ops that do more than produce a value are never dropped: stores, userops,
+/// control flow, and loads, which can fault.
+pub(crate) fn dead_value_ops(flat: &[PcodeOp]) -> Vec<bool> {
+    use std::collections::HashSet;
+
+    fn leaves_block(opcode: PcodeOpcode) -> bool {
+        matches!(
+            opcode,
+            PcodeOpcode::Branch
+                | PcodeOpcode::CBranch
+                | PcodeOpcode::BranchInd
+                | PcodeOpcode::Call
+                | PcodeOpcode::CallInd
+                | PcodeOpcode::Return
+                | PcodeOpcode::CallOther
+        )
+    }
+
+    /// A value-producing op with no other effect.
+    fn is_pure(opcode: PcodeOpcode) -> bool {
+        !leaves_block(opcode)
+            && !matches!(
+                opcode,
+                // A store is the effect. A load can fault, and a fault the
+                // guest would have taken is not ours to remove.
+                PcodeOpcode::Store | PcodeOpcode::Load | PcodeOpcode::Unknown
+            )
+    }
+
+    let mut dead = vec![false; flat.len()];
+    // (space, offset, size) written later with nothing reading it in between.
+    let mut pending: HashSet<(u64, u64, u32)> = HashSet::new();
+
+    for (index, op) in flat.iter().enumerate().rev() {
+        if leaves_block(op.opcode) {
+            pending.clear();
+        }
+
+        if let Some(out) = op.output.as_ref() {
+            if !out.is_constant {
+                let key = (out.space_id, out.offset, out.size);
+                if is_pure(op.opcode) && pending.contains(&key) {
+                    dead[index] = true;
+                    // Its inputs are not read after all, so they stay dead.
+                    continue;
+                }
+                pending.insert(key);
+            }
+        }
+
+        for input in &op.inputs {
+            if input.is_constant {
+                continue;
+            }
+            let lo = input.offset;
+            let hi = input.offset.saturating_add(u64::from(input.size));
+            pending.retain(|(space, offset, size)| {
+                *space != input.space_id
+                    || offset.saturating_add(u64::from(*size)) <= lo
+                    || *offset >= hi
+            });
+        }
+    }
+
+    dead
+}
+
 pub(crate) fn remap_relative_branches(
     op: &mut PcodeOp,
     base: usize,
@@ -2199,7 +2317,7 @@ mod tests {
         }];
         let mut compiler = JitCompiler::new().expect("cranelift backend available");
         let func_ptr = compiler
-            .compile_translation_block(&insns, 4)
+            .compile_translation_block(&insns, 4, 2)
             .expect("compile");
         let mut emu = make_emu();
         let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =

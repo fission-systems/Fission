@@ -3,13 +3,18 @@
 Three emulators, the same two byte sequences, the same instruction counts, and
 the same two-point method so translation and set-up fall out of the difference.
 
-| workload      | Unicorn (QEMU TCG) | Fission  | Ghidra `PcodeEmulator` |
+| workload      | Unicorn (QEMU TCG) |  Fission | Ghidra `PcodeEmulator` |
 |---------------|-------------------:|---------:|-----------------------:|
-| register loop |          264.0 M/s | 8.28 M/s |               0.23 M/s |
-| memory loop   |          120.4 M/s | 4.74 M/s |               0.22 M/s |
+| register loop |          264.0 M/s | 19.5 M/s |               0.23 M/s |
+| memory loop   |          120.4 M/s | 10.0 M/s |               0.22 M/s |
 
-Measured 2026-09-10 on an Apple Silicon host. Fission at `318172eb9`, Unicorn
-2.1.4 built from `vendor/`, Ghidra 11.4.2 headless.
+Measured 2026-09-10 on an Apple Silicon host. Unicorn 2.1.4 built from
+`vendor/`, Ghidra 11.4.2 headless.
+
+Fission's column moved during the session that produced this file: 8.28 / 4.74
+before the p-code temporaries stopped being flushed to memory at every block
+exit, 19.5 / 10.0 after. The gap to Unicorn went from 32x to 13.5x on the
+register loop and 25x to 12x on the memory one.
 
 ## Reproducing
 
@@ -35,10 +40,24 @@ vendor/ghidra/ghidra_11.4.2_PUBLIC/support/analyzeHeadless /tmp/gproj bench \
 
 ## What the numbers say
 
-The register loop touches no memory at all and is the *worse* of the two ratios
-(32x behind Unicorn against the memory loop's 25x). So the gap is not mainly
-the memory path -- it is per-instruction work, and the largest single piece of
-that is **eager flag computation**. SLEIGH's x86 lifts every arithmetic
+The register loop touches no memory at all and is still the *worse* of the two
+ratios, so the gap is not mainly the memory path -- it is per-instruction work.
+
+Two guesses at what that work was turned out to be wrong, and the profile named
+the real one. Dead flag elimination bought 2%; letting blocks chain under an
+instruction budget bought nothing. What the profile actually showed, in a loop
+with no memory access at all, was `im::hamt::hash_key`, `SipHasher::write`,
+`malloc`/`free` and `Arc::make_mut` at the top -- p-code *temporaries* being
+written out to `MachineState` at every block exit. SLEIGH scopes a temporary to
+one instruction and a block never splits an instruction, so nothing outside the
+block could ever read them. Not writing them is 2.1-2.35x.
+
+The eager flags are still there and still real -- SLEIGH lifts every x86
+arithmetic instruction with all six, parity included, so `add eax, 1` is about
+ten p-code ops of which seven are flags and one is a `PopCount`, and QEMU
+computes none of them until something reads (`cc_op`/`cc_src`/`cc_dst`). The
+dead-value pass now removes the ones that are overwritten before any read. It
+was simply not where the time was going. SLEIGH's x86 lifts every arithmetic
 instruction with all six flags, parity included, so `add eax, 1` is around ten
 p-code ops of which seven are flags and one is a `PopCount`. QEMU's TCG keeps
 `cc_op`/`cc_src`/`cc_dst` and computes a flag only when something reads it; in
