@@ -2,6 +2,25 @@ use crate::pcode::state::MachineState;
 use anyhow::Result;
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 
+/// The flat op index a resolved intra-block branch names.
+///
+/// `remap_relative_branches` turns a *relative* p-code branch into an absolute
+/// index into the flattened block, and writes it to `constant_val` while
+/// leaving `offset` holding the original signed delta -- the JIT's own codegen
+/// reads `constant_val` for exactly that reason. Reading `offset` here instead
+/// meant a backward branch came back as a huge unsigned index: `tzcnt`'s
+/// bit-scan loop jumped out of range, the interpreter treated that as falling
+/// out of the block, and the ops that write the result register never ran. The
+/// two engines have to read the same field or they are not running the same
+/// program.
+fn branch_target_index(dest: &Varnode) -> usize {
+    if dest.is_constant {
+        dest.constant_val.max(0) as usize
+    } else {
+        dest.offset as usize
+    }
+}
+
 pub enum StepResult {
     Next,
     Branch(u64),
@@ -45,6 +64,38 @@ impl<'a> Evaluator<'a> {
                 .read_space(vn.space_id, vn.offset, vn.size as usize)?;
             Ok(le_bytes_to_u64(&data))
         }
+    }
+
+    /// Every byte of a varnode, however wide.
+    ///
+    /// `read_varnode_u64` stops at eight, which is right for arithmetic and
+    /// wrong for anything that just moves data: an XMM register is sixteen
+    /// bytes and a YMM is thirty-two, so a 16-byte `COPY` truncated to 8 left
+    /// the top half of the destination holding whatever was there before.
+    /// SSE `strlen` is where that shows up -- `pcmpeqb` compares all sixteen,
+    /// and half of them were stale.
+    pub(crate) fn read_varnode_bytes(&mut self, vn: &Varnode) -> Result<Vec<u8>> {
+        let size = vn.size as usize;
+        if vn.is_constant {
+            let mut out = vec![0u8; size];
+            let bytes = (vn.constant_val as u64).to_le_bytes();
+            for (slot, b) in out.iter_mut().zip(bytes) {
+                *slot = b;
+            }
+            return Ok(out);
+        }
+        self.state.read_space(vn.space_id, vn.offset, size)
+    }
+
+    pub(crate) fn write_varnode_bytes(&mut self, vn: &Varnode, data: &[u8]) -> Result<()> {
+        let size = (vn.size as usize).min(data.len());
+        self.state
+            .write_space(vn.space_id, vn.offset, &data[..size])
+    }
+
+    /// Whether this op has to be done a byte at a time.
+    fn is_wide(vn: &Varnode) -> bool {
+        vn.size > 8
     }
 
     pub(crate) fn write_varnode_u64(&mut self, vn: &Varnode, val: u64) -> Result<()> {
@@ -133,13 +184,18 @@ impl<'a> Evaluator<'a> {
         match op.opcode {
             // ── Memory ───────────────────────────────────────────────────────
             PcodeOpcode::Copy => {
-                let val = self.read_varnode_u64(&op.inputs[0])?;
                 let out = op.output.as_ref().expect("COPY must have output");
                 let node = self.read_varnode_shadow(&op.inputs[0]);
                 if let Some(id) = node {
                     self.write_varnode_shadow(out, id);
                 }
-                self.write_varnode_u64(out, val)?;
+                if Self::is_wide(out) || Self::is_wide(&op.inputs[0]) {
+                    let data = self.read_varnode_bytes(&op.inputs[0])?;
+                    self.write_varnode_bytes(out, &data)?;
+                } else {
+                    let val = self.read_varnode_u64(&op.inputs[0])?;
+                    self.write_varnode_u64(out, val)?;
+                }
             }
 
             PcodeOpcode::Load => {
@@ -295,16 +351,52 @@ impl<'a> Evaluator<'a> {
 
             // ── Bitwise ───────────────────────────────────────────────────────
             PcodeOpcode::IntAnd => {
-                let (a, b, o) = self.int_binary(&op)?;
-                self.write_varnode_u64(o, a & b)?;
+                if let Some(out) = op.output.as_ref().filter(|o| Self::is_wide(o)) {
+                    let out = out.clone();
+                    let a = self.read_varnode_bytes(&op.inputs[0])?;
+                    let b = self.read_varnode_bytes(&op.inputs[1])?;
+                    let merged: Vec<u8> = a
+                        .iter()
+                        .zip(b.iter().chain(std::iter::repeat(&0)))
+                        .map(|(x, y)| x & y)
+                        .collect();
+                    self.write_varnode_bytes(&out, &merged)?;
+                } else {
+                    let (a, b, o) = self.int_binary(&op)?;
+                    self.write_varnode_u64(o, a & b)?;
+                }
             }
             PcodeOpcode::IntOr => {
-                let (a, b, o) = self.int_binary(&op)?;
-                self.write_varnode_u64(o, a | b)?;
+                if let Some(out) = op.output.as_ref().filter(|o| Self::is_wide(o)) {
+                    let out = out.clone();
+                    let a = self.read_varnode_bytes(&op.inputs[0])?;
+                    let b = self.read_varnode_bytes(&op.inputs[1])?;
+                    let merged: Vec<u8> = a
+                        .iter()
+                        .zip(b.iter().chain(std::iter::repeat(&0)))
+                        .map(|(x, y)| x | y)
+                        .collect();
+                    self.write_varnode_bytes(&out, &merged)?;
+                } else {
+                    let (a, b, o) = self.int_binary(&op)?;
+                    self.write_varnode_u64(o, a | b)?;
+                }
             }
             PcodeOpcode::IntXor => {
-                let (a, b, o) = self.int_binary(&op)?;
-                self.write_varnode_u64(o, a ^ b)?;
+                if let Some(out) = op.output.as_ref().filter(|o| Self::is_wide(o)) {
+                    let out = out.clone();
+                    let a = self.read_varnode_bytes(&op.inputs[0])?;
+                    let b = self.read_varnode_bytes(&op.inputs[1])?;
+                    let merged: Vec<u8> = a
+                        .iter()
+                        .zip(b.iter().chain(std::iter::repeat(&0)))
+                        .map(|(x, y)| x ^ y)
+                        .collect();
+                    self.write_varnode_bytes(&out, &merged)?;
+                } else {
+                    let (a, b, o) = self.int_binary(&op)?;
+                    self.write_varnode_u64(o, a ^ b)?;
+                }
             }
             PcodeOpcode::IntLeft => {
                 let (a, b, o) = self.int_binary(&op)?;
@@ -331,9 +423,19 @@ impl<'a> Evaluator<'a> {
                 self.write_varnode_u64(out, res as u64)?;
             }
             PcodeOpcode::IntNegate => {
-                let val = self.read_varnode_u64(&op.inputs[0])?;
-                let out = op.output.as_ref().expect("INT_NEGATE must have output");
-                self.write_varnode_u64(out, !val)?;
+                let out = op
+                    .output
+                    .as_ref()
+                    .expect("INT_NEGATE must have output")
+                    .clone();
+                if Self::is_wide(&out) {
+                    let data = self.read_varnode_bytes(&op.inputs[0])?;
+                    let flipped: Vec<u8> = data.iter().map(|b| !b).collect();
+                    self.write_varnode_bytes(&out, &flipped)?;
+                } else {
+                    let val = self.read_varnode_u64(&op.inputs[0])?;
+                    self.write_varnode_u64(&out, !val)?;
+                }
             }
             PcodeOpcode::Int2Comp => {
                 let val = self.read_varnode_u64(&op.inputs[0])?;
@@ -637,7 +739,7 @@ impl<'a> Evaluator<'a> {
             PcodeOpcode::Branch => {
                 let dest = &op.inputs[0];
                 if dest.space_id == 0 || dest.is_constant {
-                    return Ok(StepResult::BranchRel(dest.offset as usize));
+                    return Ok(StepResult::BranchRel(branch_target_index(dest)));
                 }
                 return Ok(StepResult::Branch(dest.offset));
             }
@@ -652,7 +754,7 @@ impl<'a> Evaluator<'a> {
                     condition_val,
                     condition_node,
                     true_rel_idx: if is_rel {
-                        Some(dest.offset as usize)
+                        Some(branch_target_index(dest))
                     } else {
                         None
                     },

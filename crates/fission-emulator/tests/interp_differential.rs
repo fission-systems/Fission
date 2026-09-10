@@ -4,52 +4,52 @@
 //! so this drives the same fixture through both engines and compares what the
 //! guest actually did -- not just that neither crashed.
 //!
-//! # Ignored, because they do not agree yet
+//! # What agrees, and what does not
 //!
-//! These ran the moment the interpreter was wired, and found two things.
+//! `the_engines_agree_exactly_on_a_binary_without_simd` passes and is the
+//! gate. On a fixture inside both engines' reach they match on every axis:
+//! instruction path, outward calls, instruction count, final PC.
 //!
-//! The first is fixed: an instruction that lifts to *no* p-code -- x86
-//! `nop dword ptr [rax]` is one -- shares its start index with whatever
-//! follows it, and both engines keyed their per-instruction accounting by that
-//! index alone. One of the pair vanished, so `jit_count_insn` fired once for
-//! two instructions and `inst_count` had been under-reporting every
-//! p-code-less instruction in every run.
+//! Getting there fixed three real bugs, each found by this harness:
 //!
-//! The second is diagnosed, and it is in the **JIT**. Comparing register state
-//! at *block boundaries* -- mid-block is meaningless, since the JIT keeps
-//! registers in Cranelift variables and flushes at TB exit, so an observer
-//! reading them part-way through sees stale values -- puts the first
-//! difference at the block after `0x10067FB`, in one register:
+//! 1. **The JIT flushed undefined variables over live registers.** `store_vn!`
+//!    already writes `host_reg_file`, which *is* register space, so the exit
+//!    writeback never needed values -- it needed to invalidate `reg_cache`.
+//!    Reading the SSA variables instead meant a register written only on an
+//!    untaken path flushed zero: `rep stosq` leaves via `CBRANCH` before the
+//!    ops that touch RDI, so the exiting iteration zeroed a live pointer.
+//!    Going through `write_space` also cleared shadow on the way, so register
+//!    taint could not survive a block boundary.
+//! 2. **The interpreter read a branch target from the wrong field.**
+//!    `remap_relative_branches` writes the resolved flat index to
+//!    `constant_val` and leaves `offset` holding the signed delta; the JIT
+//!    reads `constant_val` and the evaluator read `offset`. A backward branch
+//!    came back as a huge unsigned index, so `tzcnt`'s bit-scan loop looked
+//!    like it fell out of the block and the ops writing the result never ran.
+//! 3. **The interpreter truncated wide varnodes to eight bytes.** An XMM
+//!    register is sixteen, so a `COPY` left the top half stale.
+//!
+//! The three tests below stay `#[ignore]`d, and the reason is no longer a
+//! mystery: **neither engine implements 128-bit SIMD**, and they approximate
+//! it differently. `load_vn!` takes the low eight bytes of a wide varnode;
+//! the interpreter now moves all sixteen for `COPY` and the bitwise ops but
+//! still has no 128-bit shift, and `pmovmskb` lifts to `IntRight` on a
+//! 16-byte value followed by a `SubPiece` out of it. On the static musl
+//! fixture that is `strlen`, at step 2234:
 //!
 //! ```text
-//! jit:    RDI=0x0
-//! interp: RDI=0x7FFFFFFFEE20    <- continues 0xEE10, 0xEE18, 0xEE20
+//! after: 0x1006936 0x100693A 0x100693E 0x1006942 0x1006946 0x1006948
+//! jit:    0x10069AE   (took the branch)
+//! interp: 0x100694A   (fell through)
 //! ```
 //!
-//! `0x10067FB` is `rep stosq`. Its p-code leaves via `CBRANCH -> 0x10067FE`
-//! when `RCX == 0`, *before* the ops that touch RDI, so on the exiting
-//! iteration RDI is never written. But `ensure_var!` emits its seeding
-//! `def_var` wherever the varnode is first mentioned -- inside a block that
-//! path skips -- and the exit writeback's `use_var` then reads an undefined
-//! value and flushes **zero over a live pointer**. Everything downstream ran
-//! on rubble; that the program still reached `exit_group` in 967 instructions
-//! was the symptom, not health.
+//! Making these pass means real 128-bit semantics in both engines, not making
+//! the interpreter copy the JIT's approximation -- a differential that pins a
+//! shared wrong answer has stopped being one.
 //!
-//! ## The obvious fix is wrong, and measuring said so
-//!
-//! Hoisting the seeds into the entry block so they dominate takes the JIT from
-//! 852 to 18,248 blocks -- it starts doing musl's real start-up -- and then
-//! hangs at `0x100270C`. `var_map` is keyed by `(space, offset, **size**)`, so
-//! `EAX` and `RAX` are *different variables*, and their coherence depends on
-//! the later, wider access seeding itself from `host_reg_file` **after** the
-//! narrower `store_vn!` wrote it. Lazy seeding is load-bearing; hoisting it
-//! reads the pre-write value. Reverted.
-//!
-//! The sound fix is one variable per `(space, offset)` at register
-//! granularity, with sub-register writes doing read-modify-write on it --
-//! which removes the aliasing the size key was invented to work around in the
-//! first place (see `jit::compiler`'s own `var_map` comment). Not attempted
-//! here.
+//! One difference here is convention, not correctness: on halt the JIT leaves
+//! `pc` past the whole block and the interpreter now does the same, because
+//! the two have to answer alike even where neither answer is obviously better.
 //!
 //! Run them with `cargo test -p fission-emulator --test interp_differential
 //! -- --ignored`.
@@ -65,8 +65,21 @@ use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
 fn build(max_inst: u64, interpret: bool) -> Emulator {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_printf_malloc.elf");
+    build_from("x64_static_printf_malloc.elf", max_inst, interpret)
+}
+
+/// The fixture both engines can currently run to the end: no SSE, so neither
+/// engine's 128-bit approximation is in play.
+fn build_simple(max_inst: u64, interpret: bool) -> Emulator {
+    let mut emu = build_from("x64_concolic_branch_sys.elf", max_inst, interpret);
+    emu.seed_stdin(b"A");
+    emu
+}
+
+fn build_from(fixture: &str, max_inst: u64, interpret: bool) -> Emulator {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata")
+        .join(fixture);
     let binary = LoadedBinary::from_file(&path).expect("load");
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");
@@ -134,7 +147,7 @@ fn syscall_trace(emu: &mut Emulator) -> Vec<(u64, [u64; 6])> {
 }
 
 #[test]
-#[ignore = "interpreter diverges from the JIT; see the module doc for where"]
+#[ignore = "neither engine implements 128-bit SIMD; see the module doc"]
 fn the_interpreter_reaches_the_same_place_as_the_jit() {
     let mut jitted = build(20_000, false);
     jitted.add_observer(Box::new(BehaviorLog::new()));
@@ -180,7 +193,7 @@ fn the_interpreter_reaches_the_same_place_as_the_jit() {
 }
 
 #[test]
-#[ignore = "interpreter diverges from the JIT; see the module doc for where"]
+#[ignore = "neither engine implements 128-bit SIMD; see the module doc"]
 fn the_interpreter_covers_the_same_code() {
     let mut jitted = build(20_000, false);
     jitted.add_observer(Box::new(Coverage::new()));
@@ -213,7 +226,7 @@ fn the_interpreter_covers_the_same_code() {
 }
 
 #[test]
-#[ignore = "interpreter diverges from the JIT; see the module doc for where"]
+#[ignore = "neither engine implements 128-bit SIMD; see the module doc"]
 fn the_engines_take_the_same_path_instruction_by_instruction() {
     let mut jitted = build(20_000, false);
     jitted.add_observer(Box::new(PcTrace::default()));
@@ -244,4 +257,77 @@ fn the_engines_take_the_same_path_instruction_by_instruction() {
             int_pc.map_or("<end>".into(), |p| format!("0x{p:X}")),
         );
     }
+}
+
+/// The gate: on a fixture inside both engines' reach, they must agree exactly.
+///
+/// This is what the three ignored tests above will look like once 128-bit SIMD
+/// is real in both. Until then it guards the bugs that *are* fixed -- an
+/// undefined register flushed over a live one, a branch target read from the
+/// wrong field, a wide `COPY` truncated to eight bytes -- any of which breaks
+/// this immediately.
+#[test]
+fn the_engines_agree_exactly_on_a_binary_without_simd() {
+    let mut jitted = build_simple(4096, false);
+    jitted.add_observer(Box::new(PcTrace::default()));
+    jitted.add_observer(Box::new(BehaviorLog::new()));
+    let jit_run = jitted.run();
+
+    let mut interpreted = build_simple(4096, true);
+    interpreted.add_observer(Box::new(PcTrace::default()));
+    interpreted.add_observer(Box::new(BehaviorLog::new()));
+    let int_run = interpreted.run();
+
+    assert!(
+        interpreted.interpreted_blocks > 0 && interpreted.metrics.tbs_compiled == 0,
+        "the interpreted run did not actually interpret"
+    );
+    assert_eq!(
+        jit_run.is_ok(),
+        int_run.is_ok(),
+        "engines disagree on success: jit={jit_run:?} interp={int_run:?}"
+    );
+
+    let jit_obs = jitted.take_observers();
+    let int_obs = interpreted.take_observers();
+    let jit_pcs = &jit_obs
+        .iter()
+        .find_map(|o| o.as_any().downcast_ref::<PcTrace>())
+        .unwrap()
+        .pcs;
+    let int_pcs = &int_obs
+        .iter()
+        .find_map(|o| o.as_any().downcast_ref::<PcTrace>())
+        .unwrap()
+        .pcs;
+    assert!(!jit_pcs.is_empty(), "no trace recorded");
+    if let Some((i, a, b)) = first_divergence(jit_pcs, int_pcs) {
+        panic!(
+            "engines diverge at step {i}\n  after: {}\n  jit:    {}\n  interp: {}",
+            jit_pcs[i.saturating_sub(6)..i]
+                .iter()
+                .map(|pc| format!("0x{pc:X}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+            a.map_or("<end>".into(), |p| format!("0x{p:X}")),
+            b.map_or("<end>".into(), |p| format!("0x{p:X}")),
+        );
+    }
+
+    let calls = |obs: &[Box<dyn fission_emulator::observe::Observer>]| -> Vec<String> {
+        obs.iter()
+            .find_map(|o| o.as_any().downcast_ref::<BehaviorLog>())
+            .unwrap()
+            .events
+            .iter()
+            .map(|e| e.render())
+            .collect()
+    };
+    assert_eq!(
+        calls(&jit_obs),
+        calls(&int_obs),
+        "engines made different calls outward"
+    );
+    assert_eq!(jitted.inst_count, interpreted.inst_count);
+    assert_eq!(jitted.pc, interpreted.pc);
 }

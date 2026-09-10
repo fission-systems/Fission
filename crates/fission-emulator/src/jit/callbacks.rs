@@ -352,29 +352,49 @@ pub extern "C" fn jit_host_reg_base(emu_ptr: *mut Emulator) -> u64 {
     emu.state.host_reg_file_ptr() as u64
 }
 
-/// Bulk-sync dirty register slots from SSA values into guest register space.
+/// Refresh the register slot cache for the offsets a block wrote.
 ///
-/// `entries` is a packed array of `(offset:u64, size:u64, value:u64)` triples
-/// (`count` triples). One callout replaces N `jit_write_space` calls at CallOther.
+/// It used to write *values* here, taken from the compiled block's SSA
+/// variables, and that was two bugs at once.
+///
+/// The values were never needed. `store_vn!` writes `host_reg_file` directly on
+/// every register store, and `host_reg_file` *is* register space -- `read_space`
+/// and `write_space` both go through it. So by the time a block exits, the
+/// bytes are already right. What is not right is `reg_cache`, the aligned
+/// 8-byte shadow in front of it, which `store_vn!` does not touch. Keeping that
+/// coherent is the whole job.
+///
+/// Reading the variables was actively wrong. A register written only on a path
+/// the block did not take has no definition on the path it did take, so
+/// `use_var` read an undefined value and this call flushed it -- zero -- over a
+/// live register. `rep stosq` leaves via `CBRANCH` before the ops that touch
+/// RDI, so the exiting iteration zeroed a live pointer every time.
+///
+/// And going through `write_space` cleared shadow on the way, so register taint
+/// could not survive a block boundary.
+///
+/// `entries` is a packed array of `(offset:u64, size:u64)` pairs.
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_reg_bulk_flush(emu_ptr: *mut Emulator, entries: *const u64, count: u64) {
+pub extern "C" fn jit_reg_cache_sync(emu_ptr: *mut Emulator, entries: *const u64, count: u64) {
     if entries.is_null() || count == 0 {
         return;
     }
     let emu = unsafe { &mut *emu_ptr };
     let n = count as usize;
-    let slice = unsafe { std::slice::from_raw_parts(entries, n * 3) };
-    let reg = emu.state.register_space();
+    let slice = unsafe { std::slice::from_raw_parts(entries, n * 2) };
     for i in 0..n {
-        let off = slice[i * 3];
-        let size = (slice[i * 3 + 1] as usize).min(8).max(1);
-        let mut val = slice[i * 3 + 2];
-        let mut bytes = Vec::with_capacity(size);
-        for _ in 0..size {
-            bytes.push((val & 0xff) as u8);
-            val >>= 8;
+        let off = slice[i * 2];
+        let size = (slice[i * 2 + 1] as usize).clamp(1, 8) as u64;
+        // `reg_cache` is keyed by aligned 8-byte slot, so a write anywhere in a
+        // slot invalidates the whole slot -- and a size-1 write at offset 1
+        // (x86 `AH`) invalidates the slot holding `RAX`, which is the case that
+        // makes dropping the entry the only safe answer.
+        let mut slot = off & !7;
+        let end = off.saturating_add(size);
+        while slot < end {
+            emu.state.reg_cache.remove(&slot);
+            slot = slot.saturating_add(8);
         }
-        let _ = emu.state.write_space(reg, off, &bytes);
     }
 }
 

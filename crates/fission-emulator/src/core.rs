@@ -1124,7 +1124,17 @@ impl Emulator {
                 self.pc = pc;
                 Ok(!self.halt_requested)
             }
-            InterpExit::Halt => Ok(false),
+            InterpExit::Halt => {
+                // Leave `pc` where a compiled block would have left it: past
+                // the whole block, not at the instruction that halted. Which
+                // of the two is more *useful* is arguable -- the halting
+                // instruction says more -- but the two engines have to answer
+                // the same, and this is the answer the JIT has always given.
+                if let Some(last) = insns.last() {
+                    self.pc = last.pc.wrapping_add(u64::from(last.len));
+                }
+                Ok(false)
+            }
         }
     }
 

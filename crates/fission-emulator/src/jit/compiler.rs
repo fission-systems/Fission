@@ -125,8 +125,8 @@ impl JitCompiler {
                 crate::jit::callbacks::jit_host_reg_base as *const u8,
             ),
             (
-                "jit_reg_bulk_flush",
-                crate::jit::callbacks::jit_reg_bulk_flush as *const u8,
+                "jit_reg_cache_sync",
+                crate::jit::callbacks::jit_reg_cache_sync as *const u8,
             ),
             (
                 "jit_shadow_copy",
@@ -487,7 +487,7 @@ impl JitCompiler {
             .declare_function("jit_shadow_unop", Linkage::Import, &sig_sh_un)
             .unwrap();
 
-        // jit_reg_bulk_flush(emu, entries_ptr, count)
+        // jit_reg_cache_sync(emu, entries_ptr, count)
         let mut sig_bulk = self.module.make_signature();
         sig_bulk.params.extend([
             AbiParam::new(types::I64),
@@ -496,7 +496,7 @@ impl JitCompiler {
         ]);
         let reg_bulk_fn = self
             .module
-            .declare_function("jit_reg_bulk_flush", Linkage::Import, &sig_bulk)
+            .declare_function("jit_reg_cache_sync", Linkage::Import, &sig_bulk)
             .unwrap();
 
         // ── Blocks ───────────────────────────────────────────────────────────
@@ -1706,8 +1706,7 @@ impl JitCompiler {
                     //   bulk re-syncs AddressSpace from SSA values)
                     // - unique/ram → per-slot write_space
                     {
-                        let mut reg_entries: Vec<(u64, u32, cranelift_frontend::Variable)> =
-                            Vec::new();
+                        let mut reg_entries: Vec<(u64, u32)> = Vec::new();
                         for ((sp, off), (sz, v)) in &flushed {
                             if *sp == 0 {
                                 continue;
@@ -1715,7 +1714,7 @@ impl JitCompiler {
                             if *sp == register_space
                                 && (*off as usize) + (*sz as usize) <= HOST_REG_FILE_SIZE
                             {
-                                reg_entries.push((*off, *sz, *v));
+                                reg_entries.push((*off, *sz));
                                 continue;
                             }
                             let val = builder.use_var(*v);
@@ -1730,17 +1729,15 @@ impl JitCompiler {
                             let n = reg_entries.len();
                             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                 StackSlotKind::ExplicitSlot,
-                                (n * 24) as u32,
+                                (n * 16) as u32,
                                 0,
                             ));
-                            for (i, (off, sz, v)) in reg_entries.iter().enumerate() {
-                                let base = (i * 24) as i32;
+                            for (i, (off, sz)) in reg_entries.iter().enumerate() {
+                                let base = (i * 16) as i32;
                                 let offv = builder.ins().iconst(types::I64, *off as i64);
                                 let szv = builder.ins().iconst(types::I64, *sz as i64);
-                                let val = builder.use_var(*v);
                                 builder.ins().stack_store(offv, slot, base);
                                 builder.ins().stack_store(szv, slot, base + 8);
-                                builder.ins().stack_store(val, slot, base + 16);
                             }
                             let ptr = builder.ins().stack_addr(types::I64, slot, 0);
                             let cnt = builder.ins().iconst(types::I64, n as i64);
@@ -1897,13 +1894,13 @@ impl JitCompiler {
             for (sp, off, sz, v) in dirty {
                 last.insert((sp, off), (sz, v));
             }
-            let mut reg_entries: Vec<(u64, u32, Variable)> = Vec::new();
+            let mut reg_entries: Vec<(u64, u32)> = Vec::new();
             for ((sp, off), (sz, v)) in last {
                 if sp == 0 {
                     continue;
                 }
                 if sp == register_space && (off as usize) + (sz as usize) <= HOST_REG_FILE_SIZE {
-                    reg_entries.push((off, sz, v));
+                    reg_entries.push((off, sz));
                     continue;
                 }
                 let val = builder.use_var(v);
@@ -1918,17 +1915,15 @@ impl JitCompiler {
                 let n = reg_entries.len();
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
-                    (n * 24) as u32,
+                    (n * 16) as u32,
                     0,
                 ));
-                for (i, (off, sz, v)) in reg_entries.iter().enumerate() {
-                    let base = (i * 24) as i32;
+                for (i, (off, sz)) in reg_entries.iter().enumerate() {
+                    let base = (i * 16) as i32;
                     let offv = builder.ins().iconst(types::I64, *off as i64);
                     let szv = builder.ins().iconst(types::I64, *sz as i64);
-                    let val = builder.use_var(*v);
                     builder.ins().stack_store(offv, slot, base);
                     builder.ins().stack_store(szv, slot, base + 8);
-                    builder.ins().stack_store(val, slot, base + 16);
                 }
                 let ptr = builder.ins().stack_addr(types::I64, slot, 0);
                 let cnt = builder.ins().iconst(types::I64, n as i64);
