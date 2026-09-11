@@ -384,7 +384,17 @@ fn how_much_of_the_benchmark_corpus_translates() {
     report("opcodes lowered to nothing", &total.unimplemented, 20);
     report("decode failures", &total.decode_errors, 15);
     report("compile failures", &total.compile_errors, 15);
-    report("userops reached", &total.userops, 30);
+    // Split the userops the corpus reaches by whether anything answers them.
+    // A name answered as processor semantics is settled; the rest are the OS
+    // and instruction-extension surface still to be written, and that list is
+    // the point of the report.
+    let (settled, open): (BTreeMap<_, _>, BTreeMap<_, _>) = total
+        .userops
+        .iter()
+        .map(|(k, v)| (k.clone(), *v))
+        .partition(|(name, _)| fission_emulator::os::env::processor_userop_result(name).is_some());
+    report("userops answered as processor semantics", &settled, 12);
+    report("userops nothing answers yet", &open, 30);
 
     if !total.worst.is_empty() {
         total

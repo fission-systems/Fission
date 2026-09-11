@@ -91,8 +91,13 @@ pub trait OsEnvironment: Send + Sync {
 /// `CALLOTHER`s that are processor semantics rather than OS services.
 ///
 /// These are answered the same way under every environment, so they live here
-/// rather than three times over. Returns whether the name was answered; the
-/// value, if any, is left in `emu.callother_result`.
+/// rather than three times over. `None` means the name is not one of them.
+///
+/// Taking only the name -- and giving back the value rather than writing it --
+/// is what lets a static report ask "is this answered?" without an emulator to
+/// ask it of. The translation-coverage benchmark cannot run a corpus binary,
+/// so without this it can only list the userops a corpus reaches and not say
+/// which of them anyone answers.
 ///
 /// # Why "do nothing" has to be said out loud
 ///
@@ -102,8 +107,8 @@ pub trait OsEnvironment: Send + Sync {
 /// and one processor has nothing to order" reads exactly like "we have no idea
 /// what this instruction does". The unanswered list is only a work queue if
 /// the deliberate silences are taken out of it.
-pub fn answer_processor_userop(emu: &mut Emulator, name: &str) -> bool {
-    match name {
+pub fn processor_userop_result(name: &str) -> Option<u64> {
+    Some(match name {
         // ── Exclusive access: ldxr/stxr, ldrex/strex ────────────────────────
         //
         // One processor and no other observer, so the monitor cannot be
@@ -117,14 +122,8 @@ pub fn answer_processor_userop(emu: &mut Emulator, name: &str) -> bool {
         // retry loop spin for ever. The two aarch64 binaries in the dev corpus
         // that ran to the instruction budget without finishing were doing
         // exactly that, half a million times.
-        "ExclusiveMonitorPass" | "hasExclusiveAccess" => {
-            emu.callother_result = 1;
-            true
-        }
-        "ExclusiveMonitorsStatus" => {
-            emu.callother_result = 0;
-            true
-        }
+        "ExclusiveMonitorPass" | "hasExclusiveAccess" => 1,
+        "ExclusiveMonitorsStatus" => 0,
 
         // ── Barriers ────────────────────────────────────────────────────────
         //
@@ -141,10 +140,7 @@ pub fn answer_processor_userop(emu: &mut Emulator, name: &str) -> bool {
         | "LOCK"
         | "UNLOCK"
         | "XACQUIRE"
-        | "XRELEASE" => {
-            emu.callother_result = 0;
-            true
-        }
+        | "XRELEASE" => 0,
 
         // ── Hints ───────────────────────────────────────────────────────────
         //
@@ -154,11 +150,19 @@ pub fn answer_processor_userop(emu: &mut Emulator, name: &str) -> bool {
         | "HintPreloadDataForWrite"
         | "HintPreloadInstruction"
         | "HintDebug"
-        | "HintYield" => {
-            emu.callother_result = 0;
+        | "HintYield" => 0,
+
+        _ => return None,
+    })
+}
+
+/// [`processor_userop_result`], applied. Returns whether it answered.
+pub fn answer_processor_userop(emu: &mut Emulator, name: &str) -> bool {
+    match processor_userop_result(name) {
+        Some(value) => {
+            emu.callother_result = value;
             true
         }
-
-        _ => false,
+        None => false,
     }
 }
