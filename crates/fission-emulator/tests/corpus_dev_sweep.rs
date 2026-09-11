@@ -43,6 +43,9 @@ struct Outcome {
     exit_reason: Option<String>,
     inst: u64,
     misses: Vec<String>,
+    /// Opcodes an engine met and lowered to nothing. A run with any of these
+    /// produced a wrong answer somewhere, silently.
+    unimplemented: Vec<(String, u64)>,
     error: Option<String>,
 }
 
@@ -52,6 +55,7 @@ fn run_one(path: &Path) -> Outcome {
         exit_reason: None,
         inst: 0,
         misses: Vec::new(),
+        unimplemented: Vec::new(),
         error: Some(e),
     };
 
@@ -110,6 +114,12 @@ fn run_one(path: &Path) -> Outcome {
             exit_reason: emu.metrics.exit_reason.clone(),
             inst: emu.inst_count,
             misses: emu.metrics.hle_misses.keys().cloned().collect(),
+            unimplemented: emu
+                .metrics
+                .unimplemented_opcodes
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
             error: None,
         },
         Err(e) => Outcome {
@@ -117,6 +127,12 @@ fn run_one(path: &Path) -> Outcome {
             exit_reason: emu.metrics.exit_reason.clone(),
             inst: emu.inst_count,
             misses: emu.metrics.hle_misses.keys().cloned().collect(),
+            unimplemented: emu
+                .metrics
+                .unimplemented_opcodes
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
             error: Some(format!("run: {e}")),
         },
     }
@@ -150,6 +166,7 @@ fn how_much_of_the_dev_corpus_runs() {
     let mut halted = 0usize;
     let mut clean = 0usize;
     let mut wanted: BTreeMap<String, usize> = BTreeMap::new();
+    let mut unimplemented: BTreeMap<String, u64> = BTreeMap::new();
     for path in &binaries {
         let outcome = run_one(path);
         if outcome.halted {
@@ -160,6 +177,9 @@ fn how_much_of_the_dev_corpus_runs() {
         }
         for miss in &outcome.misses {
             *wanted.entry(miss.clone()).or_default() += 1;
+        }
+        for (op, n) in &outcome.unimplemented {
+            *unimplemented.entry(op.clone()).or_default() += n;
         }
         let name = path.file_name().unwrap().to_string_lossy();
         let status = match (&outcome.error, outcome.halted) {
@@ -177,6 +197,16 @@ fn how_much_of_the_dev_corpus_runs() {
         "\n{halted} of {} halted, {clean} of those with no unimplemented API",
         binaries.len()
     );
+    if unimplemented.is_empty() {
+        eprintln!("no p-code opcode was lowered to nothing");
+    } else {
+        eprintln!("opcodes lowered to nothing (each one is a wrong answer):");
+        let mut ranked: Vec<_> = unimplemented.into_iter().collect();
+        ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        for (op, n) in &ranked {
+            eprintln!("  {n:>6}  {op}");
+        }
+    }
     eprintln!("APIs the rest are waiting on, most wanted first:");
     let mut ranked: Vec<_> = wanted.into_iter().collect();
     ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));

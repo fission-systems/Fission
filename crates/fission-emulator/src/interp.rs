@@ -165,10 +165,14 @@ impl Emulator {
                 None
             };
 
-            let step = {
+            let (step, unimplemented) = {
                 let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
-                evaluator.step(op)?
+                let step = evaluator.step(op)?;
+                (step, evaluator.unimplemented)
             };
+            if let Some(opcode) = unimplemented {
+                self.metrics.note_unimplemented(opcode);
+            }
 
             if let Some((addr, size, write, stored)) = pending_mem {
                 let value = if write {

@@ -46,11 +46,20 @@ pub enum StepResult {
 pub struct Evaluator<'a> {
     pub state: &'a mut MachineState,
     pub solver: &'a mut fission_solver::Solver,
+    /// Set when `step` met an opcode it does not implement, which it treats as
+    /// a no-op. The caller owns the metrics, so it reads this back rather than
+    /// the evaluator reporting it -- and something must, or the run produces a
+    /// wrong answer without saying so.
+    pub unimplemented: Option<PcodeOpcode>,
 }
 
 impl<'a> Evaluator<'a> {
     pub fn new(state: &'a mut MachineState, solver: &'a mut fission_solver::Solver) -> Self {
-        Self { state, solver }
+        Self {
+            state,
+            solver,
+            unimplemented: None,
+        }
     }
 
     // ── Varnode I/O ───────────────────────────────────────────────────────────
@@ -876,6 +885,7 @@ impl<'a> Evaluator<'a> {
 
             _ => {
                 tracing::warn!("Unimplemented P-Code opcode: {:?}", op.opcode);
+                self.unimplemented = Some(op.opcode);
             }
         }
         Ok(StepResult::Next)

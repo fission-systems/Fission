@@ -43,6 +43,14 @@ pub struct JitCompiler {
     /// block until an observer is registered, and registering one flushes the
     /// cache anyway ([`crate::observe`]).
     pub observe: crate::observe::ObserveMask,
+    /// Opcodes this compiler met and did not implement, by name.
+    ///
+    /// An unimplemented op lowers to nothing, so the block compiles, runs, and
+    /// produces a wrong answer in silence. `EmulatorMetrics` has carried a
+    /// field and a report for this since the beginning and nothing ever wrote
+    /// to it; the compiler has no `Emulator` to reach, so it counts here and
+    /// the caller drains it.
+    pub unimplemented_ops: std::collections::BTreeMap<String, u64>,
 }
 
 impl JitCompiler {
@@ -174,6 +182,7 @@ impl JitCompiler {
             builder_ctx,
             compile_seq: 0,
             observe: crate::observe::ObserveMask::NONE,
+            unimplemented_ops: std::collections::BTreeMap::new(),
             shadow: crate::observe::ShadowMode::Off,
         })
     }
@@ -215,6 +224,10 @@ impl JitCompiler {
         use crate::pcode::state::HOST_REG_FILE_SIZE;
 
         let start_pc = insns[0].pc;
+        // Collected locally because `self` is borrowed by the function builder
+        // for the whole emission, then merged in below.
+        let mut unimplemented_here: std::collections::BTreeMap<String, u64> =
+            std::collections::BTreeMap::new();
 
         // Flatten ops with remapped relative branch targets.
         // Also record which global op index starts each guest instruction.
@@ -1914,6 +1927,9 @@ impl JitCompiler {
                         op.opcode,
                         start_pc
                     );
+                    *unimplemented_here
+                        .entry(format!("{:?}", op.opcode))
+                        .or_insert(0) += 1;
                 }
             }
 
@@ -1980,6 +1996,9 @@ impl JitCompiler {
         let final_pc = builder.inst_results(call)[0];
         builder.ins().return_(&[final_pc]);
         builder.finalize();
+        for (op, n) in unimplemented_here {
+            *self.unimplemented_ops.entry(op).or_insert(0) += n;
+        }
 
         // Diagnostic: dump Cranelift's generated IR for this TB. Used to
         // root-cause the ensure_var! cache-key bug (see its own comment);

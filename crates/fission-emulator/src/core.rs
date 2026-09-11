@@ -117,6 +117,15 @@ pub struct Emulator {
     /// The run loop compares every PC against it, so it is a field and not a
     /// virtual call.
     magic_range: (u64, u64),
+    /// The processor mode this image's code is in, when the addresses cannot
+    /// say so themselves.
+    ///
+    /// A stripped Cortex-M image is entirely Thumb and entirely even-addressed,
+    /// because the ABI's bit-0 marker lives on function symbols that are gone.
+    /// Decoding it in the language's default ARM mode does not fail loudly --
+    /// ARM has an encoding for nearly every 32-bit word -- so the emulator
+    /// executed plausible nonsense instead.
+    decode_context: Option<fission_sleigh::runtime::PackedContextOverride>,
 
     /// Linux ELF process image metadata (stack/auxv/brk) when loaded via ELF loader.
     pub image_info: Option<crate::os::linux::image_info::ImageInfo>,
@@ -215,6 +224,13 @@ impl Emulator {
         } else {
             std::collections::HashMap::new()
         };
+
+        // Before the frontend is shared: the mode is a fact about this image
+        // and this language, and it does not change during a run.
+        let decode_context =
+            fission_static::analysis::function_discovery::decode_context_for_address(
+                &binary, &sleigh, None,
+            );
 
         let sleigh_arc = Arc::new(sleigh);
 
@@ -338,6 +354,7 @@ impl Emulator {
             chain_depth: 0,
             halt_requested: false,
             magic_range,
+            decode_context,
             image_info: None,
             pe_image_info: None,
             signals: crate::os::linux::signal::SignalState::default(),
@@ -979,7 +996,7 @@ impl Emulator {
 
             let (pcode_ops, inst_len, details) = self
                 .sleigh
-                .decode_and_lift_with_details(&bytes_vec, cur)
+                .decode_and_lift_with_context_override(&bytes_vec, cur, self.decode_context)
                 .map_err(|e| anyhow::anyhow!("Decode/lift failed at 0x{:X}: {:#}", cur, e))?;
 
             for (id, name) in details.userops.iter() {
@@ -1126,6 +1143,15 @@ impl Emulator {
                 return self.run_block_interpreted(&insns);
             }
         };
+        // An opcode the compiler lowered to nothing is a wrong answer waiting
+        // to happen, and until now the only trace of it was a `tracing::warn`
+        // nobody reads. Drain it where the run can report it.
+        if !jit.unimplemented_ops.is_empty() {
+            let found = std::mem::take(&mut jit.unimplemented_ops);
+            for (op, n) in found {
+                *self.metrics.unimplemented_opcodes.entry(op).or_insert(0) += n;
+            }
+        }
         self.metrics.tbs_compiled += 1;
 
         let block = std::sync::Arc::new(crate::jit::cache::JitBlock {
