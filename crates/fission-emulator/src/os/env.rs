@@ -73,7 +73,7 @@ pub trait OsEnvironment: Send + Sync {
         _input_vals: &[u64],
         _output_size: u32,
     ) -> Result<HleResult> {
-        if answer_processor_userop(emu, userop_name) {
+        if answer_processor_userop(emu, userop_name, _input_vals) {
             return Ok(HleResult::Continue);
         }
         tracing::warn!(
@@ -88,49 +88,82 @@ pub trait OsEnvironment: Send + Sync {
     }
 }
 
-/// `CALLOTHER`s that are processor semantics rather than OS services.
+/// Does this `CALLOTHER` mean "enter the kernel"?
 ///
-/// These are answered the same way under every environment, so they live here
-/// rather than three times over. `None` means the name is not one of them.
+/// Every architecture's SLEIGH spec names its own: x86 has `syscall` and
+/// `sysenter`, aarch64's `svc` lifts to `CallSupervisor`, and ARM32's to
+/// `software_interrupt`. The router used to test for the name *containing*
+/// "syscall", which the last two do not, so those architectures could not make
+/// a syscall at all.
 ///
-/// Taking only the name -- and giving back the value rather than writing it --
-/// is what lets a static report ask "is this answered?" without an emulator to
-/// ask it of. The translation-coverage benchmark cannot run a corpus binary,
-/// so without this it can only list the userops a corpus reaches and not say
-/// which of them anyone answers.
-///
-/// # Why "do nothing" has to be said out loud
-///
-/// Some of these really are no-ops on this emulator, and it matters that they
-/// are *listed* as such. An unanswered userop falls through to a warning and a
-/// zero, and until it is named nobody can tell the two cases apart: "a barrier,
-/// and one processor has nothing to order" reads exactly like "we have no idea
-/// what this instruction does". The unanswered list is only a work queue if
-/// the deliberate silences are taken out of it.
-pub fn processor_userop_result(name: &str) -> Option<u64> {
-    Some(match name {
-        // ── Exclusive access: ldxr/stxr, ldrex/strex ────────────────────────
-        //
-        // One processor and no other observer, so the monitor cannot be
-        // stolen between the load and the store. The pass succeeds, and the
-        // store reports success -- which is *zero*, because that is what the
-        // architecture puts in the status register.
-        //
-        // Getting this wrong is not a small error. Both SLEIGH specs pre-set
-        // the status to "failed" and only overwrite it on the success path, so
-        // an unanswered `ExclusiveMonitorPass` makes every compare-and-swap
-        // retry loop spin for ever. The two aarch64 binaries in the dev corpus
-        // that ran to the instruction budget without finishing were doing
-        // exactly that, half a million times.
-        "ExclusiveMonitorPass" | "hasExclusiveAccess" => 1,
-        "ExclusiveMonitorsStatus" => 0,
+/// It lives here so a static report and the router read the same list. They
+/// were separate for exactly one revision, and the report answered
+/// "`software_interrupt`: nothing answers this" about a name the router had
+/// been handling all along.
+pub fn is_syscall_userop(name: &str) -> bool {
+    name == "sysenter"
+        || name == "CallSupervisor"
+        || name == "software_interrupt"
+        || name.eq_ignore_ascii_case("syscall")
+        || name.contains("syscall")
+}
 
-        // ── Barriers ────────────────────────────────────────────────────────
-        //
-        // A barrier orders this processor's accesses against what another
-        // observer can see. There is no other observer, and this emulator
-        // executes one instruction at a time in program order, so the ordering
-        // a barrier asks for already holds.
+/// A `CALLOTHER` that is processor semantics rather than an OS service.
+///
+/// One enum, so the list of names and the behaviour cannot drift apart: a
+/// static report asks [`classify_processor_userop`] whether a name is answered
+/// at all, and [`answer_processor_userop`] answers it. Two separate match
+/// statements would eventually disagree, and the report is only useful while
+/// it tells the truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessorUserop {
+    /// The `ldxr`/`ldrex` side: mark the monitor.
+    ExclusiveAccessMark,
+    /// The `stxr`/`strex` side: did the monitor survive?
+    ExclusiveMonitorPass,
+    /// The status the exclusive store reports.
+    ExclusiveMonitorStatus,
+    /// Ordering against observers that do not exist here.
+    Barrier,
+    /// Advisory.
+    Hint,
+    /// Commit `ISAModeSwitch` to the decode context: ARM/Thumb interworking.
+    SetIsaMode,
+
+    // ── ARMv7-M system registers ────────────────────────────────────────────
+    GetMainStackPointer,
+    SetMainStackPointer,
+    GetProcessStackPointer,
+    SetProcessStackPointer,
+    GetMainStackLimit,
+    SetMainStackLimit,
+    GetProcessStackLimit,
+    SetProcessStackLimit,
+    GetBasePriority,
+    SetBasePriority,
+    EnableIrq,
+    DisableIrq,
+    IsIrqEnabled,
+    EnableFault,
+    DisableFault,
+    IsFaultEnabled,
+    IsCurrentModePrivileged,
+    IsThreadMode,
+    IsThreadModePrivileged,
+    SetThreadModePrivileged,
+    IsUsingMainStack,
+    SetStackMode,
+    CurrentExceptionNumber,
+}
+
+/// Which processor userop a name is, if any.
+pub fn classify_processor_userop(name: &str) -> Option<ProcessorUserop> {
+    use ProcessorUserop::*;
+    Some(match name {
+        "ExclusiveAccess" => ExclusiveAccessMark,
+        "ExclusiveMonitorPass" | "hasExclusiveAccess" => ExclusiveMonitorPass,
+        "ExclusiveMonitorsStatus" => ExclusiveMonitorStatus,
+
         "DataMemoryBarrier"
         | "DataSynchronizationBarrier"
         | "InstructionSynchronizationBarrier"
@@ -140,29 +173,169 @@ pub fn processor_userop_result(name: &str) -> Option<u64> {
         | "LOCK"
         | "UNLOCK"
         | "XACQUIRE"
-        | "XRELEASE" => 0,
+        | "XRELEASE" => Barrier,
 
-        // ── Hints ───────────────────────────────────────────────────────────
-        //
-        // Advisory by definition: a prefetch that does not happen changes
-        // timing and nothing else, and there is no timing here.
         "HintPreloadData"
         | "HintPreloadDataForWrite"
         | "HintPreloadInstruction"
         | "HintDebug"
-        | "HintYield" => 0,
+        | "HintYield" => Hint,
+
+        "setISAMode" => SetIsaMode,
+
+        "getMainStackPointer" => GetMainStackPointer,
+        "setMainStackPointer" => SetMainStackPointer,
+        "getProcessStackPointer" => GetProcessStackPointer,
+        "setProcessStackPointer" => SetProcessStackPointer,
+        "getMainStackPointerLimit" => GetMainStackLimit,
+        "setMainStackPointerLimit" => SetMainStackLimit,
+        "getProcessStackPointerLimit" => GetProcessStackLimit,
+        "setProcessStackPointerLimit" => SetProcessStackLimit,
+        "getBasePriority" => GetBasePriority,
+        "setBasePriority" => SetBasePriority,
+        "enableIRQinterrupts" => EnableIrq,
+        "disableIRQinterrupts" => DisableIrq,
+        "isIRQinterruptsEnabled" => IsIrqEnabled,
+        "enableFIQinterrupts" => EnableFault,
+        "disableFIQinterrupts" => DisableFault,
+        "isFIQinterruptsEnabled" => IsFaultEnabled,
+        "isCurrentModePrivileged" => IsCurrentModePrivileged,
+        "isThreadMode" => IsThreadMode,
+        "isThreadModePrivileged" => IsThreadModePrivileged,
+        "setThreadModePrivileged" => SetThreadModePrivileged,
+        "isUsingMainStack" => IsUsingMainStack,
+        "setStackMode" => SetStackMode,
+        "getCurrentExceptionNumber" => CurrentExceptionNumber,
 
         _ => return None,
     })
 }
 
-/// [`processor_userop_result`], applied. Returns whether it answered.
-pub fn answer_processor_userop(emu: &mut Emulator, name: &str) -> bool {
-    match processor_userop_result(name) {
-        Some(value) => {
-            emu.callother_result = value;
-            true
+/// Answer a processor userop. Returns whether it was one.
+///
+/// The result, if the op has an output, is left in `emu.callother_result`.
+///
+/// # Why "do nothing" has to be said out loud
+///
+/// Several of these really are no-ops here, and it matters that they are
+/// *listed* as such. An unanswered userop falls through to a warning and a
+/// zero, and until it is named nobody can tell the two cases apart: "a
+/// barrier, and one processor has nothing to order" reads exactly like "we
+/// have no idea what this instruction does". The unanswered list is only a
+/// work queue if the deliberate silences are taken out of it.
+pub fn answer_processor_userop(emu: &mut Emulator, name: &str, inputs: &[u64]) -> bool {
+    use ProcessorUserop::*;
+    let Some(op) = classify_processor_userop(name) else {
+        return false;
+    };
+    let arg = |n: usize| inputs.get(n).copied().unwrap_or(0);
+    emu.callother_result = 0;
+
+    match op {
+        // ── Exclusive access: ldxr/stxr, ldrex/strex ────────────────────────
+        //
+        // One processor and no other observer, so the monitor cannot be stolen
+        // between the load and the store. The pass succeeds, and the store
+        // reports success -- which is *zero*, because that is what the
+        // architecture puts in the status register.
+        //
+        // Getting this wrong is not a small error. Both ARM specs pre-set the
+        // status to "failed" and only overwrite it on the success path, so an
+        // unanswered `ExclusiveMonitorPass` makes every compare-and-swap retry
+        // loop spin for ever. The two aarch64 binaries in the dev corpus that
+        // ran to the instruction budget without finishing were doing exactly
+        // that, half a million times.
+        ExclusiveAccessMark => {}
+        ExclusiveMonitorPass => emu.callother_result = 1,
+        ExclusiveMonitorStatus => emu.callother_result = 0,
+
+        // A barrier orders this processor's accesses against what another
+        // observer can see. There is no other observer, and this emulator
+        // executes one instruction at a time in program order.
+        Barrier => {}
+        // Advisory by definition: a prefetch that does not happen changes
+        // timing, and there is no timing here.
+        Hint => {}
+
+        // ── ARM/Thumb interworking ──────────────────────────────────────────
+        SetIsaMode => emu.commit_isa_mode(),
+
+        // ── ARMv7-M system registers ────────────────────────────────────────
+        //
+        // `sp` is the *active* stack pointer, banked by `CONTROL.SPSEL`, so
+        // only the inactive one is stored. Reading the active one has to go
+        // through `sp` or it reports a stale bank.
+        GetMainStackPointer => {
+            emu.callother_result = if emu.cortex_m.process_stack_active {
+                emu.cortex_m.banked_sp
+            } else {
+                emu.read_stack_pointer()
+            };
         }
-        None => false,
+        SetMainStackPointer => {
+            if emu.cortex_m.process_stack_active {
+                emu.cortex_m.banked_sp = arg(0);
+            } else {
+                let _ = emu.write_stack_pointer(arg(0));
+            }
+        }
+        GetProcessStackPointer => {
+            emu.callother_result = if emu.cortex_m.process_stack_active {
+                emu.read_stack_pointer()
+            } else {
+                emu.cortex_m.banked_sp
+            };
+        }
+        SetProcessStackPointer => {
+            if emu.cortex_m.process_stack_active {
+                let _ = emu.write_stack_pointer(arg(0));
+            } else {
+                emu.cortex_m.banked_sp = arg(0);
+            }
+        }
+        GetMainStackLimit => emu.callother_result = emu.cortex_m.main_stack_limit,
+        SetMainStackLimit => emu.cortex_m.main_stack_limit = arg(0),
+        GetProcessStackLimit => emu.callother_result = emu.cortex_m.process_stack_limit,
+        SetProcessStackLimit => emu.cortex_m.process_stack_limit = arg(0),
+
+        GetBasePriority => emu.callother_result = emu.cortex_m.base_priority,
+        SetBasePriority => emu.cortex_m.base_priority = arg(0),
+
+        // No interrupt controller is wired to this emulator, so the masks are
+        // recorded and nothing is ever delivered either way. Firmware that
+        // reads one back sees what it wrote, which is the part it can tell.
+        EnableIrq => emu.cortex_m.irq_enabled = true,
+        DisableIrq => emu.cortex_m.irq_enabled = false,
+        IsIrqEnabled => emu.callother_result = u64::from(emu.cortex_m.irq_enabled),
+        EnableFault => emu.cortex_m.fault_enabled = true,
+        DisableFault => emu.cortex_m.fault_enabled = false,
+        IsFaultEnabled => emu.callother_result = u64::from(emu.cortex_m.fault_enabled),
+
+        IsCurrentModePrivileged => {
+            emu.callother_result = u64::from(emu.cortex_m.current_mode_privileged());
+        }
+        IsThreadMode => emu.callother_result = u64::from(emu.cortex_m.in_thread_mode()),
+        IsThreadModePrivileged => {
+            emu.callother_result = u64::from(emu.cortex_m.thread_mode_privileged);
+        }
+        SetThreadModePrivileged => emu.cortex_m.thread_mode_privileged = arg(0) != 0,
+        IsUsingMainStack => {
+            emu.callother_result = u64::from(!emu.cortex_m.process_stack_active);
+        }
+        // The argument is "main stack selected", so selecting the other one
+        // swaps which pointer lives in `sp`.
+        SetStackMode => {
+            let want_process = arg(0) == 0;
+            if want_process != emu.cortex_m.process_stack_active {
+                let active = emu.read_stack_pointer();
+                let _ = emu.write_stack_pointer(emu.cortex_m.banked_sp);
+                emu.cortex_m.banked_sp = active;
+                emu.cortex_m.process_stack_active = want_process;
+            }
+        }
+        CurrentExceptionNumber => {
+            emu.callother_result = u64::from(emu.cortex_m.exception_number);
+        }
     }
+    true
 }

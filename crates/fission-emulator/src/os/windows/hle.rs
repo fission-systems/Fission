@@ -522,7 +522,7 @@ impl OsEnvironment for WindowsEnv {
             // Processor semantics rather than OS services: barriers,
             // exclusive access, hints. The same answer under every
             // environment, so it is written once.
-            _ if crate::os::env::answer_processor_userop(emu, userop_name) => {}
+            _ if crate::os::env::answer_processor_userop(emu, userop_name, inputs) => {}
             _ => {
                 tracing::debug!(
                     "Win32 HLE: Unhandled USEROP: {} (inputs: {:?})",

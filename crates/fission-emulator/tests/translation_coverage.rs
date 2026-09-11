@@ -392,8 +392,15 @@ fn how_much_of_the_benchmark_corpus_translates() {
         .userops
         .iter()
         .map(|(k, v)| (k.clone(), *v))
-        .partition(|(name, _)| fission_emulator::os::env::processor_userop_result(name).is_some());
-    report("userops answered as processor semantics", &settled, 12);
+        .partition(|(name, _)| {
+            fission_emulator::os::env::classify_processor_userop(name).is_some()
+                || fission_emulator::os::env::is_syscall_userop(name)
+        });
+    report(
+        "userops answered as processor or kernel entry",
+        &settled,
+        14,
+    );
     report("userops nothing answers yet", &open, 30);
 
     if !total.worst.is_empty() {

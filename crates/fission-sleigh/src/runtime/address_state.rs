@@ -43,7 +43,19 @@ impl RuntimeSleighFrontend {
     /// case since it trusts the address's own bit 0; this lets a caller force
     /// it as a decode-failure fallback instead.
     pub fn low_bit_code_mode_override(&self) -> Option<PackedContextOverride> {
+        self.isa_mode_override(true)
+    }
+
+    /// The context that selects one ISA mode or the other.
+    ///
+    /// The same fields as [`Self::low_bit_code_mode_override`], set to the mode
+    /// asked for rather than always to the low-bit one. An emulator executing
+    /// an interworking branch needs both directions: ARM's `setISAMode` commits
+    /// whichever mode `ISAModeSwitch` holds, and a `bx` into ARM code is as
+    /// real as a `bx` into Thumb.
+    pub fn isa_mode_override(&self, low_bit_mode: bool) -> Option<PackedContextOverride> {
         let compiled = self.compiled.as_ref()?;
+        let value = u64::from(low_bit_mode);
 
         let mut context_override = PackedContextOverride::default();
         for name in LOW_BIT_CODE_CONTEXT_FIELDS {
@@ -56,7 +68,7 @@ impl RuntimeSleighFrontend {
                 continue;
             };
             if context_override
-                .set_bits(field.bit_offset, field.bit_width, 1)
+                .set_bits(field.bit_offset, field.bit_width, value)
                 .is_err()
             {
                 return None;

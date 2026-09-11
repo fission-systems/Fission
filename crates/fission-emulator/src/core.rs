@@ -126,6 +126,9 @@ pub struct Emulator {
     /// ARM has an encoding for nearly every 32-bit word -- so the emulator
     /// executed plausible nonsense instead.
     decode_context: Option<fission_sleigh::runtime::PackedContextOverride>,
+    /// ARMv7-M system registers. See [`crate::arch::cortex_m`]; inert on every
+    /// other architecture, because nothing reaches for them.
+    pub cortex_m: crate::arch::cortex_m::CortexMState,
 
     /// Linux ELF process image metadata (stack/auxv/brk) when loaded via ELF loader.
     pub image_info: Option<crate::os::linux::image_info::ImageInfo>,
@@ -355,6 +358,7 @@ impl Emulator {
             halt_requested: false,
             magic_range,
             decode_context,
+            cortex_m: crate::arch::cortex_m::CortexMState::at_reset(),
             image_info: None,
             pe_image_info: None,
             signals: crate::os::linux::signal::SignalState::default(),
@@ -446,6 +450,57 @@ impl Emulator {
     }
 
     /// Attach PE image metadata and apply stack pointer / PC from it.
+    /// The active stack pointer, whatever this architecture calls it.
+    pub fn read_stack_pointer(&mut self) -> u64 {
+        let sp = self.arch.sp_reg;
+        self.read_register_u64(sp).unwrap_or(0)
+    }
+
+    /// Write the active stack pointer.
+    pub fn write_stack_pointer(&mut self, value: u64) -> Result<()> {
+        let sp = self.arch.sp_reg;
+        self.write_register_u64(sp, value)
+    }
+
+    /// Commit `ISAModeSwitch` to the decode context: ARM's `setISAMode`.
+    ///
+    /// SLEIGH models interworking in two halves. `SetISAModeSwitch(value)`
+    /// writes the `ISAModeSwitch` register, and `setISAMode()` -- a userop --
+    /// copies it into the `TMode` *context*, which is what the decoder reads.
+    /// Only the first half is p-code; without the second the decode context
+    /// never moves, so a `bx` into the other instruction set kept decoding in
+    /// the mode the image started in.
+    ///
+    /// A mode change invalidates every compiled block, because the same
+    /// address decodes to different instructions in the two modes and the
+    /// translation cache is keyed on the address alone. That is why the flush
+    /// is conditional: `bx lr` is how every Thumb function returns, and it
+    /// commits Thumb again each time. Flushing on those would be flushing
+    /// on every return.
+    pub fn commit_isa_mode(&mut self) {
+        // Not `unwrap_or(0)`. A failed read would read as "ARM", and switching
+        // a Thumb-only image into ARM mode makes every instruction after it
+        // nonsense -- ARM has an encoding for nearly every word, so it would
+        // not even fail. Leaving the mode alone when the answer is unknown is
+        // the only safe direction.
+        let Ok(raw) = self.read_register_u64("ISAModeSwitch") else {
+            return;
+        };
+        let Some(wanted) = self.sleigh.isa_mode_override(raw != 0) else {
+            return;
+        };
+        if self.decode_context == Some(wanted) {
+            return;
+        }
+        tracing::debug!(
+            "ISA mode -> {} at 0x{:X}",
+            if raw != 0 { "Thumb" } else { "ARM" },
+            self.pc
+        );
+        self.decode_context = Some(wanted);
+        self.jit_cache.flush_all();
+    }
+
     /// The syscall number the guest asked for, in the registry's numbering.
     ///
     /// `None` means the architecture's number has no counterpart -- an honest
