@@ -1468,7 +1468,7 @@ impl Emulator {
                     )
                     .collect();
                 self.ttd
-                    .record_step_with_memory(regs, 0, deltas, shadow_deltas);
+                    .record_step_with_memory(self.inst_count, regs, 0, deltas, shadow_deltas);
                 self.state.trace_mem_writes.clear();
                 self.state.trace_mem_reads.clear();
                 self.state.trace_shadow_writes.clear();

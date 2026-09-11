@@ -37,6 +37,15 @@ pub struct Timeline {
     current_position: Option<u64>,
     replay_mode: bool,
     current_snapshot: Option<Box<ExecutionSnapshot>>,
+    /// How many events this timeline has recorded.
+    ///
+    /// A debugger's timeline is ordered by *events* -- one stop, one snapshot
+    /// -- and has no instruction count to index by; an emulator's is ordered
+    /// by retired instructions. rr keeps both in a position (`trace_time` and
+    /// `ticks`) rather than picking one and hoping the other layer agrees.
+    /// Here the driver supplies whichever it owns, and this is the counter for
+    /// the event-ordered case.
+    events_recorded: u64,
 }
 
 impl Timeline {
@@ -51,6 +60,7 @@ impl Timeline {
             current_position: None,
             replay_mode: true,
             current_snapshot: None,
+            events_recorded: 0,
         }
     }
 
@@ -61,6 +71,7 @@ impl Timeline {
             current_position: position,
             replay_mode: false,
             current_snapshot: None,
+            events_recorded: 0,
         }
     }
 
@@ -143,14 +154,25 @@ impl Timeline {
         self.replay_mode
     }
 
-    pub fn record_step_internal(&mut self, registers: RegisterState, thread_id: u32) {
+    /// Record a snapshot at `step` on this timeline.
+    pub fn record_step_internal(&mut self, step: u64, registers: RegisterState, thread_id: u32) {
         match &mut self.backend {
             Backend::Internal(rec) => {
-                rec.record_step(registers, thread_id);
+                rec.record_step(step, registers, thread_id);
             }
             #[cfg(target_os = "linux")]
             Backend::RR(_) => {}
         }
+    }
+
+    /// Record the next event on an event-ordered timeline.
+    ///
+    /// For a debugger stopping on breakpoints and single steps there is no
+    /// instruction count to use, so the position is the event ordinal.
+    pub fn record_event(&mut self, registers: RegisterState, thread_id: u32) {
+        let step = self.events_recorded;
+        self.events_recorded = self.events_recorded.saturating_add(1);
+        self.record_step_internal(step, registers, thread_id);
     }
 
     pub fn seek_to(&mut self, step_index: u64) -> SeekResult {
@@ -350,8 +372,8 @@ impl TimelineDriver for Timeline {
         Timeline::current_snapshot(self).cloned()
     }
 
-    fn record_step(&mut self, registers: RegisterState, thread_id: u32) {
-        Timeline::record_step_internal(self, registers, thread_id);
+    fn record_step(&mut self, step: u64, registers: RegisterState, thread_id: u32) {
+        Timeline::record_step_internal(self, step, registers, thread_id);
     }
 
     fn seek_to(&mut self, step_index: u64) {
@@ -379,7 +401,7 @@ mod tests {
         for i in 0..5 {
             let mut regs = RegisterState::default();
             regs.rip = 0x401000 + i * 4;
-            timeline.record_step_internal(regs, 1);
+            timeline.record_event(regs, 1);
         }
 
         timeline.stop_recording();

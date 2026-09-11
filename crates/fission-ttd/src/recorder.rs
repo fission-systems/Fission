@@ -89,13 +89,26 @@ impl TTDRecorder {
         }
     }
 
-    /// Record a step with the current register state
-    pub fn record_step(&mut self, registers: RegisterState, thread_id: u32) -> Option<u64> {
+    /// Record a step with the current register state.
+    ///
+    /// `step` is the position on the *guest's* timeline -- its retired
+    /// instruction count -- and not the number of snapshots taken so far.
+    /// Those were the same field once, which meant a seek to "step 200" found
+    /// the two-hundredth snapshot and then told the emulator its instruction
+    /// count was 200. rr keeps the two apart by construction: a position there
+    /// is a `MarkKey` of trace time and tick count, never a bare integer that
+    /// two layers are free to read differently.
+    pub fn record_step(
+        &mut self,
+        step: u64,
+        registers: RegisterState,
+        thread_id: u32,
+    ) -> Option<u64> {
         if self.status != RecordingStatus::Recording {
             return None;
         }
 
-        let step_index = self.current_step;
+        let step_index = step;
         let snapshot = ExecutionSnapshot::new(step_index, registers.clone(), thread_id);
 
         self.enforce_max_snapshots();
@@ -110,6 +123,7 @@ impl TTDRecorder {
     /// Record a step with memory changes
     pub fn record_step_with_memory(
         &mut self,
+        step: u64,
         registers: RegisterState,
         thread_id: u32,
         memory_deltas: Vec<MemoryDelta>,
@@ -119,7 +133,7 @@ impl TTDRecorder {
             return None;
         }
 
-        let step_index = self.current_step;
+        let step_index = step;
         let mut snapshot = ExecutionSnapshot::new(step_index, registers.clone(), thread_id);
         for delta in memory_deltas {
             snapshot.add_memory_delta(delta);

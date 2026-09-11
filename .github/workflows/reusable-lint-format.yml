@@ -63,6 +63,17 @@ jobs:
           fi
           cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
 
+      # `fission-dynamic`'s debugger, timeline and TTD layers live behind
+      # `interactive_runtime`, which is not a default feature -- so `--workspace`
+      # above does not compile a line of them. They had stopped compiling
+      # altogether: `emulator_backend.rs` still called a three-argument
+      # `Emulator::new` and read a field named `rip` that has been `pc` for a
+      # long time, and nothing noticed because nothing built it. A feature that
+      # no job turns on is a feature nobody can tell is broken.
+      - name: Check optional features (interactive_runtime)
+        shell: bash
+        run: cargo check -p fission-dynamic --features interactive_runtime --locked
+
       - name: sccache stats
         if: always()
         shell: bash

@@ -22,7 +22,7 @@ pub trait TimelineDriver: Send {
     fn step_range(&self) -> Option<(u64, u64)>;
     fn current_position(&self) -> Option<u64>;
     fn current_snapshot_owned(&self) -> Option<ExecutionSnapshot>;
-    fn record_step(&mut self, registers: RegisterState, thread_id: u32);
+    fn record_step(&mut self, step: u64, registers: RegisterState, thread_id: u32);
     fn seek_to(&mut self, step_index: u64);
     fn rewind(&mut self, steps: u64);
     fn forward(&mut self, steps: u64);

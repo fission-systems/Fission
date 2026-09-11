@@ -132,7 +132,7 @@ impl DebugSessionBuilder {
             };
         }
 
-        let mut debugger = PlatformDebugger::default();
+        let debugger = PlatformDebugger::default();
         let timeline = if self.with_timeline {
             let arc = Arc::new(Mutex::new(Timeline::new()));
             #[cfg(target_os = "windows")]

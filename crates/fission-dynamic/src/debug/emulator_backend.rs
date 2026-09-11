@@ -3,6 +3,12 @@ use crate::debug::types::{ProcessInfo, RegisterState};
 use fission_core::Result as FissionResult;
 use fission_emulator::core::Emulator;
 
+/// The handle the debug layer uses for "the emulated process".
+///
+/// An emulator has no OS process and therefore no pid; this is a constant
+/// rather than a magic number repeated at five call sites.
+pub const EMULATED_PID: u32 = 9999;
+
 pub struct EmulatorBackend {
     pub emulator: Option<Emulator>,
 }
@@ -124,16 +130,35 @@ impl ExecutionBackend for EmulatorBackend {
 
     fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<RegisterState> {
         let _ = thread_id;
-        if let Some(emu) = &self.emulator {
-            // Create dummy RegisterState and fill with what we can get
-            let mut state = RegisterState::default();
-            state.rip = emu.rip;
-            // In a full implementation, we'd query registers from emu.state.read(1, offset, size)
-            // Need Sleigh to know register offsets, or hardcode typical x86_64 for now
-            Ok(state)
-        } else {
-            Err(fission_core::err!(debug, "Emulator not running"))
-        }
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        // Registers, not a default-constructed struct with a PC in it. The
+        // emulator resolves names through the language's register map, so
+        // asking it is both correct and the only thing that works on an
+        // architecture whose registers are not called RAX.
+        let pc = emu.pc;
+        let mut read = |name: &str| emu.read_register_u64(name).unwrap_or(0);
+        Ok(RegisterState {
+            rax: read("RAX"),
+            rbx: read("RBX"),
+            rcx: read("RCX"),
+            rdx: read("RDX"),
+            rsi: read("RSI"),
+            rdi: read("RDI"),
+            rbp: read("RBP"),
+            rsp: read("RSP"),
+            r8: read("R8"),
+            r9: read("R9"),
+            r10: read("R10"),
+            r11: read("R11"),
+            r12: read("R12"),
+            r13: read("R13"),
+            r14: read("R14"),
+            r15: read("R15"),
+            rip: pc,
+            rflags: read("EFLAGS"),
+        })
     }
 
     fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
@@ -142,22 +167,65 @@ impl ExecutionBackend for EmulatorBackend {
         let binary = fission_loader::loader::LoadedBinary::from_file(path)
             .map_err(|e| fission_core::err!(debug, "Loader error: {}", e))?;
 
-        let sleigh = fission_sleigh::runtime::RuntimeSleighFrontend::new_for_language("x86-64")
-            .map_err(|e| fission_core::err!(debug, "Sleigh init failed: {}", e))?;
+        // The language comes from the image rather than being assumed to be
+        // x86-64, and the OS layer and loader come with it -- an emulator
+        // launched without them has no stack, no image mapped and no syscalls.
+        let load_spec = binary
+            .load_spec()
+            .cloned()
+            .ok_or_else(|| fission_core::err!(debug, "no load spec for {}", path))?;
+        let sleigh =
+            fission_sleigh::runtime::RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(
+                &load_spec,
+            )
+            .map_err(|e| fission_core::err!(debug, "Sleigh init failed: {}", e))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| fission_core::err!(debug, "no SLEIGH frontend for {}", path))?;
+        let arch = fission_emulator::arch::ArchInfo::from_language_id(
+            load_spec.pair.language_id.as_str(),
+            Some(&binary),
+        )
+        .map_err(|e| fission_core::err!(debug, "Unsupported architecture: {}", e))?;
 
-        let state = fission_emulator::pcode::state::MachineState::new();
+        let mut state = fission_emulator::pcode::state::MachineState::new();
+        let is_pe = binary.format == "PE";
+        let image = if is_pe {
+            fission_emulator::os::windows::loader::load_pe(&mut state, &binary)
+                .map(Ok)
+                .map_err(|e| fission_core::err!(debug, "PE load failed: {}", e))?
+        } else {
+            fission_emulator::os::linux::loader::load_elf(&mut state, &binary)
+                .map(Err)
+                .map_err(|e| fission_core::err!(debug, "ELF load failed: {}", e))?
+        };
+        let os: Box<dyn fission_emulator::os::OsEnvironment> = if is_pe {
+            Box::new(fission_emulator::os::WindowsEnv::new())
+        } else {
+            Box::new(fission_emulator::os::LinuxEnv::new())
+        };
 
-        let emu = Emulator::new(state, binary, sleigh)
+        let mut emu = Emulator::new(state, binary, sleigh, arch, os)
             .map_err(|e| fission_core::err!(debug, "Emulator init failed: {}", e))?;
+        match image {
+            Ok(pe) => emu
+                .apply_windows_image(pe)
+                .map_err(|e| fission_core::err!(debug, "PE image failed: {}", e))?,
+            Err(elf) => emu
+                .apply_linux_image(elf)
+                .map_err(|e| fission_core::err!(debug, "ELF image failed: {}", e))?,
+        }
         self.emulator = Some(emu);
 
-        Ok(9999) // Return dummy PID
+        // There is no OS process, so there is no pid. This is the handle the
+        // rest of the debug layer uses to refer to "the emulated process".
+        Ok(EMULATED_PID)
     }
 
     fn get_state(&self) -> crate::debug::types::DebugState {
         let mut state = crate::debug::types::DebugState::default();
         if let Some(emu) = &self.emulator {
-            state.attached_pid = Some(9999);
+            state.attached_pid = Some(EMULATED_PID);
             state.main_thread_id = Some(1);
             state.status = crate::debug::types::DebugStatus::Suspended;
 
@@ -166,7 +234,7 @@ impl ExecutionBackend for EmulatorBackend {
                 1,
                 crate::debug::types::ThreadInfo {
                     thread_id: 1,
-                    start_address: emu.rip,
+                    start_address: emu.pc,
                     suspended: true,
                     is_main: true,
                 },
