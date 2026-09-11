@@ -90,6 +90,46 @@ pub extern "C" fn jit_write_space(
 //            jit_write_bytes(emu, space, offset, src_ptr, size)
 // Used for XMM/YMM and multi-chunk stores when size > 8.
 
+/// Execute one p-code op from `emu.wide_ops` through the evaluator.
+///
+/// The 128-bit integer ops are not lowered by the compiler at all. They could
+/// be -- Cranelift has an `I128` -- but the reason not to is agreement: these
+/// are the ops both engines used to truncate to eight bytes, and having the
+/// compiled path call the interpreting one makes a disagreement between them
+/// impossible rather than merely tested for.
+///
+/// Returns 1 if the op could not be executed, which stops the block.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
+    let emu = unsafe { &mut *emu_ptr };
+    let Some(op) = emu.wide_ops.get(index as usize) else {
+        tracing::error!("jit_wide_op: no op at index {index}");
+        return 1;
+    };
+    // The table is append-only and nothing appends to it while a block runs,
+    // so this reference outlives the borrow of `state` below. Same shape as
+    // the `os` pointer taken a few functions down.
+    let op: *const fission_pcode::ir::PcodeOp = op;
+    let op = unsafe { &*op };
+
+    let mut evaluator = crate::pcode::eval::Evaluator::new(&mut emu.state, &mut emu.solver);
+    let handled = match evaluator.try_step_u128(op) {
+        Ok(handled) => handled,
+        Err(e) => {
+            tracing::warn!("jit_wide_op: {:?} failed: {e:#}", op.opcode);
+            return 1;
+        }
+    };
+    let unimplemented = evaluator.unimplemented;
+    if let Some(opcode) = unimplemented {
+        emu.metrics.note_unimplemented(opcode);
+    }
+    if !handled {
+        tracing::warn!("jit_wide_op: {:?} was not handled", op.opcode);
+    }
+    0
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_read_bytes(
     emu_ptr: *mut Emulator,

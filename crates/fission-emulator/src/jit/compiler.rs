@@ -76,6 +76,10 @@ impl JitCompiler {
                 crate::jit::callbacks::jit_write_space as *const u8,
             ),
             (
+                "jit_wide_op",
+                crate::jit::callbacks::jit_wide_op as *const u8,
+            ),
+            (
                 "jit_read_bytes",
                 crate::jit::callbacks::jit_read_bytes as *const u8,
             ),
@@ -188,6 +192,9 @@ impl JitCompiler {
     }
 
     /// Compile a single guest instruction (TB of length 1).
+    ///
+    /// `wide_ops` is the emulator's call-out table; see
+    /// [`Self::compile_translation_block`].
     pub fn compile_basic_block(
         &mut self,
         pc: u64,
@@ -195,6 +202,7 @@ impl JitCompiler {
         ops: &[PcodeOp],
         register_space: u64,
         unique_space: u64,
+        wide_ops: &mut Vec<PcodeOp>,
     ) -> Result<*const u8> {
         self.compile_translation_block(
             &[GuestInsn {
@@ -204,6 +212,7 @@ impl JitCompiler {
             }],
             register_space,
             unique_space,
+            wide_ops,
         )
     }
 
@@ -219,6 +228,7 @@ impl JitCompiler {
         insns: &[GuestInsn],
         register_space: u64,
         unique_space: u64,
+        wide_ops: &mut Vec<PcodeOp>,
     ) -> Result<*const u8> {
         anyhow::ensure!(!insns.is_empty(), "empty translation block");
         use crate::pcode::state::HOST_REG_FILE_SIZE;
@@ -328,6 +338,15 @@ impl JitCompiler {
             AbiParam::new(types::I64), // ptr
             AbiParam::new(types::I64), // size
         ]);
+        // (emu, index) -> u64
+        let mut sig_wide = self.module.make_signature();
+        sig_wide.params.push(AbiParam::new(types::I64));
+        sig_wide.params.push(AbiParam::new(types::I64));
+        sig_wide.returns.push(AbiParam::new(types::I64));
+        let wide_op_fn = self
+            .module
+            .declare_function("jit_wide_op", Linkage::Import, &sig_wide)?;
+
         let read_bytes_fn = self
             .module
             .declare_function("jit_read_bytes", Linkage::Import, &sig_bytes)
@@ -548,6 +567,8 @@ impl JitCompiler {
         let write_space_ref = self
             .module
             .declare_func_in_func(write_space_fn, builder.func);
+        let wide_op_ref = self.module.declare_func_in_func(wide_op_fn, builder.func);
+
         let read_bytes_ref = self
             .module
             .declare_func_in_func(read_bytes_fn, builder.func);
@@ -950,6 +971,64 @@ impl JitCompiler {
             } else {
                 op.opcode
             };
+
+            // 128-bit integer ops go back to the evaluator rather than being
+            // lowered here. Cranelift has an `I128` and they could be lowered,
+            // but the reason not to is agreement: these are precisely the ops
+            // both engines used to truncate to eight bytes, and routing the
+            // compiled path through the interpreting one makes the two
+            // *unable* to disagree rather than merely tested for it.
+            //
+            // It costs a call per op, on 3.5% of instructions. That is the
+            // right trade for now -- a wrong answer arrives just as fast.
+            if !dead_ops[idx] && crate::pcode::eval::Evaluator::u128_handled(op) {
+                let index = wide_ops.len() as i64;
+                wide_ops.push(op.clone());
+                let idx_val = builder.ins().iconst(types::I64, index);
+                let call = builder.ins().call(wide_op_ref, &[emu_ptr, idx_val]);
+                let failed = builder.inst_results(call)[0];
+                let bad = builder.ins().icmp_imm(IntCC::NotEqual, failed, 0);
+                let stop_b = builder.create_block();
+                let cont_b = builder.create_block();
+                builder.ins().brif(bad, stop_b, &[], cont_b, &[]);
+                builder.switch_to_block(stop_b);
+                builder.seal_block(stop_b);
+                builder
+                    .ins()
+                    .jump(exit_block, &[BlockArg::from(default_next)]);
+                builder.switch_to_block(cont_b);
+                builder.seal_block(cont_b);
+
+                // The evaluator wrote the result straight into `MachineState`.
+                // This block may already be holding that varnode in an SSA
+                // variable from an earlier op, and would go on using the stale
+                // one -- `SubPiece` on a 16-byte input is the common shape,
+                // because its *output* is an ordinary eight-byte register.
+                // So re-read what the call just wrote.
+                if let Some(out) = op.output.as_ref().filter(|o| !o.is_constant) {
+                    let size = out.size.min(8);
+                    let v = ensure_var!(out.space_id, out.offset, size);
+                    let sp = builder.ins().iconst(types::I64, out.space_id as i64);
+                    let off = builder.ins().iconst(types::I64, out.offset as i64);
+                    let sz = builder.ins().iconst(types::I64, size as i64);
+                    let call = builder.ins().call(read_space_ref, &[emu_ptr, sp, off, sz]);
+                    let fresh = builder.inst_results(call)[0];
+                    builder.def_var(v, fresh);
+                    // And keep the exit flush from writing the stale value
+                    // back over it.
+                    if out.space_id != unique_space {
+                        dirty.push((out.space_id, out.offset, size, v));
+                    }
+                }
+
+                if let Some(ft) = fallthrough {
+                    builder.ins().jump(ft, &[]);
+                } else {
+                    let arg = BlockArg::from(default_next);
+                    builder.ins().jump(exit_block, &[arg]);
+                }
+                continue;
+            }
 
             match emit_opcode {
                 PcodeOpcode::Copy | PcodeOpcode::Cast => {
@@ -2315,7 +2394,7 @@ mod tests {
         }];
         let mut compiler = JitCompiler::new().expect("cranelift backend available");
         let func_ptr = compiler
-            .compile_translation_block(&insns, 4, 2)
+            .compile_translation_block(&insns, 4, 2, &mut Vec::new())
             .expect("compile");
         let mut emu = make_emu();
         let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =

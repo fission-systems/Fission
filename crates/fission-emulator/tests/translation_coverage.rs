@@ -84,6 +84,14 @@ struct Stats {
     /// cleanly and compute the wrong thing. This is the one gap the other
     /// three columns are blind to, which is why it gets its own.
     wide_insns: u64,
+    /// Which p-code ops those wide instructions are made of, by opcode and
+    /// varnode width. This is the work queue for 128-bit semantics: "implement
+    /// SIMD" is not a task, and the corpus says which operations actually
+    /// occur.
+    wide_ops: BTreeMap<String, u64>,
+    /// Wide instructions bucketed by their widest varnode. 10 bytes is x87's
+    /// 80-bit extended precision; 16 is SSE, or a 128-bit integer result.
+    wide_by_width: BTreeMap<u32, u64>,
     decode_errors: BTreeMap<String, u64>,
     compile_errors: BTreeMap<String, u64>,
     unimplemented: BTreeMap<String, u64>,
@@ -99,6 +107,12 @@ impl Stats {
         self.dead.extend(other.dead);
         self.blocks += other.blocks;
         self.wide_insns += other.wide_insns;
+        for (k, v) in other.wide_ops {
+            *self.wide_ops.entry(k).or_default() += v;
+        }
+        for (k, v) in other.wide_by_width {
+            *self.wide_by_width.entry(k).or_default() += v;
+        }
         self.instructions += other.instructions;
         for (k, v) in other.decode_errors {
             *self.decode_errors.entry(k).or_default() += v;
@@ -172,6 +186,9 @@ fn translate(path: &Path, stats: &mut Stats) {
     let Ok(mut jit) = JitCompiler::new() else {
         return;
     };
+    // The call-out table a run would own. Nothing executes here, so it is only
+    // somewhere for the compiler to record what it would have called.
+    let mut wide_ops: Vec<PcodeOp> = Vec::new();
     // The same primitive the decompiler uses, not a second copy of the rule:
     // a stripped Cortex-M image is all Thumb and all even-addressed, and
     // decoding it as ARM produces plausible nonsense rather than an error.
@@ -241,6 +258,34 @@ fn translate(path: &Path, stats: &mut Stats) {
                             || op.inputs.iter().any(|v| v.size > 8)
                     }) {
                         stats.wide_insns += 1;
+                        let widest = ops
+                            .iter()
+                            .flat_map(|op| {
+                                op.output
+                                    .as_ref()
+                                    .map(|v| v.size)
+                                    .into_iter()
+                                    .chain(op.inputs.iter().map(|v| v.size))
+                            })
+                            .max()
+                            .unwrap_or(0);
+                        *stats.wide_by_width.entry(widest).or_default() += 1;
+                        for op in &ops {
+                            let width = op
+                                .output
+                                .as_ref()
+                                .map(|v| v.size)
+                                .into_iter()
+                                .chain(op.inputs.iter().map(|v| v.size))
+                                .max()
+                                .unwrap_or(0);
+                            if width > 8 {
+                                *stats
+                                    .wide_ops
+                                    .entry(format!("{:?}/{}B", op.opcode, width))
+                                    .or_default() += 1;
+                            }
+                        }
                     }
                     for op in &ops {
                         if op.opcode == PcodeOpcode::CallOther {
@@ -290,7 +335,9 @@ fn translate(path: &Path, stats: &mut Stats) {
         }
         stats.blocks += 1;
         // Compiling is not executing. The pointer is dropped on the next line.
-        if let Err(e) = jit.compile_translation_block(&insns, layout.register, layout.unique) {
+        if let Err(e) =
+            jit.compile_translation_block(&insns, layout.register, layout.unique, &mut wide_ops)
+        {
             *stats
                 .compile_errors
                 .entry(shape(&format!("{e:#}")))
@@ -401,6 +448,18 @@ fn how_much_of_the_benchmark_corpus_translates() {
         }
     };
     report("opcodes lowered to nothing", &total.unimplemented, 20);
+    report(
+        "p-code ops on varnodes wider than 8 bytes",
+        &total.wide_ops,
+        30,
+    );
+    eprintln!("\nwide instructions by widest varnode:");
+    for (width, count) in &total.wide_by_width {
+        eprintln!(
+            "  {width:>3} bytes  {count:>8}  ({:.2}% of all instructions)",
+            *count as f64 / total.instructions.max(1) as f64 * 100.0
+        );
+    }
     report("decode failures", &total.decode_errors, 15);
     report("compile failures", &total.compile_errors, 15);
     // Split the userops the corpus reaches by whether anything answers them.

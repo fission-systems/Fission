@@ -118,6 +118,244 @@ impl<'a> Evaluator<'a> {
         vn.size > 8
     }
 
+    /// A varnode's value as a `u128`, zero-extended from its own width.
+    ///
+    /// Meaningful up to sixteen bytes. Wider than that -- a YMM at 32, a ZMM at
+    /// 64 -- still has to go a byte at a time, but nothing arithmetic reaches
+    /// those: the vector ops on them lift to `CALLOTHER`.
+    pub(crate) fn read_varnode_u128(&mut self, vn: &Varnode) -> Result<u128> {
+        if vn.is_constant {
+            return Ok(truncate_u128(vn.constant_val as i128 as u128, vn.size));
+        }
+        let data = self
+            .state
+            .read_space(vn.space_id, vn.offset, vn.size as usize)?;
+        let mut bytes = [0u8; 16];
+        let take = data.len().min(16);
+        bytes[..take].copy_from_slice(&data[..take]);
+        Ok(u128::from_le_bytes(bytes))
+    }
+
+    pub(crate) fn write_varnode_u128(&mut self, vn: &Varnode, val: u128) -> Result<()> {
+        let bytes = val.to_le_bytes();
+        let size = (vn.size as usize).min(16);
+        self.state
+            .write_space(vn.space_id, vn.offset, &bytes[..size])
+    }
+
+    /// Does this op have an operand that is too wide for `u64` and narrow
+    /// enough for `u128`?
+    ///
+    /// The comparison ops are why the *inputs* are checked and not just the
+    /// output: `IntNotEqual` on two XMM halves produces one byte, and doing it
+    /// in `u64` compares half of each.
+    fn needs_u128(op: &PcodeOp) -> bool {
+        let wide = |vn: &Varnode| vn.size > 8 && vn.size <= 16;
+        op.output.as_ref().is_some_and(wide) || op.inputs.iter().any(wide)
+    }
+
+    /// Which opcodes the 128-bit path implements.
+    ///
+    /// One list, read by two callers: the evaluator, to decide whether to take
+    /// the path, and the JIT compiler, to decide whether to hand the op back
+    /// to the evaluator instead of emitting its own eight-byte version of it.
+    /// A wide op the two engines lower differently is exactly the kind of
+    /// disagreement the differential gate exists to catch, so they read the
+    /// same list rather than each keeping one.
+    pub(crate) fn u128_handled(op: &PcodeOp) -> bool {
+        use PcodeOpcode as Op;
+        Self::needs_u128(op)
+            && op.output.is_some()
+            && matches!(
+                op.opcode,
+                Op::IntAdd
+                    | Op::PtrAdd
+                    | Op::IntSub
+                    | Op::PtrSub
+                    | Op::IntMult
+                    | Op::IntAnd
+                    | Op::IntOr
+                    | Op::IntXor
+                    | Op::IntDiv
+                    | Op::IntRem
+                    | Op::IntSDiv
+                    | Op::IntSRem
+                    | Op::IntLeft
+                    | Op::IntRight
+                    | Op::IntSRight
+                    | Op::IntNegate
+                    | Op::Int2Comp
+                    | Op::IntEqual
+                    | Op::IntNotEqual
+                    | Op::IntLess
+                    | Op::IntLessEqual
+                    | Op::IntSLess
+                    | Op::IntSLessEqual
+                    | Op::IntZExt
+                    | Op::IntSExt
+                    | Op::SubPiece
+                    | Op::Piece
+            )
+    }
+
+    /// The 128-bit integer path.
+    ///
+    /// Returns whether it handled the op. Everything it does not handle falls
+    /// through to the `u64` arms, which is correct for ops whose wide operand
+    /// is only being moved (`COPY`, `LOAD`, `STORE` already go byte-wise) and
+    /// merely unimplemented for the rest.
+    ///
+    /// # Why this exists as one block rather than an arm per opcode
+    ///
+    /// Both engines truncated a wide varnode to its low eight bytes. For
+    /// `pxor xmm0, xmm0` that leaves the top half of the register holding
+    /// whatever was there before; for x86-64's `div r64`, whose dividend is
+    /// the 128-bit `RDX:RAX`, it silently drops `RDX`. The second is not an
+    /// exotic-SIMD problem at all -- it is every 64-bit division in every
+    /// program, right only while `RDX` happens to be zero.
+    pub(crate) fn try_step_u128(&mut self, op: &PcodeOp) -> Result<bool> {
+        use PcodeOpcode as Op;
+        if !Self::u128_handled(op) {
+            return Ok(false);
+        }
+        let out = op.output.clone().expect("checked by u128_handled");
+
+        // Signed operands are sign-extended from their own varnode width, not
+        // from 128 bits: `IntSLess` on two 16-byte values is already full
+        // width, but on a 9-byte one it is not.
+        let signed = |val: u128, size: u32| -> i128 {
+            let bits = (size as u32).saturating_mul(8).min(128);
+            if bits == 0 || bits >= 128 {
+                val as i128
+            } else {
+                let shift = 128 - bits;
+                ((val << shift) as i128) >> shift
+            }
+        };
+
+        let input =
+            |me: &mut Self, n: usize| -> Result<u128> { me.read_varnode_u128(&op.inputs[n]) };
+
+        macro_rules! binary {
+            (|$a:ident, $b:ident| $body:expr) => {{
+                let $a = input(self, 0)?;
+                let $b = input(self, 1)?;
+                let value: u128 = $body;
+                self.write_varnode_u128(&out, value)?;
+            }};
+        }
+        macro_rules! signed_binary {
+            (|$a:ident, $b:ident| $body:expr) => {{
+                let $a = signed(input(self, 0)?, op.inputs[0].size);
+                let $b = signed(input(self, 1)?, op.inputs[1].size);
+                let value: i128 = $body;
+                self.write_varnode_u128(&out, value as u128)?;
+            }};
+        }
+        macro_rules! predicate {
+            (|$a:ident, $b:ident| $body:expr) => {{
+                let $a = input(self, 0)?;
+                let $b = input(self, 1)?;
+                let value: bool = $body;
+                self.write_varnode_u128(&out, u128::from(value))?;
+            }};
+        }
+        macro_rules! signed_predicate {
+            (|$a:ident, $b:ident| $body:expr) => {{
+                let $a = signed(input(self, 0)?, op.inputs[0].size);
+                let $b = signed(input(self, 1)?, op.inputs[1].size);
+                let value: bool = $body;
+                self.write_varnode_u128(&out, u128::from(value))?;
+            }};
+        }
+
+        match op.opcode {
+            Op::IntAdd | Op::PtrAdd => binary!(|a, b| a.wrapping_add(b)),
+            Op::IntSub | Op::PtrSub => binary!(|a, b| a.wrapping_sub(b)),
+            Op::IntMult => binary!(|a, b| a.wrapping_mul(b)),
+            Op::IntAnd => binary!(|a, b| a & b),
+            Op::IntOr => binary!(|a, b| a | b),
+            Op::IntXor => binary!(|a, b| a ^ b),
+
+            // Division by zero is answered with zero, matching the `u64` arms.
+            // Ghidra raises here; this emulator has nowhere to raise to, and a
+            // run that stops at the first `div` of an uninitialised register
+            // finds less than one that continues.
+            Op::IntDiv => binary!(|a, b| if b == 0 { 0 } else { a.wrapping_div(b) }),
+            Op::IntRem => binary!(|a, b| if b == 0 { 0 } else { a.wrapping_rem(b) }),
+            Op::IntSDiv => signed_binary!(|a, b| if b == 0 { 0 } else { a.wrapping_div(b) }),
+            Op::IntSRem => signed_binary!(|a, b| if b == 0 { 0 } else { a.wrapping_rem(b) }),
+
+            // A shift count at or past the width produces zero, or all sign
+            // bits for the arithmetic form. Rust's `<<` panics there, so the
+            // check is not optional.
+            Op::IntLeft => binary!(|a, b| if b >= 128 { 0 } else { a << b }),
+            Op::IntRight => binary!(|a, b| if b >= 128 { 0 } else { a >> b }),
+            Op::IntSRight => {
+                let a = signed(input(self, 0)?, op.inputs[0].size);
+                let b = input(self, 1)?;
+                let value = if b >= 128 {
+                    if a < 0 { -1i128 } else { 0 }
+                } else {
+                    a >> b
+                };
+                self.write_varnode_u128(&out, value as u128)?;
+            }
+
+            Op::IntNegate => {
+                let a = input(self, 0)?;
+                self.write_varnode_u128(&out, !a)?;
+            }
+            Op::Int2Comp => {
+                let a = input(self, 0)?;
+                self.write_varnode_u128(&out, (!a).wrapping_add(1))?;
+            }
+
+            Op::IntEqual => predicate!(|a, b| a == b),
+            Op::IntNotEqual => predicate!(|a, b| a != b),
+            Op::IntLess => predicate!(|a, b| a < b),
+            Op::IntLessEqual => predicate!(|a, b| a <= b),
+            Op::IntSLess => signed_predicate!(|a, b| a < b),
+            Op::IntSLessEqual => signed_predicate!(|a, b| a <= b),
+
+            Op::IntZExt => {
+                let a = input(self, 0)?;
+                self.write_varnode_u128(&out, a)?;
+            }
+            Op::IntSExt => {
+                let a = signed(input(self, 0)?, op.inputs[0].size);
+                self.write_varnode_u128(&out, a as u128)?;
+            }
+            Op::SubPiece => {
+                let a = input(self, 0)?;
+                let byte_offset = input(self, 1)?;
+                let shift = byte_offset.saturating_mul(8);
+                let value = if shift >= 128 { 0 } else { a >> shift };
+                self.write_varnode_u128(&out, value)?;
+            }
+            Op::Piece => {
+                let hi = input(self, 0)?;
+                let lo = input(self, 1)?;
+                let lo_bits = u128::from(op.inputs[1].size) * 8;
+                let value = if lo_bits >= 128 {
+                    lo
+                } else {
+                    (hi << lo_bits) | truncate_u128(lo, op.inputs[1].size)
+                };
+                self.write_varnode_u128(&out, value)?;
+            }
+
+            // Unreachable while this and `u128_handled` agree. If they ever
+            // stop agreeing, the JIT will have handed the op here expecting it
+            // to be done -- so say so rather than dropping it silently.
+            other => {
+                self.unimplemented = Some(other);
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub(crate) fn write_varnode_u64(&mut self, vn: &Varnode, val: u64) -> Result<()> {
         let bytes = val.to_le_bytes();
         // Clamp to 8 bytes — SIMD varnodes (XMM = 16B, YMM = 32B) are wider than u64
@@ -201,6 +439,12 @@ impl<'a> Evaluator<'a> {
 
     /// Evaluates a single P-Code operation against the current machine state.
     pub fn step(&mut self, op: &PcodeOp) -> Result<StepResult> {
+        // Anything with a varnode between nine and sixteen bytes goes through
+        // the 128-bit path first. See `try_step_u128`.
+        if self.try_step_u128(op)? {
+            return Ok(StepResult::Next);
+        }
+
         match op.opcode {
             // ── Memory ───────────────────────────────────────────────────────
             PcodeOpcode::Copy => {
@@ -280,13 +524,17 @@ impl<'a> Evaluator<'a> {
                         op.inputs[2].size,
                     )?;
                 } else {
-                    // Concrete pointer
+                    // Concrete pointer.
+                    //
+                    // Every byte, not eight. A `movaps %xmm0, (%rax)` stores
+                    // sixteen, and storing only the low half left the other
+                    // eight holding whatever was at the destination -- which
+                    // is how a `va_copy` produced a `va_list` with its fields
+                    // in the wrong places, three thousand instructions before
+                    // anything noticed.
                     let addr = self.read_varnode_u64(&op.inputs[1])?;
-                    let val = self.read_varnode_u64(&op.inputs[2])?;
-                    let bytes = val.to_le_bytes();
-                    let store_size = (op.inputs[2].size as usize).min(8);
-                    self.state
-                        .write_space(space_id, addr, &bytes[..store_size])?;
+                    let bytes = self.read_varnode_bytes(&op.inputs[2])?;
+                    self.state.write_space(space_id, addr, &bytes)?;
                     if let Some(id) = val_node {
                         for i in 0..op.inputs[2].size as u64 {
                             self.state.set_shadow_memory(space_id, addr + i, id);
@@ -907,6 +1155,16 @@ impl<'a> Evaluator<'a> {
 fn sign_extend(val: u64, size: u32) -> i64 {
     let shift = 64 - (size * 8);
     ((val as i64) << shift) >> shift
+}
+
+/// `value` kept to `size` bytes.
+fn truncate_u128(value: u128, size: u32) -> u128 {
+    let bits = size.saturating_mul(8);
+    if bits == 0 || bits >= 128 {
+        value
+    } else {
+        value & ((1u128 << bits) - 1)
+    }
 }
 
 fn bool_u64(b: bool) -> u64 {

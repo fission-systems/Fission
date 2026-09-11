@@ -129,6 +129,13 @@ pub struct Emulator {
     /// ARMv7-M system registers. See [`crate::arch::cortex_m`]; inert on every
     /// other architecture, because nothing reaches for them.
     pub cortex_m: crate::arch::cortex_m::CortexMState,
+    /// P-code ops the JIT compiled a call-out for rather than lowering.
+    ///
+    /// Append-only, and never touched while a block is running: a compiled
+    /// block names an entry by index, and `jit_wide_op` reads it back. The
+    /// ops are the 128-bit integer ones, which go through the evaluator so
+    /// that the two engines cannot lower them differently.
+    pub(crate) wide_ops: Vec<fission_pcode::ir::PcodeOp>,
 
     /// Linux ELF process image metadata (stack/auxv/brk) when loaded via ELF loader.
     pub image_info: Option<crate::os::linux::image_info::ImageInfo>,
@@ -359,6 +366,7 @@ impl Emulator {
             magic_range,
             decode_context,
             cortex_m: crate::arch::cortex_m::CortexMState::at_reset(),
+            wide_ops: Vec::new(),
             image_info: None,
             pe_image_info: None,
             signals: crate::os::linux::signal::SignalState::default(),
@@ -1231,7 +1239,12 @@ impl Emulator {
 
         let reg_sp = self.state.register_space();
         let uniq_sp = self.state.unique_space();
-        let func_ptr = match jit.compile_translation_block(&insns, reg_sp, uniq_sp) {
+        let func_ptr = match jit.compile_translation_block(
+            &insns,
+            reg_sp,
+            uniq_sp,
+            &mut self.wide_ops,
+        ) {
             Ok(ptr) => ptr,
             Err(e) => {
                 // Not fatal any more. An opcode Cranelift cannot lower is a

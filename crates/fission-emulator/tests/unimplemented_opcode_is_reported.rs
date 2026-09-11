@@ -46,7 +46,7 @@ fn the_compiler_counts_an_opcode_it_lowers_to_nothing() {
         len: 4,
         ops: vec![cpool_ref()],
     }];
-    jit.compile_translation_block(&insns, 2, 1)
+    jit.compile_translation_block(&insns, 2, 1, &mut Vec::new())
         .expect("the block still compiles -- the op lowers to nothing, it does not fail");
 
     assert_eq!(
