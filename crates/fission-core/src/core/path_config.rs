@@ -699,6 +699,43 @@ impl PathConfig {
     }
 
     /// Get all available FID database paths for an architecture
+    /// Every FID database in the bundle, whatever its name.
+    ///
+    /// The lists above name databases one at a time, which is why
+    /// `get_preferred_fid_paths` can only ever return two for an ELF: the
+    /// arrays mix architectures (`GCC_FID_FILES_X64` holds an x86 entry *and*
+    /// an AArch64 one), so it takes `.first()` and the rest is unreachable.
+    /// Fourteen of the fifty-seven databases in `utils/signatures/fid/` are
+    /// named by no list at all -- including the RHEL 6/7 glibc packs this
+    /// project generated itself, which are exactly the case FID can match,
+    /// since a distribution's glibc is one fixed build.
+    ///
+    /// Selecting by *name* was never the right filter. `FidDatabaseSet` already
+    /// asks each opened database whether it carries the program's language, so
+    /// listing everything and letting that answer decide uses the whole bundle
+    /// and cannot load an AArch64 database for an x86 program.
+    pub fn all_fid_database_paths(&self) -> Vec<PathBuf> {
+        let Some(ref dir) = self.fid_dir else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut paths: Vec<PathBuf> = entries
+            .flatten()
+            .filter_map(|entry| {
+                // `<stem>.fn.fpk` is the table every database has; the others
+                // are optional. Name the `.fidbf` the loaders expect -- they
+                // resolve the packed siblings from it.
+                let name = entry.file_name().into_string().ok()?;
+                let stem = name.strip_suffix(".fn.fpk")?;
+                Some(dir.join(format!("{stem}.fidbf")))
+            })
+            .collect();
+        paths.sort();
+        paths
+    }
+
     pub fn get_all_fid_paths(&self, is_64bit: bool) -> Vec<PathBuf> {
         let file_lists: Vec<&[&str]> = if is_64bit {
             vec![MSVC_FID_FILES_X64, GCC_FID_FILES_X64, LIBC_FID_FILES_X64]
@@ -707,13 +744,22 @@ impl PathConfig {
         };
 
         let mut result = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for list in file_lists {
             for filename in list {
-                if let Some(path) = self.find_fid_file(filename) {
+                if let Some(path) = self.find_fid_file(filename)
+                    && seen.insert(path.clone())
+                {
                     result.push(path);
                 }
             }
         }
+        // Deliberately *not* widened to the whole bundle. This list feeds
+        // `parse_all_fidbf_for_arch`, which decodes every database in full;
+        // the whole bundle through that path took `identify` on one coreutils
+        // binary from 0.99s to 1.92s. `FidDatabaseSet::discover_for_load_spec`
+        // opens the same databases lazily -- an index, not a decode -- and is
+        // where the bundle is used in full.
         result
     }
 

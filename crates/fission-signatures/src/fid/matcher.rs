@@ -55,12 +55,20 @@ impl FidDatabaseSet {
         is_64bit: bool,
         processor: Option<&str>,
     ) -> Self {
-        let paths = ResourceProvider::global().paths().get_preferred_fid_paths(
-            is_64bit,
-            format,
-            compiler_id,
-            processor,
-        );
+        let provider = ResourceProvider::global();
+        let config = provider.paths();
+        // The preferred names first, so a database chosen for this compiler
+        // keeps its precedence, then everything else the bundle holds. The
+        // language check below is what decides -- a name-based list could only
+        // ever reach two of the fifty-seven databases that ship.
+        let mut paths = config.get_preferred_fid_paths(is_64bit, format, compiler_id, processor);
+        let mut seen: std::collections::HashSet<std::path::PathBuf> =
+            paths.iter().cloned().collect();
+        for path in config.all_fid_database_paths() {
+            if seen.insert(path.clone()) {
+                paths.push(path);
+            }
+        }
         let mut databases = Vec::new();
         let mut errors = Vec::new();
         for path in paths {

@@ -8,7 +8,10 @@
 //! Those call for four different fixes, so this walks the funnel and prints
 //! the count surviving each stage.
 //!
-//! Usage: `cargo run --release -p fission-decompiler --example fid_funnel -- <binary>`
+//! Usage: `cargo run --release -p fission-decompiler --example fid_funnel --
+//! <binary> [extra.fidbf ...]`. Each extra path is opened lazily and reported
+//! on its own, which is how to ask whether a particular database in the
+//! bundle holds anything for this binary at all.
 
 use fission_decompiler::fid::{FidIdentifier, load_fid_databases};
 use fission_signatures::fidbf::FID_ACCEPT_THRESHOLD;
@@ -118,6 +121,34 @@ fn main() {
     println!("    dropped: force_rel    {only_force_relation}");
     println!("    dropped: force_spec   {only_force_specific}");
     println!("    dropped: threshold    {below_threshold}");
+
+    for extra in std::env::args().skip(2) {
+        let path = std::path::PathBuf::from(&extra);
+        let Some(lazy) = fission_signatures::fidbf::fpk_store::LazyFidDatabase::open(&path) else {
+            println!("\n{extra}: could not open");
+            continue;
+        };
+        let language = binary
+            .load_spec()
+            .map(|spec| spec.pair.language_id.0.clone())
+            .unwrap_or_default();
+        let mut accepted = 0usize;
+        for func in &binary.functions {
+            if func.is_import {
+                continue;
+            }
+            let Some((_units, full_hash, specific_hash)) = identifier.hashes(func.address) else {
+                continue;
+            };
+            if !lazy.identify_by_hashes(full_hash, specific_hash).is_empty() {
+                accepted += 1;
+            }
+        }
+        println!(
+            "\n{extra}: has_language({language})={} accepted={accepted}",
+            lazy.has_language(&language)
+        );
+    }
 
     if !rejected_sizes.is_empty() {
         rejected_sizes.sort_unstable();
