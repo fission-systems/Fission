@@ -75,6 +75,15 @@ struct Stats {
     dead: Vec<String>,
     blocks: u64,
     instructions: u64,
+    /// Instructions with a varnode wider than eight bytes.
+    ///
+    /// Neither engine implements 128-bit semantics: `load_vn!` takes the low
+    /// eight bytes of a wide varnode and the interpreter moves all sixteen for
+    /// some ops and not others. Nothing *counts* that, because the opcodes are
+    /// ordinary -- it is the width that is unsupported, so these compile
+    /// cleanly and compute the wrong thing. This is the one gap the other
+    /// three columns are blind to, which is why it gets its own.
+    wide_insns: u64,
     decode_errors: BTreeMap<String, u64>,
     compile_errors: BTreeMap<String, u64>,
     unimplemented: BTreeMap<String, u64>,
@@ -89,6 +98,7 @@ impl Stats {
         self.binaries += other.binaries;
         self.dead.extend(other.dead);
         self.blocks += other.blocks;
+        self.wide_insns += other.wide_insns;
         self.instructions += other.instructions;
         for (k, v) in other.decode_errors {
             *self.decode_errors.entry(k).or_default() += v;
@@ -226,6 +236,12 @@ fn translate(path: &Path, stats: &mut Stats) {
             match sleigh.decode_and_lift_with_context_override(bytes, pc, context) {
                 Ok((ops, len, details)) => {
                     instructions += 1;
+                    if ops.iter().any(|op| {
+                        op.output.as_ref().is_some_and(|v| v.size > 8)
+                            || op.inputs.iter().any(|v| v.size > 8)
+                    }) {
+                        stats.wide_insns += 1;
+                    }
                     for op in &ops {
                         if op.opcode == PcodeOpcode::CallOther {
                             let id = op.inputs.first().map_or(-1, |v| v.constant_val) as u32;
@@ -348,13 +364,16 @@ fn how_much_of_the_benchmark_corpus_translates() {
     for (language, stats) in &by_language {
         eprintln!(
             "{language:<28} {:>4} binaries  {:>9} insns  {:>7} blocks  \
-             decode-fail {:>4}  compile-fail {:>3}  dropped-ops {:>4}",
+             decode-fail {:>4}  compile-fail {:>3}  dropped-ops {:>4}  \
+             >8B-varnode {:>7} ({:.2}%)",
             stats.binaries,
             stats.instructions,
             stats.blocks,
             stats.decode_errors.values().sum::<u64>(),
             stats.compile_errors.values().sum::<u64>(),
             stats.unimplemented.values().sum::<u64>(),
+            stats.wide_insns,
+            stats.wide_insns as f64 / stats.instructions.max(1) as f64 * 100.0,
         );
     }
     for stats in by_language.into_values() {
