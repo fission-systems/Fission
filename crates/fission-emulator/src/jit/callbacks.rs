@@ -763,9 +763,16 @@ pub extern "C" fn jit_call_other(
         Vec::new()
     };
 
-    // x86 SYSCALL/SYSENTER are often named "syscall" in .sla; fall back by id-less name.
-    let is_syscall = userop_name == "syscall"
-        || userop_name == "sysenter"
+    // Every architecture's "enter the kernel" userop, under the name its own
+    // SLEIGH spec gives it. aarch64's `svc` lifts to `CallSupervisor` and
+    // ARM32's to `software_interrupt`, neither of which contains "syscall" --
+    // so on those architectures the guest's syscalls fell through to the
+    // default userop handler and did nothing at all. `CallSupervisor` was the
+    // most common unanswered CALLOTHER in the dev corpus, 110,912 of them, and
+    // the two aarch64 binaries that never finished were the reason.
+    let is_syscall = userop_name == "sysenter"
+        || userop_name == "CallSupervisor"
+        || userop_name == "software_interrupt"
         || userop_name.eq_ignore_ascii_case("syscall")
         || userop_name.contains("syscall");
 

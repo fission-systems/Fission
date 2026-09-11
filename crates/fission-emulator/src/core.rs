@@ -446,6 +446,50 @@ impl Emulator {
     }
 
     /// Attach PE image metadata and apply stack pointer / PC from it.
+    /// The syscall number the guest asked for, in the registry's numbering.
+    ///
+    /// `None` means the architecture's number has no counterpart -- an honest
+    /// "unknown syscall", and better than translating it into an unrelated one.
+    pub fn syscall_number(&mut self) -> Option<u64> {
+        let abi = crate::os::linux::syscall_conv::SyscallAbi::for_arch(&self.arch);
+        let raw = self.read_register_u64(abi.number).unwrap_or(0);
+        abi.canonical_number(raw)
+    }
+
+    /// The raw number the guest put in the number register, for reporting.
+    pub fn raw_syscall_number(&mut self) -> u64 {
+        let abi = crate::os::linux::syscall_conv::SyscallAbi::for_arch(&self.arch);
+        self.read_register_u64(abi.number).unwrap_or(0)
+    }
+
+    /// Argument `n` of the syscall in progress.
+    ///
+    /// Not the same as [`Self::read_arg`]: a syscall's registers are not its
+    /// architecture's *call* registers. x86-64 passes the fourth argument in
+    /// `R10` here and `RCX` there, because `syscall` clobbers `RCX`.
+    pub fn syscall_arg(&mut self, n: usize) -> u64 {
+        let abi = crate::os::linux::syscall_conv::SyscallAbi::for_arch(&self.arch);
+        abi.args
+            .get(n)
+            .and_then(|reg| self.read_register_u64(reg).ok())
+            .unwrap_or(0)
+    }
+
+    /// All six argument registers, for a report.
+    pub fn syscall_args(&mut self) -> [u64; 6] {
+        let mut out = [0u64; 6];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = self.syscall_arg(i);
+        }
+        out
+    }
+
+    /// Where a syscall's result goes.
+    pub fn set_syscall_return(&mut self, value: u64) -> Result<()> {
+        let abi = crate::os::linux::syscall_conv::SyscallAbi::for_arch(&self.arch);
+        self.write_register_u64(abi.result, value)
+    }
+
     /// Set the FS segment base, in both places that can be asked for it.
     ///
     /// Ghidra's x86 spec resolves `fs:[x]` in 32/64-bit mode by adding the

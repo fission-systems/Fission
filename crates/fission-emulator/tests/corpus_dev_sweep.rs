@@ -46,6 +46,10 @@ struct Outcome {
     /// Opcodes an engine met and lowered to nothing. A run with any of these
     /// produced a wrong answer somewhere, silently.
     unimplemented: Vec<(String, u64)>,
+    /// `CALLOTHER` names nothing answered. A no-op that returns zero.
+    unhandled_userops: Vec<(String, u64)>,
+    /// Syscall numbers with no handler. Answered with zero, like the rest.
+    unknown_syscalls: Vec<(u64, u64)>,
     error: Option<String>,
 }
 
@@ -56,6 +60,8 @@ fn run_one(path: &Path) -> Outcome {
         inst: 0,
         misses: Vec::new(),
         unimplemented: Vec::new(),
+        unhandled_userops: Vec::new(),
+        unknown_syscalls: Vec::new(),
         error: Some(e),
     };
 
@@ -120,6 +126,18 @@ fn run_one(path: &Path) -> Outcome {
                 .iter()
                 .map(|(k, v)| (k.clone(), *v))
                 .collect(),
+            unhandled_userops: emu
+                .metrics
+                .unhandled_userops
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            unknown_syscalls: emu
+                .metrics
+                .unknown_syscalls
+                .iter()
+                .map(|(k, v)| (*k, *v))
+                .collect(),
             error: None,
         },
         Err(e) => Outcome {
@@ -132,6 +150,18 @@ fn run_one(path: &Path) -> Outcome {
                 .unimplemented_opcodes
                 .iter()
                 .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            unhandled_userops: emu
+                .metrics
+                .unhandled_userops
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            unknown_syscalls: emu
+                .metrics
+                .unknown_syscalls
+                .iter()
+                .map(|(k, v)| (*k, *v))
                 .collect(),
             error: Some(format!("run: {e}")),
         },
@@ -167,6 +197,8 @@ fn how_much_of_the_dev_corpus_runs() {
     let mut clean = 0usize;
     let mut wanted: BTreeMap<String, usize> = BTreeMap::new();
     let mut unimplemented: BTreeMap<String, u64> = BTreeMap::new();
+    let mut unhandled: BTreeMap<String, u64> = BTreeMap::new();
+    let mut unknown_syscalls: BTreeMap<u64, u64> = BTreeMap::new();
     for path in &binaries {
         let outcome = run_one(path);
         if outcome.halted {
@@ -180,6 +212,12 @@ fn how_much_of_the_dev_corpus_runs() {
         }
         for (op, n) in &outcome.unimplemented {
             *unimplemented.entry(op.clone()).or_default() += n;
+        }
+        for (op, n) in &outcome.unhandled_userops {
+            *unhandled.entry(op.clone()).or_default() += n;
+        }
+        for (num, n) in &outcome.unknown_syscalls {
+            *unknown_syscalls.entry(*num).or_default() += n;
         }
         let name = path.file_name().unwrap().to_string_lossy();
         let status = match (&outcome.error, outcome.halted) {
@@ -205,6 +243,26 @@ fn how_much_of_the_dev_corpus_runs() {
         ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
         for (op, n) in &ranked {
             eprintln!("  {n:>6}  {op}");
+        }
+    }
+    if unhandled.is_empty() {
+        eprintln!("every CALLOTHER reached was answered");
+    } else {
+        eprintln!("CALLOTHERs answered with a zero (each one is a wrong value):");
+        let mut ranked: Vec<_> = unhandled.into_iter().collect();
+        ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        for (op, n) in ranked.iter().take(15) {
+            eprintln!("  {n:>6}  {op}");
+        }
+    }
+    if unknown_syscalls.is_empty() {
+        eprintln!("every syscall reached had a handler");
+    } else {
+        eprintln!("syscalls with no handler:");
+        let mut ranked: Vec<_> = unknown_syscalls.into_iter().collect();
+        ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        for (num, n) in ranked.iter().take(15) {
+            eprintln!("  {n:>6}  #{num}");
         }
     }
     eprintln!("APIs the rest are waiting on, most wanted first:");

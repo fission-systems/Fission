@@ -26,6 +26,14 @@ pub struct EmulatorMetrics {
     /// Missing libc / Win32 HLE procedures (name → count). Fake-success returns 0.
     #[serde(default)]
     pub hle_misses: BTreeMap<String, u64>,
+    /// `CALLOTHER` names no environment answered (name → count).
+    ///
+    /// The trait's default `dispatch_userop` logs a warning and returns zero,
+    /// so an unanswered userop is a wrong value the run never mentions. On a
+    /// Cortex-M image that is every `bx`: `setISAMode` is the single most
+    /// common userop in the benchmark corpus.
+    #[serde(default)]
+    pub unhandled_userops: BTreeMap<String, u64>,
     /// Unimplemented Linux syscall numbers (fake RAX=0 path).
     #[serde(default)]
     pub unknown_syscalls: BTreeMap<u64, u64>,
@@ -60,6 +68,10 @@ impl EmulatorMetrics {
 
     pub fn note_syscall(&mut self, num: u64) {
         *self.syscalls.entry(num).or_insert(0) += 1;
+    }
+
+    pub fn note_unhandled_userop(&mut self, name: &str) {
+        *self.unhandled_userops.entry(name.to_string()).or_insert(0) += 1;
     }
 
     pub fn note_hle_miss(&mut self, name: &str) {

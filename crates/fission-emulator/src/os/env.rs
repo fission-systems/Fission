@@ -68,15 +68,97 @@ pub trait OsEnvironment: Send + Sync {
     /// Default: log a warning and treat as no-op (returns 0 to any output).
     fn dispatch_userop(
         &self,
-        _emu: &mut Emulator,
+        emu: &mut Emulator,
         userop_name: &str,
         _input_vals: &[u64],
         _output_size: u32,
     ) -> Result<HleResult> {
+        if answer_processor_userop(emu, userop_name) {
+            return Ok(HleResult::Continue);
+        }
         tracing::warn!(
             "Unimplemented USEROP: '{}'. Treating as no-op (returns 0).",
             userop_name
         );
+        // A no-op behind a warning is a wrong value the run never mentions.
+        // Recording it is what lets a report say which of the userops a corpus
+        // reaches are actually answered.
+        emu.metrics.note_unhandled_userop(userop_name);
         Ok(HleResult::Continue)
+    }
+}
+
+/// `CALLOTHER`s that are processor semantics rather than OS services.
+///
+/// These are answered the same way under every environment, so they live here
+/// rather than three times over. Returns whether the name was answered; the
+/// value, if any, is left in `emu.callother_result`.
+///
+/// # Why "do nothing" has to be said out loud
+///
+/// Some of these really are no-ops on this emulator, and it matters that they
+/// are *listed* as such. An unanswered userop falls through to a warning and a
+/// zero, and until it is named nobody can tell the two cases apart: "a barrier,
+/// and one processor has nothing to order" reads exactly like "we have no idea
+/// what this instruction does". The unanswered list is only a work queue if
+/// the deliberate silences are taken out of it.
+pub fn answer_processor_userop(emu: &mut Emulator, name: &str) -> bool {
+    match name {
+        // ── Exclusive access: ldxr/stxr, ldrex/strex ────────────────────────
+        //
+        // One processor and no other observer, so the monitor cannot be
+        // stolen between the load and the store. The pass succeeds, and the
+        // store reports success -- which is *zero*, because that is what the
+        // architecture puts in the status register.
+        //
+        // Getting this wrong is not a small error. Both SLEIGH specs pre-set
+        // the status to "failed" and only overwrite it on the success path, so
+        // an unanswered `ExclusiveMonitorPass` makes every compare-and-swap
+        // retry loop spin for ever. The two aarch64 binaries in the dev corpus
+        // that ran to the instruction budget without finishing were doing
+        // exactly that, half a million times.
+        "ExclusiveMonitorPass" | "hasExclusiveAccess" => {
+            emu.callother_result = 1;
+            true
+        }
+        "ExclusiveMonitorsStatus" => {
+            emu.callother_result = 0;
+            true
+        }
+
+        // ── Barriers ────────────────────────────────────────────────────────
+        //
+        // A barrier orders this processor's accesses against what another
+        // observer can see. There is no other observer, and this emulator
+        // executes one instruction at a time in program order, so the ordering
+        // a barrier asks for already holds.
+        "DataMemoryBarrier"
+        | "DataSynchronizationBarrier"
+        | "InstructionSynchronizationBarrier"
+        | "SpeculationBarrier"
+        | "LOAcquire"
+        | "LORelease"
+        | "LOCK"
+        | "UNLOCK"
+        | "XACQUIRE"
+        | "XRELEASE" => {
+            emu.callother_result = 0;
+            true
+        }
+
+        // ── Hints ───────────────────────────────────────────────────────────
+        //
+        // Advisory by definition: a prefetch that does not happen changes
+        // timing and nothing else, and there is no timing here.
+        "HintPreloadData"
+        | "HintPreloadDataForWrite"
+        | "HintPreloadInstruction"
+        | "HintDebug"
+        | "HintYield" => {
+            emu.callother_result = 0;
+            true
+        }
+
+        _ => false,
     }
 }

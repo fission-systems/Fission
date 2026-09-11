@@ -516,18 +516,20 @@ impl OsEnvironment for WindowsEnv {
                     emu.callother_result
                 );
             }
-            "lock" | "rep" | "repne" | "repe" => {
-                tracing::debug!("Win32 HLE: Prefix userop '{}'", userop_name);
-            }
             "rdtsc" | "cpuid" => {
                 tracing::info!("Win32 HLE: Instruct userop '{}' called", userop_name);
             }
+            // Processor semantics rather than OS services: barriers,
+            // exclusive access, hints. The same answer under every
+            // environment, so it is written once.
+            _ if crate::os::env::answer_processor_userop(emu, userop_name) => {}
             _ => {
                 tracing::debug!(
                     "Win32 HLE: Unhandled USEROP: {} (inputs: {:?})",
                     userop_name,
                     inputs
                 );
+                emu.metrics.note_unhandled_userop(userop_name);
             }
         }
         Ok(HleResult::Continue)

@@ -6,6 +6,7 @@ pub mod loader;
 pub mod signal;
 pub mod syscall;
 pub mod syscall_abi;
+pub mod syscall_conv;
 
 pub use dynlink::{DynlinkInfo, DynlinkMode};
 pub use image_info::{ImageInfo, ProcessArgs};
@@ -256,20 +257,28 @@ impl OsEnvironment for LinuxEnv {
         }
 
         if func_name == "syscall" {
-            let sys_num = emu.read_register_u64("RAX").unwrap_or(0);
+            // The registry is keyed on x86-64's numbering, and an architecture
+            // using the generic table translates into it. A number with no
+            // counterpart stays raw and is reported unknown -- see
+            // `syscall_conv` for why inventing one would be worse.
+            let raw_num = emu.raw_syscall_number();
+            let sys_num = match emu.syscall_number() {
+                Some(n) => n,
+                None => {
+                    tracing::warn!("Unimplemented Linux syscall: {} (raw)", raw_num);
+                    emu.metrics.note_unknown_syscall(raw_num);
+                    emu.set_syscall_return(0)?;
+                    return Ok(HleResult::Continue);
+                }
+            };
             emu.metrics.note_syscall(sys_num);
             if !emu.observers.is_empty() {
-                // Linux x86-64 syscall ABI: RDI, RSI, RDX, R10, R8, R9 --
-                // deliberately not the SysV *call* ABI, which uses RCX where
-                // this uses R10. Read here rather than in the observer: the
-                // observer never gets the emulator.
-                let mut args = [0u64; 6];
-                for (slot, name) in args
-                    .iter_mut()
-                    .zip(["RDI", "RSI", "RDX", "R10", "R8", "R9"])
-                {
-                    *slot = emu.read_register_u64(name).unwrap_or(0);
-                }
+                // The syscall registers, which are not the architecture's
+                // *call* registers: x86-64 passes the fourth argument in R10
+                // here and RCX there, because `syscall` clobbers RCX. Read
+                // here rather than in the observer, which never gets the
+                // emulator.
+                let args = emu.syscall_args();
                 let pc = emu.pc;
                 let spec = syscall_abi::spec(sys_num);
                 let detail = spec
@@ -291,9 +300,9 @@ impl OsEnvironment for LinuxEnv {
                 }
                 return result;
             } else {
-                tracing::warn!("Unimplemented Linux x64 syscall: {}", sys_num);
+                tracing::warn!("Unimplemented Linux syscall: {}", sys_num);
                 emu.metrics.note_unknown_syscall(sys_num);
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
                 return Ok(HleResult::Continue);
             }
         }
@@ -362,18 +371,20 @@ impl OsEnvironment for LinuxEnv {
                     emu.callother_result
                 );
             }
-            "lock" | "rep" | "repne" | "repe" => {
-                tracing::debug!("Linux HLE: Prefix userop '{}'", userop_name);
-            }
             "rdtsc" | "cpuid" | "syscall" | "sysenter" => {
                 tracing::info!("Linux HLE: Instruct userop '{}' called", userop_name);
             }
+            // Processor semantics rather than OS services: barriers,
+            // exclusive access, hints. The same answer under every
+            // environment, so it is written once.
+            _ if crate::os::env::answer_processor_userop(emu, userop_name) => {}
             _ => {
                 tracing::debug!(
                     "Linux HLE: Unhandled USEROP: {} (inputs: {:?})",
                     userop_name,
                     inputs
                 );
+                emu.metrics.note_unhandled_userop(userop_name);
             }
         }
         Ok(HleResult::Continue)

@@ -1,8 +1,15 @@
-//! Linux x86-64 syscall HLE (user-mode).
+//! Linux syscall HLE (user-mode).
 //!
 //! Coverage is intentionally pragmatic: enough for static musl/glibc startup
 //! stubs and simple utilities. Expand by adding `SimProcedure`s and registering
 //! numbers in `LinuxEnv::new`. QEMU linux-user is a structural reference only.
+//!
+//! Handlers reach arguments through [`Emulator::syscall_arg`] and answer
+//! through [`Emulator::set_syscall_return`], never by register name. They used
+//! to name `RDI`/`RSI`/`RDX`/`RAX` directly, which made every one of them
+//! x86-64-only -- an aarch64 image could not make a single syscall no matter
+//! what else worked. See [`super::syscall_conv`] for which registers each
+//! architecture actually uses, and for the fact that the numbering differs too.
 
 use crate::core::Emulator;
 use crate::os::env::HleResult;
@@ -27,9 +34,9 @@ fn ram_read(emu: &mut Emulator, addr: u64, size: usize) -> Result<Vec<u8>> {
 pub struct SysRead;
 impl SimProcedure for SysRead {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let fd = emu.read_register_u64("RDI").unwrap_or(0);
-        let buf = emu.read_register_u64("RSI").unwrap_or(0);
-        let count = emu.read_register_u64("RDX").unwrap_or(0);
+        let fd = emu.syscall_arg(0);
+        let buf = emu.syscall_arg(1);
+        let count = emu.syscall_arg(2);
 
         tracing::info!("sys_read({}, 0x{:X}, {})", fd, buf, count);
 
@@ -48,10 +55,10 @@ impl SimProcedure for SysRead {
                             .set_shadow_memory(emu.state.ram_space(), buf + (i as u64), node);
                     }
                 }
-                emu.write_register_u64("RAX", bytes_read as u64)?;
+                emu.set_syscall_return(bytes_read as u64)?;
             }
             Err(_) => {
-                emu.write_register_u64("RAX", (-1i64) as u64)?;
+                emu.set_syscall_return((-1i64) as u64)?;
             }
         }
         Ok(HleResult::Continue)
@@ -61,9 +68,9 @@ impl SimProcedure for SysRead {
 pub struct SysWrite;
 impl SimProcedure for SysWrite {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let fd = emu.read_register_u64("RDI").unwrap_or(0);
-        let buf = emu.read_register_u64("RSI").unwrap_or(0);
-        let count = emu.read_register_u64("RDX").unwrap_or(0);
+        let fd = emu.syscall_arg(0);
+        let buf = emu.syscall_arg(1);
+        let count = emu.syscall_arg(2);
 
         tracing::info!("sys_write({}, 0x{:X}, {})", fd, buf, count);
 
@@ -73,10 +80,10 @@ impl SimProcedure for SysWrite {
                 if fd == 1 || fd == 2 {
                     print!("{}", String::from_utf8_lossy(&data[..written]));
                 }
-                emu.write_register_u64("RAX", written as u64)?;
+                emu.set_syscall_return(written as u64)?;
             }
             Err(_) => {
-                emu.write_register_u64("RAX", (-1i64) as u64)?;
+                emu.set_syscall_return((-1i64) as u64)?;
             }
         }
         Ok(HleResult::Continue)
@@ -86,11 +93,11 @@ impl SimProcedure for SysWrite {
 pub struct SysOpen;
 impl SimProcedure for SysOpen {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let filename_ptr = emu.read_register_u64("RDI").unwrap_or(0);
+        let filename_ptr = emu.syscall_arg(0);
         let filename = read_string(emu, filename_ptr).unwrap_or_else(|_| "unknown".into());
         tracing::info!("sys_open(\"{}\")", filename);
         let fd = emu.vfs.open(&filename, Vec::new());
-        emu.write_register_u64("RAX", fd)?;
+        emu.set_syscall_return(fd)?;
         Ok(HleResult::Continue)
     }
 }
@@ -99,9 +106,9 @@ pub struct SysOpenat;
 impl SimProcedure for SysOpenat {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // openat(dirfd, pathname, flags, mode) — x86-64: rdi, rsi, rdx, r10
-        let _dirfd = emu.read_register_u64("RDI").unwrap_or(0) as i64;
-        let pathname = emu.read_register_u64("RSI").unwrap_or(0);
-        let flags = emu.read_register_u64("RDX").unwrap_or(0);
+        let _dirfd = emu.syscall_arg(0) as i64;
+        let pathname = emu.syscall_arg(1);
+        let flags = emu.syscall_arg(2);
         let filename = read_string(emu, pathname).unwrap_or_else(|_| "unknown".into());
         tracing::info!(
             "sys_openat(dirfd={}, \"{}\", flags=0x{:X})",
@@ -121,11 +128,11 @@ impl SimProcedure for SysOpenat {
             {
                 let _ = emu.vfs.close(fd);
                 // ENOENT = 2
-                emu.write_register_u64("RAX", (-2i64) as u64)?;
+                emu.set_syscall_return((-2i64) as u64)?;
                 return Ok(HleResult::Continue);
             }
         }
-        emu.write_register_u64("RAX", fd)?;
+        emu.set_syscall_return(fd)?;
         Ok(HleResult::Continue)
     }
 }
@@ -133,12 +140,12 @@ impl SimProcedure for SysOpenat {
 pub struct SysClose;
 impl SimProcedure for SysClose {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let fd = emu.read_register_u64("RDI").unwrap_or(0);
+        let fd = emu.syscall_arg(0);
         tracing::info!("sys_close({})", fd);
         if emu.vfs.close(fd).is_ok() {
-            emu.write_register_u64("RAX", 0)?;
+            emu.set_syscall_return(0)?;
         } else {
-            emu.write_register_u64("RAX", (-1i64) as u64)?;
+            emu.set_syscall_return((-1i64) as u64)?;
         }
         Ok(HleResult::Continue)
     }
@@ -147,8 +154,8 @@ impl SimProcedure for SysClose {
 pub struct SysFstat;
 impl SimProcedure for SysFstat {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let fd = emu.read_register_u64("RDI").unwrap_or(0);
-        let statbuf = emu.read_register_u64("RSI").unwrap_or(0);
+        let fd = emu.syscall_arg(0);
+        let statbuf = emu.syscall_arg(1);
         tracing::info!("sys_fstat({}, 0x{:X})", fd, statbuf);
 
         if let Some(file) = emu.vfs.files.get(&fd) {
@@ -156,14 +163,14 @@ impl SimProcedure for SysFstat {
             target_st.st_size = file.content.len() as i64;
             target_st.st_mode = 0x81B4;
             ram_write(emu, statbuf, &target_st.to_bytes())?;
-            emu.write_register_u64("RAX", 0)?;
+            emu.set_syscall_return(0)?;
         } else if fd <= 2 {
             let mut target_st = TargetStat::default();
             target_st.st_mode = 0x2180; // char device-ish for stdio
             ram_write(emu, statbuf, &target_st.to_bytes())?;
-            emu.write_register_u64("RAX", 0)?;
+            emu.set_syscall_return(0)?;
         } else {
-            emu.write_register_u64("RAX", (-1i64) as u64)?;
+            emu.set_syscall_return((-1i64) as u64)?;
         }
         Ok(HleResult::Continue)
     }
@@ -173,8 +180,8 @@ pub struct SysNewfstatat;
 impl SimProcedure for SysNewfstatat {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // newfstatat(dirfd, pathname, statbuf, flags)
-        let pathname = emu.read_register_u64("RSI").unwrap_or(0);
-        let statbuf = emu.read_register_u64("RDX").unwrap_or(0);
+        let pathname = emu.syscall_arg(1);
+        let statbuf = emu.syscall_arg(2);
         let name = read_string(emu, pathname).unwrap_or_default();
         tracing::info!("sys_newfstatat(\"{}\")", name);
         let mut target_st = TargetStat::default();
@@ -191,7 +198,7 @@ impl SimProcedure for SysNewfstatat {
             target_st.st_blocks = (content.len() as i64 + 511) / 512;
         }
         ram_write(emu, statbuf, &target_st.to_bytes())?;
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -199,9 +206,9 @@ impl SimProcedure for SysNewfstatat {
 pub struct SysLseek;
 impl SimProcedure for SysLseek {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let fd = emu.read_register_u64("RDI").unwrap_or(0);
-        let offset = emu.read_register_u64("RSI").unwrap_or(0) as usize;
-        let whence = emu.read_register_u64("RDX").unwrap_or(0);
+        let fd = emu.syscall_arg(0);
+        let offset = emu.syscall_arg(1) as usize;
+        let whence = emu.syscall_arg(2);
         tracing::info!("sys_lseek({}, {}, {})", fd, offset, whence);
         if let Some(file) = emu.vfs.files.get_mut(&fd) {
             let new = match whence {
@@ -209,14 +216,14 @@ impl SimProcedure for SysLseek {
                 1 => file.cursor.saturating_add(offset),
                 2 => file.content.len().saturating_add(offset),
                 _ => {
-                    emu.write_register_u64("RAX", (-1i64) as u64)?;
+                    emu.set_syscall_return((-1i64) as u64)?;
                     return Ok(HleResult::Continue);
                 }
             };
             file.seek(new);
-            emu.write_register_u64("RAX", new as u64)?;
+            emu.set_syscall_return(new as u64)?;
         } else {
-            emu.write_register_u64("RAX", (-1i64) as u64)?;
+            emu.set_syscall_return((-1i64) as u64)?;
         }
         Ok(HleResult::Continue)
     }
@@ -226,9 +233,9 @@ pub struct SysWritev;
 impl SimProcedure for SysWritev {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // writev(fd, iov, iovcnt) — iovec is {void* base; size_t len}
-        let fd = emu.read_register_u64("RDI").unwrap_or(0);
-        let iov = emu.read_register_u64("RSI").unwrap_or(0);
-        let iovcnt = emu.read_register_u64("RDX").unwrap_or(0) as usize;
+        let fd = emu.syscall_arg(0);
+        let iov = emu.syscall_arg(1);
+        let iovcnt = emu.syscall_arg(2) as usize;
         let mut total = 0usize;
         for i in 0..iovcnt.min(64) {
             let base_off = iov + (i as u64) * 16;
@@ -256,7 +263,7 @@ impl SimProcedure for SysWritev {
             }
         }
         tracing::info!("sys_writev({}, iovcnt={}) -> {}", fd, iovcnt, total);
-        emu.write_register_u64("RAX", total as u64)?;
+        emu.set_syscall_return(total as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -264,10 +271,10 @@ impl SimProcedure for SysWritev {
 pub struct SysAccess;
 impl SimProcedure for SysAccess {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let path = emu.read_register_u64("RDI").unwrap_or(0);
+        let path = emu.syscall_arg(0);
         let name = read_string(emu, path).unwrap_or_default();
         tracing::info!("sys_access(\"{}\") -> 0 (ok)", name);
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -279,12 +286,12 @@ impl SimProcedure for SysMmap {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // mmap(addr, length, prot, flags, fd, offset)
         // x86-64 syscall ABI: rdi, rsi, rdx, r10, r8, r9
-        let addr = emu.read_register_u64("RDI").unwrap_or(0);
-        let length = emu.read_register_u64("RSI").unwrap_or(0);
-        let prot_bits = emu.read_register_u64("RDX").unwrap_or(0) as u8;
-        let flags = emu.read_register_u64("R10").unwrap_or(0);
-        let fd = emu.read_register_u64("R8").unwrap_or(u64::MAX) as i64;
-        let offset = emu.read_register_u64("R9").unwrap_or(0) as usize;
+        let addr = emu.syscall_arg(0);
+        let length = emu.syscall_arg(1);
+        let prot_bits = emu.syscall_arg(2) as u8;
+        let flags = emu.syscall_arg(3);
+        let fd = emu.syscall_arg(4) as i64;
+        let offset = emu.syscall_arg(5) as usize;
         let page_prot = (prot_bits & 0x07) | prot::VALID;
         let map_fixed = flags & 0x10 != 0; // MAP_FIXED
         let map_anon = flags & 0x20 != 0; // MAP_ANONYMOUS
@@ -322,7 +329,7 @@ impl SimProcedure for SysMmap {
             }
         }
 
-        emu.write_register_u64("RAX", base)?;
+        emu.set_syscall_return(base)?;
         tracing::info!(
             "sys_mmap(addr=0x{:X}, len={}, prot=0x{:X}, flags=0x{:X}, fd={}, off={}) -> 0x{:X}",
             addr,
@@ -340,9 +347,9 @@ impl SimProcedure for SysMmap {
 pub struct SysMprotect;
 impl SimProcedure for SysMprotect {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let addr = emu.read_register_u64("RDI").unwrap_or(0);
-        let len = emu.read_register_u64("RSI").unwrap_or(0);
-        let prot_bits = emu.read_register_u64("RDX").unwrap_or(0) as u8;
+        let addr = emu.syscall_arg(0);
+        let len = emu.syscall_arg(1);
+        let prot_bits = emu.syscall_arg(2) as u8;
         // Linux: mprotect on a fully/partially unmapped range returns -ENOMEM.
         // Returning success for unmapped pages made musl mallocng treat a huge
         // corrupted page-count as infinite free pages (silent write failures).
@@ -363,7 +370,7 @@ impl SimProcedure for SysMprotect {
                 len,
                 prot_bits
             );
-            emu.write_register_u64("RAX", 0)?;
+            emu.set_syscall_return(0)?;
         } else {
             // -ENOMEM
             tracing::info!(
@@ -372,7 +379,7 @@ impl SimProcedure for SysMprotect {
                 len,
                 prot_bits
             );
-            emu.write_register_u64("RAX", (-12i64) as u64)?;
+            emu.set_syscall_return((-12i64) as u64)?;
         }
         Ok(HleResult::Continue)
     }
@@ -381,8 +388,8 @@ impl SimProcedure for SysMprotect {
 pub struct SysMunmap;
 impl SimProcedure for SysMunmap {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let addr = emu.read_register_u64("RDI").unwrap_or(0);
-        let len = emu.read_register_u64("RSI").unwrap_or(0);
+        let addr = emu.syscall_arg(0);
+        let len = emu.syscall_arg(1);
         emu.state.page_map.unmap_region(addr, len);
         let mut page = page_align_down(addr);
         let end = page_align_up(addr.saturating_add(len.max(1)));
@@ -391,7 +398,7 @@ impl SimProcedure for SysMunmap {
             page = page.saturating_add(0x1000);
         }
         tracing::info!("sys_munmap(0x{:X}, {})", addr, len);
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -399,9 +406,9 @@ impl SimProcedure for SysMunmap {
 pub struct SysBrk;
 impl SimProcedure for SysBrk {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let brk = emu.read_register_u64("RDI").unwrap_or(0);
+        let brk = emu.syscall_arg(0);
         let new_brk = emu.state.page_map.set_brk(brk);
-        emu.write_register_u64("RAX", new_brk)?;
+        emu.set_syscall_return(new_brk)?;
         tracing::info!("sys_brk(0x{:X}) -> 0x{:X}", brk, new_brk);
         Ok(HleResult::Continue)
     }
@@ -412,7 +419,7 @@ impl SimProcedure for SysBrk {
 pub struct SysExit;
 impl SimProcedure for SysExit {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let code = emu.read_register_u64("RDI").unwrap_or(0) as u32;
+        let code = emu.syscall_arg(0) as u32;
         tracing::info!("sys_exit({}). Emulation finished.", code);
         Ok(HleResult::Halt(code))
     }
@@ -421,7 +428,7 @@ impl SimProcedure for SysExit {
 pub struct SysGetpid;
 impl SimProcedure for SysGetpid {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 1000)?;
+        emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }
 }
@@ -429,7 +436,7 @@ impl SimProcedure for SysGetpid {
 pub struct SysGettid;
 impl SimProcedure for SysGettid {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 1000)?;
+        emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }
 }
@@ -437,7 +444,7 @@ impl SimProcedure for SysGettid {
 pub struct SysGetuid;
 impl SimProcedure for SysGetuid {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 1000)?;
+        emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }
 }
@@ -445,7 +452,7 @@ impl SimProcedure for SysGetuid {
 pub struct SysGeteuid;
 impl SimProcedure for SysGeteuid {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 1000)?;
+        emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }
 }
@@ -453,7 +460,7 @@ impl SimProcedure for SysGeteuid {
 pub struct SysGetgid;
 impl SimProcedure for SysGetgid {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 1000)?;
+        emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }
 }
@@ -461,7 +468,7 @@ impl SimProcedure for SysGetgid {
 pub struct SysGetegid;
 impl SimProcedure for SysGetegid {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 1000)?;
+        emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }
 }
@@ -470,7 +477,7 @@ pub struct SysUname;
 impl SimProcedure for SysUname {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // struct utsname — 6 fields of 65 bytes each on Linux
-        let buf = emu.read_register_u64("RDI").unwrap_or(0);
+        let buf = emu.syscall_arg(0);
         let field = |s: &str| {
             let mut b = [0u8; 65];
             let bytes = s.as_bytes();
@@ -484,7 +491,7 @@ impl SimProcedure for SysUname {
         }
         ram_write(emu, buf, &blob)?;
         tracing::info!("sys_uname(0x{:X})", buf);
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -493,37 +500,37 @@ pub struct SysArchPrctl;
 impl SimProcedure for SysArchPrctl {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // ARCH_SET_GS=0x1001, ARCH_SET_FS=0x1002, ARCH_GET_FS=0x1003, ARCH_GET_GS=0x1004
-        let code = emu.read_register_u64("RDI").unwrap_or(0);
-        let addr = emu.read_register_u64("RSI").unwrap_or(0);
+        let code = emu.syscall_arg(0);
+        let addr = emu.syscall_arg(1);
         tracing::info!("sys_arch_prctl(code=0x{:X}, addr=0x{:X})", code, addr);
         match code {
             0x1001 => {
                 // ARCH_SET_GS
                 emu.set_gs_base(addr);
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
             }
             0x1002 => {
                 // ARCH_SET_FS — TLS thread pointer
                 emu.set_fs_base(addr);
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
             }
             0x1003 => {
                 // ARCH_GET_FS
                 if addr != 0 {
                     let _ = ram_write(emu, addr, &emu.fs_base.to_le_bytes());
                 }
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
             }
             0x1004 => {
                 // ARCH_GET_GS
                 if addr != 0 {
                     let _ = ram_write(emu, addr, &emu.gs_base.to_le_bytes());
                 }
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
             }
             _ => {
                 // Unknown subcode: success no-op (some probes).
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
             }
         }
         Ok(HleResult::Continue)
@@ -535,7 +542,7 @@ impl SimProcedure for SysArchPrctl {
 pub struct SysClockGettime;
 impl SimProcedure for SysClockGettime {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let tp = emu.read_register_u64("RSI").unwrap_or(0);
+        let tp = emu.syscall_arg(1);
         // timespec { tv_sec: i64, tv_nsec: i64 }
         let sec: i64 = 1_700_000_000;
         let nsec: i64 = 0;
@@ -543,7 +550,7 @@ impl SimProcedure for SysClockGettime {
         buf.extend_from_slice(&sec.to_le_bytes());
         buf.extend_from_slice(&nsec.to_le_bytes());
         ram_write(emu, tp, &buf)?;
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -551,7 +558,7 @@ impl SimProcedure for SysClockGettime {
 pub struct SysGettimeofday;
 impl SimProcedure for SysGettimeofday {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let tv = emu.read_register_u64("RDI").unwrap_or(0);
+        let tv = emu.syscall_arg(0);
         if tv != 0 {
             let sec: i64 = 1_700_000_000;
             let usec: i64 = 0;
@@ -560,7 +567,7 @@ impl SimProcedure for SysGettimeofday {
             buf.extend_from_slice(&usec.to_le_bytes());
             ram_write(emu, tv, &buf)?;
         }
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -568,12 +575,12 @@ impl SimProcedure for SysGettimeofday {
 pub struct SysTime;
 impl SimProcedure for SysTime {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let tloc = emu.read_register_u64("RDI").unwrap_or(0);
+        let tloc = emu.syscall_arg(0);
         let t: i64 = 1_700_000_000;
         if tloc != 0 {
             ram_write(emu, tloc, &t.to_le_bytes())?;
         }
-        emu.write_register_u64("RAX", t as u64)?;
+        emu.set_syscall_return(t as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -583,9 +590,9 @@ impl SimProcedure for SysRtSigaction {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // rt_sigaction(signum, act, oldact, sigsetsize)
         use crate::os::linux::signal::SigAction;
-        let signum = emu.read_register_u64("RDI").unwrap_or(0) as i32;
-        let act = emu.read_register_u64("RSI").unwrap_or(0);
-        let oldact = emu.read_register_u64("RDX").unwrap_or(0);
+        let signum = emu.syscall_arg(0) as i32;
+        let act = emu.syscall_arg(1);
+        let oldact = emu.syscall_arg(2);
 
         if oldact != 0 {
             // Linux kernel_sigaction layout (x86-64, simplified):
@@ -617,7 +624,7 @@ impl SimProcedure for SysRtSigaction {
                 h => SigAction::Handler(h),
             };
             if !emu.signals.set_action(signum, action, flags) {
-                emu.write_register_u64("RAX", (-22i64) as u64)?; // EINVAL
+                emu.set_syscall_return((-22i64) as u64)?; // EINVAL
                 return Ok(HleResult::Continue);
             }
             tracing::info!(
@@ -627,7 +634,7 @@ impl SimProcedure for SysRtSigaction {
                 flags
             );
         }
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -636,9 +643,9 @@ pub struct SysRtSigprocmask;
 impl SimProcedure for SysRtSigprocmask {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // rt_sigprocmask(how, set, oldset, sigsetsize)
-        let how = emu.read_register_u64("RDI").unwrap_or(0);
-        let set = emu.read_register_u64("RSI").unwrap_or(0);
-        let oldset = emu.read_register_u64("RDX").unwrap_or(0);
+        let how = emu.syscall_arg(0);
+        let set = emu.syscall_arg(1);
+        let oldset = emu.syscall_arg(2);
 
         if oldset != 0 {
             let mask = emu.signals.blocked_mask();
@@ -653,14 +660,14 @@ impl SimProcedure for SysRtSigprocmask {
                 1 => cur & !new_mask, // SIG_UNBLOCK
                 2 => new_mask,        // SIG_SETMASK
                 _ => {
-                    emu.write_register_u64("RAX", (-22i64) as u64)?;
+                    emu.set_syscall_return((-22i64) as u64)?;
                     return Ok(HleResult::Continue);
                 }
             };
             emu.signals.set_blocked_mask(next);
             tracing::debug!("sys_rt_sigprocmask how={} mask=0x{:X}", how, next);
         }
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -668,20 +675,20 @@ impl SimProcedure for SysRtSigprocmask {
 pub struct SysKill;
 impl SimProcedure for SysKill {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let pid = emu.read_register_u64("RDI").unwrap_or(0) as i64;
-        let sig = emu.read_register_u64("RSI").unwrap_or(0) as i32;
+        let pid = emu.syscall_arg(0) as i64;
+        let sig = emu.syscall_arg(1) as i32;
         tracing::info!("sys_kill(pid={}, sig={})", pid, sig);
         // Only deliver to self (pid 0, -1, or our fake pid 1000).
         if pid == 0 || pid == -1 || pid == 1000 || pid == emu.inst_count as i64 {
             if sig == 0 {
                 // Existence check
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
             } else {
                 emu.raise_signal(sig);
-                emu.write_register_u64("RAX", 0)?;
+                emu.set_syscall_return(0)?;
             }
         } else {
-            emu.write_register_u64("RAX", (-3i64) as u64)?; // ESRCH
+            emu.set_syscall_return((-3i64) as u64)?; // ESRCH
         }
         Ok(HleResult::Continue)
     }
@@ -690,13 +697,13 @@ impl SimProcedure for SysKill {
 pub struct SysTkill;
 impl SimProcedure for SysTkill {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let _tid = emu.read_register_u64("RDI").unwrap_or(0);
-        let sig = emu.read_register_u64("RSI").unwrap_or(0) as i32;
+        let _tid = emu.syscall_arg(0);
+        let sig = emu.syscall_arg(1) as i32;
         tracing::info!("sys_tkill(sig={})", sig);
         if sig != 0 {
             emu.raise_signal(sig);
         }
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -717,7 +724,7 @@ impl SimProcedure for SysRtSigreturn {
         } else {
             tracing::warn!("sys_rt_sigreturn with no saved frame");
         }
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -726,7 +733,7 @@ pub struct SysIoctl;
 impl SimProcedure for SysIoctl {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         tracing::debug!("sys_ioctl (stub -> 0)");
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -736,21 +743,21 @@ impl SimProcedure for SysFutex {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // Single-threaded: WAIT always succeeds immediately; WAKE reports 0 waiters.
         // op: 0=WAIT, 1=WAKE (low nibble); higher bits are flags.
-        let uaddr = emu.read_register_u64("RDI").unwrap_or(0);
-        let op = emu.read_register_u64("RSI").unwrap_or(0) & 0x7f;
-        let val = emu.read_register_u64("RDX").unwrap_or(0);
+        let uaddr = emu.syscall_arg(0);
+        let op = emu.syscall_arg(1) & 0x7f;
+        let val = emu.syscall_arg(2);
         if op == 0 && uaddr != 0 {
             // FUTEX_WAIT: if *uaddr != val, return -EAGAIN (would not sleep).
             if let Ok(bytes) = emu.state.read_space(emu.state.ram_space(), uaddr, 4) {
                 let cur = u32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]));
                 if cur as u64 != (val & 0xffff_ffff) {
-                    emu.write_register_u64("RAX", (-11i64) as u64)?; // EAGAIN
+                    emu.set_syscall_return((-11i64) as u64)?; // EAGAIN
                     return Ok(HleResult::Continue);
                 }
             }
         }
         tracing::debug!("sys_futex op={} uaddr=0x{:X} -> 0", op, uaddr);
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -758,15 +765,15 @@ impl SimProcedure for SysFutex {
 pub struct SysGetrandom;
 impl SimProcedure for SysGetrandom {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let buf = emu.read_register_u64("RDI").unwrap_or(0);
-        let buflen = emu.read_register_u64("RSI").unwrap_or(0) as usize;
+        let buf = emu.syscall_arg(0);
+        let buflen = emu.syscall_arg(1) as usize;
         let mut data = vec![0u8; buflen.min(4096)];
         // Deterministic pseudo-random for reproducibility.
         for (i, b) in data.iter_mut().enumerate() {
             *b = ((i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 56) as u8;
         }
         ram_write(emu, buf, &data)?;
-        emu.write_register_u64("RAX", data.len() as u64)?;
+        emu.set_syscall_return(data.len() as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -774,7 +781,7 @@ impl SimProcedure for SysGetrandom {
 pub struct SysSchedYield;
 impl SimProcedure for SysSchedYield {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -783,7 +790,7 @@ pub struct SysSetTidAddress;
 impl SimProcedure for SysSetTidAddress {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         // set_tid_address(tidptr) — store clear_child_tid; return tid.
-        let tidptr = emu.read_register_u64("RDI").unwrap_or(0);
+        let tidptr = emu.syscall_arg(0);
         emu.clear_child_tid = tidptr;
         tracing::info!("sys_set_tid_address(0x{:X}) -> tid=1000", tidptr);
         // Optionally write current tid into *tidptr if mapped.
@@ -791,7 +798,7 @@ impl SimProcedure for SysSetTidAddress {
             let tid: u64 = 1000;
             let _ = ram_write(emu, tidptr, &tid.to_le_bytes());
         }
-        emu.write_register_u64("RAX", 1000)?;
+        emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }
 }
@@ -799,7 +806,7 @@ impl SimProcedure for SysSetTidAddress {
 pub struct SysPrlimit64;
 impl SimProcedure for SysPrlimit64 {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.write_register_u64("RAX", 0)?;
+        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
