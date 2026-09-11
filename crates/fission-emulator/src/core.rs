@@ -114,6 +114,20 @@ pub struct Emulator {
     /// Soft TB-chaining depth (reset at outer run-loop entry).
     pub chain_depth: u32,
 
+    /// When set, the run loop executes exactly one guest instruction (or one
+    /// HLE dispatch) and returns. See [`Self::step_instruction`].
+    single_step: bool,
+
+    /// Memory ranges the run loop stops on. See [`Self::set_watchpoint`].
+    watchpoints: Vec<Watchpoint>,
+    /// The access that tripped a watchpoint, waiting for the run loop to see
+    /// it. Set inside a compiled block, which cannot stop by itself.
+    watch_hit: Option<WatchHit>,
+    /// The guest instruction currently executing, recorded only while
+    /// something asked for per-instruction callbacks. A watchpoint asks,
+    /// because "what wrote this" is the question watchpoints exist to answer.
+    current_insn_pc: u64,
+
     /// Addresses the run loop stops at, for a debugger front end.
     ///
     /// Private because setting one has to flush the JIT cache: a block
@@ -375,6 +389,10 @@ impl Emulator {
             jit: crate::jit::JitCompiler::new().ok(),
             jit_cache: crate::jit::cache::JitCache::new(),
             chain_depth: 0,
+            single_step: false,
+            watchpoints: Vec::new(),
+            watch_hit: None,
+            current_insn_pc: 0,
             breakpoints: std::collections::BTreeSet::new(),
             halt_requested: false,
             magic_range,
@@ -675,10 +693,29 @@ impl Emulator {
     /// carry none of the newly-wanted callbacks. QEMU does the same on plugin
     /// load, and for the same reason.
     pub fn add_observer(&mut self, observer: Box<dyn crate::observe::Observer>) {
-        let widened = self.observe.union(observer.interest());
         self.observers.push(observer);
-        if widened != self.observe {
-            self.observe = widened;
+        self.recompute_observe_mask();
+    }
+
+    /// What needs instrumenting: the union of every observer's interest and
+    /// whatever the debugger surface needs.
+    ///
+    /// One place, because there are now two sources. Setting the mask from
+    /// `add_observer` alone meant `take_observers` reset it to `NONE` and
+    /// silently disarmed any watchpoint.
+    fn recompute_observe_mask(&mut self) {
+        let mut mask = crate::observe::ObserveMask::NONE;
+        for observer in &self.observers {
+            mask = mask.union(observer.interest());
+        }
+        if !self.watchpoints.is_empty() {
+            mask.mem = true;
+            // For the instruction address in the hit: without it a watchpoint
+            // can say what was written and not by what.
+            mask.insn = true;
+        }
+        if mask != self.observe {
+            self.observe = mask;
             self.jit_cache.flush_all();
         }
     }
@@ -689,9 +726,9 @@ impl Emulator {
     /// them through a raw pointer -- so a caller reads its results out
     /// afterwards rather than keeping a handle across the run.
     pub fn take_observers(&mut self) -> Vec<Box<dyn crate::observe::Observer>> {
-        self.observe = crate::observe::ObserveMask::NONE;
-        self.jit_cache.flush_all();
-        std::mem::take(&mut self.observers)
+        let taken = std::mem::take(&mut self.observers);
+        self.recompute_observe_mask();
+        taken
     }
 
     pub fn observe_mask(&self) -> crate::observe::ObserveMask {
@@ -762,6 +799,7 @@ impl Emulator {
     }
 
     pub(crate) fn notify_insn(&mut self, pc: u64) {
+        self.current_insn_pc = pc;
         for o in &mut self.observers {
             o.on_insn(pc);
         }
@@ -772,6 +810,23 @@ impl Emulator {
     /// Only RAM: a register access is not what an observer asking about
     /// "memory" means, and every p-code op touches registers.
     pub(crate) fn notify_mem(&mut self, addr: u64, size: u32, write: bool, value: u64) {
+        if !self.watchpoints.is_empty() && self.watch_hit.is_none() {
+            let end = addr.saturating_add(u64::from(size));
+            if let Some(watch) = self.watchpoints.iter().find(|w| {
+                (if write { w.on_write } else { w.on_read })
+                    && addr < w.start.saturating_add(w.len)
+                    && w.start < end
+            }) {
+                self.watch_hit = Some(WatchHit {
+                    address: addr,
+                    size,
+                    write,
+                    value,
+                    pc: self.current_insn_pc,
+                    watch: *watch,
+                });
+            }
+        }
         for o in &mut self.observers {
             o.on_mem(addr, size, write, value);
         }
@@ -858,18 +913,17 @@ impl Emulator {
     /// The registers a TTD snapshot should record, from the language's own
     /// register map rather than a per-architecture table.
     ///
-    /// Two filters, and both are needed:
+    /// One filter: **maximal only**. `EAX`, `AX`, `AL` and `AH` are views of
+    /// `RAX`'s storage, so recording them all would store the same bytes five
+    /// times and -- worse -- restoring them in map order would write `AL` over
+    /// the low byte `RAX` had just restored. Keeping only registers no other
+    /// register contains makes the set both smaller and safe to replay in any
+    /// order.
     ///
-    /// * **Maximal only.** `EAX`, `AX`, `AL` and `AH` are views of `RAX`'s
-    ///   storage, so recording them all would store the same bytes five
-    ///   times and -- worse -- restoring them in map order would write `AL`
-    ///   over the low byte `RAX` had just restored. Keeping only registers
-    ///   no other register contains makes the set both smaller and safe to
-    ///   replay in any order.
-    /// * **Eight bytes or fewer.** `read_register_u64` refuses anything
-    ///   wider, so `ZMM0`/`Q0` cannot round-trip through a `u64` snapshot.
-    ///   Vector state is therefore not restored by a seek; that is recorded
-    ///   in `RegisterState`'s own documentation.
+    /// Vector registers (`ZMM0`, `Q0`) are included: `RegisterState` carries
+    /// anything wider than a `u64` as bytes, and they are read and written
+    /// through the register space directly rather than through
+    /// `read_register_u64`, which refuses them.
     ///
     /// Computed once per emulator: the containment filter is quadratic in
     /// the map size (x86-64 names around five hundred registers) and a
@@ -880,7 +934,7 @@ impl Emulator {
         let entries: Vec<(&str, u64, u64, u32)> = register_map
             .iter()
             .map(|(name, &(space, offset, size))| (name.as_str(), space, offset, size))
-            .filter(|&(_, _, _, size)| size > 0 && size <= 8)
+            .filter(|&(_, _, _, size)| size > 0)
             .collect();
 
         let mut names: Vec<String> = entries
@@ -924,6 +978,110 @@ impl Emulator {
             }
             page += 0x1000;
         }
+    }
+
+    // ── Stepping ────────────────────────────────────────────────────────────
+
+    /// Execute exactly one guest instruction, or dispatch one HLE stub.
+    ///
+    /// `run_instruction` is named for what it once did; both of its paths run
+    /// a whole translation block, so the debug backend's "single step" was
+    /// advancing between one and eight instructions at a time depending on
+    /// where the block boundaries fell.
+    pub fn step_instruction(&mut self) -> Result<RunOutcome> {
+        let saved = std::mem::replace(&mut self.single_step, true);
+        let outcome = self.run_inner(None);
+        self.single_step = saved;
+        outcome
+    }
+
+    /// The instruction at the program counter: how long it is, and whether it
+    /// is a call.
+    ///
+    /// "Is a call" is read off the lifted p-code rather than a mnemonic, so it
+    /// is the same answer on every architecture -- and it is what "step over"
+    /// needs in order to know whether there is anything to step over.
+    pub fn instruction_at_pc(&mut self) -> Result<InstructionShape> {
+        let insns = self.collect_translation_block()?;
+        let first = insns
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("no instruction at 0x{:X}", self.pc))?;
+        let is_call = first.ops.iter().any(|op| {
+            matches!(
+                op.opcode,
+                fission_pcode::ir::PcodeOpcode::Call | fission_pcode::ir::PcodeOpcode::CallInd
+            )
+        });
+        let is_return = first
+            .ops
+            .iter()
+            .any(|op| op.opcode == fission_pcode::ir::PcodeOpcode::Return);
+        Ok(InstructionShape {
+            address: first.pc,
+            length: first.len,
+            is_call,
+            is_return,
+        })
+    }
+
+    // ── Watchpoints ─────────────────────────────────────────────────────────
+
+    /// Stop when the guest reads or writes `[start, start + len)`.
+    ///
+    /// Costs nothing when none are set: whether compiled code carries memory
+    /// callbacks at all is decided when a block is compiled, so setting the
+    /// first one flushes the block cache the same way registering an observer
+    /// does.
+    ///
+    /// The stop is *after* the access, at the end of the translation block
+    /// containing it -- a compiled block cannot stop in its own middle. The
+    /// reported [`WatchHit`] carries the exact address, size, value and the
+    /// program counter of the instruction that did it, which is the part that
+    /// answers "who wrote this".
+    pub fn set_watchpoint(&mut self, start: u64, len: u64, on_read: bool, on_write: bool) {
+        self.watchpoints.push(Watchpoint {
+            start,
+            len: len.max(1),
+            on_read,
+            on_write,
+        });
+        self.recompute_observe_mask();
+    }
+
+    /// Remove every watchpoint starting at `start`. Returns how many went.
+    pub fn clear_watchpoint(&mut self, start: u64) -> usize {
+        let before = self.watchpoints.len();
+        self.watchpoints.retain(|w| w.start != start);
+        let removed = before - self.watchpoints.len();
+        if removed > 0 {
+            self.recompute_observe_mask();
+        }
+        removed
+    }
+
+    pub fn clear_all_watchpoints(&mut self) {
+        if !self.watchpoints.is_empty() {
+            self.watchpoints.clear();
+            self.recompute_observe_mask();
+        }
+    }
+
+    pub fn watchpoints(&self) -> &[Watchpoint] {
+        &self.watchpoints
+    }
+
+    /// The access that stopped the last run, if a watchpoint stopped it.
+    pub fn last_watch_hit(&self) -> Option<&WatchHit> {
+        self.watch_hit.as_ref()
+    }
+
+    /// Whether a watchpoint has tripped and the run loop has yet to stop.
+    ///
+    /// Read from the JIT's chaining gate: a block that tripped one must return
+    /// to the run loop rather than chain on for up to another thirty-two.
+    #[inline]
+    pub fn watch_pending(&self) -> bool {
+        self.watch_hit.is_some()
     }
 
     // ── Breakpoints ─────────────────────────────────────────────────────────
@@ -980,12 +1138,46 @@ impl Emulator {
         let names = std::mem::take(&mut self.snapshot_registers);
         let mut state = RegisterState::at(self.pc);
         for name in &names {
-            if let Ok(value) = self.read_register_u64(name) {
+            let Some(&(space, offset, size)) = self
+                .register_map
+                .iter()
+                .find(|(known, _)| known.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v)
+            else {
+                continue;
+            };
+            let Ok(bytes) = self.state.read_space(space, offset, size as usize) else {
+                continue;
+            };
+            if size <= 8 {
+                let mut value = 0u64;
+                for (i, &b) in bytes.iter().enumerate() {
+                    value |= u64::from(b) << (i * 8);
+                }
                 state.set(name, value);
+            } else {
+                state.set_bytes(name, &bytes);
             }
         }
         self.snapshot_registers = names;
         state
+    }
+
+    /// Write one register from a snapshot, whatever its width.
+    ///
+    /// `write_register_u64` refuses anything wider than eight bytes, which is
+    /// why a seek used to leave vector registers holding whatever the run had
+    /// left in them.
+    fn restore_register(&mut self, name: &str, value: &fission_ttd::RegisterValue) -> Result<()> {
+        let (space, offset, size) = self
+            .register_map
+            .iter()
+            .find(|(known, _)| known.eq_ignore_ascii_case(name))
+            .map(|(_, v)| *v)
+            .ok_or_else(|| anyhow::anyhow!("Register {} not found in register_map", name))?;
+        let mut bytes = value.to_bytes();
+        bytes.resize(size as usize, 0);
+        self.state.write_space(space, offset, &bytes)
     }
 
     /// Seek the TTD timeline to a given instruction step index.
@@ -1023,13 +1215,13 @@ impl Emulator {
         // the sixteen x86-64 general-purpose registers, so on any other
         // architecture the first write failed and the seek returned an error
         // -- the recorder had stored snapshots that could never be restored.
-        let restored: Vec<(String, u64)> = snap
+        let restored: Vec<(String, fission_ttd::RegisterValue)> = snap
             .registers
-            .iter()
-            .map(|(name, value)| (name.to_string(), value))
+            .iter_all()
+            .map(|(name, value)| (name.to_string(), value.clone()))
             .collect();
         for (name, value) in restored {
-            self.write_register_u64(&name, value)?;
+            self.restore_register(&name, &value)?;
         }
         self.pc = snap.registers.pc;
         self.inst_count = snap.step_index;
@@ -1287,6 +1479,16 @@ impl Emulator {
 
         tracing::debug!("Executing PC=0x{:X}", self.pc);
 
+        // A debugger's step is one instruction. Both paths below run a whole
+        // translation block -- that is the point of them -- so a step takes
+        // the collected block and interprets only its first instruction.
+        // Decoding a block to run one of it is wasteful and is the right
+        // trade: stepping happens at human speed.
+        if self.single_step {
+            let insns = self.collect_translation_block()?;
+            return self.run_block_interpreted(&insns[..1]);
+        }
+
         // ─── Multi-instruction TB path ────────────────────────────────────────
         //
         //   1. Cache hit  → run host TB (counts insns + soft-chains internally).
@@ -1468,6 +1670,7 @@ impl Emulator {
         self.halt_requested = false;
         self.chain_depth = 0;
         self.pcode_budget_pc = None;
+        self.watch_hit = None;
         let mut started = false;
         let outcome = loop {
             if IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1567,6 +1770,9 @@ impl Emulator {
                         self.pc = pc;
                     }
                 }
+                if self.single_step {
+                    break RunOutcome::Stepped;
+                }
                 continue;
             }
 
@@ -1580,6 +1786,12 @@ impl Emulator {
             }
             if self.halt_requested {
                 break RunOutcome::Halted;
+            }
+            if let Some(hit) = self.watch_hit {
+                break RunOutcome::HitWatchpoint(hit);
+            }
+            if self.single_step {
+                break RunOutcome::Stepped;
             }
 
             // TTD: record a snapshot every N instructions.
@@ -1643,6 +1855,8 @@ impl Emulator {
                 RunOutcome::Interrupted => "interrupted".into(),
                 RunOutcome::LoopExit => "loop_exit".into(),
                 RunOutcome::HitBreakpoint(pc) => format!("breakpoint:0x{pc:x}"),
+                RunOutcome::Stepped => "stepped".into(),
+                RunOutcome::HitWatchpoint(hit) => format!("watchpoint:0x{:x}", hit.address),
             });
         }
         tracing::info!(
@@ -1652,6 +1866,46 @@ impl Emulator {
         );
         tracing::info!("Emulator metrics: {}", self.metrics.summary_line());
         Ok(outcome)
+    }
+}
+
+/// A memory range the run loop stops on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Watchpoint {
+    pub start: u64,
+    pub len: u64,
+    pub on_read: bool,
+    pub on_write: bool,
+}
+
+/// The access that tripped a [`Watchpoint`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WatchHit {
+    /// Address of the access, which is not necessarily the watched address:
+    /// an eight-byte store can straddle a one-byte watch.
+    pub address: u64,
+    pub size: u32,
+    pub write: bool,
+    pub value: u64,
+    /// The instruction that made the access.
+    pub pc: u64,
+    pub watch: Watchpoint,
+}
+
+/// What the instruction at some address is, as far as stepping cares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstructionShape {
+    pub address: u64,
+    pub length: u32,
+    pub is_call: bool,
+    pub is_return: bool,
+}
+
+impl InstructionShape {
+    /// Where execution continues if the instruction does not branch -- the
+    /// address a "step over" of a call stops at.
+    pub fn fall_through(&self) -> u64 {
+        self.address.wrapping_add(u64::from(self.length))
     }
 }
 
@@ -1683,4 +1937,9 @@ pub enum RunOutcome {
     /// [`Emulator::set_breakpoint`]. The machine is stopped *before* the
     /// instruction there, so resuming executes it.
     HitBreakpoint(u64),
+    /// [`Emulator::step_instruction`] executed its one instruction.
+    Stepped,
+    /// A watched memory range was accessed. Details in
+    /// [`Emulator::last_watch_hit`].
+    HitWatchpoint(WatchHit),
 }

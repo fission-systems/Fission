@@ -356,6 +356,12 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     if emu.is_breakpoint(next_pc) {
         return next_pc;
     }
+    // A watchpoint tripped inside the block that just ran. The run loop is
+    // where it is reported, and chaining on would put up to another
+    // thirty-two blocks between the access and the stop.
+    if emu.watch_pending() {
+        return next_pc;
+    }
     // A budget does *not* mean returning to the dispatcher after every block.
     // `max_inst_reached` is checked on the way in above and again before each
     // hard-chain dive, so the budget is honoured either way -- but returning

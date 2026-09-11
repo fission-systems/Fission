@@ -294,3 +294,112 @@ fn time_travel_works_on_an_architecture_that_is_not_x86() {
         "seek restored different registers: {differing:?}"
     );
 }
+
+/// Vector registers come back too.
+///
+/// `RegisterState` carried `u64`s, and `read_register_u64` refuses anything
+/// wider, so `XMM0`..`XMM15` were neither recorded nor restored: a seek left
+/// them holding whatever the *later* part of the run had put there. The
+/// fixture uses SSE (glibc's `memcpy`/`strlen` do), so the difference is
+/// visible without writing any assembly.
+#[test]
+fn seeking_back_restores_vector_registers() {
+    let mut traveler = build(4_000, 16);
+    let _ = traveler.run();
+
+    let target = traveler
+        .ttd
+        .snapshots()
+        .iter()
+        .map(|s| s.step_index)
+        .find(|step| *step >= 1_000)
+        .expect("a snapshot at or after step 1000");
+
+    // The vector registers the snapshot recorded.
+    let snapshot = traveler
+        .ttd
+        .get_snapshot(target)
+        .expect("that snapshot")
+        .registers
+        .clone();
+    let vectors: Vec<(String, Vec<u8>)> = snapshot
+        .iter_all()
+        .filter(|(_, value)| value.byte_len() > 8)
+        .map(|(name, value)| (name.to_string(), value.to_bytes()))
+        .collect();
+    assert!(
+        !vectors.is_empty(),
+        "no register wider than eight bytes was recorded at all"
+    );
+
+    // What the machine really held there.
+    let mut reference = build(target + 1, 0);
+    let _ = reference.run();
+    let want: Vec<(String, Vec<u8>)> = vectors
+        .iter()
+        .map(|(name, _)| {
+            let (space, offset, size) = reference
+                .register_map
+                .iter()
+                .find(|(known, _)| known.eq_ignore_ascii_case(name))
+                .map(|(_, v)| *v)
+                .expect("the reference machine has the same registers");
+            (
+                name.clone(),
+                reference
+                    .state
+                    .read_space(space, offset, size as usize)
+                    .expect("read"),
+            )
+        })
+        .collect();
+
+    // The test is only worth anything if the end of the run differs from the
+    // point being sought -- otherwise restoring nothing would also pass.
+    let at_end: Vec<Vec<u8>> = want
+        .iter()
+        .map(|(name, _)| {
+            let (space, offset, size) = traveler
+                .register_map
+                .iter()
+                .find(|(known, _)| known.eq_ignore_ascii_case(name))
+                .map(|(_, v)| *v)
+                .expect("register");
+            traveler
+                .state
+                .read_space(space, offset, size as usize)
+                .expect("read")
+        })
+        .collect();
+    assert!(
+        at_end
+            .iter()
+            .zip(want.iter())
+            .any(|(end, (_, wanted))| end != wanted),
+        "every vector register is the same at the end of the run as at the target, \
+         so this cannot tell a working restore from one that does nothing"
+    );
+
+    traveler.ttd_seek(target).expect("seek");
+
+    let differing: Vec<String> = want
+        .iter()
+        .filter_map(|(name, wanted)| {
+            let (space, offset, size) = traveler
+                .register_map
+                .iter()
+                .find(|(known, _)| known.eq_ignore_ascii_case(name))
+                .map(|(_, v)| *v)
+                .expect("register");
+            let got = traveler
+                .state
+                .read_space(space, offset, size as usize)
+                .expect("read");
+            (&got != wanted).then(|| format!("{name}: want {wanted:02x?} got {got:02x?}"))
+        })
+        .collect();
+    assert!(
+        differing.is_empty(),
+        "seek restored different vector registers: {differing:?}"
+    );
+}

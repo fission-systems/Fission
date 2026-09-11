@@ -1,7 +1,7 @@
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{ProcessInfo, RegisterState};
 use fission_core::Result as FissionResult;
-use fission_emulator::core::{Emulator, RunOutcome};
+use fission_emulator::core::{Emulator, InstructionShape, RunOutcome};
 
 /// The handle the debug layer uses for "the emulated process".
 ///
@@ -78,13 +78,77 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn single_step(&mut self) -> FissionResult<()> {
-        if let Some(emu) = &mut self.emulator {
-            // Emulate one instruction
-            let _ = emu.run_instruction()?;
-            Ok(())
-        } else {
-            Err(fission_core::err!(debug, "Emulator not running"))
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        // `run_instruction` runs a whole translation block; this used to call
+        // it, so a "single step" advanced between one and eight instructions
+        // depending on where the block boundaries fell.
+        self.last_outcome = Some(emu.step_instruction()?);
+        Ok(())
+    }
+
+    /// Step one instruction, except that a call runs to completion.
+    ///
+    /// A temporary breakpoint on the call's fall-through, the way every
+    /// debugger does it, plus the stack-pointer guard that makes it survive
+    /// recursion: the same address is reached by the recursive call's own
+    /// return, and only the frame that made the call has a stack pointer back
+    /// at or above where it started.
+    fn step_over(&mut self) -> FissionResult<()> {
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        let shape = emu
+            .instruction_at_pc()
+            .map_err(|e| fission_core::err!(debug, "Cannot decode at 0x{:x}: {}", emu.pc, e))?;
+        if !shape.is_call {
+            self.last_outcome = Some(emu.step_instruction()?);
+            return Ok(());
         }
+        self.last_outcome = Some(run_past_call(emu, shape)?);
+        Ok(())
+    }
+
+    /// Run until the current function returns.
+    ///
+    /// Stepping, except that every call inside is stepped *over* -- so the
+    /// cost is the instruction count of this function's own body, and
+    /// everything it calls runs compiled at full speed. That is gdb's
+    /// `finish`, and it needs no unwind information, which is the point: there
+    /// is none for a stripped binary.
+    fn step_out(&mut self) -> FissionResult<()> {
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        // A bound, because a function that never returns would otherwise hang
+        // the front end with no way to tell whether it is working.
+        const MAX_STEPS: u64 = 5_000_000;
+        for _ in 0..MAX_STEPS {
+            let shape = emu
+                .instruction_at_pc()
+                .map_err(|e| fission_core::err!(debug, "Cannot decode at 0x{:x}: {}", emu.pc, e))?;
+            let outcome = if shape.is_call {
+                run_past_call(emu, shape)?
+            } else {
+                emu.step_instruction()?
+            };
+            self.last_outcome = Some(outcome);
+            // Anything other than a completed step means the machine stopped
+            // for a reason the caller has to see -- a breakpoint inside the
+            // function, the process exiting, the budget running out.
+            if !matches!(outcome, RunOutcome::Stepped | RunOutcome::Returned) {
+                return Ok(());
+            }
+            if shape.is_return {
+                return Ok(());
+            }
+        }
+        Err(fission_core::err!(
+            debug,
+            "step_out gave up after {} instructions without returning",
+            MAX_STEPS
+        ))
     }
 
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
@@ -106,6 +170,53 @@ impl ExecutionBackend for EmulatorBackend {
             return Err(fission_core::err!(
                 debug,
                 "No breakpoint at 0x{:x}",
+                address
+            ));
+        }
+        Ok(())
+    }
+
+    /// A watchpoint, which is what a memory breakpoint is here.
+    ///
+    /// The native backends implement this with guard pages; the emulator sees
+    /// every guest access already, so it needs no page tricks and can watch a
+    /// single byte without disturbing the rest of its page.
+    fn set_memory_breakpoint(
+        &mut self,
+        address: u64,
+        size: usize,
+        kind: crate::debug::types::MemoryBpKind,
+    ) -> FissionResult<()> {
+        use crate::debug::types::MemoryBpKind;
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        let (on_read, on_write) = match kind {
+            MemoryBpKind::Read => (true, false),
+            MemoryBpKind::Write => (false, true),
+            MemoryBpKind::Access => (true, true),
+            // Execute is a code breakpoint wearing a memory breakpoint's name;
+            // answering it with a data watch would stop on nothing.
+            MemoryBpKind::Execute => {
+                return Err(fission_core::err!(
+                    debug,
+                    "Execute memory breakpoints are code breakpoints here -- use a breakpoint at 0x{:x}",
+                    address
+                ));
+            }
+        };
+        emu.set_watchpoint(address, size as u64, on_read, on_write);
+        Ok(())
+    }
+
+    fn remove_memory_breakpoint(&mut self, address: u64) -> FissionResult<()> {
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        if emu.clear_watchpoint(address) == 0 {
+            return Err(fission_core::err!(
+                debug,
+                "No memory breakpoint at 0x{:x}",
                 address
             ));
         }
@@ -149,6 +260,22 @@ impl ExecutionBackend for EmulatorBackend {
         // same thing to the block cache: what it compiled is no longer what is
         // there.
         emu.invalidate_translations(address, data.len());
+        Ok(())
+    }
+
+    fn set_registers(&mut self, thread_id: u32, regs: &RegisterState) -> FissionResult<()> {
+        let _ = thread_id;
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        // Every name the caller supplied, and an error naming the first one
+        // this machine does not have -- writing the ones it recognises and
+        // dropping the rest would leave the caller believing all of it landed.
+        for (name, value) in regs.iter() {
+            emu.write_register_u64(name, value)
+                .map_err(|e| fission_core::err!(debug, "Cannot write {}: {}", name, e))?;
+        }
+        emu.pc = regs.pc;
         Ok(())
     }
 
@@ -252,4 +379,46 @@ impl ExecutionBackend for EmulatorBackend {
         }
         state
     }
+}
+
+/// Resume until a call made at `shape` comes back to its fall-through.
+///
+/// The stack-pointer guard is what makes this right under recursion: the
+/// fall-through address is also where a recursive call returns to, and only
+/// the frame that made the outermost call is back at the stack pointer it had.
+///
+/// Reports `Returned` when its own temporary breakpoint did its job, and
+/// `HitBreakpoint` only when the address was one the caller had set -- a
+/// distinction `step_out` needs, since it calls this once per call
+/// instruction and has to tell "the call came back" from "stop, the user
+/// wanted to see this".
+fn run_past_call(emu: &mut Emulator, shape: InstructionShape) -> FissionResult<RunOutcome> {
+    let target = shape.fall_through();
+    let sp_name = emu.arch.sp_reg;
+    let sp_before = emu.read_register_u64(sp_name).unwrap_or(0);
+    let user_breakpoint = emu.breakpoints().any(|address| address == target);
+    if !user_breakpoint {
+        emu.set_breakpoint(target);
+    }
+
+    let outcome = loop {
+        let outcome = emu.resume()?;
+        if outcome != RunOutcome::HitBreakpoint(target) {
+            break outcome;
+        }
+        let sp_now = emu.read_register_u64(sp_name).unwrap_or(0);
+        if sp_now >= sp_before {
+            break if user_breakpoint {
+                outcome
+            } else {
+                RunOutcome::Returned
+            };
+        }
+        // A deeper frame returning to the same address: keep going.
+    };
+
+    if !user_breakpoint {
+        emu.clear_breakpoint(target);
+    }
+    Ok(outcome)
 }
