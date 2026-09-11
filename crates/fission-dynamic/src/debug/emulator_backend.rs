@@ -29,6 +29,32 @@ impl EmulatorBackend {
     pub fn last_outcome(&self) -> Option<&RunOutcome> {
         self.last_outcome.as_ref()
     }
+
+    /// Whether the program has ended.
+    fn has_exited(&self) -> bool {
+        matches!(
+            self.last_outcome,
+            Some(RunOutcome::ProcessExited | RunOutcome::Halted)
+        )
+    }
+
+    /// The emulator to run, or an error if the program already ended.
+    ///
+    /// `run_inner` clears `halt_requested` on entry, so resuming an exited
+    /// process dispatches its exit stub again -- and again. Stepping a
+    /// finished program printed the same address and the same instruction
+    /// count forever instead of saying it was over.
+    fn runnable(&mut self) -> FissionResult<&mut Emulator> {
+        if self.has_exited() {
+            return Err(fission_core::err!(
+                debug,
+                "The program has exited; there is nothing left to run"
+            ));
+        }
+        self.emulator
+            .as_mut()
+            .ok_or_else(|| fission_core::err!(debug, "Emulator not running"))
+    }
 }
 
 impl Default for EmulatorBackend {
@@ -70,17 +96,13 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn continue_execution(&mut self) -> FissionResult<()> {
-        let Some(emu) = &mut self.emulator else {
-            return Err(fission_core::err!(debug, "Emulator not running"));
-        };
+        let emu = self.runnable()?;
         self.last_outcome = Some(emu.resume()?);
         Ok(())
     }
 
     fn single_step(&mut self) -> FissionResult<()> {
-        let Some(emu) = &mut self.emulator else {
-            return Err(fission_core::err!(debug, "Emulator not running"));
-        };
+        let emu = self.runnable()?;
         // `run_instruction` runs a whole translation block; this used to call
         // it, so a "single step" advanced between one and eight instructions
         // depending on where the block boundaries fell.
@@ -96,9 +118,7 @@ impl ExecutionBackend for EmulatorBackend {
     /// return, and only the frame that made the call has a stack pointer back
     /// at or above where it started.
     fn step_over(&mut self) -> FissionResult<()> {
-        let Some(emu) = &mut self.emulator else {
-            return Err(fission_core::err!(debug, "Emulator not running"));
-        };
+        let emu = self.runnable()?;
         let shape = emu
             .instruction_at_pc()
             .map_err(|e| fission_core::err!(debug, "Cannot decode at 0x{:x}: {}", emu.pc, e))?;
@@ -118,37 +138,12 @@ impl ExecutionBackend for EmulatorBackend {
     /// `finish`, and it needs no unwind information, which is the point: there
     /// is none for a stripped binary.
     fn step_out(&mut self) -> FissionResult<()> {
-        let Some(emu) = &mut self.emulator else {
-            return Err(fission_core::err!(debug, "Emulator not running"));
-        };
-        // A bound, because a function that never returns would otherwise hang
-        // the front end with no way to tell whether it is working.
-        const MAX_STEPS: u64 = 5_000_000;
-        for _ in 0..MAX_STEPS {
-            let shape = emu
-                .instruction_at_pc()
-                .map_err(|e| fission_core::err!(debug, "Cannot decode at 0x{:x}: {}", emu.pc, e))?;
-            let outcome = if shape.is_call {
-                run_past_call(emu, shape)?
-            } else {
-                emu.step_instruction()?
-            };
-            self.last_outcome = Some(outcome);
-            // Anything other than a completed step means the machine stopped
-            // for a reason the caller has to see -- a breakpoint inside the
-            // function, the process exiting, the budget running out.
-            if !matches!(outcome, RunOutcome::Stepped | RunOutcome::Returned) {
-                return Ok(());
-            }
-            if shape.is_return {
-                return Ok(());
-            }
+        let emu = self.runnable()?;
+        let outcome = step_out_of_frame(emu);
+        if let Ok(outcome) = &outcome {
+            self.last_outcome = Some(*outcome);
         }
-        Err(fission_core::err!(
-            debug,
-            "step_out gave up after {} instructions without returning",
-            MAX_STEPS
-        ))
+        outcome.map(|_| ())
     }
 
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
@@ -421,4 +416,40 @@ fn run_past_call(emu: &mut Emulator, shape: InstructionShape) -> FissionResult<R
         emu.clear_breakpoint(target);
     }
     Ok(outcome)
+}
+
+/// Run until the current function returns.
+///
+/// Stepping, except that every call inside is stepped *over* -- so the cost is
+/// the instruction count of this function's own body, and everything it calls
+/// runs compiled at full speed. That is gdb's `finish`, and it needs no unwind
+/// information, which is the point: a stripped binary has none.
+fn step_out_of_frame(emu: &mut Emulator) -> FissionResult<RunOutcome> {
+    // A bound, because a function that never returns would otherwise hang the
+    // front end with no way to tell whether it was working.
+    const MAX_STEPS: u64 = 5_000_000;
+    for _ in 0..MAX_STEPS {
+        let shape = emu
+            .instruction_at_pc()
+            .map_err(|e| fission_core::err!(debug, "Cannot decode at 0x{:x}: {}", emu.pc, e))?;
+        let outcome = if shape.is_call {
+            run_past_call(emu, shape)?
+        } else {
+            emu.step_instruction()?
+        };
+        // Anything else means the machine stopped for a reason the caller has
+        // to see: a breakpoint inside the function, the process exiting, the
+        // budget running out.
+        if !matches!(outcome, RunOutcome::Stepped | RunOutcome::Returned) {
+            return Ok(outcome);
+        }
+        if shape.is_return {
+            return Ok(outcome);
+        }
+    }
+    Err(fission_core::err!(
+        debug,
+        "step_out gave up after {} instructions without returning",
+        MAX_STEPS
+    ))
 }
