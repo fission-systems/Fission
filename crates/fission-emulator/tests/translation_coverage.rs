@@ -62,7 +62,17 @@ fn budget() -> u64 {
         .unwrap_or(20_000)
 }
 
+/// Which tree to translate.
+///
+/// The benchmark corpus by default. `TRANSLATE_ROOT` points it somewhere else
+/// -- `corpus/dev` when the question is about an architecture the benchmark
+/// corpus does not carry, which aarch64 is. Translation is safe on any of
+/// them; only *execution* is restricted to what we compiled ourselves.
 fn corpus_root() -> Option<PathBuf> {
+    if let Some(root) = std::env::var_os("TRANSLATE_ROOT") {
+        let path = PathBuf::from(root);
+        return path.is_dir().then_some(path);
+    }
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../fission-benchmark/decbench-data/binaries");
     path.is_dir().then_some(path)

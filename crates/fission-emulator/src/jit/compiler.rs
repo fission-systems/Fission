@@ -908,30 +908,46 @@ impl JitCompiler {
                     }
 
                     // Drop every *other* cached view of the bytes just
-                    // written, so the next use re-seeds from `host_reg_file`.
-                    //
-                    // `var_map` is keyed by (space, offset, size), and on x86
-                    // `RDX` and `EDX` are the same offset at different sizes --
-                    // two keys, two SSA variables, one storage. Writing the
-                    // wide one left the narrow one holding whatever it had
-                    // cached, and lazy seeding does not help: it only reads
-                    // `host_reg_file` the *first* time a key is used, which may
-                    // have been before the write.
-                    //
-                    // musl's mallocng is where this surfaced: `imulq %r12,%rdx`
-                    // then `subl %edx,%esi`, in one block, gave a size that was
-                    // wrong by exactly the stale `EDX`. This runs at
-                    // compile time, once per store, over a map that holds a
-                    // block's worth of entries.
-                    let (wlo, whi) = (vn.offset, vn.offset + rsz as u64);
-                    let written = (vn.space_id, vn.offset, rsz as u64);
-                    var_map.retain(|key, _| {
-                        let (space, offset, size) = *key;
-                        *key == written
-                            || space != vn.space_id
-                            || offset >= whi
-                            || offset + size <= wlo
-                    });
+                    // written, so the next use re-seeds from the backing
+                    // store. That is only sound if the value is *in* the
+                    // backing store, which for a register means the
+                    // `host_reg_file` store above actually happened -- a
+                    // register outside the mirror is written to `dirty` and
+                    // does not reach `MachineState` until the block exits, so
+                    // re-seeding one would read a stale value. Where that is
+                    // the case, write it through first.
+                    // Register space only. A unique is per-instruction
+                    // scratch that is deliberately never flushed, so dropping a
+                    // view of one makes the next use re-seed from a
+                    // `MachineState` the value never reached -- and writing it
+                    // through to prevent that costs a call on every temporary,
+                    // which took the register loop from 41M instructions a
+                    // second to 10M.
+                    if vn.space_id == register_space {
+                        if (vn.offset as usize) + (rsz as usize) > HOST_REG_FILE_SIZE {
+                            // Outside the mirror, so the store above did not
+                            // happen and the value is only in `dirty`. Write it
+                            // through, or re-seeding reads a stale one. No
+                            // architecture here lands in this branch now that
+                            // the mirror covers aarch64; it is what keeps the
+                            // invariant true if one does.
+                            let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
+                            let off = builder.ins().iconst(types::I64, vn.offset as i64);
+                            let sz = builder.ins().iconst(types::I64, rsz as i64);
+                            builder
+                                .ins()
+                                .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
+                        }
+                        let (wlo, whi) = (vn.offset, vn.offset + rsz as u64);
+                        let written = (vn.space_id, vn.offset, rsz as u64);
+                        var_map.retain(|key, _| {
+                            let (space, offset, size) = *key;
+                            *key == written
+                                || space != vn.space_id
+                                || offset >= whi
+                                || offset + size <= wlo
+                        });
+                    }
                 }
             }};
         }
@@ -998,8 +1014,8 @@ impl JitCompiler {
                 op.opcode
             };
 
-            // 128-bit integer ops go back to the evaluator rather than being
-            // lowered here. Cranelift has an `I128` and they could be lowered,
+            // 128-bit integer ops, and vector `CALLOTHER`s, go back to the
+            // evaluator rather than being lowered here. Cranelift has an `I128` and they could be lowered,
             // but the reason not to is agreement: these are precisely the ops
             // both engines used to truncate to eight bytes, and routing the
             // compiled path through the interpreting one makes the two
@@ -1007,7 +1023,10 @@ impl JitCompiler {
             //
             // It costs a call per op, on 3.5% of instructions. That is the
             // right trade for now -- a wrong answer arrives just as fast.
-            if !dead_ops[idx] && crate::pcode::eval::Evaluator::u128_handled(op) {
+            if !dead_ops[idx]
+                && (crate::pcode::eval::Evaluator::u128_handled(op)
+                    || crate::arch::vector::is_wide_userop(op))
+            {
                 let index = wide_ops.len() as i64;
                 wide_ops.push(op.clone());
                 let idx_val = builder.ins().iconst(types::I64, index);

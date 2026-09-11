@@ -227,6 +227,22 @@ impl Emulator {
                     input_vals,
                     output_size,
                 } => {
+                    // Same function the compiled path calls, for the same
+                    // reason: two implementations of one vector instruction
+                    // are two chances to be wrong differently.
+                    if crate::arch::vector::is_wide_userop(&flat[idx]) {
+                        let op = flat[idx].clone();
+                        if !crate::arch::vector::answer_vector_userop(self, &op) {
+                            let name = self
+                                .userop_map
+                                .get(&userop_id)
+                                .cloned()
+                                .unwrap_or_else(|| format!("userop_{userop_id}"));
+                            self.metrics.note_unhandled_userop(&name);
+                        }
+                        idx += 1;
+                        continue;
+                    }
                     let result = crate::jit::callbacks::jit_call_other(
                         self as *mut _,
                         userop_id,

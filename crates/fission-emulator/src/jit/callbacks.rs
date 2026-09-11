@@ -112,6 +112,21 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
     let op: *const fission_pcode::ir::PcodeOp = op;
     let op = unsafe { &*op };
 
+    // A vector userop is answered against whole varnodes rather than the
+    // `&[u64]` the ordinary userop interface passes.
+    if crate::arch::vector::is_wide_userop(op) {
+        if !crate::arch::vector::answer_vector_userop(emu, op) {
+            let name = op
+                .inputs
+                .first()
+                .and_then(|vn| emu.userop_map.get(&(vn.constant_val as u32)))
+                .cloned()
+                .unwrap_or_else(|| "<unknown>".into());
+            emu.metrics.note_unhandled_userop(&name);
+        }
+        return 0;
+    }
+
     let mut evaluator = crate::pcode::eval::Evaluator::new(&mut emu.state, &mut emu.solver);
     let handled = match evaluator.try_step_u128(op) {
         Ok(handled) => handled,

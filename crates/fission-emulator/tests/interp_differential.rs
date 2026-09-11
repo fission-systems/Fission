@@ -118,6 +118,33 @@ fn build_pe32(max_inst: u64, interpret: bool) -> Option<Emulator> {
     Some(emu)
 }
 
+/// An aarch64 ELF, from the dev corpus: there is no aarch64 fixture in the
+/// crate and this architecture's SIMD is where the engines are newest.
+fn build_aarch64(max_inst: u64, interpret: bool) -> Option<Emulator> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-aarch64_O0");
+    if !path.is_file() {
+        return None;
+    }
+    let binary = LoadedBinary::from_file(&path).expect("load");
+    let mut state = MachineState::new();
+    let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");
+    let load_spec = binary.load_spec().expect("spec").clone();
+    let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)
+        .expect("frontend")
+        .into_iter()
+        .next()
+        .expect("sleigh");
+    let arch = ArchInfo::from_language_id(load_spec.pair.language_id.as_str(), Some(&binary))
+        .expect("arch");
+    let mut emu = Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new()))
+        .expect("emulator")
+        .with_max_inst(Some(max_inst));
+    emu.force_interpreter = interpret;
+    emu.apply_linux_image(info).expect("image");
+    Some(emu)
+}
+
 /// Ordered PC trace. A sorted coverage set can only say *that* two runs
 /// differ; the first place they differ is what names the bug.
 #[derive(Default)]
@@ -415,6 +442,61 @@ fn the_engines_agree_on_a_32_bit_process() {
         .unwrap()
         .pcs;
     assert!(!jit_pcs.is_empty(), "no trace recorded");
+    if let Some((i, a, b)) = first_divergence(jit_pcs, int_pcs) {
+        panic!(
+            "engines diverge at step {i}\n  after: {}\n  jit:    {a:X?}\n  interp: {b:X?}",
+            jit_pcs[i.saturating_sub(6)..i]
+                .iter()
+                .map(|pc| format!("0x{pc:X}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
+}
+
+/// The engines agree on aarch64, SIMD and all.
+///
+/// This binary does not run to completion yet -- glibc's `ptmalloc_init`
+/// reaches `malloc_printerr`, which is a semantic bug somewhere further up --
+/// so the gate is agreement rather than success. That distinction matters: if
+/// the two engines take the same path to the same wrong place, the remaining
+/// bug is in something they share (a lift, a userop, the OS layer), and
+/// hunting it in one engine is enough. If they diverged, it would be in one of
+/// them, and this would say where.
+#[test]
+#[ignore = "diverges at step 3558; the binary does not complete yet either"]
+fn the_engines_agree_on_aarch64() {
+    let (Some(mut jitted), Some(mut interpreted)) =
+        (build_aarch64(60_000, false), build_aarch64(60_000, true))
+    else {
+        eprintln!("skipping: dev corpus not present");
+        return;
+    };
+
+    jitted.add_observer(Box::new(PcTrace::default()));
+    let jit_run = jitted.run();
+    interpreted.add_observer(Box::new(PcTrace::default()));
+    let int_run = interpreted.run();
+
+    assert_eq!(
+        jit_run.is_ok(),
+        int_run.is_ok(),
+        "engines disagree on success: jit={jit_run:?} interp={int_run:?}"
+    );
+
+    let jit_obs = jitted.take_observers();
+    let int_obs = interpreted.take_observers();
+    let jit_pcs = &jit_obs
+        .iter()
+        .find_map(|o| o.as_any().downcast_ref::<PcTrace>())
+        .unwrap()
+        .pcs;
+    let int_pcs = &int_obs
+        .iter()
+        .find_map(|o| o.as_any().downcast_ref::<PcTrace>())
+        .unwrap()
+        .pcs;
+    assert!(jit_pcs.len() > 10_000, "too short to mean anything");
     if let Some((i, a, b)) = first_divergence(jit_pcs, int_pcs) {
         panic!(
             "engines diverge at step {i}\n  after: {}\n  jit:    {a:X?}\n  interp: {b:X?}",

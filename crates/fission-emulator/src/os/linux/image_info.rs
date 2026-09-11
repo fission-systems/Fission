@@ -105,7 +105,24 @@ pub fn load_elf_image(
     let mut end_data = 0u64;
     let mut max_end = 0u64;
 
-    // 1) Map main image first so later RELA writes stick.
+    // 1) Map the program headers, which is what loading an ELF means.
+    //
+    // The section table is an analysis product: the loader reads `.data.rel.ro`
+    // and `.got` as read-only, which is a fair description of what they become
+    // after relocation and a wrong one for the kernel's map. glibc's
+    // `ptmalloc_init` writes through the GOT during start-up, and the page it
+    // wrote to was mapped without `WRITE` -- the interpreter faulted and the
+    // compiled path swallowed the store, which is how malloc came to find its
+    // own structures uninitialised and call `malloc_printerr`.
+    //
+    // A kernel maps `PT_LOAD` segments with `p_flags`, copies `p_filesz` bytes
+    // and zeroes up to `p_memsz`. Doing the same here costs forty lines of
+    // header parsing and removes a whole class of "it nearly works".
+    let mapped_segments = map_program_headers(state, inner)?;
+
+    // 2) Sections still describe the image -- and where the program headers
+    //    are unreadable (a relocatable object, a synthesised binary) they are
+    //    also the only map available.
     for sec in &inner.sections {
         if sec.virtual_address == 0 || sec.virtual_size == 0 {
             continue;
@@ -125,14 +142,16 @@ pub fn load_elf_image(
             page_prot |= prot::READ;
         }
 
-        let sec_data = binary.view_bytes(va, vsz as usize).unwrap_or(&[]);
-        let mut buf = vec![0u8; vsz as usize];
-        let n = sec_data.len().min(buf.len());
-        buf[..n].copy_from_slice(&sec_data[..n]);
-        state
-            .write_space(state.ram_space(), va, &buf)
-            .with_context(|| format!("map section {} at 0x{:X}", sec.name, va))?;
-        state.page_map.map_region(va, vsz, page_prot, false);
+        if !mapped_segments {
+            let sec_data = binary.view_bytes(va, vsz as usize).unwrap_or(&[]);
+            let mut buf = vec![0u8; vsz as usize];
+            let n = sec_data.len().min(buf.len());
+            buf[..n].copy_from_slice(&sec_data[..n]);
+            state
+                .write_space(state.ram_space(), va, &buf)
+                .with_context(|| format!("map section {} at 0x{:X}", sec.name, va))?;
+            state.page_map.map_region(va, vsz, page_prot, false);
+        }
 
         if sec.is_executable {
             start_code = start_code.min(va);
@@ -424,4 +443,139 @@ mod tests {
         let argc = u64::from_le_bytes(bytes.try_into().unwrap());
         assert_eq!(argc, 2);
     }
+}
+
+/// Map every `PT_LOAD`, the way a kernel does. Returns whether any were found.
+///
+/// Reads the program headers straight out of the file bytes rather than going
+/// through the loader's section view, because the two answer different
+/// questions: sections say what the bytes *are*, program headers say how they
+/// are placed and what may be done to them.
+fn map_program_headers(
+    state: &mut MachineState,
+    inner: &fission_loader::loader::LoadedBinaryInner,
+) -> Result<bool> {
+    let file = inner.data.as_slice();
+    if file.len() < 64 || &file[..4] != b"\x7fELF" {
+        return Ok(false);
+    }
+    let is_64 = file[4] == 2;
+    let little = file[5] != 2;
+
+    let u16_at = |off: usize| -> u16 {
+        let b = [file[off], file[off + 1]];
+        if little {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let u32_at = |off: usize| -> u32 {
+        let b: [u8; 4] = file[off..off + 4].try_into().unwrap_or_default();
+        if little {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
+    let u64_at = |off: usize| -> u64 {
+        let b: [u8; 8] = file[off..off + 8].try_into().unwrap_or_default();
+        if little {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
+    };
+
+    let (phoff, phentsize, phnum) = if is_64 {
+        (
+            u64_at(0x20) as usize,
+            u16_at(0x36) as usize,
+            u16_at(0x38) as usize,
+        )
+    } else {
+        (
+            u32_at(0x1C) as usize,
+            u16_at(0x2A) as usize,
+            u16_at(0x2C) as usize,
+        )
+    };
+    if phoff == 0 || phentsize == 0 || phnum == 0 {
+        return Ok(false);
+    }
+
+    const PT_LOAD: u32 = 1;
+    const PF_X: u32 = 1;
+    const PF_W: u32 = 2;
+    const PF_R: u32 = 4;
+
+    let ram = state.ram_space();
+    let mut mapped = false;
+    for i in 0..phnum {
+        let base = match phoff.checked_add(i.saturating_mul(phentsize)) {
+            Some(b) if b + phentsize <= file.len() => b,
+            _ => break,
+        };
+        let (p_type, p_flags, p_offset, p_vaddr, p_filesz, p_memsz) = if is_64 {
+            (
+                u32_at(base),
+                u32_at(base + 4),
+                u64_at(base + 0x08) as usize,
+                u64_at(base + 0x10),
+                u64_at(base + 0x20) as usize,
+                u64_at(base + 0x28),
+            )
+        } else {
+            (
+                u32_at(base),
+                u32_at(base + 24),
+                u32_at(base + 4) as usize,
+                u64::from(u32_at(base + 8)),
+                u32_at(base + 16) as usize,
+                u64::from(u32_at(base + 20)),
+            )
+        };
+        if p_type != PT_LOAD || p_memsz == 0 {
+            continue;
+        }
+
+        let mut page_prot = prot::VALID;
+        if p_flags & PF_R != 0 {
+            page_prot |= prot::READ;
+        }
+        if p_flags & PF_W != 0 {
+            page_prot |= prot::WRITE;
+        }
+        if p_flags & PF_X != 0 {
+            page_prot |= prot::EXEC;
+        }
+        // A segment with no read bit is still readable in practice on every
+        // architecture this runs on, and refusing the fetch would be a fault
+        // the hardware does not raise.
+        if page_prot & (prot::READ | prot::WRITE | prot::EXEC) == 0 {
+            page_prot |= prot::READ;
+        }
+        state
+            .page_map
+            .map_region(p_vaddr, p_memsz, page_prot, false);
+
+        // `p_filesz` bytes from the file, then zeroes to `p_memsz` -- that
+        // difference is `.bss`, which has no bytes to copy and must still be
+        // there and zero.
+        let mut image = vec![0u8; p_memsz as usize];
+        let avail = file.len().saturating_sub(p_offset);
+        let take = p_filesz.min(avail).min(image.len());
+        if take > 0 {
+            image[..take].copy_from_slice(&file[p_offset..p_offset + take]);
+        }
+        state
+            .write_space(ram, p_vaddr, &image)
+            .with_context(|| format!("map PT_LOAD at 0x{p_vaddr:X}"))?;
+        tracing::debug!(
+            "PT_LOAD 0x{p_vaddr:X}..0x{:X} prot=0x{page_prot:02X}",
+            p_vaddr + p_memsz
+        );
+        mapped = true;
+    }
+    Ok(mapped)
 }

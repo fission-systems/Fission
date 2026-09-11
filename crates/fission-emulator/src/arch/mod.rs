@@ -1,5 +1,6 @@
 pub mod calling_convention;
 pub mod cortex_m;
+pub mod vector;
 pub use calling_convention::*;
 
 use anyhow::{Result, bail};

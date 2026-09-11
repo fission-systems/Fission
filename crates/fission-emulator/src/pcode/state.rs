@@ -254,7 +254,15 @@ pub struct MachineState {
 }
 
 /// Bytes of register space mirrored for zero-callout JIT access.
-pub const HOST_REG_FILE_SIZE: usize = 0x2000;
+/// How much of register space is mirrored in the flat host array.
+///
+/// Large enough for every architecture this emulator runs, which is what makes
+/// the mirror worth having: a register outside it takes a call-out on every
+/// access instead of a load. aarch64 puts `x0` at 0x4000 and its `V` registers
+/// above 0x5000, so the old 0x2000 covered x86 and nothing else -- every
+/// aarch64 register access was a call, and worse, a value written to one was
+/// not visible in the backing store until the block exited.
+pub const HOST_REG_FILE_SIZE: usize = 0x8000;
 
 impl fission_solver::solver::MemoryOracle for MachineState {
     fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8> {

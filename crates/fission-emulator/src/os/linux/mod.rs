@@ -129,6 +129,17 @@ impl Default for LinuxEnv {
     }
 }
 
+/// What a real kernel answers a syscall it does not have.
+///
+/// Answering zero instead is answering *success*, and a program that asked for
+/// something and was told it worked proceeds on the strength of that. glibc's
+/// start-up asks for `rseq` and `set_robust_list`, both of which are optional
+/// and both of which it handles being refused; told they succeeded, it goes on
+/// to use state the kernel never set up. `-ENOSYS` is not a worse answer than
+/// silence, it is the only honest one, and it is the answer every caller of an
+/// optional syscall is already written for.
+const ENOSYS: u64 = (-38i64) as u64;
+
 impl OsEnvironment for LinuxEnv {
     fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
         // Loader uses "ELF64" / "ELF32" / "ELF".
@@ -267,7 +278,7 @@ impl OsEnvironment for LinuxEnv {
                 None => {
                     tracing::warn!("Unimplemented Linux syscall: {} (raw)", raw_num);
                     emu.metrics.note_unknown_syscall(raw_num);
-                    emu.set_syscall_return(0)?;
+                    emu.set_syscall_return(ENOSYS)?;
                     return Ok(HleResult::Continue);
                 }
             };
@@ -302,7 +313,7 @@ impl OsEnvironment for LinuxEnv {
             } else {
                 tracing::warn!("Unimplemented Linux syscall: {}", sys_num);
                 emu.metrics.note_unknown_syscall(sys_num);
-                emu.set_syscall_return(0)?;
+                emu.set_syscall_return(ENOSYS)?;
                 return Ok(HleResult::Continue);
             }
         }
