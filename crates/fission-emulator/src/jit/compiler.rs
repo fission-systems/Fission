@@ -906,6 +906,32 @@ impl JitCompiler {
                     if vn.space_id != unique_space {
                         dirty.push((vn.space_id, vn.offset, vn.size.min(8), v));
                     }
+
+                    // Drop every *other* cached view of the bytes just
+                    // written, so the next use re-seeds from `host_reg_file`.
+                    //
+                    // `var_map` is keyed by (space, offset, size), and on x86
+                    // `RDX` and `EDX` are the same offset at different sizes --
+                    // two keys, two SSA variables, one storage. Writing the
+                    // wide one left the narrow one holding whatever it had
+                    // cached, and lazy seeding does not help: it only reads
+                    // `host_reg_file` the *first* time a key is used, which may
+                    // have been before the write.
+                    //
+                    // musl's mallocng is where this surfaced: `imulq %r12,%rdx`
+                    // then `subl %edx,%esi`, in one block, gave a size that was
+                    // wrong by exactly the stale `EDX`. This runs at
+                    // compile time, once per store, over a map that holds a
+                    // block's worth of entries.
+                    let (wlo, whi) = (vn.offset, vn.offset + rsz as u64);
+                    let written = (vn.space_id, vn.offset, rsz as u64);
+                    var_map.retain(|key, _| {
+                        let (space, offset, size) = *key;
+                        *key == written
+                            || space != vn.space_id
+                            || offset >= whi
+                            || offset + size <= wlo
+                    });
                 }
             }};
         }

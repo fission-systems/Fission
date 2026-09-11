@@ -4,13 +4,14 @@
 //! so this drives the same fixture through both engines and compares what the
 //! guest actually did -- not just that neither crashed.
 //!
-//! # What agrees, and what does not
+//! # What agrees
 //!
-//! `the_engines_agree_exactly_on_a_binary_without_simd` passes and is the
-//! gate. On a fixture inside both engines' reach they match on every axis:
-//! instruction path, outward calls, instruction count, final PC.
+//! All of it, on every fixture here: instruction path, outward calls,
+//! instruction count, final PC. The tests below are the gate.
 //!
-//! Getting there fixed three real bugs, each found by this harness:
+//! Getting there fixed six real bugs, each found by this harness and none of
+//! them findable any other way -- a benchmark score cannot see a wrong value,
+//! only a wrong shape:
 //!
 //! 1. **The JIT flushed undefined variables over live registers.** `store_vn!`
 //!    already writes `host_reg_file`, which *is* register space, so the exit
@@ -18,41 +19,32 @@
 //!    Reading the SSA variables instead meant a register written only on an
 //!    untaken path flushed zero: `rep stosq` leaves via `CBRANCH` before the
 //!    ops that touch RDI, so the exiting iteration zeroed a live pointer.
-//!    Going through `write_space` also cleared shadow on the way, so register
-//!    taint could not survive a block boundary.
 //! 2. **The interpreter read a branch target from the wrong field.**
 //!    `remap_relative_branches` writes the resolved flat index to
 //!    `constant_val` and leaves `offset` holding the signed delta; the JIT
-//!    reads `constant_val` and the evaluator read `offset`. A backward branch
-//!    came back as a huge unsigned index, so `tzcnt`'s bit-scan loop looked
-//!    like it fell out of the block and the ops writing the result never ran.
+//!    reads `constant_val` and the evaluator read `offset`.
 //! 3. **The interpreter truncated wide varnodes to eight bytes.** An XMM
 //!    register is sixteen, so a `COPY` left the top half stale.
-//!
-//! The three tests below stay `#[ignore]`d, and the reason is no longer a
-//! mystery: **neither engine implements 128-bit SIMD**, and they approximate
-//! it differently. `load_vn!` takes the low eight bytes of a wide varnode;
-//! the interpreter now moves all sixteen for `COPY` and the bitwise ops but
-//! still has no 128-bit shift, and `pmovmskb` lifts to `IntRight` on a
-//! 16-byte value followed by a `SubPiece` out of it. On the static musl
-//! fixture that is `strlen`, at step 2234:
-//!
-//! ```text
-//! after: 0x1006936 0x100693A 0x100693E 0x1006942 0x1006946 0x1006948
-//! jit:    0x10069AE   (took the branch)
-//! interp: 0x100694A   (fell through)
-//! ```
-//!
-//! Making these pass means real 128-bit semantics in both engines, not making
-//! the interpreter copy the JIT's approximation -- a differential that pins a
-//! shared wrong answer has stopped being one.
+//! 4. **Neither engine did 128-bit integer arithmetic.** Both took the low
+//!    eight bytes, which makes `div r64` -- whose dividend is `RDX:RAX` --
+//!    right only while `RDX` is zero. See `wide_integer_semantics`.
+//! 5. **`Store` wrote eight bytes of a sixteen-byte value.** `movaps %xmm0,
+//!    (%rax)` left half the destination holding its old contents, which
+//!    corrupted a `va_copy` and sent `vfprintf` to the wrong stack slots three
+//!    thousand instructions before anything looked wrong.
+//! 6. **The JIT cached `RDX` and `EDX` as separate variables.** `var_map` is
+//!    keyed by (space, offset, size), so the two views of one register are two
+//!    entries, and writing the wide one left the narrow one holding what it
+//!    had cached. Lazy seeding does not help -- it reads `host_reg_file` the
+//!    first time a key is used, which may be before the write. `imulq
+//!    %r12,%rdx` followed by `subl %edx,%esi`, inside one block, in musl's
+//!    allocator.
 //!
 //! One difference here is convention, not correctness: on halt the JIT leaves
 //! `pc` past the whole block and the interpreter now does the same, because
 //! the two have to answer alike even where neither answer is obviously better.
 //!
-//! Run them with `cargo test -p fission-emulator --test interp_differential
-//! -- --ignored`.
+//! They all run by default: a gate that has to be asked for is not one.
 
 use std::path::PathBuf;
 
@@ -174,7 +166,6 @@ fn syscall_trace(emu: &mut Emulator) -> Vec<(u64, [u64; 6])> {
 }
 
 #[test]
-#[ignore = "neither engine implements 128-bit SIMD; see the module doc"]
 fn the_interpreter_reaches_the_same_place_as_the_jit() {
     let mut jitted = build(20_000, false);
     jitted.add_observer(Box::new(BehaviorLog::new()));
@@ -220,7 +211,6 @@ fn the_interpreter_reaches_the_same_place_as_the_jit() {
 }
 
 #[test]
-#[ignore = "neither engine implements 128-bit SIMD; see the module doc"]
 fn the_interpreter_covers_the_same_code() {
     let mut jitted = build(20_000, false);
     jitted.add_observer(Box::new(Coverage::new()));
@@ -253,7 +243,6 @@ fn the_interpreter_covers_the_same_code() {
 }
 
 #[test]
-#[ignore = "neither engine implements 128-bit SIMD; see the module doc"]
 fn the_engines_take_the_same_path_instruction_by_instruction() {
     let mut jitted = build(20_000, false);
     jitted.add_observer(Box::new(PcTrace::default()));
@@ -271,6 +260,14 @@ fn the_engines_take_the_same_path_instruction_by_instruction() {
         !jit_pcs.is_empty() && !int_pcs.is_empty(),
         "no trace recorded"
     );
+    if std::env::var_os("DUMP_TRACES").is_some() {
+        let write = |name: &str, pcs: &[u64]| {
+            let body: String = pcs.iter().map(|pc| format!("{pc:X}\n")).collect();
+            std::fs::write(name, body).expect("dump");
+        };
+        write("/tmp/trace_jit.txt", jit_pcs);
+        write("/tmp/trace_int.txt", int_pcs);
+    }
 
     if let Some((i, jit_pc, int_pc)) = first_divergence(jit_pcs, int_pcs) {
         let context: Vec<String> = jit_pcs[i.saturating_sub(6)..i]
@@ -288,11 +285,10 @@ fn the_engines_take_the_same_path_instruction_by_instruction() {
 
 /// The gate: on a fixture inside both engines' reach, they must agree exactly.
 ///
-/// This is what the three ignored tests above will look like once 128-bit SIMD
-/// is real in both. Until then it guards the bugs that *are* fixed -- an
-/// undefined register flushed over a live one, a branch target read from the
-/// wrong field, a wide `COPY` truncated to eight bytes -- any of which breaks
-/// this immediately.
+/// The narrowest of the gates here: no SIMD at all, so it was the first to
+/// pass and it is the one that keeps passing while the others are being made
+/// to. A regression in the plain integer core breaks this before it breaks
+/// anything else.
 #[test]
 fn the_engines_agree_exactly_on_a_binary_without_simd() {
     let mut jitted = build_simple(4096, false);
@@ -328,6 +324,14 @@ fn the_engines_agree_exactly_on_a_binary_without_simd() {
         .unwrap()
         .pcs;
     assert!(!jit_pcs.is_empty(), "no trace recorded");
+    if std::env::var_os("DUMP_TRACES").is_some() {
+        let write = |name: &str, pcs: &[u64]| {
+            let body: String = pcs.iter().map(|pc| format!("{pc:X}\n")).collect();
+            std::fs::write(name, body).expect("dump");
+        };
+        write("/tmp/trace_jit.txt", jit_pcs);
+        write("/tmp/trace_int.txt", int_pcs);
+    }
     if let Some((i, a, b)) = first_divergence(jit_pcs, int_pcs) {
         panic!(
             "engines diverge at step {i}\n  after: {}\n  jit:    {}\n  interp: {}",

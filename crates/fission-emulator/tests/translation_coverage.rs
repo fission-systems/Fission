@@ -77,12 +77,16 @@ struct Stats {
     instructions: u64,
     /// Instructions with a varnode wider than eight bytes.
     ///
-    /// Neither engine implements 128-bit semantics: `load_vn!` takes the low
-    /// eight bytes of a wide varnode and the interpreter moves all sixteen for
-    /// some ops and not others. Nothing *counts* that, because the opcodes are
-    /// ordinary -- it is the width that is unsupported, so these compile
-    /// cleanly and compute the wrong thing. This is the one gap the other
-    /// three columns are blind to, which is why it gets its own.
+    /// Nothing else here counts these, because the opcodes are ordinary
+    /// `COPY`, `LOAD`, `INT_XOR` -- it is the *width* that is the question, so
+    /// they compile cleanly whether or not anything executes them correctly.
+    /// That is why the column exists.
+    ///
+    /// Sixteen-byte integer ops are executed properly now, in `u128`, by both
+    /// engines. What is still approximate is the ten-byte group -- x87's
+    /// 80-bit extended precision -- and anything above sixteen, where a YMM's
+    /// thirty-two bytes move a byte at a time and nothing does arithmetic on
+    /// them. Splitting the count by width, below, says which is which.
     wide_insns: u64,
     /// Which p-code ops those wide instructions are made of, by opcode and
     /// varnode width. This is the work queue for 128-bit semantics: "implement

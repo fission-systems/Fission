@@ -60,24 +60,34 @@ fn past_sizeclass_freeable_or_bin_progress() {
         "still stuck at mallocng size-class livelock 0x10035A3"
     );
 
-    // Scan bins for any non-zero head and freeable on heap metas.
-    let mut any_bin = false;
+    // The bins are reported, not asserted on.
+    //
+    // This used to require a non-zero bin head, which held while the allocator
+    // was computing its size classes wrongly. `imulq %r12,%rdx` followed by
+    // `subl %edx,%esi` read a stale `EDX` in the compiled path, so mallocng
+    // picked a different class and populated a different bin -- and the
+    // assertion recorded that as the expected shape. With the arithmetic
+    // right, the allocator takes the path it should and those bins stay empty.
+    //
+    // The thing this test is actually for is progress rather than livelock, so
+    // it now asks the question that means: did the program get where it was
+    // going? `writev` is its output and `exit_group` is it finishing, neither
+    // of which a stalled allocator reaches.
     for i in 0..32u64 {
         let h = r64(&mut emu, 0x1007f68 + i * 8);
         if h != 0 {
-            any_bin = true;
             let freeable = r32(&mut emu, h + 0x18);
             eprintln!("bin[{i}]=0x{h:X} freeable={freeable}");
         }
     }
-    let bin5 = r64(&mut emu, 0x1007f68 + 5 * 8);
-    let freeable5 = if bin5 != 0 {
-        r32(&mut emu, bin5 + 0x18)
-    } else {
-        0
-    };
     assert!(
-        any_bin || freeable5 > 0,
-        "expected bin link or freeable progress; bin5=0x{bin5:X} freeable5={freeable5}"
+        emu.metrics.syscalls.contains_key(&20) || emu.metrics.syscalls.contains_key(&1),
+        "the program never wrote its output: {:?}",
+        emu.metrics.syscalls
+    );
+    assert!(
+        emu.metrics.syscalls.contains_key(&231) || emu.metrics.syscalls.contains_key(&60),
+        "the program never exited: {:?}",
+        emu.metrics.syscalls
     );
 }
