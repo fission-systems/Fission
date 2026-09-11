@@ -133,32 +133,10 @@ impl ExecutionBackend for EmulatorBackend {
         let Some(emu) = &mut self.emulator else {
             return Err(fission_core::err!(debug, "Emulator not running"));
         };
-        // Registers, not a default-constructed struct with a PC in it. The
-        // emulator resolves names through the language's register map, so
-        // asking it is both correct and the only thing that works on an
-        // architecture whose registers are not called RAX.
-        let pc = emu.pc;
-        let mut read = |name: &str| emu.read_register_u64(name).unwrap_or(0);
-        Ok(RegisterState {
-            rax: read("RAX"),
-            rbx: read("RBX"),
-            rcx: read("RCX"),
-            rdx: read("RDX"),
-            rsi: read("RSI"),
-            rdi: read("RDI"),
-            rbp: read("RBP"),
-            rsp: read("RSP"),
-            r8: read("R8"),
-            r9: read("R9"),
-            r10: read("R10"),
-            r11: read("R11"),
-            r12: read("R12"),
-            r13: read("R13"),
-            r14: read("R14"),
-            r15: read("R15"),
-            rip: pc,
-            rflags: read("EFLAGS"),
-        })
+        // The emulator's own answer, so a front end sees the registers the
+        // machine actually has. Naming the x86-64 sixteen here reported
+        // sixteen zeroes for every aarch64, ARM and MIPS image.
+        Ok(emu.register_state())
     }
 
     fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {

@@ -33,7 +33,20 @@ const GP: [&str; 16] = [
 fn build(max_inst: u64, ttd_interval: u64) -> Emulator {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_printf_malloc.elf");
-    let binary = LoadedBinary::from_file(&path).expect("load");
+    build_at(&path, max_inst, ttd_interval)
+}
+
+/// An aarch64 ELF, from the dev corpus: the crate carries no aarch64 fixture,
+/// and this architecture is the whole point of the test below.
+fn build_aarch64(max_inst: u64, ttd_interval: u64) -> Option<Emulator> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-aarch64_O0");
+    path.is_file()
+        .then(|| build_at(&path, max_inst, ttd_interval))
+}
+
+fn build_at(path: &std::path::Path, max_inst: u64, ttd_interval: u64) -> Emulator {
+    let binary = LoadedBinary::from_file(path).expect("load");
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");
     let load_spec = binary.load_spec().expect("spec").clone();
@@ -87,11 +100,27 @@ fn recording_a_run_records_something() {
         "a 400-instruction run with a snapshot every 4 recorded nothing"
     );
 
-    // Registers first: `RegisterState` is a fixed x86-64 struct, so a snapshot
-    // of any other architecture is all zeroes. On x86-64 it must not be.
-    let snap = emu.ttd.latest_snapshot().expect("a snapshot");
-    assert_ne!(snap.registers.rsp, 0, "no stack pointer was recorded");
-    assert_ne!(snap.registers.rip, 0, "no program counter was recorded");
+    // Registers first: a snapshot must hold the machine's own registers,
+    // named the way the machine names them.
+    let snapshot_registers = emu
+        .ttd
+        .latest_snapshot()
+        .expect("a snapshot")
+        .registers
+        .clone();
+    assert_ne!(snapshot_registers.pc, 0, "no program counter was recorded");
+    let live_rsp = emu.read_register_u64("RSP").expect("live RSP");
+    assert_eq!(
+        snapshot_registers.get("RSP"),
+        Some(live_rsp),
+        "the snapshot's stack pointer is not the machine's"
+    );
+    for name in GP {
+        assert!(
+            snapshot_registers.get(name).is_some(),
+            "{name} was not recorded"
+        );
+    }
 
     // And memory: `tracing_memory` is what makes deltas exist, and a run that
     // pushes a stack frame writes memory.
@@ -186,5 +215,82 @@ fn seeking_back_arrives_where_the_run_was() {
     assert_eq!(
         want_stack, got_stack,
         "seek restored different memory below the stack pointer"
+    );
+}
+
+/// Time travel on an architecture whose registers are not called `RAX`.
+///
+/// `RegisterState` used to be eighteen x86-64 fields, so on aarch64 a
+/// recorded snapshot held sixteen zeroes and `ttd_seek` failed on its first
+/// `write_register_u64("RAX", ..)` -- the recorder stored snapshots that
+/// could never be restored, and said nothing. Neither existing test could
+/// see it: both run the x86-64 fixture.
+#[test]
+fn time_travel_works_on_an_architecture_that_is_not_x86() {
+    let Some(mut traveler) = build_aarch64(2_000, 50) else {
+        eprintln!("skipped: no aarch64 binary in the dev corpus");
+        return;
+    };
+    let _ = traveler.run();
+
+    let snapshot = traveler
+        .ttd
+        .latest_snapshot()
+        .expect("a snapshot")
+        .registers
+        .clone();
+    assert_eq!(
+        snapshot.get("RAX"),
+        None,
+        "an aarch64 machine has no RAX; absent is the answer, not zero"
+    );
+    for name in ["X0", "X29", "X30", "SP"] {
+        assert!(snapshot.get(name).is_some(), "{name} was not recorded");
+    }
+    let live_sp = traveler.read_register_u64("SP").expect("live SP");
+    assert_eq!(
+        snapshot.get("SP"),
+        Some(live_sp),
+        "the snapshot's stack pointer is not the machine's"
+    );
+
+    // And the round trip, against the machine itself.
+    let target = traveler
+        .ttd
+        .snapshots()
+        .iter()
+        .map(|s| s.step_index)
+        .find(|step| *step >= 500)
+        .expect("a snapshot at or after step 500");
+
+    let mut reference = build_aarch64(target + 1, 0).expect("the same binary");
+    let _ = reference.run();
+    let want_pc = reference.pc;
+    let want: Vec<(String, u64)> = snapshot
+        .iter()
+        .map(|(name, _)| {
+            (
+                name.to_string(),
+                reference.read_register_u64(name).unwrap_or(0),
+            )
+        })
+        .collect();
+
+    traveler.ttd_seek(target).expect("seek");
+    assert_eq!(traveler.inst_count, target, "seek landed on another step");
+    assert_eq!(
+        traveler.pc, want_pc,
+        "seek restored another program counter"
+    );
+    let differing: Vec<String> = want
+        .iter()
+        .filter_map(|(name, wanted)| {
+            let got = traveler.read_register_u64(name).unwrap_or(0);
+            (got != *wanted).then(|| format!("{name}: want 0x{wanted:X} got 0x{got:X}"))
+        })
+        .collect();
+    assert!(
+        differing.is_empty(),
+        "seek restored different registers: {differing:?}"
     );
 }

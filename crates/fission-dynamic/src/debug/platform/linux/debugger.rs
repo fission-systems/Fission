@@ -313,25 +313,26 @@ impl ExecutionBackend for LinuxDebugger {
         let regs = ptrace::getregs(Pid::from_raw(pid as i32))
             .map_err(|e| FissionError::debug(format!("Failed to get registers: {}", e)))?;
 
-        Ok(RegisterState {
-            rax: regs.rax,
-            rbx: regs.rbx,
-            rcx: regs.rcx,
-            rdx: regs.rdx,
-            rsi: regs.rsi,
-            rdi: regs.rdi,
-            rbp: regs.rbp,
-            rsp: regs.rsp,
-            r8: regs.r8,
-            r9: regs.r9,
-            r10: regs.r10,
-            r11: regs.r11,
-            r12: regs.r12,
-            r13: regs.r13,
-            r14: regs.r14,
-            r15: regs.r15,
-            rip: regs.rip,
-            rflags: regs.eflags,
-        })
+        // `user_regs_struct` is the host's, so these names are correct here
+        // by construction -- this backend only runs on an x86-64 Linux host.
+        Ok(RegisterState::at(regs.rip)
+            .with("RAX", regs.rax)
+            .with("RBX", regs.rbx)
+            .with("RCX", regs.rcx)
+            .with("RDX", regs.rdx)
+            .with("RSI", regs.rsi)
+            .with("RDI", regs.rdi)
+            .with("RBP", regs.rbp)
+            .with("RSP", regs.rsp)
+            .with("R8", regs.r8)
+            .with("R9", regs.r9)
+            .with("R10", regs.r10)
+            .with("R11", regs.r11)
+            .with("R12", regs.r12)
+            .with("R13", regs.r13)
+            .with("R14", regs.r14)
+            .with("R15", regs.r15)
+            .with("RIP", regs.rip)
+            .with("RFLAGS", regs.eflags))
     }
 }

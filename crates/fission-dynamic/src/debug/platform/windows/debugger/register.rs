@@ -89,16 +89,19 @@ impl ExecutionBackend for WindowsDebugger {
             if self.is_wow64 == Some(true) {
                 let mut ctx: WOW64_CONTEXT = std::mem::zeroed();
                 ctx.ContextFlags = WOW64_CONTEXT_ALL;
-                ctx.Eax = regs.rax as u32;
-                ctx.Ebx = regs.rbx as u32;
-                ctx.Ecx = regs.rcx as u32;
-                ctx.Edx = regs.rdx as u32;
-                ctx.Esi = regs.rsi as u32;
-                ctx.Edi = regs.rdi as u32;
-                ctx.Ebp = regs.rbp as u32;
-                ctx.Esp = regs.rsp as u32;
-                ctx.Eip = regs.rip as u32;
-                ctx.EFlags = regs.rflags as u32;
+                // Either naming: `EAX` from this backend's own read-back,
+                // `RAX` from a state recorded on an x86-64 machine.
+                let get = |wide: &str, narrow: &str| regs.get(narrow).or_else(|| regs.get(wide));
+                ctx.Eax = get("RAX", "EAX").unwrap_or(0) as u32;
+                ctx.Ebx = get("RBX", "EBX").unwrap_or(0) as u32;
+                ctx.Ecx = get("RCX", "ECX").unwrap_or(0) as u32;
+                ctx.Edx = get("RDX", "EDX").unwrap_or(0) as u32;
+                ctx.Esi = get("RSI", "ESI").unwrap_or(0) as u32;
+                ctx.Edi = get("RDI", "EDI").unwrap_or(0) as u32;
+                ctx.Ebp = get("RBP", "EBP").unwrap_or(0) as u32;
+                ctx.Esp = get("RSP", "ESP").unwrap_or(0) as u32;
+                ctx.Eip = regs.pc as u32;
+                ctx.EFlags = regs.get("EFLAGS").unwrap_or(0) as u32;
                 let res = Wow64SetThreadContext(h_thread, &ctx);
                 let _ = CloseHandle(h_thread);
                 return res.map_err(|e| {
@@ -109,24 +112,24 @@ impl ExecutionBackend for WindowsDebugger {
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
 
-            ctx.Rax = regs.rax;
-            ctx.Rbx = regs.rbx;
-            ctx.Rcx = regs.rcx;
-            ctx.Rdx = regs.rdx;
-            ctx.Rsi = regs.rsi;
-            ctx.Rdi = regs.rdi;
-            ctx.Rbp = regs.rbp;
-            ctx.Rsp = regs.rsp;
-            ctx.R8 = regs.r8;
-            ctx.R9 = regs.r9;
-            ctx.R10 = regs.r10;
-            ctx.R11 = regs.r11;
-            ctx.R12 = regs.r12;
-            ctx.R13 = regs.r13;
-            ctx.R14 = regs.r14;
-            ctx.R15 = regs.r15;
-            ctx.Rip = regs.rip;
-            ctx.EFlags = regs.rflags as u32;
+            ctx.Rax = regs.get("RAX").unwrap_or(0);
+            ctx.Rbx = regs.get("RBX").unwrap_or(0);
+            ctx.Rcx = regs.get("RCX").unwrap_or(0);
+            ctx.Rdx = regs.get("RDX").unwrap_or(0);
+            ctx.Rsi = regs.get("RSI").unwrap_or(0);
+            ctx.Rdi = regs.get("RDI").unwrap_or(0);
+            ctx.Rbp = regs.get("RBP").unwrap_or(0);
+            ctx.Rsp = regs.get("RSP").unwrap_or(0);
+            ctx.R8 = regs.get("R8").unwrap_or(0);
+            ctx.R9 = regs.get("R9").unwrap_or(0);
+            ctx.R10 = regs.get("R10").unwrap_or(0);
+            ctx.R11 = regs.get("R11").unwrap_or(0);
+            ctx.R12 = regs.get("R12").unwrap_or(0);
+            ctx.R13 = regs.get("R13").unwrap_or(0);
+            ctx.R14 = regs.get("R14").unwrap_or(0);
+            ctx.R15 = regs.get("R15").unwrap_or(0);
+            ctx.Rip = regs.pc;
+            ctx.EFlags = regs.get("RFLAGS").unwrap_or(0) as u32;
 
             let res = SetThreadContext(h_thread, &ctx);
             let _ = CloseHandle(h_thread);

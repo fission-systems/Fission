@@ -70,6 +70,7 @@ mod tests {
             global_symbols: HashMap::new(),
             global_symbol_sizes: HashMap::new(),
             relocation_symbols: HashMap::new(),
+            loader_symbols: Vec::new(),
             function_addr_index: HashMap::new(),
             function_name_index: HashMap::new(),
             functions_sorted: true,

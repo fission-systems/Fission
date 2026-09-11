@@ -47,46 +47,35 @@ fn hex_bytes_from_str(s: &str) -> Result<Vec<u8>> {
 }
 
 fn print_regs(regs: &fission_dynamic::debug::types::RegisterState, json: bool) {
+    // Whatever the machine reported, named the way it named it. Printing a
+    // fixed x86-64 list showed sixteen zeroes for an aarch64 target and gave
+    // no sign that the names were the problem.
     if json {
-        let obj = serde_json::json!({
-            "rax": regs.rax,
-            "rbx": regs.rbx,
-            "rcx": regs.rcx,
-            "rdx": regs.rdx,
-            "rsi": regs.rsi,
-            "rdi": regs.rdi,
-            "rbp": regs.rbp,
-            "rsp": regs.rsp,
-            "r8": regs.r8,
-            "r9": regs.r9,
-            "r10": regs.r10,
-            "r11": regs.r11,
-            "r12": regs.r12,
-            "r13": regs.r13,
-            "r14": regs.r14,
-            "r15": regs.r15,
-            "rip": regs.rip,
-            "rflags": regs.rflags,
-        });
-        println!("{}", serde_json::to_string_pretty(&obj).unwrap());
-    } else {
+        let mut obj = serde_json::Map::new();
+        obj.insert("pc".to_string(), serde_json::json!(regs.pc));
+        for (name, value) in regs.iter() {
+            obj.insert(name.to_ascii_lowercase(), serde_json::json!(value));
+        }
         println!(
-            "RAX={:016x} RBX={:016x} RCX={:016x} RDX={:016x}",
-            regs.rax, regs.rbx, regs.rcx, regs.rdx
+            "{}",
+            serde_json::to_string_pretty(&serde_json::Value::Object(obj)).unwrap()
         );
-        println!(
-            "RSI={:016x} RDI={:016x} RBP={:016x} RSP={:016x}",
-            regs.rsi, regs.rdi, regs.rbp, regs.rsp
-        );
-        println!(
-            "R8 ={:016x} R9 ={:016x} R10={:016x} R11={:016x}",
-            regs.r8, regs.r9, regs.r10, regs.r11
-        );
-        println!(
-            "R12={:016x} R13={:016x} R14={:016x} R15={:016x}",
-            regs.r12, regs.r13, regs.r14, regs.r15
-        );
-        println!("RIP={:016x} RFLAGS={:016x}", regs.rip, regs.rflags);
+        return;
+    }
+
+    println!("PC ={:016x}", regs.pc);
+    let mut column = 0;
+    for (name, value) in regs.iter() {
+        print!("{name:<4}={value:016x}");
+        column += 1;
+        if column % 4 == 0 {
+            println!();
+        } else {
+            print!(" ");
+        }
+    }
+    if column % 4 != 0 {
+        println!();
     }
 }
 

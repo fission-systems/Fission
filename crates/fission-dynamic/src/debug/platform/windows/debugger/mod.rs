@@ -539,13 +539,13 @@ impl WindowsDebugger {
             .state
             .registers
             .as_ref()
-            .map(|r| r.rip)
+            .map(|r| r.pc)
             .or_else(|| {
                 self.state
                     .current_thread_id
                     .or(self.state.main_thread_id)
                     .and_then(|tid| self.fetch_registers(tid).ok())
-                    .map(|r| r.rip)
+                    .map(|r| r.pc)
             })
             .ok_or_else(|| FissionError::debug("No RIP available"))?;
         self.disassemble_at(rip, after)

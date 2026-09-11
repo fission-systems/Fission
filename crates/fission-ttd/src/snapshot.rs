@@ -79,9 +79,9 @@ impl ExecutionSnapshot {
         self.shadow_deltas.push(delta);
     }
 
-    /// Get the instruction pointer (RIP) at this snapshot
-    pub fn rip(&self) -> u64 {
-        self.registers.rip
+    /// Where the machine was executing at this snapshot.
+    pub fn pc(&self) -> u64 {
+        self.registers.pc
     }
 
     /// Estimate memory usage of this snapshot in bytes

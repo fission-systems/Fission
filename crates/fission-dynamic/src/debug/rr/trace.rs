@@ -314,27 +314,12 @@ impl RRDebugger {
                         }
                     });
 
-                    if let (Some(n), Some(v)) = (num, val) {
-                        match n {
-                            0 => state.rax = v,
-                            1 => state.rbx = v,
-                            2 => state.rcx = v,
-                            3 => state.rdx = v,
-                            4 => state.rsi = v,
-                            5 => state.rdi = v,
-                            6 => state.rbp = v,
-                            7 => state.rsp = v,
-                            8 => state.r8 = v,
-                            9 => state.r9 = v,
-                            10 => state.r10 = v,
-                            11 => state.r11 = v,
-                            12 => state.r12 = v,
-                            13 => state.r13 = v,
-                            14 => state.r14 = v,
-                            15 => state.r15 = v,
-                            16 => state.rip = v,
-                            17 => state.rflags = v,
-                            _ => {}
+                    if let (Some(n), Some(v)) = (num, val)
+                        && let Some(name) = fission_ttd::x86_64_register_name(n)
+                    {
+                        state.set(name, v);
+                        if name == "RIP" {
+                            state.pc = v;
                         }
                     }
                 }

@@ -70,9 +70,15 @@ jobs:
       # `Emulator::new` and read a field named `rip` that has been `pc` for a
       # long time, and nothing noticed because nothing built it. A feature that
       # no job turns on is a feature nobody can tell is broken.
+      #
+      # `--all-targets`, because without it this check covers the library and
+      # not its tests, and the crate's own test module had gone stale the same
+      # way: `app/snapshot.rs` built a `LoadedBinaryInner` missing a field
+      # added to the loader some time ago. Half a check is how the second half
+      # rots.
       - name: Check optional features (interactive_runtime)
         shell: bash
-        run: cargo check -p fission-dynamic --features interactive_runtime --locked
+        run: cargo check -p fission-dynamic --features interactive_runtime --all-targets --locked
 
       - name: sccache stats
         if: always()

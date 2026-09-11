@@ -24,6 +24,9 @@ pub struct Emulator {
     /// Architecture-independent program counter (replaces the old `rip` field).
     pub pc: u64,
     pub register_map: std::collections::HashMap<String, (u64, u64, u32)>,
+    /// The registers a TTD snapshot records, derived once from
+    /// [`Self::register_map`]. See [`Self::snapshot_register_names`].
+    snapshot_registers: Vec<String>,
     /// Architecture metadata: PC/SP register names, pointer size, CC, …
     pub arch: ArchInfo,
     /// OS execution environment: import patching, HLE dispatch, …
@@ -328,12 +331,15 @@ impl Emulator {
             );
         }
 
+        let snapshot_registers = Self::snapshot_register_names(&register_map);
+
         let mut emu = Self {
             state,
             binary,
             sleigh: sleigh_arc,
             pc,
             register_map,
+            snapshot_registers,
             arch,
             os,
             snapshots: Vec::new(),
@@ -841,29 +847,72 @@ impl Emulator {
         self
     }
 
-    /// Read all current GP registers into a `RegisterState` for TTD.
-    fn capture_register_state(&mut self) -> RegisterState {
-        let read = |emu: &mut Self, name: &str| emu.read_register_u64(name).unwrap_or(0);
-        RegisterState {
-            rax: read(self, "RAX"),
-            rbx: read(self, "RBX"),
-            rcx: read(self, "RCX"),
-            rdx: read(self, "RDX"),
-            rsi: read(self, "RSI"),
-            rdi: read(self, "RDI"),
-            rbp: read(self, "RBP"),
-            rsp: read(self, "RSP"),
-            r8: read(self, "R8"),
-            r9: read(self, "R9"),
-            r10: read(self, "R10"),
-            r11: read(self, "R11"),
-            r12: read(self, "R12"),
-            r13: read(self, "R13"),
-            r14: read(self, "R14"),
-            r15: read(self, "R15"),
-            rip: self.pc,
-            rflags: read(self, "EFLAGS"),
+    /// The registers a TTD snapshot should record, from the language's own
+    /// register map rather than a per-architecture table.
+    ///
+    /// Two filters, and both are needed:
+    ///
+    /// * **Maximal only.** `EAX`, `AX`, `AL` and `AH` are views of `RAX`'s
+    ///   storage, so recording them all would store the same bytes five
+    ///   times and -- worse -- restoring them in map order would write `AL`
+    ///   over the low byte `RAX` had just restored. Keeping only registers
+    ///   no other register contains makes the set both smaller and safe to
+    ///   replay in any order.
+    /// * **Eight bytes or fewer.** `read_register_u64` refuses anything
+    ///   wider, so `ZMM0`/`Q0` cannot round-trip through a `u64` snapshot.
+    ///   Vector state is therefore not restored by a seek; that is recorded
+    ///   in `RegisterState`'s own documentation.
+    ///
+    /// Computed once per emulator: the containment filter is quadratic in
+    /// the map size (x86-64 names around five hundred registers) and a
+    /// snapshot is taken every `ttd_snapshot_interval` instructions.
+    fn snapshot_register_names(
+        register_map: &std::collections::HashMap<String, (u64, u64, u32)>,
+    ) -> Vec<String> {
+        let entries: Vec<(&str, u64, u64, u32)> = register_map
+            .iter()
+            .map(|(name, &(space, offset, size))| (name.as_str(), space, offset, size))
+            .filter(|&(_, _, _, size)| size > 0 && size <= 8)
+            .collect();
+
+        let mut names: Vec<String> = entries
+            .iter()
+            .filter(|&&(name, space, offset, size)| {
+                !entries
+                    .iter()
+                    .any(|&(other, other_space, other_offset, other_size)| {
+                        other_space == space
+                        && other_offset <= offset
+                        && offset + u64::from(size) <= other_offset + u64::from(other_size)
+                        // A strictly larger register, or an equal-sized alias
+                        // whose name sorts first, so exactly one of a pair of
+                        // aliases survives.
+                        && (other_size > size || (other_size == size && other < name))
+                    })
+            })
+            .map(|&(name, _, _, _)| name.to_string())
+            .collect();
+        // The map is a `HashMap`; a snapshot's contents must not depend on
+        // its iteration order.
+        names.sort_unstable();
+        names
+    }
+
+    /// Read the current registers into a [`RegisterState`].
+    ///
+    /// The one place registers are turned into a snapshot, so the TTD
+    /// recorder and a debugger front end cannot disagree about which
+    /// registers a machine has.
+    pub fn register_state(&mut self) -> RegisterState {
+        let names = std::mem::take(&mut self.snapshot_registers);
+        let mut state = RegisterState::at(self.pc);
+        for name in &names {
+            if let Ok(value) = self.read_register_u64(name) {
+                state.set(name, value);
+            }
         }
+        self.snapshot_registers = names;
+        state
     }
 
     /// Seek the TTD timeline to a given instruction step index.
@@ -897,24 +946,19 @@ impl Emulator {
         self.state.invalidate_reg_cache();
 
         // Restore registers
-        self.write_register_u64("RAX", snap.registers.rax)?;
-        self.write_register_u64("RBX", snap.registers.rbx)?;
-        self.write_register_u64("RCX", snap.registers.rcx)?;
-        self.write_register_u64("RDX", snap.registers.rdx)?;
-        self.write_register_u64("RSI", snap.registers.rsi)?;
-        self.write_register_u64("RDI", snap.registers.rdi)?;
-        self.write_register_u64("RBP", snap.registers.rbp)?;
-        self.write_register_u64("RSP", snap.registers.rsp)?;
-        self.write_register_u64("R8", snap.registers.r8)?;
-        self.write_register_u64("R9", snap.registers.r9)?;
-        self.write_register_u64("R10", snap.registers.r10)?;
-        self.write_register_u64("R11", snap.registers.r11)?;
-        self.write_register_u64("R12", snap.registers.r12)?;
-        self.write_register_u64("R13", snap.registers.r13)?;
-        self.write_register_u64("R14", snap.registers.r14)?;
-        self.write_register_u64("R15", snap.registers.r15)?;
-        self.write_register_u64("EFLAGS", snap.registers.rflags)?;
-        self.pc = snap.registers.rip;
+        // Whatever the snapshot recorded, and only that. This used to name
+        // the sixteen x86-64 general-purpose registers, so on any other
+        // architecture the first write failed and the seek returned an error
+        // -- the recorder had stored snapshots that could never be restored.
+        let restored: Vec<(String, u64)> = snap
+            .registers
+            .iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect();
+        for (name, value) in restored {
+            self.write_register_u64(&name, value)?;
+        }
+        self.pc = snap.registers.pc;
         self.inst_count = snap.step_index;
 
         // Restore memory via stored deltas (forward apply new_value at keyframe).
@@ -1445,7 +1489,7 @@ impl Emulator {
                 && self.inst_count > 0
                 && self.inst_count % self.ttd_snapshot_interval == 0
             {
-                let regs = self.capture_register_state();
+                let regs = self.register_state();
                 let deltas: Vec<fission_ttd::MemoryDelta> = self
                     .state
                     .trace_mem_writes

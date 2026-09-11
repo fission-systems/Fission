@@ -399,9 +399,7 @@ mod tests {
         timeline.start_recording();
 
         for i in 0..5 {
-            let mut regs = RegisterState::default();
-            regs.rip = 0x401000 + i * 4;
-            timeline.record_event(regs, 1);
+            timeline.record_event(RegisterState::at(0x401000 + i * 4), 1);
         }
 
         timeline.stop_recording();
@@ -411,7 +409,7 @@ mod tests {
 
         if let SeekResult::Success(snap) = timeline.seek_to(2) {
             assert_eq!(snap.step_index, 2);
-            assert_eq!(snap.registers.rip, 0x401008);
+            assert_eq!(snap.registers.pc, 0x401008);
         } else {
             panic!("Seek failed");
         }

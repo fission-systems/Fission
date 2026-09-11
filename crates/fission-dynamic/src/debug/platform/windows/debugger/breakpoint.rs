@@ -145,26 +145,20 @@ impl ExecutionBackend for WindowsDebugger {
                 res.map_err(|e| {
                     FissionError::debug(format!("Wow64GetThreadContext failed: {:?}", e))
                 })?;
-                return Ok(crate::debug::types::RegisterState {
-                    rax: ctx.Eax as u64,
-                    rbx: ctx.Ebx as u64,
-                    rcx: ctx.Ecx as u64,
-                    rdx: ctx.Edx as u64,
-                    rsi: ctx.Esi as u64,
-                    rdi: ctx.Edi as u64,
-                    rbp: ctx.Ebp as u64,
-                    rsp: ctx.Esp as u64,
-                    r8: 0,
-                    r9: 0,
-                    r10: 0,
-                    r11: 0,
-                    r12: 0,
-                    r13: 0,
-                    r14: 0,
-                    r15: 0,
-                    rip: ctx.Eip as u64,
-                    rflags: ctx.EFlags as u64,
-                });
+                // A 32-bit process, named in 32-bit registers. `R8`..`R15`
+                // used to be reported here as sixteen zeroes; a register the
+                // process does not have is now simply absent.
+                return Ok(crate::debug::types::RegisterState::at(ctx.Eip as u64)
+                    .with("EAX", ctx.Eax as u64)
+                    .with("EBX", ctx.Ebx as u64)
+                    .with("ECX", ctx.Ecx as u64)
+                    .with("EDX", ctx.Edx as u64)
+                    .with("ESI", ctx.Esi as u64)
+                    .with("EDI", ctx.Edi as u64)
+                    .with("EBP", ctx.Ebp as u64)
+                    .with("ESP", ctx.Esp as u64)
+                    .with("EIP", ctx.Eip as u64)
+                    .with("EFLAGS", ctx.EFlags as u64));
             }
 
             let mut ctx: CONTEXT = std::mem::zeroed();
@@ -176,26 +170,25 @@ impl ExecutionBackend for WindowsDebugger {
             res.map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
 
             // Map Windows CONTEXT to our RegisterState (x64)
-            Ok(crate::debug::types::RegisterState {
-                rax: ctx.Rax,
-                rbx: ctx.Rbx,
-                rcx: ctx.Rcx,
-                rdx: ctx.Rdx,
-                rsi: ctx.Rsi,
-                rdi: ctx.Rdi,
-                rbp: ctx.Rbp,
-                rsp: ctx.Rsp,
-                r8: ctx.R8,
-                r9: ctx.R9,
-                r10: ctx.R10,
-                r11: ctx.R11,
-                r12: ctx.R12,
-                r13: ctx.R13,
-                r14: ctx.R14,
-                r15: ctx.R15,
-                rip: ctx.Rip,
-                rflags: ctx.EFlags as u64,
-            })
+            Ok(crate::debug::types::RegisterState::at(ctx.Rip)
+                .with("RAX", ctx.Rax)
+                .with("RBX", ctx.Rbx)
+                .with("RCX", ctx.Rcx)
+                .with("RDX", ctx.Rdx)
+                .with("RSI", ctx.Rsi)
+                .with("RDI", ctx.Rdi)
+                .with("RBP", ctx.Rbp)
+                .with("RSP", ctx.Rsp)
+                .with("R8", ctx.R8)
+                .with("R9", ctx.R9)
+                .with("R10", ctx.R10)
+                .with("R11", ctx.R11)
+                .with("R12", ctx.R12)
+                .with("R13", ctx.R13)
+                .with("R14", ctx.R14)
+                .with("R15", ctx.R15)
+                .with("RIP", ctx.Rip)
+                .with("RFLAGS", ctx.EFlags as u64))
         }
     }
 
@@ -215,16 +208,22 @@ impl ExecutionBackend for WindowsDebugger {
             if self.is_wow64 == Some(true) {
                 let mut ctx: WOW64_CONTEXT = std::mem::zeroed();
                 ctx.ContextFlags = WOW64_CONTEXT_ALL;
-                ctx.Eax = regs.rax as u32;
-                ctx.Ebx = regs.rbx as u32;
-                ctx.Ecx = regs.rcx as u32;
-                ctx.Edx = regs.rdx as u32;
-                ctx.Esi = regs.rsi as u32;
-                ctx.Edi = regs.rdi as u32;
-                ctx.Ebp = regs.rbp as u32;
-                ctx.Esp = regs.rsp as u32;
-                ctx.Eip = regs.rip as u32;
-                ctx.EFlags = regs.rflags as u32;
+                // Accept either naming: a state read back from this same
+                // backend says `EAX`, while one carried over from an x86-64
+                // recording says `RAX`. A register the caller did not supply
+                // keeps the zeroed context's value rather than silently
+                // becoming zero from a missing field.
+                let get = |wide: &str, narrow: &str| regs.get(narrow).or_else(|| regs.get(wide));
+                ctx.Eax = get("RAX", "EAX").unwrap_or(0) as u32;
+                ctx.Ebx = get("RBX", "EBX").unwrap_or(0) as u32;
+                ctx.Ecx = get("RCX", "ECX").unwrap_or(0) as u32;
+                ctx.Edx = get("RDX", "EDX").unwrap_or(0) as u32;
+                ctx.Esi = get("RSI", "ESI").unwrap_or(0) as u32;
+                ctx.Edi = get("RDI", "EDI").unwrap_or(0) as u32;
+                ctx.Ebp = get("RBP", "EBP").unwrap_or(0) as u32;
+                ctx.Esp = get("RSP", "ESP").unwrap_or(0) as u32;
+                ctx.Eip = regs.pc as u32;
+                ctx.EFlags = regs.get("EFLAGS").unwrap_or(0) as u32;
                 let res = Wow64SetThreadContext(h_thread, &ctx);
                 let _ = CloseHandle(h_thread);
                 return res.map_err(|e| {
@@ -235,24 +234,24 @@ impl ExecutionBackend for WindowsDebugger {
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
 
-            ctx.Rax = regs.rax;
-            ctx.Rbx = regs.rbx;
-            ctx.Rcx = regs.rcx;
-            ctx.Rdx = regs.rdx;
-            ctx.Rsi = regs.rsi;
-            ctx.Rdi = regs.rdi;
-            ctx.Rbp = regs.rbp;
-            ctx.Rsp = regs.rsp;
-            ctx.R8 = regs.r8;
-            ctx.R9 = regs.r9;
-            ctx.R10 = regs.r10;
-            ctx.R11 = regs.r11;
-            ctx.R12 = regs.r12;
-            ctx.R13 = regs.r13;
-            ctx.R14 = regs.r14;
-            ctx.R15 = regs.r15;
-            ctx.Rip = regs.rip;
-            ctx.EFlags = regs.rflags as u32;
+            ctx.Rax = regs.get("RAX").unwrap_or(0);
+            ctx.Rbx = regs.get("RBX").unwrap_or(0);
+            ctx.Rcx = regs.get("RCX").unwrap_or(0);
+            ctx.Rdx = regs.get("RDX").unwrap_or(0);
+            ctx.Rsi = regs.get("RSI").unwrap_or(0);
+            ctx.Rdi = regs.get("RDI").unwrap_or(0);
+            ctx.Rbp = regs.get("RBP").unwrap_or(0);
+            ctx.Rsp = regs.get("RSP").unwrap_or(0);
+            ctx.R8 = regs.get("R8").unwrap_or(0);
+            ctx.R9 = regs.get("R9").unwrap_or(0);
+            ctx.R10 = regs.get("R10").unwrap_or(0);
+            ctx.R11 = regs.get("R11").unwrap_or(0);
+            ctx.R12 = regs.get("R12").unwrap_or(0);
+            ctx.R13 = regs.get("R13").unwrap_or(0);
+            ctx.R14 = regs.get("R14").unwrap_or(0);
+            ctx.R15 = regs.get("R15").unwrap_or(0);
+            ctx.Rip = regs.pc;
+            ctx.EFlags = regs.get("RFLAGS").unwrap_or(0) as u32;
 
             let res = SetThreadContext(h_thread, &ctx);
             let _ = CloseHandle(h_thread);
