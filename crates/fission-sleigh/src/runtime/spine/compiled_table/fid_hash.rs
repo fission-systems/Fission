@@ -625,6 +625,186 @@ pub(crate) struct FidHashes {
 /// Returns `None` if the extent has fewer than [`FID_SHORT_CODE_UNIT_LIMIT`]
 /// code units after skipping (mirrors Ghidra returning `null` for "function
 /// too small").
+/// One object of Ghidra's `getOpObjects(ii)` list.
+///
+/// `MessageDigestFidHasher` branches on exactly these three Java types
+/// (`Scalar`, `Register`, `Address`) and ignores everything else, so an
+/// object Ghidra cannot classify simply contributes nothing rather than
+/// invalidating the operand.
+enum OpObject {
+    Register(u64),
+    Scalar(i64),
+    Address,
+}
+
+/// Ghidra's `OperandSymbol.printList` / `Constructor.printList`: walk the
+/// operand's parse subtree in print order, emitting one `FixedHandle` per
+/// leaf. A subtable operand recurses into the constructor that matched it
+/// (over *all* of its print pieces -- the first-whitespace rule applies only
+/// to the top-level mnemonic constructor); every other operand is a leaf and
+/// contributes its own handle. Literal text becomes `Character` objects in
+/// the reference, which `getOpObjects` then filters out, so this skips them.
+fn print_list_handles<'a>(handle: &'a RuntimeHandle, out: &mut Vec<&'a RuntimeFixedHandle>) {
+    let Some(sub) = handle.subtable_state.as_deref() else {
+        out.push(&handle.fixed);
+        return;
+    };
+    for piece in sub.display_template.pieces.iter() {
+        let CompiledDisplayPiece::OperandRef(index) = piece else {
+            continue;
+        };
+        if let Some(inner) = sub.handles.iter().find(|h| h.operand_index == *index) {
+            print_list_handles(inner, out);
+        }
+    }
+}
+
+/// Ghidra's `SleighInstructionPrototype.addHandleObject`, which turns one
+/// `FixedHandle` into the `Register`/`Scalar`/`Address` object the hasher
+/// sees -- and returns nothing for a handle it does not recognise, which is
+/// how `FS:[RAX]`'s unique-space offset and `lea`'s unique-space address
+/// temporary end up contributing nothing at all rather than failing.
+fn classify_handle(compiled: &CompiledFrontend, handle: &RuntimeFixedHandle) -> Option<OpObject> {
+    let space = handle.space.as_ref()?;
+    if space.index == compiled.sla_register_space_index {
+        return Some(OpObject::Register(handle.offset_offset));
+    }
+    if space.name == "const" {
+        // `new Scalar(size * 8, offset_offset, signed)` then
+        // `getSignedValue()`, which sign-extends from that bit length.
+        let bytes = if handle.size != 0 {
+            handle.size
+        } else if handle.offset_size != 0 {
+            handle.offset_size
+        } else {
+            // Ghidra falls back to the default space's pointer size.
+            space.addr_size.max(1)
+        };
+        let bits = u32::from(u8::try_from(bytes).unwrap_or(8)).saturating_mul(8);
+        let value = if bits == 0 || bits >= 64 {
+            handle.offset_offset as i64
+        } else {
+            let shift = 64 - bits;
+            ((handle.offset_offset << shift) as i64) >> shift
+        };
+        return Some(OpObject::Scalar(value));
+    }
+    if space.index == compiled.sla_unique_space_index {
+        // `getHandleAddr` returns null for the unique space, and there is no
+        // other arm, so the reference drops it.
+        return None;
+    }
+    // Everything left is one of Ghidra's TYPE_RAM spaces.
+    match handle.offset_space.as_ref() {
+        None => Some(OpObject::Address),
+        Some(offset_space) if offset_space.index == compiled.sla_register_space_index => {
+            Some(OpObject::Register(handle.offset_offset))
+        }
+        // A RAM value whose address lives in a unique temporary: the
+        // reference's `addHandleObject` falls off the end and returns false.
+        Some(_) => None,
+    }
+}
+
+/// `MessageDigestFidHasher`'s per-operand accumulation over
+/// `getOpObjects(ii)`: every object folds into one `fullUpdate`/
+/// `specificUpdate` pair with `+`, so the order of the objects does not
+/// matter, and a single digest update follows.
+fn mix_object_list(operand_index: usize, objects: &[OpObject]) -> Option<OperandContribution> {
+    let index_term = i32::try_from(operand_index)
+        .ok()?
+        .wrapping_add(1)
+        .wrapping_mul(7777);
+    let mut full = index_term;
+    let mut specific = index_term;
+    let mut specific_count = 0u32;
+    // Ghidra asks `OperandType.isScalar(operandType)` -- whether the scalar
+    // *is* the whole operand, rather than one term of a memory expression --
+    // and only then uses the real value unconditionally. An object list
+    // holding a lone scalar is that case.
+    let whole_operand_is_scalar = matches!(objects, [OpObject::Scalar(_)]);
+    for object in objects {
+        match object {
+            OpObject::Register(offset) => {
+                let mixed = reg_mix(*offset)?;
+                full = full.wrapping_add(mixed);
+                specific = specific.wrapping_add(mixed);
+            }
+            OpObject::Scalar(value) => {
+                full = full.wrapping_add(SCALAR_PLACEHOLDER);
+                if whole_operand_is_scalar {
+                    let term = (*value as i32).wrapping_add(1_234_567).wrapping_mul(67_999);
+                    specific = specific.wrapping_add(term);
+                    specific_count += 1;
+                } else {
+                    let (term, counted) = mix_compound_scalar(*value);
+                    specific = specific.wrapping_add(term);
+                    specific_count += u32::from(counted);
+                }
+            }
+            OpObject::Address => {
+                full = full.wrapping_add(SCALAR_PLACEHOLDER);
+                let term = SCALAR_PLACEHOLDER
+                    .wrapping_add(1_234_567)
+                    .wrapping_mul(67_999);
+                specific = specific.wrapping_add(term);
+            }
+        }
+    }
+    Some(OperandContribution {
+        full,
+        specific,
+        specific_count,
+    })
+}
+
+/// The constructor state whose print pieces name the instruction's operands.
+///
+/// Ghidra's `SleighInstructionPrototype.cacheMnemonicState` walks
+/// `Constructor.getFlowthruIndex()` down to the constructor that actually
+/// prints the mnemonic, and reads the operand order off *that* one.
+fn mnemonic_state(state: &RuntimeConstructState) -> &RuntimeConstructState {
+    let mut current = state;
+    while let Some(next) = current
+        .display_template
+        .flowthru_operand_index
+        .and_then(|index| current.handles.get(index))
+        .and_then(|handle| handle.subtable_state.as_deref())
+    {
+        current = next;
+    }
+    current
+}
+
+/// The operand indices Ghidra would report, in print order.
+///
+/// `Constructor.getOpsPrintOrder` counts only the print pieces *after the
+/// first whitespace*: everything before it is the mnemonic. x86 prints
+/// several operands inside the mnemonic -- the condition code of `CMOV^cc`
+/// and `SET^cc`, the repeat prefix of `CMPSB^rep` -- and Ghidra does not
+/// count those as operands at all. Hashing them shifted every later
+/// operand's index by one, and the condition code's own handle (a
+/// unique-space temporary holding the evaluated flag) matched no operand
+/// shape, so the whole function declined to hash.
+///
+/// A constructor with no whitespace at all has no operands, which is
+/// Ghidra's `return new int[0]`.
+fn operand_print_order(state: &RuntimeConstructState) -> Vec<usize> {
+    let Some(split) = state.display_template.first_whitespace else {
+        return Vec::new();
+    };
+    let Some(pieces) = state.display_template.pieces.get(split + 1..) else {
+        return Vec::new();
+    };
+    pieces
+        .iter()
+        .filter_map(|piece| match piece {
+            CompiledDisplayPiece::OperandRef(handle_index) => Some(*handle_index),
+            CompiledDisplayPiece::Literal(_) => None,
+        })
+        .collect()
+}
+
 /// Why a hash quad could not be produced. Temporary instrumentation behind
 /// `FISSION_FID_DIAG`; every arm corresponds to a `return None` below.
 fn fid_diag(reason: &str) {
@@ -672,19 +852,15 @@ pub(crate) fn compute_fid_hashes(
         // state.handles' own count, which includes internal/hidden operands
         // (a zero-extend wrapper, an address subtable's own inner unique-space
         // handle, ...) that never appear in the display string. The display
-        // template's OperandRef sequence is the authoritative order.
-        let display_order = state
-            .display_template
-            .pieces
-            .iter()
-            .filter_map(|piece| match piece {
-                CompiledDisplayPiece::OperandRef(handle_index) => Some(*handle_index),
-                CompiledDisplayPiece::Literal(_) => None,
-            })
-            .collect::<Vec<_>>();
+        // template's OperandRef sequence is the authoritative order, taken
+        // from the same place Ghidra takes it: `cacheMnemonicState` descends
+        // the flowthru chain, then `Constructor.getOpsPrintOrder` enumerates
+        // the print pieces *after the first whitespace* only.
+        let mnemonic_state = mnemonic_state(&state);
+        let display_order = operand_print_order(mnemonic_state);
 
         for (operand_index, &handle_index) in display_order.iter().enumerate() {
-            let Some(handle) = state
+            let Some(handle) = mnemonic_state
                 .handles
                 .iter()
                 .find(|h| h.operand_index == handle_index)
@@ -860,11 +1036,34 @@ pub(crate) fn compute_fid_hashes(
                     }
                     Err(None) => None,
                 };
+                let shape = match shape {
+                    Some(shape) => Some(shape),
+                    // The tracer describes a memory address by reading the
+                    // p-code back. Ghidra never does that: it walks the
+                    // operand's own parse subtree. Where the tracer has
+                    // nothing to say, do what the reference does.
+                    None => {
+                        let mut leaves = Vec::new();
+                        print_list_handles(handle, &mut leaves);
+                        let objects: Vec<OpObject> = leaves
+                            .into_iter()
+                            .filter_map(|leaf| classify_handle(compiled, leaf))
+                            .collect();
+                        if !objects.is_empty() {
+                            let contribution = mix_object_list(operand_index, &objects)?;
+                            full_digest.update_i32(contribution.full);
+                            specific_digest.update_i32(contribution.specific);
+                            specific_count += i32::try_from(contribution.specific_count).ok()?;
+                            continue;
+                        }
+                        None
+                    }
+                };
                 let Some(shape) = shape else {
-                    // An operand shape this doesn't understand -- fail the
-                    // whole function's hash rather than silently mix a
-                    // wrong or missing contribution in (see module doc
-                    // comment).
+                    // An operand shape neither the tracer nor the parse-tree
+                    // walk understands -- fail the whole function's hash
+                    // rather than silently mix a wrong or missing
+                    // contribution in (see module doc comment).
                     fid_diag(&format!(
                         "unknown operand shape: {} | op{} space={} off_space={} off_off={:#x} off_size={} size={} sub={}",
                         instr.instruction_text(),
@@ -943,6 +1142,76 @@ pub(crate) fn compute_fid_hashes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// x86 prints the condition code of `CMOV^cc` and `SET^cc` and the
+    /// repeat prefix of `CMPSB^rep` *inside the mnemonic*, and Ghidra's
+    /// `Constructor.getOpsPrintOrder` counts only the print pieces after the
+    /// first whitespace -- so `CMOVNZ RAX,RDX` has two operands, not three.
+    ///
+    /// Counting all three shifted every later operand's index and classified
+    /// the condition code's own unique-space temporary as an operand, which
+    /// no shape matched, so the whole function declined to hash. On a
+    /// statically linked glibc that cost 64% of the binary's functions.
+    #[test]
+    fn an_operand_printed_inside_the_mnemonic_is_not_an_operand() {
+        let compiled = crate::compiler::compile_x86_64_frontend().expect("compile frontend");
+        // Each of these prints an operand within its mnemonic.
+        for (bytes, expected) in [
+            (&[0x48, 0x0F, 0x45, 0xC2][..], 2), // cmovnz rax, rdx
+            (&[0x0F, 0x95, 0xC0][..], 1),       // setnz al
+        ] {
+            let state = super::super::decode_instruction_raw_state(&compiled, bytes, 0x1000)
+                .expect("decode instruction");
+            let order = operand_print_order(mnemonic_state(&state));
+            assert_eq!(
+                order.len(),
+                expected,
+                "operand count for {:02x?}, print order {order:?}",
+                bytes
+            );
+        }
+    }
+
+    /// The shapes that used to fail the whole function's hash: a
+    /// segment-relative load, a scale-only `lea` with no base register, and
+    /// a read-modify-write whose two dereferences the address tracer
+    /// refuses to attribute. Ghidra hashes all three -- its
+    /// `addHandleObject` simply contributes nothing for a handle it cannot
+    /// classify, and never gives up on the function.
+    #[test]
+    fn shapes_the_address_tracer_declines_still_hash() {
+        let compiled = crate::compiler::compile_x86_64_frontend().expect("compile frontend");
+        let instruction_bytes: [&[u8]; 6] = [
+            &[0x55],                                        // push rbp
+            &[0x64, 0x48, 0x8B, 0x04, 0x25, 0x28, 0, 0, 0], // mov rax, qword ptr FS:[0x28]
+            &[0x48, 0x8D, 0x34, 0xC5, 0x08, 0, 0, 0],       // lea rsi, [rax*8 + 8]
+            &[0x83, 0x23, 0xEF],                            // and dword ptr [rbx], -0x11
+            &[0x5D],                                        // pop rbp
+            &[0xC3],                                        // ret
+        ];
+        let mut address = 0x1000u64;
+        let mut extent = Vec::new();
+        for bytes in instruction_bytes {
+            let decoded = super::super::decode_instruction(&compiled, bytes, address)
+                .expect("decode instruction");
+            address += decoded.length as u64;
+            extent.push(decoded);
+        }
+        let resolve = |name: &str| -> Option<i64> {
+            match name.to_ascii_uppercase().as_str() {
+                "RAX" | "EAX" => Some(0x0),
+                "RBX" | "EBX" => Some(0x18),
+                "RSP" => Some(0x20),
+                "RBP" => Some(0x28),
+                "RSI" => Some(0x30),
+                _ => None,
+            }
+        };
+        assert!(
+            compute_fid_hashes(&compiled, &extent, &resolve).is_some(),
+            "every one of these operand shapes has an answer in Ghidra"
+        );
+    }
 
     /// `MessageDigestFidHasher.java`'s `obj instanceof Address` arm, spelled
     /// out from the Java rather than from this module, so the test fails if

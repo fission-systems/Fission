@@ -77,11 +77,14 @@ impl<'a> FidIdentifier<'a> {
         })
     }
 
-    /// Identify the function at `address`, or `None` if it can't be hashed
-    /// (too short, an unsupported operand shape -- e.g. SIB addressing --
-    /// or decode failure) or hashes but doesn't clear the acceptance
-    /// threshold against every loaded database.
-    pub fn identify(&self, address: u64) -> Option<FidIdentification> {
+    /// The raw FID hashes for the function at `address`, before any
+    /// database lookup: `(code_unit_count, full_hash, specific_hash)`.
+    ///
+    /// Exposed because "no match" has two very different causes -- the
+    /// hash was never computed (decode failure, unsupported operand shape)
+    /// versus the hash was computed and no database holds it -- and a
+    /// caller that only sees `identify`'s `None` cannot tell them apart.
+    pub fn hashes(&self, address: u64) -> Option<(u16, u64, u64)> {
         // A signature hash is only as good as the decode under it: lifting
         // with `None` hashed an ARM misreading of Thumb bytes, which is why
         // ARM images matched nothing at all.
@@ -115,6 +118,15 @@ impl<'a> FidIdentifier<'a> {
         let (code_unit_count, full_hash, _specific_count, specific_hash) = self
             .lifter
             .fid_hashes(&decoded.instructions, &resolve_register_offset)?;
+        Some((code_unit_count, full_hash, specific_hash))
+    }
+
+    /// Identify the function at `address`, or `None` if it can't be hashed
+    /// (too short, an unsupported operand shape -- e.g. SIB addressing --
+    /// or decode failure) or hashes but doesn't clear the acceptance
+    /// threshold against every loaded database.
+    pub fn identify(&self, address: u64) -> Option<FidIdentification> {
+        let (code_unit_count, full_hash, specific_hash) = self.hashes(address)?;
 
         let best: Option<FidbfMatch> = self
             .databases
