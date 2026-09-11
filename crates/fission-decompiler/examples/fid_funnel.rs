@@ -52,6 +52,11 @@ fn main() {
     // Of the ones the threshold rejects, how big were they? The threshold is
     // a code-unit count, so this says whether raising it is even the lever.
     let mut rejected_sizes: Vec<u32> = Vec::new();
+    // The threshold is waived by 10 points when the *specific* hash also
+    // matches, so whether that bonus ever lands decides how much of the
+    // threshold drop is real.
+    let mut candidates_seen = 0usize;
+    let mut candidates_with_specific = 0usize;
 
     for func in &binary.functions {
         if func.is_import {
@@ -75,6 +80,10 @@ fn main() {
         let mut best_reason = None;
         let mut passed = false;
         for c in &candidates {
+            candidates_seen += 1;
+            if c.specific_hash == specific_hash {
+                candidates_with_specific += 1;
+            }
             if c.auto_fail {
                 best_reason.get_or_insert("auto_fail");
                 continue;
@@ -149,6 +158,10 @@ fn main() {
             lazy.has_language(&language)
         );
     }
+
+    println!(
+        "  candidates inspected {candidates_seen}, specific hash also matched {candidates_with_specific}"
+    );
 
     if !rejected_sizes.is_empty() {
         rejected_sizes.sort_unstable();
