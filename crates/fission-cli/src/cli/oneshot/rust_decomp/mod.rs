@@ -178,7 +178,7 @@ pub(crate) fn render_one_function_inner(
     // symbol) -- unlike the empty name, an empty rendered signature
     // (`uint (void) { ... }`) isn't valid C and can't be addressed by
     // identifier downstream. Synthesize the same `sub_{addr:x}` fallback
-    // fission-serve's HTTP handler already applies, so every render path
+    // every other render path already applies, so every render path
     // agrees on one name for an unnamed function.
     let named_func;
     let func: &FunctionInfo = if func.name.trim().is_empty() {

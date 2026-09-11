@@ -4,7 +4,7 @@
 //!
 //! Extracted from `fission-cli`'s `oneshot::disasm`/`oneshot::raw_pcode`
 //! (which were `pub(super)`-scoped to that CLI module, so nothing else could
-//! call them) so both the CLI's `disasm` subcommand and `fission-serve`'s
+//! call them) so the CLI's `disasm` subcommand and any other caller share
 //! `/api/disasm/:session/:addr` handler can share one implementation instead
 //! of the CLI reimplementing it and the server not having it at all.
 

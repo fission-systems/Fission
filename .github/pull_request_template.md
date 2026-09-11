@@ -23,7 +23,6 @@
 - [ ] **Decompilation orchestration / Rust-Sleigh** (`crates/fission-decompiler/`)
 - [ ] **Loader / binary parsing** (`crates/fission-loader/`)
 - [ ] **CLI / UX** (`crates/fission-cli/`)
-- [ ] **Desktop (Dioxus)** (`crates/fission-dioxus/`)
 - [ ] **Automation / quality lanes** (`crates/fission-automation/`, including `crates/fission-automation/config/`)
 - [ ] **Benchmark harness / corpus** (`benchmark/source_semantic_benchmark/`, `benchmark/full_benchmark/`, `benchmark/config/`)
 - [ ] **Docs / process only** (no semantic code paths)

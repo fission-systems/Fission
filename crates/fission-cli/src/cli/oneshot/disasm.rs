@@ -4,7 +4,7 @@ use fission_sleigh::runtime::{DecodedInstruction, RuntimeSleighFrontend};
 use std::io::{self, Write};
 
 /// Thin CLI-side wrapper over the shared `fission_decompiler::disasm`
-/// primitive (moved there so `fission-serve`'s `/api/disasm` handler can
+/// primitive (moved there so more than one caller can
 /// share the same implementation instead of the CLI having the only copy).
 /// Keeps this module's own `(name, func_start, needs_boundary_detection,
 /// Vec<(addr, bytes_hex, text)>)` shape so the text/JSON renderers below

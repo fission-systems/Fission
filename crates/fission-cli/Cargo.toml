@@ -41,8 +41,6 @@ fission-sleigh = { path = "../fission-sleigh" }
 fission-emulator = { path = "../fission-emulator" }
 fission-dir = { path = "../fission-dir" }
 fission-dynamic = { path = "../fission-dynamic", optional = true, features = ["interactive_runtime"] }
-fission-ai = { path = "../fission-ai" }
-fission-tui = { path = "../fission-tui" }
 rayon = "1.10"
 tracing = "0.1"
 anyhow = "1.0"
@@ -55,7 +53,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 mimalloc = { version = "0.1", optional = true }
 jemallocator = { version = "0.5", optional = true }
 ctrlc = "3.5.2"
-fission-serve = { path = "../fission-serve" }
 
 [[bin]]
 name = "fission_cli"

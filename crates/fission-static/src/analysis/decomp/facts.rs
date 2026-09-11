@@ -1367,7 +1367,7 @@ mod tests {
         assert!(snapshot.dwarf_info.is_some());
     }
 
-    /// Memory regression guard: a session (`fission-serve`) holds a
+    /// Memory regression guard: a long-lived session holds a
     /// `LoadedBinary` and a `FactStore` built from it side by side for the
     /// session's entire lifetime, so `FactStore::from_binary` must *share*
     /// `binary.dwarf_functions`/`pdb_functions` (both already `Arc`-wrapped

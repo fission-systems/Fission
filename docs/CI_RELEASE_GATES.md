@@ -127,7 +127,7 @@ L1 is achievable and meaningful for decompiler releases):
 
 On **nightly schedule** or **workflow_dispatch**, Heavy also runs:
 
-- Full Linux workspace tests (excluding GUI `fission-dioxus`)
+- Full Linux workspace tests
 - Miri (soft environmental issues may still fail until isolation is fixed)
 - Coverage (non-blocking)
 

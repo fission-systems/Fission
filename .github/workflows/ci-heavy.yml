@@ -91,7 +91,7 @@ jobs:
       crates: ""
       profile: debug
       # dioxus needs GUI sys libs; static is covered by its own job.
-      exclude_crates: "fission-static,fission-dioxus"
+      exclude_crates: "fission-static"
 
   miri-check:
     name: 🧠 Miri UB Check (extended)

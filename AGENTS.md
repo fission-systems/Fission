@@ -29,8 +29,6 @@ Fission/
 │   ├── fission-analysis-db/  # Typed immutable program metadata snapshots
 │   ├── fission-signatures/   # FID/signature data and lookup
 │   ├── fission-cli/          # CLI surface
-│   ├── fission-tui/          # Terminal UI (ratatui-based AI chat)
-│   └── fission-dioxus/       # Pure Rust desktop GUI (Dioxus)
 ├── utils/                    # Checked-in signatures, type info, benchmark support data
 ├── vendor/                   # Ghidra, RetDec, other reference code
 ├── scripts/benchmark/        # Benchmark setup / history helpers
@@ -45,7 +43,6 @@ Fission/
 - `crates/fission-automation/AGENTS.md`
 - `crates/fission-cli/AGENTS.md`
 - `crates/fission-loader/AGENTS.md`
-- `crates/fission-dioxus/AGENTS.md`
 
 Read the nearest child file before editing those areas.
 
@@ -89,7 +86,7 @@ Read the nearest child file before editing those areas.
 - Do not patch semantic gaps only in printer/UI output.
 - Do not add one-off binary-specific shortcuts without invariant-based guards.
 - Do not duplicate the same metric definition across pcode and automation.
-- Do not treat `fission-cli` or `fission-dioxus` as semantic repair layers.
+- Do not treat `fission-cli` as a semantic repair layer.
 - Do not treat benchmark/reporting scripts as semantic repair layers.
 - Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `/Users/sjkim1127/Fission/utils` directly in implementation logic.
 - Do not link against, shell out to, bind to, or otherwise depend on `/Users/sjkim1127/Fission/vendor` code in production paths.

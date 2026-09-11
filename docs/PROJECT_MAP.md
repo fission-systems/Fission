@@ -30,13 +30,8 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`crates/fission-plugin`](../crates/fission-plugin) | Plugin contracts (`contracts`), manager/loader/hooks (`interactive_runtime`) |
 | [`crates/fission-cli`](../crates/fission-cli) | CLI product (`fission_cli`) |
 | [`crates/fission-script`](../crates/fission-script) | Rust-native embedded scripting (Rhai) for read-only binary automation |
-| [`crates/fission-ai`](../crates/fission-ai) | AI agent platform: multi-provider pipeline, OAuth, interactive session |
 | [`crates/fission-decompiler`](../crates/fission-decompiler) | Decompilation orchestration, Rust-Sleigh bridge, routing/workers |
 | [`crates/fission-sleigh`](../crates/fission-sleigh) | Sleigh decode/lift; CFG skeleton |
-| [`crates/fission-tui`](../crates/fission-tui) | Terminal UI (ratatui-based AI chat interface) |
-| [`crates/fission-ui`](../crates/fission-ui) | Shared Dioxus UI state, components, and native/web backend adapters |
-| [`crates/fission-serve`](../crates/fission-serve) | Local/multi-user HTTP analysis backend |
-| [`crates/fission-dioxus`](../crates/fission-dioxus) | Pure Rust desktop GUI (Dioxus Desktop) |
 
 ## Top-level directories
 

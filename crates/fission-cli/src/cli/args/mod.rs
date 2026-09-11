@@ -50,30 +50,6 @@ pub enum ParsedInvocation {
     Sandbox(SandboxArgs),
     /// Solver- and emulator-backed DIR/HIR correctness verification
     Verify(VerifyArgs),
-    /// AI chat / authentication subcommand.
-    Ai(AiInvocation),
-    /// Local HTTP API server for fission-web.
-    Serve {
-        port: u16,
-        host: String,
-    },
-}
-
-/// The AI subcommand action to perform.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AiInvocation {
-    /// Launch interactive TUI chat session.
-    Chat(crate::cli::args::AiChatArgs),
-    /// Analyze decompiled pseudocode using an AI provider.
-    Analyze(AiAnalyzeArgs),
-    /// Run Codex Browser OAuth login.
-    Login,
-    /// Run GitHub Copilot Device Code OAuth login.
-    CopilotLogin,
-    /// Show authentication status.
-    Status,
-    /// Remove stored auth token.
-    Logout,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -190,25 +166,9 @@ enum CliCommand {
     Sandbox(SandboxArgs),
     /// Solver- and emulator-backed DIR/HIR correctness verification
     Verify(VerifyArgs),
-    /// AI chat session and authentication (Codex OAuth / OpenAI / Ollama)
-    Ai(AiArgs),
-    /// Start local HTTP API server for fission-web
-    Serve(ServeCliArgs),
 }
 
 // ── Verify subcommand types ────────────────────────────────────────────────
-
-/// Arguments for `fission_cli serve`
-#[derive(Args, Debug, Clone, PartialEq, Eq)]
-pub struct ServeCliArgs {
-    /// TCP port to listen on
-    #[arg(long, short, default_value_t = 7331)]
-    pub port: u16,
-
-    /// IP address to bind (use 0.0.0.0 to accept remote connections)
-    #[arg(long, default_value = "127.0.0.1")]
-    pub host: String,
-}
 
 /// Which verification tier(s) to run -- see `fission-dir`'s crate doc.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -357,52 +317,6 @@ pub struct SandboxArgs {
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────
-
-#[derive(Args, Debug)]
-#[command(
-    about = "Interactive AI chat and authentication",
-    long_about = "Launch an interactive AI chat session or manage authentication.\n\nProvider priority: stored OAuth token (Copilot or Codex) > FISSION_AI_API_KEY > OPENAI_API_KEY > Ollama (local)",
-    after_help = "Examples:\n  fission_cli ai copilot-login      # GitHub Copilot OAuth ($10/mo, recommended)\n  fission_cli ai login              # Codex/ChatGPT OAuth (Plus required)\n  fission_cli ai chat               # Launch TUI chat\n  fission_cli ai chat --provider copilot --model gpt-4o\n  fission_cli ai chat --provider openai --model gpt-4o\n  fission_cli ai status             # Show auth status\n  fission_cli ai logout             # Remove stored token"
-)]
-pub struct AiArgs {
-    #[command(subcommand)]
-    command: Option<AiCommand>,
-}
-
-#[derive(Subcommand, Debug)]
-enum AiCommand {
-    /// Launch interactive TUI chat session
-    Chat(AiChatArgs),
-    /// Analyze decompiled pseudocode using an AI provider
-    Analyze(AiAnalyzeArgs),
-    /// Login with Codex/ChatGPT Browser OAuth (ChatGPT Plus required)
-    Login,
-    /// Login with GitHub Copilot Device Code OAuth (Copilot Individual $10/mo)
-    CopilotLogin,
-    /// Show current authentication status
-    Status,
-    /// Remove stored authentication token
-    Logout,
-}
-
-#[derive(Args, Clone, Debug, PartialEq, Eq)]
-pub struct AiChatArgs {
-    /// Optional binary to load into the AI context
-    pub binary: Option<PathBuf>,
-
-    /// AI provider to use: codex | openai | ollama
-    #[arg(long)]
-    pub provider: Option<String>,
-    /// Model name override (e.g. gpt-4o, llama3)
-    #[arg(long)]
-    pub model: Option<String>,
-}
-
-#[derive(Args, Clone, Debug, PartialEq, Eq)]
-pub struct AiAnalyzeArgs {
-    /// Custom code string to analyze (optional, positional)
-    pub code: Option<String>,
-}
 
 #[derive(Args, Debug)]
 #[command(
@@ -991,7 +905,6 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "verify",
     "debug",
     "ai",
-    "serve",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1310,30 +1223,8 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Debug(debug) => {
                     return ParsedInvocation::Debug(debug);
                 }
-                CliCommand::Ai(ai_args) => {
-                    let inv = match ai_args.command {
-                        None => AiInvocation::Chat(crate::cli::args::AiChatArgs {
-                            binary: None,
-                            provider: None,
-                            model: None,
-                        }),
-                        Some(AiCommand::Chat(args)) => AiInvocation::Chat(args),
-                        Some(AiCommand::Analyze(args)) => AiInvocation::Analyze(args),
-                        Some(AiCommand::Login) => AiInvocation::Login,
-                        Some(AiCommand::CopilotLogin) => AiInvocation::CopilotLogin,
-                        Some(AiCommand::Status) => AiInvocation::Status,
-                        Some(AiCommand::Logout) => AiInvocation::Logout,
-                    };
-                    return ParsedInvocation::Ai(inv);
-                }
                 CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
-                CliCommand::Serve(s) => {
-                    return ParsedInvocation::Serve {
-                        port: s.port,
-                        host: s.host,
-                    };
-                }
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };
@@ -1369,10 +1260,8 @@ mod tests {
                 panic!("expected one-shot canonical parse")
             }
             ParsedInvocation::Debug(_) => panic!("expected one-shot canonical parse"),
-            ParsedInvocation::Ai(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
-            ParsedInvocation::Serve { .. } => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1417,10 +1306,8 @@ mod tests {
                 panic!("legacy parser cannot emit resources status")
             }
             ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
-            ParsedInvocation::Ai(_) => panic!("legacy parser cannot emit AI"),
             ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
-            ParsedInvocation::Serve { .. } => panic!("legacy parser cannot emit serve"),
         }
     }
 
@@ -1481,29 +1368,6 @@ mod tests {
         // Omitted entirely: no override.
         let parsed3 = parse_canonical(&["fission_cli", "info", "bin.exe"]);
         assert_eq!(parsed3.args.language_override, None);
-    }
-
-    #[test]
-    fn canonical_serve_invocation_parses_port_and_host() {
-        // Regression: `serve` was missing from `CANONICAL_SUBCOMMANDS`, so
-        // `fission_cli serve --port ... --host ...` fell through to the
-        // legacy flat parser, which treated "serve" itself as the BINARY
-        // positional argument and rejected `--port` as unknown.
-        let inv = parse_oneshot_args_from([
-            "fission_cli",
-            "serve",
-            "--port",
-            "9999",
-            "--host",
-            "0.0.0.0",
-        ]);
-        match inv {
-            ParsedInvocation::Serve { port, host } => {
-                assert_eq!(port, 9999);
-                assert_eq!(host, "0.0.0.0");
-            }
-            other => panic!("expected serve invocation, got {other:?}"),
-        }
     }
 
     #[test]

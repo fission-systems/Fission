@@ -206,7 +206,7 @@ jobs:
     uses: ./.github/workflows/reusable-lint-format.yml
     with:
       os: ubuntu-latest
-      exclude_crates: "fission-signatures,fission-dioxus"
+      exclude_crates: "fission-signatures"
 
   # scripts/ci-only / scripts-only: syntax + owner boundary scripts (no cargo test matrix)
   script-checks:

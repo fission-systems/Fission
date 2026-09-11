@@ -949,7 +949,7 @@ type CalleeSummary = Option<(NirCallEffectSummary, Option<NirCallPrototypeSummar
 /// instead is sound but useless: it accumulates as the caller's loop runs, so
 /// it hits 26% where this hits **69%**, against 72% for an address-only key
 /// that would not be sound at all.
-/// Entries kept. Both caches are bounded because `fission-serve` is long
+/// Entries kept. Both caches are bounded because a session can be long
 /// lived and would otherwise hold every callee of every binary it ever opened;
 /// the p-code cache is the smaller of the two because it stores decoded
 /// bodies, not summaries.

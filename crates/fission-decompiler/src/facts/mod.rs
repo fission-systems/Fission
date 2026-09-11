@@ -8,7 +8,7 @@ mod facts;
 pub(crate) use self::facts::*;
 
 // Whole-program call-arity pre-analysis is the one entrypoint here meant to
-// be driven from *outside* this crate (fission-serve's background
+// be driven from *outside* this crate (a caller's background
 // discovery), so it needs a real `pub` re-export -- the blanket
 // `pub(crate) use` above only reaches other modules within this crate.
 pub use self::facts::seed_whole_program_call_arity_facts;

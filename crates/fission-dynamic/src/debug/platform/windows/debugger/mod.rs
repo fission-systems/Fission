@@ -258,7 +258,7 @@ impl WindowsDebugger {
         if let Some(timeline_arc) = &self.ttd_timeline {
             if let Ok(mut timeline) = timeline_arc.lock() {
                 if timeline.is_recording() {
-                    timeline.record_step_internal(registers.clone(), thread_id);
+                    timeline.record_event(registers.clone(), thread_id);
                 }
             }
         }
