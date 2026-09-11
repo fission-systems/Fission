@@ -1,7 +1,7 @@
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{ProcessInfo, RegisterState};
 use fission_core::Result as FissionResult;
-use fission_emulator::core::Emulator;
+use fission_emulator::core::{Emulator, RunOutcome};
 
 /// The handle the debug layer uses for "the emulated process".
 ///
@@ -11,11 +11,23 @@ pub const EMULATED_PID: u32 = 9999;
 
 pub struct EmulatorBackend {
     pub emulator: Option<Emulator>,
+    /// Why the last `continue` stopped. `run` discards this, and a front end
+    /// that cannot tell a breakpoint from a finished program cannot drive a
+    /// session.
+    last_outcome: Option<RunOutcome>,
 }
 
 impl EmulatorBackend {
     pub fn new() -> Self {
-        Self { emulator: None }
+        Self {
+            emulator: None,
+            last_outcome: None,
+        }
+    }
+
+    /// Why execution last stopped, or `None` if it has not run yet.
+    pub fn last_outcome(&self) -> Option<&RunOutcome> {
+        self.last_outcome.as_ref()
     }
 }
 
@@ -58,12 +70,11 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn continue_execution(&mut self) -> FissionResult<()> {
-        if let Some(emu) = &mut self.emulator {
-            emu.run()?;
-            Ok(())
-        } else {
-            Err(fission_core::err!(debug, "Emulator not running"))
-        }
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        self.last_outcome = Some(emu.resume()?);
+        Ok(())
     }
 
     fn single_step(&mut self) -> FissionResult<()> {
@@ -77,55 +88,68 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
-        let _ = address;
-        // Store in a breakpoint map, checked during step loop
-        // We'll leave it empty for now, as run_instruction can check a set of BPs
-        Err(fission_core::err!(
-            debug,
-            "SW breakpoints not yet implemented in EmulatorBackend"
-        ))
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        // No int3 to patch in: the run loop compares the program counter
+        // directly, which also means the guest cannot see the breakpoint the
+        // way it can see a patched byte.
+        emu.set_breakpoint(address);
+        Ok(())
     }
 
     fn remove_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
-        let _ = address;
-        Err(fission_core::err!(
-            debug,
-            "SW breakpoints not yet implemented in EmulatorBackend"
-        ))
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        if !emu.clear_breakpoint(address) {
+            return Err(fission_core::err!(
+                debug,
+                "No breakpoint at 0x{:x}",
+                address
+            ));
+        }
+        Ok(())
     }
 
     fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
-        if let Some(emu) = &self.emulator {
-            let mut buf = vec![0u8; size];
-            // Access space id 3 for RAM (as defined in loader mapping)
-            for i in 0..size {
-                if let Ok(b) = emu.state.read_space_readonly(3, address + i as u64, 1) {
-                    if !b.is_empty() {
-                        buf[i] = b[0];
-                    }
-                } else {
-                    return Err(fission_core::err!(
-                        debug,
-                        "Memory read failed at 0x{:x}",
-                        address + i as u64
-                    ));
-                }
-            }
-            Ok(buf)
-        } else {
-            Err(fission_core::err!(debug, "Emulator not running"))
-        }
+        let Some(emu) = &self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        // The emulator's memory is sparse and zero-fills on demand, which is
+        // right for execution and a lie to a debugger: an address nothing ever
+        // mapped read back as sixteen zero bytes. Ask the page map first, the
+        // way `gdb` answers "Cannot access memory at address".
+        use fission_emulator::pcode::page_map::AccessKind;
+        emu.state
+            .page_map
+            .check_range(address, size, AccessKind::Read)
+            .map_err(|e| {
+                fission_core::err!(debug, "Cannot access memory at 0x{:x}: {}", address, e)
+            })?;
+        // `ram_space()`, not the literal 3: the RAM space index comes from the
+        // language, and a hard-coded one is right until it is not. One read of
+        // the whole range, not one per byte.
+        emu.state
+            .read_space_readonly(emu.state.ram_space(), address, size)
+            .map_err(|e| fission_core::err!(debug, "Memory read failed at 0x{:x}: {}", address, e))
     }
 
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
-        if let Some(emu) = &mut self.emulator {
-            for (i, b) in data.iter().enumerate() {
-                let _ = emu.state.write_space(3, address + i as u64, &[*b]);
-            }
-            Ok(())
-        } else {
-            Err(fission_core::err!(debug, "Emulator not running"))
-        }
+        let Some(emu) = &mut self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        let ram = emu.state.ram_space();
+        // The failure was discarded here, so a write to an unmapped address
+        // reported success and the caller went on believing it had landed.
+        emu.state.write_space(ram, address, data).map_err(|e| {
+            fission_core::err!(debug, "Memory write failed at 0x{:x}: {}", address, e)
+        })?;
+        // Self-modifying code, and a debugger patching an instruction, are the
+        // same thing to the block cache: what it compiled is no longer what is
+        // there.
+        emu.invalidate_translations(address, data.len());
+        Ok(())
     }
 
     fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<RegisterState> {
@@ -205,7 +229,15 @@ impl ExecutionBackend for EmulatorBackend {
         if let Some(emu) = &self.emulator {
             state.attached_pid = Some(EMULATED_PID);
             state.main_thread_id = Some(1);
-            state.status = crate::debug::types::DebugStatus::Suspended;
+            state.status = match self.last_outcome {
+                // The machine ran to the end of the program; there is nothing
+                // left to step or resume, and reporting `Suspended` made a
+                // finished run look like one waiting at a breakpoint.
+                Some(RunOutcome::ProcessExited | RunOutcome::Halted) => {
+                    crate::debug::types::DebugStatus::Terminated
+                }
+                _ => crate::debug::types::DebugStatus::Suspended,
+            };
 
             // Add a single dummy thread
             state.threads.insert(

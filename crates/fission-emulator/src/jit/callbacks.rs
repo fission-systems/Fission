@@ -351,6 +351,11 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     if emu.ttd_snapshot_interval > 0 && emu.ttd.is_recording() {
         return next_pc;
     }
+    // A breakpoint on the next block: return to the run loop, which is the
+    // only place that can stop. Chaining into it would run straight past.
+    if emu.is_breakpoint(next_pc) {
+        return next_pc;
+    }
     // A budget does *not* mean returning to the dispatcher after every block.
     // `max_inst_reached` is checked on the way in above and again before each
     // hard-chain dive, so the budget is honoured either way -- but returning

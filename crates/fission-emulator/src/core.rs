@@ -114,6 +114,13 @@ pub struct Emulator {
     /// Soft TB-chaining depth (reset at outer run-loop entry).
     pub chain_depth: u32,
 
+    /// Addresses the run loop stops at, for a debugger front end.
+    ///
+    /// Private because setting one has to flush the JIT cache: a block
+    /// compiled before the breakpoint existed runs straight through it.
+    /// Use [`Self::set_breakpoint`] / [`Self::clear_breakpoint`].
+    breakpoints: std::collections::BTreeSet<u64>,
+
     /// Set by HLE/CallOther when guest requests process exit.
     pub halt_requested: bool,
     /// The trampoline region, cached from the OS environment at construction.
@@ -368,6 +375,7 @@ impl Emulator {
             jit: crate::jit::JitCompiler::new().ok(),
             jit_cache: crate::jit::cache::JitCache::new(),
             chain_depth: 0,
+            breakpoints: std::collections::BTreeSet::new(),
             halt_requested: false,
             magic_range,
             decode_context,
@@ -898,6 +906,71 @@ impl Emulator {
         names
     }
 
+    /// Drop any compiled code covering `[address, address + len)`.
+    ///
+    /// Writing to memory that has been translated -- self-modifying code, or a
+    /// debugger patching an instruction -- leaves the block cache holding a
+    /// compilation of bytes that are no longer there. The syscall and HLE
+    /// paths that map or protect memory already do this; a front end writing
+    /// through the debug backend needs the same.
+    pub fn invalidate_translations(&mut self, address: u64, len: usize) {
+        let first = address & !0xFFF;
+        let last = address.saturating_add(len.saturating_sub(1) as u64) & !0xFFF;
+        let mut page = first;
+        loop {
+            self.jit_cache.invalidate_page(page);
+            if page >= last {
+                break;
+            }
+            page += 0x1000;
+        }
+    }
+
+    // ── Breakpoints ─────────────────────────────────────────────────────────
+
+    /// Stop the run loop whenever the program counter reaches `address`.
+    ///
+    /// Flushes the JIT cache, because a block compiled before the breakpoint
+    /// existed contains the instruction at `address` in its middle and runs
+    /// straight through it. QEMU does the same thing for the same reason.
+    pub fn set_breakpoint(&mut self, address: u64) {
+        if self.breakpoints.insert(address) {
+            self.jit_cache.flush_all();
+        }
+    }
+
+    /// Stop stopping at `address`. Returns whether there was a breakpoint
+    /// there, so a front end can say "no breakpoint at ..." rather than
+    /// silently succeeding.
+    pub fn clear_breakpoint(&mut self, address: u64) -> bool {
+        let had = self.breakpoints.remove(&address);
+        if had {
+            self.jit_cache.flush_all();
+        }
+        had
+    }
+
+    pub fn clear_all_breakpoints(&mut self) {
+        if !self.breakpoints.is_empty() {
+            self.breakpoints.clear();
+            self.jit_cache.flush_all();
+        }
+    }
+
+    /// Every breakpoint, in address order.
+    pub fn breakpoints(&self) -> impl Iterator<Item = u64> + '_ {
+        self.breakpoints.iter().copied()
+    }
+
+    /// Whether the run loop would stop at `address`.
+    ///
+    /// Also read from the JIT's chaining gate, which is why it is `pub` and
+    /// takes `&self`.
+    #[inline]
+    pub fn is_breakpoint(&self, address: u64) -> bool {
+        !self.breakpoints.is_empty() && self.breakpoints.contains(&address)
+    }
+
     /// Read the current registers into a [`RegisterState`].
     ///
     /// The one place registers are turned into a snapshot, so the TTD
@@ -1136,6 +1209,13 @@ impl Emulator {
             if !out.is_empty() && self.jit_cache.lookup(cur).is_some() {
                 break;
             }
+            // And before a breakpoint, so the program counter lands exactly on
+            // it at a block boundary where the run loop can see it. Not for the
+            // first instruction: resuming from a breakpoint has to be able to
+            // execute the instruction it stopped at.
+            if !out.is_empty() && self.is_breakpoint(cur) {
+                break;
+            }
             if cur >= 0xFFFFFFF0_00000000 {
                 break;
             }
@@ -1358,8 +1438,17 @@ impl Emulator {
         }
     }
 
+    /// Run until something stops the machine, and say what did.
+    ///
+    /// [`Self::run`] discards the outcome, which is fine for a sandbox run
+    /// that only wants the final state and not fine for a debugger front
+    /// end, which has to tell a breakpoint from a finished program.
+    pub fn resume(&mut self) -> Result<RunOutcome> {
+        self.run_inner(None)
+    }
+
     pub fn run(&mut self) -> Result<()> {
-        self.run_inner(None)?;
+        self.resume()?;
         Ok(())
     }
 
@@ -1379,6 +1468,7 @@ impl Emulator {
         self.halt_requested = false;
         self.chain_depth = 0;
         self.pcode_budget_pc = None;
+        let mut started = false;
         let outcome = loop {
             if IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::warn!("Execution interrupted by Ctrl+C (SIGINT). Halting safely.");
@@ -1392,6 +1482,15 @@ impl Emulator {
             if self.halt_requested {
                 break RunOutcome::Halted;
             }
+            // Not on the way in: `continue` from a breakpoint has to be able
+            // to leave the address it stopped at. Armed after the first check
+            // rather than after the first executed instruction, so an
+            // iteration that only rewrites the PC (an HLE `JumpTo`) still
+            // arms it.
+            if started && self.is_breakpoint(self.pc) {
+                break RunOutcome::HitBreakpoint(self.pc);
+            }
+            started = true;
             if self.sym_stop_requested {
                 tracing::debug!(
                     "Symbolic gate stop at PC=0x{:X} ({} events)",
@@ -1543,6 +1642,7 @@ impl Emulator {
                 RunOutcome::Returned => "returned".into(),
                 RunOutcome::Interrupted => "interrupted".into(),
                 RunOutcome::LoopExit => "loop_exit".into(),
+                RunOutcome::HitBreakpoint(pc) => format!("breakpoint:0x{pc:x}"),
             });
         }
         tracing::info!(
@@ -1579,4 +1679,8 @@ pub enum RunOutcome {
     LoopExit,
     /// `Ctrl+C` (SIGINT) was observed.
     Interrupted,
+    /// The program counter reached an address set with
+    /// [`Emulator::set_breakpoint`]. The machine is stopped *before* the
+    /// instruction there, so resuming executes it.
+    HitBreakpoint(u64),
 }
