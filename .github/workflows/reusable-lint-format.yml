@@ -63,39 +63,26 @@ jobs:
           fi
           cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
 
-      # `fission-dynamic`'s debugger, timeline and TTD layers live behind
-      # `interactive_runtime`, which is not a default feature -- so `--workspace`
-      # above does not compile a line of them. They had stopped compiling
-      # altogether: `emulator_backend.rs` still called a three-argument
-      # `Emulator::new` and read a field named `rip` that has been `pc` for a
-      # long time, and nothing noticed because nothing built it. A feature that
-      # no job turns on is a feature nobody can tell is broken.
+      # Features that are not defaults are compiled by nothing above, and
+      # `--workspace` runs none of their tests. Both halves of that went wrong
+      # repeatedly: `fission-dynamic`'s debug layer had stopped compiling
+      # altogether (`emulator_backend.rs` called a three-argument
+      # `Emulator::new` and read a field renamed long before), a new `debug`
+      # subcommand left the CLI dispatcher's match non-exhaustive, and
+      # `app/snapshot.rs`'s test module was missing a loader field -- each time
+      # every check passed, because nothing built it.
       #
-      # `--all-targets`, because without it this check covers the library and
-      # not its tests, and the crate's own test module had gone stale the same
-      # way: `app/snapshot.rs` built a `LoadedBinaryInner` missing a field
-      # added to the loader some time ago. Half a check is how the second half
-      # rots.
-      - name: Check optional features (interactive_runtime)
+      # These *run* the tests rather than checking that they compile. A check
+      # catches "does not build"; it catches nothing about "does not work",
+      # and these suites are the only coverage the debugger, the session and
+      # the machine scripting have.
+      - name: Test optional features (interactive_runtime)
         shell: bash
-        run: cargo check -p fission-dynamic --features interactive_runtime --all-targets --locked
+        run: cargo test -p fission-dynamic --features interactive_runtime --locked
 
-      # And the CLI's `debugger` feature, which is what actually reaches that
-      # code. It is not a default either, so `--workspace` compiles none of
-      # `fission debug`: a new subcommand left the dispatcher's match
-      # non-exhaustive and every check above still passed. Twice now in one
-      # crate, and once in `fission-dynamic` -- a feature no job turns on is a
-      # feature nobody can tell is broken.
-      - name: Check optional features (debugger)
+      - name: Test optional features (script emulator)
         shell: bash
-        run: cargo check -p fission-cli --features debugger --all-targets --locked
-
-      # `fission-script`'s `emulator` feature, which is what lets a script
-      # drive a live machine. Reached through the CLI's `debugger` feature
-      # above, but checked on its own so the crate keeps building alone.
-      - name: Check optional features (script emulator)
-        shell: bash
-        run: cargo check -p fission-script --features emulator --all-targets --locked
+        run: cargo test -p fission-script --features emulator --locked
 
       - name: sccache stats
         if: always()

@@ -40,26 +40,17 @@ impl ExecutionBackend for WindowsDebugger {
                 Wow64GetThreadContext(h_thread, &mut ctx).map_err(|e| {
                     FissionError::debug(format!("Wow64GetThreadContext failed: {:?}", e))
                 })?;
-                registers = crate::debug::types::RegisterState {
-                    rax: ctx.Eax as u64,
-                    rbx: ctx.Ebx as u64,
-                    rcx: ctx.Ecx as u64,
-                    rdx: ctx.Edx as u64,
-                    rsi: ctx.Esi as u64,
-                    rdi: ctx.Edi as u64,
-                    rbp: ctx.Ebp as u64,
-                    rsp: ctx.Esp as u64,
-                    r8: 0,
-                    r9: 0,
-                    r10: 0,
-                    r11: 0,
-                    r12: 0,
-                    r13: 0,
-                    r14: 0,
-                    r15: 0,
-                    rip: ctx.Eip as u64,
-                    rflags: ctx.EFlags as u64,
-                };
+                registers = crate::debug::types::RegisterState::at(ctx.Eip as u64)
+                    .with("EAX", ctx.Eax as u64)
+                    .with("EBX", ctx.Ebx as u64)
+                    .with("ECX", ctx.Ecx as u64)
+                    .with("EDX", ctx.Edx as u64)
+                    .with("ESI", ctx.Esi as u64)
+                    .with("EDI", ctx.Edi as u64)
+                    .with("EBP", ctx.Ebp as u64)
+                    .with("ESP", ctx.Esp as u64)
+                    .with("EIP", ctx.Eip as u64)
+                    .with("EFLAGS", ctx.EFlags as u64);
                 self.record_ttd_snapshot(tid, &registers);
                 ctx.EFlags |= 0x100; // Set Trap Flag
                 Wow64SetThreadContext(h_thread, &ctx).map_err(|e| {
@@ -72,26 +63,25 @@ impl ExecutionBackend for WindowsDebugger {
                     FissionError::debug(format!("GetThreadContext failed: {:?}", e))
                 })?;
 
-                registers = crate::debug::types::RegisterState {
-                    rax: ctx.Rax,
-                    rbx: ctx.Rbx,
-                    rcx: ctx.Rcx,
-                    rdx: ctx.Rdx,
-                    rsi: ctx.Rsi,
-                    rdi: ctx.Rdi,
-                    rbp: ctx.Rbp,
-                    rsp: ctx.Rsp,
-                    r8: ctx.R8,
-                    r9: ctx.R9,
-                    r10: ctx.R10,
-                    r11: ctx.R11,
-                    r12: ctx.R12,
-                    r13: ctx.R13,
-                    r14: ctx.R14,
-                    r15: ctx.R15,
-                    rip: ctx.Rip,
-                    rflags: ctx.EFlags as u64,
-                };
+                registers = crate::debug::types::RegisterState::at(ctx.Rip)
+                    .with("RAX", ctx.Rax)
+                    .with("RBX", ctx.Rbx)
+                    .with("RCX", ctx.Rcx)
+                    .with("RDX", ctx.Rdx)
+                    .with("RSI", ctx.Rsi)
+                    .with("RDI", ctx.Rdi)
+                    .with("RBP", ctx.Rbp)
+                    .with("RSP", ctx.Rsp)
+                    .with("R8", ctx.R8)
+                    .with("R9", ctx.R9)
+                    .with("R10", ctx.R10)
+                    .with("R11", ctx.R11)
+                    .with("R12", ctx.R12)
+                    .with("R13", ctx.R13)
+                    .with("R14", ctx.R14)
+                    .with("R15", ctx.R15)
+                    .with("RIP", ctx.Rip)
+                    .with("RFLAGS", ctx.EFlags as u64);
                 self.record_ttd_snapshot(tid, &registers);
 
                 ctx.EFlags |= 0x100; // Set Trap Flag

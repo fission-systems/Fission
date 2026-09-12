@@ -23,7 +23,12 @@ path = "src/lib.rs"
 # never switched on. Measured, same machine, interleaved runs, output byte
 # identical: `coreutils/[` 155 functions 2.77s -> 1.66s (-40%),
 # `crazyflie/cf2` 2,838 functions 56.7s -> 37.6s (-34%).
-default = ["allocator-mimalloc"]
+# The debugger is part of the product, not an extra. It was optional and no
+# build turned it on, so every released binary answered `fission debug` with
+# "Debugger support is not compiled into this build" -- breakpoints,
+# watchpoints, stepping, sessions and machine scripting all shipped in
+# nothing. Measured cost of including it: 19.44 MB -> 19.82 MB, 2%.
+default = ["allocator-mimalloc", "debugger"]
 debugger = ["dep:fission-dynamic", "fission-script/emulator"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]

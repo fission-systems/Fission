@@ -119,6 +119,8 @@ jobs:
           ADDR="$("${CLI}" list "${BIN}" --json | python3 .github/scripts/pick_pe_smoke_decomp_addr.py)"
           OUT=$("${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json)
           echo "${OUT}" | python3 .github/scripts/check_decomp_output.py
+          SESSION=$("${CLI}" debug --emulator session "${BIN}" -c step -c step -c regs --json)
+          echo "${SESSION}" | python3 .github/scripts/check_debug_session.py
 
       - name: Prepare Package Directory
         shell: bash

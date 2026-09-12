@@ -469,7 +469,7 @@ impl ExecutionBackend for WindowsDebugger {
             .ok_or_else(|| FissionError::debug("No thread id for step over"))?;
 
         let regs = self.fetch_registers(tid)?;
-        let rip = regs.rip;
+        let rip = regs.pc;
 
         let code_bytes = self.read_memory(rip, 16)?;
         let decoder = self
@@ -513,12 +513,15 @@ impl ExecutionBackend for WindowsDebugger {
             .ok_or_else(|| FissionError::debug("No thread id for step out"))?;
 
         let regs = self.fetch_registers(tid)?;
+        // `ESP` in a 32-bit process, `RSP` in a 64-bit one -- the state is
+        // named the way its own machine names things.
+        let stack_pointer = regs.get("RSP").or_else(|| regs.get("ESP")).unwrap_or(0);
         let ret_addr = if self.is_wow64 == Some(true) {
-            let esp = regs.rsp as u32;
+            let esp = stack_pointer as u32;
             let bytes = self.read_memory(esp as u64, 4)?;
             u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
         } else {
-            let rsp = regs.rsp;
+            let rsp = stack_pointer;
             let bytes = self.read_memory(rsp, 8)?;
             u64::from_le_bytes([
                 bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
@@ -578,7 +581,7 @@ impl ExecutionBackend for WindowsDebugger {
             .ok_or_else(|| FissionError::debug("No thread id for skip"))?;
 
         let mut regs = self.fetch_registers(tid)?;
-        let rip = regs.rip;
+        let rip = regs.pc;
 
         let code_bytes = self.read_memory(rip, 16)?;
         let decoder = self
@@ -588,10 +591,17 @@ impl ExecutionBackend for WindowsDebugger {
         let insn = decoder.decode_one(&code_bytes, rip)?;
         let insn_len = insn.length.max(1);
 
-        if self.is_wow64 == Some(true) {
-            regs.rip = (regs.rip as u32 + insn_len as u32) as u64;
+        regs.pc = if self.is_wow64 == Some(true) {
+            (rip as u32).wrapping_add(insn_len as u32) as u64
         } else {
-            regs.rip += insn_len as u64;
+            rip.wrapping_add(insn_len as u64)
+        };
+        // The program counter is also a named register in the state the
+        // backend writes back, so both have to move.
+        if regs.get("RIP").is_some() {
+            regs.set("RIP", regs.pc);
+        } else if regs.get("EIP").is_some() {
+            regs.set("EIP", regs.pc);
         }
         self.set_registers(tid, &regs)
     }
