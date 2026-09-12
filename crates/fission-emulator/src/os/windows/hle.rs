@@ -705,19 +705,17 @@ fn handle_write_file(emu: &mut Emulator) -> Result<()> {
         emu.state
             .read_space(emu.state.ram_space(), buf_ptr, n.min(0x10_0000))?
     };
-    if is_console_or_stdout_handle(h) || h == LEGACY_STDOUT {
-        let s = String::from_utf8_lossy(&raw);
-        print!("{}", s);
-    } else {
-        // Route through SimVFS when available (best-effort path).
-        let s = String::from_utf8_lossy(&raw);
+    if !is_console_or_stdout_handle(h) && h != LEGACY_STDOUT {
         tracing::debug!(
             "WriteFile(disk-ish): {} bytes: {:?}",
             raw.len(),
-            s.chars().take(64).collect::<String>()
+            String::from_utf8_lossy(&raw)
+                .chars()
+                .take(64)
+                .collect::<String>()
         );
-        print!("{}", s);
     }
+    emu.guest_stdout(&raw);
 
     if p_written != 0 {
         emu.state.write_space(
@@ -1187,8 +1185,7 @@ fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
     let raw = emu
         .state
         .read_space(emu.state.ram_space(), buf_ptr, n_chars)?;
-    let s = String::from_utf8_lossy(&raw);
-    print!("{}", s); // Print to real stdout
+    emu.guest_stdout(&raw);
 
     if p_written != 0 {
         emu.state.write_space(
@@ -1214,8 +1211,7 @@ fn handle_write_console_w(emu: &mut Emulator) -> Result<()> {
         .chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
-    let s = String::from_utf16_lossy(&chars);
-    print!("{}", s);
+    emu.guest_stdout(String::from_utf16_lossy(&chars).as_bytes());
 
     if p_written != 0 {
         emu.state.write_space(

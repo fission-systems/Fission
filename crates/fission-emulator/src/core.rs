@@ -118,6 +118,9 @@ pub struct Emulator {
     /// HLE dispatch) and returns. See [`Self::step_instruction`].
     single_step: bool,
 
+    /// The guest's exit code, once it has asked to terminate.
+    pub exit_code: Option<u32>,
+
     /// Memory ranges the run loop stops on. See [`Self::set_watchpoint`].
     watchpoints: Vec<Watchpoint>,
     /// The access that tripped a watchpoint, waiting for the run loop to see
@@ -390,6 +393,7 @@ impl Emulator {
             jit_cache: crate::jit::cache::JitCache::new(),
             chain_depth: 0,
             single_step: false,
+            exit_code: None,
             watchpoints: Vec::new(),
             watch_hit: None,
             current_insn_pc: 0,
@@ -823,6 +827,7 @@ impl Emulator {
                     write,
                     value,
                     pc: self.current_insn_pc,
+                    step: self.inst_count,
                     watch: *watch,
                 });
             }
@@ -1022,6 +1027,19 @@ impl Emulator {
             is_call,
             is_return,
         })
+    }
+
+    /// Record bytes the guest wrote to its standard output, and echo them.
+    ///
+    /// Recording matters more than echoing: for a program under examination
+    /// the output *is* the evidence, and printing it straight to the host's
+    /// terminal left nothing any caller could read back. The Linux syscall
+    /// layer has always written through the simulated filesystem; the Windows
+    /// stubs printed and forgot.
+    pub fn guest_stdout(&mut self, bytes: &[u8]) {
+        const GUEST_STDOUT: u64 = 1;
+        let _ = self.vfs.write(GUEST_STDOUT, bytes);
+        print!("{}", String::from_utf8_lossy(bytes));
     }
 
     // ── Watchpoints ─────────────────────────────────────────────────────────
@@ -1447,6 +1465,23 @@ impl Emulator {
                 }
             });
 
+            // With a watchpoint armed, end the block after any instruction
+            // that touches memory. A compiled block cannot stop in its own
+            // middle, so the stop would otherwise land wherever the block
+            // happened to end: measured over 300 hits on the fixture, 209 of
+            // them stopped between one and seven instructions past the
+            // access. Ending here makes the block boundary *be* the
+            // instruction boundary, so the machine stops exactly after the
+            // access that tripped the watch.
+            //
+            // Only the memory instructions end a block, not every one, and
+            // only while something is watching -- arming and disarming both
+            // flush the block cache, so no block outlives the decision.
+            let touches_memory = !self.watchpoints.is_empty()
+                && pcode_ops
+                    .iter()
+                    .any(|op| matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store));
+
             let len = inst_len as u32;
             out.push(GuestInsn {
                 pc: cur,
@@ -1454,7 +1489,7 @@ impl Emulator {
                 ops: pcode_ops,
             });
             cur = cur.wrapping_add(len as u64);
-            if terminates {
+            if terminates || touches_memory {
                 break;
             }
         }
@@ -1759,7 +1794,12 @@ impl Emulator {
                 };
 
                 match result {
-                    HleResult::Halt(_) => {
+                    HleResult::Halt(code) => {
+                        // The OS layer has always reported the guest's exit
+                        // code here and this dropped it on the floor, so
+                        // "the program exited" could not be followed by
+                        // "with what".
+                        self.exit_code = Some(code);
                         self.halt_requested = true;
                         break RunOutcome::ProcessExited;
                     }
@@ -1889,6 +1929,10 @@ pub struct WatchHit {
     pub value: u64,
     /// The instruction that made the access.
     pub pc: u64,
+    /// The retired-instruction count at the access -- the same number a TTD
+    /// snapshot is indexed by, so "seek back to just before this write" is a
+    /// `ttd_seek` away.
+    pub step: u64,
     pub watch: Watchpoint,
 }
 

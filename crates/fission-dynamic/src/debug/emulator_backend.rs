@@ -9,12 +9,25 @@ use fission_emulator::core::{Emulator, InstructionShape, RunOutcome};
 /// rather than a magic number repeated at five call sites.
 pub const EMULATED_PID: u32 = 9999;
 
+/// The one thread an emulated process has.
+///
+/// The emulator runs a single guest context: there is no `clone`, no
+/// scheduler, and nothing for a second thread id to mean. A front end that
+/// asks for this one gets it and any other gets an error saying so, which is
+/// a better answer than pretending to switch.
+pub const EMULATED_THREAD_ID: u32 = 1;
+
 pub struct EmulatorBackend {
     pub emulator: Option<Emulator>,
     /// Why the last `continue` stopped. `run` discards this, and a front end
     /// that cannot tell a breakpoint from a finished program cannot drive a
     /// session.
     last_outcome: Option<RunOutcome>,
+    /// What has happened, oldest first, waiting to be polled.
+    events: std::collections::VecDeque<crate::debug::types::DebugEvent>,
+    /// How much of the guest's standard output has already been reported as
+    /// an `OutputString` event.
+    stdout_reported: usize,
 }
 
 impl EmulatorBackend {
@@ -22,7 +35,82 @@ impl EmulatorBackend {
         Self {
             emulator: None,
             last_outcome: None,
+            events: std::collections::VecDeque::new(),
+            stdout_reported: 0,
         }
+    }
+
+    /// Turn a stop into the events a front end polls for.
+    ///
+    /// Called after everything that runs the machine, so the queue says what
+    /// happened in the order it happened: the guest's output first, because it
+    /// was produced *during* the run, then why the run ended.
+    fn record_stop(&mut self, outcome: RunOutcome) {
+        use crate::debug::types::DebugEvent;
+        self.last_outcome = Some(outcome);
+        self.drain_guest_output();
+        let event = match outcome {
+            RunOutcome::HitBreakpoint(address) => Some(DebugEvent::BreakpointHit {
+                address,
+                thread_id: EMULATED_THREAD_ID,
+            }),
+            RunOutcome::HitWatchpoint(hit) => Some(DebugEvent::WatchpointHit {
+                address: hit.address,
+                size: hit.size,
+                write: hit.write,
+                pc: hit.pc,
+                thread_id: EMULATED_THREAD_ID,
+            }),
+            RunOutcome::Stepped => Some(DebugEvent::SingleStep {
+                thread_id: EMULATED_THREAD_ID,
+            }),
+            RunOutcome::ProcessExited | RunOutcome::Halted => Some(DebugEvent::ProcessExited {
+                exit_code: self
+                    .emulator
+                    .as_ref()
+                    .and_then(|emu| emu.exit_code)
+                    .unwrap_or(0),
+            }),
+            RunOutcome::Returned
+            | RunOutcome::SymGate
+            | RunOutcome::HitBudget
+            | RunOutcome::LoopExit
+            | RunOutcome::Interrupted => None,
+        };
+        if let Some(event) = event {
+            self.events.push_back(event);
+        }
+    }
+
+    /// Anything the guest has written to its standard output since the last
+    /// time this looked.
+    ///
+    /// The emulator's simulated filesystem accumulates writes to descriptor 1,
+    /// so the bytes are already there -- they were simply never surfaced. For
+    /// a sample under examination this is often the whole point.
+    fn drain_guest_output(&mut self) {
+        const GUEST_STDOUT: u64 = 1;
+        let Some(emu) = &self.emulator else {
+            return;
+        };
+        let Some(total) = emu.vfs.file_size(GUEST_STDOUT) else {
+            return;
+        };
+        if total <= self.stdout_reported {
+            return;
+        }
+        let Ok(bytes) = emu.vfs.peek(
+            GUEST_STDOUT,
+            self.stdout_reported,
+            total - self.stdout_reported,
+        ) else {
+            return;
+        };
+        self.stdout_reported = total;
+        self.events
+            .push_back(crate::debug::types::DebugEvent::OutputString {
+                message: String::from_utf8_lossy(&bytes).into_owned(),
+            });
     }
 
     /// Why execution last stopped, or `None` if it has not run yet.
@@ -69,16 +157,74 @@ impl ExecutionBackend for EmulatorBackend {
         Vec::new()
     }
 
+    /// Attach to the emulated process this backend is already running.
+    ///
+    /// There is no OS process table to search: an emulated machine exists only
+    /// inside this backend and only for as long as it does. So attaching means
+    /// the one thing it can mean -- taking hold of the machine this backend
+    /// launched -- and any other pid gets an error that says why rather than a
+    /// blanket "not supported".
     fn attach(&mut self, pid: u32) -> FissionResult<()> {
-        let _ = pid;
-        Err(fission_core::err!(
-            debug,
-            "attach(pid) is not supported by EmulatorBackend. Use launch(path) instead."
-        ))
+        if self.emulator.is_none() {
+            return Err(fission_core::err!(
+                debug,
+                "Nothing to attach to: an emulated process exists only inside this \
+                 backend, so it has to be launched here first"
+            ));
+        }
+        if pid != EMULATED_PID {
+            return Err(fission_core::err!(
+                debug,
+                "No such emulated process {}: the one running here is {}",
+                pid,
+                EMULATED_PID
+            ));
+        }
+        Ok(())
+    }
+
+    fn set_current_thread(&mut self, thread_id: u32) -> FissionResult<()> {
+        if self.emulator.is_none() {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        }
+        if thread_id != EMULATED_THREAD_ID {
+            return Err(fission_core::err!(
+                debug,
+                "No such thread {}: the emulator runs one guest context, which is thread {}",
+                thread_id,
+                EMULATED_THREAD_ID
+            ));
+        }
+        Ok(())
+    }
+
+    /// The next thing that happened, or `None` if nothing has.
+    ///
+    /// `timeout_ms` is ignored: an emulated machine only runs when this
+    /// backend is running it, so there is nothing that could arrive while a
+    /// caller waits. Returning immediately is the honest answer -- sleeping
+    /// would only make a front end slower at learning the same thing.
+    fn poll_event(
+        &mut self,
+        timeout_ms: u32,
+    ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
+        let _ = timeout_ms;
+        if self.emulator.is_none() {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        }
+        // Output the guest produced but nothing has asked about yet.
+        self.drain_guest_output();
+        Ok(self.events.pop_front())
     }
 
     fn detach(&mut self) -> FissionResult<()> {
+        // The machine goes with it: an emulated process has nowhere else to
+        // live, so detaching is the end of it and the leftover events and
+        // output position belong to a process that no longer exists.
         self.emulator = None;
+        self.last_outcome = None;
+        self.events.clear();
+        self.stdout_reported = 0;
         Ok(())
     }
 
@@ -97,7 +243,8 @@ impl ExecutionBackend for EmulatorBackend {
 
     fn continue_execution(&mut self) -> FissionResult<()> {
         let emu = self.runnable()?;
-        self.last_outcome = Some(emu.resume()?);
+        let outcome = emu.resume()?;
+        self.record_stop(outcome);
         Ok(())
     }
 
@@ -106,7 +253,8 @@ impl ExecutionBackend for EmulatorBackend {
         // `run_instruction` runs a whole translation block; this used to call
         // it, so a "single step" advanced between one and eight instructions
         // depending on where the block boundaries fell.
-        self.last_outcome = Some(emu.step_instruction()?);
+        let outcome = emu.step_instruction()?;
+        self.record_stop(outcome);
         Ok(())
     }
 
@@ -122,11 +270,12 @@ impl ExecutionBackend for EmulatorBackend {
         let shape = emu
             .instruction_at_pc()
             .map_err(|e| fission_core::err!(debug, "Cannot decode at 0x{:x}: {}", emu.pc, e))?;
-        if !shape.is_call {
-            self.last_outcome = Some(emu.step_instruction()?);
-            return Ok(());
-        }
-        self.last_outcome = Some(run_past_call(emu, shape)?);
+        let outcome = if shape.is_call {
+            run_past_call(emu, shape)?
+        } else {
+            emu.step_instruction()?
+        };
+        self.record_stop(outcome);
         Ok(())
     }
 
@@ -139,11 +288,9 @@ impl ExecutionBackend for EmulatorBackend {
     /// is none for a stripped binary.
     fn step_out(&mut self) -> FissionResult<()> {
         let emu = self.runnable()?;
-        let outcome = step_out_of_frame(emu);
-        if let Ok(outcome) = &outcome {
-            self.last_outcome = Some(*outcome);
-        }
-        outcome.map(|_| ())
+        let outcome = step_out_of_frame(emu)?;
+        self.record_stop(outcome);
+        Ok(())
     }
 
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
@@ -340,6 +487,15 @@ impl ExecutionBackend for EmulatorBackend {
                 .map_err(|e| fission_core::err!(debug, "ELF image failed: {}", e))?,
         }
         self.emulator = Some(emu);
+        // A fresh machine: nothing it did before this belongs to it.
+        self.last_outcome = None;
+        self.events.clear();
+        self.stdout_reported = 0;
+        self.events
+            .push_back(crate::debug::types::DebugEvent::ProcessCreated {
+                pid: EMULATED_PID,
+                main_thread_id: EMULATED_THREAD_ID,
+            });
 
         // There is no OS process, so there is no pid. This is the handle the
         // rest of the debug layer uses to refer to "the emulated process".
@@ -350,7 +506,7 @@ impl ExecutionBackend for EmulatorBackend {
         let mut state = crate::debug::types::DebugState::default();
         if let Some(emu) = &self.emulator {
             state.attached_pid = Some(EMULATED_PID);
-            state.main_thread_id = Some(1);
+            state.main_thread_id = Some(EMULATED_THREAD_ID);
             state.status = match self.last_outcome {
                 // The machine ran to the end of the program; there is nothing
                 // left to step or resume, and reporting `Suspended` made a
@@ -363,9 +519,9 @@ impl ExecutionBackend for EmulatorBackend {
 
             // Add a single dummy thread
             state.threads.insert(
-                1,
+                EMULATED_THREAD_ID,
                 crate::debug::types::ThreadInfo {
-                    thread_id: 1,
+                    thread_id: EMULATED_THREAD_ID,
                     start_address: emu.pc,
                     suspended: true,
                     is_main: true,

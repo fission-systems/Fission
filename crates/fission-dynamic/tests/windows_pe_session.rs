@@ -155,3 +155,115 @@ fn stepping_past_the_end_says_the_program_exited() {
     );
     assert!(backend.continue_execution().is_err());
 }
+
+/// What happened, in the order it happened.
+///
+/// `poll_event` returned "not supported on this platform", so a front end
+/// driving the emulator had to infer everything from the machine's state
+/// afterwards -- and could not see the guest's output at all, which for a
+/// sample under examination is often the whole point. The bytes were already
+/// in the emulator's simulated filesystem; nothing surfaced them.
+#[test]
+fn a_session_reports_what_the_program_did() {
+    use fission_dynamic::debug::types::DebugEvent;
+
+    let mut backend = EmulatorBackend::new();
+    let pid = backend.launch(&pe_fixture(), &[]).expect("launch");
+
+    // Launching is itself an event.
+    assert!(
+        matches!(
+            backend.poll_event(0).expect("poll"),
+            Some(DebugEvent::ProcessCreated { pid: p, .. }) if p == pid
+        ),
+        "launching reported nothing"
+    );
+
+    backend.continue_execution().expect("run");
+
+    let mut events = Vec::new();
+    while let Some(event) = backend.poll_event(0).expect("poll") {
+        events.push(event);
+    }
+
+    let output: String = events
+        .iter()
+        .filter_map(|e| match e {
+            DebugEvent::OutputString { message } => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        output.contains("hi"),
+        "the program's own output never reached the session: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, DebugEvent::ProcessExited { .. })),
+        "the program ended and the session was not told: {events:?}"
+    );
+    // And the queue empties.
+    assert!(
+        backend.poll_event(0).expect("poll").is_none(),
+        "the queue still had something in it"
+    );
+}
+
+/// A breakpoint and a watchpoint arrive as separate, distinguishable events.
+#[test]
+fn a_watchpoint_is_reported_as_itself() {
+    use fission_dynamic::debug::types::DebugEvent;
+
+    let mut backend = EmulatorBackend::new();
+    backend.launch(&pe_fixture(), &[]).expect("launch");
+    for _ in 0..8 {
+        backend.single_step().expect("step");
+    }
+    let sp = backend.fetch_registers(1).unwrap().get("RSP").expect("RSP");
+    while backend.poll_event(0).expect("poll").is_some() {}
+
+    backend
+        .set_memory_breakpoint(sp.wrapping_sub(256), 256, MemoryBpKind::Write)
+        .expect("watch");
+    backend.continue_execution().expect("run");
+
+    let mut events = Vec::new();
+    while let Some(event) = backend.poll_event(0).expect("poll") {
+        events.push(event);
+    }
+    if let Some(DebugEvent::WatchpointHit { pc, write, .. }) = events
+        .iter()
+        .find(|e| matches!(e, DebugEvent::WatchpointHit { .. }))
+    {
+        assert!(*write);
+        assert_ne!(*pc, 0, "the watchpoint event carried no instruction");
+    }
+}
+
+/// The two things an emulated process can be asked about, and the errors for
+/// everything else -- which say why rather than "not supported".
+#[test]
+fn attaching_and_thread_switching_mean_what_they_can() {
+    let mut backend = EmulatorBackend::new();
+
+    let err = backend.attach(9999).expect_err("nothing launched yet");
+    assert!(err.to_string().contains("launched"), "unhelpful: {err}");
+
+    let pid = backend.launch(&pe_fixture(), &[]).expect("launch");
+    backend.attach(pid).expect("attach to the running machine");
+    assert!(backend.attach(pid + 1).is_err());
+
+    backend.set_current_thread(1).expect("the one thread");
+    let err = backend
+        .set_current_thread(2)
+        .expect_err("there is no thread 2");
+    assert!(
+        err.to_string().contains("one guest context"),
+        "unhelpful: {err}"
+    );
+
+    backend.detach().expect("detach");
+    assert!(!backend.is_attached());
+    assert!(backend.poll_event(0).is_err(), "polling a dead session");
+}

@@ -71,6 +71,21 @@ pub enum DebugEvent {
     BreakpointHit { address: u64, thread_id: u32 },
     /// Single step completed
     SingleStep { thread_id: u32 },
+    /// A watched memory range was read or written.
+    ///
+    /// Distinct from `BreakpointHit`, which says where execution stopped and
+    /// nothing about why: the two useful facts about a watchpoint are the
+    /// address that was touched and the instruction that touched it, and they
+    /// are different addresses.
+    WatchpointHit {
+        /// The memory that was accessed.
+        address: u64,
+        size: u32,
+        write: bool,
+        /// The instruction that made the access.
+        pc: u64,
+        thread_id: u32,
+    },
     /// Exception occurred
     Exception {
         code: u32,
