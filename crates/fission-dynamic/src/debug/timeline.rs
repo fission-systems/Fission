@@ -5,6 +5,11 @@
 
 #[cfg(target_os = "linux")]
 use crate::debug::rr::RRDebugger;
+// The `Backend::RR` arms below call this trait's methods, and those arms only
+// exist on Linux -- so this file has never compiled there, and a macOS or
+// Windows build cannot tell.
+#[cfg(target_os = "linux")]
+use crate::debug::traits::TimeTravelDebugger;
 use fission_ttd::{RegisterState, SnapshotStats, TTDRecorder, TimelineDriver};
 
 pub use fission_ttd::{ExecutionSnapshot, MemoryDelta, RecordingStatus};
