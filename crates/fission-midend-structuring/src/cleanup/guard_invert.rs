@@ -726,6 +726,7 @@ mod tests {
         assert_eq!(removed, 1, "a label private to the span travels with it");
     }
 
+    #[test]
     fn refuses_a_nested_span_label_reached_from_outside() {
         let body = vec![
             guard("L"),

@@ -1232,6 +1232,7 @@ fn preview_projects_cross_space_gpr32_write_to_rust_sleigh_gpr64_read() {
     assert!(!code.contains("rbp"), "{code}");
 }
 
+#[test]
 fn preview_structures_intra_instruction_conditional_return_copy() {
     let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
@@ -1323,9 +1324,21 @@ fn preview_structures_intra_instruction_conditional_return_copy() {
 
     let code = render_mlil_preview(&func, "conditional_max", 0x140001460, &options)
         .expect("preview render");
-    assert!(code.contains("if (param_1 < param_2)"), "{code}");
-    assert!(code.contains("return param_2;"), "{code}");
+    // The guard may come out either way round: the branch says "if a < b keep
+    // b", and inverting it to "if a > b keep a" is the same function. What has
+    // to hold is that the guard compares the two parameters and its arm
+    // returns the one that comparison selected -- a swapped arm is the bug
+    // this catches, and that survives the inversion.
+    let flat = code.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flat.contains("if (param_1 < param_2) { return param_2; }")
+            || flat.contains("if (param_1 > param_2) { return param_1; }"),
+        "{code}"
+    );
     assert!(code.contains("return param_1;"), "{code}");
+    assert!(code.contains("return param_2;"), "{code}");
+    // The conditional copy is the whole point: it must not land in a
+    // temporary, and the stack slot it reads must not become a dereference.
     assert!(!code.contains("uVar"), "{code}");
     assert!(!code.contains("*var_"), "{code}");
 }

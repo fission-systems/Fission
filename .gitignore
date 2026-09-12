@@ -187,6 +187,7 @@ cargo-flamegraph.trace/
 /scripts/audit/*
 # CI runs this one, so it has to be in the repository.
 !/scripts/audit/compile_surface.sh
+!/scripts/audit/unrun_tests_scan.py
 !/scripts/audit/benchmark_smell_scan.py
 !/scripts/audit/ai_prompt_leak_scan.py
 !/scripts/audit/arch_isolation_scan.py

@@ -83,6 +83,16 @@ jobs:
         shell: bash
         run: scripts/audit/compile_surface.sh
 
+      # And the tests inside those configurations that no runner runs. A
+      # compile-surface audit cannot see these: the configuration *was* built,
+      # and only the harness skipped the function. Four were found this way in
+      # `fission-dir` (a `#[test]` written twice above a doc comment, leaving
+      # the two functions that followed it with none) and two more elsewhere,
+      # one of which failed the moment it was allowed to run.
+      - name: Tests nothing runs
+        shell: bash
+        run: scripts/audit/unrun_tests_scan.py
+
       # And running the tests those configurations hold. A check catches
       # "does not build"; it catches nothing about "does not work", and these
       # suites are the only coverage the debugger, the session and the machine
