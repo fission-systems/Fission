@@ -256,28 +256,17 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         DebugCommand::HwBp(args) => {
             #[cfg(target_os = "windows")]
             {
-                let state = find_active_state()?;
-                let mut session = build_session();
-                session.attach(state.pid)?;
-
-                let kind = match args.kind {
-                    HwBpKindArg::Execute => {
-                        fission_dynamic::debug::types::HwBreakpointKind::Execute
-                    }
-                    HwBpKindArg::Write => fission_dynamic::debug::types::HwBreakpointKind::Write,
-                    HwBpKindArg::ReadWrite => {
-                        fission_dynamic::debug::types::HwBreakpointKind::ReadWrite
-                    }
-                };
-                session.debugger.set_hw_breakpoint(args.addr, kind)?;
-                if args.json {
-                    println!(
-                        "{{\"status\":\"ok\",\"action\":\"set_hw_breakpoint\",\"address\":\"0x{:x}\"}}",
-                        args.addr
-                    );
-                } else {
-                    println!("Hardware breakpoint set at 0x{:016x}", args.addr);
-                }
+                // `set_hw_breakpoint` is on the Win32 backend, not on
+                // `ExecutionBackend`, so this could never have compiled --
+                // and nothing built it, because the `debugger` feature was
+                // not a default. Debug registers are part of that backend and
+                // it is not in this build; see `windows_native_debugger`.
+                let _ = args;
+                anyhow::bail!(
+                    "hardware breakpoints need the Win32 debugger backend, which is not in \
+                     this build; a software breakpoint (`bp`) or an emulator watchpoint \
+                     (`--emulator mem-bp`) does the same job"
+                );
             }
             #[cfg(not(target_os = "windows"))]
             {

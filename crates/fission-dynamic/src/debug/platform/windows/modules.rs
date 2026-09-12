@@ -5,10 +5,10 @@
 
 use std::collections::BTreeMap;
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::HMODULE;
 use windows::Win32::System::ProcessStatus::{
     EnumProcessModules, GetModuleBaseNameW, GetModuleFileNameExW, GetModuleInformation,
 };
-use windows::Win32::System::SystemServices::HMODULE;
 
 /// Information about a single loaded module (EXE or DLL).
 #[derive(Debug, Clone)]
@@ -28,8 +28,10 @@ pub fn enumerate_modules(process: HANDLE) -> Result<Vec<ModuleInfo>, String> {
     let modules: Vec<HMODULE> = loop {
         let mut buf = vec![HMODULE::default(); capacity];
         let cb = (capacity * std::mem::size_of::<HMODULE>()) as u32;
+        // windows-rs 0.54 returns `Result` where this was written against a
+        // `BOOL`.
         let ok =
-            unsafe { EnumProcessModules(process, buf.as_mut_ptr(), cb, &mut cb_needed).as_bool() };
+            unsafe { EnumProcessModules(process, buf.as_mut_ptr(), cb, &mut cb_needed).is_ok() };
         if !ok {
             return Err("EnumProcessModules failed".to_string());
         }
@@ -65,7 +67,7 @@ pub fn enumerate_modules(process: HANDLE) -> Result<Vec<ModuleInfo>, String> {
                 &mut mod_info,
                 std::mem::size_of::<windows::Win32::System::ProcessStatus::MODULEINFO>() as u32,
             )
-            .as_bool()
+            .is_ok()
             {
                 infos.push(ModuleInfo {
                     name,

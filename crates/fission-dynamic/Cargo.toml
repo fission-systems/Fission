@@ -12,6 +12,17 @@ categories = ["development-tools::debugging"]
 
 [features]
 default = []
+# The Win32 debugger backend. Off by default because it does not compile:
+# 269 errors against windows-rs 0.54, from imports that moved (`Nt*` to `Wdk`,
+# `HMODULE` to `Foundation`), an event constant that never had the name it is
+# given, and an `ExecutionBackend` impl declaring five methods the trait does
+# not have. Nothing has built it in a long time, and a feature nobody turns on
+# is a feature nobody can tell is broken -- so it is named, off, and honest,
+# rather than silently wired into a build that never happens.
+#
+# The emulator backend runs Windows binaries on every host and is the one
+# under test; this is only for driving a *live* Windows process.
+windows_native_debugger = []
 interactive_runtime = [
     "dep:fission-plugin",
     "dep:tokio",
@@ -49,6 +60,9 @@ libloading = { version = "0.9", optional = true }
 rayon = { version = "1.10", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# The debugger has never compiled on Windows: the module list was missing
+# the ones holding `SystemServices`, `SystemInformation` and the WOW64 and
+# `NtQueryInformation*` entry points. Nothing built it, so nothing said so.
 windows = { version = "0.54", features = [
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Threading",
@@ -57,6 +71,10 @@ windows = { version = "0.54", features = [
     "Win32_Security",
     "Win32_System_ProcessStatus",
     "Win32_System_Kernel",
+    "Win32_System_SystemServices",
+    "Win32_System_SystemInformation",
+    "Win32_System_WindowsProgramming",
+    "Wdk_System_Threading",
 ], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -26,9 +26,9 @@ use windows::Win32::System::Diagnostics::Debug::{
     CONTEXT, CONTEXT_FLAGS, CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT,
     ContinueDebugEvent, DEBUG_EVENT, DebugActiveProcess, DebugActiveProcessStop, DebugBreakProcess,
     EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT, GetThreadContext,
-    LOAD_DLL_DEBUG_EVENT, OUTPUT_DEBUG_STRING_DEBUG_EVENT, OUTPUT_DEBUG_STRING_INFO,
-    ReadProcessMemory, SetThreadContext, UNLOAD_DLL_DEBUG_EVENT, WOW64_CONTEXT, WOW64_CONTEXT_ALL,
-    WaitForDebugEvent, Wow64GetThreadContext, Wow64SetThreadContext, WriteProcessMemory,
+    LOAD_DLL_DEBUG_EVENT, OUTPUT_DEBUG_STRING_EVENT, OUTPUT_DEBUG_STRING_INFO, ReadProcessMemory,
+    SetThreadContext, UNLOAD_DLL_DEBUG_EVENT, WOW64_CONTEXT, WOW64_CONTEXT_ALL, WaitForDebugEvent,
+    Wow64GetThreadContext, Wow64SetThreadContext, WriteProcessMemory,
 };
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEM_RESERVE, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_GUARD,
@@ -481,7 +481,7 @@ impl WindowsDebugger {
                     )
                 }
             },
-            OUTPUT_DEBUG_STRING_DEBUG_EVENT => {
+            OUTPUT_DEBUG_STRING_EVENT => {
                 let info = unsafe { debug_event.u.DebugString };
                 let message = self.read_debug_string(&info);
                 self.state.last_event = Some(format!("OutputDebugString: {}", message));

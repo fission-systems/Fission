@@ -4,9 +4,9 @@
 //! registered SEH handlers for a given thread.
 
 use std::ffi::c_void;
+use windows::Wdk::System::Threading::NtQueryInformationThread;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
-use windows::Win32::System::Threading::NtQueryInformationThread;
 
 /// One SEH record from the target thread.
 #[derive(Debug, Clone)]

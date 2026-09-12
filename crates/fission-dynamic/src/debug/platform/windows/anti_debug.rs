@@ -7,7 +7,8 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::{HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows::Win32::System::Memory::{PAGE_PROTECTION_FLAGS, PAGE_READWRITE, VirtualProtectEx};
-use windows::Win32::System::Threading::NtQueryInformationProcess;
+// `Nt*` lives under `Wdk`, not `Win32`, in windows-rs 0.54.
+use windows::Wdk::System::Threading::NtQueryInformationProcess;
 
 /// Represents a single anti-debug bypass that was applied.
 #[derive(Debug, Clone, PartialEq, Eq)]

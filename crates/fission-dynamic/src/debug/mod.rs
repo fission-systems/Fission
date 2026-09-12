@@ -135,7 +135,9 @@ impl DebugSessionBuilder {
         let debugger = PlatformDebugger::default();
         let timeline = if self.with_timeline {
             let arc = Arc::new(Mutex::new(Timeline::new()));
-            #[cfg(target_os = "windows")]
+            // Only the Win32 backend records into a timeline, and it is not
+            // in every build (see `windows_native_debugger`).
+            #[cfg(all(target_os = "windows", feature = "windows_native_debugger"))]
             debugger.set_ttd_timeline(arc.clone());
             Some(arc)
         } else {

@@ -84,6 +84,16 @@ jobs:
         shell: bash
         run: cargo test -p fission-script --features emulator --locked
 
+      # The Win32 debugger backend, checked rather than built into anything.
+      # It does not compile and is behind `windows_native_debugger` for that
+      # reason; this step is what will say when someone has finished the port,
+      # and until then it is expected to fail, which is why it does not gate.
+      - name: Check the unported Win32 debugger (informational)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: bash
+        run: cargo check -p fission-dynamic --features interactive_runtime,windows_native_debugger --locked
+
       - name: sccache stats
         if: always()
         shell: bash

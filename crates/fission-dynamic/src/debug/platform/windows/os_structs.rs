@@ -4,9 +4,9 @@
 //! to locate the structures, then `ReadProcessMemory` to extract fields.
 
 use std::ffi::c_void;
+use windows::Wdk::System::Threading::{NtQueryInformationProcess, NtQueryInformationThread};
 use windows::Win32::Foundation::{HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
-use windows::Win32::System::Threading::{NtQueryInformationProcess, NtQueryInformationThread};
 
 /// Key fields from the Process Environment Block.
 #[derive(Debug, Clone)]

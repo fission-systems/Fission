@@ -19,7 +19,7 @@ pub fn read_memory(process_handle: HANDLE, address: u64, size: usize) -> Result<
             size,
             Some(&mut bytes_read),
         )
-        .as_bool()
+        .is_ok()
         {
             if bytes_read < size {
                 buffer.truncate(bytes_read);
