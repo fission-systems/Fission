@@ -185,6 +185,8 @@ cargo-flamegraph.trace/
 # Everything else (benchmark helpers, corpus builders, audit, ghidra-fid-generator)
 # is local-only developer tooling.
 /scripts/audit/*
+# CI runs this one, so it has to be in the repository.
+!/scripts/audit/compile_surface.sh
 !/scripts/audit/benchmark_smell_scan.py
 !/scripts/audit/ai_prompt_leak_scan.py
 !/scripts/audit/arch_isolation_scan.py
