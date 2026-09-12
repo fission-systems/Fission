@@ -194,7 +194,8 @@ cargo-flamegraph.trace/
 !/scripts/audit/nir_boundary_scan.py
 !/scripts/audit/regression_replay.py
 /scripts/benchmark/
-/scripts/corpus/
+/scripts/corpus/*
+!/scripts/corpus/build_real_programs.sh
 /scripts/ghidra-fid-generator/
 /scripts/gdt_extract_signatures.py
 /scripts/check_no_fission_analysis_dependency.sh
