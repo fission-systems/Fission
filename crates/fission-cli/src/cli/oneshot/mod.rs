@@ -2,6 +2,7 @@
 //!
 //! Executes a single command and exits (non-interactive).
 
+mod analysis_db;
 mod assessment;
 mod binary_info;
 mod callgraph;
@@ -144,6 +145,47 @@ fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Resu
 /// with no indication why. Low-confidence hits are suppressed here (kept
 /// for `info --detections`'s more exhaustive listing) since a single weak
 /// indicator isn't worth interrupting every run for.
+/// Where this invocation's analysis database lives, unless it was told not to
+/// have one.
+pub(crate) fn analysis_db_path(
+    binary_path: &std::path::Path,
+    explicit: Option<&std::path::Path>,
+    disabled: bool,
+) -> Option<std::path::PathBuf> {
+    if disabled {
+        return None;
+    }
+    Some(match explicit {
+        Some(path) => path.to_path_buf(),
+        None => fission_project::Project::default_path(binary_path),
+    })
+}
+
+/// Read the analysis database and put its decisions onto the binary.
+///
+/// A database for a *different* binary is an error rather than a shrug: its
+/// names would land on whatever happens to live at those addresses and the
+/// result would read like analysis. A missing one is the ordinary case and
+/// says nothing.
+fn apply_analysis_db(cli: &OneShotArgs, binary: &mut LoadedBinary) -> Result<()> {
+    let Some(path) = analysis_db_path(&cli.binary, cli.analysis_db.as_deref(), cli.no_analysis_db)
+    else {
+        return Ok(());
+    };
+    let Some(project) =
+        fission_project::Project::read(&path).map_err(|e| anyhow::anyhow!("{e}"))?
+    else {
+        return Ok(());
+    };
+    let applied = project
+        .apply(binary)
+        .map_err(|e| anyhow::anyhow!("{e} (database: {})", path.display()))?;
+    if cli.verbose && applied > 0 {
+        eprintln!("[*] {} name(s) from {}", applied, path.display());
+    }
+    Ok(())
+}
+
 fn warn_if_packed_or_protected(binary: &LoadedBinary) {
     let detection = fission_loader::detect(binary);
     let hits: Vec<&fission_loader::Detection> = detection
@@ -237,6 +279,7 @@ fn run() -> Result<()> {
             }
             return Ok(());
         }
+        ParsedInvocation::Db(args) => return analysis_db::run(args),
         ParsedInvocation::Debug(args) => {
             #[cfg(feature = "debugger")]
             {
@@ -722,6 +765,12 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             binary.functions.len()
         );
     }
+
+    // Decisions someone made about this binary, put back onto it before
+    // anything reads it. Everything downstream -- listing, decompiling,
+    // disassembling -- goes through this same `LoadedBinary`, so a chosen
+    // name reaches all of them from here and nowhere else.
+    apply_analysis_db(cli, &mut binary)?;
 
     warn_if_packed_or_protected(&binary);
 

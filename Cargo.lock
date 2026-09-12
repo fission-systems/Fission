@@ -875,6 +875,7 @@ dependencies = [
  "fission-dynamic",
  "fission-emulator",
  "fission-loader",
+ "fission-project",
  "fission-script",
  "fission-sleigh",
  "fission-static",
@@ -885,6 +886,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "unicode-width 0.2.0",
@@ -1132,6 +1134,17 @@ dependencies = [
  "dirs",
  "fission-core",
  "fission-loader",
+]
+
+[[package]]
+name = "fission-project"
+version = "0.2.3"
+dependencies = [
+ "fission-loader",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

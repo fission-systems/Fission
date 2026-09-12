@@ -46,6 +46,8 @@ pub enum ParsedInvocation {
         verbose: bool,
     },
     Debug(DebugArgs),
+    /// The analysis database: names, notes and breakpoints that survive runs
+    Db(DbArgs),
     /// Sandbox (emulator) execution
     Sandbox(SandboxArgs),
     /// Solver- and emulator-backed DIR/HIR correctness verification
@@ -121,6 +123,21 @@ struct CliArgs {
     #[arg(long = "arch", global = true, value_name = "ARCH")]
     arch: Option<String>,
 
+    /// Read decisions from this analysis database instead of the default one.
+    ///
+    /// It holds what someone chose about a binary -- names, notes,
+    /// breakpoints -- and is the only thing this tool produces that cannot be
+    /// re-derived by running again. By default it is the binary's own path
+    /// with `.fission.json` appended, so work accumulates without anyone
+    /// naming a file. (`--db` rather than `--project`, which `decomp` already
+    /// uses for "emit one buildable translation unit".)
+    #[arg(long = "db", global = true, value_name = "FILE")]
+    analysis_db: Option<PathBuf>,
+
+    /// Ignore the analysis database: report the binary as it is on disk.
+    #[arg(long = "no-db", global = true)]
+    no_analysis_db: bool,
+
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -163,6 +180,8 @@ enum CliCommand {
     Inventory(InventoryArgs),
     /// Inspect resolved resource paths and bundle-root candidates
     Resources(ResourcesArgs),
+    /// Names, notes and breakpoints that survive between runs
+    Db(DbArgs),
     /// Rhai scripts over read-only binary inventory (`binary.*`, `emit`)
     Script(ScriptArgs),
     /// Live process debugger (Windows only)
@@ -186,6 +205,67 @@ pub enum VerifyTierArg {
     Symbolic,
     /// All three tiers.
     All,
+}
+
+/// The analysis database: what someone decided about a binary.
+///
+/// Everything else this tool prints is derived -- run it again and you get it
+/// again. A name chosen for `FUN_00401230`, a note about why a loop matters,
+/// a breakpoint that took an hour to find: none of that can be re-derived,
+/// and this is where it goes. Every other command reads it automatically, so
+/// a name set here shows up in `list`, `disasm` and `decomp` from then on.
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+#[command(
+    after_help = "Examples:\n  fission_cli db sample.exe name 0x401230 parse_header\n  fission_cli db sample.exe note 0x401244 'bounds check is off by one'\n  fission_cli db sample.exe show --json"
+)]
+pub struct DbArgs {
+    /// Binary the decisions are about
+    pub binary: PathBuf,
+
+    #[command(subcommand)]
+    pub command: DbCommand,
+
+    /// Output in JSON format
+    #[arg(short, long, global = true)]
+    pub json: bool,
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum DbCommand {
+    /// Name the function at an address
+    Name {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+        name: String,
+    },
+    /// Forget a name, so the binary's own is used again
+    RmName {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+    },
+    /// Attach a note to an address
+    Note {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+        text: String,
+    },
+    /// Remove a note
+    RmNote {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+    },
+    /// Remember a breakpoint for the next debug session
+    Bp {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+    },
+    /// Forget a breakpoint
+    RmBp {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+    },
+    /// Show everything recorded
+    Show,
 }
 
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
@@ -924,6 +1004,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "sandbox",
     "verify",
     "debug",
+    "db",
     "ai",
 ];
 
@@ -961,11 +1042,15 @@ where
         fission_core::resource_roots::set_cli_resource_bundle_root(cli.resource_root.clone());
         let language_override = cli.language.clone();
         let arch = cli.arch.clone();
+        let analysis_db = cli.analysis_db.clone();
+        let no_analysis_db = cli.no_analysis_db;
         let invocation = normalize_canonical(cli);
         match invocation {
             ParsedInvocation::OneShot(mut parsed) => {
                 parsed.args.language_override = language_override;
                 parsed.args.arch = arch;
+                parsed.args.analysis_db = analysis_db;
+                parsed.args.no_analysis_db = no_analysis_db;
                 ParsedInvocation::OneShot(parsed)
             }
             other => other,
@@ -996,6 +1081,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
             };
             ParsedInvocation::Script(invocation)
         }
+        CliCommand::Db(db) => ParsedInvocation::Db(db),
         CliCommand::Resources(resources) => match resources.command {
             ResourcesCommand::Status(s) => ParsedInvocation::ResourcesStatus {
                 json: s.common.json,
@@ -1249,6 +1335,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
+                CliCommand::Db(_) => unreachable!("db branch handled above"),
             };
             ParsedInvocation::OneShot(ParsedOneShotArgs {
                 args,
@@ -1282,6 +1369,7 @@ mod tests {
                 panic!("expected one-shot canonical parse")
             }
             ParsedInvocation::Debug(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Db(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
         }
@@ -1328,6 +1416,7 @@ mod tests {
                 panic!("legacy parser cannot emit resources status")
             }
             ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
+            ParsedInvocation::Db(_) => panic!("legacy parser cannot emit db"),
             ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
         }

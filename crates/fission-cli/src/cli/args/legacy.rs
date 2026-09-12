@@ -229,6 +229,10 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         verbose: cli.verbose,
         no_header: cli.no_header,
         project: false,
+        // The legacy surface predates the analysis database; it takes the
+        // default beside the binary like everything else.
+        analysis_db: None,
+        no_analysis_db: false,
         strings_xrefs: false,
         strings_sections: Vec::new(),
         hex_addr: None,

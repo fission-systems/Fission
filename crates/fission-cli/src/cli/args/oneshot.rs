@@ -105,6 +105,11 @@ pub struct OneShotArgs {
     /// Force a specific SLEIGH language ID instead of auto-detecting one
     /// (global `--language` flag, canonical parser only).
     pub language_override: Option<String>,
+    /// Analysis database to read decisions from; `None` means the default
+    /// beside the binary.
+    pub analysis_db: Option<PathBuf>,
+    /// Ignore the analysis database.
+    pub no_analysis_db: bool,
 }
 
 impl Default for OneShotArgs {
@@ -190,6 +195,8 @@ impl Default for OneShotArgs {
             similar_function: None,
             similar_top_k: 5,
             language_override: None,
+            analysis_db: None,
+            no_analysis_db: false,
         }
     }
 }

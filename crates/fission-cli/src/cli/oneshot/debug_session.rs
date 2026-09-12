@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 
 use crate::cli::args::{DebugCommand, DebugSessionArgs, MemoryBpKindArg};
 use fission_dynamic::debug::traits::ExecutionBackend;
+use fission_dynamic::debug::types as debug_types_alias;
 use fission_dynamic::debug::types::{DebugEvent, MemoryBpKind, RegisterState};
 
 /// Split a command line on whitespace, honouring double quotes.
@@ -373,6 +374,35 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
         .with_context(|| format!("failed to launch {}", args.path))?;
     let thread_id = session.debugger.get_state().main_thread_id.unwrap_or(1);
 
+    // Breakpoints and watchpoints someone recorded earlier, put back before
+    // the first command runs. Finding an address worth stopping at is the
+    // expensive part of a session; having to find it again next time is what
+    // makes a debugger a thing you use once.
+    let mut restored: Vec<Value> = Vec::new();
+    if let Ok(Some(project)) = fission_project::Project::read(
+        &fission_project::Project::default_path(std::path::Path::new(&args.path)),
+    ) {
+        for address in &project.breakpoints {
+            if session.debugger.set_sw_breakpoint(*address).is_ok() {
+                restored.push(json!({ "breakpoint": format!("0x{address:x}") }));
+            }
+        }
+        for watch in &project.watchpoints {
+            let kind = match (watch.on_read, watch.on_write) {
+                (true, true) => debug_types_alias::MemoryBpKind::Access,
+                (true, false) => debug_types_alias::MemoryBpKind::Read,
+                _ => debug_types_alias::MemoryBpKind::Write,
+            };
+            if session
+                .debugger
+                .set_memory_breakpoint(watch.address, watch.size as usize, kind)
+                .is_ok()
+            {
+                restored.push(json!({ "watchpoint": format!("0x{:x}", watch.address) }));
+            }
+        }
+    }
+
     let mut results: Vec<Value> = Vec::new();
     let mut failed = false;
     for line in &commands {
@@ -433,6 +463,7 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
     let mut report = json!({
         "binary": args.path,
         "pid": pid,
+        "restored": restored,
         "backend": if use_emulator { "emulator" } else { "native" },
         "results": results,
         "final": {
