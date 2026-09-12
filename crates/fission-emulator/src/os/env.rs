@@ -129,6 +129,8 @@ pub enum ProcessorUserop {
     Hint,
     /// Commit `ISAModeSwitch` to the decode context: ARM/Thumb interworking.
     SetIsaMode,
+    /// `CPUID`, which SLEIGH splits into one userop per leaf.
+    Cpuid,
 
     // ── ARMv7-M system registers ────────────────────────────────────────────
     GetMainStackPointer,
@@ -160,6 +162,13 @@ pub enum ProcessorUserop {
 pub fn classify_processor_userop(name: &str) -> Option<ProcessorUserop> {
     use ProcessorUserop::*;
     Some(match name {
+        // SLEIGH does not emit a bare `cpuid` for the leaves it knows: the
+        // x86 spec branches on EAX and calls a userop named for that leaf,
+        // so matching `"cpuid"` alone caught none of them. A real program's
+        // C runtime asks on startup -- `cpuid_basic_info` was the one
+        // unanswered CALLOTHER in a sweep of six of them.
+        name if name.starts_with("cpuid") => Cpuid,
+
         "ExclusiveAccess" => ExclusiveAccessMark,
         "ExclusiveMonitorPass" | "hasExclusiveAccess" => ExclusiveMonitorPass,
         "ExclusiveMonitorsStatus" => ExclusiveMonitorStatus,
@@ -245,6 +254,38 @@ pub fn answer_processor_userop(emu: &mut Emulator, name: &str, inputs: &[u64]) -
         // loop spin for ever. The two aarch64 binaries in the dev corpus that
         // ran to the instruction budget without finishing were doing exactly
         // that, half a million times.
+        // ── CPUID ───────────────────────────────────────────────────────────
+        //
+        // The userop returns a *pointer*: the x86 spec writes
+        // `tmpptr = cpuid_<leaf>_info(EAX)` and the instruction then reads
+        // EAX/EBX/EDX/ECX from `tmpptr + 0/4/8/12`. Answering zero therefore
+        // does not mean "no features" -- it means the guest reads four
+        // registers out of address zero, and gets whatever is there.
+        //
+        // What this claims to be is a decision, not a detail. Claiming more
+        // than the emulator implements is the dangerous direction: a program
+        // told it has AVX-512 will use it, and this emulator decodes those
+        // registers to an empty handle. So: the x86-64 baseline and nothing
+        // above it. Every program that runs on x86-64 at all already assumes
+        // this much.
+        Cpuid => {
+            let leaf = arg(0);
+            let (eax, ebx, edx, ecx) = cpuid_leaf(leaf);
+            let Some(address) = emu.scratch_bytes(16) else {
+                return false;
+            };
+            let mut bytes = [0u8; 16];
+            bytes[0..4].copy_from_slice(&eax.to_le_bytes());
+            bytes[4..8].copy_from_slice(&ebx.to_le_bytes());
+            bytes[8..12].copy_from_slice(&edx.to_le_bytes());
+            bytes[12..16].copy_from_slice(&ecx.to_le_bytes());
+            let ram = emu.state.ram_space();
+            if emu.state.write_space(ram, address, &bytes).is_err() {
+                return false;
+            }
+            emu.callother_result = address;
+        }
+
         ExclusiveAccessMark => {}
         ExclusiveMonitorPass => emu.callother_result = 1,
         ExclusiveMonitorStatus => emu.callother_result = 0,
@@ -338,4 +379,45 @@ pub fn answer_processor_userop(emu: &mut Emulator, name: &str, inputs: &[u64]) -
         }
     }
     true
+}
+
+/// What this processor answers for one CPUID leaf: `(EAX, EBX, EDX, ECX)`.
+///
+/// The x86-64 baseline, deliberately. Every feature claimed here is one the
+/// guest may then use, and a claim the emulator cannot honour is worse than
+/// an absent one -- a program told it has AVX-512 will reach for registers
+/// this emulator decodes to an empty handle. Everything a 64-bit program is
+/// already entitled to assume is claimed; nothing else is.
+fn cpuid_leaf(leaf: u64) -> (u32, u32, u32, u32) {
+    match leaf {
+        // Leaf 0: the highest leaf this answers, and the vendor string in
+        // EBX:EDX:ECX. "GenuineIntel" rather than something invented, because
+        // runtime libraries switch on it and an unknown vendor sends them
+        // down paths nobody tests.
+        0 => (1, 0x756e_6547, 0x4965_6e69, 0x6c65_746e),
+
+        // Leaf 1: family/model/stepping, then the feature words. EDX carries
+        // the ones x86-64 guarantees -- FPU, TSC, CMOV, MMX, FXSR, SSE, SSE2
+        // -- and ECX carries none, so SSE3 and everything after it reads as
+        // absent and the guest takes its portable path.
+        1 => {
+            const FPU: u32 = 1 << 0;
+            const TSC: u32 = 1 << 4;
+            const MSR: u32 = 1 << 5;
+            const PAE: u32 = 1 << 6;
+            const CX8: u32 = 1 << 8;
+            const CMOV: u32 = 1 << 15;
+            const MMX: u32 = 1 << 23;
+            const FXSR: u32 = 1 << 24;
+            const SSE: u32 = 1 << 25;
+            const SSE2: u32 = 1 << 26;
+            let edx = FPU | TSC | MSR | PAE | CX8 | CMOV | MMX | FXSR | SSE | SSE2;
+            // Family 6, model 15, stepping 1: an ordinary 64-bit part.
+            (0x0000_06F1, 0, edx, 0)
+        }
+
+        // Anything else: all zeroes, which for a leaf above the reported
+        // maximum is what a real processor returns.
+        _ => (0, 0, 0, 0),
+    }
 }

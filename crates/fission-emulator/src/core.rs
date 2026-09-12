@@ -121,6 +121,11 @@ pub struct Emulator {
     /// The guest's exit code, once it has asked to terminate.
     pub exit_code: Option<u32>,
 
+    /// A page the emulator owns inside the guest, for userops that have to
+    /// return a *pointer* to something rather than a value. Mapped on first
+    /// use so a run that never needs one never pays for it.
+    scratch: Option<(u64, u64)>,
+
     /// Memory ranges the run loop stops on. See [`Self::set_watchpoint`].
     watchpoints: Vec<Watchpoint>,
     /// The access that tripped a watchpoint, waiting for the run loop to see
@@ -394,6 +399,7 @@ impl Emulator {
             chain_depth: 0,
             single_step: false,
             exit_code: None,
+            scratch: None,
             watchpoints: Vec::new(),
             watch_hit: None,
             current_insn_pc: 0,
@@ -1040,6 +1046,36 @@ impl Emulator {
         const GUEST_STDOUT: u64 = 1;
         let _ = self.vfs.write(GUEST_STDOUT, bytes);
         print!("{}", String::from_utf8_lossy(bytes));
+    }
+
+    /// Guest-visible scratch: `len` writable bytes at an address the guest
+    /// can read from.
+    ///
+    /// Some userops answer with a pointer rather than a value -- x86's
+    /// `CPUID` is defined as `tmpptr = cpuid_<leaf>(EAX)` followed by four
+    /// reads from `tmpptr` -- so there has to be somewhere real to point at.
+    /// One page, mapped once, handed out in order; a run that asks for more
+    /// than a page's worth gets `None` rather than a wrapped pointer into
+    /// somebody else's answer.
+    pub fn scratch_bytes(&mut self, len: u64) -> Option<u64> {
+        use crate::pcode::page_map::prot;
+        const SCRATCH_LEN: u64 = 0x1000;
+
+        let (base, used) = match self.scratch {
+            Some(existing) => existing,
+            None => {
+                let base = self.state.page_map.mmap_anon(SCRATCH_LEN, prot::RW);
+                if base == 0 {
+                    return None;
+                }
+                (base, 0)
+            }
+        };
+        if used + len > SCRATCH_LEN {
+            return None;
+        }
+        self.scratch = Some((base, used + len));
+        Some(base + used)
     }
 
     // ── Watchpoints ─────────────────────────────────────────────────────────
