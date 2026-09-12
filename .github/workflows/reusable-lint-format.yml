@@ -80,6 +80,16 @@ jobs:
         shell: bash
         run: cargo check -p fission-dynamic --features interactive_runtime --all-targets --locked
 
+      # And the CLI's `debugger` feature, which is what actually reaches that
+      # code. It is not a default either, so `--workspace` compiles none of
+      # `fission debug`: a new subcommand left the dispatcher's match
+      # non-exhaustive and every check above still passed. Twice now in one
+      # crate, and once in `fission-dynamic` -- a feature no job turns on is a
+      # feature nobody can tell is broken.
+      - name: Check optional features (debugger)
+        shell: bash
+        run: cargo check -p fission-cli --features debugger --all-targets --locked
+
       - name: sccache stats
         if: always()
         shell: bash

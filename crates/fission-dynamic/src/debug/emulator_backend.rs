@@ -118,11 +118,17 @@ impl EmulatorBackend {
         self.last_outcome.as_ref()
     }
 
-    /// Whether the program has ended.
-    fn has_exited(&self) -> bool {
+    /// Whether the machine has stopped for good.
+    ///
+    /// `LoopExit` belongs here with the two obvious ones: it is the run loop
+    /// finding that there is nothing further to execute -- the fixture's
+    /// `main` returning to a null return address, or a fatal signal. Leaving
+    /// it out let a second `continue` walk into "Failed to fetch instruction
+    /// bytes at 0x0", which is true and tells a reader nothing.
+    fn has_finished(&self) -> bool {
         matches!(
             self.last_outcome,
-            Some(RunOutcome::ProcessExited | RunOutcome::Halted)
+            Some(RunOutcome::ProcessExited | RunOutcome::Halted | RunOutcome::LoopExit)
         )
     }
 
@@ -133,10 +139,11 @@ impl EmulatorBackend {
     /// finished program printed the same address and the same instruction
     /// count forever instead of saying it was over.
     fn runnable(&mut self) -> FissionResult<&mut Emulator> {
-        if self.has_exited() {
+        if self.has_finished() {
             return Err(fission_core::err!(
                 debug,
-                "The program has exited; there is nothing left to run"
+                "The program has stopped for good ({}); there is nothing left to run",
+                self.stop_reason().unwrap_or_else(|| "exited".into())
             ));
         }
         self.emulator
@@ -181,6 +188,22 @@ impl ExecutionBackend for EmulatorBackend {
             ));
         }
         Ok(())
+    }
+
+    fn stop_reason(&self) -> Option<String> {
+        let reason = match self.last_outcome? {
+            RunOutcome::HitBreakpoint(address) => format!("breakpoint:0x{address:x}"),
+            RunOutcome::HitWatchpoint(hit) => format!("watchpoint:0x{:x}", hit.address),
+            RunOutcome::Stepped => "stepped".into(),
+            RunOutcome::ProcessExited => "exited".into(),
+            RunOutcome::Halted => "halted".into(),
+            RunOutcome::HitBudget => "instruction-budget".into(),
+            RunOutcome::Returned => "returned".into(),
+            RunOutcome::SymGate => "symbolic-gate".into(),
+            RunOutcome::LoopExit => "no-more-code".into(),
+            RunOutcome::Interrupted => "interrupted".into(),
+        };
+        Some(reason)
     }
 
     fn set_current_thread(&mut self, thread_id: u32) -> FissionResult<()> {
@@ -429,7 +452,13 @@ impl ExecutionBackend for EmulatorBackend {
         // The emulator's own answer, so a front end sees the registers the
         // machine actually has. Naming the x86-64 sixteen here reported
         // sixteen zeroes for every aarch64, ARM and MIPS image.
-        Ok(emu.register_state())
+        //
+        // The *debugger's* view: the general-purpose registers, the stack
+        // pointer and the program counter. `register_state` records every
+        // register the language defines because a TTD snapshot must restore
+        // them all, and a register dump of five hundred mostly-zero entries
+        // is not a register dump.
+        Ok(emu.debug_register_state())
     }
 
     fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
@@ -507,14 +536,13 @@ impl ExecutionBackend for EmulatorBackend {
         if let Some(emu) = &self.emulator {
             state.attached_pid = Some(EMULATED_PID);
             state.main_thread_id = Some(EMULATED_THREAD_ID);
-            state.status = match self.last_outcome {
-                // The machine ran to the end of the program; there is nothing
-                // left to step or resume, and reporting `Suspended` made a
-                // finished run look like one waiting at a breakpoint.
-                Some(RunOutcome::ProcessExited | RunOutcome::Halted) => {
-                    crate::debug::types::DebugStatus::Terminated
-                }
-                _ => crate::debug::types::DebugStatus::Suspended,
+            // The machine ran to the end of the program; there is nothing
+            // left to step or resume, and reporting `Suspended` made a
+            // finished run look like one waiting at a breakpoint.
+            state.status = if self.has_finished() {
+                crate::debug::types::DebugStatus::Terminated
+            } else {
+                crate::debug::types::DebugStatus::Suspended
             };
 
             // Add a single dummy thread

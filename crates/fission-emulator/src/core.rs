@@ -1178,6 +1178,35 @@ impl Emulator {
             }
         }
         self.snapshot_registers = names;
+        // Deliberately *not* overwriting the architecture's program-counter
+        // register with `self.pc`. The program counter lives in `self.pc` and
+        // not in the register space, so the space's own `RIP`/`PC` is stale --
+        // but a snapshot records what the machine holds and restores exactly
+        // that, and injecting a value the register space never had made a
+        // restored machine disagree with the one it was restored from. The
+        // `pc` field carries the real one. `debug_register_state` shows it,
+        // because a register *view* wants the truth rather than the artifact.
+        state
+    }
+
+    /// The registers a debugger's register view shows.
+    ///
+    /// [`Self::register_state`] records every register the language defines,
+    /// because a TTD snapshot has to restore all of them. That is around five
+    /// hundred entries on x86-64 -- the control registers, the debug
+    /// registers, the x87 status word, each condition flag on its own -- and
+    /// printing them buries the sixteen anyone asked for.
+    pub fn debug_register_state(&mut self) -> RegisterState {
+        let mut state = RegisterState::at(self.pc);
+        let mut names: Vec<&'static str> = self.arch.gp_regs.to_vec();
+        names.push(self.arch.sp_reg);
+        names.push(self.arch.pc_reg);
+        for name in names {
+            if let Ok(value) = self.read_register_u64(name) {
+                state.set(name, value);
+            }
+        }
+        state.set(self.arch.pc_reg, self.pc);
         state
     }
 

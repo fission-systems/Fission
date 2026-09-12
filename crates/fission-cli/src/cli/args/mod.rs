@@ -1243,7 +1243,7 @@ pub use debug::{
     DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs, DebugCommand,
     DebugDllBpArgs, DebugExBpArgs, DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs,
     DebugInitArgs, DebugMemBpArgs, DebugModuleArgs, DebugProtectArgs, DebugReadArgs,
-    DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
+    DebugSessionArgs, DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
     DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
 };
 

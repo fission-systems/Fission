@@ -57,6 +57,16 @@ pub trait ExecutionBackend: Send {
     /// Single step one instruction
     fn single_step(&mut self) -> FissionResult<()>;
 
+    /// Why execution last stopped, in one word, or `None` if this backend
+    /// does not know.
+    ///
+    /// A front end driving a session has to tell "stopped at your breakpoint"
+    /// from "ran out of program", and `get_state`'s three-way status cannot:
+    /// both are `Suspended`.
+    fn stop_reason(&self) -> Option<String> {
+        None
+    }
+
     /// Poll for the next debug event
     fn poll_event(&mut self, timeout_ms: u32) -> FissionResult<Option<super::types::DebugEvent>> {
         let _ = timeout_ms;

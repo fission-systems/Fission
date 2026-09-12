@@ -9,6 +9,8 @@ mod callgraph;
 mod debug;
 mod debug_bundle_extra;
 mod debug_decomp;
+#[cfg(feature = "debugger")]
+mod debug_session;
 mod disasm;
 mod function_select;
 mod functions;

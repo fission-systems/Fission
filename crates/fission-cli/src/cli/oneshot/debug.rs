@@ -116,7 +116,6 @@ fn print_hex_dump(addr: u64, data: &[u8], json: bool) {
 }
 
 pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
-    use fission_dynamic::debug::traits::ExecutionBackend;
     let emulator = args.emulator;
     let build_session = || {
         let mut builder = fission_dynamic::debug::DebugSession::new();
@@ -878,6 +877,11 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             }
             Ok(())
         }
+
+        // The one command that owns a live machine for its whole duration.
+        // Every arm around it re-attaches to a pid between invocations, which
+        // an emulated process cannot survive.
+        DebugCommand::Session(args) => super::debug_session::run_session(args, emulator),
 
         DebugCommand::Imports(args) => {
             let state = find_active_state()?;

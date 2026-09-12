@@ -107,6 +107,38 @@ pub enum DebugCommand {
     SwitchThread(DebugSwitchThreadArgs),
     /// Poll for the next debug event
     Event,
+    /// Run a list of debugger commands against one live session
+    Session(DebugSessionArgs),
+}
+
+/// One invocation, one live machine, a list of commands, structured output.
+///
+/// The subcommands above each build a session, attach to a pid, do one thing
+/// and exit -- which works because the OS keeps a native process alive between
+/// invocations. An emulated machine has nowhere to live but this process, so
+/// every one of them would get a fresh program at its entry point. This runs
+/// them against a session that lasts as long as the command does.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+#[command(
+    long_about = "Run several debugger commands against one live session.\n\nCommands use the same vocabulary as the subcommands above: `bp 0x401000`, `continue`, `regs`, `read 0x7ffe0000 --size 64`.\n\nThe emulator backend needs this: an emulated process exists only inside the command that launched it, so `debug --emulator bp` followed by `debug --emulator continue` would be two different programs.",
+    after_help = "Examples:\n  fission_cli debug --emulator session sample.exe -c 'bp 0x140001016' -c continue -c regs\n  fission_cli debug --emulator session sample.exe --script plan.txt --json\n  echo 'step\\nregs' | fission_cli debug --emulator session sample.exe --script -"
+)]
+pub struct DebugSessionArgs {
+    /// Executable to launch
+    pub path: String,
+    /// A command to run, repeatable, in order
+    #[arg(short = 'c', long = "command")]
+    pub commands: Vec<String>,
+    /// Read commands from a file, one per line (`-` for standard input).
+    /// Blank lines and `#` comments are skipped.
+    #[arg(long)]
+    pub script: Option<String>,
+    /// Carry on after a command fails instead of stopping there
+    #[arg(long)]
+    pub keep_going: bool,
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
 }
 
 #[derive(Clone, Args, Debug, PartialEq, Eq)]
