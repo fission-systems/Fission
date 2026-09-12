@@ -24,7 +24,7 @@ path = "src/lib.rs"
 # identical: `coreutils/[` 155 functions 2.77s -> 1.66s (-40%),
 # `crazyflie/cf2` 2,838 functions 56.7s -> 37.6s (-34%).
 default = ["allocator-mimalloc"]
-debugger = ["dep:fission-dynamic"]
+debugger = ["dep:fission-dynamic", "fission-script/emulator"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]
 

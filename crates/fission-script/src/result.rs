@@ -5,7 +5,7 @@ use serde::Serialize;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScriptRunStatus {
     Ok,

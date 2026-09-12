@@ -10,7 +10,7 @@ mod limits;
 mod result;
 mod sandbox;
 
-pub use engine::{check_script, run_script};
+pub use engine::{ScriptOptions, check_script, run_script, run_script_with};
 pub use error::ScriptError;
 pub use limits::ScriptLimits;
 pub use result::{

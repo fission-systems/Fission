@@ -1140,6 +1140,7 @@ version = "0.2.3"
 dependencies = [
  "fission-core",
  "fission-decompiler",
+ "fission-dynamic",
  "fission-loader",
  "fission-static",
  "rhai",

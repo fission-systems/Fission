@@ -29,6 +29,8 @@ pub fn execute_script(invocation: ScriptInvocation) -> Result<()> {
             binary,
             script,
             json,
+            emulator,
+            timeout_ms,
         } => {
             anyhow::ensure!(
                 binary.exists(),
@@ -61,11 +63,23 @@ pub fn execute_script(invocation: ScriptInvocation) -> Result<()> {
             let source = fs::read_to_string(&script)
                 .with_context(|| format!("failed to read script `{}`", script.display()))?;
 
-            let result = fission_script::run_script(
+            // A script that drives a machine runs the program, which takes
+            // much longer than reading its inventory -- the default budget is
+            // half a second and an emulated run blows through it.
+            let mut limits = ScriptLimits::default();
+            if let Some(ms) = timeout_ms {
+                limits.max_runtime_ms = ms;
+            } else if emulator {
+                limits.max_runtime_ms = 30_000;
+                limits.max_operations = 100_000_000;
+            }
+
+            let result = fission_script::run_script_with(
                 &loaded,
                 &source,
                 &script.display().to_string(),
-                ScriptLimits::default(),
+                limits,
+                fission_script::ScriptOptions { machine: emulator },
             );
 
             if json {

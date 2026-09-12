@@ -67,6 +67,11 @@ pub enum ScriptCmd {
         binary: PathBuf,
         script: PathBuf,
         json: bool,
+        /// Launch the binary under the emulator and give the script a
+        /// `machine` to drive.
+        emulator: bool,
+        /// Wall-clock budget in milliseconds.
+        timeout_ms: Option<u64>,
     },
 }
 
@@ -874,6 +879,21 @@ struct ScriptRunArgs {
     #[arg(long, value_name = "FILE")]
     script: PathBuf,
 
+    /// Launch the binary under the emulator and give the script a `machine`
+    /// to drive: breakpoints, stepping, watchpoints, registers, memory.
+    ///
+    /// This runs the program's instructions, emulated. Without it a script
+    /// only reads the file.
+    #[arg(long)]
+    emulator: bool,
+
+    /// Wall-clock budget in milliseconds.
+    ///
+    /// The default suits reading a binary's inventory. Running one takes
+    /// longer, so `--emulator` raises it unless this says otherwise.
+    #[arg(long, value_name = "MS")]
+    timeout_ms: Option<u64>,
+
     #[arg(short, long)]
     json: bool,
 
@@ -969,6 +989,8 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                         binary: r.binary,
                         script: r.script,
                         json: r.json,
+                        emulator: r.emulator,
+                        timeout_ms: r.timeout_ms,
                     },
                 },
             };
@@ -1408,6 +1430,7 @@ mod tests {
                         binary,
                         script,
                         json,
+                        ..
                     } => {
                         assert_eq!(binary, PathBuf::from("app.exe"));
                         assert_eq!(script, PathBuf::from("scan.rhai"));

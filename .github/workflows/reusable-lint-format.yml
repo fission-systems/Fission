@@ -90,6 +90,13 @@ jobs:
         shell: bash
         run: cargo check -p fission-cli --features debugger --all-targets --locked
 
+      # `fission-script`'s `emulator` feature, which is what lets a script
+      # drive a live machine. Reached through the CLI's `debugger` feature
+      # above, but checked on its own so the crate keeps building alone.
+      - name: Check optional features (script emulator)
+        shell: bash
+        run: cargo check -p fission-script --features emulator --all-targets --locked
+
       - name: sccache stats
         if: always()
         shell: bash

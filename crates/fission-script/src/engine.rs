@@ -21,12 +21,41 @@ pub fn check_script(source: &str) -> Result<(), ScriptError> {
     Ok(())
 }
 
+/// What a run is allowed to reach beyond the binary's inventory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ScriptOptions {
+    /// Launch the binary under the emulator and hand the script a `machine`.
+    ///
+    /// Off by default: launching costs a real program load, and a script that
+    /// only reads the inventory should not pay for an emulator it never
+    /// touches. It is also the difference between a script that inspects a
+    /// file and one that runs it.
+    pub machine: bool,
+}
+
 pub fn run_script(
     binary: &LoadedBinary,
     script_source: &str,
     script_path_display: &str,
     limits: ScriptLimits,
 ) -> ScriptRunResult {
+    run_script_with(
+        binary,
+        script_source,
+        script_path_display,
+        limits,
+        ScriptOptions::default(),
+    )
+}
+
+pub fn run_script_with(
+    binary: &LoadedBinary,
+    script_source: &str,
+    script_path_display: &str,
+    limits: ScriptLimits,
+    options: ScriptOptions,
+) -> ScriptRunResult {
+    let _ = options;
     let meta = host::script_meta(script_path_display.to_string());
 
     let findings = Arc::new(Mutex::new(Vec::new()));
@@ -70,6 +99,8 @@ pub fn run_script(
         };
     }
 
+    host::register_helpers(&mut engine);
+
     let bin = Arc::new(binary.clone());
     if let Err(e) = host::register_binary(&mut engine) {
         return ScriptRunResult {
@@ -95,9 +126,28 @@ pub fn run_script(
     let host_bin = BinaryHost(bin);
     let deadline = Duration::from_millis(limits.max_runtime_ms.max(1));
 
+    // A live machine, if the caller asked for one. Launching costs a real
+    // program load, so it happens only when requested -- a script that reads
+    // the inventory should not pay for an emulator it never touches.
+    #[cfg(feature = "emulator")]
+    let machine = if options.machine {
+        match crate::api::machine::MachineHost::launch(&binary.path) {
+            Ok(machine) => Some(machine),
+            Err(message) => return ScriptRunResult::error_compile(message, &limits),
+        }
+    } else {
+        None
+    };
+    #[cfg(feature = "emulator")]
+    crate::api::machine::register(&mut engine);
+
     let handle = thread::spawn(move || {
         let mut scope = rhai::Scope::new();
         scope.push("binary", host_bin);
+        #[cfg(feature = "emulator")]
+        if let Some(machine) = machine {
+            scope.push("machine", machine);
+        }
         engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
     });
 
