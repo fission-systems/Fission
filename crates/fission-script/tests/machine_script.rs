@@ -161,3 +161,53 @@ fn emit_keeps_what_it_was_given() {
     assert_eq!(data["functions"], serde_json::json!(12));
     assert_eq!(data["note"], serde_json::json!("x"));
 }
+
+/// Stopping somewhere and not being able to say what is there answers half
+/// the question. The bytes come from the machine's memory, so this reads code
+/// the program wrote or unpacked at run time, which a static listing of the
+/// file cannot cover.
+#[test]
+fn a_script_can_read_the_code_it_stopped_in() {
+    let result = run(r#"
+        machine.step();
+        let here = machine.disasm(4);
+        let explicit = machine.disasm(machine.pc(), 1);
+        emit(#{
+            kind: "listing",
+            count: here.len(),
+            first: here[0].text,
+            first_at: here[0].address,
+            pc: machine.pc(),
+            explicit: explicit[0].text,
+            second_at: here[1].address,
+            first_len: here[0].length,
+        });
+        "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+
+    let d = result.findings[0].data.as_ref().expect("data");
+    assert_eq!(d["count"], serde_json::json!(4));
+
+    let first = d["first"].as_str().expect("instruction text");
+    assert!(!first.is_empty(), "an instruction disassembled to nothing");
+
+    // The listing starts at the program counter.
+    assert_eq!(
+        d["first_at"], d["pc"],
+        "disasm(n) did not start where the machine is"
+    );
+    // And `disasm(n)` and `disasm(pc, n)` are the same place.
+    assert_eq!(d["explicit"], d["first"]);
+    // Consecutive: the second instruction begins where the first ends.
+    assert_eq!(
+        d["second_at"].as_i64().expect("second address"),
+        d["first_at"].as_i64().expect("first address")
+            + d["first_len"].as_i64().expect("first length"),
+        "the listing is not consecutive"
+    );
+}

@@ -71,8 +71,8 @@ fn collect_commands(args: &DebugSessionArgs) -> Result<Vec<String>> {
             commands.push(line.to_string());
         }
     }
-    if commands.is_empty() {
-        bail!("no commands: pass at least one -c/--command, or --script");
+    if commands.is_empty() && args.rhai.is_none() {
+        bail!("no commands: pass at least one -c/--command, --script, or --rhai");
     }
     Ok(commands)
 }
@@ -403,13 +403,34 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
         }
     }
 
+    // A script, on the machine this session has been driving: the command
+    // list has no loops and no conditions, and handing the script its own
+    // freshly launched copy of the program would throw away everything the
+    // commands above just set up.
+    let mut script_result = None;
+    if let Some(path) = &args.rhai {
+        if failed && !args.keep_going {
+            // The session already stopped; running a script on a machine in
+            // an unknown state would report something nobody asked for.
+        } else {
+            match run_rhai(&mut session, &args.path, path) {
+                Ok(value) => script_result = Some(value),
+                Err(error) => {
+                    failed = true;
+                    script_result =
+                        Some(json!({ "status": "error", "error": format!("{error:#}") }));
+                }
+            }
+        }
+    }
+
     let state = session.debugger.get_state();
     let final_pc = session
         .debugger
         .fetch_registers(thread_id)
         .ok()
         .map(|r| format!("0x{:x}", r.pc));
-    let report = json!({
+    let mut report = json!({
         "binary": args.path,
         "pid": pid,
         "backend": if use_emulator { "emulator" } else { "native" },
@@ -420,6 +441,10 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
             "stop": session.debugger.stop_reason(),
         },
     });
+
+    if let (Some(script), Some(map)) = (script_result, report.as_object_mut()) {
+        map.insert("script".into(), script);
+    }
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -466,6 +491,30 @@ fn print_human(report: &Value) {
             println!("      · {}", compact(event));
         }
     }
+    if let Some(script) = report.get("script") {
+        println!("script: {}", script["status"].as_str().unwrap_or("error"));
+        for finding in script["findings"].as_array().into_iter().flatten() {
+            let kind = finding["kind"].as_str().unwrap_or("finding");
+            let address = finding["address"].as_str().unwrap_or("");
+            let message = finding["message"].as_str().unwrap_or("");
+            let data = finding
+                .get("data")
+                .filter(|d| !d.is_null())
+                .map(|d| d.to_string())
+                .unwrap_or_default();
+            println!("  {kind:<16} {address:<18} {message} {data}");
+        }
+        for d in script["diagnostics"].as_array().into_iter().flatten() {
+            println!(
+                "  [{}] {}",
+                d["severity"].as_str().unwrap_or("error"),
+                d["message"].as_str().unwrap_or("")
+            );
+        }
+        if let Some(error) = script.get("error").and_then(|e| e.as_str()) {
+            println!("  FAILED  {error}");
+        }
+    }
     println!(
         "final: {} at {}",
         report["final"]["status"].as_str().unwrap_or("?"),
@@ -477,5 +526,56 @@ fn compact(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+/// Hand the session's machine to a Rhai script and fold its findings in.
+///
+/// The backend is taken out of the session for the duration: the script owns
+/// it while it runs, and gives it back so the report's closing state is the
+/// real one.
+fn run_rhai(
+    session: &mut fission_dynamic::debug::DebugSession,
+    binary_path: &str,
+    script_path: &str,
+) -> Result<Value> {
+    let source = std::fs::read_to_string(script_path)
+        .with_context(|| format!("read the script at {script_path}"))?;
+    let binary = fission_loader::loader::LoadedBinary::from_file(binary_path)
+        .with_context(|| format!("re-read {binary_path} for the script's view of it"))?;
+
+    let placeholder: Box<dyn ExecutionBackend> =
+        Box::new(fission_dynamic::debug::emulator_backend::EmulatorBackend::new());
+    let backend = std::mem::replace(&mut session.debugger, placeholder);
+    let machine = fission_script::MachineHost::adopt(backend, &binary);
+
+    let limits = fission_script::ScriptLimits {
+        max_runtime_ms: 30_000,
+        max_operations: 100_000_000,
+        ..fission_script::ScriptLimits::default()
+    };
+    let result = fission_script::run_script_on_machine(
+        &binary,
+        &source,
+        script_path,
+        limits,
+        machine.clone(),
+    );
+
+    if let Some(backend) = machine.into_backend() {
+        session.debugger = backend;
+    }
+
+    let value = serde_json::to_value(&result).context("serialise the script result")?;
+    match result.status {
+        fission_script::ScriptRunStatus::Ok => Ok(value),
+        other => Err(anyhow::anyhow!(
+            "script finished with status {other:?}: {}",
+            result
+                .diagnostics
+                .first()
+                .map(|d| d.message.as_str())
+                .unwrap_or("no diagnostic")
+        )),
     }
 }

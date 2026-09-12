@@ -133,6 +133,14 @@ pub struct DebugSessionArgs {
     /// Blank lines and `#` comments are skipped.
     #[arg(long)]
     pub script: Option<String>,
+    /// Run a Rhai script against the same machine, after any commands above.
+    ///
+    /// The command list has no loops and no conditions, which is the whole
+    /// difference: "break on every import and report the ones reached" is a
+    /// script, not a list. It runs on the machine this session already
+    /// launched rather than starting a second copy of the program.
+    #[arg(long, value_name = "FILE")]
+    pub rhai: Option<String>,
     /// Carry on after a command fails instead of stopping there
     #[arg(long)]
     pub keep_going: bool,

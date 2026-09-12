@@ -55,6 +55,49 @@ pub fn run_script_with(
     limits: ScriptLimits,
     options: ScriptOptions,
 ) -> ScriptRunResult {
+    run_script_inner(
+        binary,
+        script_source,
+        script_path_display,
+        limits,
+        options,
+        None,
+    )
+}
+
+/// Run a script against a machine the caller already has.
+///
+/// The CLI's `debug session` owns a live machine and runs a fixed command
+/// list against it; this lets the same session hand that machine to a script
+/// instead of launching a second copy of the program, so "set these
+/// breakpoints, then loop" is one session rather than two.
+#[cfg(feature = "emulator")]
+pub fn run_script_on_machine(
+    binary: &LoadedBinary,
+    script_source: &str,
+    script_path_display: &str,
+    limits: ScriptLimits,
+    machine: crate::api::machine::MachineHost,
+) -> ScriptRunResult {
+    run_script_inner(
+        binary,
+        script_source,
+        script_path_display,
+        limits,
+        ScriptOptions { machine: true },
+        Some(machine),
+    )
+}
+
+fn run_script_inner(
+    binary: &LoadedBinary,
+    script_source: &str,
+    script_path_display: &str,
+    limits: ScriptLimits,
+    options: ScriptOptions,
+    #[cfg(feature = "emulator")] existing: Option<crate::api::machine::MachineHost>,
+    #[cfg(not(feature = "emulator"))] _existing: Option<()>,
+) -> ScriptRunResult {
     let _ = options;
     let meta = host::script_meta(script_path_display.to_string());
 
@@ -130,13 +173,13 @@ pub fn run_script_with(
     // program load, so it happens only when requested -- a script that reads
     // the inventory should not pay for an emulator it never touches.
     #[cfg(feature = "emulator")]
-    let machine = if options.machine {
-        match crate::api::machine::MachineHost::launch(&binary.path) {
+    let machine = match (existing, options.machine) {
+        (Some(machine), _) => Some(machine),
+        (None, true) => match crate::api::machine::MachineHost::launch(&binary.path, binary) {
             Ok(machine) => Some(machine),
             Err(message) => return ScriptRunResult::error_compile(message, &limits),
-        }
-    } else {
-        None
+        },
+        (None, false) => None,
     };
     #[cfg(feature = "emulator")]
     crate::api::machine::register(&mut engine);

@@ -164,3 +164,56 @@ fn a_script_is_the_same_vocabulary() {
     );
     let _ = std::fs::remove_file(&script);
 }
+
+/// A command list has no loops and no conditions; a script does. Both drive
+/// the same machine, in one session, so the commands can set up what the
+/// script then works from.
+#[test]
+fn a_script_continues_from_where_the_commands_left_the_machine() {
+    let dir = std::env::temp_dir().join("fission-session-test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let script = dir.join("after.rhai");
+    std::fs::write(
+        &script,
+        r#"
+        emit(#{ kind: "resumed_at", address: machine.pc() });
+        for i in machine.disasm(3) {
+            emit(#{ kind: "insn", address: i.address, message: i.text });
+        }
+        "#,
+    )
+    .expect("write script");
+
+    let (ok, report) = run_session(&[
+        "-c",
+        "bp 0x140001016",
+        "-c",
+        "continue",
+        "--rhai",
+        script.to_str().expect("path"),
+    ]);
+    assert!(ok, "{report:#}");
+
+    let script_result = &report["script"];
+    assert_eq!(script_result["status"], "ok", "{script_result:#}");
+    let findings = script_result["findings"].as_array().expect("findings");
+
+    // The script inherited the machine: it starts where the breakpoint left
+    // it, not at the entry point of a freshly launched second copy.
+    assert_eq!(findings[0]["kind"], "resumed_at");
+    assert_eq!(
+        findings[0]["address"], "0x140001016",
+        "the script got a different machine than the commands drove"
+    );
+
+    // And it can say what is there, which is the other half of stopping.
+    assert_eq!(findings[1]["kind"], "insn");
+    assert_eq!(findings[1]["address"], "0x140001016");
+    assert!(
+        findings[1]["message"]
+            .as_str()
+            .is_some_and(|t| !t.is_empty()),
+        "the instruction at the breakpoint disassembled to nothing: {findings:#?}"
+    );
+    assert_eq!(findings.len(), 4, "{findings:#?}");
+}

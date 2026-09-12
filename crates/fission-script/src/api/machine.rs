@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use fission_dynamic::debug::emulator_backend::EmulatorBackend;
 use fission_dynamic::debug::traits::ExecutionBackend;
 use fission_dynamic::debug::types::{DebugEvent, MemoryBpKind};
+use fission_dynamic::decode::InstructionDecoder;
 use rhai::{Array, Dynamic, EvalAltResult, Map};
 
 /// The machine, shared with the Rhai engine.
@@ -35,7 +36,15 @@ pub struct MachineHost(Arc<Mutex<Session>>);
 /// that event away. Everything is pumped into here instead, and each accessor
 /// takes only what it is about and leaves the rest.
 struct Session {
-    backend: EmulatorBackend,
+    /// Any backend, not the emulator specifically: every method below is on
+    /// the trait, so the same binding drives a native target the day one is
+    /// worth driving from a script -- and so a caller that already owns a
+    /// session can hand this one *its* machine rather than launching a second.
+    backend: Box<dyn ExecutionBackend>,
+    /// Reads the bytes the machine is about to execute. `None` when the
+    /// language has no compiled SLEIGH frontend, which `disasm` then says
+    /// rather than returning an empty listing.
+    decoder: Option<Box<dyn InstructionDecoder>>,
     pending: Vec<DebugEvent>,
 }
 
@@ -61,27 +70,56 @@ fn fail(message: impl std::fmt::Display) -> Box<EvalAltResult> {
 
 impl MachineHost {
     /// Launch `path` under the emulator.
-    pub fn launch(path: &str) -> Result<Self, String> {
+    pub fn launch(
+        path: &str,
+        binary: &fission_loader::loader::LoadedBinary,
+    ) -> Result<Self, String> {
         let mut backend = EmulatorBackend::new();
         backend
             .launch(path, &[])
             .map_err(|e| format!("could not launch {path}: {e}"))?;
-        Ok(Self(Arc::new(Mutex::new(Session {
+        Ok(Self::adopt(Box::new(backend), binary))
+    }
+
+    /// Wrap a machine somebody else launched.
+    pub fn adopt(
+        backend: Box<dyn ExecutionBackend>,
+        binary: &fission_loader::loader::LoadedBinary,
+    ) -> Self {
+        let decoder = binary.load_spec().and_then(|spec| {
+            fission_dynamic::decode::SleighDecoder::from_load_spec(spec)
+                .ok()
+                .map(|d| Box::new(d) as Box<dyn InstructionDecoder>)
+        });
+        Self(Arc::new(Mutex::new(Session {
             backend,
+            decoder,
             pending: Vec::new(),
-        }))))
+        })))
+    }
+
+    /// Take the machine back out.
+    ///
+    /// `None` if the script kept a reference alive past its own run, which
+    /// cannot happen for a script that has finished -- the engine and its
+    /// scope are dropped with the thread.
+    pub fn into_backend(self) -> Option<Box<dyn ExecutionBackend>> {
+        Arc::into_inner(self.0)?
+            .into_inner()
+            .ok()
+            .map(|session| session.backend)
     }
 
     fn with<T>(
         &self,
         what: &str,
-        f: impl FnOnce(&mut EmulatorBackend) -> ScriptResult<T>,
+        f: impl FnOnce(&mut dyn ExecutionBackend) -> ScriptResult<T>,
     ) -> ScriptResult<T> {
         let mut guard = self
             .0
             .lock()
             .map_err(|_| fail(format!("the machine is poisoned; cannot {what}")))?;
-        let out = f(&mut guard.backend);
+        let out = f(guard.backend.as_mut());
         // Whatever running produced, kept for whoever asks.
         guard.pump();
         out
@@ -266,6 +304,62 @@ impl MachineHost {
         })
     }
 
+    /// The instructions at `address`: what the machine is about to run.
+    ///
+    /// A debugger that can stop somewhere and not say what is there answers
+    /// half the question. The bytes come from the machine's own memory, so
+    /// this reads code the program wrote or unpacked at run time, which is
+    /// the case a static listing of the file cannot cover.
+    pub fn disasm(&mut self, address: i64, count: i64) -> ScriptResult<Array> {
+        let count = count.clamp(1, 4096) as usize;
+        // Long enough for `count` instructions of any length this decodes.
+        let window = (count * 16).min(64 * 1024);
+        let bytes = self.read_bytes(address as u64, window)?;
+        self.with_session("disassemble", |s| {
+            let Some(decoder) = s.decoder.as_ref() else {
+                return Err(fail(
+                    "no disassembler for this binary's language, so there is nothing to show",
+                ));
+            };
+            let decoded = decoder
+                .decode_window(&bytes, address as u64, count)
+                .map_err(|e| fail(format!("could not decode at 0x{address:x}: {e}")))?;
+            Ok(decoded
+                .iter()
+                .map(|insn| {
+                    let mut m = Map::new();
+                    m.insert("address".into(), Dynamic::from(insn.address as i64));
+                    m.insert("length".into(), Dynamic::from(insn.length as i64));
+                    m.insert("text".into(), Dynamic::from(insn.text()));
+                    m.insert("mnemonic".into(), Dynamic::from(insn.mnemonic.clone()));
+                    m.insert("is_call".into(), Dynamic::from(insn.is_call));
+                    m.insert("is_return".into(), Dynamic::from(insn.is_return));
+                    m.insert("is_branch".into(), Dynamic::from(insn.is_branch));
+                    m.insert(
+                        "target".into(),
+                        match insn.branch_target {
+                            Some(t) => Dynamic::from(t as i64),
+                            None => Dynamic::UNIT,
+                        },
+                    );
+                    Dynamic::from_map(m)
+                })
+                .collect())
+        })?
+    }
+
+    /// The instructions at the program counter.
+    pub fn disasm_here(&mut self, count: i64) -> ScriptResult<Array> {
+        let pc = self.pc()?;
+        self.disasm(pc, count)
+    }
+
+    fn read_bytes(&mut self, address: u64, size: usize) -> ScriptResult<Vec<u8>> {
+        self.with("read memory", |b| {
+            b.read_memory(address, size).map_err(fail)
+        })
+    }
+
     /// Everything that has happened since this was last called.
     pub fn events(&mut self) -> ScriptResult<Array> {
         self.with_session("read events", |s| {
@@ -377,6 +471,8 @@ pub fn register(engine: &mut rhai::Engine) {
         .register_fn("read", MachineHost::read)
         .register_fn("read_string", MachineHost::read_string)
         .register_fn("write", MachineHost::write)
+        .register_fn("disasm", MachineHost::disasm)
+        .register_fn("disasm", MachineHost::disasm_here)
         .register_fn("events", MachineHost::events)
         .register_fn("output", MachineHost::output);
 }

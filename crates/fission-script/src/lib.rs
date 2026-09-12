@@ -2,7 +2,7 @@
 
 //! Rust-native embedded scripting over binary inventory (read-only).
 
-mod api;
+pub mod api;
 mod engine;
 mod error;
 mod host;
@@ -10,6 +10,10 @@ mod limits;
 mod result;
 mod sandbox;
 
+#[cfg(feature = "emulator")]
+pub use api::machine::MachineHost;
+#[cfg(feature = "emulator")]
+pub use engine::run_script_on_machine;
 pub use engine::{ScriptOptions, check_script, run_script, run_script_with};
 pub use error::ScriptError;
 pub use limits::ScriptLimits;
