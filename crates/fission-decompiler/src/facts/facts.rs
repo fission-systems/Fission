@@ -282,6 +282,46 @@ fn build_nir_call_prototype_summaries(
     binary: &LoadedBinary,
 ) -> HashMap<String, NirCallPrototypeSummary> {
     let mut summaries = build_nir_import_call_prototype_summaries(call_target_refs);
+
+    // Signatures somebody chose, first and unconditionally. A caller reads
+    // these to declare and type its calls, so without them a typed callee is
+    // typed only inside itself: the caller still printed
+    // `extern unsigned long long list_sum(...)` while the function above it
+    // read `int list_sum(const Node *head)`.
+    //
+    // `insert` rather than `entry().or_insert`: this is the one source that
+    // outranks the rest, and the imports pass above has already filled in
+    // whatever a name happens to collide with in a signature database.
+    for (address, signature) in &binary.user_signatures {
+        let Some(function) = binary.function_at_exact(*address) else {
+            continue;
+        };
+        if function.name.is_empty() {
+            continue;
+        }
+        let arity = signature.param_types.len();
+        summaries.insert(
+            function.name.clone(),
+            NirCallPrototypeSummary {
+                min_arity: arity,
+                max_arity: arity,
+                // Exact, because a person wrote it down. Inference locks an
+                // arity only when it can prove one.
+                locked_exact_arity: Some(arity),
+                param_pointer_pointees: vec![None; arity],
+                param_surface_type_names: signature
+                    .param_types
+                    .iter()
+                    .map(|name| (!name.is_empty()).then(|| name.clone()))
+                    .collect(),
+                returns_void: signature
+                    .return_type
+                    .as_deref()
+                    .is_some_and(|name| name.trim().eq_ignore_ascii_case("void")),
+            },
+        );
+    }
+
     for debug in binary.dwarf_functions.values() {
         if debug.name.is_empty() {
             continue;

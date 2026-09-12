@@ -159,7 +159,11 @@ fn render_hir_function_with_profile(
         rendered.push_str(&format!("typedef {definition} {name};\n"));
     }
     for (target, return_ty) in &called_externs {
-        rendered.push_str(&render_called_extern(target, return_ty));
+        rendered.push_str(&render_called_extern(
+            target,
+            return_ty,
+            options.declared_signatures.get(target.as_str()),
+        ));
     }
     rendered.push('\n');
     rendered.push_str(&print_hir_function_with_profile(
@@ -549,7 +553,16 @@ fn merge_opaque_pcodeop_return_type(existing: &NirType, next: &NirType) -> NirTy
 /// the arity is zero and every call with arguments is an error rather than a
 /// warning. On a mingw-built PE that single spelling produced 68 of the unit's
 /// 170 errors -- 28 from `__fission_branchind` alone.
-fn render_called_extern(target: &str, return_ty: &NirType) -> String {
+///
+/// `declared` is the exception, and the only one: a signature somebody wrote
+/// down. The reason the list is left open is that call sites are the only
+/// evidence of arity and they disagree -- which stops being true the moment
+/// a person says what the arity is. Without this, a typed callee was typed
+/// only inside itself and its caller still declared it `(...)`.
+fn render_called_extern(target: &str, return_ty: &NirType, declared: Option<&String>) -> String {
+    if let Some(declaration) = declared {
+        return format!("extern {declaration};\n");
+    }
     let return_type = opaque_pcodeop_return_type_name(return_ty);
     format!("extern {return_type} {target}(...);\n")
 }

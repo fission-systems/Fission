@@ -233,3 +233,99 @@ fn an_unreadable_signature_is_refused() {
         "a refused signature was saved anyway:\n{show}"
     );
 }
+
+/// A chosen signature reaches the *callers* too, which is where most of the
+/// leverage is.
+///
+/// A called function this unit does not define is declared `extern T f(...)`,
+/// with an open parameter list, because the call sites are the only evidence
+/// of arity and they disagree. A signature somebody wrote down is the one
+/// case where that reasoning does not apply -- and until it was wired
+/// through, a typed callee was typed only inside itself.
+#[test]
+fn a_chosen_signature_reaches_the_callers() {
+    // A fixture with calls in it: the PE one above holds a single function,
+    // so nothing in it can declare anything.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let binary = dir.path().join("static.elf");
+    std::fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../fission-emulator/testdata/x64_static_printf_malloc.elf"
+        ),
+        &binary,
+    )
+    .expect("copy fixture");
+    let path = binary.to_str().expect("path");
+
+    let addresses = {
+        let (ok, listing) = run(&["list", path, "--json"]);
+        assert!(ok, "{listing}");
+        let start = listing.find(['[', '{']).expect("json");
+        let listed: serde_json::Value = serde_json::Deserializer::from_str(&listing[start..])
+            .into_iter()
+            .next()
+            .expect("a document")
+            .expect("parse");
+        let functions = listed
+            .get("functions")
+            .and_then(|f| f.as_array())
+            .or_else(|| listed.as_array())
+            .expect("a function list")
+            .clone();
+        functions
+            .iter()
+            .filter_map(|f| Some(f["address"].as_str()?.to_string()))
+            .collect::<Vec<_>>()
+    };
+    assert!(addresses.len() > 5, "too few functions to find a call");
+
+    // Find a real caller/callee pair rather than guessing one: decompile each
+    // function and look for an `extern` it emits for somebody else.
+    let mut found = None;
+    for caller in &addresses {
+        let (ok, text) = run(&["decomp", path, "--addr", caller]);
+        if !ok {
+            continue;
+        }
+        for line in text.lines() {
+            let Some(rest) = line.trim().strip_prefix("extern ") else {
+                continue;
+            };
+            let Some(open) = rest.find('(') else { continue };
+            let name = rest[..open].rsplit([' ', '*']).next().unwrap_or("").trim();
+            // Only a function this binary defines can be given a signature.
+            if let Some(callee) = addresses.iter().find(|a| {
+                name == format!("FUN_{a}") || name == format!("sub_{}", a.trim_start_matches("0x"))
+            }) {
+                found = Some((caller.clone(), callee.clone(), name.to_string()));
+                break;
+            }
+        }
+        if found.is_some() {
+            break;
+        }
+    }
+    let Some((caller, callee, _)) = found else {
+        // Nothing in this fixture calls a locally defined function through an
+        // `extern`; there is no pair to check rather than a failure to report.
+        eprintln!("skipped: no caller/callee pair in the fixture");
+        return;
+    };
+
+    let (ok, out) = run(&["db", path, "name", &callee, "chosen_callee"]);
+    assert!(ok, "{out}");
+    let (ok, out) = run(&["db", path, "sig", &callee, "int (const char *what)"]);
+    assert!(ok, "{out}");
+
+    let (ok, text) = run(&["decomp", path, "--addr", &caller]);
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("extern int chosen_callee(const char *what);"),
+        "the caller did not declare the callee the way it was written:\n{}",
+        text.lines()
+            .filter(|l| l.contains("chosen_callee"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}

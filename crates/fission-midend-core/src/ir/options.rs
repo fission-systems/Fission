@@ -88,6 +88,16 @@ pub struct NirRenderOptions {
     /// Relocation use-site address → referenced symbol name.
     #[serde(default)]
     pub relocation_names: HashMap<u64, String>,
+    /// Function name → the declaration somebody wrote for it, already
+    /// rendered as C: `int list_sum(const Node *head)`.
+    ///
+    /// A called function this unit does not define is declared `extern T
+    /// f(...)`, with an open parameter list, because the call sites are the
+    /// only evidence of arity and they disagree often enough not to be
+    /// trusted. A signature a person wrote down is the one case where that
+    /// reasoning does not apply, so it is carried here and used verbatim.
+    #[serde(default)]
+    pub declared_signatures: HashMap<String, String>,
     /// Calling convention used to identify parameter registers.
     /// Auto-detected from binary format in `from_loaded_binary`; can be overridden.
     #[serde(default)]
@@ -507,6 +517,45 @@ impl NirRenderOptions {
                 .or_insert_with(|| format!("\"{}\"", value.escape_default()));
         }
 
+        // Declarations for the signatures somebody chose, keyed the way a
+        // call site names its target.
+        let mut declared_signatures: HashMap<String, String> = HashMap::new();
+        for (address, signature) in &inner.user_signatures {
+            let Some(function) = inner.functions.iter().find(|f| f.address == *address) else {
+                continue;
+            };
+            if function.name.is_empty() {
+                continue;
+            }
+            let params = if signature.param_types.is_empty() {
+                "void".to_string()
+            } else {
+                signature
+                    .param_types
+                    .iter()
+                    .enumerate()
+                    .map(|(index, type_name)| {
+                        match signature.param_names.get(index).filter(|n| !n.is_empty()) {
+                            Some(name) if type_name.ends_with('*') => {
+                                format!("{type_name}{name}")
+                            }
+                            Some(name) => format!("{type_name} {name}"),
+                            None => type_name.clone(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let returns = signature.return_type.as_deref().unwrap_or("void");
+            declared_signatures.insert(
+                sanitize_c_identifier(&function.name),
+                format!(
+                    "{returns} {}({params})",
+                    sanitize_c_identifier(&function.name)
+                ),
+            );
+        }
+
         // Detect calling convention from the selected SLEIGH language first, then format.
         let fmt_upper = binary.format.to_ascii_uppercase();
         let lang_upper = binary
@@ -570,6 +619,7 @@ impl NirRenderOptions {
             global_names,
             global_sizes: inner.global_symbol_sizes.clone(),
             relocation_names: inner.relocation_symbols.clone(),
+            declared_signatures,
             calling_convention,
             userops: HashMap::new(),
             cspec_param_offsets: None,

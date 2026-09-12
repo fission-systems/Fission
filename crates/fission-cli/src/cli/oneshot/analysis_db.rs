@@ -18,8 +18,15 @@ use fission_loader::loader::LoadedBinary;
 use fission_project::Project;
 
 pub fn run(args: DbArgs) -> Result<()> {
-    let binary = LoadedBinary::from_file(&args.binary)
+    let mut binary = LoadedBinary::from_file(&args.binary)
         .with_context(|| format!("failed to read binary at {}", args.binary.display()))?;
+    // The same discovery every other command runs. Without it `db` sees only
+    // the functions the container's symbol table names, and refuses to name
+    // one that `list` had just printed -- which is how this was found.
+    let _ = fission_static::analysis::discover_functions_with_runtime(
+        &mut binary,
+        fission_static::analysis::FunctionDiscoveryProfile::Balanced,
+    );
     let path = Project::default_path(&args.binary);
 
     let mut project = match Project::read(&path).map_err(|e| anyhow::anyhow!("{e}"))? {
