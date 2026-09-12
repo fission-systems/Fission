@@ -63,19 +63,30 @@ jobs:
           fi
           cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
 
-      # Features that are not defaults are compiled by nothing above, and
-      # `--workspace` runs none of their tests. Both halves of that went wrong
-      # repeatedly: `fission-dynamic`'s debug layer had stopped compiling
-      # altogether (`emulator_backend.rs` called a three-argument
-      # `Emulator::new` and read a field renamed long before), a new `debug`
-      # subcommand left the CLI dispatcher's match non-exhaustive, and
-      # `app/snapshot.rs`'s test module was missing a loader field -- each time
-      # every check passed, because nothing built it.
+      # Every build configuration this workspace has, compiled.
       #
-      # These *run* the tests rather than checking that they compile. A check
-      # catches "does not build"; it catches nothing about "does not work",
-      # and these suites are the only coverage the debugger, the session and
-      # the machine scripting have.
+      # A feature that is not a default is compiled by nothing above:
+      # `--workspace` uses default features, so `interactive_runtime`,
+      # `emulator`, `softfloat` and the allocator choices were built by no job
+      # at all. Five defects hid in exactly that gap -- `fission-dynamic`'s
+      # debug layer had stopped compiling, a new `debug` subcommand left the
+      # CLI dispatcher's match non-exhaustive, `app/snapshot.rs`'s tests were
+      # missing a loader field, a Linux-only `use` kept main red for ten
+      # commits, and the Win32 debugger backend had 269 errors -- and each was
+      # found by accident because nothing looked.
+      #
+      # The list of configurations lives in the script, not here, so adding a
+      # feature and forgetting to cover it is one edit rather than two. The
+      # script also runs on a developer's machine, where `--all` adds the
+      # Windows cross build and a Linux container.
+      - name: Compile surface (every feature combination)
+        shell: bash
+        run: scripts/audit/compile_surface.sh
+
+      # And running the tests those configurations hold. A check catches
+      # "does not build"; it catches nothing about "does not work", and these
+      # suites are the only coverage the debugger, the session and the machine
+      # scripting have.
       - name: Test optional features (interactive_runtime)
         shell: bash
         run: cargo test -p fission-dynamic --features interactive_runtime --locked
@@ -83,16 +94,6 @@ jobs:
       - name: Test optional features (script emulator)
         shell: bash
         run: cargo test -p fission-script --features emulator --locked
-
-      # The Win32 debugger backend, checked rather than built into anything.
-      # It does not compile and is behind `windows_native_debugger` for that
-      # reason; this step is what will say when someone has finished the port,
-      # and until then it is expected to fail, which is why it does not gate.
-      - name: Check the unported Win32 debugger (informational)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: bash
-        run: cargo check -p fission-dynamic --features interactive_runtime,windows_native_debugger --locked
 
       - name: sccache stats
         if: always()

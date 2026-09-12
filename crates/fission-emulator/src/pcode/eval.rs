@@ -1189,9 +1189,19 @@ fn size_mask_u64(size: u32) -> u64 {
     }
 }
 
+/// The low eight bytes, little-endian.
+///
+/// `take(8)` and not `enumerate` over everything: `read_varnode_u64`'s own
+/// documentation says it "stops at eight, which is right for arithmetic and
+/// wrong for anything that just moves data", and this is where it was
+/// supposed to stop. A wider varnode -- a sixteen-byte XMM register reaching
+/// here through the memory observer, which reads the output of a SIMD load to
+/// report its value -- shifted past sixty-three. In a debug build that panics;
+/// in a release build it wraps, and the observer reports a number that is
+/// quietly wrong.
 fn le_bytes_to_u64(bytes: &[u8]) -> u64 {
     let mut v = 0u64;
-    for (i, &b) in bytes.iter().enumerate() {
+    for (i, &b) in bytes.iter().take(8).enumerate() {
         v |= (b as u64) << (i * 8);
     }
     v
