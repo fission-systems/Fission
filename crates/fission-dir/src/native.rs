@@ -1756,7 +1756,6 @@ mod tests {
         (PcodeFoundation::new(0x401000, function).unwrap(), selection)
     }
 
-    #[test]
     /// The composed flag identities, checked against the semantics they stand
     /// in for rather than against themselves.
     ///
@@ -1835,7 +1834,6 @@ mod tests {
     /// already has: operand and result differ in width, which the solver
     /// tracks as different sorts. So the concrete side is checked directly
     /// against the definition rather than against the symbolic side.
-    #[test]
     /// `PopCount` and the shifts, against their definitions.
     ///
     /// x86 lowers its parity flag as `PopCount(x & 0xff) & 1`, so this is the
@@ -1923,6 +1921,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn width_conversions_match_their_pcode_definitions() {
         fn build(
             opcode: PcodeOpcode,
@@ -1993,6 +1992,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn reconstructs_and_proves_a_pcode_native_region() {
         let (foundation, selection) = arithmetic_foundation();
         let artifacts = DirPipeline::new(
