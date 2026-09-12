@@ -1542,6 +1542,35 @@ fn addr_within_function_bounds(
     address >= start_addr
 }
 
+/// What somebody chose for this function, if anything.
+///
+/// Rides on the binary, put there by an analysis database after load (see
+/// `fission-project`), so this layer does not have to know where decisions
+/// are stored -- only that the binary may carry some.
+fn nir_hints_from_user_signature(binary: &LoadedBinary, address: u64) -> Option<NirFunctionHints> {
+    let signature = binary.user_signatures.get(&address)?;
+
+    let mut hints = NirFunctionHints::default();
+    hints.return_type_name.clone_from(&signature.return_type);
+    for (index, type_name) in signature.param_types.iter().enumerate() {
+        if !type_name.is_empty() {
+            hints.param_type_names.insert(index, type_name.clone());
+        }
+    }
+    // Names are positional and may be sparse: a caller can type a parameter
+    // without naming it, and `param_names` is a dense `Vec`, so the gaps are
+    // empty strings rather than missing entries.
+    let named = signature
+        .param_names
+        .iter()
+        .rposition(|name| !name.is_empty())
+        .map(|last| last + 1)
+        .unwrap_or(0);
+    hints.param_names = signature.param_names[..named].to_vec();
+
+    (!nir_function_hints_are_empty(&hints)).then_some(hints)
+}
+
 fn build_nir_function_hints(
     binary: &LoadedBinary,
     fact_store: &FactStore,
@@ -1550,6 +1579,15 @@ fn build_nir_function_hints(
     let debug_hints = fact_store
         .preferred_debug_function(address)
         .and_then(|debug| nir_hints_from_debug_function(debug, binary));
+
+    // A chosen signature outranks debug information, which outranks what was
+    // inferred. Someone correcting a type is correcting exactly this: DWARF
+    // can be absent, stale, or about a different build, and the inference is
+    // a guess -- the one thing nobody has to second-guess is what a person
+    // just typed.
+    let chosen = nir_hints_from_user_signature(binary, address);
+    let debug_hints = merge_nir_function_hints(chosen, debug_hints.as_ref());
+
     merge_nir_function_hints(debug_hints, fact_store.structuring_hints(address))
 }
 

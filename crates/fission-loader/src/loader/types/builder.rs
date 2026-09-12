@@ -282,6 +282,8 @@ impl LoadedBinaryBuilder {
             global_symbols,
             global_symbol_sizes: self.global_symbol_sizes,
             loader_symbols,
+            // Empty unless an analysis database supplies them after load.
+            user_signatures: std::collections::HashMap::new(),
             relocation_symbols,
             function_addr_index,
             function_name_index,

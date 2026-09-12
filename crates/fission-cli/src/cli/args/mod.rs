@@ -243,6 +243,23 @@ pub enum DbCommand {
         #[arg(value_parser = parse_hex_address)]
         addr: u64,
     },
+    /// Give a function a signature, e.g. `"int (char *buf, int len)"`
+    ///
+    /// It outranks both DWARF and inference, and propagates: a parameter
+    /// typed `char *` reads as a string inside the function and at every
+    /// call site.
+    Sig {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+        /// `<return> (<type> <name>, ...)`, or just `(...)` to leave the
+        /// return type alone. `void` and `()` both mean no parameters.
+        signature: String,
+    },
+    /// Forget a signature
+    RmSig {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+    },
     /// Attach a note to an address
     Note {
         #[arg(value_parser = parse_hex_address)]

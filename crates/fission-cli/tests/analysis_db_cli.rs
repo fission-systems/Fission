@@ -179,3 +179,57 @@ fn a_recorded_breakpoint_is_restored_by_a_session() {
         "the session did not restore the recorded breakpoint: {report:#}"
     );
 }
+
+/// The type loop: correcting a type changes what the decompiler prints, and
+/// the correction survives the invocation.
+///
+/// This is the lever Ghidra's type editor is, and the reason renaming alone
+/// plateaus -- a name says what a function is, a signature says what goes in
+/// and what comes out, and that propagates into every use.
+#[test]
+fn a_chosen_signature_reaches_the_decompiler() {
+    let (_dir, binary) = sample("sample.exe");
+    let path = binary.to_str().expect("path");
+
+    // A function with a parameter the decompiler had to guess at.
+    let (ok, before) = run(&["decomp", path, "--addr", ENTRY]);
+    assert!(ok, "{before}");
+
+    let (ok, out) = run(&["db", path, "sig", ENTRY, "int (const char *text, int len)"]);
+    assert!(ok, "{out}");
+
+    let (ok, after) = run(&["decomp", path, "--addr", ENTRY]);
+    assert!(ok, "{after}");
+    assert_ne!(before, after, "the signature changed nothing in the output");
+    assert!(
+        after.contains("const char *") && after.contains("text"),
+        "the chosen parameter type did not reach the decompiler:\n{}",
+        &after[..after.len().min(600)]
+    );
+
+    // And `--no-db` still shows the binary as it is.
+    let (ok, without) = run(&["decomp", path, "--addr", ENTRY, "--no-db"]);
+    assert!(ok, "{without}");
+    assert_eq!(without, before, "--no-db still applied the signature");
+}
+
+/// A signature this cannot read confidently is refused: a wrong parse would
+/// attach a type nobody chose, and the output would look like analysis.
+#[test]
+fn an_unreadable_signature_is_refused() {
+    let (_dir, binary) = sample("sample.exe");
+    let path = binary.to_str().expect("path");
+
+    for bad in ["int", "int (char *", "int (int, ...)"] {
+        let (ok, out) = run(&["db", path, "sig", ENTRY, bad]);
+        assert!(!ok, "{bad:?} was accepted: {out}");
+    }
+
+    // And nothing was written by the attempts.
+    let (ok, show) = run(&["db", path, "show"]);
+    assert!(ok, "{show}");
+    assert!(
+        show.contains("nothing recorded yet"),
+        "a refused signature was saved anyway:\n{show}"
+    );
+}

@@ -162,6 +162,37 @@ pub enum ProjectError {
     NewerSchema { found: u32, known: u32 },
 }
 
+/// A function signature somebody chose.
+///
+/// The half of a decision that a name cannot carry. A name says *what* a
+/// function is; a signature says what goes in and what comes out, and that
+/// propagates -- a parameter typed `char *` makes its uses inside the
+/// function read as a string, and its arguments at every call site read as
+/// one too. It is the lever Ghidra's type editor is, and the reason renaming
+/// alone plateaus.
+///
+/// Types are the strings a person writes (`char *`, `struct stat *`). The
+/// layers below take type *names* -- `NirFunctionHints` is a map of index to
+/// `String` -- so there is nothing to parse them into.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Signature {
+    /// Return type. Absent leaves whatever was inferred.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns: Option<String>,
+    /// Parameters, in order, as `(type, name)`. A name may be empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<Param>,
+}
+
+/// One parameter of a [`Signature`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Param {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+}
+
 /// A note attached to an address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Comment {
@@ -207,6 +238,9 @@ pub struct Project {
     /// Address -> a note about it.
     #[serde(default, with = "hex_keys")]
     pub comments: BTreeMap<u64, Comment>,
+    /// Function entry point -> the signature someone chose for it.
+    #[serde(default, with = "hex_keys", skip_serializing_if = "BTreeMap::is_empty")]
+    pub signatures: BTreeMap<u64, Signature>,
     /// Addresses a debug session should break on.
     #[serde(default, with = "hex_list")]
     pub breakpoints: Vec<u64>,
@@ -224,6 +258,7 @@ impl Project {
             binary_path: binary.path.clone(),
             names: BTreeMap::new(),
             comments: BTreeMap::new(),
+            signatures: BTreeMap::new(),
             breakpoints: Vec::new(),
             watchpoints: Vec::new(),
         }
@@ -315,7 +350,7 @@ impl Project {
                 actual: binary.hash.clone(),
             });
         }
-        if self.names.is_empty() {
+        if self.names.is_empty() && self.signatures.is_empty() {
             return Ok(0);
         }
 
@@ -326,6 +361,24 @@ impl Project {
                 function.name = name.clone();
                 applied += 1;
             }
+        }
+
+        // Signatures ride along the same way, and are read by the decompiler
+        // ahead of anything it inferred.
+        for (address, signature) in &self.signatures {
+            inner.user_signatures.insert(
+                *address,
+                fission_loader::loader::types::UserSignature {
+                    return_type: signature.returns.clone(),
+                    param_types: signature
+                        .params
+                        .iter()
+                        .map(|p| p.type_name.clone())
+                        .collect(),
+                    param_names: signature.params.iter().map(|p| p.name.clone()).collect(),
+                },
+            );
+            applied += 1;
         }
         // The name index maps names to positions, so it is stale the moment a
         // name changes. Rebuilt rather than patched: a half-updated index is
@@ -354,6 +407,14 @@ impl Project {
 
     pub fn clear_comment(&mut self, address: u64) -> Option<Comment> {
         self.comments.remove(&address)
+    }
+
+    pub fn set_signature(&mut self, address: u64, signature: Signature) -> Option<Signature> {
+        self.signatures.insert(address, signature)
+    }
+
+    pub fn clear_signature(&mut self, address: u64) -> Option<Signature> {
+        self.signatures.remove(&address)
     }
 
     /// Remember a breakpoint. Returns whether it was new.
@@ -388,6 +449,7 @@ impl Project {
     /// Whether there is anything in here worth writing.
     pub fn is_empty(&self) -> bool {
         self.names.is_empty()
+            && self.signatures.is_empty()
             && self.comments.is_empty()
             && self.breakpoints.is_empty()
             && self.watchpoints.is_empty()
@@ -571,5 +633,216 @@ mod tests {
         });
         assert_eq!(project.watchpoints.len(), 1);
         assert_eq!(project.watchpoints[0].size, 64);
+    }
+}
+
+/// Parsing what a person writes into a [`Signature`].
+///
+/// A C declarator is a small grammar and this reads the part of it people
+/// actually type at a prompt: `int (char *buf, int len)`, `void (void)`,
+/// `(int)` to set the parameters and leave the return alone. It is
+/// deliberately not a C parser -- a wrong parse here would attach a type
+/// nobody chose and the output would look like analysis, so anything it
+/// cannot read confidently is an error rather than a guess.
+pub mod signature_syntax {
+    use super::{Param, Signature};
+
+    /// Split `text` at the parenthesis that opens the parameter list.
+    fn split_at_params(text: &str) -> Result<(&str, &str), String> {
+        let open = text
+            .find('(')
+            .ok_or_else(|| format!("{text:?} has no parameter list; write e.g. `int (char *)`"))?;
+        if !text.trim_end().ends_with(')') {
+            return Err(format!("{text:?} is missing its closing parenthesis"));
+        }
+        let close = text.rfind(')').expect("checked above");
+        Ok((text[..open].trim(), text[open + 1..close].trim()))
+    }
+
+    /// Split a parameter list on commas that are not inside brackets.
+    ///
+    /// `void (*)(int, int)` is one parameter, not two.
+    fn split_params(text: &str) -> Result<Vec<&str>, String> {
+        let mut out = Vec::new();
+        let mut depth = 0i32;
+        let mut start = 0usize;
+        for (i, c) in text.char_indices() {
+            match c {
+                '(' | '[' => depth += 1,
+                ')' | ']' => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return Err(format!("unbalanced brackets in {text:?}"));
+                    }
+                }
+                ',' if depth == 0 => {
+                    out.push(text[start..i].trim());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        if depth != 0 {
+            return Err(format!("unbalanced brackets in {text:?}"));
+        }
+        out.push(text[start..].trim());
+        Ok(out)
+    }
+
+    /// Separate a declaration into its type and the name it declares.
+    ///
+    /// The name, if there is one, is the trailing identifier: in
+    /// `char *buf` it is `buf` and the type is `char *`; in `char *` there is
+    /// none. `unsigned int` has no name even though it ends in a word, which
+    /// is why a trailing word only counts when what precedes it is not empty
+    /// *and* the word is not a type keyword.
+    fn split_declaration(text: &str) -> (String, String) {
+        const KEYWORDS: [&str; 14] = [
+            "void", "char", "short", "int", "long", "float", "double", "signed", "unsigned",
+            "const", "volatile", "struct", "union", "enum",
+        ];
+        let text = text.trim();
+        let Some(last_space) = text.rfind(|c: char| c.is_whitespace() || c == '*') else {
+            return (text.to_string(), String::new());
+        };
+        let (head, tail) = text.split_at(last_space + 1);
+        let tail = tail.trim();
+        let is_identifier = !tail.is_empty()
+            && tail.chars().all(|c| c.is_alphanumeric() || c == '_')
+            && tail
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
+            && !KEYWORDS.contains(&tail);
+        if is_identifier && !head.trim().is_empty() {
+            (head.trim().to_string(), tail.to_string())
+        } else {
+            (text.to_string(), String::new())
+        }
+    }
+
+    /// Read `<return> (<params>)`.
+    pub fn parse(text: &str) -> Result<Signature, String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("empty signature".to_string());
+        }
+        let (returns, params_text) = split_at_params(text)?;
+
+        let returns = (!returns.is_empty()).then(|| returns.to_string());
+
+        let mut params = Vec::new();
+        if !params_text.is_empty() && params_text != "void" {
+            for piece in split_params(params_text)? {
+                if piece.is_empty() {
+                    return Err(format!("empty parameter in {text:?}"));
+                }
+                if piece == "..." {
+                    // A variadic tail is not a parameter with a type; the
+                    // layers below have no way to say "and then some", so
+                    // saying so is better than dropping it silently.
+                    return Err(
+                        "variadic parameters (`...`) are not supported; give the fixed ones"
+                            .to_string(),
+                    );
+                }
+                let (type_name, name) = split_declaration(piece);
+                params.push(Param { type_name, name });
+            }
+        }
+        Ok(Signature { returns, params })
+    }
+
+    /// Render a signature the way it would be written.
+    pub fn render(signature: &Signature) -> String {
+        let params = if signature.params.is_empty() {
+            "void".to_string()
+        } else {
+            signature
+                .params
+                .iter()
+                .map(|p| {
+                    if p.name.is_empty() {
+                        p.type_name.clone()
+                    } else if p.type_name.ends_with('*') {
+                        format!("{}{}", p.type_name, p.name)
+                    } else {
+                        format!("{} {}", p.type_name, p.name)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match &signature.returns {
+            Some(r) => format!("{r} ({params})"),
+            None => format!("({params})"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::signature_syntax::{parse, render};
+
+    #[test]
+    fn a_signature_reads_the_way_it_is_written() {
+        let s = parse("int (char *buf, int len)").expect("parse");
+        assert_eq!(s.returns.as_deref(), Some("int"));
+        assert_eq!(s.params.len(), 2);
+        assert_eq!(s.params[0].type_name, "char *");
+        assert_eq!(s.params[0].name, "buf");
+        assert_eq!(s.params[1].type_name, "int");
+        assert_eq!(s.params[1].name, "len");
+    }
+
+    /// A type made of several words is not a type plus a name.
+    #[test]
+    fn a_multi_word_type_without_a_name_stays_a_type() {
+        let s = parse("(unsigned int, const char *, struct stat *st)").expect("parse");
+        assert_eq!(s.returns, None, "no return type was given");
+        assert_eq!(s.params[0].type_name, "unsigned int");
+        assert_eq!(s.params[0].name, "");
+        assert_eq!(s.params[1].type_name, "const char *");
+        assert_eq!(s.params[1].name, "");
+        assert_eq!(s.params[2].type_name, "struct stat *");
+        assert_eq!(s.params[2].name, "st");
+    }
+
+    /// A function pointer parameter contains a comma and is still one
+    /// parameter.
+    #[test]
+    fn a_comma_inside_brackets_does_not_split_a_parameter() {
+        let s = parse("int (void (*cmp)(int, int), int n)").expect("parse");
+        assert_eq!(s.params.len(), 2, "{:?}", s.params);
+        assert_eq!(s.params[1].type_name, "int");
+        assert_eq!(s.params[1].name, "n");
+    }
+
+    #[test]
+    fn void_and_nothing_both_mean_no_parameters() {
+        assert!(parse("void (void)").expect("parse").params.is_empty());
+        assert!(parse("void ()").expect("parse").params.is_empty());
+    }
+
+    /// Anything it cannot read confidently is an error: a wrong parse would
+    /// attach a type nobody chose.
+    #[test]
+    fn what_it_cannot_read_is_refused() {
+        for bad in ["int", "int (char *", "int (a,, b)", "int (int, ...)"] {
+            assert!(parse(bad).is_err(), "{bad:?} was accepted");
+        }
+    }
+
+    #[test]
+    fn rendering_round_trips() {
+        for text in [
+            "int (char *buf, int len)",
+            "void (void)",
+            "char * (const char *, unsigned int n)",
+        ] {
+            let once = parse(text).expect("parse");
+            let again = parse(&render(&once)).expect("re-parse");
+            assert_eq!(once, again, "{text:?} did not survive a round trip");
+        }
     }
 }

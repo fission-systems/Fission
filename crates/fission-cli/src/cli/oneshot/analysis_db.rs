@@ -72,6 +72,37 @@ pub fn run(args: DbArgs) -> Result<()> {
             );
         }
 
+        DbCommand::Sig { addr, signature } => {
+            require_function(&binary, addr)?;
+            let parsed = fission_project::signature_syntax::parse(&signature)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let rendered = fission_project::signature_syntax::render(&parsed);
+            let previous = project.set_signature(addr, parsed);
+            report(
+                args.json,
+                json!({
+                    "action": "sig",
+                    "address": format!("0x{addr:x}"),
+                    "signature": rendered,
+                    "previous": previous
+                        .as_ref()
+                        .map(fission_project::signature_syntax::render),
+                }),
+                || format!("0x{addr:012x}  {rendered}"),
+            );
+        }
+
+        DbCommand::RmSig { addr } => {
+            if project.clear_signature(addr).is_none() {
+                bail!("no signature recorded at 0x{addr:x}");
+            }
+            report(
+                args.json,
+                json!({ "action": "rm-sig", "address": format!("0x{addr:x}") }),
+                || format!("0x{addr:012x}  signature removed"),
+            );
+        }
+
         DbCommand::Note { addr, text } => {
             project.set_comment(addr, &text);
             report(
@@ -168,6 +199,12 @@ fn show(project: &Project, path: &std::path::Path, json_out: bool) -> Result<()>
     }
     for (address, name) in &project.names {
         println!("  name  0x{address:012x}  {name}");
+    }
+    for (address, signature) in &project.signatures {
+        println!(
+            "  sig   0x{address:012x}  {}",
+            fission_project::signature_syntax::render(signature)
+        );
     }
     for (address, comment) in &project.comments {
         println!("  note  0x{address:012x}  {}", comment.text);

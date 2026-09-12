@@ -152,6 +152,27 @@ pub struct InferredFieldInfo {
     pub size: u32,
 }
 
+/// A function signature somebody chose, as opposed to one that was inferred.
+///
+/// Rides on the binary for the same reason a chosen *name* does: every
+/// consumer already reads this object, so a decision applied here reaches the
+/// decompiler, the listing and the disassembler without any of them learning
+/// about where decisions are stored. See `fission-project`.
+///
+/// Types are plain strings, not a parsed type graph. What a person writes is
+/// `char *` or `struct stat *`, and the layers below already take type
+/// *names* -- `NirFunctionHints` is `HashMap<usize, String>` -- so parsing
+/// here would only mean rendering it back again.
+#[derive(Debug, Clone, Default, Archive, Deserialize, Serialize)]
+pub struct UserSignature {
+    /// Return type, e.g. `int`. `None` leaves whatever was inferred.
+    pub return_type: Option<String>,
+    /// Parameter types by position.
+    pub param_types: Vec<String>,
+    /// Parameter names by position, where one was given.
+    pub param_names: Vec<String>,
+}
+
 /// Information about an inferred type (class/struct) from metadata
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 pub struct InferredTypeInfo {
@@ -342,6 +363,10 @@ pub struct LoadedBinaryInner {
     pub global_symbol_sizes: std::collections::HashMap<u64, u64>,
     /// Non-function symbols recovered from binary-format symbol tables.
     pub loader_symbols: Vec<LoaderSymbolInfo>,
+    /// Function signatures somebody chose, by entry point. Empty unless an
+    /// analysis database supplied them; see `fission-project`.
+    #[rkyv(with = rkyv::with::AsVec)]
+    pub user_signatures: std::collections::HashMap<u64, UserSignature>,
     /// Relocation use-site mapping (instruction/data address -> referenced symbol name).
     pub relocation_symbols: std::collections::HashMap<u64, String>,
     /// Index of functions by address for O(1) lookup

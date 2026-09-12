@@ -71,6 +71,7 @@ mod tests {
             global_symbol_sizes: HashMap::new(),
             relocation_symbols: HashMap::new(),
             loader_symbols: Vec::new(),
+            user_signatures: Default::default(),
             function_addr_index: HashMap::new(),
             function_name_index: HashMap::new(),
             functions_sorted: true,
