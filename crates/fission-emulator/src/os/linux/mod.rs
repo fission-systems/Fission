@@ -382,7 +382,12 @@ impl OsEnvironment for LinuxEnv {
                     emu.callother_result
                 );
             }
-            "rdtsc" | "cpuid" | "syscall" | "sysenter" => {
+            // `syscall` and `sysenter` are the entry, not the service: the
+            // dispatcher below reads the number out of the registers, so
+            // there is nothing for a userop to answer. `rdtsc` and `cpuid`
+            // used to be named here too, which shadowed the processor
+            // handler and left the guest reading a stale result slot.
+            "syscall" | "sysenter" => {
                 tracing::info!("Linux HLE: Instruct userop '{}' called", userop_name);
             }
             // Processor semantics rather than OS services: barriers,

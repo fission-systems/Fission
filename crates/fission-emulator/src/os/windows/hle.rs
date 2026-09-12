@@ -516,9 +516,6 @@ impl OsEnvironment for WindowsEnv {
                     emu.callother_result
                 );
             }
-            "rdtsc" | "cpuid" => {
-                tracing::info!("Win32 HLE: Instruct userop '{}' called", userop_name);
-            }
             // Processor semantics rather than OS services: barriers,
             // exclusive access, hints. The same answer under every
             // environment, so it is written once.

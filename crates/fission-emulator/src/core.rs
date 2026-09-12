@@ -86,6 +86,9 @@ pub struct Emulator {
     pub ttd_snapshot_interval: u64,
     /// Simulated tick counter used for time-related HLE APIs.
     pub tick_count: u64,
+    /// How many times `RDTSC` has been read, which is what keeps two
+    /// back-to-back reads from returning the same count.
+    pub tsc_reads: u64,
 
     /// Unexplored conditional branches (used for TTD-based concolic exploration).
     pub sym_events: Vec<SymBranch>,
@@ -389,6 +392,7 @@ impl Emulator {
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,
             tick_count: 0,
+            tsc_reads: 0,
             sym_events: Vec::new(),
             sym_stop_requested: false,
             concolic_stop_on_branch: false,

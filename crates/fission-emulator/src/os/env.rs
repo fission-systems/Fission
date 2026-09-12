@@ -131,6 +131,8 @@ pub enum ProcessorUserop {
     SetIsaMode,
     /// `CPUID`, which SLEIGH splits into one userop per leaf.
     Cpuid,
+    /// `RDTSC`: the cycle counter the guest reads to time itself.
+    Rdtsc,
 
     // ── ARMv7-M system registers ────────────────────────────────────────────
     GetMainStackPointer,
@@ -168,6 +170,14 @@ pub fn classify_processor_userop(name: &str) -> Option<ProcessorUserop> {
         // C runtime asks on startup -- `cpuid_basic_info` was the one
         // unanswered CALLOTHER in a sweep of six of them.
         name if name.starts_with("cpuid") => Cpuid,
+
+        // `RDTSC` is `tmp:8 = rdtsc(); EDX = tmp(4); EAX = tmp(0)` -- a
+        // value, not a pointer. Both OS layers had an arm for it that only
+        // logged, so the guest read whatever the previous CALLOTHER had left
+        // in the result slot and called it a timestamp. Two reads could come
+        // back equal, or backwards, and a loop that divides by the delta
+        // divides by zero.
+        "rdtsc" => Rdtsc,
 
         "ExclusiveAccess" => ExclusiveAccessMark,
         "ExclusiveMonitorPass" | "hasExclusiveAccess" => ExclusiveMonitorPass,
@@ -284,6 +294,19 @@ pub fn answer_processor_userop(emu: &mut Emulator, name: &str, inputs: &[u64]) -
                 return false;
             }
             emu.callother_result = address;
+        }
+
+        // Tied to instructions retired, so it advances with execution rather
+        // than with wall clock -- a replay to the same step reads the same
+        // count -- and nudged by one per read, so two back-to-back reads can
+        // never come back equal.
+        Rdtsc => {
+            const CYCLES_PER_INSTRUCTION: u64 = 4;
+            emu.tsc_reads = emu.tsc_reads.wrapping_add(1);
+            emu.callother_result = emu
+                .inst_count
+                .saturating_mul(CYCLES_PER_INSTRUCTION)
+                .saturating_add(emu.tsc_reads);
         }
 
         ExclusiveAccessMark => {}
