@@ -31,7 +31,21 @@ use fission_sleigh::runtime::RuntimeSleighFrontend;
 
 const MAX_INST: u64 = 2_000_000;
 
+/// Which binaries to sweep.
+///
+/// `FISSION_SWEEP_ROOT` re-points this. The dev corpus is programs we
+/// compiled to exercise one construct each, which is the wrong shape for
+/// asking "what is missing": a real program calls things our test programs
+/// never do, and the missing-API tally is only as honest as the input.
+///
+/// Never point this at the DecBench/evalkit corpus. Those binaries include
+/// malware compiled from source and are static-analysis-only -- this sweep
+/// *executes* what it is given.
 fn corpus() -> Option<PathBuf> {
+    if let Some(root) = std::env::var_os("FISSION_SWEEP_ROOT") {
+        let path = PathBuf::from(root);
+        return path.is_dir().then_some(path);
+    }
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../fission-benchmark/corpus/dev/binaries");
     path.is_dir().then_some(path)
