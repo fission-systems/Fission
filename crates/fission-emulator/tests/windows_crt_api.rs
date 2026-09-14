@@ -1013,3 +1013,57 @@ fn the_character_classes_answer_in_the_c_locale() {
         "toupper(EOF) is EOF"
     );
 }
+
+// ── The data model and the locale ───────────────────────────────────────────
+
+/// Windows is LLP64: `%ld` reads a 32-bit `long` even on a 64-bit guest. A
+/// C89-configured Lua keeps its integers in a `long`, and `math.floor(-2.5)`
+/// printed as 4294967293. The upper half of the slot is whatever the caller
+/// left there, so it is poisoned here.
+#[test]
+fn a_long_is_thirty_two_bits_on_windows() {
+    let mut emu = windows_emulator();
+    let stdout = call(&mut emu, "__acrt_iob_func", &[1]);
+    let before = stream_text(&emu, 1).len();
+
+    vfprintf(
+        &mut emu,
+        stdout,
+        "%ld|%lu|%lld\n",
+        &[0xDEAD_BEEF_FFFF_FFFD, 0x1234_5678_FFFF_FFFF, (-3i64) as u64],
+    );
+
+    assert_eq!(
+        &stream_text(&emu, 1)[before..],
+        "-3|4294967295|-3\n",
+        "long is 32 bits under LLP64; long long is still 64"
+    );
+}
+
+/// The C locale's `decimal_point` is ".". Lua appends it to a float that
+/// prints like an integer, and with a null `localeconv` `2^10` became `1024 0`.
+#[test]
+fn localeconv_describes_the_c_locale() {
+    let mut emu = windows_emulator();
+    let lconv = call(&mut emu, "localeconv", &[]);
+    assert_ne!(lconv, 0, "localeconv answered with null");
+
+    let decimal_point = read_pointer(&mut emu, lconv);
+    assert_eq!(&read_back(&mut emu, decimal_point, 2), b".\0");
+    let thousands_sep = read_pointer(&mut emu, lconv + 8);
+    assert_eq!(
+        read_back(&mut emu, thousands_sep, 1),
+        [0],
+        "no thousands separator"
+    );
+    assert_eq!(
+        read_back(&mut emu, lconv + 80, 1),
+        [127],
+        "int_frac_digits is CHAR_MAX: not available in this locale"
+    );
+    let wide_decimal_point = read_pointer(&mut emu, lconv + 88);
+    assert_eq!(
+        &read_back(&mut emu, wide_decimal_point, 4),
+        &[b'.', 0, 0, 0]
+    );
+}

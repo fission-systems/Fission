@@ -138,22 +138,25 @@ enum Length {
 
 impl Length {
     /// A slot narrowed to the declared type, sign-extended where signed.
-    fn signed(self, word: u64, is_64bit: bool) -> i64 {
+    /// `long_is_64bit` is the data model, not the pointer size: LP64 (Linux,
+    /// macOS) has a 64-bit `long`, LLP64 (Windows) keeps it at 32 bits even
+    /// on a 64-bit guest.
+    fn signed(self, word: u64, long_is_64bit: bool) -> i64 {
         match self {
             Length::Char => word as u8 as i8 as i64,
             Length::Short => word as u16 as i16 as i64,
             Length::Int => word as u32 as i32 as i64,
-            Length::Long if !is_64bit => word as u32 as i32 as i64,
+            Length::Long if !long_is_64bit => word as u32 as i32 as i64,
             _ => word as i64,
         }
     }
 
-    fn unsigned(self, word: u64, is_64bit: bool) -> u64 {
+    fn unsigned(self, word: u64, long_is_64bit: bool) -> u64 {
         match self {
             Length::Char => word as u8 as u64,
             Length::Short => word as u16 as u64,
             Length::Int => word as u32 as u64,
-            Length::Long if !is_64bit => word as u32 as u64,
+            Length::Long if !long_is_64bit => word as u32 as u64,
             _ => word,
         }
     }
@@ -177,6 +180,11 @@ struct Spec {
 /// the whole string, before any truncation it does itself.
 pub fn format_c(emu: &mut Emulator, fmt: &str, args: &mut dyn ArgSource) -> Result<String> {
     let is_64bit = emu.arch.pointer_size == 8;
+    // Windows is LLP64: `long` stays 32 bits on a 64-bit guest. Reading it as
+    // 64 printed Lua's `math.floor(-2.5)` -- a C89-configured Lua keeps its
+    // integers in a `long` -- as 4294967293. The formatter's own tests run on
+    // an ELF, where `long` really is 64 bits, which is how it went unseen.
+    let long_is_64bit = is_64bit && emu.binary.format != "PE";
     let bytes = fmt.as_bytes();
     let mut out = String::new();
     let mut i = 0;
@@ -290,15 +298,15 @@ pub fn format_c(emu: &mut Emulator, fmt: &str, args: &mut dyn ArgSource) -> Resu
                 continue;
             }
             b'd' | b'i' => {
-                let value = spec.length.signed(args.next_word(emu), is_64bit);
+                let value = spec.length.signed(args.next_word(emu), long_is_64bit);
                 signed_digits(value, &spec)
             }
             b'u' => {
-                let value = spec.length.unsigned(args.next_word(emu), is_64bit);
+                let value = spec.length.unsigned(args.next_word(emu), long_is_64bit);
                 pad_digits(&value.to_string(), &spec)
             }
             b'o' => {
-                let value = spec.length.unsigned(args.next_word(emu), is_64bit);
+                let value = spec.length.unsigned(args.next_word(emu), long_is_64bit);
                 let digits = pad_digits(&format!("{value:o}"), &spec);
                 if spec.alt && !digits.starts_with('0') {
                     format!("0{digits}")
@@ -307,7 +315,7 @@ pub fn format_c(emu: &mut Emulator, fmt: &str, args: &mut dyn ArgSource) -> Resu
                 }
             }
             b'x' | b'X' => {
-                let value = spec.length.unsigned(args.next_word(emu), is_64bit);
+                let value = spec.length.unsigned(args.next_word(emu), long_is_64bit);
                 let digits = if conversion == b'x' {
                     format!("{value:x}")
                 } else {

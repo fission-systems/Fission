@@ -517,6 +517,7 @@ pub fn dispatch(emu: &mut Emulator, globals: &CrtGlobals, name: &str) -> Result<
         "_fstat64" => fstat64(emu, globals, true)?,
         "_fstat" | "_fstat64i32" | "fstat" => fstat64(emu, globals, false)?,
         "_errno" | "__errno_location" => errno_pointer(emu, globals)?,
+        "localeconv" => emu.write_return_val(globals.lconv)?,
         "getenv" | "_wgetenv" | "getenv_s" => getenv(emu)?,
         "_write" | "write" => write(emu, globals)?,
 

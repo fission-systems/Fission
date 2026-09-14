@@ -58,6 +58,11 @@ pub struct CrtGlobals {
     pub wide_program_name: u64,
     /// The cell `_errno()` hands out the address of.
     pub errno: u64,
+    /// The C locale's `struct lconv`, which `localeconv()` hands out.
+    ///
+    /// Lua appends `localeconv()->decimal_point[0]` to a float that prints
+    /// like an integer; answered with null, `2^10` came out as `1024 0`.
+    pub lconv: u64,
     /// The `FILE` objects, one per descriptor. A program never fills one in
     /// itself -- it asks the CRT for the pointer -- but `feof` and `ferror`
     /// are macros in some headers and do read through it, so the storage has
@@ -117,6 +122,10 @@ impl CrtGlobals {
         next += 32;
         let errno = next;
         next += ptr;
+        // Ten `char*`, eight `char`, eight `wchar_t*`; then the strings.
+        let lconv = next;
+        next += ptr * 10 + 8 + ptr * 8;
+        next += 16;
         debug_assert!(next - BASE <= SIZE, "the CRT page is full");
 
         state.page_map.map_region(
@@ -148,6 +157,7 @@ impl CrtGlobals {
             wenviron_vector,
             wide_program_name,
             errno,
+            lconv,
             iob,
             ptr,
         };
@@ -192,6 +202,7 @@ impl CrtGlobals {
             self.put(state, self.scratch + i * self.ptr, 0)?;
         }
         self.put(state, self.errno, 0)?;
+        self.write_lconv(state)?;
         state.write_space(ram, self.iob, &vec![0u8; STREAM_SIZE as usize])?;
         Ok(())
     }
@@ -236,6 +247,29 @@ impl CrtGlobals {
 }
 
 impl CrtGlobals {
+    /// The C locale: `decimal_point` is ".", every other string is empty, and
+    /// every numeric field is `CHAR_MAX`, which is how the standard spells
+    /// "not available in this locale".
+    fn write_lconv(&self, state: &mut MachineState) -> Result<()> {
+        let ram = state.ram_space();
+        let strings = self.lconv + self.ptr * 10 + 8 + self.ptr * 8;
+        let dot = strings; // ".\0"
+        let empty = strings + 2; // "\0"
+        let wide_dot = strings + 4; // L".\0"
+        let wide_empty = strings + 8; // L"\0"
+        state.write_space(ram, strings, &[b'.', 0, 0, 0, b'.', 0, 0, 0, 0, 0, 0, 0])?;
+        for i in 0..10 {
+            let target = if i == 0 { dot } else { empty };
+            self.put(state, self.lconv + i * self.ptr, target)?;
+        }
+        state.write_space(ram, self.lconv + self.ptr * 10, &[127u8; 8])?;
+        for i in 0..8 {
+            let target = if i == 0 { wide_dot } else { wide_empty };
+            self.put(state, self.lconv + self.ptr * 10 + 8 + i * self.ptr, target)?;
+        }
+        Ok(())
+    }
+
     /// The `FILE*` for a descriptor, if there is a slot for it.
     pub fn stream(&self, fd: u64) -> u64 {
         if fd >= IOB_COUNT {
