@@ -17,7 +17,8 @@ Scope: `crates/fission-solver`
 | `Solver` | `src/solver.rs` | Node registry, assertions, `check_sat` with a memory-oracle CEGAR loop, `is_true`/`is_false`/`min`/`max` |
 | `AigManager` | `src/aig.rs` | Bit-blasting to an and-inverter graph: adders, comparisons, multiply, unsigned and signed divide/remainder/modulus, if-then-else, and shifts by constant or symbolic amounts (a barrel shifter) |
 | `CnfBuilder` | `src/cnf.rs` | Tseitin encoding of the AIG |
-| `SatSolver` | `src/sat.rs` | CDCL: watched literals, VSIDS heap, phase saving, LBD-scored learned-clause GC |
+| `SatSolver` | `src/sat.rs` | CDCL: watched literals, VSIDS heap, phase saving, LBD-scored collection of learned clauses |
+| `smtlib` | `src/smtlib.rs` | QF_BV SMT-LIB 2 printer, so answers can be compared with another solver |
 | theories | `src/theory/` | Bitvector (eager bit-blasting) and array (select/store) |
 
 ## Key Invariants
@@ -32,7 +33,10 @@ Scope: `crates/fission-solver`
 8. **`Unknown` is not a verdict** — `is_true`/`is_false` require an explicit `Unsat` of the negation; `min`/`max` return `None` when a probe is `Unknown`. Treating `!satisfiable(..)` as proof reads "could not tell" as "always".
 9. **Sizes are not consistently bits** — `new_var(_, 8)` and the constant-folding masks treat size as bits, while the emulator registers a stdin byte with size `1` and `max()` multiplies `get_size()` by eight. Know which convention a caller uses before relying on a width.
 10. **A shift by a symbolic amount is a real shift** — it was lowered as the identity (`x << y` as `x`), which fission-dir reaches because it passes arbitrary expressions as shift amounts. Constant shifts take a separate path that must not allocate the amount: it used to build `vec![FALSE; shift]`.
-11. **Check circuits against definitions, not against Z3** — the division circuit is ported from Z3 (MIT); a test that agrees with Z3 shows the port is faithful, not that it is right. `tests/soundness_probe.rs` checks every 4-bit input against the SMT-LIB definition.
+11. **A clause is read against level 0 when it arrives** — `add_clause` drops a clause a level-0 literal already satisfies and removes literals level 0 already falsified. It used to attach watches blind, and the bit-vector layer loads each assertion's unit before the gate clauses that connect assertions, so a connecting clause could arrive already falsified and never be looked at again: `x == 0` then `x + x != 0` was SAT.
+12. **Unsatisfiability is sticky** — once `add_clause` returns `false` the solver stays inconsistent (`ok`), and every later `add_clause` and `solve` says so. Callers ignored that `false` (`Solver::assert` does; the loader stopped at it and dropped the rest), and the next `solve` ran on a partial clause set.
+13. **Only learned clauses are collected, and never a locked one** — `clause_meta` marks each clause; input clauses and theory lemmas are `None`. Collection used to pair learned-clause metadata with clause indices through a boundary nothing ever set, and deleted input clauses once search passed a hundred conflicts: pigeonhole problems and bit-vector problems from five bits up came back SAT. A clause that is the reason for a current assignment is kept.
+14. **Check circuits against definitions, not against Z3** — the division circuit is ported from Z3 (MIT); a test that agrees with Z3 shows the port is faithful, not that it is right. `tests/soundness_probe.rs` checks every 4-bit input against the SMT-LIB definition.
 
 ## `SymExpr` AST Reference
 
@@ -62,7 +66,7 @@ Scope: `crates/fission-solver`
 Bit-blasting and CDCL exist; constant folding exists for the common constructors. What is missing, roughly in order of what a benchmark would need first:
 
 1. **Sign extension and rotation nodes** — callers build sign extension from `Ite` today, which is correct but larger than a direct circuit (Z3 reference: `mk_sign_extend`, `mk_ext_rotate_left_right` in `src/ast/rewriter/bit_blaster/bit_blaster_tpl_def.h`). Float arithmetic beyond what `lower_float_bits` covers still surfaces as `Unknown`.
-2. **An SMT-LIB QF_BV reader** — to run standard benchmarks, whose `:status` is the answer key.
+2. **An SMT-LIB QF_BV reader** — to run standard benchmarks, whose `:status` is the answer key. The other direction exists: `smtlib::script` prints a problem, and `tests/differential_z3.rs` (ignored; needs a `z3` binary) compares verdicts on random formulas. Run it with `FISSION_Z3=/opt/homebrew/bin/z3 FISSION_DIFF_CASES=2000 FISSION_DIFF_DEPTH=3 cargo test --release -p fission-solver --test differential_z3 -- --ignored --nocapture`. Its first run found the four defects in invariants 9 and 11-13; a disagreement is a bug in one of the two solvers.
 3. **A consistent size unit** — see invariant 9.
 4. **Word-level simplification before blasting** — Z3's `bv_rewriter.cpp` is the reference; add rules only where Fission's own queries show a cost.
 6. **Model extraction** — After `Sat`, extract concrete variable assignments from the learned model.

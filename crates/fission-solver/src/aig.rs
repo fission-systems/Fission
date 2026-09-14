@@ -416,6 +416,50 @@ impl AigManager {
         }
     }
 
+    /// `a < b`, unsigned: the borrow out of `a - b`, as a carry chain.
+    ///
+    /// Both operands at the wider width. This used to size the chain by `a`
+    /// alone, so a wider `b` had its high bits ignored.
+    fn add_ult(&mut self, a: &[AigLit], b: &[AigLit]) -> AigLit {
+        let width = a.len().max(b.len());
+        let mut carry = AigLit::TRUE;
+        for i in 0..width {
+            let x = a.get(i).copied().unwrap_or(AigLit::FALSE);
+            let y = b.get(i).copied().unwrap_or(AigLit::FALSE).not();
+            let x_xor_y = self.add_xor(x, y);
+            let both = self.add_and(x, y);
+            let propagated = self.add_and(x_xor_y, carry);
+            carry = self.add_or(both, propagated);
+        }
+        // carry out set: no borrow, a >= b.
+        carry.not()
+    }
+
+    /// `a < b`, signed: flip both sign bits, then compare unsigned.
+    ///
+    /// On the bits themselves, with no constant involved. This used to XOR
+    /// with the constant `1 << (size * 8 - 1)` -- a size read as *bytes*.
+    /// Called with a size in bits, as fission-dir and every test do, a 6-bit
+    /// operand got the mask `1 << 47`, which truncates to zero: the flip did
+    /// nothing, and every signed comparison was silently unsigned. `27 <s 62`
+    /// (62 being -2 in six bits) came back SAT. At 64 bits the mask was
+    /// `1 << 511`, which overflows.
+    fn add_slt(&mut self, a: &[AigLit], b: &[AigLit]) -> AigLit {
+        let width = a.len().max(b.len());
+        if width == 0 {
+            return AigLit::FALSE;
+        }
+        let pad = |bits: &[AigLit]| -> Vec<AigLit> {
+            (0..width)
+                .map(|i| bits.get(i).copied().unwrap_or(AigLit::FALSE))
+                .collect()
+        };
+        let (mut a, mut b) = (pad(a), pad(b));
+        a[width - 1] = a[width - 1].not();
+        b[width - 1] = b[width - 1].not();
+        self.add_ult(&a, &b)
+    }
+
     pub fn add_full_adder(&mut self, a: AigLit, b: AigLit, cin: AigLit) -> (AigLit, AigLit) {
         // sum = a ^ b ^ cin
         let a_xor_b = self.add_xor(a, b);
@@ -546,28 +590,9 @@ impl AigManager {
                 vec![self.add_neq(&a_bits, &b_bits)]
             }
             SymExpr::Ult(a, b) => {
-                // Unsigned less-than: a < b
-                // a < b  ⟺  borrow-out of (a - b) = 1
-                //          ⟺  carry-out of (a + ~b + 1) = 0  (two's complement)
-                // We build a single full-adder chain: a + ~b with carry_in = 1
-                // The final carry_out = 1 means a >= b, carry_out = 0 means a < b
                 let a_bits = self.lower_expr(a);
                 let b_bits = self.lower_expr(b);
-                let b_inv: Vec<AigLit> = b_bits.into_iter().map(|l| l.not()).collect();
-                let len = a_bits.len();
-
-                let mut carry = AigLit::TRUE; // carry-in = 1 (for two's complement negation)
-                for i in 0..len {
-                    let ax = a_bits.get(i).copied().unwrap_or(AigLit::FALSE);
-                    let bx = b_inv.get(i).copied().unwrap_or(AigLit::TRUE);
-                    // full adder carry-out: (a & b) | ((a ^ b) & carry_in)
-                    let axb = self.add_xor(ax, bx);
-                    let a_and_b = self.add_and(ax, bx);
-                    let axb_and_c = self.add_and(axb, carry);
-                    carry = self.add_or(a_and_b, axb_and_c);
-                }
-                // carry == 1 means a >= b (no borrow), carry == 0 means a < b (borrow)
-                vec![carry.not()]
+                vec![self.add_ult(&a_bits, &b_bits)]
             }
             SymExpr::Ule(a, b) => {
                 // a <= b  ≡  !(b < a)
@@ -576,14 +601,9 @@ impl AigManager {
                 vec![bits[0].not()]
             }
             SymExpr::Slt(a, b) => {
-                // Signed less-than: flip sign bits, then do ULT
-                // a <_s b  ≡  (a XOR (1<<N-1)) <_u (b XOR (1<<N-1))
-                let size = a.get_size() as usize;
-                let sign_mask = SymExpr::new_const(1u64 << ((size * 8) - 1), a.get_size());
-                let a_flipped = SymExpr::Xor(a.clone(), Box::new(sign_mask.clone()));
-                let b_flipped = SymExpr::Xor(b.clone(), Box::new(sign_mask));
-                let ult = SymExpr::Ult(Box::new(a_flipped), Box::new(b_flipped));
-                self.lower_expr(&ult)
+                let a_bits = self.lower_expr(a);
+                let b_bits = self.lower_expr(b);
+                vec![self.add_slt(&a_bits, &b_bits)]
             }
             SymExpr::Sle(a, b) => {
                 // a <=_s b  ≡  !(b <_s a)

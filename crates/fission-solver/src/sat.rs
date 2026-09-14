@@ -161,6 +161,14 @@ pub struct SatSolver {
 
     /// Index in `trail` of the next literal to propagate
     qhead: usize,
+    /// False once the clause set is known unsatisfiable at level 0.
+    ///
+    /// Sticky, as in MiniSat: `add_clause` returning `false` is a fact about
+    /// every later question. Callers dropped that return value -- the
+    /// bit-vector layer's loader stopped at the first `false` and discarded
+    /// the clauses after it, and `Solver::assert` ignored it -- so the next
+    /// `solve` ran on a partial clause set and answered SAT.
+    ok: bool,
 
     /// VSIDS Variable Activity (for decision heuristic)
     activity: Vec<f64>,
@@ -172,10 +180,16 @@ pub struct SatSolver {
     // ── Clause DB / LBD Garbage Collection ───────────────────────────────────
     // Reference: Z3 sat_gc.cpp gc_glue / gc_half pattern
     //
-    /// Index into `clauses` where learned clauses begin (original clauses before this idx).
-    learned_start: usize,
-    /// LBD metadata for each learned clause (parallel to clauses[learned_start..]).
-    learned_meta: Vec<LearnedMeta>,
+    /// One entry per clause, parallel to `clauses`: `Some` for a clause learned
+    /// from a conflict, which collection may delete; `None` for an input
+    /// clause or a theory lemma, which it must never touch.
+    ///
+    /// This used to be a boundary index, `learned_start`, with metadata only
+    /// for learned clauses -- and nothing ever set the boundary. Collection
+    /// paired the i-th learned clause's metadata with clause `i`, which was an
+    /// input clause, and deleted input clauses: pigeonhole problems came back
+    /// SAT, and so did bit-vector problems from five bits up.
+    clause_meta: Vec<Option<LearnedMeta>>,
     /// Conflict counter since the last GC run.
     conflicts_since_gc: u32,
     /// GC fires when conflicts_since_gc >= gc_threshold; threshold grows after each GC.
@@ -201,12 +215,12 @@ impl SatSolver {
             trail: vec![],
             trail_lim: vec![],
             qhead: 0,
+            ok: true,
             activity: vec![0.0],
             var_inc: 1.0,
             order: VarOrder::new(),
             phase: vec![LBool::False],
-            learned_start: 0,
-            learned_meta: vec![],
+            clause_meta: vec![],
             conflicts_since_gc: 0,
             gc_threshold: 100,
         }
@@ -283,14 +297,19 @@ impl SatSolver {
         true
     }
 
-    /// Mark the boundary between input clauses and learned clauses.
-    /// Must be called after all input clauses are added via add_clause, before solve().
-    pub fn seal_input_clauses(&mut self) {
-        self.learned_start = self.clauses.len();
+    /// Add a clause to the solver. Returns false if the formula becomes trivially UNSAT.
+    pub fn add_clause(&mut self, lits: Vec<Lit>) -> bool {
+        if !self.ok {
+            return false;
+        }
+        let accepted = self.add_clause_inner(lits);
+        if !accepted && self.decision_level() == 0 {
+            self.ok = false;
+        }
+        accepted
     }
 
-    /// Add a clause to the solver. Returns false if the formula becomes trivially UNSAT.
-    pub fn add_clause(&mut self, mut lits: Vec<Lit>) -> bool {
+    fn add_clause_inner(&mut self, mut lits: Vec<Lit>) -> bool {
         for lit in &lits {
             self.ensure_var(lit.var());
         }
@@ -312,6 +331,26 @@ impl SatSolver {
             }
         }
 
+        // At level 0 an assignment is permanent, so a clause can be read against
+        // it: a true literal satisfies the clause for good, and a false literal
+        // can never help it.
+        //
+        // This used to attach watches to the first two literals without
+        // looking. The solver adds each assertion's unit clause before the
+        // Tseitin clauses that connect assertions, so a connecting clause could
+        // arrive with *both* watched literals already false at level 0 --
+        // falsified -- and neither variable would ever be assigned again to
+        // trigger its watches. `x == 0` followed by `x + x != 0` came back SAT.
+        if self.decision_level() == 0 {
+            if lits
+                .iter()
+                .any(|&lit| matches!(self.value_lit(lit), LBool::True))
+            {
+                return true;
+            }
+            lits.retain(|&lit| !matches!(self.value_lit(lit), LBool::False));
+        }
+
         if lits.is_empty() {
             return false;
         } else if lits.len() == 1 {
@@ -330,6 +369,7 @@ impl SatSolver {
         let lit1 = lits[1];
 
         self.clauses.push(Clause(lits));
+        self.clause_meta.push(None);
 
         self.watches[lit0.not().index()].push(Watcher {
             clause_idx: c_idx,
@@ -529,53 +569,51 @@ impl SatSolver {
     /// - Evict the worst half; never evict glue clauses (lbd <= 2)
     /// - Update watch lists to point to new clause indices
     fn gc_learned(&mut self) {
-        let ls = self.learned_start;
-        let total = self.clauses.len();
-        if total <= ls {
-            return;
-        }
-
-        let learned_count = total - ls;
-        if learned_count < 10 {
-            return;
-        }
-
-        // Collect (lbd, original_index) for each learned clause
-        let mut order: Vec<(u32, usize)> = self
-            .learned_meta
+        debug_assert_eq!(self.clause_meta.len(), self.clauses.len());
+        let mut learned: Vec<(u32, usize)> = self
+            .clause_meta
             .iter()
             .enumerate()
-            .map(|(i, m)| (m.lbd, ls + i))
+            .filter_map(|(i, meta)| meta.as_ref().map(|m| (m.lbd, i)))
             .collect();
-        // Sort: low LBD (high quality) first
-        order.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        if learned.len() < 10 {
+            return;
+        }
+        let learned_count = learned.len();
 
-        let keep = learned_count / 2;
-        let to_keep: std::collections::HashSet<usize> = order[..keep.min(order.len())]
+        // A clause that is the reason for a current assignment is locked:
+        // conflict analysis will read it. Deleting it would turn an implied
+        // literal into what looks like a decision.
+        let locked: std::collections::HashSet<usize> = self
+            .trail
+            .iter()
+            .filter_map(|lit| {
+                self.vardata
+                    .get(lit.var() as usize)
+                    .and_then(|data| data.reason)
+            })
+            .collect();
+
+        // Low LBD first; keep the better half.
+        learned.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let to_keep: std::collections::HashSet<usize> = learned[..learned_count / 2]
             .iter()
             .map(|(_, idx)| *idx)
             .collect();
 
-        // Collect clauses to keep (input clauses + kept learned)
-        let mut new_clauses: Vec<Clause> = self.clauses[..ls].to_vec();
-        let mut new_meta: Vec<LearnedMeta> = Vec::new();
-        let mut index_map: Vec<Option<usize>> = vec![None; self.clauses.len()];
-
-        for i in 0..ls {
-            index_map[i] = Some(i);
-        }
-
-        for (meta_i, orig_idx) in self
-            .learned_meta
-            .iter()
-            .enumerate()
-            .map(|(i, _)| (i, ls + i))
-        {
-            if to_keep.contains(&orig_idx) {
-                let new_idx = new_clauses.len();
-                index_map[orig_idx] = Some(new_idx);
-                new_clauses.push(self.clauses[orig_idx].clone());
-                new_meta.push(self.learned_meta[meta_i].clone());
+        let total = self.clauses.len();
+        let mut new_clauses: Vec<Clause> = Vec::with_capacity(total);
+        let mut new_meta: Vec<Option<LearnedMeta>> = Vec::with_capacity(total);
+        let mut index_map: Vec<Option<usize>> = vec![None; total];
+        for i in 0..total {
+            let keep = match &self.clause_meta[i] {
+                None => true,
+                Some(_) => to_keep.contains(&i) || locked.contains(&i),
+            };
+            if keep {
+                index_map[i] = Some(new_clauses.len());
+                new_clauses.push(self.clauses[i].clone());
+                new_meta.push(self.clause_meta[i].clone());
             }
         }
 
@@ -602,7 +640,7 @@ impl SatSolver {
         }
 
         self.clauses = new_clauses;
-        self.learned_meta = new_meta;
+        self.clause_meta = new_meta;
         self.conflicts_since_gc = 0;
         self.gc_threshold = (self.gc_threshold * 12 / 10).max(50); // grow by 20%
     }
@@ -670,6 +708,9 @@ impl SatSolver {
         mut theory: Option<&mut dyn crate::theory::Theory>,
         assumptions: &[Lit],
     ) -> bool {
+        if !self.ok {
+            return false;
+        }
         self.cancel_until(0);
 
         for &lit in assumptions {
@@ -705,11 +746,9 @@ impl SatSolver {
 
                             let c_idx = self.clauses.len();
                             self.clauses.push(Clause(lits.clone()));
-
-                            let lbd = self.compute_lbd(&lits);
-                            if c_idx >= self.learned_start {
-                                self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
-                            }
+                            // A theory lemma is a constraint the theory will not
+                            // repeat; deleting it would lose it.
+                            self.clause_meta.push(None);
 
                             if lits.len() == 1 {
                                 // Unit clause. Enqueue it.
@@ -786,11 +825,8 @@ impl SatSolver {
                     let lbd = self.compute_lbd(&final_clause);
 
                     self.clauses.push(Clause(final_clause));
-
-                    // Track learned clause metadata for LBD-based GC
-                    if c_idx >= self.learned_start {
-                        self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
-                    }
+                    self.clause_meta
+                        .push(Some(LearnedMeta { lbd, activity: 0 }));
 
                     self.watches[lit0.not().index()].push(Watcher {
                         clause_idx: c_idx,

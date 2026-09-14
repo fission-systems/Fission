@@ -334,3 +334,473 @@ fn a_huge_constant_shift_is_zero_without_allocating_it() {
         "x << 2^40 is zero for every x"
     );
 }
+
+// ── Constants as direct operands ────────────────────────────────────────────
+//
+// Every check above pins variables with `x == c` and hands the operation
+// variables. A constant written straight into the operation takes a different
+// lowering path, and a random differential run against z3 disagreed on 42 of
+// 500 formulas that did exactly that.
+
+fn check_constant_operands(
+    what: &str,
+    build: impl Fn(SymExpr, SymExpr) -> SymExpr,
+    expected: impl Fn(u64, u64) -> u64,
+) {
+    for x in 0..=MASK {
+        for y in 0..=MASK {
+            let want = expected(x, y) & MASK;
+            let result = || build(SymExpr::new_const(x, WIDTH), SymExpr::new_const(y, WIDTH));
+            let eq = SymExpr::Eq(
+                Box::new(result()),
+                Box::new(SymExpr::new_const(want, WIDTH)),
+            );
+            let neq = SymExpr::Neq(
+                Box::new(result()),
+                Box::new(SymExpr::new_const(want, WIDTH)),
+            );
+            let got_eq = sat(eq);
+            let got_neq = sat(neq);
+            assert!(
+                matches!(got_eq, SatResult::Sat) && matches!(got_neq, SatResult::Unsat),
+                "{what}(#{x}, #{y}) with constant operands: expected {want}; \
+                 `==` gave {got_eq:?}, `!=` gave {got_neq:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_operation_is_right_with_constant_operands() {
+    let s = |v: u64| signed(v);
+    check_constant_operands(
+        "bvadd",
+        |a, b| SymExpr::Add(Box::new(a), Box::new(b)),
+        |x, y| x + y,
+    );
+    check_constant_operands(
+        "bvsub",
+        |a, b| SymExpr::Sub(Box::new(a), Box::new(b)),
+        |x, y| x.wrapping_sub(y),
+    );
+    check_constant_operands(
+        "bvmul",
+        |a, b| SymExpr::Mul(Box::new(a), Box::new(b)),
+        |x, y| x * y,
+    );
+    check_constant_operands(
+        "bvudiv",
+        |a, b| SymExpr::Udiv(Box::new(a), Box::new(b)),
+        |x, y| if y == 0 { MASK } else { x / y },
+    );
+    check_constant_operands(
+        "bvurem",
+        |a, b| SymExpr::Urem(Box::new(a), Box::new(b)),
+        |x, y| if y == 0 { x } else { x % y },
+    );
+    check_constant_operands(
+        "bvsdiv",
+        |a, b| SymExpr::Sdiv(Box::new(a), Box::new(b)),
+        |x, y| {
+            let (a, b) = (s(x), s(y));
+            if b == 0 {
+                if a < 0 {
+                    1
+                } else {
+                    MASK
+                }
+            } else {
+                (a / b) as u64
+            }
+        },
+    );
+    check_constant_operands(
+        "bvsrem",
+        |a, b| SymExpr::Srem(Box::new(a), Box::new(b)),
+        |x, y| {
+            let (a, b) = (s(x), s(y));
+            if b == 0 {
+                a as u64
+            } else {
+                (a % b) as u64
+            }
+        },
+    );
+    check_constant_operands(
+        "bvsmod",
+        |a, b| SymExpr::Smod(Box::new(a), Box::new(b)),
+        |x, y| {
+            let (a, b) = (s(x), s(y));
+            if b == 0 {
+                return a as u64;
+            }
+            let r = a % b;
+            (if r != 0 && ((r < 0) != (b < 0)) {
+                r + b
+            } else {
+                r
+            }) as u64
+        },
+    );
+    check_constant_operands(
+        "bvand",
+        |a, b| SymExpr::And(Box::new(a), Box::new(b)),
+        |x, y| x & y,
+    );
+    check_constant_operands(
+        "bvor",
+        |a, b| SymExpr::Or(Box::new(a), Box::new(b)),
+        |x, y| x | y,
+    );
+    check_constant_operands(
+        "bvxor",
+        |a, b| SymExpr::Xor(Box::new(a), Box::new(b)),
+        |x, y| x ^ y,
+    );
+    check_constant_operands(
+        "bvshl",
+        |a, b| SymExpr::Shl(Box::new(a), Box::new(b)),
+        |x, y| if y >= WIDTH as u64 { 0 } else { x << y },
+    );
+    check_constant_operands(
+        "bvlshr",
+        |a, b| SymExpr::Lshr(Box::new(a), Box::new(b)),
+        |x, y| if y >= WIDTH as u64 { 0 } else { x >> y },
+    );
+    check_constant_operands(
+        "bvashr",
+        |a, b| SymExpr::Ashr(Box::new(a), Box::new(b)),
+        |x, y| {
+            let a = s(x);
+            if y >= WIDTH as u64 {
+                if a < 0 {
+                    MASK
+                } else {
+                    0
+                }
+            } else {
+                (a >> y) as u64
+            }
+        },
+    );
+}
+
+// ── Comparisons ─────────────────────────────────────────────────────────────
+//
+// Nothing above compared symbolic operands exhaustively. A random run against
+// z3 disagreed on 175 of 2000 shallow formulas, nearly all with a signed
+// comparison in them; the smallest was `27 <s 62` at six bits.
+
+/// Pin `x` and `y`, then ask whether the one-bit comparison equals the
+/// expected truth value (SAT) and whether it differs (UNSAT).
+fn check_comparison_exhaustively(
+    what: &str,
+    build: impl Fn(SymExpr, SymExpr) -> SymExpr,
+    expected: impl Fn(u64, u64) -> bool,
+) {
+    for x in 0..=MASK {
+        for y in 0..=MASK {
+            let want = u64::from(expected(x, y));
+            for negate in [false, true] {
+                let xv = SymExpr::new_var("x", WIDTH);
+                let yv = SymExpr::new_var("y", WIDTH);
+                let mut solver = Solver::new();
+                solver.assert(SymExpr::Eq(
+                    Box::new(xv.clone()),
+                    Box::new(SymExpr::new_const(x, WIDTH)),
+                ));
+                solver.assert(SymExpr::Eq(
+                    Box::new(yv.clone()),
+                    Box::new(SymExpr::new_const(y, WIDTH)),
+                ));
+                let truth = Box::new(SymExpr::new_const(want, 1));
+                let result = Box::new(build(xv, yv));
+                solver.assert(if negate {
+                    SymExpr::Neq(result, truth)
+                } else {
+                    SymExpr::Eq(result, truth)
+                });
+                let got = solver.check_sat().expect("check_sat");
+                let ok = if negate {
+                    matches!(got, SatResult::Unsat)
+                } else {
+                    matches!(got, SatResult::Sat)
+                };
+                assert!(
+                    ok,
+                    "{what}({x}, {y}) should be {}, got {got:?} for `{}`",
+                    want == 1,
+                    if negate { "!=" } else { "==" }
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unsigned_comparisons_match_their_definitions_on_every_4_bit_pair() {
+    check_comparison_exhaustively(
+        "bvult",
+        |a, b| SymExpr::Ult(Box::new(a), Box::new(b)),
+        |x, y| x < y,
+    );
+    check_comparison_exhaustively(
+        "bvule",
+        |a, b| SymExpr::Ule(Box::new(a), Box::new(b)),
+        |x, y| x <= y,
+    );
+}
+
+#[test]
+fn signed_comparisons_match_their_definitions_on_every_4_bit_pair() {
+    check_comparison_exhaustively(
+        "bvslt",
+        |a, b| SymExpr::Slt(Box::new(a), Box::new(b)),
+        |x, y| signed(x) < signed(y),
+    );
+    check_comparison_exhaustively(
+        "bvsle",
+        |a, b| SymExpr::Sle(Box::new(a), Box::new(b)),
+        |x, y| signed(x) <= signed(y),
+    );
+    check_comparison_exhaustively(
+        "bvsgt",
+        |a, b| SymExpr::Sgt(Box::new(a), Box::new(b)),
+        |x, y| signed(x) > signed(y),
+    );
+}
+
+/// The sign mask used to be `1 << (size * 8 - 1)`, which at 64 bits is a
+/// shift by 511. The most negative 64-bit value is less than zero.
+#[test]
+fn a_64_bit_signed_comparison_does_not_overflow_and_is_right() {
+    let min = SymExpr::new_const(1u64 << 63, 64);
+    let zero = SymExpr::new_const(0, 64);
+    let lt = SymExpr::Slt(Box::new(min.clone()), Box::new(zero.clone()));
+    assert!(matches!(sat(lt), SatResult::Sat), "-2^63 <s 0");
+    let gt = SymExpr::Slt(Box::new(zero), Box::new(min));
+    assert!(matches!(sat(gt), SatResult::Unsat), "0 <s -2^63 is false");
+}
+
+// ── The same variable on both sides ─────────────────────────────────────────
+//
+// Every exhaustive check above used two *different* variables pinned to equal
+// values. With one variable on both sides the two operands are the same AIG
+// literals, and structural simplification takes over. The disagreements left
+// after fixing the signed comparisons were all of this shape --
+// `(bvurem x x)` against `(bvsmod x x)`.
+
+fn check_same_operand(
+    what: &str,
+    build: impl Fn(SymExpr, SymExpr) -> SymExpr,
+    expected: impl Fn(u64) -> u64,
+) {
+    for x in 0..=MASK {
+        let want = expected(x) & MASK;
+        for negate in [false, true] {
+            let xv = SymExpr::new_var("x", WIDTH);
+            let mut solver = Solver::new();
+            solver.assert(SymExpr::Eq(
+                Box::new(xv.clone()),
+                Box::new(SymExpr::new_const(x, WIDTH)),
+            ));
+            let result = Box::new(build(xv.clone(), xv));
+            let target = Box::new(SymExpr::new_const(want, WIDTH));
+            solver.assert(if negate {
+                SymExpr::Neq(result, target)
+            } else {
+                SymExpr::Eq(result, target)
+            });
+            let got = solver.check_sat().expect("check_sat");
+            let ok = if negate {
+                matches!(got, SatResult::Unsat)
+            } else {
+                matches!(got, SatResult::Sat)
+            };
+            assert!(
+                ok,
+                "{what}(x, x) at x = {x}: expected {want}, got {got:?} for `{}`",
+                if negate { "!=" } else { "==" }
+            );
+        }
+    }
+}
+
+#[test]
+fn every_operation_is_right_with_the_same_variable_on_both_sides() {
+    let s = |v: u64| signed(v);
+    check_same_operand(
+        "bvadd",
+        |a, b| SymExpr::Add(Box::new(a), Box::new(b)),
+        |x| x + x,
+    );
+    check_same_operand(
+        "bvsub",
+        |a, b| SymExpr::Sub(Box::new(a), Box::new(b)),
+        |_| 0,
+    );
+    check_same_operand(
+        "bvmul",
+        |a, b| SymExpr::Mul(Box::new(a), Box::new(b)),
+        |x| x * x,
+    );
+    check_same_operand(
+        "bvudiv",
+        |a, b| SymExpr::Udiv(Box::new(a), Box::new(b)),
+        |x| if x == 0 { MASK } else { 1 },
+    );
+    check_same_operand(
+        "bvurem",
+        |a, b| SymExpr::Urem(Box::new(a), Box::new(b)),
+        |x| if x == 0 { 0 } else { 0 },
+    );
+    check_same_operand(
+        "bvsdiv",
+        |a, b| SymExpr::Sdiv(Box::new(a), Box::new(b)),
+        |x| if x == 0 { MASK } else { 1 },
+    );
+    check_same_operand(
+        "bvsrem",
+        |a, b| SymExpr::Srem(Box::new(a), Box::new(b)),
+        |x| if s(x) == 0 { x } else { 0 },
+    );
+    check_same_operand(
+        "bvsmod",
+        |a, b| SymExpr::Smod(Box::new(a), Box::new(b)),
+        |x| if s(x) == 0 { x } else { 0 },
+    );
+    check_same_operand(
+        "bvand",
+        |a, b| SymExpr::And(Box::new(a), Box::new(b)),
+        |x| x,
+    );
+    check_same_operand("bvor", |a, b| SymExpr::Or(Box::new(a), Box::new(b)), |x| x);
+    check_same_operand(
+        "bvxor",
+        |a, b| SymExpr::Xor(Box::new(a), Box::new(b)),
+        |_| 0,
+    );
+    check_same_operand(
+        "bvshl",
+        |a, b| SymExpr::Shl(Box::new(a), Box::new(b)),
+        |x| if x >= WIDTH as u64 { 0 } else { x << x },
+    );
+    check_same_operand(
+        "bvlshr",
+        |a, b| SymExpr::Lshr(Box::new(a), Box::new(b)),
+        |x| if x >= WIDTH as u64 { 0 } else { x >> x },
+    );
+    check_same_operand(
+        "bvashr",
+        |a, b| SymExpr::Ashr(Box::new(a), Box::new(b)),
+        |x| {
+            if x >= WIDTH as u64 {
+                if s(x) < 0 {
+                    MASK
+                } else {
+                    0
+                }
+            } else {
+                (s(x) >> x) as u64
+            }
+        },
+    );
+}
+
+// ── Clauses that arrive after their literals are fixed ──────────────────────
+//
+// The solver loads each assertion's unit clause before the Tseitin clauses
+// that connect assertions to each other. `add_clause` used to attach watches
+// without reading the clause against the level-0 assignment, so a connecting
+// clause whose literals were already all false was never looked at again.
+// Found as "the same variable on both sides": `x + x != 0` with `x == 0` was
+// SAT, while the same two constraints joined into one assertion were UNSAT.
+
+/// At the SAT core: `a`, then `!b`, then `a -> b`.
+#[test]
+fn a_clause_falsified_before_it_arrives_is_still_a_conflict() {
+    use fission_solver::cnf::Lit;
+    use fission_solver::sat::SatSolver;
+
+    let mut sat = SatSolver::new();
+    let (a, b) = (Lit::new(1, false), Lit::new(2, false));
+    assert!(sat.add_clause(vec![a]));
+    assert!(sat.add_clause(vec![b.not()]));
+    let accepted = sat.add_clause(vec![a.not(), b]);
+    assert!(
+        !accepted || !sat.solve(),
+        "a, !b and (a -> b) together are unsatisfiable"
+    );
+}
+
+fn verdict(assertions: Vec<SymExpr>) -> SatResult {
+    let mut solver = Solver::new();
+    for assertion in assertions {
+        solver.assert(assertion);
+    }
+    solver.check_sat().expect("check_sat")
+}
+
+/// The shapes that went wrong, as assertions that share AIG nodes. Joined
+/// into one assertion each of these was already right, and so was the same
+/// problem over two different variables -- which is why no earlier test
+/// could see it.
+#[test]
+fn assertions_that_share_structure_are_all_enforced() {
+    let x = SymExpr::new_var("x", 4);
+    let c = |v| SymExpr::new_const(v, 4);
+    let pin = |v| SymExpr::Eq(Box::new(x.clone()), Box::new(c(v)));
+    let doubled = || SymExpr::Add(Box::new(x.clone()), Box::new(x.clone()));
+
+    let cases: Vec<(&str, Vec<SymExpr>)> = vec![
+        (
+            "x == 0 ; x + x != 0",
+            vec![pin(0), SymExpr::Neq(Box::new(doubled()), Box::new(c(0)))],
+        ),
+        (
+            "x + x != 0 ; x == 0",
+            vec![SymExpr::Neq(Box::new(doubled()), Box::new(c(0))), pin(0)],
+        ),
+        (
+            "x == 0 ; (x << 1) != 0",
+            vec![
+                pin(0),
+                SymExpr::Neq(
+                    Box::new(SymExpr::Shl(Box::new(x.clone()), Box::new(c(1)))),
+                    Box::new(c(0)),
+                ),
+            ],
+        ),
+        (
+            "x == 1 ; x + x != 2",
+            vec![pin(1), SymExpr::Neq(Box::new(doubled()), Box::new(c(2)))],
+        ),
+    ];
+    for (label, assertions) in cases {
+        assert!(
+            matches!(verdict(assertions), SatResult::Unsat),
+            "{label} is unsatisfiable"
+        );
+    }
+}
+
+// ── Problems big enough to collect learned clauses ──────────────────────────
+
+/// `urem(x, x)` and `smod(x, x)` are equal for every `x`, so neither is greater.
+/// From five bits up the search learns enough clauses to trigger collection,
+/// which used to delete input clauses -- and this came back SAT. Every value
+/// pinned individually was right, because pinning ends the search at level 0.
+#[test]
+fn a_free_variable_problem_stays_right_after_clause_collection() {
+    for width in 1..=8u32 {
+        let x = SymExpr::new_var("x", width);
+        let greater = SymExpr::Sgt(
+            Box::new(SymExpr::Urem(Box::new(x.clone()), Box::new(x.clone()))),
+            Box::new(SymExpr::Smod(Box::new(x.clone()), Box::new(x))),
+        );
+        assert!(
+            matches!(sat(greater), SatResult::Unsat),
+            "urem(x,x) >s smod(x,x) has no solution at {width} bits"
+        );
+    }
+}
