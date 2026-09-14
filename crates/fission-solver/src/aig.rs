@@ -46,6 +46,10 @@ pub struct AigManager {
     /// Maps ArraySelect nodes to their vector of AIG literals
     array_select_map: HashMap<SymExpr, Vec<AigLit>>,
     pub last_cnf_node: usize,
+    /// Operations met during lowering that have no circuit here. Any entry
+    /// makes an answer about this problem untrustworthy, and the solver
+    /// reports `Unknown` rather than a verdict.
+    unsupported: Vec<String>,
 }
 
 impl Default for AigManager {
@@ -62,6 +66,7 @@ impl AigManager {
             var_map: HashMap::new(),
             array_select_map: HashMap::new(),
             last_cnf_node: 0,
+            unsupported: Vec::new(),
         }
     }
 
@@ -149,6 +154,107 @@ impl AigManager {
 
     pub fn add_neq(&mut self, a_bits: &[AigLit], b_bits: &[AigLit]) -> AigLit {
         self.add_eq(a_bits, b_bits).not()
+    }
+
+    /// What lowering met and could not encode, in the order it was met.
+    pub fn unsupported(&self) -> &[String] {
+        &self.unsupported
+    }
+
+    pub fn note_unsupported(&mut self, what: String) {
+        if !self.unsupported.contains(&what) {
+            self.unsupported.push(what);
+        }
+    }
+
+    /// `n` fresh, unconstrained bits.
+    fn fresh_bits(&mut self, n: usize) -> Vec<AigLit> {
+        (0..n)
+            .map(|_| {
+                let idx = self.nodes.len() as u32 + 1;
+                self.nodes.push(AigNode::Var(idx));
+                AigLit::new(idx, false)
+            })
+            .collect()
+    }
+
+    /// `c ? t : e` for one bit.
+    pub fn add_ite(&mut self, c: AigLit, t: AigLit, e: AigLit) -> AigLit {
+        let then_side = self.add_and(c, t);
+        let else_side = self.add_and(c.not(), e);
+        self.add_or(then_side, else_side)
+    }
+
+    /// `a - b` and whether it did *not* borrow -- that is, whether `a >= b`.
+    fn add_subtracter(&mut self, a: &[AigLit], b: &[AigLit]) -> (Vec<AigLit>, AigLit) {
+        let len = a.len().max(b.len());
+        let mut diff = Vec::with_capacity(len);
+        let mut carry = AigLit::TRUE;
+        for i in 0..len {
+            let x = a.get(i).copied().unwrap_or(AigLit::FALSE);
+            let y = b.get(i).copied().unwrap_or(AigLit::FALSE).not();
+            let (sum, next) = self.add_full_adder(x, y, carry);
+            diff.push(sum);
+            carry = next;
+        }
+        (diff, carry)
+    }
+
+    /// `a * b` modulo `2^width`, shift-and-add.
+    fn add_multiplier(&mut self, a: &[AigLit], b: &[AigLit]) -> Vec<AigLit> {
+        let width = a.len().max(b.len());
+        let bit = |bits: &[AigLit], i: usize| bits.get(i).copied().unwrap_or(AigLit::FALSE);
+        let mut product = vec![AigLit::FALSE; width];
+        for i in 0..width {
+            let multiplier_bit = bit(b, i);
+            let mut partial = vec![AigLit::FALSE; width];
+            for j in 0..width - i {
+                partial[i + j] = self.add_and(bit(a, j), multiplier_bit);
+            }
+            product = self.add_ripple_carry_adder(&product, &partial, AigLit::FALSE);
+        }
+        product
+    }
+
+    /// Unsigned `a / b` and `a % b`, by restoring division -- the circuit
+    /// Z3 builds in `bit_blaster_tpl_def.h`'s `mk_udiv_urem` (MIT License,
+    /// Copyright (c) Microsoft Corporation).
+    ///
+    /// Division by zero needs no special case and gets the SMT-LIB answer:
+    /// every subtraction of zero succeeds, so the quotient is all ones and the
+    /// remainder is the dividend.
+    fn add_udiv_urem(&mut self, a: &[AigLit], b: &[AigLit]) -> (Vec<AigLit>, Vec<AigLit>) {
+        let width = a.len().max(b.len());
+        let pad = |bits: &[AigLit]| -> Vec<AigLit> {
+            (0..width)
+                .map(|i| bits.get(i).copied().unwrap_or(AigLit::FALSE))
+                .collect()
+        };
+        let (a, b) = (pad(a), pad(b));
+        let mut partial = vec![AigLit::FALSE; width];
+        partial[0] = a[width - 1];
+        let mut quotient = vec![AigLit::FALSE; width];
+        for step in 0..width {
+            let (difference, fits) = self.add_subtracter(&partial, &b);
+            quotient[width - 1 - step] = fits;
+            if step < width - 1 {
+                // Keep the difference if it fitted, then bring the next
+                // dividend bit down. The top bit that falls off is always
+                // zero: a partial remainder before the last step holds at
+                // most `step + 1` bits.
+                let mut next = vec![AigLit::FALSE; width];
+                for j in (1..width).rev() {
+                    next[j] = self.add_ite(fits, difference[j - 1], partial[j - 1]);
+                }
+                next[0] = a[width - step - 2];
+                partial = next;
+            } else {
+                for j in 0..width {
+                    partial[j] = self.add_ite(fits, difference[j], partial[j]);
+                }
+            }
+        }
+        (quotient, partial)
     }
 
     pub fn add_full_adder(&mut self, a: AigLit, b: AigLit, cin: AigLit) -> (AigLit, AigLit) {
@@ -473,13 +579,54 @@ impl AigManager {
                 }
                 out
             }
-            // Mul, Udiv, Ite, and other ops not yet supported
+            SymExpr::Mul(a, b) => {
+                let a_bits = self.lower_expr(a);
+                let b_bits = self.lower_expr(b);
+                self.add_multiplier(&a_bits, &b_bits)
+            }
+            SymExpr::Udiv(a, b) => {
+                let a_bits = self.lower_expr(a);
+                let b_bits = self.lower_expr(b);
+                self.add_udiv_urem(&a_bits, &b_bits).0
+            }
+            SymExpr::Ite { cond, t, f } => {
+                let c_bits = self.lower_expr(cond);
+                let t_bits = self.lower_expr(t);
+                let f_bits = self.lower_expr(f);
+                if c_bits.len() != 1 {
+                    self.note_unsupported(format!("Ite with a {}-bit condition", c_bits.len()));
+                }
+                let c = c_bits.first().copied().unwrap_or(AigLit::FALSE);
+                let width = t_bits.len().max(f_bits.len());
+                (0..width)
+                    .map(|i| {
+                        let then_bit = t_bits.get(i).copied().unwrap_or(AigLit::FALSE);
+                        let else_bit = f_bits.get(i).copied().unwrap_or(AigLit::FALSE);
+                        self.add_ite(c, then_bit, else_bit)
+                    })
+                    .collect()
+            }
+            // Everything else. This used to answer all-false bits, so the
+            // solver believed `a * b`, `a / b` and `ite(c, x, y)` were always
+            // zero: `x * 3 == 6` came back UNSAT, and `x*3 != x*5` came back
+            // UNSAT -- a false proof that two different functions are equal,
+            // which fission-dir reports as `Equivalent`. Unconstrained bits
+            // plus a recorded miss make the answer `Unknown` instead.
             _ => {
-                tracing::warn!("Unsupported AIG lowering for {:?}", expr);
-                let n = expr.get_size().max(1) as usize;
-                // Prefer bit-width for multi-byte payloads.
-                let n = if n <= 8 { n * 8 } else { n };
-                vec![AigLit::FALSE; n]
+                let debug = format!("{expr:?}");
+                let name = debug
+                    .split(|c: char| !c.is_alphanumeric())
+                    .next()
+                    .unwrap_or("?")
+                    .to_string();
+                tracing::warn!("Unsupported AIG lowering for {name}");
+                self.note_unsupported(name);
+                let n = match expr.get_sort() {
+                    crate::ast::Sort::Float(sz) => sz * 8,
+                    crate::ast::Sort::BitVector(sz) => sz,
+                    crate::ast::Sort::Array { range, .. } => range.byte_size(),
+                };
+                self.fresh_bits(n.max(1) as usize)
             }
         }
     }

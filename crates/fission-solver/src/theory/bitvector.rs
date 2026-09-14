@@ -30,6 +30,12 @@ impl BvTheorySolver {
         }
     }
 
+    /// What lowering could not encode. Non-empty means no verdict about this
+    /// problem can be trusted.
+    pub fn unsupported(&self) -> &[String] {
+        self.aig.unsupported()
+    }
+
     /// Lower an expression into AIG, ensuring all its components are mapped.
     /// In an eager setting, we lower the whole constraint here.
     pub fn assert_expr(&mut self, expr: &SymExpr) {
@@ -38,7 +44,12 @@ impl BvTheorySolver {
             // Assert that the boolean result of the condition is TRUE
             self.cnf.assert_lit(bits[0]);
         } else {
+            // Dropping the assertion used to be silent, and a dropped
+            // constraint makes a problem looser than the one asked -- a SAT
+            // here could be a model of something else.
             tracing::warn!("Assertion size != 1, skipping in BvTheory: {:?}", expr);
+            self.aig
+                .note_unsupported(format!("assertion {} bits wide", bits.len()));
         }
     }
 
@@ -71,6 +82,11 @@ impl BvTheorySolver {
             Some(cnf_lit)
         } else {
             tracing::warn!("Expression size != 1, cannot lower to literal: {:?}", expr);
+            // `None` also means "trivially UNSAT", and the caller cannot tell
+            // the two apart; the recorded miss is what turns its UNSAT into
+            // `Unknown`.
+            self.aig
+                .note_unsupported(format!("assumption {} bits wide", bits.len()));
             None
         }
     }

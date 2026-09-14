@@ -103,7 +103,7 @@ impl Solver {
             self.lowered_assertions += 1;
         }
         if !self.bv_theory.load_into_sat(&mut self.sat) {
-            return Ok(SatResult::Unsat);
+            return Ok(self.refuted());
         }
 
         loop {
@@ -125,13 +125,13 @@ impl Solver {
                 if let Some(lit) = self.bv_theory.lower_to_literal(e, &mut self.sat) {
                     assumptions.push(lit);
                 } else {
-                    return Ok(SatResult::Unsat);
+                    return Ok(self.refuted());
                 }
             }
 
             // 3. Solve pure boolean SAT problem with assumptions
             if !self.sat.solve_with_assumptions(None, &assumptions) {
-                return Ok(SatResult::Unsat);
+                return Ok(self.refuted());
             }
 
             // 4. Model Extraction
@@ -187,7 +187,29 @@ impl Solver {
                 tracing::debug!("Model: var_id={} value=0x{:X}", node_id, val);
             }
 
-            return Ok(SatResult::Sat);
+            // A model of a problem with an unencoded operation is a model of
+            // a looser problem, not of this one.
+            return Ok(if self.bv_theory.unsupported().is_empty() {
+                SatResult::Sat
+            } else {
+                SatResult::Unknown
+            });
+        }
+    }
+
+    /// The verdict when the SAT core finds no model: `Unsat` only if every
+    /// operation in the problem was encoded. An unencoded one was lowered to
+    /// unconstrained bits, so "no model" is not a statement about the problem
+    /// that was asked.
+    ///
+    /// The record is per solver and sticky, so a miss in one query's extra
+    /// constraints makes later queries on the same solver `Unknown` too --
+    /// conservative, and never wrong.
+    fn refuted(&self) -> SatResult {
+        if self.bv_theory.unsupported().is_empty() {
+            SatResult::Unsat
+        } else {
+            SatResult::Unknown
         }
     }
 
@@ -285,9 +307,15 @@ impl Solver {
         match expr {
             SymExpr::Const { val, .. } => *val != 0,
             _ => {
-                // Check that NOT(expr) is UNSAT
+                // NOT(expr) must be *refuted*. `!satisfiable(..)` also counted
+                // `Unknown` as proof, which made "could not tell" read as
+                // "always true".
                 let negated = SymExpr::new_eq(expr.clone(), SymExpr::new_const(0, 1));
-                !self.satisfiable(&[negated])
+                matches!(
+                    self.check_sat_with_oracle(None, &[negated])
+                        .unwrap_or(SatResult::Unknown),
+                    SatResult::Unsat
+                )
             }
         }
     }
@@ -298,9 +326,13 @@ impl Solver {
         match expr {
             SymExpr::Const { val, .. } => *val == 0,
             _ => {
-                // Check that expr is UNSAT
+                // `expr` must be refuted, for the same reason as `is_true`.
                 let positive = SymExpr::new_neq(expr.clone(), SymExpr::new_const(0, 1));
-                !self.satisfiable(&[positive])
+                matches!(
+                    self.check_sat_with_oracle(None, &[positive])
+                        .unwrap_or(SatResult::Unknown),
+                    SatResult::Unsat
+                )
             }
         }
     }
@@ -329,11 +361,17 @@ impl Solver {
                 Box::new(expr.clone()),
                 Box::new(SymExpr::new_const(mid, expr.get_size())),
             );
-            if self.satisfiable(&[constraint]) {
-                best = mid;
-                hi = mid;
-            } else {
-                lo = mid + 1;
+            // A bound the solver could not decide is not a bound.
+            match self
+                .check_sat_with_oracle(None, &[constraint])
+                .unwrap_or(SatResult::Unknown)
+            {
+                SatResult::Sat => {
+                    best = mid;
+                    hi = mid;
+                }
+                SatResult::Unsat => lo = mid + 1,
+                SatResult::Unknown => return None,
             }
         }
         Some(best)
@@ -367,11 +405,16 @@ impl Solver {
                 Box::new(SymExpr::new_const(mid, expr.get_size())),
                 Box::new(expr.clone()),
             );
-            if self.satisfiable(&[constraint]) {
-                best = mid;
-                lo = mid;
-            } else {
-                hi = mid - 1;
+            match self
+                .check_sat_with_oracle(None, &[constraint])
+                .unwrap_or(SatResult::Unknown)
+            {
+                SatResult::Sat => {
+                    best = mid;
+                    lo = mid;
+                }
+                SatResult::Unsat => hi = mid - 1,
+                SatResult::Unknown => return None,
             }
         }
         Some(best)

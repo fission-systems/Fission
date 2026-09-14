@@ -14,7 +14,11 @@ Scope: `crates/fission-solver`
 | Module | File | Purpose |
 |---|---|---|
 | `SymExpr` | `src/ast.rs` | Symbolic expression AST: constants, variables, arithmetic, bitwise, comparisons, ITE, bitvector ops |
-| `Solver` | `src/solver.rs` | Node registry, path condition list, SAT result enum, skeleton `check_sat()` |
+| `Solver` | `src/solver.rs` | Node registry, assertions, `check_sat` with a memory-oracle CEGAR loop, `is_true`/`is_false`/`min`/`max` |
+| `AigManager` | `src/aig.rs` | Bit-blasting to an and-inverter graph: adders, comparisons, shifts, multiply, unsigned divide, if-then-else |
+| `CnfBuilder` | `src/cnf.rs` | Tseitin encoding of the AIG |
+| `SatSolver` | `src/sat.rs` | CDCL: watched literals, VSIDS heap, phase saving, LBD-scored learned-clause GC |
+| theories | `src/theory/` | Bitvector (eager bit-blasting) and array (select/store) |
 
 ## Key Invariants
 
@@ -24,7 +28,10 @@ Scope: `crates/fission-solver`
 4. **`Solver::register_node` is the canonical way to store a computed expression** — Do not store nodes in ad-hoc side maps.
 5. **`Solver::register_var` is the canonical way to create a new symbolic variable** — Used by taint sources.
 6. **Assertions must be 1-bit** — `solver.assert(expr)` should only accept `SymExpr` values where `get_size() == 1`.
-7. **`check_sat` is a stub** — Until DPLL/CDCL bit-blasting is implemented, `check_sat()` returns `SatResult::Sat`. Do not treat this as a verified result.
+7. **An operation without a circuit makes the answer `Unknown`** — `AigManager` records every operation it cannot encode (and every assertion or assumption that is not one bit wide) and lowers it to *unconstrained* bits. `check_sat` then returns `Unknown`, never `Sat` or `Unsat`. It used to lower them to all-false bits, which made `x*3 != x*5` UNSAT: a false equivalence proof. fission-dir maps `Unsat` straight to `Equivalent`, so this invariant is what keeps a missing circuit from becoming a wrong proof.
+8. **`Unknown` is not a verdict** — `is_true`/`is_false` require an explicit `Unsat` of the negation; `min`/`max` return `None` when a probe is `Unknown`. Treating `!satisfiable(..)` as proof reads "could not tell" as "always".
+9. **Sizes are not consistently bits** — `new_var(_, 8)` and the constant-folding masks treat size as bits, while the emulator registers a stdin byte with size `1` and `max()` multiplies `get_size()` by eight. Know which convention a caller uses before relying on a width.
+10. **Check circuits against definitions, not against Z3** — the division circuit is ported from Z3 (MIT); a test that agrees with Z3 shows the port is faithful, not that it is right. `tests/soundness_probe.rs` checks every 4-bit input against the SMT-LIB definition.
 
 ## `SymExpr` AST Reference
 
@@ -51,13 +58,12 @@ Scope: `crates/fission-solver`
 
 ## Planned Development
 
-The solver is currently a scaffolding. The planned implementation path is:
+Bit-blasting and CDCL exist; constant folding exists for the common constructors. What is missing, roughly in order of what a benchmark would need first:
 
-1. **Constant folding** — Evaluate `Add(Const(3), Const(5))` to `Const(8)` at construction time.
-2. **Simplification** — Implement algebraic simplifications (identity, absorption, De Morgan).
-3. **Bit-blasting** — Lower bitvector expressions to CNF SAT clauses.
-4. **DPLL** — Implement the Davis-Putnam-Logemann-Loveland SAT procedure.
-5. **CDCL** — Extend with Conflict-Driven Clause Learning for practical performance.
+1. **Remainder, signed division, arithmetic shift, sign extension** — no AST nodes and no circuits yet (Z3 reference: `mk_sdiv_srem_smod`, `mk_ashr`, `mk_sign_extend` in `src/ast/rewriter/bit_blaster/bit_blaster_tpl_def.h`). Until then they surface as `Unknown`.
+2. **An SMT-LIB QF_BV reader** — to run standard benchmarks, whose `:status` is the answer key.
+3. **A consistent size unit** — see invariant 9.
+4. **Word-level simplification before blasting** — Z3's `bv_rewriter.cpp` is the reference; add rules only where Fission's own queries show a cost.
 6. **Model extraction** — After `Sat`, extract concrete variable assignments from the learned model.
 
 ## Anti-Patterns
