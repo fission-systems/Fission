@@ -368,9 +368,100 @@ pub fn access(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
     }
 }
 
-pub fn stat64(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
-    set_errno(emu, globals, 2)?; // ENOENT
-    emu.write_return_val(u64::MAX)
+/// `_S_IFCHR`: what a console is.
+const S_IFCHR: u16 = 0x2000;
+/// `_S_IFREG`.
+const S_IFREG: u16 = 0x8000;
+/// `_S_IREAD | _S_IWRITE`.
+const S_IRW: u16 = 0x0180;
+
+/// Fill a `struct _stat*` for something that exists.
+///
+/// Two layouts, because the CRT has two: `_stat64` carries a 64-bit size at
+/// offset 24, `_stat64i32` (which is also what `_stat` is on x64) a 32-bit
+/// size at 20. The times follow the size either way.
+fn write_stat(
+    emu: &mut Emulator,
+    buffer: u64,
+    mode: u16,
+    size: u64,
+    wide_size: bool,
+) -> Result<()> {
+    if buffer == 0 {
+        return Ok(());
+    }
+    let mut bytes = [0u8; 56];
+    bytes[6..8].copy_from_slice(&mode.to_le_bytes());
+    bytes[8..10].copy_from_slice(&1u16.to_le_bytes()); // st_nlink
+    let times_at = if wide_size {
+        bytes[24..32].copy_from_slice(&size.to_le_bytes());
+        32
+    } else {
+        bytes[20..24].copy_from_slice(&(size as u32).to_le_bytes());
+        24
+    };
+    const FIXED_EPOCH_SECONDS: u64 = 1_767_225_600; // the clock `_time64` reads
+    for slot in 0..3 {
+        let at = times_at + slot * 8;
+        bytes[at..at + 8].copy_from_slice(&FIXED_EPOCH_SECONDS.to_le_bytes());
+    }
+    let length = if wide_size { 56 } else { 48 };
+    let space = emu.state.ram_space();
+    emu.state.write_space(space, buffer, &bytes[..length])?;
+    Ok(())
+}
+
+/// `_stat64(path, buffer)` -- a file exists if the VFS was seeded with it or
+/// a host path was aliased to it, and nothing else does.
+pub fn stat64(emu: &mut Emulator, globals: &CrtGlobals, wide_size: bool) -> Result<()> {
+    let path_pointer = emu.read_arg(0).unwrap_or(0);
+    let buffer = emu.read_arg(1).unwrap_or(0);
+    let path = read_c_string(emu, path_pointer, 512);
+
+    let size = if let Some(content) = emu.vfs.path_seeds.get(&path) {
+        Some(content.len() as u64)
+    } else {
+        emu.vfs
+            .host_aliases
+            .get(&path)
+            .and_then(|host| std::fs::metadata(host).ok())
+            .map(|meta| meta.len())
+    };
+    match size {
+        Some(size) => {
+            write_stat(emu, buffer, S_IFREG | S_IRW, size, wide_size)?;
+            emu.write_return_val(0)
+        }
+        None => {
+            set_errno(emu, globals, 2)?; // ENOENT
+            emu.write_return_val(u64::MAX)
+        }
+    }
+}
+
+/// `_fstat64(fd, buffer)` -- a descriptor that is open exists.
+///
+/// This used to share `_stat64`'s "nothing exists" answer, so the standard
+/// streams failed it. libdeflate's gzip driver stats stdin before it reads
+/// it, and reported "unable to stat file" for a stream that was right there.
+pub fn fstat64(emu: &mut Emulator, globals: &CrtGlobals, wide_size: bool) -> Result<()> {
+    let fd = stream_or_fd(globals, emu.read_arg(0).unwrap_or(0));
+    let buffer = emu.read_arg(1).unwrap_or(0);
+
+    if fd < 3 {
+        write_stat(emu, buffer, S_IFCHR | S_IRW, 0, wide_size)?;
+        return emu.write_return_val(0);
+    }
+    match emu.vfs.file_size(fd) {
+        Some(size) => {
+            write_stat(emu, buffer, S_IFREG | S_IRW, size as u64, wide_size)?;
+            emu.write_return_val(0)
+        }
+        None => {
+            set_errno(emu, globals, 9)?; // EBADF
+            emu.write_return_val(u64::MAX)
+        }
+    }
 }
 
 /// `_errno()` -- the *address* of the variable, because the header defines
@@ -421,7 +512,10 @@ pub fn dispatch(emu: &mut Emulator, globals: &CrtGlobals, name: &str) -> Result<
         "_close" | "close" => close(emu)?,
         "_lseeki64" | "_lseek" | "lseek" => lseeki64(emu, globals)?,
         "_access" | "access" | "_waccess" => access(emu, globals)?,
-        "_stat64" | "_stat" | "_stat64i32" | "_fstat64" | "stat" => stat64(emu, globals)?,
+        "_stat64" | "_wstat64" => stat64(emu, globals, true)?,
+        "_stat" | "_stat64i32" | "_wstat" | "stat" => stat64(emu, globals, false)?,
+        "_fstat64" => fstat64(emu, globals, true)?,
+        "_fstat" | "_fstat64i32" | "fstat" => fstat64(emu, globals, false)?,
         "_errno" | "__errno_location" => errno_pointer(emu, globals)?,
         "getenv" | "_wgetenv" | "getenv_s" => getenv(emu)?,
         "_write" | "write" => write(emu, globals)?,

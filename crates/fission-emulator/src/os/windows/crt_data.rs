@@ -43,6 +43,19 @@ pub struct CrtGlobals {
     pub environ_vector: u64,
     /// `argv[0]`, which is also the command line.
     pub program_name: u64,
+    /// The same process, spelled in UTF-16 for a `wmain` program.
+    ///
+    /// These used to be the narrow cells. A `wmain` program reads `argv[0]`
+    /// as UTF-16, so `"program.exe\0"` came out as three CJK characters and
+    /// whatever followed -- libdeflate's gzip driver parsed that as a file
+    /// operand and reported "unable to stat file".
+    pub wargv: u64,
+    pub wenviron: u64,
+    pub winitenv: u64,
+    pub wcmdln: u64,
+    pub wargv_vector: u64,
+    pub wenviron_vector: u64,
+    pub wide_program_name: u64,
     /// The cell `_errno()` hands out the address of.
     pub errno: u64,
     /// The `FILE` objects, one per descriptor. A program never fills one in
@@ -85,6 +98,7 @@ impl CrtGlobals {
         };
         let (argc, argv, environ, commode, fmode, acmdln, initenv) =
             (cell(), cell(), cell(), cell(), cell(), cell(), cell());
+        let (wargv, wenviron, winitenv, wcmdln) = (cell(), cell(), cell(), cell());
         let scratch_cells = 32;
         let scratch = next;
         next += ptr * scratch_cells;
@@ -94,6 +108,12 @@ impl CrtGlobals {
         let environ_vector = next;
         next += ptr;
         let program_name = next;
+        next += 32;
+        let wargv_vector = next;
+        next += ptr * 2;
+        let wenviron_vector = next;
+        next += ptr;
+        let wide_program_name = next;
         next += 32;
         let errno = next;
         next += ptr;
@@ -120,6 +140,13 @@ impl CrtGlobals {
             argv_vector,
             environ_vector,
             program_name,
+            wargv,
+            wenviron,
+            winitenv,
+            wcmdln,
+            wargv_vector,
+            wenviron_vector,
+            wide_program_name,
             errno,
             iob,
             ptr,
@@ -143,6 +170,20 @@ impl CrtGlobals {
         self.put(state, self.environ, self.environ_vector)?;
         self.put(state, self.initenv, self.environ_vector)?;
         self.put(state, self.acmdln, self.program_name)?;
+
+        // The wide copies: same shape, UTF-16 text.
+        let wide_name: Vec<u8> = "program.exe\0"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        state.write_space(ram, self.wide_program_name, &wide_name)?;
+        self.put(state, self.wargv_vector, self.wide_program_name)?;
+        self.put(state, self.wargv_vector + self.ptr, 0)?;
+        self.put(state, self.wenviron_vector, 0)?;
+        self.put(state, self.wargv, self.wargv_vector)?;
+        self.put(state, self.wenviron, self.wenviron_vector)?;
+        self.put(state, self.winitenv, self.wenviron_vector)?;
+        self.put(state, self.wcmdln, self.wide_program_name)?;
         // `_commode` and `_fmode` both default to zero: no commit-on-write,
         // text mode. Writing them is what makes them readable at all.
         self.put(state, self.commode, 0)?;
@@ -170,12 +211,16 @@ impl CrtGlobals {
     pub fn data_cell(&self, bare_name: &str, nth_unknown: u64) -> Option<u64> {
         let known = match bare_name {
             "__argc" => self.argc,
-            "__argv" | "__wargv" => self.argv,
-            "_environ" | "_wenviron" => self.environ,
-            "__initenv" | "__winitenv" => self.initenv,
+            "__argv" => self.argv,
+            "__wargv" => self.wargv,
+            "_environ" => self.environ,
+            "_wenviron" => self.wenviron,
+            "__initenv" => self.initenv,
+            "__winitenv" => self.winitenv,
             "_commode" => self.commode,
             "_fmode" => self.fmode,
-            "_acmdln" | "_wcmdln" => self.acmdln,
+            "_acmdln" => self.acmdln,
+            "_wcmdln" => self.wcmdln,
             // Data msvcrt exports that mingw imports and this emulator has no
             // opinion about. They still have to be writable memory.
             "_pgmptr" | "_wpgmptr" | "_pctype" | "_mbctype" | "__mb_cur_max" | "_daylight"

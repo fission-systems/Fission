@@ -104,6 +104,27 @@ pub fn read_c_string(emu: &mut Emulator, address: u64, limit: usize) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+/// A UTF-16 string out of guest memory, stopping at the NUL or at `limit`
+/// characters.
+pub fn read_wide_c_string(emu: &mut Emulator, address: u64, limit: usize) -> String {
+    if address == 0 {
+        return "(null)".to_string();
+    }
+    let space = emu.state.ram_space();
+    let mut units = Vec::new();
+    let mut cursor = address;
+    while units.len() < limit {
+        match emu.state.read_space(space, cursor, 2) {
+            Ok(pair) if pair.len() == 2 && (pair[0] != 0 || pair[1] != 0) => {
+                units.push(u16::from_le_bytes([pair[0], pair[1]]));
+            }
+            _ => break,
+        }
+        cursor = cursor.wrapping_add(2);
+    }
+    String::from_utf16_lossy(&units)
+}
+
 /// How wide the integer conversions are.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Length {
@@ -248,7 +269,7 @@ pub fn format_c(emu: &mut Emulator, fmt: &str, args: &mut dyn ArgSource) -> Resu
                     (b'h', Length::Short) => Length::Char,
                     (b'h', _) => Length::Short,
                     (b'l', Length::Long) => Length::LongLong,
-                    (b'l', _) => Length::Long,
+                    (b'l' | b'w', _) => Length::Long,
                     (b'L' | b'q' | b'j', _) => Length::LongLong,
                     (b'z' | b't' | b'I', _) => Length::Size,
                     _ => break,
@@ -299,13 +320,27 @@ pub fn format_c(emu: &mut Emulator, fmt: &str, args: &mut dyn ArgSource) -> Resu
                     digits
                 }
             }
+            // `%lc` and Microsoft's `%C` are a wide character. Reading it as a
+            // byte is right for ASCII and wrong for everything else.
+            b'c' | b'C' if conversion == b'C' || spec.length == Length::Long => {
+                let unit = args.next_word(emu) as u16;
+                String::from_utf16_lossy(&[unit])
+            }
             b'c' => ((args.next_word(emu) as u8) as char).to_string(),
-            b's' => {
+            // `%ls` and Microsoft's `%S`/`%ws` are a wide string. A program
+            // built with `-municode` prints its own name this way, and read as
+            // bytes a UTF-16 "program.exe" stops after the `p`.
+            b's' | b'S' => {
                 let pointer = args.next_word(emu);
                 let limit = spec.precision.unwrap_or(4096);
-                let mut text = read_c_string(emu, pointer, limit.max(1));
+                let wide = conversion == b'S' || spec.length == Length::Long;
+                let mut text = if wide {
+                    read_wide_c_string(emu, pointer, limit.max(1))
+                } else {
+                    read_c_string(emu, pointer, limit.max(1))
+                };
                 if let Some(precision) = spec.precision {
-                    text.truncate(precision);
+                    text = text.chars().take(precision).collect();
                 }
                 text
             }
@@ -344,7 +379,11 @@ pub fn format_c(emu: &mut Emulator, fmt: &str, args: &mut dyn ArgSource) -> Resu
             }
         };
 
-        out.push_str(&pad(&body, &spec, matches!(conversion, b's' | b'c')));
+        out.push_str(&pad(
+            &body,
+            &spec,
+            matches!(conversion, b's' | b'c' | b'S' | b'C'),
+        ));
     }
 
     Ok(out)

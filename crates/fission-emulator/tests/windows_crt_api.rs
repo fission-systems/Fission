@@ -507,3 +507,158 @@ fn mocked_input_reaches_readfile_and_fgets_alike() {
     assert_eq!(call(&mut emu, "fgets", &[line, 16, stdin]), line);
     assert_eq!(&read_back(&mut emu, line, 4), b"cd\n\0");
 }
+
+// ── The command line, in both encodings ─────────────────────────────────────
+
+/// UTF-16 units from guest memory up to the NUL.
+fn read_wide_text(emu: &mut Emulator, at: u64) -> String {
+    let mut units = Vec::new();
+    for i in 0..256u64 {
+        let pair = read_back(emu, at + i * 2, 2);
+        let unit = u16::from_le_bytes([pair[0], pair[1]]);
+        if unit == 0 {
+            break;
+        }
+        units.push(unit);
+    }
+    String::from_utf16_lossy(&units)
+}
+
+fn read_pointer(emu: &mut Emulator, at: u64) -> u64 {
+    u64::from_le_bytes(read_back(emu, at, 8).try_into().unwrap())
+}
+
+/// A `wmain` program reads `argv[0]` as UTF-16. Handed the narrow vector,
+/// `"program.exe"` read as three CJK characters and whatever followed, and
+/// libdeflate's gzip driver took that for a file operand.
+#[test]
+fn a_wmain_program_gets_utf16_argv() {
+    let mut emu = windows_emulator();
+    let argc_out = SCRATCH + 0x1000;
+    let argv_out = SCRATCH + 0x1010;
+    let envp_out = SCRATCH + 0x1020;
+
+    call(
+        &mut emu,
+        "__wgetmainargs",
+        &[argc_out, argv_out, envp_out, 0, 0],
+    );
+
+    let argv = read_pointer(&mut emu, argv_out);
+    let argv0 = read_pointer(&mut emu, argv);
+    assert_eq!(read_wide_text(&mut emu, argv0), "program.exe");
+    assert_eq!(
+        read_pointer(&mut emu, argv + 8),
+        0,
+        "argv is not terminated"
+    );
+    let envp = read_pointer(&mut emu, envp_out);
+    assert_eq!(read_pointer(&mut emu, envp), 0, "environment is not empty");
+
+    // And the `__p___wargv` accessor names the same vector.
+    let cell = call(&mut emu, "__p___wargv", &[]);
+    assert_eq!(read_pointer(&mut emu, cell), argv);
+}
+
+/// The narrow side is unchanged by it.
+#[test]
+fn a_main_program_still_gets_narrow_argv() {
+    let mut emu = windows_emulator();
+    let argc_out = SCRATCH + 0x1000;
+    let argv_out = SCRATCH + 0x1010;
+    let envp_out = SCRATCH + 0x1020;
+
+    call(
+        &mut emu,
+        "__getmainargs",
+        &[argc_out, argv_out, envp_out, 0, 0],
+    );
+
+    let argv = read_pointer(&mut emu, argv_out);
+    let argv0 = read_pointer(&mut emu, argv);
+    assert_eq!(&read_back(&mut emu, argv0, 12), b"program.exe\0");
+    let wide_cell = call(&mut emu, "__p___wargv", &[]);
+    assert_ne!(
+        argv,
+        read_pointer(&mut emu, wide_cell),
+        "the narrow and wide vectors are the same storage again"
+    );
+}
+
+// ── stat and fstat ──────────────────────────────────────────────────────────
+
+fn stat_mode(emu: &mut Emulator, buffer: u64) -> u16 {
+    u16::from_le_bytes(read_back(emu, buffer + 6, 2).try_into().unwrap())
+}
+
+/// An open descriptor exists. `_fstat64` used to share `_stat64`'s "nothing
+/// exists", so stdin failed it -- and libdeflate's gzip driver stats stdin
+/// before reading it.
+#[test]
+fn fstat_of_a_standard_stream_is_a_character_device() {
+    let mut emu = windows_emulator();
+    let buffer = SCRATCH + 0x1000;
+    for fd in 0..3u64 {
+        assert_eq!(call(&mut emu, "_fstat64", &[fd, buffer]), 0, "fd {fd}");
+        assert_eq!(stat_mode(&mut emu, buffer) & 0xF000, 0x2000, "fd {fd}");
+    }
+    assert_eq!(
+        call(&mut emu, "_fstat64", &[42, buffer]) as i64,
+        -1,
+        "a descriptor that was never opened must not stat"
+    );
+}
+
+#[test]
+fn stat_of_a_seeded_file_reports_its_size_in_both_layouts() {
+    let mut emu = windows_emulator();
+    emu.vfs.seed_path("data.bin", b"hello file".to_vec());
+    let path = plant(&mut emu, SCRATCH, "data.bin");
+    let buffer = SCRATCH + 0x1000;
+
+    assert_eq!(call(&mut emu, "_stat64", &[path, buffer]), 0);
+    assert_eq!(stat_mode(&mut emu, buffer) & 0xF000, 0x8000);
+    assert_eq!(
+        u64::from_le_bytes(read_back(&mut emu, buffer + 24, 8).try_into().unwrap()),
+        10,
+        "_stat64 carries a 64-bit size at offset 24"
+    );
+
+    assert_eq!(call(&mut emu, "_stat64i32", &[path, buffer]), 0);
+    assert_eq!(
+        u32::from_le_bytes(read_back(&mut emu, buffer + 20, 4).try_into().unwrap()),
+        10,
+        "_stat64i32 carries a 32-bit size at offset 20"
+    );
+
+    let missing = plant(&mut emu, SCRATCH + 0x100, "nowhere.bin");
+    assert_eq!(call(&mut emu, "_stat64", &[missing, buffer]) as i64, -1);
+}
+
+/// A `-municode` program prints its own name with `%ls`.
+#[test]
+fn printf_reads_ls_as_a_wide_string() {
+    let mut emu = windows_emulator();
+    let stderr = call(&mut emu, "__acrt_iob_func", &[2]);
+    let wide: Vec<u8> = "program.exe\0"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let space = emu.state.ram_space();
+    emu.state
+        .write_space(space, SCRATCH + 0x400, &wide)
+        .expect("wide text");
+
+    vfprintf(
+        &mut emu,
+        stderr,
+        "%ls: %S|%lc\n",
+        &[SCRATCH + 0x400, SCRATCH + 0x400, 0x4E2D],
+    );
+
+    assert!(
+        stream_text(&emu, 2).contains("program.exe: program.exe|中"),
+        "stderr holds {:?}",
+        stream_text(&emu, 2)
+    );
+}

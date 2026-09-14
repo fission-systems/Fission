@@ -447,7 +447,8 @@ impl OsEnvironment for WindowsEnv {
             | "_initialize_wide_environment" => {
                 emu.write_return_val(0)?;
             }
-            "__getmainargs" | "__wgetmainargs" => handle_getmainargs(emu, self)?,
+            "__getmainargs" => handle_getmainargs(emu, self, false)?,
+            "__wgetmainargs" => handle_getmainargs(emu, self, true)?,
             // The `__p_*` family: each returns the *address* of a CRT global.
             // A stub that returned zero here is why every UCRT binary in the
             // dev corpus died -- the start-up assigns through the pointer
@@ -457,23 +458,29 @@ impl OsEnvironment for WindowsEnv {
                 let g = crt_globals(emu, self)?;
                 let addr = match func_name {
                     "__p___argc" => g.argc,
-                    // The wide forms get the narrow storage. Nothing here
-                    // reads it as text, and an empty wide vector would still
-                    // be a lie about the encoding -- this way there is one
-                    // argv, and it is the one `main` was given.
-                    "__p___argv" | "__p___wargv" => g.argv,
-                    "__p__environ" | "__p__wenviron" => g.environ,
+                    // The wide forms get their own UTF-16 storage. They used
+                    // to share the narrow cells on the grounds that nothing
+                    // read them as text; a `wmain` program does.
+                    "__p___argv" => g.argv,
+                    "__p___wargv" => g.wargv,
+                    "__p__environ" => g.environ,
+                    "__p__wenviron" => g.wenviron,
                     "__p__commode" => g.commode,
-                    "__p__acmdln" | "__p__wcmdln" => g.acmdln,
+                    "__p__acmdln" => g.acmdln,
+                    "__p__wcmdln" => g.wcmdln,
                     _ => g.fmode,
                 };
                 emu.write_return_val(addr)?;
             }
             // UCRT's own accessors for the same two vectors, which hand back
             // the vector rather than its address.
-            "_get_initial_narrow_environment" | "_get_initial_wide_environment" => {
+            "_get_initial_narrow_environment" => {
                 let g = crt_globals(emu, self)?;
                 emu.write_return_val(g.environ_vector)?;
+            }
+            "_get_initial_wide_environment" => {
+                let g = crt_globals(emu, self)?;
+                emu.write_return_val(g.wenviron_vector)?;
             }
             // At-exit registration, UCRT spelling. Nothing runs at exit here,
             // so this is the same answer `atexit` gives: registered fine.
@@ -1074,7 +1081,7 @@ fn crt_globals(_emu: &mut Emulator, env: &WindowsEnv) -> Result<CrtGlobals> {
 /// The vectors live in the CRT data page, which is the same storage
 /// `__p___argv` hands out and the same storage the IAT's `__argv` slot points
 /// at -- there is one argv, and this is a third window onto it.
-fn handle_getmainargs(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
+fn handle_getmainargs(emu: &mut Emulator, env: &WindowsEnv, wide: bool) -> Result<()> {
     let ptr = u64::from(emu.arch.pointer_size);
     let argc_out = emu.read_arg(0)?;
     let argv_out = emu.read_arg(1)?;
@@ -1085,11 +1092,16 @@ fn handle_getmainargs(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     if argc_out != 0 {
         emu.state.write_space(ram, argc_out, &1u32.to_le_bytes())?;
     }
+    let (argv, envp) = if wide {
+        (g.wargv_vector, g.wenviron_vector)
+    } else {
+        (g.argv_vector, g.environ_vector)
+    };
     if argv_out != 0 {
-        write_ptr(emu, argv_out, g.argv_vector, ptr)?;
+        write_ptr(emu, argv_out, argv, ptr)?;
     }
     if envp_out != 0 {
-        write_ptr(emu, envp_out, g.environ_vector, ptr)?;
+        write_ptr(emu, envp_out, envp, ptr)?;
     }
     emu.write_return_val(0)?;
     Ok(())
