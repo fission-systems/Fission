@@ -29,7 +29,11 @@ use fission_emulator::os::{LinuxEnv, OsEnvironment, WindowsEnv};
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
-const MAX_INST: u64 = 2_000_000;
+/// Per binary. Two million was enough for programs written to exercise one
+/// construct; duktape needs 2.2M to reach its prompt and exit, and at two
+/// million it read as "did not exit" -- indistinguishable from the hang it
+/// actually had, until the memset fix, a moment earlier.
+const MAX_INST: u64 = 10_000_000;
 
 /// Which binaries to sweep.
 ///

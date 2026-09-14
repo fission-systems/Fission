@@ -698,3 +698,289 @@ fn memcpy_and_memmove_return_the_destination() {
         assert_eq!(&read_back(&mut emu, dst, 6), b"abcdef", "{name}");
     }
 }
+
+// ── The math library ────────────────────────────────────────────────────────
+
+fn set_double(emu: &mut Emulator, register: &str, value: f64) {
+    emu.write_register_u64(register, value.to_bits())
+        .expect("xmm register");
+}
+
+fn returned_double(emu: &mut Emulator) -> f64 {
+    f64::from_bits(emu.read_register_u64("XMM0_Qa").expect("xmm0"))
+}
+
+/// A `double` comes back in XMM0, not RAX. Answered the way every other
+/// stub answers -- zero in RAX -- the guest reads whatever the last
+/// floating-point operation left in XMM0. duktape called `trunc` nine times
+/// before its first prompt.
+#[test]
+fn math_results_come_back_in_xmm0() {
+    let mut emu = windows_emulator();
+    let cases: &[(&str, f64, f64)] = &[
+        ("trunc", -2.75, -2.0),
+        ("floor", -2.25, -3.0),
+        ("ceil", -2.75, -2.0),
+        ("sqrt", 81.0, 9.0),
+        ("cbrt", -27.0, -3.0),
+        ("log2", 1024.0, 10.0),
+        ("fabs", -0.5, 0.5),
+    ];
+    for (name, x, want) in cases {
+        set_double(&mut emu, "XMM0_Qa", 12345.0); // what a stale value looks like
+        set_double(&mut emu, "XMM0_Qa", *x);
+        call(&mut emu, name, &[]);
+        assert_eq!(returned_double(&mut emu), *want, "{name}({x})");
+    }
+}
+
+/// Two `double` arguments are XMM0 and XMM1, and C's `fmod` keeps the
+/// dividend's sign.
+#[test]
+fn binary_math_reads_both_xmm_arguments() {
+    let mut emu = windows_emulator();
+    let cases: &[(&str, f64, f64, f64)] = &[
+        ("pow", 2.0, 10.0, 1024.0),
+        ("fmod", -7.0, 3.0, -1.0),
+        ("fmod", 7.0, -3.0, 1.0),
+        ("atan2", 0.0, -1.0, std::f64::consts::PI),
+    ];
+    for (name, x, y, want) in cases {
+        set_double(&mut emu, "XMM0_Qa", *x);
+        set_double(&mut emu, "XMM1_Qa", *y);
+        call(&mut emu, name, &[]);
+        assert_eq!(returned_double(&mut emu), *want, "{name}({x}, {y})");
+    }
+}
+
+/// `frexp(x, &exp)`: the pointer is the second *positional* argument, so it
+/// is in RDX even though the first went in XMM0.
+#[test]
+fn frexp_splits_into_mantissa_and_exponent() {
+    let mut emu = windows_emulator();
+    let exp_at = SCRATCH + 0x1000;
+    set_double(&mut emu, "XMM0_Qa", 8.0);
+    call(&mut emu, "frexp", &[0, exp_at]);
+    assert_eq!(returned_double(&mut emu), 0.5);
+    assert_eq!(
+        i32::from_le_bytes(read_back(&mut emu, exp_at, 4).try_into().unwrap()),
+        4
+    );
+}
+
+/// `strtod` answers where the number ended, and a caller learns "not a
+/// number" from `end == text`. Both halves are checked.
+#[test]
+fn strtod_parses_the_longest_numeric_prefix_and_says_where_it_stopped() {
+    let mut emu = windows_emulator();
+    let end_at = SCRATCH + 0x1000;
+    let cases: &[(&str, f64, u64)] = &[
+        ("  12.25abc", 12.25, 7),
+        ("0x1.8p3", 12.0, 7),
+        ("1e", 1.0, 1),
+        ("-Infinity", f64::NEG_INFINITY, 9),
+        ("abc", 0.0, 0),
+    ];
+    for (text, want, consumed) in cases {
+        let at = plant(&mut emu, SCRATCH, text);
+        call(&mut emu, "strtod", &[at, end_at]);
+        assert_eq!(returned_double(&mut emu), *want, "strtod({text:?})");
+        let end = u64::from_le_bytes(read_back(&mut emu, end_at, 8).try_into().unwrap());
+        assert_eq!(end - at, *consumed, "strtod({text:?}) end pointer");
+    }
+}
+
+// ── One clock ───────────────────────────────────────────────────────────────
+
+/// `SystemTimeToFileTime` for the instant `_time64` reports, which is also
+/// the base `GetSystemTimeAsFileTime` counts from. These were two clocks a
+/// year apart.
+#[test]
+fn filetime_and_time_t_describe_the_same_instant() {
+    let mut emu = windows_emulator();
+
+    let time_t = call(&mut emu, "_time64", &[0]);
+
+    // SYSTEMTIME for 2026-01-01 00:00:00.000.
+    let system = SCRATCH + 0x1000;
+    let mut fields = Vec::new();
+    for value in [2026u16, 1, 4, 1, 0, 0, 0, 0] {
+        fields.extend_from_slice(&value.to_le_bytes());
+    }
+    let space = emu.state.ram_space();
+    emu.state
+        .write_space(space, system, &fields)
+        .expect("systemtime");
+    let file = SCRATCH + 0x1100;
+    assert_eq!(call(&mut emu, "SystemTimeToFileTime", &[system, file]), 1);
+    let converted = u64::from_le_bytes(read_back(&mut emu, file, 8).try_into().unwrap());
+    assert_eq!(
+        converted / 10_000_000 - 11_644_473_600,
+        time_t,
+        "SystemTimeToFileTime and _time64 disagree about 2026-01-01"
+    );
+
+    let now = SCRATCH + 0x1200;
+    call(&mut emu, "GetSystemTimeAsFileTime", &[now]);
+    let now = u64::from_le_bytes(read_back(&mut emu, now, 8).try_into().unwrap());
+    let seconds_apart = (now / 10_000_000 - 11_644_473_600) as i64 - time_t as i64;
+    assert!(
+        (0..3600).contains(&seconds_apart),
+        "GetSystemTimeAsFileTime is {seconds_apart}s from _time64"
+    );
+}
+
+#[test]
+fn an_impossible_systemtime_fails_the_conversion() {
+    let mut emu = windows_emulator();
+    let system = SCRATCH + 0x1000;
+    let mut fields = Vec::new();
+    for value in [2026u16, 13, 0, 1, 0, 0, 0, 0] {
+        fields.extend_from_slice(&value.to_le_bytes());
+    }
+    let space = emu.state.ram_space();
+    emu.state
+        .write_space(space, system, &fields)
+        .expect("systemtime");
+    assert_eq!(
+        call(
+            &mut emu,
+            "SystemTimeToFileTime",
+            &[system, SCRATCH + 0x1100]
+        ),
+        0,
+        "month 13 converted"
+    );
+}
+
+// ── setjmp and longjmp ──────────────────────────────────────────────────────
+
+/// Call a stub and hand back what the dispatcher decided, for the one stub
+/// that does not simply return.
+fn dispatch_raw(emu: &mut Emulator, name: &str) -> fission_emulator::os::env::HleResult {
+    let os = std::mem::replace(&mut emu.os, Box::new(BareMetalEnv::new()));
+    let result = os.dispatch_hle(emu, name).expect("dispatch");
+    emu.os = os;
+    result
+}
+
+/// `longjmp` returns from the `setjmp` a second time: callee-saved registers
+/// as they were, the stack pointer `setjmp`'s caller had, control at
+/// `setjmp`'s return address, and the value given.
+///
+/// It used to fall through to the generic miss and return zero. Both script
+/// engines in the corpus report errors this way; duktape aborted and Lua
+/// spun for two hundred million instructions.
+#[test]
+fn longjmp_returns_from_setjmp_again_with_the_saved_state() {
+    let mut emu = windows_emulator();
+    let buf = SCRATCH + 0x1000;
+    let space = emu.state.ram_space();
+
+    // A `call setjmp` just happened: the return address is on top of the stack.
+    let sp = emu.read_register_u64("RSP").expect("rsp") - 0x100;
+    emu.write_register_u64("RSP", sp).expect("rsp");
+    const RETURN_TO: u64 = 0x1400_0DEAD;
+    emu.state
+        .write_space(space, sp, &RETURN_TO.to_le_bytes())
+        .expect("return address");
+    for (register, value) in [
+        ("RBX", 0x11u64),
+        ("RBP", 0x22),
+        ("RSI", 0x33),
+        ("R12", 0x44),
+        ("R15", 0x55),
+    ] {
+        emu.write_register_u64(register, value).expect("register");
+    }
+    emu.write_register_u64("XMM6_Qa", 0x6666).expect("xmm6");
+    emu.write_register_u64("XMM15_Qb", 0xF0F0).expect("xmm15");
+
+    emu.write_register_u64("RCX", buf).expect("arg");
+    assert!(matches!(
+        dispatch_raw(&mut emu, "__intrinsic_setjmpex"),
+        fission_emulator::os::env::HleResult::Continue
+    ));
+    assert_eq!(
+        emu.read_register_u64("RAX").unwrap(),
+        0,
+        "the first return is zero"
+    );
+
+    // The program runs on and clobbers everything.
+    for register in ["RBX", "RBP", "RSI", "R12", "R15", "XMM6_Qa", "XMM15_Qb"] {
+        emu.write_register_u64(register, 0xBAD).expect("clobber");
+    }
+    emu.write_register_u64("RSP", sp - 0x800)
+        .expect("deeper stack");
+
+    emu.write_register_u64("RCX", buf).expect("arg");
+    emu.write_register_u64("RDX", 7).expect("value");
+    let result = dispatch_raw(&mut emu, "longjmp");
+
+    assert!(
+        matches!(result, fission_emulator::os::env::HleResult::JumpTo(pc) if pc == RETURN_TO),
+        "longjmp must land on setjmp's return address"
+    );
+    assert_eq!(emu.read_register_u64("RAX").unwrap(), 7);
+    assert_eq!(
+        emu.read_register_u64("RSP").unwrap(),
+        sp + 8,
+        "the stack pointer setjmp's caller had after the call returned"
+    );
+    for (register, value) in [
+        ("RBX", 0x11u64),
+        ("RBP", 0x22),
+        ("RSI", 0x33),
+        ("R12", 0x44),
+        ("R15", 0x55),
+        ("XMM6_Qa", 0x6666),
+        ("XMM15_Qb", 0xF0F0),
+    ] {
+        assert_eq!(
+            emu.read_register_u64(register).unwrap(),
+            value,
+            "{register}"
+        );
+    }
+}
+
+/// C forbids `longjmp` from making `setjmp` return zero: that would read as
+/// "first time through" and run the protected code again.
+#[test]
+fn longjmp_with_zero_returns_one() {
+    let mut emu = windows_emulator();
+    let buf = SCRATCH + 0x1000;
+    let sp = emu.read_register_u64("RSP").unwrap() - 0x100;
+    emu.write_register_u64("RSP", sp).unwrap();
+    let space = emu.state.ram_space();
+    emu.state
+        .write_space(space, sp, &0x1400_0BEEFu64.to_le_bytes())
+        .unwrap();
+
+    emu.write_register_u64("RCX", buf).unwrap();
+    dispatch_raw(&mut emu, "_setjmp");
+    emu.write_register_u64("RCX", buf).unwrap();
+    emu.write_register_u64("RDX", 0).unwrap();
+    dispatch_raw(&mut emu, "longjmp");
+    assert_eq!(emu.read_register_u64("RAX").unwrap(), 1);
+}
+
+#[test]
+fn the_span_functions_measure_the_right_prefix() {
+    let mut emu = windows_emulator();
+    let text = plant(&mut emu, SCRATCH, "0x1f.8p3");
+    let hex = plant(&mut emu, SCRATCH + 0x100, "0123456789abcdefx");
+    let marks = plant(&mut emu, SCRATCH + 0x200, ".pP");
+    let nan_letters = plant(&mut emu, SCRATCH + 0x300, "nN");
+
+    assert_eq!(call(&mut emu, "strspn", &[text, hex]), 4, "\"0x1f\" is hex");
+    assert_eq!(
+        call(&mut emu, "strcspn", &[text, marks]),
+        4,
+        "up to the '.'"
+    );
+    assert_eq!(call(&mut emu, "strpbrk", &[text, marks]), text + 4);
+    // Lua refuses "inf"/"nan" by asking this; a number has neither letter.
+    assert_eq!(call(&mut emu, "strpbrk", &[text, nan_letters]), 0);
+}

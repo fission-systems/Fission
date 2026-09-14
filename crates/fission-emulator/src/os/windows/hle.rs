@@ -8,6 +8,14 @@ use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 use std::sync::Mutex;
 
+/// The one instant this process believes it started at: 2026-01-01T00:00:00Z.
+/// Fixed, because a replay has to read the same clock.
+const FIXED_EPOCH_SECONDS: u64 = 1_767_225_600;
+/// Seconds between the FILETIME epoch (1601) and the Unix one.
+const FILETIME_UNIX_OFFSET_SECONDS: u64 = 11_644_473_600;
+/// The same instant in FILETIME units, 100 ns since 1601.
+const FIXED_FILETIME_BASE: u64 = (FIXED_EPOCH_SECONDS + FILETIME_UNIX_OFFSET_SECONDS) * 10_000_000;
+
 /// Standard handle cookies returned by GetStdHandle (and accepted by WriteFile).
 const STD_INPUT_HANDLE: u64 = 0x50;
 const STD_OUTPUT_HANDLE: u64 = 0x51;
@@ -200,6 +208,7 @@ impl OsEnvironment for WindowsEnv {
                 emu.write_return_val(1)?;
             }
             "GetSystemInfo" | "GetNativeSystemInfo" => handle_get_system_info(emu)?,
+            "SystemTimeToFileTime" => handle_system_time_to_file_time(emu)?,
             "GetConsoleScreenBufferInfo" => handle_console_screen_buffer_info(emu)?,
             "SetConsoleTextAttribute" | "SetConsoleCP" | "SetConsoleOutputCP" => {
                 emu.write_return_val(1)?;
@@ -209,7 +218,6 @@ impl OsEnvironment for WindowsEnv {
             // measures an interval gets zero, which is what a machine this
             // fast would report anyway.
             "time" | "_time64" | "_time32" => {
-                const FIXED_EPOCH_SECONDS: u64 = 1_767_225_600; // 2026-01-01T00:00:00Z
                 let pointer = emu.read_arg(0).unwrap_or(0);
                 if pointer != 0 {
                     let space = emu.state.ram_space();
@@ -225,14 +233,20 @@ impl OsEnvironment for WindowsEnv {
             "signal" | "raise" => {
                 emu.write_return_val(0)?;
             }
-            // `setjmp` returns zero when it is the one setting the jump
-            // buffer, which is the return every caller's `if` is written
-            // against. The `longjmp` back to it is not supported, and a
-            // program that takes that path stops being followed rather than
-            // silently continuing from the wrong place.
-            "__intrinsic_setjmpex" | "_setjmp" | "_setjmp3" | "setjmp" => {
-                emu.write_return_val(0)?;
+            // `setjmp` records where it was called from and returns zero;
+            // `longjmp` returns there a second time with a non-zero value.
+            //
+            // This used to answer zero and save nothing, under a comment
+            // saying a program that took the `longjmp` path "stops being
+            // followed". It did not stop: `longjmp` fell through to the
+            // generic miss, returned zero and carried on. Both script engines
+            // in the corpus report every error that way -- duktape aborted on
+            // a ReferenceError, Lua spun for two hundred million instructions
+            // after its first.
+            "__intrinsic_setjmpex" | "__intrinsic_setjmp" | "_setjmpex" | "_setjmp" | "setjmp" => {
+                handle_setjmp(emu)?
             }
+            "longjmp" | "_longjmp" => return handle_longjmp(emu),
             "WaitForSingleObject" | "WaitForSingleObjectEx" => {
                 emu.write_return_val(0)?;
             }
@@ -316,6 +330,9 @@ impl OsEnvironment for WindowsEnv {
             }
             "strrchr" => handle_strrchr(emu)?,
             "strchr" => handle_strchr(emu)?,
+            "strpbrk" => handle_strpbrk(emu)?,
+            "strspn" => handle_strspn(emu, true)?,
+            "strcspn" => handle_strspn(emu, false)?,
             // The wide-character spellings, which a `wmain` program reaches
             // for before anything else. libdeflate's gzip driver is one.
             "wcslen" | "lstrlenW" => handle_wcslen(emu)?,
@@ -532,11 +549,13 @@ impl OsEnvironment for WindowsEnv {
                 emu.tick_count = emu.tick_count.wrapping_add(15);
                 emu.write_return_val(emu.tick_count)?;
             }
-            "GetSystemTimeAsFileTime" => {
+            "GetSystemTimeAsFileTime" | "GetSystemTimePreciseAsFileTime" => {
                 // lpSystemTimeAsFileTime: pointer in RCX (arg 0)
                 // Return a deterministic fake FILETIME (100-ns intervals since 1601-01-01).
-                // Use a fixed base (2025-01-01 00:00:00 UTC) plus tick_count offset.
-                let file_time_base: u64 = 133_800_000_000_000_000; // ~2025-01-01 in FILETIME units
+                // The same instant `_time64` reports, plus the tick offset. These
+                // were two clocks a year apart: a program comparing a FILETIME
+                // with a `time_t` saw its own start-up happen in 2025.
+                let file_time_base: u64 = FIXED_FILETIME_BASE;
                 let fake_time = file_time_base.wrapping_add(emu.tick_count.wrapping_mul(10_000));
                 let ptr = emu.read_arg(0).unwrap_or(0);
                 if ptr != 0 {
@@ -577,10 +596,13 @@ impl OsEnvironment for WindowsEnv {
                 // The C runtime's own surface, which needs the process data
                 // page the loader built -- `__acrt_iob_func` hands out
                 // addresses inside it.
-                let handled = match globals.as_ref() {
-                    Some(globals) => crate::os::windows::crt_stdio::dispatch(emu, globals, other)?,
-                    None => false,
-                };
+                let handled = crate::os::windows::crt_math::dispatch(emu, other)?
+                    || match globals.as_ref() {
+                        Some(globals) => {
+                            crate::os::windows::crt_stdio::dispatch(emu, globals, other)?
+                        }
+                        None => false,
+                    };
                 if !handled {
                     tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", func_name);
                     emu.metrics.note_hle_miss(func_name);
@@ -1719,4 +1741,183 @@ fn handle_memset(emu: &mut Emulator) -> Result<()> {
     }
     emu.write_return_val(dst)?;
     Ok(())
+}
+
+/// `SystemTimeToFileTime(&system_time, &file_time)`.
+///
+/// SYSTEMTIME is eight `u16`s: year, month, day-of-week (ignored, as Windows
+/// ignores it), day, hour, minute, second, millisecond. A field out of range
+/// fails the call, which is the documented behaviour and the one a caller's
+/// error path is written for.
+fn handle_system_time_to_file_time(emu: &mut Emulator) -> Result<()> {
+    let system_at = emu.read_arg(0).unwrap_or(0);
+    let file_at = emu.read_arg(1).unwrap_or(0);
+    if system_at == 0 || file_at == 0 {
+        return emu.write_return_val(0);
+    }
+    let raw = emu.state.read_space(emu.state.ram_space(), system_at, 16)?;
+    let field = |i: usize| u16::from_le_bytes([raw[i * 2], raw[i * 2 + 1]]) as i64;
+    let (year, month, day) = (field(0), field(1), field(3));
+    let (hour, minute, second, milli) = (field(4), field(5), field(6), field(7));
+    let valid = (1601..=30827).contains(&year)
+        && (1..=12).contains(&month)
+        && (1..=31).contains(&day)
+        && hour < 24
+        && minute < 60
+        && second < 60
+        && milli < 1000;
+    if !valid {
+        emu.win_last_error = 87; // ERROR_INVALID_PARAMETER
+        return emu.write_return_val(0);
+    }
+    let days = days_from_civil(year, month, day) + (FILETIME_UNIX_OFFSET_SECONDS / 86_400) as i64;
+    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second;
+    let file_time = (seconds as u64) * 10_000_000 + (milli as u64) * 10_000;
+    emu.state
+        .write_space(emu.state.ram_space(), file_at, &file_time.to_le_bytes())?;
+    emu.write_return_val(1)
+}
+
+/// Days from 1970-01-01 to a proleptic Gregorian date (Hinnant's algorithm).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The callee-saved state of the x64 ABI, in `_JUMP_BUFFER` order.
+///
+/// `Frame` sits at 0 and `Rip` at 80, `MxCsr` at 88 and `Xmm6`..`Xmm15` from
+/// 96, sixteen bytes each: 256 in all, the size of mingw's `jmp_buf`. Both
+/// halves of the buffer are written and read here, so only self-consistency
+/// is strictly required -- the real layout is kept so a debugger reading the
+/// buffer sees what it expects.
+const JMP_GP_SLOTS: [(u64, &str); 8] = [
+    (8, "RBX"),
+    (24, "RBP"),
+    (32, "RSI"),
+    (40, "RDI"),
+    (48, "R12"),
+    (56, "R13"),
+    (64, "R14"),
+    (72, "R15"),
+];
+const JMP_RSP: u64 = 16;
+const JMP_RIP: u64 = 80;
+const JMP_MXCSR: u64 = 88;
+const JMP_XMM_BASE: u64 = 96;
+
+/// `setjmp(buf)`: the stub was entered by a `call`, so `[RSP]` is where
+/// `setjmp` returns to and `RSP + 8` is the stack pointer after it does.
+fn handle_setjmp(emu: &mut Emulator) -> Result<()> {
+    let buf = emu.read_arg(0)?;
+    if emu.arch.pointer_size != 8 || buf == 0 {
+        // The 32-bit buffer is laid out differently and not written here;
+        // saying so beats a zero that pretends to have saved something.
+        emu.metrics.note_hle_miss("setjmp (32-bit or null buffer)");
+        return emu.write_return_val(0);
+    }
+    let space = emu.state.ram_space();
+    let sp = emu.read_register_u64("RSP")?;
+    let rip = u64::from_le_bytes(emu.state.read_space(space, sp, 8)?[..8].try_into()?);
+
+    let mut bytes = vec![0u8; 256];
+    let mut put = |at: u64, value: u64| {
+        bytes[at as usize..at as usize + 8].copy_from_slice(&value.to_le_bytes());
+    };
+    put(0, sp + 8); // Frame
+    for (at, register) in JMP_GP_SLOTS {
+        put(at, emu.read_register_u64(register)?);
+    }
+    put(JMP_RSP, sp + 8);
+    put(JMP_RIP, rip);
+    let mxcsr = emu.read_register_u64("MXCSR").unwrap_or(0x1F80) as u32;
+    bytes[JMP_MXCSR as usize..JMP_MXCSR as usize + 4].copy_from_slice(&mxcsr.to_le_bytes());
+    for n in 0..10u64 {
+        let at = (JMP_XMM_BASE + n * 16) as usize;
+        let low = emu.read_register_u64(&format!("XMM{}_Qa", n + 6))?;
+        let high = emu.read_register_u64(&format!("XMM{}_Qb", n + 6))?;
+        bytes[at..at + 8].copy_from_slice(&low.to_le_bytes());
+        bytes[at + 8..at + 16].copy_from_slice(&high.to_le_bytes());
+    }
+    emu.state.write_space(space, buf, &bytes)?;
+    emu.write_return_val(0)
+}
+
+/// `longjmp(buf, value)`: restore what `setjmp` saved and return from that
+/// `setjmp` again, with `value` -- or 1, since a `setjmp` that returns zero
+/// means "first time" and C forbids `longjmp` from saying that.
+fn handle_longjmp(emu: &mut Emulator) -> Result<HleResult> {
+    let buf = emu.read_arg(0)?;
+    let value = emu.read_arg(1)? as u32;
+    if emu.arch.pointer_size != 8 || buf == 0 {
+        emu.metrics.note_hle_miss("longjmp (32-bit or null buffer)");
+        anyhow::bail!("longjmp through an unsupported jump buffer at 0x{buf:x}");
+    }
+    let space = emu.state.ram_space();
+    let bytes = emu.state.read_space(space, buf, 256)?;
+    let get = |at: u64| u64::from_le_bytes(bytes[at as usize..at as usize + 8].try_into().unwrap());
+
+    for (at, register) in JMP_GP_SLOTS {
+        emu.write_register_u64(register, get(at))?;
+    }
+    emu.write_register_u64("RSP", get(JMP_RSP))?;
+    let mxcsr = u32::from_le_bytes(bytes[88..92].try_into()?) as u64;
+    let _ = emu.write_register_u64("MXCSR", mxcsr);
+    for n in 0..10u64 {
+        let at = JMP_XMM_BASE + n * 16;
+        emu.write_register_u64(&format!("XMM{}_Qa", n + 6), get(at))?;
+        emu.write_register_u64(&format!("XMM{}_Qb", n + 6), get(at + 8))?;
+    }
+    emu.write_return_val(if value == 0 { 1 } else { value as u64 })?;
+    // No `simulate_return`: the stack pointer was just restored to the one
+    // `setjmp`'s caller had, and control goes straight to where `setjmp`
+    // returned the first time.
+    Ok(HleResult::JumpTo(get(JMP_RIP)))
+}
+
+fn read_c_bytes(emu: &mut Emulator, at: u64) -> Vec<u8> {
+    let space = emu.state.ram_space();
+    let mut bytes = Vec::new();
+    let mut cursor = at;
+    while at != 0 && bytes.len() < 0x10_0000 {
+        match emu.state.read_space(space, cursor, 1) {
+            Ok(b) if !b.is_empty() && b[0] != 0 => bytes.push(b[0]),
+            _ => break,
+        }
+        cursor += 1;
+    }
+    bytes
+}
+
+/// `strpbrk(s, accept)` -- the first byte of `s` that is in `accept`.
+/// Lua's number parser asks it for `"nN"` to refuse "inf" and "nan"; answered
+/// with null it believed every string had one.
+fn handle_strpbrk(emu: &mut Emulator) -> Result<()> {
+    let s = emu.read_arg(0)?;
+    let accept_at = emu.read_arg(1)?;
+    let text = read_c_bytes(emu, s);
+    let accept = read_c_bytes(emu, accept_at);
+    match text.iter().position(|b| accept.contains(b)) {
+        Some(at) => emu.write_return_val(s + at as u64),
+        None => emu.write_return_val(0),
+    }
+}
+
+/// `strspn(s, set)` -- the length of the prefix made of bytes in `set` --
+/// and, with `inside` false, `strcspn`: the prefix made of bytes *not* in it.
+fn handle_strspn(emu: &mut Emulator, inside: bool) -> Result<()> {
+    let s = emu.read_arg(0)?;
+    let set_at = emu.read_arg(1)?;
+    let text = read_c_bytes(emu, s);
+    let set = read_c_bytes(emu, set_at);
+    let length = text
+        .iter()
+        .position(|b| set.contains(b) != inside)
+        .unwrap_or(text.len());
+    emu.write_return_val(length as u64)
 }
