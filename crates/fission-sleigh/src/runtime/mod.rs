@@ -685,6 +685,38 @@ mod tests {
         );
     }
 
+    /// A SIB scale prints the multiplier the encoding actually asks for.
+    ///
+    /// `attach values ss [1 2 4 8]` is applied when the operand is bound, so
+    /// the display has the mapped value already and must print it. It used to
+    /// index the table a second time: a scale of 1 printed `*0x2` and 2 printed
+    /// `*0x4`, while 4 and 8 landed out of range and came out right by
+    /// accident. Reading disassembly is how an agent checks a decompilation,
+    /// and it was being told `[rsi + rcx]` is `[RSI + RCX*0x2]`.
+    #[test]
+    fn x86_64_sib_scales_render_as_encoded() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
+        // Every expectation here was checked against llvm-objdump.
+        let cases: [(&[u8], &str); 4] = [
+            // movzx EDX, byte ptr [rsi + rcx]
+            (&[0x0f, 0xb6, 0x14, 0x0e], "[RSI + RCX*0x1]"),
+            // lea ESI, [rsi + 2*rsi]
+            (&[0x8d, 0x34, 0x76], "[RSI + RSI*0x2]"),
+            // movsxd RAX, dword ptr [rdx + 4*rax]
+            (&[0x48, 0x63, 0x04, 0x82], "[RDX + RAX*0x4]"),
+            // mov RDX, qword ptr [r15 + 8*rsi - 8]
+            (&[0x49, 0x8b, 0x54, 0xf7, 0xf8], "[R15 + RSI*0x8"),
+        ];
+        for (bytes, expected) in cases {
+            let decoded = frontend
+                .decode_window(bytes, 0x1000, 1)
+                .expect("x86-64 decode");
+            let text = decoded.first().expect("one instruction").instruction_text();
+            assert!(text.contains(expected), "expected {expected} in {text:?}");
+        }
+    }
+
     #[test]
     fn runtime_function_lift_follows_conditional_target_after_fallthrough_ret() {
         let frontend =

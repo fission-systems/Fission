@@ -377,6 +377,20 @@ pub(super) fn format_operand_with_display_kind(
                 }
             }
             crate::compiler::CompiledDisplayOperandKind::ValueMap(values) => {
+                // A value-map operand bound as an immediate already *holds* its
+                // mapped value: `SlaValueMap` reads the raw field and looks the
+                // table up at decode time. Indexing the table again applies the
+                // attach twice. With x86's `attach values ss [1 2 4 8]`, a SIB
+                // scale of 1 printed as `*0x2` and 2 as `*0x4`, while 4 and 8
+                // landed out of range and came out right by accident.
+                //
+                // Other bindings (a register or named varnode) carry the raw
+                // selector, and those still need the lookup.
+                if matches!(operand, BoundOperand::Immediate { .. }) {
+                    if let Some(value) = operand_display_value(operand) {
+                        return format_signed_hex(value);
+                    }
+                }
                 if let Some(index) = operand_display_index(operand) {
                     if let Some(value) = values.get(index) {
                         return format_signed_hex(*value);
