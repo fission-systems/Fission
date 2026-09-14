@@ -36,6 +36,22 @@ pub enum AigNode {
     And(AigLit, AigLit),
 }
 
+/// Which way a shift goes, and what fills the bits it vacates.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShiftKind {
+    Left,
+    LogicalRight,
+    ArithmeticRight,
+}
+
+/// The three signed division results, which share one unsigned divider.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignedDivision {
+    Quotient,
+    Remainder,
+    Modulus,
+}
+
 /// An And-Inverter Graph manager for converting ASTs.
 pub struct AigManager {
     nodes: Vec<AigNode>,
@@ -257,6 +273,149 @@ impl AigManager {
         (quotient, partial)
     }
 
+    /// Two's-complement negation: invert and add one.
+    fn add_neg(&mut self, a: &[AigLit]) -> Vec<AigLit> {
+        let inverted: Vec<AigLit> = a.iter().map(|lit| lit.not()).collect();
+        self.add_ripple_carry_adder(&inverted, &[], AigLit::TRUE)
+    }
+
+    /// `c ? t : e` bit by bit, padding the shorter side with zeros.
+    fn mux_bits(&mut self, c: AigLit, t: &[AigLit], e: &[AigLit]) -> Vec<AigLit> {
+        let width = t.len().max(e.len());
+        (0..width)
+            .map(|i| {
+                let then_bit = t.get(i).copied().unwrap_or(AigLit::FALSE);
+                let else_bit = e.get(i).copied().unwrap_or(AigLit::FALSE);
+                self.add_ite(c, then_bit, else_bit)
+            })
+            .collect()
+    }
+
+    /// A shift by a symbolic amount: a barrel shifter, one stage per amount
+    /// bit that can still move something, then saturation for everything
+    /// larger. SMT-LIB: shifting by the width or more gives zero, or all sign
+    /// bits for an arithmetic right shift.
+    ///
+    /// This used to be the identity -- `x << y` lowered as `x` -- so
+    /// `x << 1 == 2` for `x = 1` came back UNSAT.
+    fn add_shift(&mut self, a: &[AigLit], amount: &[AigLit], kind: ShiftKind) -> Vec<AigLit> {
+        let width = a.len();
+        if width == 0 {
+            return Vec::new();
+        }
+        let fill = if kind == ShiftKind::ArithmeticRight {
+            a[width - 1]
+        } else {
+            AigLit::FALSE
+        };
+        let mut out = a.to_vec();
+        let mut stage = 0usize;
+        while stage < amount.len() && stage < usize::BITS as usize - 1 && (1usize << stage) < width
+        {
+            let step = 1usize << stage;
+            let shifted: Vec<AigLit> = (0..width)
+                .map(|j| match kind {
+                    ShiftKind::Left if j >= step => out[j - step],
+                    ShiftKind::Left => AigLit::FALSE,
+                    _ if j + step < width => out[j + step],
+                    _ => fill,
+                })
+                .collect();
+            out = self.mux_bits(amount[stage], &shifted, &out);
+            stage += 1;
+        }
+        // Any higher amount bit set means a shift of at least the width.
+        let mut too_far = AigLit::FALSE;
+        for &bit in &amount[stage..] {
+            too_far = self.add_or(too_far, bit);
+        }
+        let saturated = vec![fill; width];
+        self.mux_bits(too_far, &saturated, &out)
+    }
+
+    /// A shift by a constant, without building a shifter -- and without
+    /// allocating the shift amount: this used to start from
+    /// `vec![FALSE; shift]`, so a large constant allocated that many bits.
+    fn shift_by_constant(a: &[AigLit], amount: u64, kind: ShiftKind) -> Vec<AigLit> {
+        let width = a.len();
+        let fill = match (kind, a.last()) {
+            (ShiftKind::ArithmeticRight, Some(&msb)) => msb,
+            _ => AigLit::FALSE,
+        };
+        let shift = usize::try_from(amount).unwrap_or(usize::MAX);
+        (0..width)
+            .map(|j| match kind {
+                ShiftKind::Left => j.checked_sub(shift).map_or(AigLit::FALSE, |from| a[from]),
+                _ => j
+                    .checked_add(shift)
+                    .filter(|&from| from < width)
+                    .map_or(fill, |from| a[from]),
+            })
+            .collect()
+    }
+
+    /// Signed quotient, remainder or modulus, straight from the SMT-LIB
+    /// definitions: divide the magnitudes once, then fix the sign.
+    ///
+    /// Z3's `mk_sdiv_srem_smod` builds four unsigned dividers, one per sign
+    /// combination, and chooses between them; one divider over absolute
+    /// values computes the same functions. Division by zero needs no special
+    /// case: it inherits `bvudiv`/`bvurem`'s answers through the formulas.
+    fn add_signed_division(
+        &mut self,
+        a: &[AigLit],
+        b: &[AigLit],
+        kind: SignedDivision,
+    ) -> Vec<AigLit> {
+        let width = a.len().max(b.len());
+        if width == 0 {
+            return Vec::new();
+        }
+        let pad = |bits: &[AigLit]| -> Vec<AigLit> {
+            (0..width)
+                .map(|i| bits.get(i).copied().unwrap_or(AigLit::FALSE))
+                .collect()
+        };
+        let (a, b) = (pad(a), pad(b));
+        let (a_negative, b_negative) = (a[width - 1], b[width - 1]);
+
+        let neg_a = self.add_neg(&a);
+        let neg_b = self.add_neg(&b);
+        let abs_a = self.mux_bits(a_negative, &neg_a, &a);
+        let abs_b = self.mux_bits(b_negative, &neg_b, &b);
+        let (quotient, remainder) = self.add_udiv_urem(&abs_a, &abs_b);
+
+        match kind {
+            // Negative exactly when the signs differ.
+            SignedDivision::Quotient => {
+                let signs_differ = self.add_xor(a_negative, b_negative);
+                let negated = self.add_neg(&quotient);
+                self.mux_bits(signs_differ, &negated, &quotient)
+            }
+            // The dividend's sign.
+            SignedDivision::Remainder => {
+                let negated = self.add_neg(&remainder);
+                self.mux_bits(a_negative, &negated, &remainder)
+            }
+            // The divisor's sign -- and zero stays zero, which is the case a
+            // sign fix-up applied unconditionally gets wrong: `-u + t` would
+            // turn a zero remainder into `t`.
+            SignedDivision::Modulus => {
+                let negated = self.add_neg(&remainder);
+                let negated_plus_b = self.add_ripple_carry_adder(&negated, &b, AigLit::FALSE);
+                let plus_b = self.add_ripple_carry_adder(&remainder, &b, AigLit::FALSE);
+                // (a<0, b<0) -> -u ; (a<0, b>=0) -> -u + b
+                let when_a_negative = self.mux_bits(b_negative, &negated, &negated_plus_b);
+                // (a>=0, b<0) -> u + b ; (a>=0, b>=0) -> u
+                let when_a_positive = self.mux_bits(b_negative, &plus_b, &remainder);
+                let signed = self.mux_bits(a_negative, &when_a_negative, &when_a_positive);
+                let zero = vec![AigLit::FALSE; width];
+                let remainder_is_zero = self.add_eq(&remainder, &zero);
+                self.mux_bits(remainder_is_zero, &zero, &signed)
+            }
+        }
+    }
+
     pub fn add_full_adder(&mut self, a: AigLit, b: AigLit, cin: AigLit) -> (AigLit, AigLit) {
         // sum = a ^ b ^ cin
         let a_xor_b = self.add_xor(a, b);
@@ -437,42 +596,18 @@ impl AigManager {
                 let blt = SymExpr::Slt(b.clone(), a.clone());
                 self.lower_expr(&blt)
             }
-            SymExpr::Shl(a, b) => {
-                // Constant shift only (symbolic shift amount not yet supported)
+            SymExpr::Shl(a, b) | SymExpr::Lshr(a, b) | SymExpr::Ashr(a, b) => {
+                let kind = match expr {
+                    SymExpr::Shl(..) => ShiftKind::Left,
+                    SymExpr::Lshr(..) => ShiftKind::LogicalRight,
+                    _ => ShiftKind::ArithmeticRight,
+                };
                 let a_bits = self.lower_expr(a);
-                let a_len = a_bits.len();
-                if let SymExpr::Const { val: shift, .. } = b.as_ref() {
-                    let shift = *shift as usize;
-                    let mut out = vec![AigLit::FALSE; shift];
-                    let take_count = if shift < a_len { a_len - shift } else { 0 };
-                    out.extend(a_bits.into_iter().take(take_count));
-                    out.truncate(a_len);
-                    // Pad to original length if truncated
-                    while out.len() < a_len {
-                        out.push(AigLit::FALSE);
-                    }
-                    out
+                if let SymExpr::Const { val, .. } = b.as_ref() {
+                    Self::shift_by_constant(&a_bits, *val, kind)
                 } else {
-                    tracing::warn!("Symbolic shift not yet supported — treating as identity");
-                    a_bits
-                }
-            }
-            SymExpr::Lshr(a, b) => {
-                let a_bits = self.lower_expr(a);
-                if let SymExpr::Const { val: shift, .. } = b.as_ref() {
-                    let shift = *shift as usize;
-                    if shift >= a_bits.len() {
-                        vec![AigLit::FALSE; a_bits.len()]
-                    } else {
-                        let mut out = a_bits[shift..].to_vec();
-                        while out.len() < a_bits.len() {
-                            out.push(AigLit::FALSE);
-                        }
-                        out
-                    }
-                } else {
-                    tracing::warn!("Symbolic shift not yet supported — treating as identity");
-                    a_bits
+                    let amount = self.lower_expr(b);
+                    self.add_shift(&a_bits, &amount, kind)
                 }
             }
             SymExpr::Extract { expr, lsb, size } => {
@@ -588,6 +723,21 @@ impl AigManager {
                 let a_bits = self.lower_expr(a);
                 let b_bits = self.lower_expr(b);
                 self.add_udiv_urem(&a_bits, &b_bits).0
+            }
+            SymExpr::Urem(a, b) => {
+                let a_bits = self.lower_expr(a);
+                let b_bits = self.lower_expr(b);
+                self.add_udiv_urem(&a_bits, &b_bits).1
+            }
+            SymExpr::Sdiv(a, b) | SymExpr::Srem(a, b) | SymExpr::Smod(a, b) => {
+                let kind = match expr {
+                    SymExpr::Sdiv(..) => SignedDivision::Quotient,
+                    SymExpr::Srem(..) => SignedDivision::Remainder,
+                    _ => SignedDivision::Modulus,
+                };
+                let a_bits = self.lower_expr(a);
+                let b_bits = self.lower_expr(b);
+                self.add_signed_division(&a_bits, &b_bits, kind)
             }
             SymExpr::Ite { cond, t, f } => {
                 let c_bits = self.lower_expr(cond);

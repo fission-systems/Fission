@@ -196,3 +196,141 @@ fn a_dropped_assertion_makes_the_answer_unknown() {
         "an assertion the solver could not encode must not yield SAT or UNSAT"
     );
 }
+
+/// A shift by a *symbolic* amount was lowered as the identity: `x << y` was
+/// `x`. SMT-LIB: a shift by the width or more gives zero.
+#[test]
+fn left_shift_by_a_symbolic_amount_matches_its_definition_on_every_4_bit_pair() {
+    check_exhaustively(
+        "bvshl",
+        |x, y| SymExpr::Shl(Box::new(x), Box::new(y)),
+        |x, y| if y >= WIDTH as u64 { 0 } else { x << y },
+    );
+}
+
+#[test]
+fn logical_right_shift_by_a_symbolic_amount_matches_its_definition_on_every_4_bit_pair() {
+    check_exhaustively(
+        "bvlshr",
+        |x, y| SymExpr::Lshr(Box::new(x), Box::new(y)),
+        |x, y| if y >= WIDTH as u64 { 0 } else { x >> y },
+    );
+}
+
+// ── Remainder, signed division and arithmetic shift ─────────────────────────
+
+/// A 4-bit value read as two's complement.
+fn signed(value: u64) -> i64 {
+    let value = value & MASK;
+    if value & (1 << (WIDTH - 1)) != 0 {
+        value as i64 - (1 << WIDTH)
+    } else {
+        value as i64
+    }
+}
+
+/// SMT-LIB `bvurem`: `x % 0` is `x`.
+#[test]
+fn unsigned_remainder_matches_its_definition_on_every_4_bit_pair() {
+    check_exhaustively(
+        "bvurem",
+        |x, y| SymExpr::Urem(Box::new(x), Box::new(y)),
+        |x, y| if y == 0 { x } else { x % y },
+    );
+}
+
+/// SMT-LIB `bvsdiv`: truncates toward zero; `s / 0` is 1 for negative `s` and
+/// all ones otherwise; `-8 / -1` wraps back to -8.
+#[test]
+fn signed_division_matches_its_definition_on_every_4_bit_pair() {
+    check_exhaustively(
+        "bvsdiv",
+        |x, y| SymExpr::Sdiv(Box::new(x), Box::new(y)),
+        |x, y| {
+            let (s, t) = (signed(x), signed(y));
+            if t == 0 {
+                if s < 0 {
+                    1
+                } else {
+                    MASK
+                }
+            } else {
+                (s / t) as u64
+            }
+        },
+    );
+}
+
+/// SMT-LIB `bvsrem`: the sign follows the dividend; `s rem 0` is `s`.
+#[test]
+fn signed_remainder_matches_its_definition_on_every_4_bit_pair() {
+    check_exhaustively(
+        "bvsrem",
+        |x, y| SymExpr::Srem(Box::new(x), Box::new(y)),
+        |x, y| {
+            let (s, t) = (signed(x), signed(y));
+            if t == 0 {
+                s as u64
+            } else {
+                (s % t) as u64
+            }
+        },
+    );
+}
+
+/// SMT-LIB `bvsmod`: the sign follows the divisor, a zero remainder stays
+/// zero, and `s mod 0` is `s`.
+#[test]
+fn signed_modulus_matches_its_definition_on_every_4_bit_pair() {
+    check_exhaustively(
+        "bvsmod",
+        |x, y| SymExpr::Smod(Box::new(x), Box::new(y)),
+        |x, y| {
+            let (s, t) = (signed(x), signed(y));
+            if t == 0 {
+                return s as u64;
+            }
+            let r = s % t;
+            (if r != 0 && ((r < 0) != (t < 0)) {
+                r + t
+            } else {
+                r
+            }) as u64
+        },
+    );
+}
+
+/// SMT-LIB `bvashr`: vacated bits copy the sign; a shift by the width or more
+/// leaves only sign bits.
+#[test]
+fn arithmetic_right_shift_matches_its_definition_on_every_4_bit_pair() {
+    check_exhaustively(
+        "bvashr",
+        |x, y| SymExpr::Ashr(Box::new(x), Box::new(y)),
+        |x, y| {
+            let s = signed(x);
+            if y >= WIDTH as u64 {
+                if s < 0 {
+                    MASK
+                } else {
+                    0
+                }
+            } else {
+                (s >> y) as u64
+            }
+        },
+    );
+}
+
+/// A shift by a huge constant used to allocate the shift amount in bits before
+/// truncating. It is zero, and answering that must not cost memory.
+#[test]
+fn a_huge_constant_shift_is_zero_without_allocating_it() {
+    let x = SymExpr::new_var("x", 8);
+    let shifted = SymExpr::Shl(Box::new(x), Box::new(SymExpr::new_const(1 << 40, 8)));
+    let non_zero = SymExpr::Neq(Box::new(shifted), Box::new(SymExpr::new_const(0, 8)));
+    assert!(
+        matches!(sat(non_zero), SatResult::Unsat),
+        "x << 2^40 is zero for every x"
+    );
+}

@@ -52,6 +52,14 @@ pub enum SymExpr {
     Sub(Box<SymExpr>, Box<SymExpr>),
     Mul(Box<SymExpr>, Box<SymExpr>),
     Udiv(Box<SymExpr>, Box<SymExpr>),
+    /// Unsigned remainder. `x % 0` is `x` (SMT-LIB `bvurem`).
+    Urem(Box<SymExpr>, Box<SymExpr>),
+    /// Signed division, truncating toward zero (SMT-LIB `bvsdiv`).
+    Sdiv(Box<SymExpr>, Box<SymExpr>),
+    /// Signed remainder; the sign follows the dividend (SMT-LIB `bvsrem`).
+    Srem(Box<SymExpr>, Box<SymExpr>),
+    /// Signed modulus; the sign follows the divisor (SMT-LIB `bvsmod`).
+    Smod(Box<SymExpr>, Box<SymExpr>),
 
     // Bitwise
     And(Box<SymExpr>, Box<SymExpr>),
@@ -59,6 +67,8 @@ pub enum SymExpr {
     Xor(Box<SymExpr>, Box<SymExpr>),
     Shl(Box<SymExpr>, Box<SymExpr>),
     Lshr(Box<SymExpr>, Box<SymExpr>),
+    /// Arithmetic right shift: vacated bits copy the sign bit.
+    Ashr(Box<SymExpr>, Box<SymExpr>),
 
     // Boolean / Comparison (returns 1-bit boolean expression)
     Eq(Box<SymExpr>, Box<SymExpr>),
@@ -478,12 +488,20 @@ impl SymExpr {
         match self {
             Self::Const { size, .. } => Sort::BitVector(*size),
             Self::Var { sort, .. } => sort.clone(),
-            Self::Add(a, _) | Self::Sub(a, _) | Self::Mul(a, _) | Self::Udiv(a, _) => a.get_sort(),
+            Self::Add(a, _)
+            | Self::Sub(a, _)
+            | Self::Mul(a, _)
+            | Self::Udiv(a, _)
+            | Self::Urem(a, _)
+            | Self::Sdiv(a, _)
+            | Self::Srem(a, _)
+            | Self::Smod(a, _) => a.get_sort(),
             Self::And(a, _)
             | Self::Or(a, _)
             | Self::Xor(a, _)
             | Self::Shl(a, _)
-            | Self::Lshr(a, _) => a.get_sort(),
+            | Self::Lshr(a, _)
+            | Self::Ashr(a, _) => a.get_sort(),
             Self::Eq(_, _)
             | Self::Neq(_, _)
             | Self::Ult(_, _)
