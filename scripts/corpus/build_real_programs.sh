@@ -109,6 +109,28 @@ if fetch "https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.t
     -DZSTD_LEGACY_SUPPORT=0 -DZSTD_MULTITHREAD=0"
 fi
 
+# ── brotli: a compressor with large static tables and a context modeller ────
+if fetch "https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz" \
+  "brotli.tar.gz" "brotli-1.1.0/c/tools/brotli.c"; then
+  build brotli bash -c "cd '${SRC}/brotli-1.1.0' && ${CC} -O1 -o '${OUT}/brotli.exe' \
+    \$(find c/common c/dec c/enc c/tools -name '*.c') -Ic/include"
+fi
+
+# ── libdeflate: the same job as zlib written again, and its gzip driver ─────
+if fetch "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.20.tar.gz" \
+  "libdeflate.tar.gz" "libdeflate-1.20/programs/gzip.c"; then
+  build libdeflate bash -c "cd '${SRC}/libdeflate-1.20' && ${CC} -O1 -o '${OUT}/libdeflate.exe' \
+    \$(find lib -name '*.c') programs/gzip.c programs/prog_util.c programs/tgetopt.c \
+    -I. -Icommon -Iprograms -municode"
+fi
+
+# ── duktape: a second language runtime, and a very different one from Lua ───
+if fetch "https://github.com/svaarala/duktape/releases/download/v2.7.0/duktape-2.7.0.tar.xz" \
+  "duktape.tar.xz" "duktape-2.7.0/src/duktape.c"; then
+  build duktape bash -c "cd '${SRC}/duktape-2.7.0' && ${CC} -O1 -o '${OUT}/duktape.exe' \
+    src/duktape.c examples/cmdline/duk_cmdline.c -Isrc -Iexamples/cmdline -lm"
+fi
+
 # ── jq's core: JSON parsing, a bytecode VM, decimal arithmetic ──────────────
 if fetch "https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.18.tar.gz" \
   "cjson.tar.gz" "cJSON-1.7.18/cJSON.c"; then

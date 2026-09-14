@@ -292,7 +292,7 @@ impl SimProcedure for Read {
 
         if fd == 0 {
             let mut data = vec![0u8; count];
-            let mut bytes_read = 0;
+            let bytes_read;
             // Prefer VFS stdin (seeded by with_stdin_mock / seed_stdin).
             if let Ok(v) = emu.vfs.read(0, count) {
                 bytes_read = v.len();
@@ -307,10 +307,9 @@ impl SimProcedure for Read {
                 mock_buf.drain(..to_read);
                 bytes_read = to_read;
             } else {
-                use std::io::Read as IoRead;
-                if let Ok(n) = std::io::stdin().read(&mut data) {
-                    bytes_read = n;
-                }
+                let host = emu.guest_stdin(count);
+                bytes_read = host.len();
+                data[..bytes_read].copy_from_slice(&host);
             }
             if bytes_read > 0 {
                 emu.state

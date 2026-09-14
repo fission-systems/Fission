@@ -1,5 +1,6 @@
 pub mod bare_metal;
 pub mod env;
+pub mod format;
 pub mod linux;
 pub mod procedure;
 pub mod vfs;

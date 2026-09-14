@@ -43,8 +43,31 @@ pub struct CrtGlobals {
     pub environ_vector: u64,
     /// `argv[0]`, which is also the command line.
     pub program_name: u64,
+    /// The cell `_errno()` hands out the address of.
+    pub errno: u64,
+    /// The `FILE` objects, one per descriptor. A program never fills one in
+    /// itself -- it asks the CRT for the pointer -- but `feof` and `ferror`
+    /// are macros in some headers and do read through it, so the storage has
+    /// to be real and readable.
+    ///
+    /// Slot *n* is descriptor *n*, so a `FILE*` and a fd convert into each
+    /// other by arithmetic and there is no table to keep in step. The first
+    /// three are the standard streams the VFS already reserves.
+    pub iob: u64,
     ptr: u64,
 }
+
+/// Bytes per `FILE`. Larger than any field this emulator fills in, so a
+/// program that reads one gets zeros rather than the next stream's storage.
+pub const IOB_STRIDE: u64 = 0x40;
+/// How many descriptors can be a `FILE`. One page's worth; a program that
+/// opens more gets a failed `fopen`, which is a case it already handles.
+pub const IOB_COUNT: u64 = STREAM_SIZE / IOB_STRIDE;
+
+/// The `FILE` array's own page. Its own, because one page holds sixty-four
+/// of them and the CRT variables need the room.
+const STREAM_BASE: u64 = 0x7FFC_0000;
+const STREAM_SIZE: u64 = 0x1000;
 
 impl CrtGlobals {
     /// Build the page. Called once per process, from `patch_imports`.
@@ -71,6 +94,18 @@ impl CrtGlobals {
         let environ_vector = next;
         next += ptr;
         let program_name = next;
+        next += 32;
+        let errno = next;
+        next += ptr;
+        debug_assert!(next - BASE <= SIZE, "the CRT page is full");
+
+        state.page_map.map_region(
+            STREAM_BASE,
+            STREAM_SIZE,
+            prot::VALID | prot::READ | prot::WRITE,
+            true,
+        );
+        let iob = STREAM_BASE;
 
         let mut globals = Self {
             argc,
@@ -85,6 +120,8 @@ impl CrtGlobals {
             argv_vector,
             environ_vector,
             program_name,
+            errno,
+            iob,
             ptr,
         };
         globals.write_defaults(state)?;
@@ -113,6 +150,8 @@ impl CrtGlobals {
         for i in 0..self.scratch_cells {
             self.put(state, self.scratch + i * self.ptr, 0)?;
         }
+        self.put(state, self.errno, 0)?;
+        state.write_space(ram, self.iob, &vec![0u8; STREAM_SIZE as usize])?;
         Ok(())
     }
 
@@ -148,5 +187,25 @@ impl CrtGlobals {
             _ => return None,
         };
         Some(known)
+    }
+}
+
+impl CrtGlobals {
+    /// The `FILE*` for a descriptor, if there is a slot for it.
+    pub fn stream(&self, fd: u64) -> u64 {
+        if fd >= IOB_COUNT {
+            return 0;
+        }
+        self.iob + fd * IOB_STRIDE
+    }
+
+    /// Which descriptor a `FILE*` is, if it is one of ours.
+    ///
+    /// A pointer into the middle of a `FILE` still resolves: a program that
+    /// was handed `&iob[1]` and passes `&iob[1].flags` is talking about
+    /// stdout either way.
+    pub fn stream_index(&self, pointer: u64) -> Option<u64> {
+        (pointer >= self.iob && pointer < self.iob + STREAM_SIZE)
+            .then(|| (pointer - self.iob) / IOB_STRIDE)
     }
 }

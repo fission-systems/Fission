@@ -79,6 +79,13 @@ pub struct Emulator {
     pub pcode_budget_pc: Option<u64>,
     /// Optional buffer to mock standard input (`stdin`).
     pub stdin_buffer: Option<Vec<u8>>,
+    /// Whether a console read with no mock falls through to the *host's*
+    /// standard input. Off by default: a guest REPL reading an open pipe that
+    /// never closes blocks the whole process -- which is how a sweep of real
+    /// programs sat for twenty minutes at no CPU, lua and duktape waiting on
+    /// a background job's stdin. A harness has no human at the other end;
+    /// only an interactive front end should turn this on.
+    pub host_stdin: bool,
 
     /// TTD (Time-Travel Debugging) recorder.
     pub ttd: TTDRecorder,
@@ -389,6 +396,7 @@ impl Emulator {
             observe: crate::observe::ObserveMask::NONE,
             pcode_budget_pc: None,
             stdin_buffer: None,
+            host_stdin: false,
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,
             tick_count: 0,
@@ -871,6 +879,12 @@ impl Emulator {
         self
     }
 
+    /// Let console reads with no mock reach the host's standard input.
+    pub fn with_host_stdin(mut self, enabled: bool) -> Self {
+        self.host_stdin = enabled;
+        self
+    }
+
     pub fn with_stdin_mock(mut self, mock: Option<String>) -> Self {
         self.stdin_buffer = mock.map(|s| s.into_bytes());
         // Keep VFS fd 0 in sync so `sys_read` (not only libc read) sees the mock.
@@ -1050,6 +1064,40 @@ impl Emulator {
         const GUEST_STDOUT: u64 = 1;
         let _ = self.vfs.write(GUEST_STDOUT, bytes);
         print!("{}", String::from_utf8_lossy(bytes));
+    }
+
+    /// What the guest wrote to its standard error.
+    ///
+    /// Separate from stdout because the difference is information: a program
+    /// under analysis that prints a diagnostic and one that prints a result
+    /// are doing different things, and a single merged stream loses which was
+    /// which.
+    pub fn guest_stderr(&mut self, bytes: &[u8]) {
+        const GUEST_STDERR: u64 = 2;
+        let _ = self.vfs.write(GUEST_STDERR, bytes);
+        eprint!("{}", String::from_utf8_lossy(bytes));
+    }
+
+    /// Up to `limit` bytes of whatever stands in for standard input: the
+    /// mock if there is one, the host's stdin if that was asked for, and
+    /// end-of-file otherwise.
+    pub fn guest_stdin(&mut self, limit: usize) -> Vec<u8> {
+        if let Some(buffer) = self.stdin_buffer.as_mut() {
+            let take = limit.min(buffer.len());
+            return buffer.drain(..take).collect();
+        }
+        if !self.host_stdin || limit == 0 {
+            return Vec::new();
+        }
+        use std::io::Read;
+        let mut data = vec![0u8; limit.min(0x10_0000)];
+        match std::io::stdin().read(&mut data) {
+            Ok(n) => {
+                data.truncate(n);
+                data
+            }
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Guest-visible scratch: `len` writable bytes at an address the guest

@@ -98,6 +98,7 @@ impl OsEnvironment for WindowsEnv {
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult> {
         tracing::info!("HLE Intercept: {}", func_name);
         emu.metrics.note_userop(&format!("win32:{func_name}"));
+        let globals = *self.crt_globals.lock().unwrap_or_else(|e| e.into_inner());
         match func_name {
             "LoadLibraryA" | "LoadLibraryExA" => handle_load_library_a(emu)?,
             "LoadLibraryW" | "LoadLibraryExW" => handle_load_library_w(emu)?,
@@ -178,7 +179,60 @@ impl OsEnvironment for WindowsEnv {
                 emu.write_return_val(1)?;
             }
             // Thread / Sync / process identity
-            "CreateThread" => handle_create_thread(emu)?,
+            "CreateThread" | "_beginthreadex" | "_beginthread" => handle_create_thread(emu)?,
+            // A condition variable is a pointer-sized word the caller owns.
+            // Nothing here schedules, so initialising it to zero and waking
+            // nobody is the whole of it -- and a program that waits on one
+            // would deadlock against a stub that pretended to block.
+            "InitializeConditionVariable" => {
+                let pointer = emu.read_arg(0).unwrap_or(0);
+                if pointer != 0 {
+                    let space = emu.state.ram_space();
+                    let _ = emu.state.write_space(space, pointer, &0u64.to_le_bytes());
+                }
+                emu.write_return_val(0)?;
+            }
+            "WakeConditionVariable" | "WakeAllConditionVariable" => {
+                emu.write_return_val(0)?;
+            }
+            "SetConsoleCtrlHandler" => {
+                // Installed and never called: there is no Ctrl-C here.
+                emu.write_return_val(1)?;
+            }
+            "GetSystemInfo" | "GetNativeSystemInfo" => handle_get_system_info(emu)?,
+            "GetConsoleScreenBufferInfo" => handle_console_screen_buffer_info(emu)?,
+            "SetConsoleTextAttribute" | "SetConsoleCP" | "SetConsoleOutputCP" => {
+                emu.write_return_val(1)?;
+            }
+            // A fixed instant, because a replay has to read the same one. A
+            // program that prints a timestamp prints this one; a program that
+            // measures an interval gets zero, which is what a machine this
+            // fast would report anyway.
+            "time" | "_time64" | "_time32" => {
+                const FIXED_EPOCH_SECONDS: u64 = 1_767_225_600; // 2026-01-01T00:00:00Z
+                let pointer = emu.read_arg(0).unwrap_or(0);
+                if pointer != 0 {
+                    let space = emu.state.ram_space();
+                    let _ =
+                        emu.state
+                            .write_space(space, pointer, &FIXED_EPOCH_SECONDS.to_le_bytes());
+                }
+                emu.write_return_val(FIXED_EPOCH_SECONDS)?;
+            }
+            // Installed and never delivered: nothing here raises a signal.
+            // Reporting the previous handler as SIG_DFL is what a first
+            // installation sees.
+            "signal" | "raise" => {
+                emu.write_return_val(0)?;
+            }
+            // `setjmp` returns zero when it is the one setting the jump
+            // buffer, which is the return every caller's `if` is written
+            // against. The `longjmp` back to it is not supported, and a
+            // program that takes that path stops being followed rather than
+            // silently continuing from the wrong place.
+            "__intrinsic_setjmpex" | "_setjmp" | "_setjmp3" | "setjmp" => {
+                emu.write_return_val(0)?;
+            }
             "WaitForSingleObject" | "WaitForSingleObjectEx" => {
                 emu.write_return_val(0)?;
             }
@@ -255,6 +309,22 @@ impl OsEnvironment for WindowsEnv {
 
             // Str / Mem / codepage
             "lstrcpyA" | "strcpy" => handle_lstrcpy_a(emu)?,
+            "strcmp" | "lstrcmpA" => handle_strcmp(emu, None)?,
+            "strncmp" => {
+                let limit = emu.read_arg(2).unwrap_or(0);
+                handle_strcmp(emu, Some(limit))?;
+            }
+            "strrchr" => handle_strrchr(emu)?,
+            "strchr" => handle_strchr(emu)?,
+            // The wide-character spellings, which a `wmain` program reaches
+            // for before anything else. libdeflate's gzip driver is one.
+            "wcslen" | "lstrlenW" => handle_wcslen(emu)?,
+            "wcsrchr" => handle_wcsrchr(emu)?,
+            "wcscmp" | "lstrcmpW" => handle_wcscmp(emu, false)?,
+            "_wcsicmp" | "lstrcmpiW" => handle_wcscmp(emu, true)?,
+            "strstr" => handle_strstr(emu)?,
+            "strncpy" | "lstrcpynA" => handle_strncpy(emu)?,
+            "memcmp" | "RtlCompareMemory" => handle_memcmp(emu)?,
             "lstrcatA" | "strcat" => handle_lstrcat_a(emu)?,
             "lstrlenA" | "strlen" => handle_lstrlen_a(emu)?,
             "RtlMoveMemory" | "memmove" | "memcpy" => handle_rtl_move_memory(emu)?,
@@ -372,7 +442,9 @@ impl OsEnvironment for WindowsEnv {
             | "_set_app_type"
             | "__setusermatherr"
             | "_configure_narrow_argv"
-            | "_initialize_narrow_environment" => {
+            | "_configure_wide_argv"
+            | "_initialize_narrow_environment"
+            | "_initialize_wide_environment" => {
                 emu.write_return_val(0)?;
             }
             "__getmainargs" | "__wgetmainargs" => handle_getmainargs(emu, self)?,
@@ -485,11 +557,20 @@ impl OsEnvironment for WindowsEnv {
             "GetEnvironmentVariableA" | "GetEnvironmentVariableW" => {
                 emu.write_return_val(0)?; // not found
             }
-            _ => {
-                tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", func_name);
-                emu.metrics.note_hle_miss(func_name);
-                emu.win_last_error = 127; // ERROR_PROC_NOT_FOUND-ish
-                emu.write_return_val(0)?;
+            other => {
+                // The C runtime's own surface, which needs the process data
+                // page the loader built -- `__acrt_iob_func` hands out
+                // addresses inside it.
+                let handled = match globals.as_ref() {
+                    Some(globals) => crate::os::windows::crt_stdio::dispatch(emu, globals, other)?,
+                    None => false,
+                };
+                if !handled {
+                    tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", func_name);
+                    emu.metrics.note_hle_miss(func_name);
+                    emu.win_last_error = 127; // ERROR_PROC_NOT_FOUND-ish
+                    emu.write_return_val(0)?;
+                }
             }
         }
         Ok(HleResult::Continue)
@@ -1290,19 +1371,8 @@ fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
     let p_chars_read = emu.read_arg(3)?;
     let _p_input_ctrl = emu.read_arg(4)?;
 
-    let mut data = vec![0u8; chars_to_read];
-    let mut bytes_read = 0;
-    if let Some(ref mut mock_buf) = emu.stdin_buffer {
-        let to_read = std::cmp::min(chars_to_read, mock_buf.len());
-        data[..to_read].copy_from_slice(&mock_buf[..to_read]);
-        mock_buf.drain(..to_read);
-        bytes_read = to_read;
-    } else {
-        use std::io::Read;
-        if let Ok(n) = std::io::stdin().read(&mut data) {
-            bytes_read = n;
-        }
-    }
+    let data = emu.guest_stdin(chars_to_read);
+    let bytes_read = data.len();
 
     if bytes_read > 0 {
         emu.state
@@ -1335,19 +1405,10 @@ fn handle_read_console_w(emu: &mut Emulator) -> Result<()> {
     let p_chars_read = emu.read_arg(3)?;
     let _p_input_ctrl = emu.read_arg(4)?;
 
-    let mut data = vec![0u8; chars_to_read];
-    let mut chars_read = 0;
-    if let Some(ref mut mock_buf) = emu.stdin_buffer {
-        let to_read = std::cmp::min(chars_to_read, mock_buf.len());
-        data[..to_read].copy_from_slice(&mock_buf[..to_read]);
-        mock_buf.drain(..to_read);
-        chars_read = to_read;
-    } else {
-        use std::io::Read;
-        if let Ok(n) = std::io::stdin().read(&mut data) {
-            chars_read = n; // Note: for W, ideally read UTF-16, but reading bytes as ASCII usually works for crackmes
-        }
-    }
+    // Bytes read as ASCII and widened below, which is enough for the
+    // console input a crackme asks for.
+    let data = emu.guest_stdin(chars_to_read);
+    let chars_read = data.len();
 
     if chars_read > 0 {
         // Expand ASCII to UTF-16
@@ -1368,4 +1429,254 @@ fn handle_read_console_w(emu: &mut Emulator) -> Result<()> {
 
     emu.write_return_val(1)?;
     Ok(())
+}
+
+/// `strcmp(a, b)` and, with a limit, `strncmp(a, b, n)`.
+fn handle_strcmp(emu: &mut Emulator, limit: Option<u64>) -> Result<()> {
+    let a = emu.read_arg(0).unwrap_or(0);
+    let b = emu.read_arg(1).unwrap_or(0);
+    let limit = limit.unwrap_or(u64::MAX);
+
+    let space = emu.state.ram_space();
+    let mut result: i64 = 0;
+    let mut i = 0u64;
+    while i < limit {
+        let left = emu
+            .state
+            .read_space(space, a.wrapping_add(i), 1)
+            .map(|v| v[0])
+            .unwrap_or(0);
+        let right = emu
+            .state
+            .read_space(space, b.wrapping_add(i), 1)
+            .map(|v| v[0])
+            .unwrap_or(0);
+        if left != right {
+            result = left as i64 - right as i64;
+            break;
+        }
+        if left == 0 {
+            break;
+        }
+        i += 1;
+        if i > 0x10_0000 {
+            break;
+        }
+    }
+    emu.write_return_val(result as u64)
+}
+
+/// `strrchr(s, c)` -- the *last* occurrence, which is what a path split uses.
+fn handle_strrchr(emu: &mut Emulator) -> Result<()> {
+    let s = emu.read_arg(0).unwrap_or(0);
+    let needle = emu.read_arg(1).unwrap_or(0) as u8;
+
+    let space = emu.state.ram_space();
+    let mut found = 0u64;
+    let mut i = 0u64;
+    loop {
+        let byte = emu
+            .state
+            .read_space(space, s.wrapping_add(i), 1)
+            .map(|v| v[0])
+            .unwrap_or(0);
+        if byte == needle {
+            found = s.wrapping_add(i);
+        }
+        if byte == 0 || i > 0x10_0000 {
+            break;
+        }
+        i += 1;
+    }
+    emu.write_return_val(found)
+}
+
+/// `GetSystemInfo(&info)` -- one processor, four-kilobyte pages.
+fn handle_get_system_info(emu: &mut Emulator) -> Result<()> {
+    let pointer = emu.read_arg(0).unwrap_or(0);
+    if pointer == 0 {
+        return emu.write_return_val(0);
+    }
+    // SYSTEM_INFO, 64-bit layout.
+    let mut info = [0u8; 48];
+    info[0..4].copy_from_slice(&9u32.to_le_bytes()); // PROCESSOR_ARCHITECTURE_AMD64
+    info[4..8].copy_from_slice(&0x1000u32.to_le_bytes()); // dwPageSize
+    info[8..16].copy_from_slice(&0x1_0000u64.to_le_bytes()); // lpMinimumApplicationAddress
+    info[16..24].copy_from_slice(&0x7FFF_FFFE_0000u64.to_le_bytes()); // lpMaximum...
+    info[24..32].copy_from_slice(&1u64.to_le_bytes()); // dwActiveProcessorMask
+    info[32..36].copy_from_slice(&1u32.to_le_bytes()); // dwNumberOfProcessors
+    info[36..40].copy_from_slice(&8664u32.to_le_bytes()); // dwProcessorType
+    info[40..44].copy_from_slice(&0x1000u32.to_le_bytes()); // dwAllocationGranularity
+    let space = emu.state.ram_space();
+    emu.state.write_space(space, pointer, &info)?;
+    emu.write_return_val(0)
+}
+
+/// `strchr(s, c)` -- the first occurrence. The NUL counts, which is how
+/// `strchr(s, 0)` finds the end of a string.
+fn handle_strchr(emu: &mut Emulator) -> Result<()> {
+    let s = emu.read_arg(0).unwrap_or(0);
+    let needle = emu.read_arg(1).unwrap_or(0) as u8;
+    let space = emu.state.ram_space();
+    let mut i = 0u64;
+    loop {
+        let byte = emu
+            .state
+            .read_space(space, s.wrapping_add(i), 1)
+            .map(|v| v[0])
+            .unwrap_or(0);
+        if byte == needle {
+            return emu.write_return_val(s.wrapping_add(i));
+        }
+        if byte == 0 || i > 0x10_0000 {
+            return emu.write_return_val(0);
+        }
+        i += 1;
+    }
+}
+
+/// `strstr(haystack, needle)`.
+fn handle_strstr(emu: &mut Emulator) -> Result<()> {
+    let haystack_at = emu.read_arg(0).unwrap_or(0);
+    let needle_at = emu.read_arg(1).unwrap_or(0);
+    let haystack = read_string(emu, haystack_at).unwrap_or_default();
+    let needle = read_string(emu, needle_at).unwrap_or_default();
+    match haystack.find(&needle) {
+        Some(at) => emu.write_return_val(haystack_at + at as u64),
+        None => emu.write_return_val(0),
+    }
+}
+
+/// `strncpy(dst, src, n)` -- and the padding, which is the part programs
+/// depend on: the destination is filled to `n` with NULs, and is *not*
+/// terminated if the source was longer.
+fn handle_strncpy(emu: &mut Emulator) -> Result<()> {
+    let dst = emu.read_arg(0).unwrap_or(0);
+    let src = emu.read_arg(1).unwrap_or(0);
+    let n = emu.read_arg(2).unwrap_or(0).min(0x10_0000) as usize;
+    let space = emu.state.ram_space();
+
+    let mut bytes = Vec::with_capacity(n);
+    let mut ended = false;
+    for i in 0..n {
+        let byte = if ended {
+            0
+        } else {
+            emu.state
+                .read_space(space, src.wrapping_add(i as u64), 1)
+                .map(|v| v[0])
+                .unwrap_or(0)
+        };
+        if byte == 0 {
+            ended = true;
+        }
+        bytes.push(byte);
+    }
+    if !bytes.is_empty() && dst != 0 {
+        emu.state.write_space(space, dst, &bytes)?;
+    }
+    emu.write_return_val(dst)
+}
+
+/// `memcmp(a, b, n)`.
+fn handle_memcmp(emu: &mut Emulator) -> Result<()> {
+    let a = emu.read_arg(0).unwrap_or(0);
+    let b = emu.read_arg(1).unwrap_or(0);
+    let n = emu.read_arg(2).unwrap_or(0).min(0x100_0000) as usize;
+    let space = emu.state.ram_space();
+
+    let left = emu.state.read_space(space, a, n).unwrap_or_default();
+    let right = emu.state.read_space(space, b, n).unwrap_or_default();
+    let result = left
+        .iter()
+        .zip(right.iter())
+        .find_map(|(l, r)| (l != r).then(|| *l as i64 - *r as i64))
+        .unwrap_or(0);
+    emu.write_return_val(result as u64)
+}
+
+/// `GetConsoleScreenBufferInfo(handle, &info)` -- an eighty-column console,
+/// which is what a program formats its output for.
+fn handle_console_screen_buffer_info(emu: &mut Emulator) -> Result<()> {
+    let pointer = emu.read_arg(1).unwrap_or(0);
+    if pointer == 0 {
+        return emu.write_return_val(0);
+    }
+    let mut info = [0u8; 22];
+    info[0..2].copy_from_slice(&80u16.to_le_bytes()); // dwSize.X
+    info[2..4].copy_from_slice(&300u16.to_le_bytes()); // dwSize.Y
+    // dwCursorPosition stays at the origin.
+    info[8..10].copy_from_slice(&7u16.to_le_bytes()); // wAttributes: grey on black
+    info[14..16].copy_from_slice(&79u16.to_le_bytes()); // srWindow.Right
+    info[16..18].copy_from_slice(&24u16.to_le_bytes()); // srWindow.Bottom
+    info[18..20].copy_from_slice(&80u16.to_le_bytes()); // dwMaximumWindowSize.X
+    info[20..22].copy_from_slice(&25u16.to_le_bytes());
+    let space = emu.state.ram_space();
+    emu.state.write_space(space, pointer, &info)?;
+    emu.write_return_val(1)
+}
+
+/// The UTF-16 units of a wide string, stopping at the NUL.
+fn read_wide(emu: &mut Emulator, address: u64) -> Vec<u16> {
+    let space = emu.state.ram_space();
+    let mut units = Vec::new();
+    let mut cursor = address;
+    while units.len() < 0x10000 {
+        let Ok(pair) = emu.state.read_space(space, cursor, 2) else {
+            break;
+        };
+        let unit = u16::from_le_bytes([pair[0], pair[1]]);
+        if unit == 0 {
+            break;
+        }
+        units.push(unit);
+        cursor = cursor.wrapping_add(2);
+    }
+    units
+}
+
+/// `wcslen(s)` -- in characters, not bytes, which is the mistake this would
+/// otherwise make.
+fn handle_wcslen(emu: &mut Emulator) -> Result<()> {
+    let s = emu.read_arg(0).unwrap_or(0);
+    let length = read_wide(emu, s).len() as u64;
+    emu.write_return_val(length)
+}
+
+/// `wcsrchr(s, c)`.
+fn handle_wcsrchr(emu: &mut Emulator) -> Result<()> {
+    let s = emu.read_arg(0).unwrap_or(0);
+    let needle = emu.read_arg(1).unwrap_or(0) as u16;
+    let units = read_wide(emu, s);
+    match units.iter().rposition(|unit| *unit == needle) {
+        Some(at) => emu.write_return_val(s + at as u64 * 2),
+        None => emu.write_return_val(0),
+    }
+}
+
+/// `wcscmp(a, b)`, and case-insensitively for `_wcsicmp`.
+fn handle_wcscmp(emu: &mut Emulator, fold_case: bool) -> Result<()> {
+    let a = emu.read_arg(0).unwrap_or(0);
+    let b = emu.read_arg(1).unwrap_or(0);
+    let fold = |units: Vec<u16>| -> Vec<u16> {
+        if fold_case {
+            units
+                .into_iter()
+                .map(|unit| match u8::try_from(unit) {
+                    Ok(byte) => byte.to_ascii_lowercase() as u16,
+                    Err(_) => unit,
+                })
+                .collect()
+        } else {
+            units
+        }
+    };
+    let left = fold(read_wide(emu, a));
+    let right = fold(read_wide(emu, b));
+    let result = match left.cmp(&right) {
+        std::cmp::Ordering::Less => -1i64,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    };
+    emu.write_return_val(result as u64)
 }

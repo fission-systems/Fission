@@ -515,6 +515,12 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     // Create Emulator and Run
     let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?
         .with_max_inst(args.max_inst)
+        // The guest's console reads reach this process's stdin only when a
+        // person is at it. Piped or backgrounded, an open stdin that never
+        // closes would block the run forever on the first REPL prompt.
+        .with_host_stdin(
+            args.stdin_mock.is_none() && std::io::IsTerminal::is_terminal(&std::io::stdin()),
+        )
         .with_stdin_mock(args.stdin_mock)
         .with_ttd(args.ttd_record.unwrap_or(0));
 
