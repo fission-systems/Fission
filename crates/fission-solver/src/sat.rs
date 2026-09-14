@@ -520,14 +520,21 @@ impl SatSolver {
                 }
             }
 
-            // Select next literal to look at
-            loop {
-                p = self.trail[idx];
+            // Select next literal to look at: the most recent trail literal
+            // this analysis has marked.
+            //
+            // The decrement used to come *before* the `seen` test, so finding
+            // the marked literal at `trail[0]` subtracted from zero -- a panic
+            // in debug, and in release a wrap that was harmless only because
+            // the loop broke before using the wrapped index. It takes a
+            // problem big enough for analysis to walk to the bottom of the
+            // trail, which nothing tested until the brute-force and pigeonhole
+            // checks.
+            while !seen[self.trail[idx].var() as usize] {
                 idx -= 1;
-                if seen[p.var() as usize] {
-                    break;
-                }
             }
+            p = self.trail[idx];
+            idx = idx.saturating_sub(1);
 
             seen[p.var() as usize] = false;
             path_c -= 1;
