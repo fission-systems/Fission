@@ -984,3 +984,32 @@ fn the_span_functions_measure_the_right_prefix() {
     // Lua refuses "inf"/"nan" by asking this; a number has neither letter.
     assert_eq!(call(&mut emu, "strpbrk", &[text, nan_letters]), 0);
 }
+
+// ── Character classes ───────────────────────────────────────────────────────
+
+/// Lua's `tonumber` asks `isalpha`; answered with zero, no character was a
+/// letter.
+#[test]
+fn the_character_classes_answer_in_the_c_locale() {
+    let mut emu = windows_emulator();
+    let yes = |emu: &mut Emulator, name: &str, c: u8| call(emu, name, &[c as u64]) != 0;
+
+    assert!(yes(&mut emu, "isalpha", b'x'));
+    assert!(!yes(&mut emu, "isalpha", b'7'));
+    assert!(yes(&mut emu, "isxdigit", b'F'));
+    assert!(!yes(&mut emu, "isxdigit", b'g'));
+    // Vertical tab is space in C and not in Rust's `is_ascii_whitespace`.
+    assert!(yes(&mut emu, "isspace", 0x0B));
+    assert!(yes(&mut emu, "ispunct", b'%'));
+    // EOF is in no class, and a byte above 0x7F is not a letter in "C".
+    assert_eq!(call(&mut emu, "isalpha", &[(-1i64) as u64]), 0);
+    assert!(!yes(&mut emu, "isalpha", 0xE9));
+
+    assert_eq!(call(&mut emu, "toupper", &[b'q' as u64]), b'Q' as u64);
+    assert_eq!(call(&mut emu, "tolower", &[b'7' as u64]), b'7' as u64);
+    assert_eq!(
+        call(&mut emu, "toupper", &[(-1i64) as u64]) as i64,
+        -1,
+        "toupper(EOF) is EOF"
+    );
+}

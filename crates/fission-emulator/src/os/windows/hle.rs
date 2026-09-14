@@ -330,6 +330,13 @@ impl OsEnvironment for WindowsEnv {
             }
             "strrchr" => handle_strrchr(emu)?,
             "strchr" => handle_strchr(emu)?,
+            // The C-locale character classes. Lua's `tonumber` asked `isalpha`
+            // and got zero -- "no letter here" -- for every character.
+            "isalpha" | "isdigit" | "isspace" | "isalnum" | "isxdigit" | "isupper" | "islower"
+            | "ispunct" | "iscntrl" | "isprint" | "isgraph" | "isblank" | "_isctype" => {
+                handle_ctype(emu, func_name)?
+            }
+            "toupper" | "tolower" | "_toupper" | "_tolower" => handle_case(emu, func_name)?,
             "strpbrk" => handle_strpbrk(emu)?,
             "strspn" => handle_strspn(emu, true)?,
             "strcspn" => handle_strspn(emu, false)?,
@@ -1920,4 +1927,81 @@ fn handle_strspn(emu: &mut Emulator, inside: bool) -> Result<()> {
         .position(|b| set.contains(b) != inside)
         .unwrap_or(text.len());
     emu.write_return_val(length as u64)
+}
+
+/// A character class in the C locale, which is the only one this process
+/// has: nothing here calls `setlocale`.
+///
+/// The argument is an `int` that is either `EOF` (-1) or an `unsigned char`
+/// value; anything outside that range is in no class. The answer is non-zero
+/// for "yes", and the value does not matter -- the UCRT returns the class
+/// bit, callers only test it.
+fn handle_ctype(emu: &mut Emulator, name: &str) -> Result<()> {
+    let value = emu.read_arg(0)? as i32;
+    let Ok(byte) = u8::try_from(value) else {
+        return emu.write_return_val(0);
+    };
+    let c = byte as char;
+    let yes = match name {
+        "isalpha" => c.is_ascii_alphabetic(),
+        "isdigit" => c.is_ascii_digit(),
+        // C's isspace includes vertical tab (0x0B); Rust's is_ascii_whitespace
+        // does not, so it is spelled out.
+        "isspace" => matches!(byte, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r'),
+        "isalnum" => c.is_ascii_alphanumeric(),
+        "isxdigit" => c.is_ascii_hexdigit(),
+        "isupper" => c.is_ascii_uppercase(),
+        "islower" => c.is_ascii_lowercase(),
+        "ispunct" => c.is_ascii_punctuation(),
+        "iscntrl" => c.is_ascii_control(),
+        "isprint" => (0x20..=0x7E).contains(&byte),
+        "isgraph" => c.is_ascii_graphic(),
+        "isblank" => matches!(byte, b' ' | b'\t'),
+        // `_isctype(c, mask)`: the UCRT's bit layout.
+        _ => {
+            let mask = emu.read_arg(1)? as u32;
+            let mut bits = 0u32;
+            if c.is_ascii_uppercase() {
+                bits |= 0x1;
+            }
+            if c.is_ascii_lowercase() {
+                bits |= 0x2;
+            }
+            if c.is_ascii_digit() {
+                bits |= 0x4;
+            }
+            if matches!(byte, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r') {
+                bits |= 0x8;
+            }
+            if c.is_ascii_punctuation() {
+                bits |= 0x10;
+            }
+            if c.is_ascii_control() {
+                bits |= 0x20;
+            }
+            if byte == b' ' {
+                bits |= 0x40;
+            }
+            if c.is_ascii_hexdigit() {
+                bits |= 0x80;
+            }
+            if c.is_ascii_alphabetic() {
+                bits |= 0x100;
+            }
+            bits & mask != 0
+        }
+    };
+    emu.write_return_val(u64::from(yes))
+}
+
+/// `toupper`/`tolower`: ASCII letters change, everything else -- `EOF`
+/// included -- comes back as it went in.
+fn handle_case(emu: &mut Emulator, name: &str) -> Result<()> {
+    let value = emu.read_arg(0)? as i32;
+    let converted = match u8::try_from(value) {
+        Ok(byte) if name.ends_with("upper") => byte.to_ascii_uppercase() as i32,
+        Ok(byte) => byte.to_ascii_lowercase() as i32,
+        Err(_) => value,
+    };
+    emu.write_return_val(converted as i64 as u64)
 }
