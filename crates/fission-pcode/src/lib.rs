@@ -15,6 +15,10 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
+// The one `unsafe` block this crate had was a raw-pointer reborrow the borrow
+// checker did not need, and it was the only thing its Miri job could check.
+// Forbidding it makes that guarantee a compile error instead of a nightly job.
+#![forbid(unsafe_code)]
 
 pub mod arch;
 pub mod cfg;

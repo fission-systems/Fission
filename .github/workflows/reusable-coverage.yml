@@ -69,11 +69,17 @@ jobs:
             crate_flags+=(-p "$crate")
           done
 
+          # One instrumented run, then one report per format. cargo-llvm-cov
+          # refuses `--html` and `--lcov` in the same invocation, and this
+          # step asked for both -- so the scheduled run failed before it
+          # measured anything, and the threshold check below never had a
+          # file to read.
           cargo llvm-cov \
             "${crate_flags[@]}" \
             --locked \
-            --html --output-dir coverage/html \
-            --lcov --output-path coverage/lcov.info
+            --no-report
+          cargo llvm-cov report --html --output-dir coverage/html
+          cargo llvm-cov report --lcov --output-path coverage/lcov.info
 
       - name: Check coverage threshold for fission-pcode
         shell: bash

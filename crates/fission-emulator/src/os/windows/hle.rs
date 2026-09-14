@@ -327,8 +327,17 @@ impl OsEnvironment for WindowsEnv {
             "memcmp" | "RtlCompareMemory" => handle_memcmp(emu)?,
             "lstrcatA" | "strcat" => handle_lstrcat_a(emu)?,
             "lstrlenA" | "strlen" => handle_lstrlen_a(emu)?,
-            "RtlMoveMemory" | "memmove" | "memcpy" => handle_rtl_move_memory(emu)?,
-            "RtlZeroMemory" | "memset" => handle_rtl_zero_memory(emu)?,
+            "RtlMoveMemory" => handle_rtl_move_memory(emu)?,
+            // `memcpy` and `memmove` return the destination, which
+            // `RtlMoveMemory` (void) does not; a caller chaining on the result
+            // got a null pointer.
+            "memmove" | "memcpy" => {
+                handle_rtl_move_memory(emu)?;
+                let dst = emu.read_arg(0)?;
+                emu.write_return_val(dst)?;
+            }
+            "RtlZeroMemory" => handle_rtl_zero_memory(emu)?,
+            "memset" => handle_memset(emu)?,
             "MultiByteToWideChar" => handle_multi_byte_to_wide_char(emu)?,
             "WideCharToMultiByte" => handle_wide_char_to_multi_byte(emu)?,
 
@@ -1691,4 +1700,23 @@ fn handle_wcscmp(emu: &mut Emulator, fold_case: bool) -> Result<()> {
         std::cmp::Ordering::Greater => 1,
     };
     emu.write_return_val(result as u64)
+}
+
+/// `memset(dst, c, n)` -- which is not `RtlZeroMemory(dst, len)`.
+///
+/// It shared that handler, so the fill byte was read as the *length* and the
+/// real length ignored: `memset(table, 0xFF, n)` wrote 255 zeros and returned
+/// null. duktape initialises an open-addressing hash table that way, marking
+/// every slot empty with -1, and then probed a table with no empty slot for
+/// sixty million instructions.
+fn handle_memset(emu: &mut Emulator) -> Result<()> {
+    let dst = emu.read_arg(0)?;
+    let fill = emu.read_arg(1)? as u8;
+    let len = emu.read_arg(2)? as usize;
+    if len > 0 && dst != 0 {
+        let bytes = vec![fill; len.min(0x100_0000)];
+        emu.state.write_space(emu.state.ram_space(), dst, &bytes)?;
+    }
+    emu.write_return_val(dst)?;
+    Ok(())
 }

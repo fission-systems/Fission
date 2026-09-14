@@ -180,11 +180,13 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn lower_block_stmts(&mut self, block_idx: usize) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
         let pcode_idx = PreviewBuilder::pcode_block_idx(self, block_idx);
-        // Index into blocks without holding a borrow across the mutable lower call.
-        let block_ptr = self.pcode.blocks.as_ptr();
-        // SAFETY: pcode is immutable for the lifetime of PreviewBuilder; we only
-        // reborrow a block by index for the duration of lower_block_stmts.
-        let block = unsafe { &*block_ptr.add(pcode_idx) };
+        // `pcode` is a shared `&'a PcodeFunction`, so copying the reference out
+        // borrows the function for `'a` rather than borrowing `self`, and the
+        // mutable lower call below is free to take `self`. This used to be a
+        // raw-pointer reborrow -- the only `unsafe` in the crate, and the one
+        // thing its Miri job existed to check.
+        let pcode = self.pcode;
+        let block = &pcode.blocks[pcode_idx];
         PreviewBuilder::lower_block_stmts(self, block)
     }
     fn lower_block_terminator(

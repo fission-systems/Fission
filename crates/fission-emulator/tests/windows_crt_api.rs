@@ -662,3 +662,39 @@ fn printf_reads_ls_as_a_wide_string() {
         stream_text(&emu, 2)
     );
 }
+
+// ── memset and memcpy ───────────────────────────────────────────────────────
+
+/// `memset(dst, c, n)` fills `n` bytes with `c`. It used to share
+/// `RtlZeroMemory(dst, len)`'s handler, which read the fill byte as the
+/// length: `memset(t, 0xFF, 8)` wrote 255 zeros. duktape marks every slot of
+/// a hash table empty with exactly that call, then probed it forever.
+#[test]
+fn memset_fills_with_the_byte_it_was_given_for_the_length_it_was_given() {
+    let mut emu = windows_emulator();
+    let at = SCRATCH + 0x1000;
+    let space = emu.state.ram_space();
+    emu.state
+        .write_space(space, at, &[0x11u8; 16])
+        .expect("poison");
+
+    let returned = call(&mut emu, "memset", &[at, 0xFF, 8]);
+
+    assert_eq!(returned, at, "memset returns its destination");
+    assert_eq!(
+        read_back(&mut emu, at, 16),
+        [[0xFFu8; 8], [0x11u8; 8]].concat(),
+        "eight 0xFF bytes and nothing past them"
+    );
+}
+
+#[test]
+fn memcpy_and_memmove_return_the_destination() {
+    let mut emu = windows_emulator();
+    let src = plant(&mut emu, SCRATCH, "abcdef");
+    let dst = SCRATCH + 0x1000;
+    for name in ["memcpy", "memmove"] {
+        assert_eq!(call(&mut emu, name, &[dst, src, 6]), dst, "{name}");
+        assert_eq!(&read_back(&mut emu, dst, 6), b"abcdef", "{name}");
+    }
+}

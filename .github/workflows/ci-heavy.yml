@@ -93,12 +93,16 @@ jobs:
       # dioxus needs GUI sys libs; static is covered by its own job.
       exclude_crates: "fission-static"
 
-  miri-check:
-    name: 🧠 Miri UB Check (extended)
-    if: github.event_name != 'push'
-    uses: ./.github/workflows/reusable-miri.yml
-    with:
-      crates: "fission-pcode,fission-loader"
+  # No Miri job. It ran on fission-pcode and fission-loader, and it never
+  # checked anything: under isolation it aborted each crate at its first file
+  # `open`, and without isolation it stops at `insta` spawning a process and
+  # at memmap2's file-backed mapping. Neither is undefined behaviour, and
+  # neither crate had unsafe Miri could reach -- pcode's one block was a
+  # raw-pointer reborrow the borrow checker did not need (now removed, and
+  # the crate is `forbid(unsafe_code)`), loader's is the mmap itself. The code
+  # that is actually unsafe here is the emulator's JIT and the dynamic crate's
+  # OS FFI, which Miri cannot run. `reusable-miri.yml` stays, fixed, for a
+  # crate that grows unsafe it can check.
 
   coverage:
     name: 📈 Code Coverage (extended)
@@ -118,7 +122,6 @@ jobs:
       - nir-check
       - msrv-check
       - test-linux-full
-      - miri-check
       - coverage
     runs-on: ubuntu-latest
     if: always()
@@ -159,7 +162,6 @@ jobs:
           require_success "MSRV" "${{ needs.msrv-check.result }}"
 
           require_success_or_skipped "Full Linux tests (extended)" "${{ needs.test-linux-full.result }}"
-          require_success_or_skipped "Miri (extended)" "${{ needs.miri-check.result }}"
 
           # Coverage is warn-only even when run
           if [ "${{ needs.coverage.result }}" = "failure" ]; then
@@ -174,4 +176,4 @@ jobs:
             exit 1
           fi
           echo "✅ Heavy validation checks passed for this event!"
-          echo "ℹ️  Main push L1 = release-critical jobs. Full/Miri/coverage run on nightly or dispatch."
+          echo "ℹ️  Main push L1 = release-critical jobs. Full tests and coverage run on nightly or dispatch."

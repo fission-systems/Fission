@@ -17,8 +17,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Strict provenance: catch ptr-int casts that may not be portable
-  MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
+  # Strict provenance: catch ptr-int casts that may not be portable.
+  #
+  # Isolation is off because the unit tests read their own fixtures -- a
+  # snapshot file in fission-pcode, the working directory in fission-loader --
+  # and under isolation Miri aborts the whole crate at the first `open`. That
+  # is an unsupported operation, not undefined behaviour, and it stopped each
+  # crate before a single unsafe block was checked.
+  MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation"
 
 jobs:
   miri:
@@ -68,7 +74,10 @@ jobs:
             exit_code=$?
             echo "::endgroup::"
             if [ $exit_code -ne 0 ]; then
-              echo "::error::Miri detected UB in crate: $crate"
+              # Any failure lands here: undefined behaviour, an unsupported
+              # operation, or an ordinary test failure. Say which it might be
+              # rather than calling all of them UB.
+              echo "::error::Miri run failed in crate: $crate (undefined behaviour, an unsupported operation, or a failing test -- see the group above)"
               FAILED=1
             fi
           done
