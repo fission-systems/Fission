@@ -83,6 +83,8 @@ pub struct OneShotArgs {
     pub xref_no_disassembly: bool,
     /// Optional function VA for JSON slice (`xrefs --function`).
     pub xref_function: Option<u64>,
+    /// `xrefs --to`: report only references whose target is this address.
+    pub xref_to: Option<u64>,
     /// Embed xref summary into `info --json` (`info --xrefs`).
     pub info_xrefs: bool,
     /// Embed stage metric/evidence bundle in JSON (`decomp`); requires `--json` or `--benchmark`.
@@ -185,6 +187,7 @@ impl Default for OneShotArgs {
             xrefs_cmd: false,
             xref_no_disassembly: false,
             xref_function: None,
+            xref_to: None,
             info_xrefs: false,
             debug_decomp: false,
             debug_decomp_bundle: None,

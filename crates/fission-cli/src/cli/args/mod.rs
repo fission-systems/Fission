@@ -836,6 +836,14 @@ struct XrefsArgs {
     #[arg(long, value_parser = parse_hex_address)]
     function: Option<u64>,
 
+    /// Only rows that point at this address: "who references X"
+    ///
+    /// The question an agent asks first -- which code uses this string, this
+    /// global, this function -- and the one the index could answer but no
+    /// command would.
+    #[arg(long = "to", value_parser = parse_hex_address)]
+    to: Option<u64>,
+
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
@@ -1264,6 +1272,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.xrefs_cmd = true;
                     args.xref_no_disassembly = xrefs.no_disassembly;
                     args.xref_function = xrefs.function;
+                    args.xref_to = xrefs.to;
                     args.function_discovery_profile = xrefs.function_discovery_profile;
                     args.json = xrefs.common.json;
                     args.verbose = xrefs.common.verbose;

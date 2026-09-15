@@ -102,6 +102,19 @@ impl XrefDatabase {
     ) -> Self {
         let mut db = Self::new();
 
+        // Every address the image maps, so a data reference can be judged by
+        // whether it lands *in the binary* rather than by whether it lands in
+        // the code section being decoded.
+        let mapped: Vec<(u64, u64)> = binary
+            .sections
+            .iter()
+            .filter_map(|section| {
+                let size = section.virtual_size.max(section.file_size);
+                let end = section.virtual_address.checked_add(size)?;
+                (size > 0).then_some((section.virtual_address, end))
+            })
+            .collect();
+
         for section in binary.executable_sections() {
             let start = section.file_offset as usize;
             let end = start.saturating_add(section.file_size as usize);
@@ -109,7 +122,7 @@ impl XrefDatabase {
                 continue;
             };
             let base_addr = section.virtual_address;
-            db.analyze_code(frontend, code, base_addr);
+            db.analyze_code(frontend, code, base_addr, &mapped);
         }
 
         // Sweep data sections for hardcoded pointers to enrich xref coverage
@@ -146,9 +159,13 @@ impl XrefDatabase {
         }
     }
 
-    fn analyze_code(&mut self, frontend: &RuntimeSleighFrontend, code: &[u8], base_addr: u64) {
-        let addr_upper_bound = base_addr + code.len() as u64 * 2;
-
+    fn analyze_code(
+        &mut self,
+        frontend: &RuntimeSleighFrontend,
+        code: &[u8],
+        base_addr: u64,
+        mapped: &[(u64, u64)],
+    ) {
         let Ok(instructions) = frontend.decode_window(code, base_addr, usize::MAX) else {
             return;
         };
@@ -158,8 +175,19 @@ impl XrefDatabase {
 
             for reference in &instr.references {
                 let xref_type = xref_type_from_sleigh_kind(reference.kind);
+                // A data reference is kept when it points somewhere the image
+                // maps. This used to require the target to land inside the
+                // *code section currently being decoded* (`base_addr` up to
+                // `base_addr + code.len() * 2`), so every reference into
+                // `.rodata` or `.data` was dropped: `mov ESI, 0x40201f`
+                // loading a string never reached the index, `strings --xrefs`
+                // printed an empty "Referenced by" column for strings that are
+                // plainly used, and "who references this address" could only
+                // ever answer for targets inside the same section.
                 if matches!(xref_type, XrefType::Data)
-                    && (reference.target <= base_addr || reference.target >= addr_upper_bound)
+                    && !mapped
+                        .iter()
+                        .any(|(start, end)| (*start..*end).contains(&reference.target))
                 {
                     continue;
                 }
@@ -272,6 +300,69 @@ mod tests {
         assert_eq!(db.get_refs_to(0x2000).len(), 2);
         assert_eq!(db.get_refs_from(0x1000).len(), 1);
         assert_eq!(db.total_refs(), 2);
+    }
+
+    /// A reference into a data section is kept.
+    ///
+    /// The filter used to require a data target to land inside the code
+    /// section being decoded (`base_addr .. base_addr + code.len() * 2`), so
+    /// every pointer into `.rodata` was dropped before it reached the index:
+    /// `strings --xrefs` showed an empty "Referenced by" column for strings
+    /// that are plainly loaded, and "who references this address" could not
+    /// answer for a string or a global at all. Found in an agent RE pilot,
+    /// where the empty column reads as "nothing uses this string".
+    #[test]
+    fn a_reference_into_a_data_section_is_kept() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+        // .text at 0x1000: `mov ESI, 0x2000` then `ret`. 0x2000 is in
+        // .rodata -- outside the code section, which is the whole point.
+        let mut image = vec![0u8; 0x3000];
+        image[0x1000..0x1006].copy_from_slice(&[0xbe, 0x00, 0x20, 0x00, 0x00, 0xc3]);
+        image[0x2000..0x2006].copy_from_slice(b"hello\0");
+
+        let binary = LoadedBinaryBuilder::new("data_xref.bin".to_string(), DataBuffer::Heap(image))
+            .format("RAW")
+            .entry_point(0x1000)
+            .image_base(0)
+            .is_64bit(true)
+            // .text is deliberately small: the filter this pins used to accept
+            // anything below `base + code.len() * 2`, so a large code section
+            // would cover .rodata by accident and the test would pass either
+            // way. 0x100 bytes at 0x1000 reach only 0x1200.
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x100,
+                file_offset: 0x1000,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".rodata".to_string(),
+                virtual_address: 0x2000,
+                virtual_size: 0x100,
+                file_offset: 0x2000,
+                file_size: 0x100,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("build");
+
+        // A synthetic image has no load spec to resolve a frontend from, so
+        // the frontend is handed in directly.
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
+        let db = XrefDatabase::build_with_frontend(&binary, &frontend);
+
+        assert!(
+            !db.get_refs_to(0x2000).is_empty(),
+            "the instruction at 0x1000 loads 0x2000; that reference must reach the index"
+        );
     }
 
     #[test]

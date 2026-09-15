@@ -15,6 +15,12 @@ pub(super) fn run_xrefs(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> 
 
     let mut stdout = std::io::stdout().lock();
 
+    // "Who references this address?" -- the first question anyone asks of an
+    // index, and the one that used to need `--json` piped through a filter.
+    if let Some(target) = cli.xref_to {
+        return report_references_to(&mut stdout, binary, &idx, target, cli.json);
+    }
+
     if cli.json {
         let mut payload = json!({
             "summary": summary,
@@ -170,4 +176,79 @@ fn describe_target(binary: &LoadedBinary, record: &fission_static::analysis::Xre
         return format!("0x{address:x}  \"{}\"", text.escape_default());
     }
     format!("0x{address:x}")
+}
+
+/// Every reference that points at `target`.
+///
+/// The index already holds them; nothing could ask. An agent checking what
+/// uses a string, a global or a function had to dump the whole index as JSON
+/// and join records by hand.
+fn report_references_to(
+    w: &mut std::io::StdoutLock<'_>,
+    binary: &LoadedBinary,
+    idx: &fission_static::analysis::XrefIndex,
+    target: u64,
+    json: bool,
+) -> Result<()> {
+    let hits: Vec<_> = idx
+        .refs
+        .iter()
+        .filter(|record| record.target.address == Some(target))
+        .collect();
+
+    if json {
+        let payload = json!({
+            "target": format!("0x{target:x}"),
+            "count": hits.len(),
+            "refs": hits,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload).context("serialize xref --to JSON")?
+        );
+        return Ok(());
+    }
+
+    if hits.is_empty() {
+        writeln!(
+            w,
+            "no reference points at 0x{target:x} (try --function-discovery-profile aggressive, \
+             or check the address is the start of the referenced object)"
+        )
+        .context("write empty xref --to")?;
+        return Ok(());
+    }
+
+    writeln!(w, "{} reference(s) to 0x{target:x}:", hits.len())
+        .context("write xref --to header")?;
+    writeln!(
+        w,
+        "{:>18}  {:<18}  {:<24}  {}",
+        "From", "Kind", "In function", "Evidence"
+    )
+    .context("write xref --to columns")?;
+    writeln!(w, "{:─<96}", "").context("write xref --to rule")?;
+
+    for record in hits {
+        let from = record.source.address;
+        let in_function = match binary.function_at(from) {
+            Some(function) if !function.name.is_empty() => function.name.clone(),
+            Some(function) => format!("0x{:x}", function.address),
+            None => "-".to_string(),
+        };
+        let evidence = record
+            .evidence
+            .note
+            .clone()
+            .unwrap_or_else(|| format!("{:?}", record.evidence.layer));
+        writeln!(
+            w,
+            "  0x{from:012x}  {:<18}  {:<24}  {}",
+            format!("{:?}", record.kind),
+            in_function,
+            evidence
+        )
+        .context("write xref --to row")?;
+    }
+    Ok(())
 }

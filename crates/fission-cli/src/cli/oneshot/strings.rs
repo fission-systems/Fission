@@ -123,11 +123,19 @@ pub(super) fn print_strings(
             min_len
         )?;
     }
-    writeln!(
-        stdout,
-        "{:>18}  {:<10}  {:<28}  String",
-        "Address", "Section", "Referenced by"
-    )?;
+    // The "Referenced by" column is only filled when `--xrefs` asked for the
+    // disassembly pass. Printing an empty column without it reads as "nothing
+    // references this string", which is a different claim from "not looked
+    // for" -- and it cost an agent a wrong conclusion in the crackme pilot.
+    if with_xrefs {
+        writeln!(
+            stdout,
+            "{:>18}  {:<10}  {:<28}  String",
+            "Address", "Section", "Referenced by"
+        )?;
+    } else {
+        writeln!(stdout, "{:>18}  {:<10}  String", "Address", "Section")?;
+    }
     writeln!(stdout, "{:─<100}", "")?;
     for found in &strings {
         let address = match found.address {
@@ -158,9 +166,19 @@ pub(super) fn print_strings(
         } else {
             found.text.clone()
         };
+        if with_xrefs {
+            writeln!(
+                stdout,
+                "{address:>18}  {section:<10}  {referrers:<28}  {text}"
+            )?;
+        } else {
+            writeln!(stdout, "{address:>18}  {section:<10}  {text}")?;
+        }
+    }
+    if !with_xrefs {
         writeln!(
             stdout,
-            "{address:>18}  {section:<10}  {referrers:<28}  {text}"
+            "hint: --xrefs also reports which code references each string"
         )?;
     }
     Ok(())
