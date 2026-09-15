@@ -1,5 +1,6 @@
 mod alias;
 mod binding;
+mod phi_latch;
 mod provenance;
 mod seed;
 mod shape;

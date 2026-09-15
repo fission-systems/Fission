@@ -1408,3 +1408,184 @@ fn loop_pointer_scan_load_and_add_share_cursor_binding() {
          load={load_ptr:?} body={loop_body:?}"
     );
 }
+
+/// A value reloaded at the latch and read, through a narrower lane, at the top
+/// of the next iteration (gcc -O1 `check`: `mov eax,'p'` ... `movsx eax,al;
+/// sub eax,1; cmp` ... `movzx eax, byte [rcx+key]; test al,al; jnz head`).
+/// The head overwrites EAX before the latch reloads it, so this is not an
+/// update and the update proof rightly rejects it; the latch reload still has
+/// to assign the variable the head reads, or every character is compared
+/// against the first one.
+#[test]
+fn loop_head_reads_the_value_reloaded_at_the_latch() {
+    fn unique_sized(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+    let eax = reg(0x0, 4);
+    let al = reg(0x0, 1);
+    let rax = reg(0x0, 8);
+    let rcx = reg(0x8, 8);
+    let edx = reg(0x10, 4);
+    let dl = reg(0x10, 1);
+    let rdi = reg(0x38, 8);
+    let zf = reg(0x206, 1);
+    let blocks_spec = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rcx.clone()), vec![constant(0)]),
+                op(
+                    1,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![Varnode::constant(0x70, 4)],
+                ),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    3,
+                    PcodeOpcode::IntAdd,
+                    Some(unique_sized(0x100, 8)),
+                    vec![rdi.clone(), rcx.clone()],
+                ),
+                op(
+                    4,
+                    PcodeOpcode::Load,
+                    Some(unique_sized(0x110, 1)),
+                    vec![constant(3), unique_sized(0x100, 8)],
+                ),
+                op(
+                    5,
+                    PcodeOpcode::IntZExt,
+                    Some(edx.clone()),
+                    vec![unique_sized(0x110, 1)],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![dl.clone(), Varnode::constant(0, 1)],
+                ),
+                op(7, PcodeOpcode::CBranch, None, vec![constant(0x1040), zf.clone()]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(8, PcodeOpcode::IntSExt, Some(edx.clone()), vec![dl.clone()]),
+                op(9, PcodeOpcode::IntSExt, Some(eax.clone()), vec![al.clone()]),
+                op(
+                    10,
+                    PcodeOpcode::IntSub,
+                    Some(eax.clone()),
+                    vec![eax.clone(), Varnode::constant(1, 4)],
+                ),
+                op(
+                    11,
+                    PcodeOpcode::IntNotEqual,
+                    Some(zf.clone()),
+                    vec![edx.clone(), eax.clone()],
+                ),
+                op(12, PcodeOpcode::CBranch, None, vec![constant(0x1050), zf.clone()]),
+            ],
+        ),
+        block_at(
+            0x1030,
+            3,
+            vec![
+                op(
+                    13,
+                    PcodeOpcode::IntAdd,
+                    Some(rcx.clone()),
+                    vec![rcx.clone(), constant(1)],
+                ),
+                op(
+                    14,
+                    PcodeOpcode::IntAdd,
+                    Some(unique_sized(0x120, 8)),
+                    vec![rcx.clone(), constant(0x1400_1800)],
+                ),
+                op(
+                    15,
+                    PcodeOpcode::Load,
+                    Some(unique_sized(0x130, 1)),
+                    vec![constant(3), unique_sized(0x120, 8)],
+                ),
+                op(
+                    16,
+                    PcodeOpcode::IntZExt,
+                    Some(eax.clone()),
+                    vec![unique_sized(0x130, 1)],
+                ),
+                op(17, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax.clone()]),
+                op(
+                    18,
+                    PcodeOpcode::IntNotEqual,
+                    Some(zf.clone()),
+                    vec![al.clone(), Varnode::constant(0, 1)],
+                ),
+                op(19, PcodeOpcode::CBranch, None, vec![constant(0x1010), zf.clone()]),
+            ],
+        ),
+        block_at(
+            0x1040,
+            4,
+            vec![
+                op(20, PcodeOpcode::Copy, Some(eax.clone()), vec![Varnode::constant(1, 4)]),
+                op(21, PcodeOpcode::Return, None, vec![eax.clone()]),
+            ],
+        ),
+        block_at(
+            0x1050,
+            5,
+            vec![
+                op(22, PcodeOpcode::Copy, Some(eax.clone()), vec![Varnode::constant(0, 4)]),
+                op(23, PcodeOpcode::Return, None, vec![eax.clone()]),
+            ],
+        ),
+    ];
+    let mut blocks = blocks_spec;
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![4, 2];
+    blocks[2].successors = vec![5, 3];
+    blocks[3].successors = vec![1, 4];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+
+    let code = crate::midend::render_mlil_preview(&pcode, "check", 0x1000, &options)
+        .expect("render latch reload loop");
+
+    let lines: Vec<&str> = code.lines().map(str::trim).collect();
+    let seed = lines
+        .iter()
+        .find_map(|line| line.strip_suffix(" = 112;"))
+        .unwrap_or_else(|| panic!("the preheader seed should be a named variable:\n{code}"));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains(seed) && line.contains("- 1")),
+        "the head must compare against the seeded variable:\n{code}"
+    );
+    let assignments = lines
+        .iter()
+        .filter(|line| line.starts_with(&format!("{seed} = ")))
+        .count();
+    assert!(
+        assignments >= 2,
+        "the latch reload must assign `{seed}`, the variable the head reads, \
+         not a name nothing reads:\n{code}"
+    );
+}

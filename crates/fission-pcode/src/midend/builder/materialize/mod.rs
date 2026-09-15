@@ -1210,7 +1210,8 @@ impl<'a> PreviewBuilder<'a> {
             .loop_carried_output_binding_name(block, op_idx, op, output)
             .or_else(|| {
                 self.loop_carried_passthrough_output_binding_name(block, op_idx, op, output)
-            });
+            })
+            .or_else(|| self.loop_head_phi_latch_binding_name(block, op_idx, output));
         if loop_carried_lhs_name.is_none()
             && self.output_used_only_by_passthrough_chain(block, op_idx, output)
         {

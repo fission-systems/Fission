@@ -2794,6 +2794,60 @@ mod tests {
     }
 
     #[test]
+    fn loop_header_subregister_read_sees_the_latch_definition() {
+        // Mirrors `check()` in the minimal loop case: the entry and the loop
+        // latch both write the wide register, and the loop header reads only
+        // its low byte.
+        let pcode = function(vec![
+            vec![copy(0x1000, register_sized(0, 4), Varnode::constant(0x70, 4))],
+            vec![copy(0x1010, unique_sized(0, 1), register_sized(0, 1))],
+            vec![copy(0x1020, register_sized(0, 4), Varnode::constant(0x41, 4))],
+            vec![],
+        ]);
+        let successors = vec![vec![1], vec![2, 3], vec![1], vec![]];
+        let predecessors = vec![vec![], vec![0, 2], vec![1], vec![1]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let low = SsaStorageKey {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0,
+            size: 1,
+        };
+        let phi = ssa.phis[&1]
+            .iter()
+            .find(|phi| phi.storage == low)
+            .expect("the low byte needs a header phi");
+        assert_eq!(
+            phi.operands
+                .iter()
+                .map(|operand| operand.predecessor)
+                .collect::<Vec<_>>(),
+            vec![0, 2],
+            "the header phi must take both the entry and the latch value"
+        );
+        let entry_definition = &ssa.operation_outputs[&SsaOpSite { block: 0, op: 0 }];
+        let latch_definition = &ssa.operation_outputs[&SsaOpSite { block: 2, op: 0 }];
+        assert_ne!(
+            phi.operands[0].value, phi.operands[1].value,
+            "collapsing both arms onto one value is the defect"
+        );
+        assert_eq!(phi.operands[0].value, entry_definition[0].value);
+        assert_eq!(phi.operands[1].value, latch_definition[0].value);
+        assert_eq!(
+            ssa.operation_inputs[&SsaUseSite {
+                block: 1,
+                op: 0,
+                input: 0,
+            }][0]
+                .value,
+            phi.output,
+            "the header read must resolve to the phi, not to the entry value"
+        );
+    }
+
+    #[test]
     fn same_block_uses_follow_each_redefinition() {
         let pcode = function(vec![vec![
             copy(0x1000, register(0), Varnode::constant(1, 4)),
