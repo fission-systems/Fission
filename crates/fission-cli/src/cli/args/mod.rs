@@ -416,6 +416,18 @@ pub struct SandboxArgs {
     /// HLE/syscall defaults to unlimited unless --max-hle-misses / --max-unknown-syscalls set)
     #[arg(long)]
     pub fail_on_budget: bool,
+
+    /// argv[1..] for the guest program (argv[0] is the binary's own path)
+    ///
+    /// Without this the guest always sees `argc=1`, so any program that reads
+    /// its own arguments -- `if (argc != 2) return 2;`, a crackme's password
+    /// taken as `argv[1]` -- takes the same "wrong invocation" branch every
+    /// run, regardless of what's actually being tested. Everything after `--`
+    /// (or after the binary, if unambiguous) is passed through verbatim,
+    /// including values that look like flags: `fission_cli sandbox ./a.out --
+    /// -x password1` gives the guest `argv = ["a.out", "-x", "password1"]`.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────
@@ -1399,6 +1411,43 @@ mod tests {
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
         }
+    }
+
+    #[test]
+    fn sandbox_trailing_args_reach_the_guest() {
+        // Without this, `sandbox`'s guest process always saw `argc == 1`
+        // (only its own path) regardless of what the user typed, so any
+        // program that branches on its own arguments -- `if (argc != 2)
+        // return 2;`, a crackme reading `argv[1]` as the candidate password
+        // -- took the same "wrong invocation" path on every single run.
+        let ParsedInvocation::Sandbox(args) =
+            parse_oneshot_args_from(["fission_cli", "sandbox", "app.exe", "--", "pass1"])
+        else {
+            panic!("expected a sandbox invocation");
+        };
+        assert_eq!(args.args, vec!["pass1".to_string()]);
+
+        // A value that looks like a flag must still reach argv verbatim
+        // (`allow_hyphen_values`) rather than clap trying to parse it as one.
+        let ParsedInvocation::Sandbox(args) = parse_oneshot_args_from([
+            "fission_cli",
+            "sandbox",
+            "app.exe",
+            "--",
+            "-x",
+            "pass1",
+        ]) else {
+            panic!("expected a sandbox invocation");
+        };
+        assert_eq!(args.args, vec!["-x".to_string(), "pass1".to_string()]);
+
+        // No trailing args at all must still parse (the common, argv-less case).
+        let ParsedInvocation::Sandbox(args) =
+            parse_oneshot_args_from(["fission_cli", "sandbox", "app.exe"])
+        else {
+            panic!("expected a sandbox invocation");
+        };
+        assert!(args.args.is_empty());
     }
 
     #[test]

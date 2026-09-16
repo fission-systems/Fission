@@ -479,8 +479,23 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
             )?);
         }
         "ELF" | "ELF64" => {
-            linux_image = Some(fission_emulator::os::linux::loader::load_elf(
-                &mut state, &binary,
+            // argv[0] mirrors what a real `execve` gives the guest when
+            // invoked as `./binary`: the path as named on the command line,
+            // not the loader's placeholder "fission-guest". Without a real
+            // argv[0] plus the user's own trailing args here, `if (argc !=
+            // 2) return 2;` (or any argument-reading crackme) always takes
+            // the same "wrong invocation" branch, so dynamic confirmation
+            // can never actually run the path it exists to check.
+            let mut argv = vec![binary_path.display().to_string()];
+            argv.extend(args.args.iter().cloned());
+            let process_args = fission_emulator::os::linux::ProcessArgs {
+                argv,
+                ..fission_emulator::os::linux::ProcessArgs::default()
+            };
+            linux_image = Some(fission_emulator::os::linux::loader::load_elf_with_args(
+                &mut state,
+                &binary,
+                &process_args,
             )?);
         }
         fmt => anyhow::bail!("Unsupported binary format for sandbox loader: {}", fmt),
@@ -642,6 +657,10 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     } else {
         report
     };
+    if let Some(code) = emu.exit_code {
+        tracing::info!("Guest exited with code {code}");
+    }
+    let report = report.with_exit_code(emu.exit_code);
 
     if let Some(path) = args.metrics_out {
         let json = report

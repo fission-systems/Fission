@@ -1934,7 +1934,29 @@ impl Emulator {
             }
 
             if !self.run_instruction()? {
-                break RunOutcome::LoopExit;
+                // `run_instruction`'s JIT path returns `Ok(!self.halt_requested)`
+                // (see its doc), so `Ok(false)` means EITHER a genuine
+                // execution failure OR a clean halt set *during* this call --
+                // a `syscall(exit_group)` inline in the compiled block reaches
+                // `halt_requested` through `jit_call_other`/`jit_hle_trap`,
+                // which this same iteration never otherwise checks before
+                // breaking. Misreading that as `LoopExit` (the pre-existing
+                // behaviour) mislabels every statically linked binary's
+                // ordinary exit as a failure: `smoke_ci_fixture_hello_sys`'s
+                // own `exit=Some("loop_exit")` was this, on a binary that
+                // halted perfectly cleanly. `exit_code` (set alongside
+                // `halt_requested` on the same `HleResult::Halt` arm) is the
+                // signal that this was a real process exit rather than some
+                // other halt_requested trigger with no captured code.
+                break if self.halt_requested {
+                    if self.exit_code.is_some() {
+                        RunOutcome::ProcessExited
+                    } else {
+                        RunOutcome::Halted
+                    }
+                } else {
+                    RunOutcome::LoopExit
+                };
             }
 
             // ── Pending Linux signals (between TBs) ───────────────────────────

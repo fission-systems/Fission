@@ -386,6 +386,15 @@ pub struct SandboxMetricsReport {
     /// byte-identical to what it was before observation existed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behavior: Option<BehaviorReport>,
+    /// The guest's own exit status (`exit`/`exit_group`'s argument, or
+    /// `main`'s return value via the `__libc_start_main` stub), when the run
+    /// ended that way. `Emulator::run()` has captured this correctly since
+    /// the debug-session watchpoint work, but nothing downstream ever read
+    /// it: a crackme's whole verdict is normally its exit code, and the
+    /// report -- and the CLI process's own exit status -- said nothing about
+    /// it regardless of `halt_requested` being `true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<u32>,
 }
 
 impl SandboxMetricsReport {
@@ -450,7 +459,16 @@ impl SandboxMetricsReport {
             metrics,
             budget,
             behavior: None,
+            exit_code: None,
         }
+    }
+
+    /// Records the guest's exit status. See the field doc comment on
+    /// `exit_code` for why this needs a caller at all: `Emulator` already
+    /// knows it, but nothing was asking.
+    pub fn with_exit_code(mut self, exit_code: Option<u32>) -> Self {
+        self.exit_code = exit_code;
+        self
     }
 
     /// Attach what the observers saw. Built from the observers rather than

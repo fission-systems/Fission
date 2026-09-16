@@ -75,6 +75,25 @@ fn run_binary(path: &Path, expect: SmokeExpect) -> Result<Emulator> {
         "expected exit/exit_group, got {:?}",
         emu.metrics.syscalls
     );
+    // A raw `syscall(exit_group)` inline in a JIT-compiled block used to set
+    // `halt_requested` (via `jit_call_other`) but never `exit_code`, and the
+    // outer run loop misclassified the resulting `run_instruction() ==
+    // Ok(false)` as `RunOutcome::LoopExit` rather than a clean halt -- this
+    // exact fixture's own `exit_reason` used to read "loop_exit" despite a
+    // perfectly ordinary exit(0). Both are asserted here, not just
+    // `halt_requested`, because `halt_requested` alone did not catch it.
+    assert_eq!(
+        emu.metrics.exit_reason.as_deref(),
+        Some("halt"),
+        "clean process exit misclassified, metrics={}",
+        emu.metrics.summary_line()
+    );
+    assert_eq!(
+        emu.exit_code,
+        Some(0),
+        "guest exit code not captured, metrics={}",
+        emu.metrics.summary_line()
+    );
     eprintln!(
         "smoke ok ({}): {}",
         path.display(),

@@ -852,7 +852,21 @@ pub extern "C" fn jit_call_other(
     };
 
     match result {
-        HleResult::Halt(_) => {
+        HleResult::Halt(code) => {
+            // The interpreter's own HLE-trap branch in `run_inner` (used for
+            // a *magic-trampoline* Halt, e.g. `libc::Exit`/`_exit`) has always
+            // recorded `emu.exit_code` here. This callback is the OTHER path
+            // to a `HleResult::Halt`: a raw `syscall` instruction executed
+            // *inside a JIT-compiled block* (`is_syscall` above), which is
+            // how every statically-linked musl/glibc binary this session has
+            // tested actually exits -- there is no GOT/PLT trampoline to
+            // patch in a static binary, so `exit`/`exit_group` is an inline
+            // `syscall` in guest code, not a magic-address call the
+            // interpreter's own branch ever sees. This arm discarded `code`
+            // outright, so a clean guest exit never set `emu.exit_code` at
+            // all: "the program exited" could never be followed by "with
+            // what" for the dominant real-world exit path.
+            emu.exit_code = Some(code);
             emu.halt_requested = true;
             1
         }
@@ -892,7 +906,11 @@ pub extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> u64 {
     };
 
     match result {
-        HleResult::Halt(_) => {
+        HleResult::Halt(code) => {
+            // Same gap as `jit_call_other`'s `HleResult::Halt` arm: a
+            // magic-trampoline call (e.g. an imported `exit`) reached from
+            // *inside* a compiled block used to drop the exit code.
+            emu.exit_code = Some(code);
             emu.halt_requested = true;
             1
         }
