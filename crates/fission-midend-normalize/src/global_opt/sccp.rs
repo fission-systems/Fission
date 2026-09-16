@@ -220,14 +220,23 @@ fn loop_variant_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
 fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
     let mut changed = false;
     match expr {
-        PreHirExpr::Var(name)
-        | PreHirExpr::AddressOfGlobal(name)
-        | PreHirExpr::AddressOfLocal(name) => {
+        // `env` maps a variable NAME to the value currently held IN it
+        // (the only insertion site is `Assign{lhs: Var(name), ..}` below).
+        // `AddressOfLocal`/`AddressOfGlobal` name the same storage but ask
+        // for its ADDRESS, an unrelated quantity -- substituting them here
+        // turned `getline(&buf, &n, f)` into `getline(0, 0, f)` once `buf`'s
+        // initializer (`buf = NULL;`) put "buf -> 0" in the env, because nothing
+        // told this pass that passing `&buf` to a call also reads `buf`'s
+        // address, not its value. See `kill_locals_with_address_taken_in_calls`
+        // for the matching write-side half: a call receiving a local's address
+        // may write through it, so the local's value goes unknown too.
+        PreHirExpr::Var(name) => {
             if let Some((v, ty)) = env.get(name) {
                 *expr = PreHirExpr::Const(*v, ty.clone());
                 changed = true;
             }
         }
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {}
         PreHirExpr::Unary { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
         PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= sccp_subst_expr(lhs, env);
@@ -260,6 +269,97 @@ fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
         PreHirExpr::Const(_, _) => {}
     }
     changed
+}
+
+/// Drop from `env` any local whose address is passed to a call anywhere in
+/// `expr`: the callee may write through that pointer (`getline(&buf, &n,
+/// f)`, `scanf("%d", &x)`, `fstat(fd, &st)`), so the local's last-known value
+/// no longer holds past the call. This pass has no per-callee effect summary
+/// to consult, so it kills unconditionally -- always sound (declining to
+/// treat something as constant is never wrong), and cheap since a written
+/// local was going to lose its constant status at the next real write anyway.
+///
+/// Must run on `expr` *after* `sccp_subst_expr`/`fold_expr_hir`: an
+/// `AddressOfLocal` cannot itself have been folded into a `Const` (that is
+/// exactly what `sccp_subst_expr` now refuses to do), so this always finds
+/// the real argument shape, not a folded stand-in.
+fn kill_locals_with_address_taken_in_calls(expr: &PreHirExpr, env: &mut ConstEnv) {
+    if let PreHirExpr::Call { args, .. } = expr {
+        for arg in args {
+            collect_address_taken_locals(arg, env);
+        }
+    }
+    match expr {
+        PreHirExpr::Call { args, .. } => {
+            for a in args {
+                kill_locals_with_address_taken_in_calls(a, env);
+            }
+        }
+        PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
+            kill_locals_with_address_taken_in_calls(inner, env);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            kill_locals_with_address_taken_in_calls(lhs, env);
+            kill_locals_with_address_taken_in_calls(rhs, env);
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            kill_locals_with_address_taken_in_calls(base, env);
+            kill_locals_with_address_taken_in_calls(index, env);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            kill_locals_with_address_taken_in_calls(cond, env);
+            kill_locals_with_address_taken_in_calls(then_expr, env);
+            kill_locals_with_address_taken_in_calls(else_expr, env);
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
+    }
+}
+
+/// Names of every local whose address appears anywhere in `expr` (a call
+/// argument, or a sub-address like `&local + k` / `(char *)&local` nested
+/// inside one) -- the removal side of [`kill_locals_with_address_taken_in_calls`].
+fn collect_address_taken_locals(expr: &PreHirExpr, env: &mut ConstEnv) {
+    match expr {
+        PreHirExpr::AddressOfLocal(name) => {
+            env.remove(name);
+        }
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => collect_address_taken_locals(inner, env),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_address_taken_locals(lhs, env);
+            collect_address_taken_locals(rhs, env);
+        }
+        PreHirExpr::Select {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_address_taken_locals(then_expr, env);
+            collect_address_taken_locals(else_expr, env);
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::Const(_, _)
+        | PreHirExpr::Load { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::AggregateCopy { .. } => {}
+    }
 }
 
 #[cfg(test)]
@@ -322,6 +422,82 @@ mod tests {
             panic!("expected branch condition to remain binary");
         };
         assert_eq!(rhs.as_ref(), &var("x"));
+    }
+
+    #[test]
+    fn sccp_does_not_fold_address_of_local_to_its_known_value() {
+        // `char *buf = NULL; getline(&buf, &n, f);` -- `buf`'s value (0) must
+        // never be substituted into the `&buf` ARGUMENT itself. Reinstating
+        // the old shared match arm turns this into `getline(0, &n, f)`.
+        let mut func = PreHirFunction {
+            name: "test_sccp_address_of_local".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("buf".to_string()),
+                    rhs: PreHirExpr::Const(0, int(64)),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "getline".to_string(),
+                    args: vec![PreHirExpr::AddressOfLocal("buf".to_string())],
+                    ty: int(64),
+                }),
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &func.body[1] else {
+            panic!("expected the call statement to remain a call");
+        };
+        assert_eq!(
+            args[0],
+            PreHirExpr::AddressOfLocal("buf".to_string()),
+            "an address-of-local argument must never be replaced by the \
+             local's last-known value: `&buf` is not `buf`"
+        );
+    }
+
+    #[test]
+    fn sccp_kills_a_locals_known_value_when_its_address_escapes_to_a_call() {
+        // Even once the argument itself is protected, a later plain READ of
+        // the same local (`x = buf;`, e.g. from `mov rdi, [rbp-0x10]` after
+        // the call reloads its value) must not inherit the local's PRE-call
+        // constant: `getline` may have written through `&buf`.
+        let mut func = PreHirFunction {
+            name: "test_sccp_call_kills_escaped_local".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("buf".to_string()),
+                    rhs: PreHirExpr::Const(0, int(64)),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "getline".to_string(),
+                    args: vec![PreHirExpr::AddressOfLocal("buf".to_string())],
+                    ty: int(64),
+                }),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: var("buf"),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
+            panic!("expected the trailing read to remain an assignment");
+        };
+        assert_eq!(
+            rhs, &var("buf"),
+            "a local whose address was passed to a call must not keep its \
+             pre-call constant value: the call may have written through it"
+        );
     }
 
     #[test]
@@ -474,9 +650,11 @@ fn sccp_stmt(
                     } else {
                         env.remove(name);
                     }
+                    kill_locals_with_address_taken_in_calls(rhs, env);
                 } else {
                     changed |= sccp_subst_expr(rhs, env);
                     changed |= fold_expr_hir(rhs);
+                    kill_locals_with_address_taken_in_calls(rhs, env);
                 }
                 break;
             }
@@ -488,6 +666,7 @@ fn sccp_stmt(
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 changed |= sccp_subst_expr(expr, env);
                 changed |= fold_expr_hir(expr);
+                kill_locals_with_address_taken_in_calls(expr, env);
                 break;
             }
             PreHirStmt::Block(stmts) => {
