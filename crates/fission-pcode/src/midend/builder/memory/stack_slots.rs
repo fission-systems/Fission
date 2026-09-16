@@ -1163,7 +1163,15 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(value) = signed_const_displacement(vn) {
             return Some(value);
         }
-        if !is_register_space_id(vn.space_id) && vn.space_id != UNIQUE_SPACE_ID {
+        // `is_unique_space_id`, not a bare `UNIQUE_SPACE_ID` compare: the legacy
+        // constant is 3 and Rust-Sleigh emits unique temps in space 2, so the
+        // bare form rejected every Rust-Sleigh temp before it could be walked.
+        // ARM materialises an immediate into one before adding it (`add.w
+        // r3,sp,#0x6` lifts to `Copy u <- const(6)` then `IntAdd r3 <- sp, u`),
+        // so the displacement never resolved and an escaping stack address
+        // never recovered as `&local` -- while x86, whose `lea` carries the
+        // literal inline, was unaffected and hid the asymmetry.
+        if !is_register_space_id(vn.space_id) && !is_unique_space_id(vn.space_id) {
             return None;
         }
         let key = VarnodeKey::from(vn);

@@ -2624,6 +2624,82 @@ fn lookup_def_site_allows_unique_low_view_of_wide_temp() {
 }
 
 #[test]
+fn arm_immediate_through_unique_temp_recovers_stack_local_address() {
+    // ARM lifts `add.w r3,sp,#0x6` as `Copy u <- const(6)` followed by
+    // `IntAdd r3 <- sp, u`, so the displacement reaches the add as a
+    // unique-space temp rather than a literal. `resolve_constant_operand`
+    // gated on a bare `UNIQUE_SPACE_ID` (3) while Rust-Sleigh emits unique
+    // temps in space 2, so the add never resolved to a stack address and an
+    // escaping local's address printed as raw `sp + 6` with the slot itself
+    // left undefined. x86's `lea` carries the literal inline, which is why
+    // only ARM ever saw this.
+    let sp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x54, 4);
+    let store_addr = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x143600, 4);
+    let stored = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 1);
+    let imm = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x12f000, 4);
+    let r3 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x2c, 4);
+    let r0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 4);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // `strb.w r0,[sp,#0x6]` -- the memory-access form, whose literal
+            // displacement is what registers the slot at offset 6.
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(store_addr.clone()),
+                vec![sp.clone(), constant(6)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Store,
+                None,
+                vec![constant(3), store_addr, stored],
+            ),
+            // `add.w r3,sp,#0x6` -- the address-computation form under test.
+            op(2, PcodeOpcode::Copy, Some(imm.clone()), vec![constant(6)]),
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(r3.clone()),
+                vec![sp.clone(), imm],
+            ),
+            // The address has to be read as a value, or the guard declines it.
+            op(4, PcodeOpcode::Copy, Some(r0), vec![r3]),
+        ],
+    )]);
+
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::Arm32;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "ELF".to_string();
+    options.pe_x64_only = false;
+
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder
+        .run_incremental_heritage()
+        .expect("heritage registers the stack slot the store touches");
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 3,
+    });
+
+    let address = builder.stack_local_address_expr(&pcode.blocks[0].ops[3]);
+
+    assert!(
+        matches!(
+            address,
+            Some(PreHirExpr::AddressOfLocal(_) | PreHirExpr::PtrOffset { .. })
+        ),
+        "an immediate routed through a unique temp must still resolve to a \
+         stack local's address, got {address:?}"
+    );
+}
+
+#[test]
 fn duplicate_start_join_uses_shared_merge_binding_for_conflicting_defs() {
     fn op_at(
         seq_num: u32,
