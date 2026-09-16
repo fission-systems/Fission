@@ -5,7 +5,7 @@ mod engine;
 mod frontend;
 mod function;
 mod lift;
-pub use lift::resolve_indirect_branch_targets;
+pub use lift::{attach_inferred_indirect_edges, resolve_indirect_branch_targets};
 mod registry;
 mod spine;
 
@@ -2354,6 +2354,160 @@ mod tests {
                 .map(|block| format!("0x{:x}", block.start_address))
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// A statically linked, non-PIE ELF's jump table has no relocation at its
+    /// use site -- the linker already resolved every entry into the raw table
+    /// bytes, since nothing needs runtime fixup. `x64_static_switch_no_reloc.elf`
+    /// (built `zig cc -target x86_64-linux-musl -O1 -static`, `readelf -r`
+    /// confirms zero relocations) is exactly that shape, with a 4-case
+    /// `switch` compiled as `cmp edi,3; ja default; jmp [table+rcx*8]`.
+    ///
+    /// The decode/analyse fixed point (`resolve_indirect_branch_targets`
+    /// after a first lift, fed back as `additional_decode_entries`, lifted
+    /// again) correctly found and decoded all 4 case bodies as bytes -- but
+    /// they still rendered as one straight-line block concatenating every
+    /// case, on every corpus binary this was checked against. Two gaps, both
+    /// exercised end-to-end here:
+    ///   1. `resolve_indirect_branch_targets` returned a flat `Vec<u64>`,
+    ///      losing which `BranchInd` each target belonged to, so nothing
+    ///      could ever attach them as *that* dispatch's CFG successors.
+    ///   2. `additional_decode_entries` seeded the decode worklist and the
+    ///      reachability pass, but never the block-leader set -- so a seeded
+    ///      address that decode reaches by falling straight through from the
+    ///      previous one (exactly what dense, contiguous case bodies do)
+    ///      merged into that block's own instruction run instead of starting
+    ///      a block of its own, leaving nothing for (1)'s fix to attach an
+    ///      edge to even once it knew where to attach one.
+    #[test]
+    fn static_switch_dispatch_case_bodies_become_reachable_blocks() {
+        use fission_loader::loader::LoadedBinary;
+        use std::path::Path;
+
+        let binary_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_static_switch_no_reloc.elf");
+        let binary = LoadedBinary::from_file(&binary_path).expect("load fixture");
+        assert!(
+            binary.inner().relocations.is_empty(),
+            "fixture must have no relocations -- that is the whole point of this test"
+        );
+        let load_spec = binary.load_spec().expect("load spec");
+        let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)
+            .expect("frontends");
+        let frontend = frontends.first().expect("frontend");
+        let entry = 0x1002030u64;
+        let max_bytes = 128usize;
+        let bytes = binary.view_bytes(entry, max_bytes).expect("bytes");
+
+        // Mirrors fission-static's `readonly_windows_for` (control_flow_facts/mod.rs);
+        // duplicated inline because fission-sleigh cannot depend on fission-static.
+        let mut readonly_windows: Vec<(u64, std::sync::Arc<[u8]>)> = Vec::new();
+        for section in &binary.sections {
+            if section.is_executable || section.is_writable || !section.is_readable {
+                continue;
+            }
+            let size = section.file_size.min(section.virtual_size.max(section.file_size));
+            let Ok(size) = usize::try_from(size) else { continue };
+            if size == 0 || section.virtual_address == 0 {
+                continue;
+            }
+            if let Some(bytes) = binary.view_bytes(section.virtual_address, size) {
+                readonly_windows.push((section.virtual_address, std::sync::Arc::from(bytes)));
+            }
+        }
+
+        let mut memory_context = DecodeMemoryContext {
+            readonly_windows,
+            ..DecodeMemoryContext::default()
+        };
+        let contract = DecodeContract::decomp_function(512);
+
+        let first = frontend
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
+                entry,
+                contract,
+                &memory_context,
+                None,
+            )
+            .expect("first lift");
+
+        // Case bodies are not reachable yet: nothing in a plain recursive
+        // decode can know a computed jump's targets.
+        let case_bodies = [0x1002044u64, 0x1002058, 0x100206b, 0x100207e];
+        for addr in case_bodies {
+            assert!(
+                !first
+                    .function
+                    .blocks
+                    .iter()
+                    .any(|b| b.start_address == addr),
+                "0x{addr:x} should not be reachable before the fixed point runs"
+            );
+        }
+
+        let discovered = crate::runtime::resolve_indirect_branch_targets(
+            &first.function,
+            entry,
+            bytes,
+            &memory_context,
+            true,
+        );
+        let all_targets: Vec<u64> = discovered.values().flatten().copied().collect();
+        for addr in case_bodies {
+            assert!(
+                all_targets.contains(&addr),
+                "0x{addr:x} not found by the post-decode analysis; found={all_targets:x?}"
+            );
+        }
+        memory_context.additional_decode_entries.extend(all_targets);
+
+        let mut second = frontend
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
+                entry,
+                contract,
+                &memory_context,
+                None,
+            )
+            .expect("second lift with seeded targets");
+        crate::runtime::attach_inferred_indirect_edges(&mut second.function, &discovered);
+
+        let starts: Vec<u64> = second
+            .function
+            .blocks
+            .iter()
+            .map(|b| b.start_address)
+            .collect();
+        for addr in case_bodies {
+            assert!(
+                starts.contains(&addr),
+                "0x{addr:x} did not become its own block; starts={starts:x?}"
+            );
+        }
+
+        let dispatch_block = second
+            .function
+            .blocks
+            .iter()
+            .find(|b| {
+                b.ops
+                    .last()
+                    .is_some_and(|op| op.opcode == PcodeOpcode::BranchInd)
+            })
+            .expect("dispatch block with a BranchInd");
+        let successor_starts: Vec<u64> = dispatch_block
+            .successors
+            .iter()
+            .filter_map(|&idx| second.function.blocks.get(idx as usize))
+            .map(|b| b.start_address)
+            .collect();
+        for addr in case_bodies {
+            assert!(
+                successor_starts.contains(&addr),
+                "dispatch block's successors do not include 0x{addr:x}; successors={successor_starts:x?}"
+            );
+        }
     }
 
     #[test]

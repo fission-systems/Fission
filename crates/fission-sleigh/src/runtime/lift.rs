@@ -928,12 +928,33 @@ pub fn resolve_indirect_branch_targets(
     bytes: &[u8],
     memory_context: &DecodeMemoryContext,
     little_endian: bool,
-) -> Vec<u64> {
+) -> BTreeMap<u64, Vec<u64>> {
     const MAX_JUMP_TABLE_CASES: u64 = 256;
-    let mut found = Vec::new();
+    // Keyed by the `BranchInd` instruction's own address, not flattened, so
+    // the caller can wire each dispatch's *own* targets as its CFG successors
+    // (`attach_inferred_indirect_edges`) rather than only seeding the decode
+    // worklist with the union of every table in the function. Seeding the
+    // worklist alone decodes the case bodies as bytes but leaves them
+    // unreachable: nothing connects the `BranchInd` to them, so reachability
+    // pruning (or structuring, walking the CFG) never sees them as anything
+    // but dead code after a computed jump -- confirmed on a minimal 12-case
+    // `switch` reproduction, where the fixed point decoded all 72 case-body
+    // instructions but the emitted C still had 4 blocks and one straight-line
+    // concatenation of every case, because the fixed point only ever called
+    // this for its *flat* return value, never to attach edges.
+    let mut found: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
 
     for block in &function.blocks {
         let Some(value) = dispatch_at_branch(&block.ops) else {
+            continue;
+        };
+        let Some(source) = block
+            .ops
+            .iter()
+            .rev()
+            .find(|op| op.opcode == PcodeOpcode::BranchInd)
+            .map(|op| op.address)
+        else {
             continue;
         };
         // The table's own address, from the load the dispatch reads it with.
@@ -990,11 +1011,7 @@ pub fn resolve_indirect_branch_targets(
             // One entry proves nothing -- any four readable bytes that happen
             // to point into the function would pass.
             if targets.len() >= 2 {
-                for target in targets {
-                    if !found.contains(&target) {
-                        found.push(target);
-                    }
-                }
+                found.entry(source).or_default().extend(targets);
                 break;
             }
         }
@@ -1002,7 +1019,21 @@ pub fn resolve_indirect_branch_targets(
     found
 }
 
-fn attach_inferred_indirect_edges(
+/// Wires each `BranchInd` at a key address in `inferred_edges` to the block
+/// starting at each of its listed targets, as that block's CFG successors.
+///
+/// Used internally by the lift's own in-lift table inference (weak: only
+/// "the last write to this varnode anywhere decoded so far" is available
+/// mid-lift, see [`jump_table_targets_from`]'s doc comment). Also exposed for
+/// [`resolve_indirect_branch_targets`]'s caller: that function runs *after* a
+/// full decode, with real per-block definitions, and is the one that reliably
+/// finds a table's targets -- but finding them and decoding their bytes is
+/// not the same as the dispatch actually branching to them. Without also
+/// calling this on the result, the target blocks exist (seeded into
+/// `additional_decode_entries`, decoded) but are unreachable: nothing
+/// connects the `BranchInd` to them, so structuring sees a dead-ended
+/// computed jump and every case body after it as orphaned straight-line code.
+pub fn attach_inferred_indirect_edges(
     function: &mut PcodeFunction,
     inferred_edges: &BTreeMap<u64, Vec<u64>>,
 ) {
@@ -1583,6 +1614,24 @@ impl RuntimeSleighFrontend {
             .copied()
             .collect();
         indirect_targets.extend(memory_context.jump_table_targets.iter().copied());
+        // `additional_decode_entries`' own doc comment already promises this:
+        // seeding it is supposed to be "required for a block to survive into
+        // the final PcodeFunction", but surviving decode and reachability
+        // pruning is not surviving into a block of its *own* -- without also
+        // being a block leader here, a seeded address that decode reaches by
+        // falling straight through from the previous one merges into that
+        // block's linear instruction run instead of starting a new block.
+        // That is exactly what a jump-table's case bodies do: dense,
+        // contiguous, no gaps between them -- so a fixed point that resolved
+        // a 12-case dispatch correctly (`resolve_indirect_branch_targets`,
+        // `attach_inferred_indirect_edges`) still rendered one straight-line
+        // block concatenating every case, because none of the 12 targets
+        // were ever block leaders to begin with; there was nothing for the
+        // attached successor edges to point at. Applies uniformly to the
+        // other current use of `additional_decode_entries` too (LSDA landing
+        // pads), which are exactly as much "a distinct entry point, not a
+        // fallthrough continuation" as a switch case is.
+        indirect_targets.extend(memory_context.additional_decode_entries.iter().copied());
         let indirect_targets_for_snapshot = indirect_targets.clone();
 
         let cfg_hints = InstructionCfgHints::from_memory_context(memory_context);

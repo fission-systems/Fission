@@ -247,6 +247,14 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // The best decode any round of the fixed point produced, kept so a round
     // that fails cannot leave the function worse off than before it ran.
     let mut last_good: Option<fission_sleigh::runtime::DecodedPcodeFunction> = None;
+    // Every `BranchInd` -> targets edge any round's post-decode analysis
+    // found, across the whole fixed point. `additional_decode_entries` alone
+    // gets the target bytes decoded into real blocks; this is what makes the
+    // dispatch actually branch to them -- see `attach_inferred_indirect_edges`'s
+    // doc comment. Accumulated rather than only using the last round's answer
+    // because a table found in an early round is still real even once later
+    // rounds move on to a different (e.g. nested) dispatch.
+    let mut discovered_edges: std::collections::BTreeMap<u64, Vec<u64>> = Default::default();
     let mut result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
         bytes,
         decode_entry_address,
@@ -273,10 +281,25 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 &memory_context,
                 little_endian,
             );
+            if std::env::var_os("FISSION_JT_TRACE").is_some() {
+                eprintln!(
+                    "[JT] entry=0x{decode_entry_address:x} round_blocks={} dispatches={} targets={}",
+                    lifted.function.blocks.len(),
+                    discovered.len(),
+                    discovered.values().map(Vec::len).sum::<usize>()
+                );
+            }
             let fresh: Vec<u64> = discovered
-                .into_iter()
+                .values()
+                .flatten()
+                .copied()
                 .filter(|target| !memory_context.additional_decode_entries.contains(target))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
                 .collect();
+            for (source, targets) in discovered {
+                discovered_edges.entry(source).or_default().extend(targets);
+            }
             if fresh.is_empty() {
                 break;
             }
@@ -308,6 +331,26 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 last_good = Some(better.clone());
             }
             result = next;
+        }
+    }
+    // Every round's decoded-and-seeded targets are real bytes by now, but the
+    // dispatch itself still has no edge to them until this runs -- see
+    // `attach_inferred_indirect_edges`'s doc comment. Applied to both
+    // `result` and `last_good`: whichever one downstream actually returns
+    // (a later round can still fail and fall back to an earlier one) needs
+    // the wiring, not just whichever happens to be `result` right here.
+    if !discovered_edges.is_empty() {
+        if let Ok(lifted) = &mut result {
+            fission_sleigh::runtime::attach_inferred_indirect_edges(
+                &mut lifted.function,
+                &discovered_edges,
+            );
+        }
+        if let Some(good) = &mut last_good {
+            fission_sleigh::runtime::attach_inferred_indirect_edges(
+                &mut good.function,
+                &discovered_edges,
+            );
         }
     }
     match result {
