@@ -57,6 +57,7 @@ impl LinuxEnv {
         simos.register_procedure("__xstat", Box::new(libc::Stat));
         simos.register_procedure("__xstat64", Box::new(libc::Stat));
         simos.register_procedure("read", Box::new(libc::Read));
+        simos.register_procedure("getline", Box::new(libc::Getline));
         simos.register_procedure("write", Box::new(libc::Write));
         simos.register_procedure("exit", Box::new(libc::Exit));
         simos.register_procedure("_exit", Box::new(libc::Exit));

@@ -356,7 +356,13 @@ impl SimProcedure for Write {
 pub struct Exit;
 impl SimProcedure for Exit {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let code = emu.read_arg(0).unwrap_or(0) as u32;
+        // POSIX exit status is 8 bits (`WEXITSTATUS`/shell `$?`) -- the
+        // kernel itself only keeps `status & 0xff`. `main`'s `int` return
+        // narrows to `u32` further up the call chain, so an out-of-range or
+        // negative value (`return -1;`, this session's own `check()`
+        // reproduction) would otherwise surface as e.g. `4294967295` instead
+        // of the `255` every POSIX tool and human actually expects.
+        let code = (emu.read_arg(0).unwrap_or(0) as u32) & 0xFF;
         tracing::info!("SimProcedure: exit({}). Emulation finished.", code);
         Ok(HleResult::Halt(code))
     }
@@ -567,6 +573,121 @@ pub fn format_printf(emu: &mut Emulator, fmt: &str, first_arg: usize) -> Result<
     Ok(out)
 }
 
+/// musl's internal `FILE.fd` field offset. Confirmed empirically against two
+/// independent musl builds (Homebrew `musl-cross` 0.9.11 and Zig's own
+/// bundled musl, both x86-64): `fileno()`/`fileno_unlocked()` both compile
+/// to `mov e_x, dword ptr [f + 0x78]`. `stdio_impl.h` (where `fd` is
+/// actually declared) is a musl-internal header neither toolchain installs,
+/// so this was read directly out of the compiled function rather than
+/// guessed or copied from an unverified source.
+const MUSL_FILE_FD_OFFSET: u64 = 0x78;
+
+/// `ssize_t getline(char **lineptr, size_t *n, FILE *stream)`.
+///
+/// This emulator's Linux HLE has no `fopen`/`FILE*` subsystem at all -- no
+/// `fopen`, no `fread`, no buffered stdio of any kind -- so `stream` is
+/// whatever bit pattern the guest's own musl libc happens to have put there,
+/// and the only thing needed out of it is the underlying fd, which musl's
+/// `FILE` struct carries at a fixed offset regardless of *which* stream it
+/// is. Reading that fd directly (rather than special-casing "is this
+/// stdin?") means `getline(&buf, &n, stdin)` and `getline(&buf, &n,
+/// fopen("data.txt", "r"))` both work through the exact path `SysRead`
+/// already uses (`emu.vfs.read`), uniformly, with no separate stdin case.
+///
+/// Musl only, deliberately: glibc's `_IO_FILE` is a different struct with
+/// `fd` at a different offset, and there is no signal available here to
+/// distinguish the two ABIs. A mismatched libc reading garbage at +0x78 is
+/// very unlikely to land on a small integer matching a real registered fd,
+/// so `emu.vfs.read` on it almost always fails immediately and this
+/// declines (returns -1, the real `getline` EOF/error contract) rather than
+/// silently returning wrong data -- but this is not a proof, just the
+/// reason a wrong-ABI case is expected to fail loud rather than quiet.
+///
+/// Growable buffer: accumulated on the host side in a plain `Vec<u8>`
+/// first, written to a single freshly `heap_alloc`'d guest buffer sized
+/// exactly right, once, at the end. This bump allocator has no working
+/// `realloc` -- `Free`'s own doc comment already establishes that freeing
+/// (and therefore growing an existing block in place) is a no-op here -- so
+/// allocating fresh and abandoning whatever `*lineptr` pointed to is the
+/// same simplification the rest of this allocator already makes, not a new
+/// one.
+pub struct Getline;
+impl SimProcedure for Getline {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let lineptr = emu.read_arg(0).unwrap_or(0);
+        let nptr = emu.read_arg(1).unwrap_or(0);
+        let stream = emu.read_arg(2).unwrap_or(0);
+
+        let fd = {
+            let ram = emu.state.ram_space();
+            let addr = stream.saturating_add(MUSL_FILE_FD_OFFSET);
+            match emu.state.read_space(ram, addr, 4) {
+                Ok(bytes) if bytes.len() == 4 => {
+                    i32::from_le_bytes(bytes.try_into().expect("checked len"))
+                }
+                _ => {
+                    tracing::warn!(
+                        "getline(stream=0x{stream:X}): could not read FILE.fd at +0x{MUSL_FILE_FD_OFFSET:X}; declining"
+                    );
+                    emu.write_return_val((-1i64) as u64)?;
+                    return Ok(HleResult::Continue);
+                }
+            }
+        };
+        if fd < 0 {
+            emu.write_return_val((-1i64) as u64)?;
+            return Ok(HleResult::Continue);
+        }
+        let fd = fd as u64;
+
+        // A real stream ends at EOF; this only guards one that somehow never
+        // does, so a bad guest can't hang the emulator inside one call.
+        const MAX_LINE: usize = 1 << 20;
+        let mut line = Vec::new();
+        loop {
+            if line.len() >= MAX_LINE {
+                tracing::warn!("getline(fd={fd}): {MAX_LINE} bytes with no newline, stopping");
+                break;
+            }
+            match emu.vfs.read(fd, 1) {
+                Ok(bytes) if !bytes.is_empty() => {
+                    let byte = bytes[0];
+                    line.push(byte);
+                    if byte == b'\n' {
+                        break;
+                    }
+                }
+                // Empty read (EOF) or a VFS error either way stop; both mean
+                // "nothing more is coming from this fd".
+                _ => break,
+            }
+        }
+
+        if line.is_empty() {
+            // Real getline's contract at EOF with nothing read: return -1
+            // and leave *lineptr/*n exactly as the caller had them.
+            emu.write_return_val((-1i64) as u64)?;
+            return Ok(HleResult::Continue);
+        }
+
+        line.push(0); // NUL terminator; not part of the returned length.
+        let ram = emu.state.ram_space();
+        let buf = emu.heap_alloc(line.len() as u64)?;
+        emu.state.write_space(ram, buf, &line)?;
+        if lineptr != 0 {
+            emu.state.write_space(ram, lineptr, &buf.to_le_bytes())?;
+        }
+        if nptr != 0 {
+            emu.state
+                .write_space(ram, nptr, &(line.len() as u64).to_le_bytes())?;
+        }
+        let read_len = (line.len() - 1) as u64; // excludes the NUL, includes '\n'
+        tracing::info!("SimProcedure: getline(...) -> {read_len} bytes into 0x{buf:X}");
+        emu.write_return_val(read_len)?;
+        Ok(HleResult::Continue)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -691,5 +812,72 @@ mod tests {
         let got = read_string(&mut emu, buf).unwrap();
         assert_eq!(got, "n=7");
         assert_eq!(emu.read_register_u64("RAX").unwrap(), 3);
+    }
+
+    #[test]
+    fn getline_reads_stdin_line_by_line_then_reports_eof() {
+        let mut emu = tiny_emu();
+        let base = 0x402000u64;
+        emu.state
+            .page_map
+            .map_region(base, 0x2000, crate::pcode::page_map::prot::RW, true);
+
+        // A minimal stand-in for musl's FILE: only the fd field, at the
+        // literal offset (not `MUSL_FILE_FD_OFFSET`, deliberately -- using
+        // the production constant to build the fixture would make the test
+        // pass no matter what that constant is changed to, checking nothing)
+        // the real `fileno`/`fileno_unlocked` disassembly confirmed:
+        // `mov e_x, dword ptr [f + 0x78]`, identically in Homebrew's
+        // `musl-cross` 0.9.11 and Zig's own bundled musl.
+        let stream = base;
+        const REAL_MUSL_FILE_FD_OFFSET: u64 = 0x78;
+        // Poisoned first: a freshly mapped region reads as zero, which is
+        // also a valid fd (stdin) -- reading the fd at the WRONG offset would
+        // silently see that same zero and this test would pass no matter
+        // where `Getline` actually reads from. 0xFF bytes make a wrong-offset
+        // read come back negative (an invalid fd), which `Getline` itself
+        // then rejects -- turning a wrong offset into a visible failure.
+        emu.state
+            .write_space(emu.state.ram_space(), stream, &[0xFFu8; 0x200])
+            .unwrap();
+        emu.state
+            .write_space(
+                emu.state.ram_space(),
+                stream + REAL_MUSL_FILE_FD_OFFSET,
+                &0i32.to_le_bytes(), // fd 0 == stdin
+            )
+            .unwrap();
+        let lineptr_slot = base + 0x100;
+        let n_slot = base + 0x108;
+        emu.seed_stdin(b"hello\nworld");
+
+        let call = |emu: &mut Emulator| -> (i64, u64) {
+            emu.write_register_u64("RDI", lineptr_slot).unwrap();
+            emu.write_register_u64("RSI", n_slot).unwrap();
+            emu.write_register_u64("RDX", stream).unwrap();
+            Getline.run(emu).unwrap();
+            let ret = emu.read_register_u64("RAX").unwrap() as i64;
+            let ptr_bytes = emu
+                .state
+                .read_space(emu.state.ram_space(), lineptr_slot, 8)
+                .unwrap();
+            (ret, u64::from_le_bytes(ptr_bytes.try_into().unwrap()))
+        };
+
+        // First call: up to and including the '\n'.
+        let (ret, ptr) = call(&mut emu);
+        assert_eq!(ret, 6, "\"hello\\n\" is 6 bytes");
+        assert_eq!(read_string(&mut emu, ptr).unwrap(), "hello\n");
+
+        // Second call: the rest, with no trailing delimiter -- still a
+        // successful read, matching real getline on the final unterminated
+        // line of a stream.
+        let (ret, ptr) = call(&mut emu);
+        assert_eq!(ret, 5, "\"world\" with no newline is 5 bytes");
+        assert_eq!(read_string(&mut emu, ptr).unwrap(), "world");
+
+        // Third call: true EOF, nothing read at all.
+        let (ret, _ptr) = call(&mut emu);
+        assert_eq!(ret, -1);
     }
 }

@@ -419,7 +419,11 @@ impl SimProcedure for SysBrk {
 pub struct SysExit;
 impl SimProcedure for SysExit {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let code = emu.syscall_arg(0) as u32;
+        // POSIX exit status is 8 bits (see `libc::Exit`'s matching comment;
+        // this is the raw-syscall path `exit(2)`/`exit_group(2)` reach for a
+        // statically linked binary's own inline `syscall`, and it needs the
+        // same mask so both paths agree).
+        let code = (emu.syscall_arg(0) as u32) & 0xFF;
         tracing::info!("sys_exit({}). Emulation finished.", code);
         Ok(HleResult::Halt(code))
     }
