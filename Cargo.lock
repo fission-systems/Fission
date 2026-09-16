@@ -844,24 +844,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fission-automation"
-version = "0.2.3"
-dependencies = [
- "anyhow",
- "clap",
- "fission-core",
- "fission-pcode",
- "jemallocator",
- "metrics",
- "miette",
- "mimalloc",
- "rayon",
- "serde",
- "serde_json",
- "toml",
-]
-
-[[package]]
 name = "fission-cli"
 version = "0.2.3"
 dependencies = [

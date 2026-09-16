@@ -399,7 +399,7 @@ git commit -m "feat(cli): add --strings flag"
    ```bash
    cargo fmt -- --check
    cargo clippy --workspace --exclude fission-tauri -- -D warnings
-   cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
+   cargo test -p fission-pcode -p fission-loader --verbose
     cargo build -p fission-cli --release
    ```
 

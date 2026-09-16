@@ -270,7 +270,7 @@ gh run download RUN_ID
 # Validate locally before PR submission
 cargo fmt --all
 cargo clippy --all -- -D warnings
-cargo test -p fission-pcode -p fission-automation
+cargo test -p fission-pcode
 
 # Takes ~5 minutes (CI takes 40 minutes)
 ```
@@ -308,7 +308,7 @@ For big refactors:
 # Simulate Fast Gate
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
-cargo test -p fission-pcode -p fission-automation
+cargo test -p fission-pcode
 ```
 
 **Step 2: Check detailed logs**

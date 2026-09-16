@@ -150,7 +150,7 @@ Contract tests live in:
 
 ```bash
 cargo nextest run -p fission-pcode
-cargo check -p fission-pcode -p fission-decompiler -p fission-automation
+cargo check -p fission-pcode -p fission-decompiler
 python3 scripts/audit/nir_boundary_scan.py --root . --format markdown --output docs/audits/YYYY-MM-DD-nir-boundary-scan.md
 ```
 

@@ -28,33 +28,9 @@ Subset constants enumerating promoted keys appear in [`benchmark/full_benchmark/
 
 Shares nested metric dictionaries with corpus rows (`owner_metrics`, `shape_drift_metrics`, `normalize_pass_metrics`, …) and exposes comparison helpers (`both_success_rate_pct`, `top_regressions`, `baseline_blockers`).
 
-## Automation lane outputs (`fission-automation`)
+## `NirBuildStats`
 
-Artifacts upload under `benchmark/artifacts/automation/` (CI: [`reusable-nir-check.yml`](../.github/workflows/reusable-nir-check.yml)).
-
-| File | Role |
-|------|------|
-| `summary.json` | Aggregate lane snapshot (`AutomationSummary`) |
-| `summary.md` | Human-readable sibling |
-| `decision_insights.json` | Go/stop reasoning surfaces |
-| `diagnosis.json` | Bucketed diagnostics |
-
-### `AutomationSummary` (JSON)
-
-Defined in Rust (`crates/fission-automation/src/report/snapshot.rs`). Trend-minded fields:
-
-| Field | Meaning |
-|-------|---------|
-| `generated_at`, `lane`, `run_id`, `run_profile` | Run identity |
-| `target_count`, `*_elapsed_ms`, `total_elapsed_ms` | Throughput / perf proxies |
-| `binaries[]` | Per-binary snapshots (`binary`, success counters, recovery maps) |
-| `aggregate` | Rollup mirrors binary keys + `diagnosis_bucket_counts`, `nir_block_signature_counts` |
-
-Each `BinarySnapshot` / `AggregateSnapshot` embeds `nir_build_stats_totals`, which **must** match the canonical [`NirBuildStats`](../crates/fission-pcode/src/nir/ir/build_stats.rs) JSON shape (guard tests live in `snapshot.rs`).
-
-### Embedded `NirBuildStats`
-
-Counters cover timing (`build_duration_ms`, `normalize_duration_ms`, …), pcode validation (`invalid_pcode_shape_count`, …), Ghidra-parity stage mirrors (`ghidra_action_*`), BlockGraph collapse admission (`blockgraph_collapse_*`), structuring outcomes (`structuring_*`, `region_linearize_*`, …). **Extend counters only in `nir/ir/build_stats.rs`**, then thread through automation aggregates—never fork a parallel telemetry struct.
+Counters cover timing (`build_duration_ms`, `normalize_duration_ms`, …), pcode validation (`invalid_pcode_shape_count`, …), Ghidra-parity stage mirrors (`ghidra_action_*`), BlockGraph collapse admission (`blockgraph_collapse_*`), structuring outcomes (`structuring_*`, `region_linearize_*`, …). **Extend counters only in `nir/ir/build_stats.rs`**—never fork a parallel telemetry struct.
 
 ## Loader identity (`BinaryIdentityReport`)
 

@@ -85,9 +85,6 @@ check "fission-plugin +interactive_runtime" ok \
   cargo check -p fission-plugin --features interactive_runtime --all-targets --locked
 check "fission-cli +allocator-jemallocator" ok \
   cargo check -p fission-cli --no-default-features --features allocator-jemallocator --locked
-check "fission-automation +allocator-mimalloc" ok \
-  cargo check -p fission-automation --features allocator-mimalloc --all-targets --locked
-
 # On a Windows host the unported Win32 backend can be checked natively. It is
 # expected to fail, so it does not gate -- but it is listed, so the day someone
 # finishes the port this script says "UNEXPECTEDLY OK" rather than staying

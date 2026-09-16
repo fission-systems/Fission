@@ -49,4 +49,3 @@ cargo nextest run -p fission-loader
 
 - Debugging a bad decompilation: [`DEBUGGING_A_DECOMP_FAILURE.md`](DEBUGGING_A_DECOMP_FAILURE.md)  
 - Adding loader coverage: [`ADDING_A_LOADER_TEST.md`](ADDING_A_LOADER_TEST.md)  
-- Automation lanes: [`crates/fission-automation/AGENTS.md`](../../crates/fission-automation/AGENTS.md)

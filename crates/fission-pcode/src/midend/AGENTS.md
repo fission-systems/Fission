@@ -100,5 +100,4 @@ Every semantic fix must pass **both** the targeted unit test and the broader gat
 cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 cargo build -p fission-cli --release
-cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200
 ```

@@ -24,7 +24,6 @@ Fission/
 │   ├── fission-decompiler/   # Orchestration + Rust-Sleigh bridge (re-exports IR crate)
 │   ├── fission-sleigh/       # Sleigh decode/lift runtime
 │   ├── fission-static/       # Static facts, native preparation, analysis services
-│   ├── fission-automation/   # Quality lanes, deltas, go/stop signals, artifacts
 │   ├── fission-loader/       # Binary parsing, symbols, sections, strings
 │   ├── fission-analysis-db/  # Typed immutable program metadata snapshots
 │   ├── fission-signatures/   # FID/signature data and lookup
@@ -40,7 +39,6 @@ Fission/
 
 - `crates/fission-pcode/src/midend/AGENTS.md`
 - `crates/fission-pcode/src/midend/structuring/AGENTS.md`
-- `crates/fission-automation/AGENTS.md`
 - `crates/fission-cli/AGENTS.md`
 - `crates/fission-loader/AGENTS.md`
 
@@ -53,8 +51,6 @@ Read the nearest child file before editing those areas.
 | NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
 | NIR telemetry contract | `crates/fission-pcode/src/midend/types.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
-| Quality lanes / automation summaries | `crates/fission-automation/` | `nir-check`, reports; must stay aligned with `NirBuildStats` |
-| Automation summaries / deltas (implementation) | `crates/fission-automation/src/report/` | Markdown/JSON pipeline; must stay aligned with `NirBuildStats` |
 | Source semantic benchmark / corpus reports | `benchmark/source_semantic_benchmark/` | Canonical source-vs-Fission semantic quality surface; Ghidra is not used as the oracle |
 | Ghidra reference benchmark | `benchmark/full_benchmark/` | Reference/comparison lane only; keep reporting/gating additive |
 | Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
@@ -105,10 +101,6 @@ cargo build -p fission-cli --release
 cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 cargo check -p fission-decompiler
-cargo check -p fission-automation
-
-# Quality lane
-cargo run -p fission-automation -- nir-check --lane nir
 
 # Canonical benchmark runner
 python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --help
@@ -131,7 +123,6 @@ submodules and rewrites files you never touched.
 - For NIR/structuring changes: targeted nextest filter → `cargo nextest run -p fission-pcode` → `cargo check -p fission-pcode`.
 - For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/TUI surfaces as needed).
 - For resource path / bundle resolution changes: `cargo nextest run -p fission-core` and smoke `fission_cli resources status`.
-- If telemetry/reporting changes: also run `cargo check -p fission-automation`.
 - If benchmark/reporting changes: validate under `benchmark/source_semantic_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 - Release gate policy: [`docs/CI_RELEASE_GATES.md`](docs/CI_RELEASE_GATES.md) (L0 Fast / L1 Heavy / L2 Release E2E / L3 CD).

@@ -10,7 +10,6 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 
 | Crate path | Role (summary) |
 |------------|----------------|
-| [`crates/fission-automation`](../crates/fission-automation) | Quality lanes (`nir-check`), reporting |
 | [`crates/fission-core`](../crates/fission-core) | Shared core types/utilities |
 | [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols, relocations, virtual types; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
 | [`crates/fission-analysis-protocol`](../crates/fission-analysis-protocol) | Target-independent analysis backend, resource capability, and HTTP/worker wire contracts |

@@ -46,7 +46,6 @@ CORPUS_TOKENS = (
 FAST_SCAN_ROOTS = (
     "crates/fission-pcode/src/nir",
     "crates/fission-decompiler/src",
-    "crates/fission-automation/src",
 )
 
 FULL_SCAN_ROOTS = (

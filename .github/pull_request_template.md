@@ -23,7 +23,6 @@
 - [ ] **Decompilation orchestration / Rust-Sleigh** (`crates/fission-decompiler/`)
 - [ ] **Loader / binary parsing** (`crates/fission-loader/`)
 - [ ] **CLI / UX** (`crates/fission-cli/`)
-- [ ] **Automation / quality lanes** (`crates/fission-automation/`, including `crates/fission-automation/config/`)
 - [ ] **Benchmark harness / corpus** (`benchmark/source_semantic_benchmark/`, `benchmark/full_benchmark/`, `benchmark/config/`)
 - [ ] **Docs / process only** (no semantic code paths)
 - [ ] **CI / release plumbing** (`.github/`, `docs/RELEASE.md`)
@@ -60,7 +59,7 @@ comparison_outcome: <improved|regressed|mixed|unchanged|n/a>
 
 ## Telemetry and Reporting
 
-- [ ] Changes to decompiler semantics or inventory output: **confirmed** [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs) and `fission-automation` aggregates stay aligned, or this PR updates them together with tests.
+- [ ] Changes to decompiler semantics or inventory output: **confirmed** [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs) consumers stay aligned, or this PR updates them together with tests.
 - [ ] No parallel ad-hoc telemetry JSON outside the established `summary.json` / benchmark contracts ([`docs/QUALITY_METRICS.md`](docs/QUALITY_METRICS.md)).
 
 ## ADR / Design Traceability

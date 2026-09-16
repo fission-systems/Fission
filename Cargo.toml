@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "crates/fission-project",
     "crates/fission-script",
-    "crates/fission-automation",
     "crates/fission-core",
     "crates/fission-loader",
     "crates/fission-analysis-db",

@@ -5,7 +5,6 @@
 /crates/fission-pcode/ @sjkim1127
 /crates/fission-decompiler/ @sjkim1127
 /crates/fission-static/ @sjkim1127
-/crates/fission-automation/ @sjkim1127
 /crates/fission-cli/ @sjkim1127
 /crates/fission-loader/ @sjkim1127
 /benchmark/ @sjkim1127

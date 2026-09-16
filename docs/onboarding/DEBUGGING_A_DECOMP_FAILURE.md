@@ -48,7 +48,6 @@ Symptoms: types look fine internally but pseudocode unreadable.
 When the single function is understood:
 
 ```bash
-cargo run -p fission-automation -- nir-check --lane nir --functions-limit 50 --no-build --fission-bin ./target/release/fission_cli
 ```
 
 Attach `benchmark/artifacts/automation/` excerpts to the PR if quality logic changed ([`CONTRIBUTING.md`](../../CONTRIBUTING.md)).

@@ -43,13 +43,11 @@ flowchart BT
     Signatures["fission-signatures"] --> Loader
     Signatures --> Static
     Script["fission-script<br/>Rhai / read-only automation"] --> CLI
-    Script --> Automation["fission-automation"]
     Dynamic["fission-dynamic"] --> Decompiler
     TTD["fission-ttd"] --> Dynamic
     Plugin["fission-plugin"] --> Decompiler
     Decompiler --> CLI["fission-cli"]
     Decompiler --> GUI["fission-tauri"]
-    Automation --> CLI
     CLI --> Debug["debug surfaces<br/>script / disasm / xrefs / inventory / triage"]
     GUI --> Debug
     Plugin --> CLI

@@ -63,7 +63,6 @@ The current state is strong on conditional reconstruction and normalization, but
 
 4. **Telemetry and automation integration improved**
    - `NirBuildStats` now tracks SCC/irreducible counters and conservative fallback rejections.
-   - `fission-automation` reports and deltas consume these fields.
 
 ---
 
