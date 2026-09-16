@@ -1540,7 +1540,6 @@
 <p>Not strictly gated by <code>cd.yml</code>, but strongly recommended before tagging:</p>
 <ul>
 <li>[ ] <code>cargo nextest run -p fission-pcode</code> (and crates touched by the release; use <code>cargo test</code> only when doctests or harness-specific behavior must be checked).</li>
-<li>[ ] <code>cargo run -p fission-automation -- nir-check --lane nir</code> with <code>--fail-on-stop</code> when automation semantics changed (<a href="../crates/fission-automation/AGENTS.md"><code>crates/fission-automation/AGENTS.md</code></a>).</li>
 </ul>
 <p>Heavy CI uploads automation artifacts under <code>benchmark/artifacts/automation/</code> — attach links or excerpts to the GitHub Release discussion when helpful.</p>
 <h2 id="5-benchmark-corpus-optional-attachment">5. Benchmark corpus (optional attachment)<a class="headerlink" href="#5-benchmark-corpus-optional-attachment" title="Permanent link">&para;</a></h2>

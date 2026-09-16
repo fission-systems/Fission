@@ -1677,7 +1677,7 @@ Rule/Action reference:</p>
 </ol>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>nextest<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-pcode
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-pcode<span class="w"> </span>-p<span class="w"> </span>fission-decompiler<span class="w"> </span>-p<span class="w"> </span>fission-automation
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-pcode<span class="w"> </span>-p<span class="w"> </span>fission-decompiler
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python3<span class="w"> </span>scripts/audit/nir_boundary_scan.py<span class="w"> </span>--root<span class="w"> </span>.<span class="w"> </span>--format<span class="w"> </span>markdown<span class="w"> </span>--output<span class="w"> </span>docs/audits/YYYY-MM-DD-nir-boundary-scan.md
 </span></code></pre></div>
 <p>For semantic changes, rerun source-semantic benchmark rows with stale caches disabled.</p>

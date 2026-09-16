@@ -1312,13 +1312,11 @@
     Signatures["fission-signatures"] --&gt; Loader
     Signatures --&gt; Static
     Script["fission-script&lt;br/&gt;Rhai / read-only automation"] --&gt; CLI
-    Script --&gt; Automation["fission-automation"]
     Dynamic["fission-dynamic"] --&gt; Decompiler
     TTD["fission-ttd"] --&gt; Dynamic
     Plugin["fission-plugin"] --&gt; Decompiler
     Decompiler --&gt; CLI["fission-cli"]
     Decompiler --&gt; GUI["fission-tauri"]
-    Automation --&gt; CLI
     CLI --&gt; Debug["debug surfaces&lt;br/&gt;script / disasm / xrefs / inventory / triage"]
     GUI --&gt; Debug
     Plugin --&gt; CLI
