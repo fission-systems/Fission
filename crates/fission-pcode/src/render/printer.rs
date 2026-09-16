@@ -1117,6 +1117,17 @@ fn print_binary_op(op: HirBinaryOp) -> &'static str {
 /// does not fit in signed `int`.
 fn print_integer_const(value: i64, ty: &NirType) -> String {
     let NirType::Int { bits, signed } = ty else {
+        if matches!(ty, NirType::Ptr(_)) {
+            // The caller already tried `ctx.global_names` and fell through to
+            // us, so this is an address with no known symbol -- a string
+            // pointer whose target text was not captured, a global outside
+            // any resolved section, and so on. Every *other* address this
+            // tool prints (disasm operands, `xrefs`, `hex --json`) is hex; an
+            // agent reading a lone unresolved pointer constant as plain
+            // decimal (`5368878324`) has no way to tell it apart from an
+            // ordinary integer value it should treat as data, not a location.
+            return format!("0x{:x}", value as u64);
+        }
         return value.to_string();
     };
     if !(1..=64).contains(bits) {
@@ -2325,6 +2336,46 @@ mod tests {
             rendered.contains("return (int)(unsigned long long)(local_d);"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn unresolved_pointer_constant_renders_as_hex_not_decimal() {
+        // An address that failed to resolve to a named global (empty
+        // global_names) must still read as an address to an agent parsing
+        // this output, not as an ordinary decimal integer indistinguishable
+        // from a loop bound or a size. 0x140001040 was picked because its
+        // decimal form (5368713280) gives no visual hint it is hex at all.
+        let hir = HirFunction {
+            name: "return_unresolved_string_pointer".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: u8_ptr(),
+            body: vec![HirStmt::Return(Some(HirExpr::Const(0x140001040, u8_ptr())))],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function_with_global_names(&hir, &std::collections::HashMap::new());
+
+        assert!(rendered.contains("0x140001040"), "{rendered}");
+        assert!(!rendered.contains("5368713280"), "{rendered}");
+    }
+
+    #[test]
+    fn unresolved_pointer_constant_renders_as_hex_in_context_free_path() {
+        // Same defect, the other call site: print_hir_function (no
+        // global_names at all) goes through the context-free HirExpr::Const
+        // arm at line ~856, a separate match from the ctx-aware one above.
+        let hir = HirFunction {
+            name: "return_pointer_constant_no_ctx".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: u8_ptr(),
+            body: vec![HirStmt::Return(Some(HirExpr::Const(0x140001040, u8_ptr())))],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(rendered.contains("0x140001040"), "{rendered}");
+        assert!(!rendered.contains("5368713280"), "{rendered}");
     }
 
     #[test]
