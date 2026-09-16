@@ -48,10 +48,10 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             };
             for phi in phis {
-                let (latch, entry): (Vec<&fission_midend_core::ir::SsaPhiOperand>, Vec<_>) =
-                    phi.operands.iter().partition(|operand| {
-                        loop_body.body.contains(&(operand.predecessor as usize))
-                    });
+                let (latch, entry): (Vec<&fission_midend_core::ir::SsaPhiOperand>, Vec<_>) = phi
+                    .operands
+                    .iter()
+                    .partition(|operand| loop_body.body.contains(&(operand.predecessor as usize)));
                 let carried_by_this_definition = latch
                     .iter()
                     .any(|operand| pieces.iter().any(|piece| piece.value == operand.value));
@@ -92,9 +92,10 @@ impl<'a> PreviewBuilder<'a> {
                         .ops
                         .get(definition.op as usize)?;
                     let definition_output = definition_op.output.as_ref()?;
-                    let name = self
-                        .materialized_vns
-                        .get(&MaterializedVarnodeKey::new(definition_output, definition_op))?;
+                    let name = self.materialized_vns.get(&MaterializedVarnodeKey::new(
+                        definition_output,
+                        definition_op,
+                    ))?;
                     names.insert(name.clone());
                 }
                 let mut names = names.into_iter();

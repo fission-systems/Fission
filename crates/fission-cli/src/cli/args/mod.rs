@@ -1429,14 +1429,9 @@ mod tests {
 
         // A value that looks like a flag must still reach argv verbatim
         // (`allow_hyphen_values`) rather than clap trying to parse it as one.
-        let ParsedInvocation::Sandbox(args) = parse_oneshot_args_from([
-            "fission_cli",
-            "sandbox",
-            "app.exe",
-            "--",
-            "-x",
-            "pass1",
-        ]) else {
+        let ParsedInvocation::Sandbox(args) =
+            parse_oneshot_args_from(["fission_cli", "sandbox", "app.exe", "--", "-x", "pass1"])
+        else {
             panic!("expected a sandbox invocation");
         };
         assert_eq!(args.args, vec!["-x".to_string(), "pass1".to_string()]);

@@ -494,7 +494,8 @@ mod tests {
             panic!("expected the trailing read to remain an assignment");
         };
         assert_eq!(
-            rhs, &var("buf"),
+            rhs,
+            &var("buf"),
             "a local whose address was passed to a call must not keep its \
              pre-call constant value: the call may have written through it"
         );

@@ -2353,7 +2353,8 @@ mod tests {
             ..HirFunction::default()
         };
 
-        let rendered = print_hir_function_with_global_names(&hir, &std::collections::HashMap::new());
+        let rendered =
+            print_hir_function_with_global_names(&hir, &std::collections::HashMap::new());
 
         assert!(rendered.contains("0x140001040"), "{rendered}");
         assert!(!rendered.contains("5368713280"), "{rendered}");

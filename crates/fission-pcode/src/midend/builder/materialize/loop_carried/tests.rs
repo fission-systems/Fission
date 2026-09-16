@@ -1478,7 +1478,12 @@ fn loop_head_reads_the_value_reloaded_at_the_latch() {
                     Some(zf.clone()),
                     vec![dl.clone(), Varnode::constant(0, 1)],
                 ),
-                op(7, PcodeOpcode::CBranch, None, vec![constant(0x1040), zf.clone()]),
+                op(
+                    7,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1040), zf.clone()],
+                ),
             ],
         ),
         block_at(
@@ -1499,7 +1504,12 @@ fn loop_head_reads_the_value_reloaded_at_the_latch() {
                     Some(zf.clone()),
                     vec![edx.clone(), eax.clone()],
                 ),
-                op(12, PcodeOpcode::CBranch, None, vec![constant(0x1050), zf.clone()]),
+                op(
+                    12,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1050), zf.clone()],
+                ),
             ],
         ),
         block_at(
@@ -1530,21 +1540,36 @@ fn loop_head_reads_the_value_reloaded_at_the_latch() {
                     Some(eax.clone()),
                     vec![unique_sized(0x130, 1)],
                 ),
-                op(17, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax.clone()]),
+                op(
+                    17,
+                    PcodeOpcode::IntZExt,
+                    Some(rax.clone()),
+                    vec![eax.clone()],
+                ),
                 op(
                     18,
                     PcodeOpcode::IntNotEqual,
                     Some(zf.clone()),
                     vec![al.clone(), Varnode::constant(0, 1)],
                 ),
-                op(19, PcodeOpcode::CBranch, None, vec![constant(0x1010), zf.clone()]),
+                op(
+                    19,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1010), zf.clone()],
+                ),
             ],
         ),
         block_at(
             0x1040,
             4,
             vec![
-                op(20, PcodeOpcode::Copy, Some(eax.clone()), vec![Varnode::constant(1, 4)]),
+                op(
+                    20,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![Varnode::constant(1, 4)],
+                ),
                 op(21, PcodeOpcode::Return, None, vec![eax.clone()]),
             ],
         ),
@@ -1552,7 +1577,12 @@ fn loop_head_reads_the_value_reloaded_at_the_latch() {
             0x1050,
             5,
             vec![
-                op(22, PcodeOpcode::Copy, Some(eax.clone()), vec![Varnode::constant(0, 4)]),
+                op(
+                    22,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![Varnode::constant(0, 4)],
+                ),
                 op(23, PcodeOpcode::Return, None, vec![eax.clone()]),
             ],
         ),

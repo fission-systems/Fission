@@ -2384,8 +2384,8 @@ mod tests {
         use fission_loader::loader::LoadedBinary;
         use std::path::Path;
 
-        let binary_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("testdata/x64_static_switch_no_reloc.elf");
+        let binary_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_switch_no_reloc.elf");
         let binary = LoadedBinary::from_file(&binary_path).expect("load fixture");
         assert!(
             binary.inner().relocations.is_empty(),
@@ -2406,8 +2406,12 @@ mod tests {
             if section.is_executable || section.is_writable || !section.is_readable {
                 continue;
             }
-            let size = section.file_size.min(section.virtual_size.max(section.file_size));
-            let Ok(size) = usize::try_from(size) else { continue };
+            let size = section
+                .file_size
+                .min(section.virtual_size.max(section.file_size));
+            let Ok(size) = usize::try_from(size) else {
+                continue;
+            };
             if size == 0 || section.virtual_address == 0 {
                 continue;
             }

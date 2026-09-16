@@ -2799,9 +2799,17 @@ mod tests {
         // latch both write the wide register, and the loop header reads only
         // its low byte.
         let pcode = function(vec![
-            vec![copy(0x1000, register_sized(0, 4), Varnode::constant(0x70, 4))],
+            vec![copy(
+                0x1000,
+                register_sized(0, 4),
+                Varnode::constant(0x70, 4),
+            )],
             vec![copy(0x1010, unique_sized(0, 1), register_sized(0, 1))],
-            vec![copy(0x1020, register_sized(0, 4), Varnode::constant(0x41, 4))],
+            vec![copy(
+                0x1020,
+                register_sized(0, 4),
+                Varnode::constant(0x41, 4),
+            )],
             vec![],
         ]);
         let successors = vec![vec![1], vec![2, 3], vec![1], vec![]];
