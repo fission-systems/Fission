@@ -38,7 +38,7 @@ jobs:
       # a SLEIGH intra-instruction label never resolved, which is the
       # lifter, not a corner. Measured cost: sleigh 253s, emulator 189s,
       # dir 12s, solver 5s.
-      crates: "fission-core,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-loader,fission-pcode,fission-sleigh,fission-static,fission-decompiler,fission-automation,fission-cli,fission-analysis-db,fission-signatures,fission-emulator,fission-solver,fission-dir"
+      crates: "fission-core,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-loader,fission-pcode,fission-sleigh,fission-static,fission-decompiler,fission-cli,fission-analysis-db,fission-signatures,fission-emulator,fission-solver,fission-dir"
       profile: debug
 
   build-windows-heavy:
@@ -55,7 +55,7 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
-      crates: "fission-midend-structuring,fission-pcode,fission-decompiler,fission-automation"
+      crates: "fission-midend-structuring,fission-pcode,fission-decompiler"
       profile: release
       timeout_minutes: 120
 
@@ -67,19 +67,11 @@ jobs:
       profile: release
       upload_artifact: true
 
-  nir-check:
-    name: 🔬 Automation NIR-Check
-    uses: ./.github/workflows/reusable-nir-check.yml
-    with:
-      run_profile: fast
-      functions_limit: "10"
-      update_latest: false
-
   msrv-check:
     name: 🦀 MSRV Check
     uses: ./.github/workflows/reusable-msrv.yml
     with:
-      crates: "fission-midend-structuring,fission-pcode,fission-loader,fission-decompiler,fission-automation"
+      crates: "fission-midend-structuring,fission-pcode,fission-loader,fission-decompiler"
 
   # ── Extended (nightly + manual only; not required for main-push L1) ───────
   test-linux-full:
@@ -109,7 +101,7 @@ jobs:
     if: github.event_name != 'push'
     uses: ./.github/workflows/reusable-coverage.yml
     with:
-      crates: "fission-pcode,fission-loader,fission-automation"
+      crates: "fission-pcode,fission-loader"
       warn_threshold_pct: 60
 
   # Final summary — release-critical always; extended only when not skipped
@@ -119,7 +111,6 @@ jobs:
       - test-linux-release-critical
       - build-macos-heavy
       - test-windows-heavy
-      - nir-check
       - msrv-check
       - test-linux-full
       - coverage
@@ -158,7 +149,6 @@ jobs:
           require_success "Release-critical Linux tests" "${{ needs.test-linux-release-critical.result }}"
           require_success "macOS heavy build" "${{ needs.build-macos-heavy.result }}"
           require_success "Windows heavy tests" "${{ needs.test-windows-heavy.result }}"
-          require_success "NIR-Check" "${{ needs.nir-check.result }}"
           require_success "MSRV" "${{ needs.msrv-check.result }}"
 
           require_success_or_skipped "Full Linux tests (extended)" "${{ needs.test-linux-full.result }}"

@@ -37,7 +37,6 @@ jobs:
       run_script_checks: ${{ steps.filter.outputs.run_script_checks }}
       run_tests: ${{ steps.filter.outputs.run_tests }}
       run_cli_smoke: ${{ steps.filter.outputs.run_cli_smoke }}
-      run_nir_gate: ${{ steps.filter.outputs.run_nir_gate }}
       run_multi_os: ${{ steps.filter.outputs.run_multi_os }}
     steps:
       - uses: actions/checkout@v7
@@ -74,7 +73,6 @@ jobs:
               echo "run_script_checks=true"
               echo "run_tests=true"
               echo "run_cli_smoke=true"
-              echo "run_nir_gate=true"
               echo "run_multi_os=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -93,7 +91,6 @@ jobs:
               echo "run_script_checks=false"
               echo "run_tests=true"
               echo "run_cli_smoke=true"
-              echo "run_nir_gate=true"
               if [ "${{ github.event_name }}" = "push" ]; then
                 echo "run_multi_os=true"
               else
@@ -153,21 +150,21 @@ jobs:
           case "$LANE" in
             docs)
               RUN_SECURITY=false; RUN_LINT=false; RUN_PASS=false; RUN_SCRIPTS=false
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_NIR=false; RUN_MULTI=false
+              RUN_TESTS=false; RUN_SMOKE=false; RUN_MULTI=false
               ;;
             scripts)
               RUN_SECURITY=false; RUN_LINT=false; RUN_PASS=true; RUN_SCRIPTS=true
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_NIR=false; RUN_MULTI=false
+              RUN_TESTS=false; RUN_SMOKE=false; RUN_MULTI=false
               ;;
             ci)
               RUN_SECURITY=$SECURITY_META; RUN_LINT=false; RUN_PASS=true; RUN_SCRIPTS=true
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_NIR=false; RUN_MULTI=false
+              RUN_TESTS=false; RUN_SMOKE=false; RUN_MULTI=false
               # Workflow changes that touch reusable test runners still need a sanity compile? keep pass-gate only.
               if [ "$SECURITY_META" = true ]; then RUN_SECURITY=true; fi
               ;;
             rust)
               RUN_SECURITY=true; RUN_LINT=true; RUN_PASS=true; RUN_SCRIPTS=$SCRIPTS
-              RUN_TESTS=true; RUN_SMOKE=true; RUN_NIR=true
+              RUN_TESTS=true; RUN_SMOKE=true
               if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
                 RUN_MULTI=true
               else
@@ -184,13 +181,12 @@ jobs:
             echo "run_script_checks=${RUN_SCRIPTS}"
             echo "run_tests=${RUN_TESTS}"
             echo "run_cli_smoke=${RUN_SMOKE}"
-            echo "run_nir_gate=${RUN_NIR}"
             echo "run_multi_os=${RUN_MULTI}"
           } >> "$GITHUB_OUTPUT"
 
           echo "Resolved lane=${LANE}"
           echo "  security=${RUN_SECURITY} lint=${RUN_LINT} pass_gate=${RUN_PASS} scripts=${RUN_SCRIPTS}"
-          echo "  tests=${RUN_TESTS} smoke=${RUN_SMOKE} nir=${RUN_NIR} multi_os=${RUN_MULTI}"
+          echo "  tests=${RUN_TESTS} smoke=${RUN_SMOKE} multi_os=${RUN_MULTI}"
 
   # Step 1: Security & Lint
   security-check:
@@ -363,7 +359,7 @@ jobs:
     with:
       os: ubuntu-latest
       # loader → analysis-db → midend/pcode stack (ADR 0010 + 0012 owners)
-      crates: "fission-loader,fission-analysis-db,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode,fission-automation"
+      crates: "fission-loader,fission-analysis-db,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode"
       profile: debug
 
   cli-smoke-linux:
@@ -373,12 +369,6 @@ jobs:
     uses: ./.github/workflows/reusable-cli-smoke.yml
     with:
       profile: debug
-
-  nir-regression-gate:
-    name: 🔬 NIR Regression Gate
-    needs: [changes, test-linux]
-    if: needs.changes.outputs.run_nir_gate == 'true'
-    uses: ./.github/workflows/reusable-nir-regression-gate.yml
 
   # Multi-OS: main push + dispatch, rust/utils lane only
   build-macos:
@@ -398,7 +388,7 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: macos-latest
-      crates: "fission-midend-structuring,fission-pcode,fission-automation,fission-loader"
+      crates: "fission-midend-structuring,fission-pcode,fission-loader"
       profile: debug
 
   build-windows:
@@ -418,7 +408,7 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
-      crates: "fission-midend-structuring,fission-pcode,fission-decompiler,fission-automation"
+      crates: "fission-midend-structuring,fission-pcode,fission-decompiler"
       profile: debug
       timeout_minutes: 90
 
@@ -434,7 +424,6 @@ jobs:
         pass-gate-lint,
         test-linux,
         cli-smoke-linux,
-        nir-regression-gate,
         test-macos,
         test-windows,
       ]
@@ -478,7 +467,6 @@ jobs:
           require_if "${{ needs.changes.outputs.run_pass_gate }}" "Pass-gate lint" "${{ needs.pass-gate-lint.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_tests }}" "Linux tests" "${{ needs.test-linux.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_cli_smoke }}" "CLI smoke" "${{ needs.cli-smoke-linux.result }}" || FAILED=1
-          require_if "${{ needs.changes.outputs.run_nir_gate }}" "NIR regression gate" "${{ needs.nir-regression-gate.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_multi_os }}" "macOS tests" "${{ needs.test-macos.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_multi_os }}" "Windows tests" "${{ needs.test-windows.result }}" || FAILED=1
 

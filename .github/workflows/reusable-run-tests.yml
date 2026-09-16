@@ -10,7 +10,7 @@ on:
       crates:
         type: string
         required: false
-        description: "Specific crates to test (comma-separated, e.g. fission-pcode,fission-automation)"
+        description: "Specific crates to test (comma-separated, e.g. fission-pcode,fission-loader)"
       profile:
         type: string
         required: false

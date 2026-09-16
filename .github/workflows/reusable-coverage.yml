@@ -10,7 +10,7 @@ on:
       crates:
         type: string
         required: false
-        default: "fission-pcode,fission-loader,fission-automation"
+        default: "fission-pcode,fission-loader"
         description: "Crates to measure coverage for (comma-separated)"
       warn_threshold_pct:
         type: number
