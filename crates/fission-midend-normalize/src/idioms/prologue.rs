@@ -206,7 +206,7 @@ fn is_entry_stack_slot_callee_saved_store(stmt: &PreHirStmt) -> bool {
 /// only when the destination pointer is a synthetic stack scaffold name, so
 /// ordinary early stores through parameters or globals are left intact.
 pub fn remove_entry_stack_scaffold_stores(func: &mut PreHirFunction) -> bool {
-    remove_entry_stack_scaffold_stores_from_body(&mut func.body)
+    remove_entry_stack_scaffold_stores_from_body(&mut func.body, &[])
 }
 
 struct EntryStackScaffoldRemovalPlan {
@@ -215,7 +215,17 @@ struct EntryStackScaffoldRemovalPlan {
 }
 
 impl EntryStackScaffoldRemovalPlan {
-    fn prove(body: &[PreHirStmt]) -> Option<Self> {
+    /// `outer` holds the statements that follow `body` at each enclosing
+    /// level, outermost last. The liveness guards below ask "is this name
+    /// still read after the prefix", and when this pass recurses into a
+    /// leading `Block` the answer is not confined to that block: a stack slot
+    /// initialised inside the entry block is routinely read by statements
+    /// after it. Without those slices a live parameter spill counted as zero
+    /// uses and was deleted as scaffold, leaving its local declared and never
+    /// assigned -- observed on ARM Thumb, where `push {lr}` supplies the
+    /// scaffold evidence and the two parameter spills follow it in the same
+    /// block.
+    fn prove(body: &[PreHirStmt], outer: &[&[PreHirStmt]]) -> Option<Self> {
         // The prefix has to be walked with state, not filtered statement by
         // statement: a pointer only counts as scaffold because an earlier
         // statement in this same prefix bound it to a stack address. ARM's
@@ -261,9 +271,15 @@ impl EntryStackScaffoldRemovalPlan {
         // Every name the prefix bound to a stack address, not just the ones
         // the name-based rule recognised: a walking pointer the body reads
         // afterwards is a local the function uses, not scaffold to drop.
-        let alias_escapes_prefix = aliases
-            .iter()
-            .any(|alias| count_ptr_var_rvalue_uses(suffix, alias) > 0);
+        let uses_after = |name: &str| -> usize {
+            count_ptr_var_rvalue_uses(suffix, name)
+                + outer
+                    .iter()
+                    .map(|stmts| count_ptr_var_rvalue_uses(stmts, name))
+                    .sum::<usize>()
+        };
+
+        let alias_escapes_prefix = aliases.iter().any(|alias| uses_after(alias) > 0);
         if alias_escapes_prefix {
             return None;
         }
@@ -275,7 +291,7 @@ impl EntryStackScaffoldRemovalPlan {
                 if let Some(slot) = entry_stack_slot_scaffold_name(stmt) {
                     // A stack-looking binding read by the function body is a
                     // semantic home/local initializer, not removable ABI noise.
-                    return (count_ptr_var_rvalue_uses(suffix, slot) == 0).then_some(index);
+                    return (uses_after(slot) == 0).then_some(index);
                 }
                 Some(index)
             })
@@ -301,16 +317,30 @@ impl EntryStackScaffoldRemovalPlan {
     }
 }
 
-fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<PreHirStmt>) -> bool {
-    if let Some(plan) = EntryStackScaffoldRemovalPlan::prove(body)
+fn remove_entry_stack_scaffold_stores_from_body(
+    body: &mut Vec<PreHirStmt>,
+    outer: &[&[PreHirStmt]],
+) -> bool {
+    if let Some(plan) = EntryStackScaffoldRemovalPlan::prove(body, outer)
         && plan.apply(body)
     {
         return true;
     }
 
-    if let Some(PreHirStmt::Block(inner)) = body.first_mut() {
+    // `split_first_mut` rather than `first_mut`: recursing into the leading
+    // block needs it mutably *and* needs the statements after it immutably,
+    // to hand down as the block's outer tail.
+    let Some((first, rest)) = body.split_first_mut() else {
+        return false;
+    };
+    if let PreHirStmt::Block(inner) = first {
+        let rest: &[PreHirStmt] = rest;
+        let mut nested: Vec<&[PreHirStmt]> = Vec::with_capacity(outer.len() + 1);
+        nested.push(rest);
+        nested.extend_from_slice(outer);
         return remove_entry_stack_scaffold_stores_from_body(
             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner),
+            &nested,
         );
     }
 
@@ -1822,6 +1852,48 @@ mod tests {
 
         assert!(!remove_entry_stack_scaffold_stores(&mut func));
         assert_eq!(func.body.len(), 2);
+    }
+
+    #[test]
+    fn keeps_a_stack_slot_initializer_read_after_the_enclosing_block() {
+        // Every other test here uses a flat body, so none of them reach the
+        // recursion into a leading `Block` -- which is where the liveness
+        // guard used to see only that block's own remainder. Real ARM Thumb
+        // shape: `push {lr}` is the scaffold evidence, the parameter spill
+        // follows it inside the entry block, and the spill's only reads are
+        // statements *after* that block.
+        let mut func = PreHirFunction {
+            name: "spill_then_use_after_block".to_owned(),
+            int_param_offsets: Vec::new(),
+            body: vec![
+                PreHirStmt::Block(std::rc::Rc::new(vec![
+                    scaffold_store("sp", "lr"),
+                    spill_assign("local_6", PreHirExpr::Var("param_2".to_owned())),
+                ])),
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "callee".to_owned(),
+                    args: vec![PreHirExpr::Var("local_6".to_owned())],
+                    ty: u64_ty(),
+                }),
+            ],
+            ..Default::default()
+        };
+
+        remove_entry_stack_scaffold_stores(&mut func);
+
+        let PreHirStmt::Block(inner) = &func.body[0] else {
+            panic!("expected the leading block to survive: {:?}", func.body);
+        };
+        assert!(
+            inner.iter().any(|stmt| matches!(
+                stmt,
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    ..
+                } if name == "local_6"
+            )),
+            "local_6 is read after the block, so its initializer must stay: {inner:?}"
+        );
     }
 
     #[test]
