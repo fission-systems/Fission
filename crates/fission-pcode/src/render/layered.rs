@@ -108,6 +108,62 @@ mod layered_tests {
         );
         assert!(layered.hir.contains("x"));
     }
+
+    /// A mapped-address global reached only through a `for` body still has to
+    /// earn its file-scope declaration.
+    ///
+    /// The decl walk descends into every other compound statement, so a name
+    /// used before the loop was hoisted and one used only inside it was not --
+    /// it stayed a rescued Temp local and printed as a local that is read and
+    /// never assigned. ARM PC-relative literal pools hit this constantly:
+    /// `sub_800a178` in the ARM corpus has four adjacent pool slots, and the
+    /// two read inside its loop were exactly the two that lost their
+    /// declaration.
+    #[test]
+    fn global_referenced_only_in_for_body_is_declared_at_file_scope() {
+        let func = HirFunction {
+            name: "pool_loop".into(),
+            params: vec![],
+            locals: vec![NirBinding {
+                name: "tmp_14001040".into(),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            body: vec![HirStmt::For {
+                init: None,
+                cond: None,
+                update: None,
+                body: vec![HirStmt::Return(Some(HirExpr::Var("tmp_14001040".into())))],
+            }],
+            ..Default::default()
+        };
+        let options = MlilPreviewOptions {
+            sections: vec![(0x1400_1000, 0x1400_2000)],
+            ..Default::default()
+        };
+
+        let code = render_hir_function_with_global_decls(&func, &options);
+        let first_mention = code
+            .find("tmp_14001040")
+            .expect("the name is referenced, so it must appear in the output");
+        let signature = code
+            .find("pool_loop(")
+            .expect("rendered output must contain the function signature");
+        assert!(
+            first_mention < signature,
+            "a mapped-address global reached only through a `for` body must be \
+             declared at file scope, not left as a local nothing assigns:\n{code}"
+        );
+    }
 }
 
 fn render_hir_function_with_profile(
@@ -1201,7 +1257,10 @@ fn collect_global_decls_from_stmts(
                 );
             }
             HirStmt::For {
-                init, cond, update, ..
+                init,
+                cond,
+                update,
+                body,
             } => {
                 if let Some(init) = init {
                     collect_global_decls_from_stmts(
@@ -1230,6 +1289,13 @@ fn collect_global_decls_from_stmts(
                         decls,
                     );
                 }
+                collect_global_decls_from_stmts(
+                    body,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::Return(None)
             | HirStmt::Label(_)
