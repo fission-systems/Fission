@@ -86,6 +86,6 @@ Full SBOM generation is **not** yet automated in CI. Acceptable interim steps:
 
 **Current:** Prefer **version-scoped** notes tied to SemVer tags / GitHub Releases (and a root `CHANGELOG.md` when the project adopts one).
 
-**Archive:** Earlier date-stamped engineering logs (`YYYYMMDD_Changelog.md`) were consolidated under [`docs/changelog/Legacy/`](changelog/Legacy/). [`docs/changelog/new/README.md`](changelog/new/README.md) explains the retired scratch folder.
+**Archive:** Earlier date-stamped engineering logs (`YYYYMMDD_Changelog.md`) were consolidated under [`docs/changelog/Legacy/`](changelog/Legacy/). New releases use version-scoped notes rather than dated logs.
 
 Contributors: see [`CONTRIBUTING.md`](../CONTRIBUTING.md) § Documentation for where to mention user-facing edits.
