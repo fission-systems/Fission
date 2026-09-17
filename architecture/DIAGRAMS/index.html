@@ -1316,11 +1316,8 @@
     TTD["fission-ttd"] --&gt; Dynamic
     Plugin["fission-plugin"] --&gt; Decompiler
     Decompiler --&gt; CLI["fission-cli"]
-    Decompiler --&gt; GUI["fission-tauri"]
     CLI --&gt; Debug["debug surfaces&lt;br/&gt;script / disasm / xrefs / inventory / triage"]
-    GUI --&gt; Debug
-    Plugin --&gt; CLI
-    Plugin --&gt; GUI</code></pre>
+    Plugin --&gt; CLI</code></pre>
 <h2 id="loader-pipeline">Loader Pipeline<a class="headerlink" href="#loader-pipeline" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
     Detect["detect&lt;br/&gt;format family"] --&gt; Probe["probe/load-spec&lt;br/&gt;architecture + load spec"]

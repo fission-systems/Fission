@@ -1368,12 +1368,12 @@
 forbidden cross-stage behaviors that the action pipeline framework enforces.</p>
 <p>Related code:</p>
 <ul>
-<li>Framework: <a href="../crates/fission-pcode/src/nir/action_pipeline/"><code>crates/fission-pcode/src/nir/action_pipeline/</code></a></li>
-<li>Normalize driver: <a href="../crates/fission-pcode/src/nir/normalize/pipeline/groups.rs"><code>crates/fission-pcode/src/nir/normalize/pipeline/groups.rs</code></a> (<code>run_normalize_pipeline</code>)</li>
-<li>Canonical pass sequence: <a href="../crates/fission-pcode/src/nir/normalize/pipeline/run.rs"><code>crates/fission-pcode/src/nir/normalize/pipeline/run.rs</code></a> (<code>run_canonical_normalize_passes</code>)</li>
+<li>Framework: <a href="../../crates/fission-midend-prehir/src/action_pipeline/"><code>crates/fission-midend-prehir/src/action_pipeline/</code></a></li>
+<li>Normalize driver: <a href="../../crates/fission-midend-normalize/src/pipeline/groups.rs"><code>crates/fission-midend-normalize/src/pipeline/groups.rs</code></a> (<code>run_normalize_pipeline</code>)</li>
+<li>Canonical pass sequence: <a href="../../crates/fission-midend-normalize/src/pipeline/run.rs"><code>crates/fission-midend-normalize/src/pipeline/run.rs</code></a> (<code>run_canonical_normalize_passes</code>)</li>
 <li>ActionGroup registry (Ghidra order, migration target): <code>build_normalize_pipeline</code> in <code>groups.rs</code></li>
-<li>Structuring collapse: <a href="../crates/fission-pcode/src/nir/structuring/collapse_driver.rs"><code>crates/fission-pcode/src/nir/structuring/collapse_driver.rs</code></a></li>
-<li>Telemetry: <a href="../crates/fission-pcode/src/nir/ir/build_stats.rs"><code>crates/fission-pcode/src/nir/ir/build_stats.rs</code></a></li>
+<li>Structuring collapse: <a href="../../crates/fission-midend-structuring/src/collapse_driver.rs"><code>crates/fission-midend-structuring/src/collapse_driver.rs</code></a></li>
+<li>Telemetry: <a href="../../crates/fission-midend-core/src/ir/build_stats.rs"><code>crates/fission-midend-core/src/ir/build_stats.rs</code></a></li>
 </ul>
 <h2 id="stage-map">Stage Map<a class="headerlink" href="#stage-map" title="Permanent link">&para;</a></h2>
 <table>
@@ -1484,7 +1484,7 @@ another owner-to-owner dependency.</p>
 <p><code>normalize_hir_function</code> always dispatches through <code>run_normalize_pipeline</code>, which runs the
 Ghidra-ordered ActionGroup registry via <code>build_normalize_pipeline().run()</code>.</p>
 <p>Each ActionGroup maps 1:1 to a stage function in
-<a href="../crates/fission-pcode/src/nir/normalize/pipeline/stages.rs"><code>stages.rs</code></a>. Stage functions
+<a href="../../crates/fission-midend-normalize/src/pipeline/stages.rs"><code>stages.rs</code></a>. Stage functions
 contain the canonical pass sequence (conditional cleanups, admission gates, and fixpoints).
 <code>run_canonical_normalize_passes</code> is a thin sequential wrapper over the same stage functions for
 callers that bypass the ActionGroup driver.</p>
@@ -1609,7 +1609,7 @@ Rule/Action reference:</p>
 </tbody>
 </table>
 <h2 id="admission-gates">Admission Gates<a class="headerlink" href="#admission-gates" title="Permanent link">&para;</a></h2>
-<p>Centralized in <a href="../crates/fission-pcode/src/nir/action_pipeline/gates.rs"><code>action_pipeline/gates.rs</code></a>:</p>
+<p>Centralized in <a href="../../crates/fission-midend-prehir/src/action_pipeline/gates.rs"><code>action_pipeline/gates.rs</code></a>:</p>
 <table>
 <thead>
 <tr>

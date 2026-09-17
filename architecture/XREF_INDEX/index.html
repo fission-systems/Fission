@@ -1280,7 +1280,7 @@
 <h2 id="ownership">Ownership<a class="headerlink" href="#ownership" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>fission-static</code></strong> owns <a href="../../crates/fission-static/src/analysis/xref_index/mod.rs"><code>xref_index</code></a>: <code>XrefRecord</code>, <code>XrefIndexBuilder</code>, merge helpers, and queries (<code>refs_from_address</code>, <code>refs_to_address</code>, summaries).</li>
-<li><strong><code>fission-cli</code></strong> / <strong><code>fission-tauri</code></strong> consume the public API only (no duplicated decode logic).</li>
+<li><strong><code>fission-cli</code></strong> consumes the public API only (no duplicated decode logic).</li>
 </ul>
 <h2 id="layers-today">Layers today<a class="headerlink" href="#layers-today" title="Permanent link">&para;</a></h2>
 <table>
@@ -1317,7 +1317,7 @@
 </ul>
 <h2 id="p-code-layer-planned-hook">P-code layer (planned hook)<a class="headerlink" href="#p-code-layer-planned-hook" title="Permanent link">&para;</a></h2>
 <p><strong>Goal:</strong> emit xref records whose evidence cites pcode ops / VARNODE flows once lifted artifacts exist, without rescuing semantics via pretty-printed decompiler text.</p>
-<p><strong>Natural seam:</strong> <a href="../../crates/fission-decompiler/src/rust_sleigh/pipeline.rs"><code>decompile_with_rust_sleigh</code></a> (invoked from <a href="../../crates/fission-cli/src/cli/oneshot/rust_decomp/mod.rs"><code>rust_decomp/mod.rs</code></a> on the non-native CLI path). After pcode is produced for a function slice but <strong>before</strong> NIR normalization consumes irreversible summaries, walk pcode ops that denote memory/register flows with absolute addresses:</p>
+<p><strong>Natural seam:</strong> <a href="../../crates/fission-decompiler/src/pipeline/rust_sleigh/mod.rs"><code>decompile_with_rust_sleigh</code></a> (invoked from <a href="../../crates/fission-cli/src/cli/oneshot/rust_decomp/mod.rs"><code>rust_decomp/mod.rs</code></a> on the non-native CLI path). After pcode is produced for a function slice but <strong>before</strong> NIR normalization consumes irreversible summaries, walk pcode ops that denote memory/register flows with absolute addresses:</p>
 <ol>
 <li>Restrict promotions using existing guards (executable range checks, confidence, symbol correlation); never reinterpret arbitrary immediates as pointers.</li>
 <li>Map each qualifying pcode tuple to <code>XrefKind</code> / <code>XrefEvidence { layer: Pcode, pcode_op: Some(...), … }</code>.</li>

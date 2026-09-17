@@ -1321,17 +1321,17 @@
 <p>Symptoms: empty bodies, chaotic control flow, telemetry explosions.</p>
 <ul>
 <li>Inspect embedded counters via automation summaries (<code>nir_build_stats_totals</code>, <a href="../../QUALITY_METRICS/"><code>docs/QUALITY_METRICS.md</code></a>).</li>
-<li>Canonical counters live in <a href="../../crates/fission-pcode/src/nir/ir/build_stats.rs"><code>crates/fission-pcode/src/nir/ir/build_stats.rs</code></a>.</li>
+<li>Canonical counters live in <a href="../../crates/fission-midend-core/src/ir/build_stats.rs"><code>crates/fission-midend-core/src/ir/build_stats.rs</code></a>.</li>
 </ul>
 <h2 id="5-structuring-normalization">5. Structuring / normalization<a class="headerlink" href="#5-structuring-normalization" title="Permanent link">&para;</a></h2>
 <p>Symptoms: duplicated labels, collapsed loops, odd regions.</p>
 <ul>
-<li>Fix in <a href="../../crates/fission-pcode/src/nir/structuring/"><code>crates/fission-pcode/src/nir/structuring/</code></a> per child <code>AGENTS.md</code>.</li>
+<li>Fix in <a href="../../crates/fission-pcode/src/midend/structuring/"><code>crates/fission-pcode/src/midend/structuring/</code></a> per child <code>AGENTS.md</code>.</li>
 </ul>
 <h2 id="6-rendering">6. Rendering<a class="headerlink" href="#6-rendering" title="Permanent link">&para;</a></h2>
 <p>Symptoms: types look fine internally but pseudocode unreadable.</p>
 <ul>
-<li>Only after NIR/HIR matches intent should you tune <a href="../../crates/fission-pcode/src/nir/printer.rs"><code>printer.rs</code></a> paths.</li>
+<li>Only after NIR/HIR matches intent should you tune <a href="../../crates/fission-pcode/src/render/printer.rs"><code>printer.rs</code></a> paths.</li>
 </ul>
 <h2 id="7-regression-scale-up">7. Regression scale-up<a class="headerlink" href="#7-regression-scale-up" title="Permanent link">&para;</a></h2>
 <p>When the single function is understood:</p>
