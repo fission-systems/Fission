@@ -142,11 +142,7 @@ artifacts/
 │   └── test-results.json
 │
 ├── ci-heavy-{github.run_id}/
-│   ├── corpus-validation.json
 │   ├── test-report.html
-│   ├── nir-check/
-│   │   ├── per_binary/
-│   │   ├── summary.json
 │   └── regression-report.md
 │
 └── releases/

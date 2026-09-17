@@ -245,6 +245,6 @@ source of the contract.
 
 ## Non-Goals
 
-- `fission-cli` and `fission-tauri` are not semantic repair layers.
+- `fission-cli` is not a semantic repair layer.
 - `fission-static` should not regain decompiler policy ownership.
 - printer or postprocess should not recreate structure when proof is absent.

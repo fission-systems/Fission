@@ -62,13 +62,13 @@ Do **not** copy RetDec logic into production paths to “paper over” semantic 
 
 | Item | Location | Upstream | License (summary) | Runtime vs reference |
 |------|-----------|----------|-------------------|----------------------|
-| `libsla` / `libsla-sys` vendor stubs | [`vendor/libsla`](./vendor/libsla), [`vendor/libsla-sys`](./vendor/libsla-sys) | Ghidra-licensed components / FFI bindings as documented in-tree | See respective `LICENSE` files under those directories | **Build/runtime** linkage surface — follow [`docs/build/BUILD.md`](docs/build/BUILD.md). |
+| `libsla` / `libsla-sys` vendor stubs | [`vendor/libsla`](./vendor/libsla), [`vendor/libsla-sys`](./vendor/libsla-sys) | Ghidra-licensed components / FFI bindings as documented in-tree | See respective `LICENSE` files under those directories | **Build/runtime** linkage surface. |
 
 ---
 
 ## Other crates.io / npm dependencies
 
-Rust crates are declared in workspace `Cargo.toml` files; npm packages for the desktop UI live under [`crates/fission-tauri/package-lock.json`](./crates/fission-tauri/package-lock.json). Automated update proposals may arrive via [Dependabot](.github/dependabot.yml); release hygiene is described in [`docs/RELEASE.md`](docs/RELEASE.md).
+Rust crates are declared in workspace `Cargo.toml` files. Automated update proposals may arrive via [Dependabot](.github/dependabot.yml); release hygiene is described in [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ---
 

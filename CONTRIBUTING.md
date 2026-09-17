@@ -470,23 +470,11 @@ Runs on `main`, nightly schedule, and manual dispatch:
 
 - Linux full validation
   - broader Rust test coverage
-  - Tauri frontend build (`npm run build`)
   - decompiler smoke validation
 - Windows heavy build/test
-- automation nir-check lanes (`nir`, `regression`) with artifact upload
+- MSRV check and extended coverage
 
 Heavy checks may take longer and are intentionally offloaded to GitHub.
-
-### Automation artifacts
-
-Heavy workflow uploads `benchmark/artifacts/automation/` so contributors can inspect:
-
-- `summary.json` / `summary.md`
-- `decision_insights.json`
-- `diagnosis.json`
-- per-binary candidate outputs
-
-If your PR impacts decompilation quality logic, review these artifacts before concluding regression status.
 
 ---
 

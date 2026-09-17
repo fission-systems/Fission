@@ -47,11 +47,8 @@ flowchart BT
     TTD["fission-ttd"] --> Dynamic
     Plugin["fission-plugin"] --> Decompiler
     Decompiler --> CLI["fission-cli"]
-    Decompiler --> GUI["fission-tauri"]
     CLI --> Debug["debug surfaces<br/>script / disasm / xrefs / inventory / triage"]
-    GUI --> Debug
     Plugin --> CLI
-    Plugin --> GUI
 ```
 
 ## Loader Pipeline

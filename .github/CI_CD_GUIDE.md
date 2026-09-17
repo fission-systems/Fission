@@ -23,9 +23,9 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 │  - reusable-run-tests.yml             │
 │  - reusable-cli-smoke.yml              │
 │  - reusable-build-cli.yml             │
-│  - reusable-nir-check.yml             │
-│  - reusable-corpus-validation.yml     │
-│  - reusable-benchmark.yml             │
+│  - reusable-coverage.yml              │
+│  - reusable-miri.yml                  │
+│  - reusable-msrv.yml                  │
 │  - reusable-upload-artifacts.yml       │
 └─────────────────────────────────────────┘
          ↓ (uses)
@@ -226,10 +226,9 @@ test-new-module:
 | `reusable-lint-format.yml` | os, exclude_crates | Code style checks |
 | `reusable-run-tests.yml` | os, crates, profile, coverage | Run tests |
 | `reusable-build-cli.yml` | os, target, profile | Build CLI |
-
-| `reusable-nir-check.yml` | run_profile, functions_limit | NIR validation |
-| `reusable-corpus-validation.yml` | - | Corpus validation |
-| `reusable-benchmark.yml` | (see workflow) | Full benchmark lane |
+| `reusable-coverage.yml` | crates, warn_threshold_pct | Coverage (extended) |
+| `reusable-miri.yml` | (see workflow) | Miri, for crates with reachable unsafe |
+| `reusable-msrv.yml` | crates | Minimum supported Rust version |
 | `reusable-upload-artifacts.yml` | artifact_name, paths | Upload artifacts |
 
 ---

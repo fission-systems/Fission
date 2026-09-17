@@ -5,12 +5,12 @@ forbidden cross-stage behaviors that the action pipeline framework enforces.
 
 Related code:
 
-- Framework: [`crates/fission-pcode/src/nir/action_pipeline/`](../crates/fission-pcode/src/nir/action_pipeline/)
-- Normalize driver: [`crates/fission-pcode/src/nir/normalize/pipeline/groups.rs`](../crates/fission-pcode/src/nir/normalize/pipeline/groups.rs) (`run_normalize_pipeline`)
-- Canonical pass sequence: [`crates/fission-pcode/src/nir/normalize/pipeline/run.rs`](../crates/fission-pcode/src/nir/normalize/pipeline/run.rs) (`run_canonical_normalize_passes`)
+- Framework: [`crates/fission-midend-prehir/src/action_pipeline/`](../../crates/fission-midend-prehir/src/action_pipeline/)
+- Normalize driver: [`crates/fission-midend-normalize/src/pipeline/groups.rs`](../../crates/fission-midend-normalize/src/pipeline/groups.rs) (`run_normalize_pipeline`)
+- Canonical pass sequence: [`crates/fission-midend-normalize/src/pipeline/run.rs`](../../crates/fission-midend-normalize/src/pipeline/run.rs) (`run_canonical_normalize_passes`)
 - ActionGroup registry (Ghidra order, migration target): `build_normalize_pipeline` in `groups.rs`
-- Structuring collapse: [`crates/fission-pcode/src/nir/structuring/collapse_driver.rs`](../crates/fission-pcode/src/nir/structuring/collapse_driver.rs)
-- Telemetry: [`crates/fission-pcode/src/nir/ir/build_stats.rs`](../crates/fission-pcode/src/nir/ir/build_stats.rs)
+- Structuring collapse: [`crates/fission-midend-structuring/src/collapse_driver.rs`](../../crates/fission-midend-structuring/src/collapse_driver.rs)
+- Telemetry: [`crates/fission-midend-core/src/ir/build_stats.rs`](../../crates/fission-midend-core/src/ir/build_stats.rs)
 
 ## Stage Map
 
@@ -46,7 +46,7 @@ another owner-to-owner dependency.
 Ghidra-ordered ActionGroup registry via `build_normalize_pipeline().run()`.
 
 Each ActionGroup maps 1:1 to a stage function in
-[`stages.rs`](../crates/fission-pcode/src/nir/normalize/pipeline/stages.rs). Stage functions
+[`stages.rs`](../../crates/fission-midend-normalize/src/pipeline/stages.rs). Stage functions
 contain the canonical pass sequence (conditional cleanups, admission gates, and fixpoints).
 `run_canonical_normalize_passes` is a thin sequential wrapper over the same stage functions for
 callers that bypass the ActionGroup driver.
@@ -109,7 +109,7 @@ Retained idiom owners: `prologue`, `subflow`, `split_flow`, `branch_hoist`.
 
 ## Admission Gates
 
-Centralized in [`action_pipeline/gates.rs`](../crates/fission-pcode/src/nir/action_pipeline/gates.rs):
+Centralized in [`action_pipeline/gates.rs`](../../crates/fission-midend-prehir/src/action_pipeline/gates.rs):
 
 | Gate | Threshold | Used by |
 |---|---|---|

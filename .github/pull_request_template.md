@@ -59,12 +59,12 @@ comparison_outcome: <improved|regressed|mixed|unchanged|n/a>
 
 ## Telemetry and Reporting
 
-- [ ] Changes to decompiler semantics or inventory output: **confirmed** [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs) consumers stay aligned, or this PR updates them together with tests.
-- [ ] No parallel ad-hoc telemetry JSON outside the established `summary.json` / benchmark contracts ([`docs/QUALITY_METRICS.md`](docs/QUALITY_METRICS.md)).
+- [ ] Changes to decompiler semantics or inventory output: **confirmed** [`NirBuildStats`](../crates/fission-midend-core/src/ir/build_stats.rs) consumers stay aligned, or this PR updates them together with tests.
+- [ ] No parallel ad-hoc telemetry JSON outside the established `summary.json` / benchmark contracts ([`docs/QUALITY_METRICS.md`](../docs/QUALITY_METRICS.md)).
 
 ## ADR / Design Traceability
 
-- [ ] Architectural trade-offs are covered by an existing [`docs/adr/`](docs/adr/) decision, **or** this PR adds/updates an ADR.
+- [ ] Architectural trade-offs are covered by an existing [`docs/adr/`](../docs/adr/) decision, **or** this PR adds/updates an ADR.
 - ADR link(s): <!-- e.g. `docs/adr/0001-cli-first-external-surface.md` -->
 
 ## Risk Notes

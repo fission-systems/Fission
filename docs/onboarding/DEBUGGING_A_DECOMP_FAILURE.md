@@ -29,19 +29,19 @@ Symptoms: absurd pcode volume or decode aborts.
 Symptoms: empty bodies, chaotic control flow, telemetry explosions.
 
 - Inspect embedded counters via automation summaries (`nir_build_stats_totals`, [`docs/QUALITY_METRICS.md`](../QUALITY_METRICS.md)).
-- Canonical counters live in [`crates/fission-pcode/src/nir/ir/build_stats.rs`](../../crates/fission-pcode/src/nir/ir/build_stats.rs).
+- Canonical counters live in [`crates/fission-midend-core/src/ir/build_stats.rs`](../../crates/fission-midend-core/src/ir/build_stats.rs).
 
 ## 5. Structuring / normalization
 
 Symptoms: duplicated labels, collapsed loops, odd regions.
 
-- Fix in [`crates/fission-pcode/src/nir/structuring/`](../../crates/fission-pcode/src/nir/structuring/) per child `AGENTS.md`.
+- Fix in [`crates/fission-pcode/src/midend/structuring/`](../../crates/fission-pcode/src/midend/structuring/) per child `AGENTS.md`.
 
 ## 6. Rendering
 
 Symptoms: types look fine internally but pseudocode unreadable.
 
-- Only after NIR/HIR matches intent should you tune [`printer.rs`](../../crates/fission-pcode/src/nir/printer.rs) paths.
+- Only after NIR/HIR matches intent should you tune [`printer.rs`](../../crates/fission-pcode/src/render/printer.rs) paths.
 
 ## 7. Regression scale-up
 

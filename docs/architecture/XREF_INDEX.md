@@ -5,7 +5,7 @@ This note captures **ownership**, **surface APIs**, and the intended **p-code at
 ## Ownership
 
 - **`fission-static`** owns [`xref_index`](../../crates/fission-static/src/analysis/xref_index/mod.rs): `XrefRecord`, `XrefIndexBuilder`, merge helpers, and queries (`refs_from_address`, `refs_to_address`, summaries).
-- **`fission-cli`** / **`fission-tauri`** consume the public API only (no duplicated decode logic).
+- **`fission-cli`** consumes the public API only (no duplicated decode logic).
 
 ## Layers today
 
@@ -26,7 +26,7 @@ Confidence follows [`fission_loader::Confidence`](../../crates/fission-loader/sr
 
 **Goal:** emit xref records whose evidence cites pcode ops / VARNODE flows once lifted artifacts exist, without rescuing semantics via pretty-printed decompiler text.
 
-**Natural seam:** [`decompile_with_rust_sleigh`](../../crates/fission-decompiler/src/rust_sleigh/pipeline.rs) (invoked from [`rust_decomp/mod.rs`](../../crates/fission-cli/src/cli/oneshot/rust_decomp/mod.rs) on the non-native CLI path). After pcode is produced for a function slice but **before** NIR normalization consumes irreversible summaries, walk pcode ops that denote memory/register flows with absolute addresses:
+**Natural seam:** [`decompile_with_rust_sleigh`](../../crates/fission-decompiler/src/pipeline/rust_sleigh/mod.rs) (invoked from [`rust_decomp/mod.rs`](../../crates/fission-cli/src/cli/oneshot/rust_decomp/mod.rs) on the non-native CLI path). After pcode is produced for a function slice but **before** NIR normalization consumes irreversible summaries, walk pcode ops that denote memory/register flows with absolute addresses:
 
 1. Restrict promotions using existing guards (executable range checks, confidence, symbol correlation); never reinterpret arbitrary immediates as pointers.
 2. Map each qualifying pcode tuple to `XrefKind` / `XrefEvidence { layer: Pcode, pcode_op: Some(...), … }`.
