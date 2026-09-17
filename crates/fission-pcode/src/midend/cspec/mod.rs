@@ -1009,3 +1009,57 @@ mod group_slot_tests {
         )));
     }
 }
+
+#[cfg(test)]
+mod arm_stack_pentry_tests {
+    use super::*;
+    use std::path::Path;
+
+    /// ARM's own `.cspec` says where stack-passed arguments begin, so the ABI
+    /// data behind `param_5` is present even though no ARM function ever
+    /// recovers one.
+    ///
+    /// This pins the *data* half of that gap. The gap itself is in the
+    /// consumers (`midend/abi.rs`), which gate stack-argument recovery on
+    /// `is_64bit` or `X86_32` and so reject ARM32 whatever this resolves to.
+    #[test]
+    fn arm_default_proto_declares_a_stack_argument_base() {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils/sleigh-specs/languages/ARM");
+        assert!(
+            dir.is_dir(),
+            "ARM sleigh specs are committed and must be present: {dir:?}"
+        );
+
+        let doc = CspecDocument::parse_file(&dir.join("ARM.cspec")).expect("parse ARM.cspec");
+        let proto = doc.default_proto.as_ref().expect("ARM default_proto");
+
+        let stack_pentry = proto.input.iter().find_map(|pentry| match pentry {
+            CspecPentry::Stack { offset } => Some(*offset),
+            CspecPentry::Register { .. } => None,
+        });
+        assert_eq!(
+            stack_pentry,
+            Some(0),
+            "ARM.cspec declares <addr offset=\"0\" space=\"stack\"/> for overflow args"
+        );
+
+        let mut reg_map = SlaRegisterMap::default();
+        for i in 0..13_u64 {
+            reg_map.insert(format!("r{i}"), (0x20 + i * 4, 4));
+        }
+        reg_map.insert("sp".into(), (0x54, 4));
+        reg_map.insert("lr".into(), (0x58, 4));
+
+        let resolved = doc.resolve(&reg_map);
+        let rp = resolved
+            .default_proto
+            .expect("ARM prototype resolves against a register map");
+        assert_eq!(
+            rp.stack_arg_base,
+            Some(0),
+            "stack_arg_base is the value the abi.rs consumers would use"
+        );
+        assert_eq!(rp.extrapop, 0, "ARM pushes no return address on the stack");
+    }
+}
