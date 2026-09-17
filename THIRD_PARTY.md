@@ -2,7 +2,7 @@
 
 **Last verified:** 2026-05-02
 
-This document satisfies the practical intent of [`CLA.md`](./CLA.md) § “Third-Party Material”: clearly identify bundled third-party trees, their licenses, whether they ship in release artifacts, and how to refresh them.
+This document identifies bundled third-party trees, their licenses, whether they ship in release artifacts, and how to refresh them. Attributions that Apache-2.0 § 4(d) requires to travel with a distribution are collected in [`NOTICE`](./NOTICE).
 
 Normative architecture remains [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md). This file focuses on **license, source, scope, and update procedure**.
 

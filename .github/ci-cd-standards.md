@@ -189,7 +189,7 @@ artifacts/
 ### Dependency Checks
 - `cargo deny check all`: runs on all PRs
   - Known CVE validation
-  - License verification (AGPL-3.0-or-later)
+  - License verification (Apache-2.0)
   - Source verification
 
 ### Permission Policy

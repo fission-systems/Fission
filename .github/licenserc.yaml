@@ -1,6 +1,6 @@
 header:
   license:
-    spdx-id: MIT
+    spdx-id: Apache-2.0
     copyright-owner: Fission Contributors
     content: |
       Copyright 2026 Fission Contributors

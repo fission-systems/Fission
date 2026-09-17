@@ -127,8 +127,6 @@ allow = [
     "Zlib",
     "Unlicense",
     "Unicode-3.0",
-    # Workspace crates publish under AGPL (see CONTRIBUTING / crate manifests).
-    "AGPL-3.0-or-later",
     # Transitive via Tauri / dirs (Servo cssparser, selectors, option-ext, …).
     "MPL-2.0",
     # Transitive via Dioxus/reqwest dependencies

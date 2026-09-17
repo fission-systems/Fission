@@ -1,0 +1,50 @@
+Fission
+Copyright 2026 Fission Contributors
+
+This product is licensed under the Apache License, Version 2.0. See LICENSE.
+
+This product includes or derives from third-party material listed below.
+Full provenance, versions, and refresh procedures are in THIRD_PARTY.md.
+
+------------------------------------------------------------------------------
+Ghidra
+Copyright (C) National Security Agency
+Licensed under the Apache License, Version 2.0.
+
+  Sleigh specifications, processor definitions, and the opinion/data tables
+  under utils/ghidra-data/ are derived from Ghidra releases. Algorithms in
+  crates/fission-sleigh/ and crates/fission-pcode/ follow Ghidra's published
+  semantics. See utils/ghidra-data/NOTICE for the upstream notice.
+
+------------------------------------------------------------------------------
+Z3 Theorem Prover
+Copyright (c) Microsoft Corporation
+Licensed under the MIT License.
+
+  The restoring-division circuit in crates/fission-solver/src/aig.rs
+  (add_udiv_urem) is ported from Z3's mk_udiv_urem in
+  bit_blaster_tpl_def.h.
+
+------------------------------------------------------------------------------
+Detect It Easy
+Copyright (c) hors<horsicq@gmail.com>
+Licensed under the MIT License.
+
+  Signature databases and rules under utils/signatures/die/detect-it-easy/
+  are redistributed as versioned corpus data. See the bundled LICENSE in
+  that directory.
+
+------------------------------------------------------------------------------
+Cranelift (Bytecode Alliance)
+Licensed under the Apache License, Version 2.0 with LLVM exception.
+
+  crates/fission-emulator depends on the cranelift-* crates from crates.io.
+  The vendored copy under vendor/cranelift-0.133.1/ is reference-only and is
+  not linked into any build.
+
+------------------------------------------------------------------------------
+Reference-only trees
+
+  vendor/ contains third-party sources kept for reading and comparison only.
+  No production path depends on them at build or runtime. Each carries its
+  own license; see vendor/MANIFEST.md and THIRD_PARTY.md.

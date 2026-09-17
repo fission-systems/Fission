@@ -8,7 +8,6 @@ First off, thank you for considering contributing to Fission! It's people like y
 
 - [Code of Conduct](#code-of-conduct)
 - [How Can I Contribute?](#how-can-i-contribute)
-- [Contributor License Agreement](#contributor-license-agreement)
 - [License And Source Header Policy](#license-and-source-header-policy)
 - [Development Setup](#development-setup)
 - [Coding Standards](#coding-standards)
@@ -102,20 +101,12 @@ Contributions are made through pull requests. See [Pull Request Process](#pull-r
 - Adding support for new binary formats
 - Improving error messages
 
-## Contributor License Agreement
-
-Fission accepts contributions under the Contributor License Agreement in [`CLA.md`](./CLA.md).
-
-By submitting a pull request or other intentional contribution to the project, you agree to that CLA.
-
-This is required so the core engine can remain open while preserving the ability to operate Fission as an open-core project.
-
 ## License And Source Header Policy
 
 Fission uses repository-level licensing as the default source of truth:
 
 - the repository license is defined by [`LICENSE`](./LICENSE)
-- public Rust packages also declare `license = "AGPL-3.0-or-later"` in their `Cargo.toml`
+- public Rust packages also declare `license = "Apache-2.0"` in their `Cargo.toml`
 
 Current source header policy:
 
@@ -132,7 +123,7 @@ Use a short SPDX-style header in cases like:
 Preferred short header format:
 
 ```text
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 ```
 
 Do not add mixed or ad-hoc custom headers without a clear reason. If a contribution introduces third-party code or unusual attribution requirements, document that explicitly in the pull request.
@@ -639,9 +630,9 @@ cargo doc --document-private-items
 
 ## License
 
-By contributing to Fission, you agree that your contributions are governed by the repository license and the Contributor License Agreement in [`CLA.md`](./CLA.md).
+By contributing to Fission, you agree that your contributions are governed by the repository license.
 
-For the public repository, the project license is AGPL-3.0-or-later.
+The project license is Apache-2.0.
 
 ---
 

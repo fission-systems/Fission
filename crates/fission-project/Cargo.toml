@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Fission Dev Team"]
 description = "What an analyst decided about a binary, kept between runs"
 repository = "https://github.com/fission-systems/Fission"
-license = "AGPL-3.0-or-later"
+license = "Apache-2.0"
 keywords = ["fission", "reverse-engineering", "project"]
 categories = ["development-tools"]
 

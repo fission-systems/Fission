@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/fission-systems/Fission/actions/workflows/ci.yml/badge.svg)](https://github.com/fission-systems/Fission/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
-[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 </div>
 
@@ -12,83 +12,20 @@
 
 # Fission
 
-**Fission is working toward taking a compiled binary back to a project you can
-build and run again.** Not a listing to read — a tree that compiles, links, and
-behaves the way the original did.
+A Rust-native reverse-engineering workspace. It loads binaries, lifts
+instruction semantics through Ghidra-style Sleigh specifications, and owns
+everything after that — its own IR, structuring, type recovery, and rendering.
 
-That is the target, and it is not reached. Decompiling one binary's 68
-functions and compiling them as a single unit currently stops on 20 errors,
-every one of them a missing or duplicated *declaration* rather than a wrong
-statement. Where the work stands against each axis is below.
+The long-term target is restoration rather than readability: taking a compiled
+binary back to a project that builds and runs again, not a listing to read.
+That target is **not reached**. Decompiling one binary's 68 functions and
+compiling them as a single unit currently stops on 20 errors, every one of them
+a missing or duplicated *declaration* rather than a wrong statement.
 
-Fission is a Rust-native reverse-engineering workspace. It loads binaries,
-lifts instruction semantics through Ghidra-style Sleigh specifications, and
-owns everything after that — its own IR, structuring, type recovery,
-rendering, and quality gates — in Rust.
-
-Restoration sets the standards, and they are stricter than readability's.
-Output that reads well but drops a write to a global is fine to skim and
-useless to rebuild from, so correctness is checked by execution rather than by
-eye: `fission-dir` evaluates the decompiled body, runs the same machine code
-under `fission-emulator`, and compares. What it cannot prove it reports as an
-assumption instead of hiding.
-
-## Where it stands
-
-Measured on [DecBench](https://decbench.com)'s sample set — 224 binaries, 250
-functions, scored by the benchmark's own metrics. The published row is what the
-maintainer's ingest produced; the local column is our harness, whose denominators
-are smaller because it cannot rebuild a source CFG for every row.
-
-| | v0.1.9 | v0.2.1 | v0.2.3 (local) |
-|---|---|---|---|
-| Structure (GED), exact matches | — | 51 / 246 | **63–64** / 233 |
-| Types, exact matches (code-only parser) | — | 9 / 235 | 8 / 222 |
-| Union — perfect on ≥1 metric | — | 56 / 250 | **66–67** / 250 |
-| Functions decompiled | 250/250 | 250/250 | 250/250 |
-
-DecBench scores three axes and ranks by their union. **Structure** is a graph
-edit distance against the CFG the compiler was given; **types** compares
-recovered variables against DWARF; **byte_match** recompiles the output and
-diffs the assembly. All three count only *exact* matches — a near miss scores
-the same as a miss.
-
-### What the metrics do not see
-
-A benchmark that scores CFG shape and declared types is blind to whether the
-emitted C *does what the binary does*. v0.2.3 fixed a class of defect found by
-diffing recompiled assembly rather than by any metric moving:
-
-- writes to absolute-addressed globals were dropped (1 of 46 reached the output;
-  now 30, and it had been that way since v0.1.9)
-- every call site carried the return address as a trailing argument, on 66 of
-  250 rows
-- argument registers were read across an intervening call, handing one call's
-  arguments to the next
-- a receiver was materialized for functions that return nothing (`rax = free(p)`)
-
-None of these moved a score by more than a row. All of them were wrong.
-
-### On `goto` counts
-
-Earlier releases reported `goto` density as a headline number, and v0.2.0 drove
-it from 2,089 to 621 on this corpus. That framing is retired.
-
-The structure metric is purely topological: it costs a matched node pair
-`|out-degree difference| + |in-degree difference|`, and nothing else — statement
-text, names, casts and types are invisible to it. `goto` count is not part of
-that, and selecting between structuring candidates on it does not help: forcing
-every one of the six alternative drivers onto the near-miss functions yields
-**zero** additional exact matches. v0.2.3 optimizes structural accuracy instead,
-and the `goto` count rose to 1,087 as a consequence.
-
-Fission also runs an execution differential: evaluate the decompiled body, run
-the same machine code under `fission-emulator`, and compare. It catches
-semantics-preserving claims that are not — including a deliberately injected
-"negate every `if` condition" sabotage.
-
-See [`docs/changelog/`](docs/changelog/) for how each number was reached,
-including the approaches that were measured and rejected.
+Because the goal is a tree that rebuilds, correctness is checked by execution
+rather than by eye: `fission-dir` evaluates the decompiled body, runs the same
+machine code under `fission-emulator`, and compares. What it cannot prove it
+reports as an assumption instead of hiding.
 
 ## Quick start
 
@@ -97,31 +34,28 @@ Requires Rust 1.85+ and [`cargo-nextest`](https://nexte.st/).
 ```bash
 git clone https://github.com/fission-systems/Fission.git
 cd Fission
-```
-
-Real decompilation needs Sleigh specifications and signature data. Both are
-in `utils/`, which is committed — the clone already has them, so there is
-nothing to download. (Only `utils/source/`, the inputs the packed `.fpk`
-tables are built from, stays out of git.)
-
-```bash
 cargo build -p fission-cli --release
 ./target/release/fission_cli --help
 ```
 
-For local iteration prefer `--profile quick-release`: `[profile.release]`
-uses fat LTO and `codegen-units = 1`, which serializes linking and dominates
-rebuild time. `quick-release` drops both but keeps `opt-level = 3` —
-measured ~2.9x faster on a one-crate rebuild (44s → 15s) with byte-identical
-output on the regression set. Use plain `--release` for anything feeding a
-benchmark or a perf measurement.
+Sleigh specifications and signature data live in `utils/`, which is committed —
+the clone already has them, nothing to download. (Only `utils/source/`, the
+inputs the packed `.fpk` tables are built from, stays out of git.)
 
 ```bash
 fission_cli info    <binary>          # format, architecture, provenance
 fission_cli list    <binary>          # discovered functions
+fission_cli disasm  <binary> --addr 0x1400
 fission_cli decomp  <binary> --addr 0x1400010a0
 fission_cli decomp  <binary> --all --json
+fission_cli xrefs   <binary> --to 0x140002000
 ```
+
+For local iteration prefer `--profile quick-release`. `[profile.release]` uses
+fat LTO and `codegen-units = 1`, which serializes linking and dominates rebuild
+time; `quick-release` drops both but keeps `opt-level = 3` — measured ~2.9x
+faster on a one-crate rebuild (44s → 15s) with byte-identical output on the
+regression set. Use plain `--release` for anything feeding a benchmark.
 
 Full command reference: [`docs/CLI.md`](docs/CLI.md).
 
@@ -136,7 +70,7 @@ Binary bytes
   → fission-pcode  HIR      human-readable derivation
   → structuring, cleanup, rendering
   → fission-decompiler      result contracts
-  → CLI, TUI, GUI, automation
+  → CLI, TUI, GUI
 ```
 
 Two output layers with different contracts:
@@ -148,8 +82,8 @@ Two output layers with different contracts:
 
 ### Structuring
 
-The interesting part. Fission implements all three published approaches
-against one substrate and lets them compete per function:
+Fission implements all three published approaches against one substrate and
+lets them compete per function:
 
 | Approach | Reference | Module |
 |---|---|---|
@@ -159,22 +93,40 @@ against one substrate and lets them compete per function:
 
 The substrate is `CollapseGraph`: a CFG that **shrinks** as regions fold, so
 each match sees the already-simplified shape. Every reference implementation
-folds a live graph; Fission used to analyse a static one with side tables,
-and that was the root architectural gap.
+folds a live graph; Fission used to analyse a static one with side tables, and
+that was the root architectural gap.
 
 Drivers do not pre-empt each other. Each *offers* a candidate and
-`structuring_quality` decides, comparing raw, normalized, and full
-post-layout output — a candidate that looks worse before cleanup routinely
-wins after it. `goto` count must strictly drop; destroying a recovered
-`switch` or leaving empty `if` shells is a hard veto; nesting depth, guard
-formula size, and statement count are budgets scaled by how many jumps the
-candidate actually removed.
+`structuring_quality` decides, comparing raw, normalized, and full post-layout
+output — a candidate that looks worse before cleanup routinely wins after it.
 
 That admission rule is known to be optimizing the wrong thing. Forcing all six
-drivers on the near-miss functions yields zero additional exact matches, and
-`goto` count does not track the structural distance the benchmark scores. The
-open work is finding a signal that does — one computable without the source CFG,
-which is the constraint that makes it hard.
+drivers onto the near-miss functions yields zero additional exact matches, and
+`goto` count does not track the structural distance benchmarks score. Finding a
+signal that does — computable without the source CFG — is open work.
+
+## Evaluation
+
+Fission is scored on [DecBench](https://decbench.com), which measures structure
+(graph edit distance against the source CFG), types (against DWARF), and
+byte_match (recompile and diff). All three count only *exact* matches, so a
+near miss scores the same as a miss.
+
+Two cautions about reading those numbers, both learned here:
+
+- **A benchmark that scores CFG shape and declared types cannot see whether the
+  emitted C does what the binary does.** Several real defect classes were found
+  by diffing recompiled assembly or by execution differential, and none of them
+  moved a score by more than a row — dropped writes to globals, return
+  addresses passed as trailing arguments, argument registers read across an
+  intervening call.
+- **`goto` density is not a quality metric.** Earlier releases reported it as a
+  headline number. The structure metric is purely topological and `goto` count
+  is not part of it; optimizing structural accuracy instead raised the count.
+
+Current numbers, how each was reached, and the approaches measured and rejected
+are in [`docs/changelog/`](docs/changelog/) and
+[`docs/EVALUATION.md`](docs/EVALUATION.md).
 
 ## Where to look next
 
@@ -206,20 +158,19 @@ cargo nextest run -p fission-pcode     # one crate
 cargo build --workspace --all-targets  # compile everything
 ```
 
-`fission-dir` carries the execution differential; run it after any change
-that claims to preserve semantics. Aggregate metrics must not hide
-row-level regressions — a changed pseudocode file is not automatically an
-improvement, and a passing synthetic test is necessary but not sufficient
-for a quality claim. The reasoning is in
-[`AGENTS.md`](AGENTS.md#decompiler-quality-loop).
+`fission-dir` carries the execution differential; run it after any change that
+claims to preserve semantics. Aggregate metrics must not hide row-level
+regressions — a changed pseudocode file is not automatically an improvement,
+and a passing synthetic test is necessary but not sufficient for a quality
+claim. The reasoning is in [`AGENTS.md`](AGENTS.md#decompiler-quality-loop).
 
 ## Security
 
 Fission analyses untrusted binaries. Sample handling rules are in
 [`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md). Report
-vulnerabilities through GitHub Security Advisories rather than a public
-issue.
+vulnerabilities through GitHub Security Advisories rather than a public issue.
 
 ## License
 
-AGPL-3.0-or-later. See [`LICENSE`](LICENSE).
+Apache-2.0. See [`LICENSE`](LICENSE) for the terms and [`NOTICE`](NOTICE) for
+third-party attributions.
