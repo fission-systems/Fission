@@ -456,15 +456,30 @@ fn the_engines_agree_on_a_32_bit_process() {
 
 /// The engines agree on aarch64, SIMD and all.
 ///
-/// This binary does not run to completion yet -- glibc's `ptmalloc_init`
-/// reaches `malloc_printerr`, which is a semantic bug somewhere further up --
-/// so the gate is agreement rather than success. That distinction matters: if
-/// the two engines take the same path to the same wrong place, the remaining
-/// bug is in something they share (a lift, a userop, the OS layer), and
-/// hunting it in one engine is enough. If they diverged, it would be in one of
-/// them, and this would say where.
+/// This binary does not run to completion yet, so the gate is agreement rather
+/// than success. That distinction is the whole point: if the two engines take
+/// the same path to the same wrong place, the remaining bug is in something
+/// they share (a lift, a userop, the OS layer), and hunting it in one engine
+/// is enough. If they diverge, it is in one of them, and this says where.
+///
+/// They diverge, and it said where. Measured 2026-09-18:
+///
+/// - The PC traces split at step 2590, where `cbz w2, 0x42a728` reads
+///   `__libc_single_threaded` (0x490f18) and the engines disagree on the byte.
+/// - That is the symptom. A write watchpoint on 0x490f18 puts the cause 396
+///   steps earlier, at step 2194, `pc=0x41eb44`: both engines stop there, both
+///   hold `X20=1`, and the JIT's store writes 0 anyway.
+/// - `strb w20, [x2,#0xf18]` lifts to `Copy unique:0x74700:4 <- X20:4` then
+///   `Store <- unique:0x74700:1`. The JIT caches values by
+///   `(space, offset, size)` and never writes uniques through, so the 1-byte
+///   read misses the 4-byte entry and calls out to unique memory nothing wrote.
+///   Its IR computes the right byte and drops it on the floor.
+///
+/// Mechanism, distribution and the fix shape are in
+/// `docs/plans/emulator-jit-only-roadmap.md`. Un-ignore this test when that
+/// item closes: the divergence is the assertion it exists to make.
 #[test]
-#[ignore = "diverges at step 3558; the binary does not complete yet either"]
+#[ignore = "JIT stores a stale unique at step 2194; see the note above"]
 fn the_engines_agree_on_aarch64() {
     let (Some(mut jitted), Some(mut interpreted)) =
         (build_aarch64(60_000, false), build_aarch64(60_000, true))

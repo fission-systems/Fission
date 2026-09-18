@@ -133,6 +133,30 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       `#[ignore]`, and the only ignored solver test is the z3 differential,
       which is ignored for needing a z3 binary. Closed by the 2026-09-14 solver
       work (`d26a88651`, `9d854a608`) on top of the earlier BCP-watch fix.
+- [ ] **JIT reads a unique it never wrote, when the width differs.** `var_map` in
+      `jit/compiler.rs` keys cached values by `(space, offset, size)`, and unique
+      space is deliberately never written through (`if vn.space_id != unique_space`
+      before every `dirty.push`) because flushing temporaries cost 41M→10M inst/s.
+      That holds while a unique is read back at the width it was written. Read it
+      narrower and the key misses, so the load falls through to a `jit_read_space`
+      callout that reads unique memory **nothing ever wrote** — a silent wrong value,
+      not a fault.
+      - Repro: `corpus/dev/binaries/c/control_flow_gcc-aarch64_O0`, step 2194,
+        `pc=0x41eb44`. `strb w20, [x2,#0xf18]` lifts to `Copy unique:0x74700:4 <- X20:4`
+        then `Store <- unique:0x74700:1`. JIT stores 0, interpreter stores 1; the
+        Cranelift IR computes the right byte and drops it (`v124` defined, never used).
+        Control flow only diverges 396 steps later, at the `cbz` on
+        `__libc_single_threaded` (0x490f18) — which is why a PC-only trace names
+        step 2590 and not the cause.
+      - Distribution: 32 occurrences over 60 functions / 4,719 instructions, **all**
+        same-offset narrower reads; 0 wider reads, 0 misaligned overlaps. One binary,
+        so a fix must still fall through to the callout for shapes it cannot satisfy.
+      - Correct semantics: Ghidra's `UniqueMemoryBank` is a byte-addressable bank
+        cleared per instruction, so widths alias through the same bytes and the
+        lifetime is one instruction; `read_varnode_u64` composes `le_bytes_to_u64`
+        over exactly `vn.size` bytes, so a narrower read takes the **low** bytes.
+      - Fix shape: on a unique read that misses, derive from a wider cached entry at
+        the same offset by masking. Blanket write-through is the measured 4x loss.
 - [x] static CRT ladder to 15k/50k: **stop_pc stuck at `0x10035A3`** after mmap/brk/TLS;
       still **zero unknown syscalls** — livelock, not missing HLE numbers
 - [x] `max_inst` + `pcode_budget` fuses (TB exit on fuse; no false process halt)
