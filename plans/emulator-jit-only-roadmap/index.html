@@ -1529,7 +1529,25 @@
       <code>#[ignore]</code>, and the only ignored solver test is the z3 differential,
       which is ignored for needing a z3 binary. Closed by the 2026-09-14 solver
       work (<code>d26a88651</code>, <code>9d854a608</code>) on top of the earlier BCP-watch fix.</li>
-<li>[ ] <strong>JIT reads a unique it never wrote, when the width differs.</strong> <code>var_map</code> in
+<li>[x] <strong>JIT reads a unique it never wrote, when the width differs.</strong> Fixed
+      2026-09-18: <code>ensure_var!</code> now derives a missing unique read from the
+      narrowest strictly-wider cached entry at the same offset, masking to the
+      requested width, and falls through to the callout for any shape it cannot
+      satisfy. <code>min_by_key</code> on the cached width, not <code>iter().find()</code>, so the
+      choice does not depend on <code>HashMap</code> iteration order. <code>store_vn!</code>'s
+      <code>retain</code> is deliberately left register-only: dropping a unique's
+      overlapping views is what <em>causes</em> the stale read, because there is no
+      backing store to re-seed from. Asserted by
+      <code>a_unique_read_narrower_than_its_write_takes_the_low_bytes</code>, which covers
+      4→1, 8→4 and 4→2 so a mask that is accidentally right for one byte does
+      not pass, and which fails with a literal <code>0</code> against the unfixed
+      compiler. <strong><code>the_engines_agree_on_aarch64</code> stays <code>#[ignore]</code></strong>: the
+      aarch64 divergence moved from step 2194 to step 3558 (<code>0x45192C</code>, JIT
+      falls through to <code>0x451930</code> where the interpreter branches back to
+      <code>0x45191C</code>), which is the <em>older</em> divergence this one was sitting in
+      front of — it is the number the ignore attribute carried before this
+      work, not a regression from it. The description below is kept as the
+      record of what was wrong. <code>var_map</code> in
       <code>jit/compiler.rs</code> keys cached values by <code>(space, offset, size)</code>, and unique
       space is deliberately never written through (<code>if vn.space_id != unique_space</code>
       before every <code>dirty.push</code>) because flushing temporaries cost 41M→10M inst/s.
