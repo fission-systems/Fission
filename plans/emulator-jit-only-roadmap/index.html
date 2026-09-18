@@ -1536,7 +1536,10 @@
       That holds while a unique is read back at the width it was written. Read it
       narrower and the key misses, so the load falls through to a <code>jit_read_space</code>
       callout that reads unique memory <strong>nothing ever wrote</strong> — a silent wrong value,
-      not a fault.<ul>
+      not a fault. This is bug 6 in <code>tests/interp_differential.rs</code> (the <code>RDX</code>/<code>EDX</code>
+      one) recurring in the one space its fix could not reach: that fix drops
+      overlapping cached views on write so the next read re-seeds from
+      <code>host_reg_file</code>, and a unique has no backing store to re-seed from.<ul>
 <li>Repro: <code>corpus/dev/binaries/c/control_flow_gcc-aarch64_O0</code>, step 2194,
     <code>pc=0x41eb44</code>. <code>strb w20, [x2,#0xf18]</code> lifts to <code>Copy unique:0x74700:4 &lt;- X20:4</code>
     then <code>Store &lt;- unique:0x74700:1</code>. JIT stores 0, interpreter stores 1; the
