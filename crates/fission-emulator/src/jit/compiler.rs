@@ -657,9 +657,52 @@ impl JitCompiler {
                 if let Some(v) = var_map.get(&key) {
                     *v
                 } else {
+                    // A unique read with no entry of its own width. Unique
+                    // space is deliberately never written through to
+                    // `MachineState` (see `store_vn!`), so the callout below
+                    // would read bytes nothing ever wrote and hand back zero
+                    // -- a wrong value rather than a fault. The bytes do
+                    // exist, in a wider cached entry at the same offset.
+                    //
+                    // This is the register bug in the comment above, in the
+                    // one space that fix cannot reach: there, dropping the
+                    // overlapping views makes the next read re-seed from
+                    // `host_reg_file`. A unique has no backing store to
+                    // re-seed from, so the value has to be *derived* from the
+                    // wider entry instead.
+                    //
+                    // Same offset and strictly wider only. Measured over 60
+                    // functions / 4,719 instructions, all 32 occurrences were
+                    // that one shape -- no wider read of a narrower write, no
+                    // misaligned overlap -- and generalising past what was
+                    // observed would be guessing. Narrowing takes the low
+                    // bytes, which is what `read_varnode_u64` does on every
+                    // little-endian target here.
+                    let derived_from_wider = if $space != 0 && $space == unique_space {
+                        var_map
+                            .iter()
+                            .filter(|(k, _)| {
+                                k.0 == $space && k.1 == $offset && k.2 > ($size as u64)
+                            })
+                            // The narrowest covering entry, so the choice does
+                            // not depend on `HashMap` iteration order.
+                            .min_by_key(|(k, _)| k.2)
+                            .map(|(_, v)| *v)
+                    } else {
+                        None
+                    };
                     let v = builder.declare_var(types::I64);
                     var_map.insert(key, v);
-                    if $space == 0 {
+                    if let Some(src) = derived_from_wider {
+                        let wide = builder.use_var(src);
+                        let bits = ($size as u64) * 8;
+                        let val = if bits > 0 && bits < 64 {
+                            builder.ins().band_imm(wide, ((1u64 << bits) - 1) as i64)
+                        } else {
+                            wide
+                        };
+                        builder.def_var(v, val);
+                    } else if $space == 0 {
                         let c = builder.ins().iconst(types::I64, $offset as i64);
                         builder.def_var(v, c);
                     } else if $space == register_space
@@ -2529,5 +2572,75 @@ mod tests {
         let mut emu2 = compile_and_run(ops2);
         assert_eq!(read_reg(&mut emu2, 32), 6, "-6 / -1 == 6");
         assert_eq!(read_reg(&mut emu2, 40) as i64, -4, "-8 >>s 1 == -4");
+    }
+
+    /// Unique space id, matching the `2` that `compile_and_run` passes as
+    /// `compile_translation_block`'s `unique_space`.
+    fn uniq(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 2,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn copy(out: Varnode, input: Varnode, seq: u32) -> PcodeOp {
+        PcodeOp {
+            seq_num: seq,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(out),
+            inputs: vec![input],
+            asm_mnemonic: None,
+        }
+    }
+
+    /// Reading a unique at a narrower width than it was written takes the low
+    /// bytes of what was written, not zero.
+    ///
+    /// `var_map` keys cached values by `(space, offset, size)`, so a 1-byte
+    /// read of a 4-byte write misses. For a register the miss re-seeds from
+    /// `host_reg_file`; unique space is deliberately never written through
+    /// (flushing temporaries cost 41M -> 10M inst/s), so the miss used to call
+    /// `jit_read_space` on bytes nothing had ever written and get back zero --
+    /// a wrong value rather than a fault.
+    ///
+    /// Real repro: `strb w20, [x2,#0xf18]` in control_flow_gcc-aarch64_O0
+    /// lifts to `Copy unique:0x74700:4 <- X20:4` then `Store <-
+    /// unique:0x74700:1`; the store wrote 0 and 396 steps later the guest read
+    /// `__libc_single_threaded` as clear and took the other branch. It is bug
+    /// 6 in `tests/interp_differential.rs` in the one space that fix could not
+    /// reach.
+    #[test]
+    fn a_unique_read_narrower_than_its_write_takes_the_low_bytes() {
+        let ops = vec![
+            // 4 -> 1, the shape the aarch64 divergence is made of.
+            copy(uniq(0x100, 4), imm(0x44332211, 4), 0),
+            copy(reg(0, 1), uniq(0x100, 1), 1),
+            // 8 -> 4 and 4 -> 2, so a mask that only happens to be right for
+            // one byte does not pass.
+            copy(uniq(0x200, 8), imm(0x0877665544332211, 8), 2),
+            copy(reg(8, 4), uniq(0x200, 4), 3),
+            copy(uniq(0x300, 4), imm(0x44332211, 4), 4),
+            copy(reg(16, 2), uniq(0x300, 2), 5),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(
+            read_reg(&mut emu, 0) & 0xFF,
+            0x11,
+            "1-byte read of a 4-byte unique"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 8) & 0xFFFF_FFFF,
+            0x44332211,
+            "4-byte read of an 8-byte unique"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 16) & 0xFFFF,
+            0x2211,
+            "2-byte read of a 4-byte unique"
+        );
     }
 }

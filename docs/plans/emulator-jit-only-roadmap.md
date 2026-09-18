@@ -133,7 +133,25 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       `#[ignore]`, and the only ignored solver test is the z3 differential,
       which is ignored for needing a z3 binary. Closed by the 2026-09-14 solver
       work (`d26a88651`, `9d854a608`) on top of the earlier BCP-watch fix.
-- [ ] **JIT reads a unique it never wrote, when the width differs.** `var_map` in
+- [x] **JIT reads a unique it never wrote, when the width differs.** Fixed
+      2026-09-18: `ensure_var!` now derives a missing unique read from the
+      narrowest strictly-wider cached entry at the same offset, masking to the
+      requested width, and falls through to the callout for any shape it cannot
+      satisfy. `min_by_key` on the cached width, not `iter().find()`, so the
+      choice does not depend on `HashMap` iteration order. `store_vn!`'s
+      `retain` is deliberately left register-only: dropping a unique's
+      overlapping views is what *causes* the stale read, because there is no
+      backing store to re-seed from. Asserted by
+      `a_unique_read_narrower_than_its_write_takes_the_low_bytes`, which covers
+      4→1, 8→4 and 4→2 so a mask that is accidentally right for one byte does
+      not pass, and which fails with a literal `0` against the unfixed
+      compiler. **`the_engines_agree_on_aarch64` stays `#[ignore]`**: the
+      aarch64 divergence moved from step 2194 to step 3558 (`0x45192C`, JIT
+      falls through to `0x451930` where the interpreter branches back to
+      `0x45191C`), which is the *older* divergence this one was sitting in
+      front of — it is the number the ignore attribute carried before this
+      work, not a regression from it. The description below is kept as the
+      record of what was wrong. `var_map` in
       `jit/compiler.rs` keys cached values by `(space, offset, size)`, and unique
       space is deliberately never written through (`if vn.space_id != unique_space`
       before every `dirty.push`) because flushing temporaries cost 41M→10M inst/s.

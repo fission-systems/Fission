@@ -462,29 +462,36 @@ fn the_engines_agree_on_a_32_bit_process() {
 /// they share (a lift, a userop, the OS layer), and hunting it in one engine
 /// is enough. If they diverge, it is in one of them, and this says where.
 ///
-/// They diverge, and it said where. Measured 2026-09-18:
+/// They diverged, and it said where -- twice, one bug standing in front of the
+/// other.
+///
+/// The first was the JIT's, measured and fixed 2026-09-18:
 ///
 /// - The PC traces split at step 2590, where `cbz w2, 0x42a728` reads
-///   `__libc_single_threaded` (0x490f18) and the engines disagree on the byte.
-/// - That is the symptom. A write watchpoint on 0x490f18 puts the cause 396
+///   `__libc_single_threaded` (0x490f18) and the engines disagreed on the byte.
+/// - That was the symptom. A write watchpoint on 0x490f18 put the cause 396
 ///   steps earlier, at step 2194, `pc=0x41eb44`: both engines stop there, both
-///   hold `X20=1`, and the JIT's store writes 0 anyway.
+///   hold `X20=1`, and the JIT's store wrote 0 anyway.
 /// - `strb w20, [x2,#0xf18]` lifts to `Copy unique:0x74700:4 <- X20:4` then
 ///   `Store <- unique:0x74700:1`. The JIT caches values by
 ///   `(space, offset, size)` and never writes uniques through, so the 1-byte
-///   read misses the 4-byte entry and calls out to unique memory nothing wrote.
-///   Its IR computes the right byte and drops it on the floor.
-/// - This is bug 6 above, in the one space that fix could not reach. For
+///   read missed the 4-byte entry and called out to unique memory nothing had
+///   written. Its IR computed the right byte and dropped it on the floor.
+/// - That is bug 6 above, in the one space that fix could not reach. For
 ///   registers it drops every overlapping cached view on write, so the next
 ///   read re-seeds from `host_reg_file`. A unique has no backing store to
 ///   re-seed from, so dropping the view is what *causes* the stale read: the
-///   value has to be derived from the wider entry instead.
+///   value has to be derived from the wider entry instead, which is what
+///   `ensure_var!` now does.
 ///
-/// Mechanism, distribution and the fix shape are in
-/// `docs/plans/emulator-jit-only-roadmap.md`. Un-ignore this test when that
-/// item closes: the divergence is the assertion it exists to make.
+/// Fixing that uncovered the second, which is the older of the two: the engines
+/// now agree through step 3557 and split at 3558, `pc=0x45192C`, where the JIT
+/// falls through to 0x451930 and the interpreter branches back to 0x45191C.
+/// That is the step this test's `#[ignore]` named before the unique work
+/// started, so it is what was always behind it and not something the fix
+/// introduced. Undiagnosed; un-ignore when it is.
 #[test]
-#[ignore = "JIT stores a stale unique at step 2194; see the note above"]
+#[ignore = "engines diverge at step 3558 (0x45192C) -- older than, and uncovered by, the unique-width fix"]
 fn the_engines_agree_on_aarch64() {
     let (Some(mut jitted), Some(mut interpreted)) =
         (build_aarch64(60_000, false), build_aarch64(60_000, true))
