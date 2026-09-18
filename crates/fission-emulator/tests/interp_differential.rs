@@ -474,6 +474,11 @@ fn the_engines_agree_on_a_32_bit_process() {
 ///   `(space, offset, size)` and never writes uniques through, so the 1-byte
 ///   read misses the 4-byte entry and calls out to unique memory nothing wrote.
 ///   Its IR computes the right byte and drops it on the floor.
+/// - This is bug 6 above, in the one space that fix could not reach. For
+///   registers it drops every overlapping cached view on write, so the next
+///   read re-seeds from `host_reg_file`. A unique has no backing store to
+///   re-seed from, so dropping the view is what *causes* the stale read: the
+///   value has to be derived from the wider entry instead.
 ///
 /// Mechanism, distribution and the fix shape are in
 /// `docs/plans/emulator-jit-only-roadmap.md`. Un-ignore this test when that

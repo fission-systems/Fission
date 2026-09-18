@@ -140,7 +140,10 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       That holds while a unique is read back at the width it was written. Read it
       narrower and the key misses, so the load falls through to a `jit_read_space`
       callout that reads unique memory **nothing ever wrote** — a silent wrong value,
-      not a fault.
+      not a fault. This is bug 6 in `tests/interp_differential.rs` (the `RDX`/`EDX`
+      one) recurring in the one space its fix could not reach: that fix drops
+      overlapping cached views on write so the next read re-seeds from
+      `host_reg_file`, and a unique has no backing store to re-seed from.
       - Repro: `corpus/dev/binaries/c/control_flow_gcc-aarch64_O0`, step 2194,
         `pc=0x41eb44`. `strb w20, [x2,#0xf18]` lifts to `Copy unique:0x74700:4 <- X20:4`
         then `Store <- unique:0x74700:1`. JIT stores 0, interpreter stores 1; the
