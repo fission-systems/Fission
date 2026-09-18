@@ -126,7 +126,13 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] `max_inst` honored inside chain (no chain when budgeted); seal op-blocks after CFG edges
 - [x] path-SAT prune re-enabled with OOB-safe `value_lit` + panic isolation
 - [x] path-SAT quality: Const false/true; free vars; `Eq(var,const)` SAT; `Eq∧Neq` UNSAT
-- [ ] path-SAT CDCL gap: `Eq(x,c1)∧Eq(x,c2)` still wrongly SAT (tracked `#[ignore]` tests)
+- [x] path-SAT CDCL gap closed: `Eq(x,c1)∧Eq(x,c2)` is UNSAT, asserted by two
+      *active* tests — `path_sat_eq_var_two_consts_contradiction` (emulator) and
+      `aig::tests::test_eq_var_two_consts_contradiction` (solver). The earlier
+      "tracked `#[ignore]` tests" note was wrong: nothing tracks this under
+      `#[ignore]`, and the only ignored solver test is the z3 differential,
+      which is ignored for needing a z3 binary. Closed by the 2026-09-14 solver
+      work (`d26a88651`, `9d854a608`) on top of the earlier BCP-watch fix.
 - [x] static CRT ladder to 15k/50k: **stop_pc stuck at `0x10035A3`** after mmap/brk/TLS;
       still **zero unknown syscalls** — livelock, not missing HLE numbers
 - [x] `max_inst` + `pcode_budget` fuses (TB exit on fuse; no false process halt)
