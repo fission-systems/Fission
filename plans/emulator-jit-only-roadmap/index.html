@@ -1522,7 +1522,13 @@
 <li>[x] <code>max_inst</code> honored inside chain (no chain when budgeted); seal op-blocks after CFG edges</li>
 <li>[x] path-SAT prune re-enabled with OOB-safe <code>value_lit</code> + panic isolation</li>
 <li>[x] path-SAT quality: Const false/true; free vars; <code>Eq(var,const)</code> SAT; <code>Eq∧Neq</code> UNSAT</li>
-<li>[ ] path-SAT CDCL gap: <code>Eq(x,c1)∧Eq(x,c2)</code> still wrongly SAT (tracked <code>#[ignore]</code> tests)</li>
+<li>[x] path-SAT CDCL gap closed: <code>Eq(x,c1)∧Eq(x,c2)</code> is UNSAT, asserted by two
+      <em>active</em> tests — <code>path_sat_eq_var_two_consts_contradiction</code> (emulator) and
+      <code>aig::tests::test_eq_var_two_consts_contradiction</code> (solver). The earlier
+      "tracked <code>#[ignore]</code> tests" note was wrong: nothing tracks this under
+      <code>#[ignore]</code>, and the only ignored solver test is the z3 differential,
+      which is ignored for needing a z3 binary. Closed by the 2026-09-14 solver
+      work (<code>d26a88651</code>, <code>9d854a608</code>) on top of the earlier BCP-watch fix.</li>
 <li>[x] static CRT ladder to 15k/50k: <strong>stop_pc stuck at <code>0x10035A3</code></strong> after mmap/brk/TLS;
       still <strong>zero unknown syscalls</strong> — livelock, not missing HLE numbers</li>
 <li>[x] <code>max_inst</code> + <code>pcode_budget</code> fuses (TB exit on fuse; no false process halt)</li>
