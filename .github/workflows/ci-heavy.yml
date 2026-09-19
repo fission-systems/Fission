@@ -1,7 +1,7 @@
 name: CI Heavy Validation
 
 on:
-  # L1 release gate on every main push (decompiler-critical jobs).
+  # L1 release gate on every non-documentation main push (decompiler-critical jobs).
   # Nightly / manual dispatch also run the full workspace suite + Miri.
   # Policy: docs/CI_RELEASE_GATES.md
   push:

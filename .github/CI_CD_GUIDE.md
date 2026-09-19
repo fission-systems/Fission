@@ -105,7 +105,7 @@ git push
 ### 2. Heavy Validation (ci-heavy.yml) 🔵
 
 **When is it triggered?**
-- Every push to `main` (L1 release gate signal)
+- Every non-documentation push to `main` (L1 release gate signal)
 - Daily at 02:30 UTC (nightly safety net)
 - Manual trigger
 

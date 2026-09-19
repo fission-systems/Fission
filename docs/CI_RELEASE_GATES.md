@@ -19,7 +19,7 @@ This document is the policy source for how Fission promotes a git commit to a
 | Layer | Workflow | When | Role |
 |-------|----------|------|------|
 | **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core+midend tests, CLI smoke, NIR gate. **PR = Linux-first**; cross-OS tests on `main` push. Docs/wiki-only short-circuits |
-| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every `main` push + nightly + dispatch | **Push:** release-critical crates, platforms, NIR-check, MSRV. **Nightly/dispatch:** also full workspace tests, Miri, coverage |
+| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every non-documentation `main` push + nightly + dispatch | **Push:** release-critical crates, platforms, NIR-check, MSRV. **Nightly/dispatch:** also full workspace tests, Miri, coverage. Docs/wiki-only pushes skip L1. |
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
 | **L3 CD** | [`cd.yml`](../.github/workflows/cd.yml) | Tag push `v*.*.*` / `X.Y.Z` | Multi-platform CLI archives (each includes `utils/`) → GitHub Release |
@@ -99,7 +99,7 @@ Optional: run **Release E2E Gate** alone (dispatch) to pre-validate a SHA withou
 
 ## L1 job split (main push vs extended)
 
-On **`push` to `main`**, Heavy runs the **release-critical** set only (so a green
+On a non-documentation **`push` to `main`**, Heavy runs the **release-critical** set only (so a green
 L1 is achievable and meaningful for decompiler releases):
 
 - Linux (single nextest process): `fission-core`, midend crates, `loader`,
