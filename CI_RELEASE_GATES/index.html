@@ -1336,7 +1336,7 @@
 <td><strong>L0 Fast Gate</strong></td>
 <td><a href="../.github/workflows/ci.yml"><code>ci.yml</code></a></td>
 <td>PR + every <code>main</code> push</td>
-<td>Lint, security, core+midend tests, CLI smoke, NIR gate. <strong>PR = Linux-first</strong>; multi-OS on <code>main</code> push. Docs/wiki-only short-circuits</td>
+<td>Lint, security, core+midend tests, CLI smoke, NIR gate. <strong>PR = Linux-first</strong>; cross-OS tests on <code>main</code> push. Docs/wiki-only short-circuits</td>
 </tr>
 <tr>
 <td><strong>L1 Heavy</strong></td>
@@ -1446,8 +1446,10 @@ L1 is achievable and meaningful for decompiler releases):</p>
 <li><code>docs</code> — short-circuit green</li>
 <li><code>scripts</code> — pass-gate + Python/shell syntax only</li>
 <li><code>ci</code> — pass-gate + workflow YAML parse (+ security if <code>deny.toml</code>/dependabot)</li>
-<li><code>rust</code> — full Linux Fast Gate (multi-OS on <code>main</code> push)</li>
-<li>PR Fast Gate no longer runs macOS/Windows matrices (covered on <code>main</code> L0 + L1).</li>
+<li><code>rust</code> — full Linux Fast Gate (cross-OS tests on <code>main</code> push)</li>
+<li>PR Fast Gate no longer runs macOS/Windows tests (covered on <code>main</code> L0 + L1).</li>
+<li>Fast Gate no longer performs separate macOS/Windows CLI release builds on <code>main</code>;
+  those release builds remain in L1 Heavy while L0 keeps the cross-OS test signal.</li>
 <li><code>reusable-run-tests</code> runs multi-package nextest in <strong>one</strong> cargo process and
   skips webkit/GTK sysdeps unless GUI packages are required.</li>
 <li><strong>sccache</strong> (GitHub Actions backend) on lint / test / CLI build reusables via
