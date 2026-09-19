@@ -484,14 +484,23 @@ fn the_engines_agree_on_a_32_bit_process() {
 ///   value has to be derived from the wider entry instead, which is what
 ///   `ensure_var!` now does.
 ///
-/// Fixing that uncovered the second, which is the older of the two: the engines
-/// now agree through step 3557 and split at 3558, `pc=0x45192C`, where the JIT
-/// falls through to 0x451930 and the interpreter branches back to 0x45191C.
-/// That is the step this test's `#[ignore]` named before the unique work
-/// started, so it is what was always behind it and not something the fix
-/// introduced. Undiagnosed; un-ignore when it is.
+/// Fixing that uncovered a second, older divergence: the engines agreed
+/// through step 3557 and split at 3558, `pc=0x45192C`, where the JIT fell
+/// through to 0x451930 and the interpreter branched back to 0x45191C. The
+/// split was inside the `stxr` p-code at 0x451928. Its
+/// `ExclusiveMonitorPass` userop wrote data result `1` and returned
+/// `HleResult::Continue`; the JIT consumed those two channels correctly, but
+/// the interpreter wrote the control result (`0`) into the `check` varnode.
+/// The interpreter therefore took the failure path and retained the initial
+/// status `1` in W17. The generic CallOther result contract is now shared by
+/// the two paths and has a synthetic regression in `interp.rs`.
+///
+/// After that fix the old split is gone. The next unresolved split is at step
+/// 3775: the JIT takes 0x411EC4 back to 0x411D5C, while the interpreter falls
+/// through to 0x411EC8 and later stops on an unmapped write at 0x4BA000. Keep
+/// this corpus test ignored until that independent divergence is diagnosed.
 #[test]
-#[ignore = "engines diverge at step 3558 (0x45192C) -- older than, and uncovered by, the unique-width fix"]
+#[ignore = "next divergence is step 3775: JIT 0x411D5C vs interpreter 0x411EC8 after the 0x45192C fix"]
 fn the_engines_agree_on_aarch64() {
     let (Some(mut jitted), Some(mut interpreted)) =
         (build_aarch64(60_000, false), build_aarch64(60_000, true))
@@ -504,12 +513,6 @@ fn the_engines_agree_on_aarch64() {
     let jit_run = jitted.run();
     interpreted.add_observer(Box::new(PcTrace::default()));
     let int_run = interpreted.run();
-
-    assert_eq!(
-        jit_run.is_ok(),
-        int_run.is_ok(),
-        "engines disagree on success: jit={jit_run:?} interp={int_run:?}"
-    );
 
     let jit_obs = jitted.take_observers();
     let int_obs = interpreted.take_observers();
@@ -534,4 +537,9 @@ fn the_engines_agree_on_aarch64() {
                 .join(" ")
         );
     }
+    assert_eq!(
+        jit_run.is_ok(),
+        int_run.is_ok(),
+        "engines disagree on success: jit={jit_run:?} interp={int_run:?}"
+    );
 }

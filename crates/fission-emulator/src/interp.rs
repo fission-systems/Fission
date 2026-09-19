@@ -243,7 +243,7 @@ impl Emulator {
                         idx += 1;
                         continue;
                     }
-                    let result = crate::jit::callbacks::jit_call_other(
+                    let _control = crate::jit::callbacks::jit_call_other(
                         self as *mut _,
                         userop_id,
                         input_vals.as_ptr(),
@@ -251,6 +251,16 @@ impl Emulator {
                         u64::from(output_size),
                     );
                     if let Some(out) = flat[idx].output.clone() {
+                        // `jit_call_other` returns the control result (halt,
+                        // jump, or continue), not the userop's data result.
+                        // The latter is stored in the same slot the JIT reads
+                        // after the callback. Using the control result here
+                        // made every continuing CallOther with an output look
+                        // like zero to the interpreter. AArch64's
+                        // ExclusiveMonitorPass returns Continue while its
+                        // data result is one, so this changed the predicate
+                        // that controls the exclusive-store path.
+                        let result = crate::jit::callbacks::jit_callother_result(self as *mut _);
                         let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
                         evaluator.write_varnode_u64(&out, result)?;
                     }
@@ -273,5 +283,88 @@ impl Emulator {
         }
 
         Ok(InterpExit::FallThrough(fallthrough))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arch::ArchInfo;
+    use crate::core::Emulator;
+    use crate::os::LinuxEnv;
+    use crate::pcode::state::MachineState;
+    use fission_loader::loader::LoadedBinary;
+    use fission_sleigh::runtime::RuntimeSleighFrontend;
+    use std::path::PathBuf;
+
+    fn test_emulator() -> Emulator {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_printf_malloc.elf");
+        let binary = LoadedBinary::from_file(&path).expect("load test ELF");
+        let mut state = MachineState::new();
+        crate::os::linux::loader::load_elf(&mut state, &binary).expect("load ELF");
+        let load_spec = binary.load_spec().expect("load spec").clone();
+        let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)
+            .expect("frontend")
+            .into_iter()
+            .next()
+            .expect("frontend candidate");
+        let arch = ArchInfo::from_language_id(load_spec.pair.language_id.as_str(), Some(&binary))
+            .expect("architecture");
+        Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).expect("emulator")
+    }
+
+    fn constant(value: i64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 0,
+            offset: value as u64,
+            size,
+            is_constant: true,
+            constant_val: value,
+        }
+    }
+
+    fn register(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 4,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    #[test]
+    fn interpreter_writes_callother_data_result_not_control_result() {
+        let mut emu = test_emulator();
+        let userop_id = 0xD00D;
+        emu.userop_map.insert(userop_id, "segment_fs".to_string());
+        emu.fs_base = 0x7FFF_0000_0000;
+
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::CallOther,
+                address: 0x1000,
+                output: Some(register(0, 8)),
+                inputs: vec![constant(userop_id as i64, 4), constant(0x2A, 8)],
+                asm_mnemonic: Some("CALLOTHER".to_string()),
+            }],
+        }];
+
+        let exit = emu
+            .interpret_translation_block(&insns)
+            .expect("interpret CallOther");
+        assert!(matches!(exit, InterpExit::FallThrough(0x1004)));
+        let value = emu
+            .state
+            .read_space(emu.state.register_space(), 0, 8)
+            .expect("read result");
+        assert_eq!(
+            u64::from_le_bytes(value.try_into().unwrap()),
+            emu.fs_base + 0x2A
+        );
     }
 }
