@@ -1327,7 +1327,10 @@
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>through to ordinary stack locals even though ARM.cspec supplied the base. The
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>ARM prologue also materializes an immediate in a unique temporary before
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>subtracting it from SP; scalar pointer proof therefore needed to follow a
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>bounded Copy/Cast/ZExt/SExt constant chain as well.
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>bounded Copy/Cast/ZExt/SExt constant chain as well. The constant resolver now
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>keeps the source bit-pattern and width while applying `IntZExt` versus
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>`IntSExt`; a width-changing raw `Cast` remains conservative because it does
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>not encode the numeric extension semantics needed by this proof.
 </span></code></pre></div>
 <h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
 <p>Generalized rule:</p>
@@ -1341,9 +1344,10 @@
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>SSA proves the address in the entry-SP coordinate, and scalar memory SSA
 </span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>proves that every reaching memory value is function-entry input. The pointer
 </span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>proof may follow a bounded copy/cast/extension chain for a materialized
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>constant, but not an unknown arithmetic value. Stores performed by the
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>current function, unknown/bounded addresses, and misaligned offsets remain
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>ordinary stack storage.
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>constant, applying zero/sign extension before interpreting the final
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>arithmetic width, but not an unknown arithmetic value. Stores performed by
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>the current function, unknown/bounded addresses, and misaligned offsets remain
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>ordinary stack storage.
 </span></code></pre></div>
 <ul>
 <li>[x] The production condition is based on cspec ABI slots and scalar memory-SSA ownership, not an ARM function/address guard.</li>
@@ -1370,17 +1374,17 @@
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
 <li>[x] Targeted invariant test:</li>
-<li>Command: <code>cargo nextest run -p fission-pcode --filter-expr 'test(arm32_incoming_stack_load_becomes_fifth_formal_parameter) | test(arm32_incoming_stack_load_follows_a_materialized_prologue_immediate) | test(arm32_overwritten_entry_stack_slot_does_not_become_formal_parameter) | test(x64_incoming_stack_slots_follow_cspec_register_and_frame_layout)'</code></li>
-<li>Result: 4 tests passed; ARM32 emits <code>param_5</code> for direct and materialized-prologue entry loads, while an overwritten entry slot remains non-parameter.</li>
+<li>Command: <code>cargo nextest run -p fission-pcode -E 'test(arm32_incoming_stack_load_becomes_fifth_formal_parameter) or test(arm32_incoming_stack_load_follows_a_materialized_prologue_immediate) or test(arm32_overwritten_entry_stack_slot_does_not_become_formal_parameter) or test(x64_incoming_stack_slots_follow_cspec_register_and_frame_layout) or test(zero_extension_preserves_narrow_unsigned_constant_bits) or test(sign_extension_preserves_narrow_signed_constant_bits) or test(width_changing_cast_does_not_guess_pointer_delta) or test(materialized_ram_base_with_literal_offset_keeps_ram_guard)'</code></li>
+<li>Result: 8 tests passed; ARM32 emits <code>param_5</code> for direct and materialized-prologue entry loads, an overwritten entry slot remains non-parameter, <code>ZExt(0xff:u8)</code> resolves as <code>+255</code>, <code>SExt(0xff:u8)</code> as <code>-1</code>, width-changing <code>Cast</code> remains unknown, and a materialized RAM base keeps an exact positive RAM guard.</li>
 <li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode</code></li>
-<li>Result: 1,060 tests passed, 2 skipped.</li>
+<li>Result: 1,064 tests passed, 2 skipped.</li>
 <li>[x] Focused benchmark row:</li>
 <li>Command: repeat the exact 200-function cache-free CLI measurement above and inspect <code>uartOpen</code> plus all changed ARM outputs.</li>
 <li>Result: <code>param_5</code> 0 -&gt; 3, <code>param_6</code> 0 -&gt; 1, <code>param_7</code> remains 0. <code>uartOpen</code> changes from three visible register parameters plus two locals to six formals, with the two byte stack loads as <code>uchar param_5</code> and <code>uchar param_6</code>.</li>
-<li>[ ] Smoke or automation sample:</li>
-<li>Command: external local ARM scale smoke, when the local benchmark runner is available.</li>
-<li>Expected no-regression signal: existing ARM outputs without proven incoming stack loads stay unchanged.</li>
+<li>[x] Smoke or automation sample:</li>
+<li>Command: <code>target/debug/fission_cli decomp /Users/sjkim1127/fission-benchmark/corpus/scale/binaries/O2-noinline/cleanflight/cleanflight_DALRCF405.elf --all --limit 200 --json --layer nir --no-db --no-warnings -o /tmp/fission-arm-final.NsyrKM/after.json</code></li>
+<li>Result: 200/200 functions emitted with zero fallbacks. Compared with the previous P0 output, only <code>SysTick_Config</code> changed: its prior <code>invalid scalar ssa</code> fallback was removed and it now emits <code>uint SysTick_Config(int param_1)</code>. Compared with the baseline, the new formal-bearing set is <code>__udivmoddi4</code>, <code>i2cWriteBuffer</code>, <code>i2cRead</code>, and <code>uartOpen</code>; all other signatures in the window stayed unchanged. The ARM window retains <code>param_5</code> 0 -&gt; 3, <code>param_6</code> 0 -&gt; 1, and <code>param_7</code> 0 -&gt; 0.</li>
 <li>[x] Optional related checks:</li>
 <li>Command: <code>cargo check -p fission-pcode -p fission-decompiler</code> and <code>cargo build --release -p fission-cli</code></li>
 <li>Result: both <code>cargo check</code> and the release CLI build passed.</li>
@@ -1397,6 +1401,8 @@
 <li>[x] Production code contains no hardcoded binary/function/address/corpus guards.</li>
 <li>[x] The justification is metric-independent: an accessed entry-owned incoming stack slot is part of the formal ABI interface, not a local.</li>
 <li>[x] The implementation extends the existing ABI/stack-slot owner and does not add a parallel semantic layer.</li>
+<li>[x] High-bit narrow constants preserve p-code extension semantics: zero extension and sign extension no longer share a signed-leaf interpretation.</li>
+<li>[x] Width-changing raw <code>Cast</code> remains conservative, and the materialized absolute RAM-base regression does not reclassify an address as a negative RAM offset.</li>
 </ul>
 
 
