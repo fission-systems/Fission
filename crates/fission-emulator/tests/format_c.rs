@@ -138,22 +138,23 @@ fn strings_and_characters_match_the_host_libc() {
 #[test]
 fn floating_point_matches_the_host_libc() {
     let mut emu = emulator();
+    const PI: f64 = std::f64::consts::PI;
     let cases: &[(&str, &[Arg], &str)] = &[
-        ("[%f]", &[Arg::Double(3.14159265)], "[3.141593]"),
-        ("[%.2f]", &[Arg::Double(3.14159265)], "[3.14]"),
-        ("[%10.2f]", &[Arg::Double(3.14159265)], "[      3.14]"),
-        ("[%-10.2f|]", &[Arg::Double(3.14159265)], "[3.14      |]"),
+        ("[%f]", &[Arg::Double(PI)], "[3.141593]"),
+        ("[%.2f]", &[Arg::Double(PI)], "[3.14]"),
+        ("[%10.2f]", &[Arg::Double(PI)], "[      3.14]"),
+        ("[%-10.2f|]", &[Arg::Double(PI)], "[3.14      |]"),
         ("[%e]", &[Arg::Double(31415.9265)], "[3.141593e+04]"),
         ("[%E]", &[Arg::Double(0.00031415)], "[3.141500E-04]"),
         ("[%g]", &[Arg::Double(100000.0)], "[100000]"),
         ("[%g]", &[Arg::Double(1000000.0)], "[1e+06]"),
         ("[%g]", &[Arg::Double(0.0001)], "[0.0001]"),
         ("[%g]", &[Arg::Double(0.00001)], "[1e-05]"),
-        ("[%.3g]", &[Arg::Double(3.14159)], "[3.14]"),
+        ("[%.3g]", &[Arg::Double(PI)], "[3.14]"),
         ("[%f]", &[Arg::Double(0.0)], "[0.000000]"),
         ("[%g]", &[Arg::Double(0.0)], "[0]"),
         ("[%e]", &[Arg::Double(0.0)], "[0.000000e+00]"),
-        ("[%.*f]", &[Arg::Word(3), Arg::Double(3.14159)], "[3.142]"),
+        ("[%.*f]", &[Arg::Word(3), Arg::Double(PI)], "[3.142]"),
     ];
     for (fmt, args, want) in cases {
         assert_eq!(&formatted(&mut emu, fmt, args), want, "format {fmt}");

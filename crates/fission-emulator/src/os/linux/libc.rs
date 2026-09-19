@@ -769,12 +769,24 @@ mod tests {
         emu.state
             .page_map
             .map_region(tid_slot, 0x1000, crate::pcode::page_map::prot::RW, true);
+        let tid_slot_bytes = [0xA5, 0x5A, 0xC3, 0x3C, 0x11, 0x22, 0x33, 0x44];
+        let ram = emu.state.ram_space();
+        emu.state
+            .write_space(ram, tid_slot, &tid_slot_bytes)
+            .unwrap();
         emu.write_register_u64("RDI", tid_slot).unwrap();
         crate::os::linux::syscall::SysSetTidAddress
             .run(&mut emu)
             .unwrap();
         assert_eq!(emu.clear_child_tid, tid_slot);
         assert_eq!(emu.read_register_u64("RAX").unwrap(), 1000);
+        assert_eq!(
+            emu.state
+                .read_space(ram, tid_slot, tid_slot_bytes.len())
+                .unwrap(),
+            tid_slot_bytes,
+            "set_tid_address must only register clear_child_tid"
+        );
     }
 
     #[test]

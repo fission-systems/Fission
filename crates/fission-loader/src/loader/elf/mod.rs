@@ -25,6 +25,7 @@ const SHT_DYNSYM: u32 = 11;
 const SHF_WRITE: u64 = 0x1;
 const SHF_ALLOC: u64 = 0x2;
 const SHF_EXECINSTR: u64 = 0x4;
+const SHT_NOBITS: u32 = 8;
 const SHN_UNDEF: u16 = 0;
 const STT_NOTYPE: u8 = 0;
 const STT_OBJECT: u8 = 1;
@@ -65,6 +66,14 @@ const R_LARCH_B21: u32 = 65;
 const R_LARCH_B26: u32 = 66;
 const RELOCATABLE_IMAGE_BASE: u64 = 0x100000;
 const ELF_EXTERNAL_IMAGE_BASE: u64 = 0xffff_2000_0000_0000;
+
+fn elf_section_file_size(section_type: u32, virtual_size: u64) -> u64 {
+    if section_type == SHT_NOBITS {
+        0
+    } else {
+        virtual_size
+    }
+}
 
 impl ElfLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
@@ -194,7 +203,7 @@ impl ElfLoader {
                     virtual_address,
                     virtual_size: shdr.sh_size, // ELF does not distinguish VSize/RawSize clearly in SH, mostly same
                     file_offset: shdr.sh_offset,
-                    file_size: shdr.sh_size, // except NOBITS
+                    file_size: elf_section_file_size(shdr.sh_type, shdr.sh_size),
                     is_executable: (shdr.sh_flags & SHF_EXECINSTR) != 0,
                     is_readable: (shdr.sh_flags & SHF_ALLOC) != 0,
                     is_writable: (shdr.sh_flags & SHF_WRITE) != 0,
@@ -482,7 +491,7 @@ impl ElfLoader {
                     virtual_address,
                     virtual_size: shdr.sh_size as u64,
                     file_offset: shdr.sh_offset as u64,
-                    file_size: shdr.sh_size as u64,
+                    file_size: elf_section_file_size(shdr.sh_type, shdr.sh_size as u64),
                     is_executable: (shdr.sh_flags as u64 & SHF_EXECINSTR) != 0,
                     is_readable: (shdr.sh_flags as u64 & SHF_ALLOC) != 0,
                     is_writable: (shdr.sh_flags as u64 & SHF_WRITE) != 0,
@@ -3239,6 +3248,12 @@ fn map_symbol_versions_32(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn elf_nobits_sections_have_no_file_bytes() {
+        assert_eq!(elf_section_file_size(SHT_NOBITS, 0x158), 0);
+        assert_eq!(elf_section_file_size(SHT_SYMTAB, 0x158), 0x158);
+    }
 
     #[test]
     fn riscv_relocation_patch_encodes_hi20_and_lo12_fields() {

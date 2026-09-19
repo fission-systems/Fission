@@ -797,11 +797,6 @@ impl SimProcedure for SysSetTidAddress {
         let tidptr = emu.syscall_arg(0);
         emu.clear_child_tid = tidptr;
         tracing::info!("sys_set_tid_address(0x{:X}) -> tid=1000", tidptr);
-        // Optionally write current tid into *tidptr if mapped.
-        if tidptr != 0 {
-            let tid: u64 = 1000;
-            let _ = ram_write(emu, tidptr, &tid.to_le_bytes());
-        }
         emu.set_syscall_return(1000)?;
         Ok(HleResult::Continue)
     }

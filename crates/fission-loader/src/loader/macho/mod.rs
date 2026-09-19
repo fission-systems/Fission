@@ -128,7 +128,7 @@ impl MachoLoader {
                         virtual_address: sect.addr,
                         virtual_size: sect.size,
                         file_offset: sect.offset as u64,
-                        file_size: sect.size,
+                        file_size: macho_section_file_size(sect.flags, sect.size),
                         is_executable,
                         is_readable: true,
                         is_writable: (seg.initprot & 0x02) != 0, // VM_PROT_WRITE = 0x02
@@ -338,7 +338,7 @@ impl MachoLoader {
                         virtual_address: sect.addr as u64,
                         virtual_size: sect.size as u64,
                         file_offset: sect.offset as u64,
-                        file_size: sect.size as u64,
+                        file_size: macho_section_file_size(sect.flags, sect.size as u64),
                         is_executable,
                         is_readable: true,
                         is_writable: (seg.initprot & 0x02) != 0,
@@ -782,6 +782,18 @@ fn macho_section_has_instructions(flags: u32) -> bool {
     (flags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS)) != 0
 }
 
+fn macho_section_file_size(flags: u32, virtual_size: u64) -> u64 {
+    const SECTION_TYPE_MASK: u32 = 0x0000_00ff;
+    const S_ZEROFILL: u32 = 0x1;
+    const S_GB_ZEROFILL: u32 = 0xc;
+    const S_THREAD_LOCAL_ZEROFILL: u32 = 0x12;
+
+    match flags & SECTION_TYPE_MASK {
+        S_ZEROFILL | S_GB_ZEROFILL | S_THREAD_LOCAL_ZEROFILL => 0,
+        _ => virtual_size,
+    }
+}
+
 fn infer_macho_function_sizes(functions: &mut [FunctionInfo], sections: &[SectionInfo]) {
     let mut code_starts: Vec<u64> = functions
         .iter()
@@ -919,7 +931,7 @@ fn macho_relocation_site(section: &MachoSectionRelocInfo, r_address: u64) -> u64
 #[cfg(test)]
 mod tests {
     use super::{
-        MachoLoader, MachoSectionRelocInfo, infer_macho_function_sizes,
+        MachoLoader, MachoSectionRelocInfo, infer_macho_function_sizes, macho_section_file_size,
         macho_section_has_instructions, normalize_macho_symbol_name,
         parse_macho_relocation_symbols_64,
     };
@@ -956,6 +968,14 @@ mod tests {
         assert!(macho_section_has_instructions(0x8000_0400));
         assert!(macho_section_has_instructions(0x0000_0400));
         assert!(!macho_section_has_instructions(0x0000_0001));
+    }
+
+    #[test]
+    fn macho_zero_fill_sections_have_no_file_bytes() {
+        assert_eq!(macho_section_file_size(0x1, 0x158), 0);
+        assert_eq!(macho_section_file_size(0xc, 0x158), 0);
+        assert_eq!(macho_section_file_size(0x12, 0x158), 0);
+        assert_eq!(macho_section_file_size(0x8000_0400, 0x158), 0x158);
     }
 
     #[test]

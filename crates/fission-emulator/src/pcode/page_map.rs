@@ -129,7 +129,9 @@ impl PageMap {
         self.brk = aligned;
     }
 
-    /// Map `[start, start+len)` with the given protection. Overlapping pages are replaced.
+    /// Map `[start, start+len)` with the given protection. Overlapping pages
+    /// are replaced while unaffected portions of partially overlapped
+    /// mappings are preserved.
     ///
     /// Page span is computed from the **original** half-open range, not from
     /// `align_down(start) + len`. Using the latter drops the trailing page when
@@ -158,7 +160,30 @@ impl PageMap {
             page += PAGE_SIZE;
         }
 
-        self.mappings.retain(|m| m.end <= start || m.start >= end);
+        let mut next = Vec::with_capacity(self.mappings.len() + 2);
+        for mapping in self.mappings.drain(..) {
+            if mapping.end <= start || mapping.start >= end {
+                next.push(mapping);
+                continue;
+            }
+            if mapping.start < start {
+                next.push(GuestMapping {
+                    start: mapping.start,
+                    end: start,
+                    prot: mapping.prot,
+                    anon: mapping.anon,
+                });
+            }
+            if mapping.end > end {
+                next.push(GuestMapping {
+                    start: end,
+                    end: mapping.end,
+                    prot: mapping.prot,
+                    anon: mapping.anon,
+                });
+            }
+        }
+        self.mappings = next;
         self.mappings.push(GuestMapping {
             start,
             end,
@@ -488,6 +513,44 @@ mod tests {
             !pm.is_mapped(0x1009000),
             "must not over-map past page_align_up(end)"
         );
+    }
+
+    #[test]
+    fn remapping_middle_preserves_mapping_prefix_and_suffix() {
+        let mut pm = PageMap::new();
+        pm.map_region(0x1000, 0x4000, prot::RW, false);
+        pm.map_region(0x2000, 0x1000, prot::RX, false);
+
+        let ranges: Vec<_> = pm
+            .mappings()
+            .iter()
+            .map(|mapping| (mapping.start, mapping.end, mapping.prot, mapping.anon))
+            .collect();
+        assert_eq!(
+            ranges,
+            vec![
+                (
+                    0x1000,
+                    0x2000,
+                    prot::RW | prot::VALID | prot::WRITE_ORG,
+                    false
+                ),
+                (0x2000, 0x3000, prot::RX | prot::VALID, false),
+                (
+                    0x3000,
+                    0x5000,
+                    prot::RW | prot::VALID | prot::WRITE_ORG,
+                    false
+                ),
+            ]
+        );
+        assert!(pm.is_mapped(0x1000));
+        assert!(pm.is_mapped(0x3000));
+
+        // The preserved suffix must remain visible to the anonymous mmap
+        // collision scan; otherwise this request would incorrectly reuse it.
+        pm.mmap_hint = 0x3000;
+        assert_eq!(pm.mmap_anon(0x1000, prot::RW), 0x5000);
     }
 
     #[test]
