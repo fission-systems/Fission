@@ -11,7 +11,6 @@ pub mod external_symbol;
 pub mod function_discovery;
 pub mod function_provenance;
 pub mod noreturn;
-pub mod optimizer;
 pub mod patch;
 pub mod prototype_hint;
 pub mod string_xrefs;
@@ -43,7 +42,6 @@ pub use function_provenance::{
     FunctionProvenanceIndex, FunctionProvenanceKind, FunctionProvenanceRecord,
     build_function_provenance_index,
 };
-pub use optimizer::{Optimizer, OptimizerConfig};
 pub use patch::{Patch, PatchManager, QuickPatch};
 pub use prototype_hint::win_api_prototype_hint_json;
 pub use string_xrefs::{

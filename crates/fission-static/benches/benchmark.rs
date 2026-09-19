@@ -9,8 +9,6 @@ use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_ma
 use fission_pcode::{
     PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode, cfg::CfgAnalysis,
 };
-use fission_static::analysis::optimizer::OptimizerConfig;
-use fission_static::analysis::optimizer::integration::optimize_c_code;
 use std::fs;
 use std::path::PathBuf;
 
@@ -121,50 +119,6 @@ fn cfg_analysis_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-fn optimizer_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("optimizer");
-
-    let simple_code = r#"
-    int x = a ^ 0;
-    int y = b + 0;
-    int z = c * 1;
-    if (x > 0) {
-        result = x + y;
-    }
-    return result;
-"#;
-
-    let complex_code = r#"
-    int sum = 0;
-    for (int i = 0; i < 1000; i++) {
-        int temp = (i * 2) & 0xFF;
-        int opt = temp | 0;
-        sum += opt;
-        if (opt > 0) {
-            sum = sum ^ 0;
-        }
-    }
-    int final = sum * 1;
-    return final;
-"#;
-
-    group.bench_function("simple_optimization", |b| {
-        b.iter(|| {
-            let result = optimize_c_code(black_box(simple_code), OptimizerConfig::default());
-            black_box(result)
-        })
-    });
-
-    group.bench_function("complex_optimization", |b| {
-        b.iter(|| {
-            let result = optimize_c_code(black_box(complex_code), OptimizerConfig::default());
-            black_box(result)
-        })
-    });
-
-    group.finish();
-}
-
 fn binary_load_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("binary_loading");
     group.sample_size(50); // Reduce sample size for I/O-heavy benchmark
@@ -269,10 +223,5 @@ fn binary_load_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    cfg_analysis_benchmark,
-    optimizer_benchmark,
-    binary_load_benchmark
-);
+criterion_group!(benches, cfg_analysis_benchmark, binary_load_benchmark);
 criterion_main!(benches);
