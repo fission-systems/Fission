@@ -202,6 +202,7 @@ impl JitCompiler {
         ops: &[PcodeOp],
         register_space: u64,
         unique_space: u64,
+        check_memory_faults: bool,
         wide_ops: &mut Vec<PcodeOp>,
     ) -> Result<*const u8> {
         self.compile_translation_block(
@@ -212,6 +213,7 @@ impl JitCompiler {
             }],
             register_space,
             unique_space,
+            check_memory_faults,
             wide_ops,
         )
     }
@@ -228,6 +230,7 @@ impl JitCompiler {
         insns: &[GuestInsn],
         register_space: u64,
         unique_space: u64,
+        check_memory_faults: bool,
         wide_ops: &mut Vec<PcodeOp>,
     ) -> Result<*const u8> {
         anyhow::ensure!(!insns.is_empty(), "empty translation block");
@@ -256,7 +259,9 @@ impl JitCompiler {
             }
         }
 
-        // Does any op jump *backwards* inside this block?
+        // Does any op jump *backwards* inside this block? Fault-aware blocks
+        // also use the per-op fuse so a failed memory callback stops before
+        // the next p-code operation can observe a fabricated zero value.
         //
         // The per-op fuse below exists to break a loop inside one
         // instruction's semantics -- `tzcnt`'s bit scan, the `rep` forms --
@@ -276,7 +281,10 @@ impl JitCompiler {
                     target >= 0 && (target as usize) < flat.len() && target as usize <= index
                 }
             })
-        });
+        }) || (check_memory_faults
+            && flat
+                .iter()
+                .any(|op| matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store)));
 
         // Ops whose result nothing reads. They keep their block -- branch
         // targets are indices into `flat`, so the numbering has to stay -- and
@@ -2498,7 +2506,7 @@ mod tests {
         }];
         let mut compiler = JitCompiler::new().expect("cranelift backend available");
         let func_ptr = compiler
-            .compile_translation_block(&insns, 4, 2, &mut Vec::new())
+            .compile_translation_block(&insns, 4, 2, false, &mut Vec::new())
             .expect("compile");
         let mut emu = make_emu();
         let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
@@ -2614,7 +2622,7 @@ mod tests {
         }];
         let mut compiler = JitCompiler::new().expect("cranelift backend available");
         let func_ptr = compiler
-            .compile_translation_block(&insns, 4, 2, &mut Vec::new())
+            .compile_translation_block(&insns, 4, 2, false, &mut Vec::new())
             .expect("compile");
         let mut emu = make_emu();
         emu.userop_map.insert(5, "syscall".to_string());
@@ -2651,7 +2659,7 @@ mod tests {
         }];
         let mut compiler = JitCompiler::new().expect("cranelift backend available");
         let func_ptr = compiler
-            .compile_translation_block(&insns, 4, 2, &mut Vec::new())
+            .compile_translation_block(&insns, 4, 2, false, &mut Vec::new())
             .expect("compile");
         let mut emu = make_emu();
         emu.userop_map.insert(17, "LOCK".to_string());
@@ -2661,6 +2669,43 @@ mod tests {
             unsafe { std::mem::transmute(func_ptr) };
         assert_eq!(f(&mut emu as *mut _), 0x1004);
         assert_eq!(read_reg(&mut emu, 24), 0x39);
+    }
+
+    #[test]
+    fn jit_stops_at_a_memory_fault_before_the_next_pcode_op() {
+        let mut emu = make_emu();
+        let ram = emu.state.ram_space();
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Store,
+                address: 0x1000,
+                output: None,
+                inputs: vec![imm(ram as i64, 8), imm(0xDEAD_0000, 8), imm(1, 1)],
+                asm_mnemonic: Some("STORE unmapped".to_string()),
+            },
+            copy(reg(24, 8), imm(42, 8), 1),
+        ];
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops,
+        }];
+        let mut compiler = JitCompiler::new().expect("cranelift backend available");
+        let func_ptr = compiler
+            .compile_translation_block(&insns, 4, 2, true, &mut Vec::new())
+            .expect("compile");
+        let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+            unsafe { std::mem::transmute(func_ptr) };
+        assert_eq!(f(&mut emu as *mut _), 0x1004);
+        assert!(
+            emu.jit_fault
+                .as_deref()
+                .is_some_and(|message| message.contains("not mapped")),
+            "expected a recorded memory fault, got {:?}",
+            emu.jit_fault
+        );
+        assert_eq!(read_reg(&mut emu, 24), 0, "the next p-code op must not run");
     }
 
     /// Unique space id, matching the `2` that `compile_and_run` passes as

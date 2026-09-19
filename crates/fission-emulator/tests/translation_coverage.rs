@@ -349,9 +349,13 @@ fn translate(path: &Path, stats: &mut Stats) {
         }
         stats.blocks += 1;
         // Compiling is not executing. The pointer is dropped on the next line.
-        if let Err(e) =
-            jit.compile_translation_block(&insns, layout.register, layout.unique, &mut wide_ops)
-        {
+        if let Err(e) = jit.compile_translation_block(
+            &insns,
+            layout.register,
+            layout.unique,
+            false,
+            &mut wide_ops,
+        ) {
             *stats
                 .compile_errors
                 .entry(shape(&format!("{e:#}")))

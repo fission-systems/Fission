@@ -16,6 +16,22 @@ use crate::pcode::page_map::page_align_down;
 /// Max direct TB chain depth (soft chaining, QEMU-inspired).
 pub const MAX_CHAIN_DEPTH: u32 = 32;
 
+fn record_memory_fault(
+    emu: &mut Emulator,
+    operation: &str,
+    space_id: u64,
+    offset: u64,
+    size: usize,
+    error: impl std::fmt::Display,
+) {
+    if emu.jit_fault.is_none() {
+        emu.metrics.memory_faults = emu.metrics.memory_faults.saturating_add(1);
+        emu.jit_fault = Some(format!(
+            "JIT {operation} failed at space {space_id} offset 0x{offset:X} size {size}: {error}"
+        ));
+    }
+}
+
 // ── Generic address-space I/O (≤8 bytes as u64) ─────────────────────────────
 
 #[unsafe(no_mangle)]
@@ -44,7 +60,10 @@ pub extern "C" fn jit_read_space(
             }
             val
         }
-        Err(_) => 0,
+        Err(error) => {
+            record_memory_fault(emu, "read", space_id, offset, size, error);
+            0
+        }
     }
 }
 
@@ -74,7 +93,10 @@ pub extern "C" fn jit_write_space(
         Vec::new()
     };
 
-    let _ = emu.state.write_space(space_id, offset, &bytes);
+    if let Err(error) = emu.state.write_space(space_id, offset, &bytes) {
+        record_memory_fault(emu, "write", space_id, offset, size, error);
+        return;
+    }
     if emu.observe.mem && emu.state.spaces_layout.is_ram(space_id) {
         emu.notify_mem(offset, size as u32, true, val);
     }
@@ -167,7 +189,10 @@ pub extern "C" fn jit_read_bytes(
                 dst[n..].fill(0);
             }
         }
-        Err(_) => dst.fill(0),
+        Err(error) => {
+            record_memory_fault(emu, "wide read", space_id, offset, size, error);
+            dst.fill(0);
+        }
     }
 }
 
@@ -192,7 +217,10 @@ pub extern "C" fn jit_write_bytes(
         Vec::new()
     };
 
-    let _ = emu.state.write_space(space_id, offset, src);
+    if let Err(error) = emu.state.write_space(space_id, offset, src) {
+        record_memory_fault(emu, "wide write", space_id, offset, size, error);
+        return;
+    }
 
     for page in smc_pages {
         emu.jit_cache.invalidate_page(page_align_down(page));
@@ -264,6 +292,9 @@ pub(crate) fn pcode_budget(max_inst: u64) -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
     let emu = unsafe { &mut *emu_ptr };
+    if emu.jit_fault.is_some() {
+        return 1;
+    }
     emu.pcode_ops = emu.pcode_ops.saturating_add(1);
     if emu.halt_requested {
         return 1;
@@ -292,7 +323,9 @@ pub extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
 
 #[inline]
 fn max_inst_reached(emu: &Emulator) -> bool {
-    emu.halt_requested || emu.max_inst.is_some_and(|m| emu.inst_count >= m)
+    emu.halt_requested
+        || emu.jit_fault.is_some()
+        || emu.max_inst.is_some_and(|m| emu.inst_count >= m)
 }
 
 /// Soft direct chaining: if `next_pc` is already compiled, enter it (bounded depth).

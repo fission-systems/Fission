@@ -209,6 +209,8 @@ pub struct Emulator {
     pub clear_child_tid: u64,
     /// Last CallOther/userop data result (consumed by JIT after `jit_call_other`).
     pub callother_result: u64,
+    /// First memory fault raised by a compiled JIT block, if any.
+    pub(crate) jit_fault: Option<String>,
 }
 
 /// Max guest instructions per translation block.
@@ -432,6 +434,7 @@ impl Emulator {
             gs_base: 0,
             clear_child_tid: 0,
             callother_result: 0,
+            jit_fault: None,
         };
 
         // Default SP if no ELF image_info applied yet (Windows / bare-metal).
@@ -1660,6 +1663,10 @@ impl Emulator {
                 // inst_count is advanced inside the TB via jit_count_insn.
                 let next_pc = func(self as *mut _);
                 self.pc = next_pc;
+                if let Some(error) = self.jit_fault.take() {
+                    self.metrics.exit_reason = Some("memory_fault".into());
+                    return Err(anyhow::anyhow!(error));
+                }
                 return Ok(!self.halt_requested);
             }
         }
@@ -1721,6 +1728,7 @@ impl Emulator {
             &insns,
             reg_sp,
             uniq_sp,
+            self.state.enforce_page_faults,
             &mut self.wide_ops,
         ) {
             Ok(ptr) => ptr,
@@ -1765,6 +1773,10 @@ impl Emulator {
             unsafe { std::mem::transmute(block.host_func_ptr) };
         let next_pc = func(self as *mut _);
         self.pc = next_pc;
+        if let Some(error) = self.jit_fault.take() {
+            self.metrics.exit_reason = Some("memory_fault".into());
+            return Err(anyhow::anyhow!(error));
+        }
         Ok(!self.halt_requested)
     }
 
@@ -1820,6 +1832,7 @@ impl Emulator {
     fn run_inner(&mut self, stop_pc: Option<u64>) -> Result<RunOutcome> {
         tracing::info!("Sandbox execution started at PC=0x{:X}", self.pc);
         self.halt_requested = false;
+        self.jit_fault = None;
         self.chain_depth = 0;
         self.pcode_budget_pc = None;
         self.watch_hit = None;

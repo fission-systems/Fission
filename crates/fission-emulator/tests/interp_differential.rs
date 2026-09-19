@@ -496,13 +496,10 @@ fn the_engines_agree_on_a_32_bit_process() {
 /// the two paths and has a synthetic regression in `interp.rs`.
 ///
 /// After that fix the old split is gone. Both engines now take the same path
-/// through step 12510. The interpreter then reports an unmapped write at
-/// `0x4BA000` from `stp q0, q0, [x3, #-0x20]` at `0x4188F4`, while the JIT's
-/// memory callback currently ignores that write error and continues to
-/// `0x4188F8`. Keep this corpus test ignored until JIT memory-fault reporting
-/// is made equivalent to the interpreter.
+/// through step 12510 and report the same unmapped write at `0x4BA000` from
+/// `stp q0, q0, [x3, #-0x20]` at `0x4188F4`. The process does not complete on
+/// this corpus image, but the differential remains a useful agreement gate.
 #[test]
-#[ignore = "interpreter faults at step 12511 on unmapped write 0x4BA000; JIT memory callback still ignores the fault"]
 fn the_engines_agree_on_aarch64() {
     let (Some(mut jitted), Some(mut interpreted)) =
         (build_aarch64(60_000, false), build_aarch64(60_000, true))
