@@ -240,7 +240,11 @@ impl LoadedBinary {
         if let Ok(idx) = idx {
             let section = &self.sections[idx];
             let offset_in_section = va - section.virtual_address;
-            return Some(section.file_offset as usize + offset_in_section as usize);
+            if offset_in_section >= section.file_size {
+                return None;
+            }
+            let file_offset = section.file_offset.checked_add(offset_in_section)?;
+            return usize::try_from(file_offset).ok();
         }
         None
     }
@@ -284,4 +288,50 @@ fn section_contains(section: &SectionInfo, address: u64) -> bool {
     section_size > 0
         && address >= section.virtual_address
         && address < section.virtual_address + section_size
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loader::types::{DataBuffer, LoadedBinaryBuilder};
+
+    fn binary_with_sections(sections: Vec<SectionInfo>) -> LoadedBinary {
+        LoadedBinaryBuilder::new("query-test".to_string(), DataBuffer::Heap(vec![0; 0x100]))
+            .add_sections(sections)
+            .build()
+            .expect("synthetic binary should build")
+    }
+
+    #[test]
+    fn va_to_file_offset_rejects_virtual_only_section_bytes() {
+        let binary = binary_with_sections(vec![SectionInfo {
+            name: ".bss".to_string(),
+            virtual_address: 0x2000,
+            virtual_size: 0x100,
+            file_offset: 0,
+            file_size: 0,
+            is_executable: false,
+            is_readable: true,
+            is_writable: true,
+        }]);
+
+        assert_eq!(binary.va_to_file_offset(0x2050), None);
+    }
+
+    #[test]
+    fn va_to_file_offset_stops_at_file_backed_section_tail() {
+        let binary = binary_with_sections(vec![SectionInfo {
+            name: ".data".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 0x100,
+            file_offset: 0x40,
+            file_size: 0x20,
+            is_executable: false,
+            is_readable: true,
+            is_writable: true,
+        }]);
+
+        assert_eq!(binary.va_to_file_offset(0x101f), Some(0x5f));
+        assert_eq!(binary.va_to_file_offset(0x1020), None);
+    }
 }

@@ -61,6 +61,7 @@ pub(super) fn parse_coff_symbols(
                 if str_offset < loader.data.len() as u64 {
                     loader.read_string_at(str_offset)
                 } else {
+                    i += aux_count as u32;
                     continue;
                 }
             }
@@ -567,5 +568,42 @@ mod tests {
         };
 
         assert!(parse_coff_loader_symbols(&loader, 0, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn invalid_long_name_skips_aux_records_before_next_symbol() {
+        let mut data = vec![0u8; 58];
+
+        // Primary symbol with an invalid long-name offset and one auxiliary
+        // record. The auxiliary record is deliberately shaped like a
+        // function so a cursor that fails to skip it would report a ghost.
+        data[0..4].fill(0);
+        data[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        data[14..16].copy_from_slice(&(symbol_type::DT_FCN << 4).to_le_bytes());
+        data[16] = storage_class::C_EXT;
+        data[17] = 1;
+
+        data[18..26].copy_from_slice(b"ghost\0\0\0");
+        data[30..32].copy_from_slice(&(symbol_type::DT_FCN << 4).to_le_bytes());
+        data[34] = storage_class::C_EXT;
+
+        data[36..44].copy_from_slice(b"real\0\0\0\0");
+        data[44..48].copy_from_slice(&0x20u32.to_le_bytes());
+        data[48..50].copy_from_slice(&1i16.to_le_bytes());
+        data[50..52].copy_from_slice(&(symbol_type::DT_FCN << 4).to_le_bytes());
+        data[52] = storage_class::C_EXT;
+
+        let sections = [executable_section()];
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        let symbols = parse_coff_symbols(&loader, 0, 3, 0).expect("parse symbols");
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "real");
+        assert_eq!(symbols[0].address, 0x401020);
     }
 }

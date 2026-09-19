@@ -842,6 +842,9 @@ impl<'a> PeLoaderImpl<'a> {
             // Check if RVA is within this section
             if rva >= section_rva && rva < section_rva + section_size {
                 let delta = rva - section_rva;
+                if u64::from(delta) >= section.file_size {
+                    return None;
+                }
                 return Some(section.file_offset + delta as u64);
             }
         }
@@ -1213,6 +1216,9 @@ fn identity_va_to_file_offset(binary: &LoadedBinary, va: u64) -> Option<usize> {
         let end = sec.virtual_address.saturating_add(sec.virtual_size);
         if va >= sec.virtual_address && va < end {
             let delta = va.checked_sub(sec.virtual_address)?;
+            if delta >= sec.file_size {
+                return None;
+            }
             let fo = sec.file_offset.checked_add(delta)?;
             let fo_usize = usize::try_from(fo).ok()?;
             return (fo_usize < data_len).then_some(fo_usize);
@@ -2013,6 +2019,50 @@ mod tests {
         assert_eq!(dp.address, 0x4010C0);
         assert_eq!(dp.is_import, false);
         assert_eq!(dp.kind, Some("delay_proxy".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod file_offset_tests {
+    use super::*;
+
+    fn section(file_size: u64) -> SectionInfo {
+        SectionInfo {
+            name: ".bss".to_string(),
+            virtual_address: 0x140002000,
+            virtual_size: 0x100,
+            file_offset: 0,
+            file_size,
+            is_executable: false,
+            is_readable: true,
+            is_writable: true,
+        }
+    }
+
+    #[test]
+    fn pe_rva_to_file_offset_rejects_unbacked_virtual_tail() {
+        let sections = [section(0)];
+        let loader = PeLoaderImpl {
+            data: &[],
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        assert_eq!(loader.rva_to_file_offset(0x2050, 0x140000000), None);
+    }
+
+    #[test]
+    fn pe_identity_offset_rejects_unbacked_virtual_tail() {
+        let binary = LoadedBinaryBuilder::new(
+            "identity-test".to_string(),
+            DataBuffer::Heap(vec![0xaa; 0x100]),
+        )
+        .add_section(section(0))
+        .build()
+        .expect("synthetic binary should build");
+
+        assert_eq!(identity_va_to_file_offset(&binary, 0x140002050), None);
     }
 }
 

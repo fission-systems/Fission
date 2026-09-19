@@ -27,6 +27,9 @@ impl<'a> TeLoaderImpl<'a> {
 
             if rva >= section_rva && rva < section_rva + section_size {
                 let delta = rva - section_rva;
+                if u64::from(delta) >= section.file_size {
+                    return None;
+                }
                 return Some(section.file_offset + delta as u64);
             }
         }
@@ -642,5 +645,26 @@ mod tests {
             .iter()
             .find(|t| t.name == "EFI_IMAGE_SECTION_HEADER_0");
         assert!(sec_type.is_some());
+    }
+
+    #[test]
+    fn te_rva_to_file_offset_rejects_unbacked_virtual_tail() {
+        let sections = [SectionInfo {
+            name: ".bss".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 0x100,
+            file_offset: 0,
+            file_size: 0,
+            is_executable: false,
+            is_readable: true,
+            is_writable: true,
+        }];
+        let loader = TeLoaderImpl {
+            data: &[],
+            sections: &sections,
+            stripped_size: 0,
+        };
+
+        assert_eq!(loader.rva_to_file_offset(0x1050, 0x400000), None);
     }
 }
