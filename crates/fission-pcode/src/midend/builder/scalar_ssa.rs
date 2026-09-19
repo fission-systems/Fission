@@ -1004,6 +1004,50 @@ fn resolve_pointer_input(
     resolve_pointer_value(pcode, ssa, options, value.id, visiting, budget - 1)
 }
 
+/// A constant whose bit-pattern has been resolved through scalar SSA.
+///
+/// Keeping the source width is important: `IntZExt` and `IntSExt` have
+/// different meanings for a high-bit-set narrow literal even when both are
+/// eventually consumed by the same pointer arithmetic operation.
+#[derive(Clone, Copy, Debug)]
+struct ResolvedConstant {
+    bits: u64,
+    size: u32,
+}
+
+impl ResolvedConstant {
+    fn from_literal(varnode: &Varnode) -> Option<Self> {
+        if !varnode.is_constant {
+            return None;
+        }
+        Some(Self {
+            bits: varnode.offset & size_mask(varnode.size)?,
+            size: varnode.size,
+        })
+    }
+
+    fn zero_extend_to(self, size: u32) -> Option<Self> {
+        (size >= self.size).then_some(Self {
+            bits: self.bits & size_mask(size)?,
+            size,
+        })
+    }
+
+    fn sign_extend_to(self, size: u32) -> Option<Self> {
+        if size < self.size {
+            return None;
+        }
+        Some(Self {
+            bits: signed_bits(self.bits, self.size)? as u64 & size_mask(size)?,
+            size,
+        })
+    }
+
+    fn signed_at(self, size: u32) -> Option<i64> {
+        signed_bits(self.bits, size)
+    }
+}
+
 /// Resolve an arithmetic operand to a signed constant even when SLEIGH has
 /// materialized the literal through a scalar temporary first. Many ARM
 /// prologues lift an immediate as `Copy unique <- const(k)` followed by
@@ -1027,7 +1071,28 @@ fn resolve_constant_input(
         .ops
         .get(site.op as usize)?;
     let input = op.inputs.get(input_index)?;
-    if let Some(value) = signed_constant_delta(input) {
+    let resolved = resolve_constant_input_bits(pcode, ssa, site, input_index, visiting, budget)?;
+    resolved.signed_at(input.size)
+}
+
+fn resolve_constant_input_bits(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    site: SsaOpSite,
+    input_index: usize,
+    visiting: &mut BTreeSet<SsaValueId>,
+    budget: usize,
+) -> Option<ResolvedConstant> {
+    if budget == 0 {
+        return None;
+    }
+    let op = pcode
+        .blocks
+        .get(site.block as usize)?
+        .ops
+        .get(site.op as usize)?;
+    let input = op.inputs.get(input_index)?;
+    if let Some(value) = ResolvedConstant::from_literal(input) {
         return Some(value);
     }
     if !is_register_space_id(input.space_id) && !is_unique_space_id(input.space_id) {
@@ -1054,7 +1119,7 @@ fn resolve_constant_value(
     value_id: SsaValueId,
     visiting: &mut BTreeSet<SsaValueId>,
     budget: usize,
-) -> Option<i64> {
+) -> Option<ResolvedConstant> {
     if budget == 0 || !visiting.insert(value_id) {
         return None;
     }
@@ -1066,12 +1131,25 @@ fn resolve_constant_value(
                 .get(site.block as usize)?
                 .ops
                 .get(site.op as usize)?;
+            let output_size = op.output.as_ref()?.size;
             match op.opcode {
-                PcodeOpcode::Copy
-                | PcodeOpcode::Cast
-                | PcodeOpcode::IntZExt
-                | PcodeOpcode::IntSExt => {
-                    resolve_constant_input(pcode, ssa, site, 0, visiting, budget - 1)
+                PcodeOpcode::Copy | PcodeOpcode::Cast => {
+                    // COPY has equal input/output sizes by construction. CAST
+                    // is a type-only operation in raw p-code; if a
+                    // decompiler-added CAST changes size, its numeric
+                    // extension/truncation semantics are not encoded here, so
+                    // do not guess them in a pointer proof.
+                    let input =
+                        resolve_constant_input_bits(pcode, ssa, site, 0, visiting, budget - 1)?;
+                    (input.size == output_size).then_some(input)
+                }
+                PcodeOpcode::IntZExt => {
+                    resolve_constant_input_bits(pcode, ssa, site, 0, visiting, budget - 1)?
+                        .zero_extend_to(output_size)
+                }
+                PcodeOpcode::IntSExt => {
+                    resolve_constant_input_bits(pcode, ssa, site, 0, visiting, budget - 1)?
+                        .sign_extend_to(output_size)
                 }
                 _ => None,
             }
@@ -1140,32 +1218,17 @@ fn resolve_pointer_value(
                         resolve_pointer_input(pcode, ssa, options, site, 0, visiting, budget - 1)
                     }
                     PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
-                        if let Some(delta) = resolve_constant_input(
-                            pcode,
-                            ssa,
-                            site,
-                            0,
-                            &mut BTreeSet::new(),
-                            budget - 1,
-                        ) {
-                            resolve_pointer_input(
+                        let left_is_literal = op.inputs[0].is_constant;
+                        let right_is_literal = op.inputs[1].is_constant;
+                        if !left_is_literal && right_is_literal {
+                            let delta = resolve_constant_input(
                                 pcode,
                                 ssa,
-                                options,
                                 site,
                                 1,
-                                visiting,
+                                &mut BTreeSet::new(),
                                 budget - 1,
-                            )?
-                            .shifted(delta)
-                        } else if let Some(delta) = resolve_constant_input(
-                            pcode,
-                            ssa,
-                            site,
-                            1,
-                            &mut BTreeSet::new(),
-                            budget - 1,
-                        ) {
+                            )?;
                             resolve_pointer_input(
                                 pcode,
                                 ssa,
@@ -1176,8 +1239,78 @@ fn resolve_pointer_value(
                                 budget - 1,
                             )?
                             .shifted(delta)
+                        } else if left_is_literal && !right_is_literal {
+                            let delta = resolve_constant_input(
+                                pcode,
+                                ssa,
+                                site,
+                                0,
+                                &mut BTreeSet::new(),
+                                budget - 1,
+                            )?;
+                            resolve_pointer_input(
+                                pcode,
+                                ssa,
+                                options,
+                                site,
+                                1,
+                                visiting,
+                                budget - 1,
+                            )?
+                            .shifted(delta)
                         } else {
-                            None
+                            // A non-literal constant chain can be either an
+                            // absolute pointer (for example an ARM MMIO
+                            // address) or an arithmetic displacement. If
+                            // both operands are materialized, only accept the
+                            // case whose other operand is already proven to be
+                            // the Stack base; otherwise guessing can create a
+                            // negative RAM address from an absolute pointer.
+                            let left_range = resolve_pointer_input(
+                                pcode,
+                                ssa,
+                                options,
+                                site,
+                                0,
+                                visiting,
+                                budget - 1,
+                            );
+                            let right_range = resolve_pointer_input(
+                                pcode,
+                                ssa,
+                                options,
+                                site,
+                                1,
+                                visiting,
+                                budget - 1,
+                            );
+                            let left_delta = resolve_constant_input(
+                                pcode,
+                                ssa,
+                                site,
+                                0,
+                                &mut BTreeSet::new(),
+                                budget - 1,
+                            );
+                            let right_delta = resolve_constant_input(
+                                pcode,
+                                ssa,
+                                site,
+                                1,
+                                &mut BTreeSet::new(),
+                                budget - 1,
+                            );
+                            if left_range
+                                .is_some_and(|range| range.region == SsaMemoryRegion::Stack)
+                            {
+                                left_range?.shifted(right_delta?)
+                            } else if right_range
+                                .is_some_and(|range| range.region == SsaMemoryRegion::Stack)
+                            {
+                                right_range?.shifted(left_delta?)
+                            } else {
+                                None
+                            }
                         }
                     }
                     PcodeOpcode::IntSub if op.inputs.len() == 2 => {
@@ -1295,23 +1428,30 @@ fn is_call_return_address_scaffold_store(
 }
 
 fn signed_constant_delta(varnode: &Varnode) -> Option<i64> {
-    if !varnode.is_constant {
-        return None;
-    }
-    let bits = varnode.size.checked_mul(8)?;
-    match bits {
-        1..=63 => {
-            let mask = (1_u64 << bits) - 1;
-            let value = varnode.offset & mask;
-            let sign_bit = 1_u64 << (bits - 1);
-            if value & sign_bit == 0 {
-                i64::try_from(value).ok()
-            } else {
-                Some((value | !mask) as i64)
-            }
-        }
-        64 => Some(varnode.offset as i64),
+    ResolvedConstant::from_literal(varnode)?.signed_at(varnode.size)
+}
+
+fn size_mask(size: u32) -> Option<u64> {
+    match size.checked_mul(8)? {
+        1..=63 => Some((1_u64 << (size * 8)) - 1),
+        64 => Some(u64::MAX),
         _ => None,
+    }
+}
+
+fn signed_bits(bits: u64, size: u32) -> Option<i64> {
+    let mask = size_mask(size)?;
+    let bits = bits & mask;
+    let width = size.checked_mul(8)?;
+    if width == 64 {
+        Some(bits as i64)
+    } else {
+        let sign_bit = 1_u64 << (width - 1);
+        if bits & sign_bit == 0 {
+            i64::try_from(bits).ok()
+        } else {
+            Some((bits | !mask) as i64)
+        }
     }
 }
 
@@ -3287,6 +3427,39 @@ mod tests {
     }
 
     #[test]
+    fn materialized_ram_base_with_literal_offset_keeps_ram_guard() {
+        let pointer = unique_sized(0x100, 4);
+        let adjusted_pointer = unique_sized(0x104, 4);
+        let pcode = function(vec![vec![
+            copy(0x1000, pointer.clone(), Varnode::constant(0xe000_e000, 4)),
+            op(
+                0x1001,
+                PcodeOpcode::IntAdd,
+                Some(adjusted_pointer.clone()),
+                vec![pointer, Varnode::constant(0x14, 4)],
+            ),
+            op(
+                0x1002,
+                PcodeOpcode::Load,
+                Some(unique_sized(0x108, 4)),
+                vec![Varnode::constant(3, 4), adjusted_pointer],
+            ),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let guard = &ssa.dynamic_guards[&SsaOpSite { block: 0, op: 2 }];
+        assert_eq!(guard.region, Some(SsaMemoryRegion::Ram));
+        assert_eq!(guard.space_id, Some(3));
+        assert_eq!(guard.precision, SsaGuardRangePrecision::Exact);
+        assert_eq!(guard.minimum_offset, 0xe000_e014);
+        assert_eq!(guard.maximum_offset_exclusive, Some(0xe000_e018));
+    }
+
+    #[test]
     fn call_return_address_scaffold_does_not_shift_later_stack_loads() {
         let rsp = register_sized(0x20, 8);
         let saved = register_sized(0x28, 8);
@@ -4121,6 +4294,93 @@ mod tests {
             find_root(&mut parents, 0),
             find_root(&mut parents, 2),
             "interfering operand must NOT be forced into the phi output's group"
+        );
+    }
+
+    fn resolve_extension_delta(opcode: PcodeOpcode) -> Option<i64> {
+        let extended = unique_sized(0x100, 4);
+        let arithmetic_output = unique_sized(0x104, 4);
+        let pcode = function(vec![vec![
+            op(
+                0x1000,
+                opcode,
+                Some(extended.clone()),
+                vec![Varnode::constant(0xff, 1)],
+            ),
+            op(
+                0x1001,
+                PcodeOpcode::IntAdd,
+                Some(arithmetic_output),
+                vec![register(0x54), extended],
+            ),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        resolve_constant_input(
+            &pcode,
+            &ssa,
+            SsaOpSite { block: 0, op: 1 },
+            1,
+            &mut BTreeSet::new(),
+            64,
+        )
+    }
+
+    #[test]
+    fn zero_extension_preserves_narrow_unsigned_constant_bits() {
+        assert_eq!(
+            resolve_extension_delta(PcodeOpcode::IntZExt),
+            Some(255),
+            "ZExt u8(0xff) to u32 must be +255, not -1"
+        );
+    }
+
+    #[test]
+    fn sign_extension_preserves_narrow_signed_constant_bits() {
+        assert_eq!(
+            resolve_extension_delta(PcodeOpcode::IntSExt),
+            Some(-1),
+            "SExt u8(0xff) to u32 must be -1"
+        );
+    }
+
+    #[test]
+    fn width_changing_cast_does_not_guess_pointer_delta() {
+        let cast_output = unique_sized(0x108, 4);
+        let arithmetic_output = unique_sized(0x10c, 4);
+        let pcode = function(vec![vec![
+            op(
+                0x1000,
+                PcodeOpcode::Cast,
+                Some(cast_output.clone()),
+                vec![Varnode::constant(0xff, 1)],
+            ),
+            op(
+                0x1001,
+                PcodeOpcode::IntAdd,
+                Some(arithmetic_output),
+                vec![register(0x54), cast_output],
+            ),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        assert_eq!(
+            resolve_constant_input(
+                &pcode,
+                &ssa,
+                SsaOpSite { block: 0, op: 1 },
+                1,
+                &mut BTreeSet::new(),
+                64,
+            ),
+            None,
+            "a width-changing CAST does not encode its extension semantics"
         );
     }
 }

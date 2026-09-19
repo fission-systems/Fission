@@ -31,7 +31,10 @@ entry-memory-SSA path under `options.is_64bit`, so ARM32 entry-owned loads fell
 through to ordinary stack locals even though ARM.cspec supplied the base. The
 ARM prologue also materializes an immediate in a unique temporary before
 subtracting it from SP; scalar pointer proof therefore needed to follow a
-bounded Copy/Cast/ZExt/SExt constant chain as well.
+bounded Copy/Cast/ZExt/SExt constant chain as well. The constant resolver now
+keeps the source bit-pattern and width while applying `IntZExt` versus
+`IntSExt`; a width-changing raw `Cast` remains conservative because it does
+not encode the numeric extension semantics needed by this proof.
 ```
 
 ## 3. Generality / Invariant Proof
@@ -49,8 +52,9 @@ only when the address is aligned, at or above the cspec base, scalar pointer
 SSA proves the address in the entry-SP coordinate, and scalar memory SSA
 proves that every reaching memory value is function-entry input. The pointer
 proof may follow a bounded copy/cast/extension chain for a materialized
-constant, but not an unknown arithmetic value. Stores performed by the
-current function, unknown/bounded addresses, and misaligned offsets remain
+constant, applying zero/sign extension before interpreting the final
+arithmetic width, but not an unknown arithmetic value. Stores performed by
+the current function, unknown/bounded addresses, and misaligned offsets remain
 ordinary stack storage.
 ```
 
@@ -78,17 +82,17 @@ Comparable coverage:
 ## 5. Validation Matrix
 
 - [x] Targeted invariant test:
-  - Command: `cargo nextest run -p fission-pcode --filter-expr 'test(arm32_incoming_stack_load_becomes_fifth_formal_parameter) | test(arm32_incoming_stack_load_follows_a_materialized_prologue_immediate) | test(arm32_overwritten_entry_stack_slot_does_not_become_formal_parameter) | test(x64_incoming_stack_slots_follow_cspec_register_and_frame_layout)'`
-  - Result: 4 tests passed; ARM32 emits `param_5` for direct and materialized-prologue entry loads, while an overwritten entry slot remains non-parameter.
+  - Command: `cargo nextest run -p fission-pcode -E 'test(arm32_incoming_stack_load_becomes_fifth_formal_parameter) or test(arm32_incoming_stack_load_follows_a_materialized_prologue_immediate) or test(arm32_overwritten_entry_stack_slot_does_not_become_formal_parameter) or test(x64_incoming_stack_slots_follow_cspec_register_and_frame_layout) or test(zero_extension_preserves_narrow_unsigned_constant_bits) or test(sign_extension_preserves_narrow_signed_constant_bits) or test(width_changing_cast_does_not_guess_pointer_delta) or test(materialized_ram_base_with_literal_offset_keeps_ram_guard)'`
+  - Result: 8 tests passed; ARM32 emits `param_5` for direct and materialized-prologue entry loads, an overwritten entry slot remains non-parameter, `ZExt(0xff:u8)` resolves as `+255`, `SExt(0xff:u8)` as `-1`, width-changing `Cast` remains unknown, and a materialized RAM base keeps an exact positive RAM guard.
 - [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
-  - Result: 1,060 tests passed, 2 skipped.
+  - Result: 1,064 tests passed, 2 skipped.
 - [x] Focused benchmark row:
   - Command: repeat the exact 200-function cache-free CLI measurement above and inspect `uartOpen` plus all changed ARM outputs.
   - Result: `param_5` 0 -> 3, `param_6` 0 -> 1, `param_7` remains 0. `uartOpen` changes from three visible register parameters plus two locals to six formals, with the two byte stack loads as `uchar param_5` and `uchar param_6`.
-- [ ] Smoke or automation sample:
-  - Command: external local ARM scale smoke, when the local benchmark runner is available.
-  - Expected no-regression signal: existing ARM outputs without proven incoming stack loads stay unchanged.
+- [x] Smoke or automation sample:
+  - Command: `target/debug/fission_cli decomp /Users/sjkim1127/fission-benchmark/corpus/scale/binaries/O2-noinline/cleanflight/cleanflight_DALRCF405.elf --all --limit 200 --json --layer nir --no-db --no-warnings -o /tmp/fission-arm-final.NsyrKM/after.json`
+  - Result: 200/200 functions emitted with zero fallbacks. Compared with the previous P0 output, only `SysTick_Config` changed: its prior `invalid scalar ssa` fallback was removed and it now emits `uint SysTick_Config(int param_1)`. Compared with the baseline, the new formal-bearing set is `__udivmoddi4`, `i2cWriteBuffer`, `i2cRead`, and `uartOpen`; all other signatures in the window stayed unchanged. The ARM window retains `param_5` 0 -> 3, `param_6` 0 -> 1, and `param_7` 0 -> 0.
 - [x] Optional related checks:
   - Command: `cargo check -p fission-pcode -p fission-decompiler` and `cargo build --release -p fission-cli`
   - Result: both `cargo check` and the release CLI build passed.
@@ -105,3 +109,5 @@ Comparable coverage:
 - [x] Production code contains no hardcoded binary/function/address/corpus guards.
 - [x] The justification is metric-independent: an accessed entry-owned incoming stack slot is part of the formal ABI interface, not a local.
 - [x] The implementation extends the existing ABI/stack-slot owner and does not add a parallel semantic layer.
+- [x] High-bit narrow constants preserve p-code extension semantics: zero extension and sign extension no longer share a signed-leaf interpretation.
+- [x] Width-changing raw `Cast` remains conservative, and the materialized absolute RAM-base regression does not reclassify an address as a negative RAM offset.
