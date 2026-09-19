@@ -2,7 +2,7 @@ name: CI Heavy Validation
 
 on:
   # L1 release gate on every non-documentation main push (decompiler-critical jobs).
-  # Nightly / manual dispatch also run the full workspace suite + Miri.
+  # Nightly / manual dispatch run the full workspace suite + extended checks.
   # Policy: docs/CI_RELEASE_GATES.md
   push:
     branches: ["main"]
@@ -32,9 +32,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ── L1 release-critical (every main push + nightly + dispatch) ────────────
+  # ── L1 release-critical (non-documentation main push only) ────────────────
   test-linux-release-critical:
     name: 🧪 Release-Critical Tests (Linux)
+    if: github.event_name == 'push'
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
@@ -83,7 +84,10 @@ jobs:
     with:
       crates: "fission-midend-structuring,fission-pcode,fission-loader,fission-decompiler"
 
-  # ── Extended (nightly + manual only; not required for main-push L1) ───────
+  # ── Extended (nightly + manual only) ──────────────────────────────────────
+  # Full workspace mode includes every release-critical package and separately
+  # runs fission-static when it is excluded, so it replaces the narrower Linux
+  # job on these events instead of duplicating it.
   test-linux-full:
     name: 🧪 Full Tests (Linux · extended)
     if: github.event_name != 'push'
@@ -114,7 +118,7 @@ jobs:
       crates: "fission-pcode,fission-loader"
       warn_threshold_pct: 60
 
-  # Final summary — release-critical always; extended only when not skipped
+  # Final summary — one Linux suite per event; extended only when not skipped
   heavy-summary:
     name: ✅ Heavy Validation Summary
     needs:
@@ -156,12 +160,18 @@ jobs:
             fi
           }
 
-          require_success "Release-critical Linux tests" "${{ needs.test-linux-release-critical.result }}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            require_success "Release-critical Linux tests" "${{ needs.test-linux-release-critical.result }}"
+          else
+            require_success "Full Linux tests (extended)" "${{ needs.test-linux-full.result }}"
+          fi
           require_success "macOS heavy build" "${{ needs.build-macos-heavy.result }}"
           require_success "Windows heavy tests" "${{ needs.test-windows-heavy.result }}"
           require_success "MSRV" "${{ needs.msrv-check.result }}"
 
-          require_success_or_skipped "Full Linux tests (extended)" "${{ needs.test-linux-full.result }}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            require_success_or_skipped "Full Linux tests (extended)" "${{ needs.test-linux-full.result }}"
+          fi
 
           # Coverage is warn-only even when run
           if [ "${{ needs.coverage.result }}" = "failure" ]; then
@@ -176,4 +186,4 @@ jobs:
             exit 1
           fi
           echo "✅ Heavy validation checks passed for this event!"
-          echo "ℹ️  Main push L1 = release-critical jobs. Full tests and coverage run on nightly or dispatch."
+          echo "ℹ️  Main push L1 = release-critical jobs. Nightly/manual use the full Linux suite instead of duplicating it."

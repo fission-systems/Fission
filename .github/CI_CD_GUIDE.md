@@ -76,7 +76,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 ✓ Pass-gate / owner-boundary scripts
 ✓ Core + midend Tests (Linux, single nextest multi -p, sccache)
 ✓ CLI smoke + NIR regression gate
-✓ macOS/Windows tests (main push only; release CLI builds run in Heavy)
+✓ macOS test smoke (main push only; Windows release tests and release CLI builds run in Heavy)
 ```
 
 **Success criteria:**
@@ -85,7 +85,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 - [ ] No lint warnings (`-D warnings`)
 - [ ] Linux core+midend tests passed
 - [ ] CLI smoke + NIR regression gate passed
-- [ ] On main: macOS + Windows Fast Gate tests passed
+- [ ] On main: macOS Fast Gate smoke and Windows Heavy tests passed
 
 **If it fails:**
 ```bash

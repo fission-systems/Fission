@@ -18,7 +18,7 @@ This document is the policy source for how Fission promotes a git commit to a
 
 | Layer | Workflow | When | Role |
 |-------|----------|------|------|
-| **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core+midend tests, CLI smoke, NIR gate. **PR = Linux-first**; cross-OS tests on `main` push. Docs/wiki-only short-circuits |
+| **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core+midend tests, CLI smoke, NIR gate. **PR = Linux-first**; macOS test smoke on `main` push. Windows release tests remain in L1. Docs/wiki-only short-circuits |
 | **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every non-documentation `main` push + nightly + dispatch | **Push:** release-critical crates, platforms, NIR-check, MSRV. **Nightly/dispatch:** also full workspace tests, Miri, coverage. Docs/wiki-only pushes skip L1. |
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
@@ -118,18 +118,21 @@ L1 is achievable and meaningful for decompiler releases):
   - `docs` — short-circuit green
   - `scripts` — pass-gate + Python/shell syntax only
   - `ci` — pass-gate + workflow YAML parse (+ security if `deny.toml`/dependabot)
-  - `rust` — full Linux Fast Gate (cross-OS tests on `main` push)
-- PR Fast Gate no longer runs macOS/Windows tests (covered on `main` L0 + L1).
+  - `rust` — full Linux Fast Gate (macOS test smoke on `main` push)
+- PR Fast Gate no longer runs macOS/Windows tests (macOS smoke is on main L0;
+  Windows release tests are on L1).
 - Fast Gate no longer performs separate macOS/Windows CLI release builds on `main`;
-  those release builds remain in L1 Heavy while L0 keeps the cross-OS test signal.
+  those release builds remain in L1 Heavy while L0 keeps the macOS test smoke signal.
 - `reusable-run-tests` runs multi-package nextest in **one** cargo process and
   skips webkit/GTK sysdeps unless GUI packages are required.
 - **sccache** (GitHub Actions backend) on lint / test / CLI build reusables via
   [`.github/actions/setup-sccache`](../.github/actions/setup-sccache).
 
-On **nightly schedule** or **workflow_dispatch**, Heavy also runs:
+On **nightly schedule** or **`workflow_dispatch`**, Heavy runs the full Linux
+workspace suite in place of the narrower release-critical Linux suite, and also runs:
 
 - Full Linux workspace tests
+- The full suite includes the release-critical packages, so Linux tests are not duplicated.
 - Miri (soft environmental issues may still fail until isolation is fixed)
 - Coverage (non-blocking)
 

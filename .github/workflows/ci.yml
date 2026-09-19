@@ -25,7 +25,7 @@ jobs:
   #   docs     — docs/wiki/markdown only → short-circuit
   #   scripts  — scripts/** only → pass-gate + script syntax
   #   ci       — .github/** (and CI meta) only → pass-gate + workflow sanity
-  #   rust     — crates/utils/Cargo/* → full Linux (and cross-OS tests on main)
+  #   rust     — crates/utils/Cargo/* → full Linux (and macOS test smoke on main)
   changes:
     name: 🔎 Detect changes
     runs-on: ubuntu-latest
@@ -37,7 +37,7 @@ jobs:
       run_script_checks: ${{ steps.filter.outputs.run_script_checks }}
       run_tests: ${{ steps.filter.outputs.run_tests }}
       run_cli_smoke: ${{ steps.filter.outputs.run_cli_smoke }}
-      run_multi_os: ${{ steps.filter.outputs.run_multi_os }}
+      run_macos_test: ${{ steps.filter.outputs.run_macos_test }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -73,7 +73,7 @@ jobs:
               echo "run_script_checks=true"
               echo "run_tests=true"
               echo "run_cli_smoke=true"
-              echo "run_multi_os=true"
+              echo "run_macos_test=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -92,9 +92,9 @@ jobs:
               echo "run_tests=true"
               echo "run_cli_smoke=true"
               if [ "${{ github.event_name }}" = "push" ]; then
-                echo "run_multi_os=true"
+                echo "run_macos_test=true"
               else
-                echo "run_multi_os=false"
+                echo "run_macos_test=false"
               fi
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -150,15 +150,15 @@ jobs:
           case "$LANE" in
             docs)
               RUN_SECURITY=false; RUN_LINT=false; RUN_PASS=false; RUN_SCRIPTS=false
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_MULTI=false
+              RUN_TESTS=false; RUN_SMOKE=false; RUN_MACOS=false
               ;;
             scripts)
               RUN_SECURITY=false; RUN_LINT=false; RUN_PASS=true; RUN_SCRIPTS=true
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_MULTI=false
+              RUN_TESTS=false; RUN_SMOKE=false; RUN_MACOS=false
               ;;
             ci)
               RUN_SECURITY=$SECURITY_META; RUN_LINT=false; RUN_PASS=true; RUN_SCRIPTS=true
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_MULTI=false
+              RUN_TESTS=false; RUN_SMOKE=false; RUN_MACOS=false
               # Workflow changes that touch reusable test runners still need a sanity compile? keep pass-gate only.
               if [ "$SECURITY_META" = true ]; then RUN_SECURITY=true; fi
               ;;
@@ -166,9 +166,9 @@ jobs:
               RUN_SECURITY=true; RUN_LINT=true; RUN_PASS=true; RUN_SCRIPTS=$SCRIPTS
               RUN_TESTS=true; RUN_SMOKE=true
               if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                RUN_MULTI=true
+                RUN_MACOS=true
               else
-                RUN_MULTI=false
+                RUN_MACOS=false
               fi
               ;;
           esac
@@ -181,12 +181,12 @@ jobs:
             echo "run_script_checks=${RUN_SCRIPTS}"
             echo "run_tests=${RUN_TESTS}"
             echo "run_cli_smoke=${RUN_SMOKE}"
-            echo "run_multi_os=${RUN_MULTI}"
+            echo "run_macos_test=${RUN_MACOS}"
           } >> "$GITHUB_OUTPUT"
 
           echo "Resolved lane=${LANE}"
           echo "  security=${RUN_SECURITY} lint=${RUN_LINT} pass_gate=${RUN_PASS} scripts=${RUN_SCRIPTS}"
-          echo "  tests=${RUN_TESTS} smoke=${RUN_SMOKE} multi_os=${RUN_MULTI}"
+          echo "  tests=${RUN_TESTS} smoke=${RUN_SMOKE} macos_test=${RUN_MACOS}"
 
   # Step 1: Security & Lint
   security-check:
@@ -370,29 +370,18 @@ jobs:
     with:
       profile: debug
 
-  # Cross-OS tests: main push + dispatch, rust/utils lane only.
+  # macOS test smoke: main push + dispatch, rust/utils lane only.
   # Release CLI builds are owned by CI Heavy; these jobs keep platform test
   # coverage without compiling the same CLI a second time in Fast Gate.
   test-macos:
     name: 🧪 Tests (macOS)
     needs: [changes]
-    if: needs.changes.outputs.run_multi_os == 'true'
+    if: needs.changes.outputs.run_macos_test == 'true'
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: macos-latest
       crates: "fission-midend-structuring,fission-pcode,fission-loader"
       profile: debug
-
-  test-windows:
-    name: 🧪 Tests (Windows)
-    needs: [changes]
-    if: needs.changes.outputs.run_multi_os == 'true'
-    uses: ./.github/workflows/reusable-run-tests.yml
-    with:
-      os: windows-latest
-      crates: "fission-midend-structuring,fission-pcode,fission-decompiler"
-      profile: debug
-      timeout_minutes: 90
 
   # Final summary — lane-aware required jobs
   ci-summary:
@@ -407,7 +396,6 @@ jobs:
         test-linux,
         cli-smoke-linux,
         test-macos,
-        test-windows,
       ]
     runs-on: ubuntu-latest
     if: always()
@@ -449,11 +437,10 @@ jobs:
           require_if "${{ needs.changes.outputs.run_pass_gate }}" "Pass-gate lint" "${{ needs.pass-gate-lint.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_tests }}" "Linux tests" "${{ needs.test-linux.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_cli_smoke }}" "CLI smoke" "${{ needs.cli-smoke-linux.result }}" || FAILED=1
-          require_if "${{ needs.changes.outputs.run_multi_os }}" "macOS tests" "${{ needs.test-macos.result }}" || FAILED=1
-          require_if "${{ needs.changes.outputs.run_multi_os }}" "Windows tests" "${{ needs.test-windows.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_macos_test }}" "macOS tests" "${{ needs.test-macos.result }}" || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then
             exit 1
           fi
           echo "✅ Fast Gate passed for lane=${LANE}"
-          echo "ℹ️  PR multi-OS is deferred to main L0 + L1 Heavy when applicable."
+          echo "ℹ️  PR platform tests are deferred to main L0 + L1 Heavy when applicable."
