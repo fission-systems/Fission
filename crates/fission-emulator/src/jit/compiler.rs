@@ -2033,30 +2033,46 @@ impl JitCompiler {
                     builder.switch_to_block(cont_b);
                     builder.seal_block(cont_b);
 
-                    // Reload flushed vars (HLE may have mutated them).
-                    // Registers: zero-callout load from host_reg_file.
-                    for ((sp, off), (sz, v)) in flushed {
-                        if sp == 0 {
-                            continue;
-                        }
-                        if sp == register_space
-                            && (off as usize) + (sz as usize) <= HOST_REG_FILE_SIZE
-                        {
+                    // A userop can mutate any register or memory, not just a
+                    // varnode that was dirty before the call. In particular,
+                    // a syscall writes its return register even when the TB
+                    // only read that register before the syscall. Reload
+                    // cached registers from their backing mirror, and drop
+                    // cached memory views so later reads re-seed from the
+                    // backing state. Unique-space values are instruction-local
+                    // SSA and have no backing state to reload from.
+                    let cached_registers: Vec<_> = var_map
+                        .iter()
+                        .filter(|(key, _)| key.0 == register_space)
+                        .map(|(key, var)| (*key, *var))
+                        .collect();
+                    for ((sp, off, size), v) in cached_registers {
+                        if (off as usize) + (size as usize) <= HOST_REG_FILE_SIZE {
                             let ptr = builder.ins().iadd_imm(host_reg_base, off as i64);
                             let flags = MemFlagsData::trusted();
                             let val = builder.ins().load(types::I64, flags, ptr, 0);
+                            let val = if size < 8 && size > 0 {
+                                builder
+                                    .ins()
+                                    .band_imm(val, ((1u64 << (size * 8)) - 1) as i64)
+                            } else {
+                                val
+                            };
                             builder.def_var(v, val);
                             continue;
                         }
                         let spv = builder.ins().iconst(types::I64, sp as i64);
                         let offv = builder.ins().iconst(types::I64, off as i64);
-                        let szv = builder.ins().iconst(types::I64, sz as i64);
+                        let szv = builder.ins().iconst(types::I64, size as i64);
                         let rcall = builder
                             .ins()
                             .call(read_space_ref, &[emu_ptr, spv, offv, szv]);
                         let val = builder.inst_results(rcall)[0];
                         builder.def_var(v, val);
                     }
+                    var_map.retain(|key, _| {
+                        key.0 == 0 || key.0 == unique_space || key.0 == register_space
+                    });
                     // Drop pre-HLE dirty so TB exit does not re-write stale SSA.
                     dirty.clear();
 
@@ -2572,6 +2588,79 @@ mod tests {
         let mut emu2 = compile_and_run(ops2);
         assert_eq!(read_reg(&mut emu2, 32), 6, "-6 / -1 == 6");
         assert_eq!(read_reg(&mut emu2, 40) as i64, -4, "-8 >>s 1 == -4");
+    }
+
+    #[test]
+    fn callother_reloads_cached_registers_after_external_mutation() {
+        // x86-64 syscall userop 5, with RAX=39 (getpid). The first COPY
+        // caches RAX without writing it; the syscall then changes RAX to the
+        // return value. The second COPY must observe that external mutation.
+        let ops = vec![
+            copy(reg(16, 8), reg(0, 8), 0),
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::CallOther,
+                address: 0x1000,
+                output: None,
+                inputs: vec![imm(5, 4)],
+                asm_mnemonic: Some("CALLOTHER syscall".to_string()),
+            },
+            copy(reg(24, 8), reg(0, 8), 2),
+        ];
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops,
+        }];
+        let mut compiler = JitCompiler::new().expect("cranelift backend available");
+        let func_ptr = compiler
+            .compile_translation_block(&insns, 4, 2, &mut Vec::new())
+            .expect("compile");
+        let mut emu = make_emu();
+        emu.userop_map.insert(5, "syscall".to_string());
+        emu.write_register_u64("RAX", 39)
+            .expect("seed getpid syscall");
+        let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+            unsafe { std::mem::transmute(func_ptr) };
+        assert_eq!(f(&mut emu as *mut _), 0x1004);
+        assert_eq!(read_reg(&mut emu, 24), 1000);
+    }
+
+    #[test]
+    fn callother_masks_reloaded_narrow_registers() {
+        // A 32-bit register view must keep its own width when it is reloaded
+        // after a userop. The high half is deliberately non-zero in the
+        // backing register slot so an unmasked reload is observable when the
+        // narrow view is copied into an eight-byte temporary.
+        let ops = vec![
+            copy(reg(16, 4), reg(0, 4), 0),
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::CallOther,
+                address: 0x1000,
+                output: None,
+                inputs: vec![imm(17, 4)],
+                asm_mnemonic: Some("CALLOTHER LOCK".to_string()),
+            },
+            copy(reg(24, 8), reg(16, 4), 2),
+        ];
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops,
+        }];
+        let mut compiler = JitCompiler::new().expect("cranelift backend available");
+        let func_ptr = compiler
+            .compile_translation_block(&insns, 4, 2, &mut Vec::new())
+            .expect("compile");
+        let mut emu = make_emu();
+        emu.userop_map.insert(17, "LOCK".to_string());
+        emu.write_register_u64("RAX", 0xABCD_0000_0000_0039)
+            .expect("seed RAX");
+        let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+            unsafe { std::mem::transmute(func_ptr) };
+        assert_eq!(f(&mut emu as *mut _), 0x1004);
+        assert_eq!(read_reg(&mut emu, 24), 0x39);
     }
 
     /// Unique space id, matching the `2` that `compile_and_run` passes as
