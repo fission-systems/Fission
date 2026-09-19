@@ -2,7 +2,7 @@
 
 use super::util::{
     compute_postdominator_sets_for_exit, compute_rpo, cooper_intersect, nearest_common_from_sets,
-    reverse_reachable_from,
+    reachable_from,
 };
 use crate::HashSet;
 use fission_midend_core::fast_hash::FastMap as HashMap;
@@ -41,21 +41,14 @@ impl PostDomTree {
             exits.push(node_count - 1);
         }
 
-        let mut postdominators = HashMap::default();
-        for exit in exits.iter().copied() {
-            let component = reverse_reachable_from(exit, predecessors);
-            if component.is_empty() {
-                continue;
-            }
-            let local = compute_postdominator_sets_for_exit(&component, successors, exit);
-            postdominators.extend(local);
-        }
-
-        for idx in 0..node_count {
-            postdominators
-                .entry(idx)
-                .or_insert_with(|| [idx].into_iter().collect::<HashSet<_>>());
-        }
+        // `ImmPostDomTree` adds one virtual successor to all real exits before
+        // running Cooper's algorithm. That is the function-level definition
+        // of postdominance: a block postdominates `n` only when every path
+        // from `n` to *any* exit reaches it. Computing one conditional set per
+        // exit and extending them into a map loses that distinction because a
+        // later exit overwrites the earlier set for shared predecessors.
+        let immediate = ImmPostDomTree::compute(successors, predecessors);
+        let postdominators = immediate.postdominator_sets();
 
         Self {
             exits,
@@ -170,7 +163,16 @@ impl ImmPostDomTree {
         let start = super_exit.unwrap_or(exits[0]);
 
         // Compute RPO of the reverse CFG starting from `start` (= virtual/actual exit).
-        let rpo_order = compute_rpo(start, &rev_succs, total_nodes);
+        // `compute_rpo` also appends disconnected nodes for the benefit of
+        // whole-graph callers. Cooper's iteration must not process those
+        // nodes as if they were reachable from the function exit: doing so
+        // can turn a disconnected cycle into a bogus idom cycle. Such nodes
+        // have no strict postdominator and are finalized as self-roots below.
+        let reverse_reachable = reachable_from(start, &rev_succs);
+        let rpo_order = compute_rpo(start, &rev_succs, total_nodes)
+            .into_iter()
+            .filter(|node| reverse_reachable.contains(node))
+            .collect::<Vec<_>>();
 
         // Build RPO number map: rpo_number[n] = position in RPO traversal.
         let mut rpo_number = vec![usize::MAX; total_nodes];
@@ -227,6 +229,34 @@ impl ImmPostDomTree {
             node_count,
             virtual_exit: super_exit,
         }
+    }
+
+    /// Materialize the global postdominator sets represented by this tree.
+    ///
+    /// The public `PostDomTree` API still exposes sets because SESE discovery
+    /// and a few heuristics consume them. Following the already-computed idom
+    /// chain keeps that compatibility without rerunning a set-intersection
+    /// dataflow once per real exit. The virtual super-exit is intentionally
+    /// omitted: it is an analysis sentinel, not a CFG block.
+    fn postdominator_sets(&self) -> HashMap<usize, HashSet<usize>> {
+        let mut sets = HashMap::default();
+        for node in 0..self.node_count {
+            let mut set = HashSet::default();
+            let mut current = node;
+            let mut visited = HashSet::default();
+            while current < self.node_count && visited.insert(current) {
+                set.insert(current);
+                let Some(parent) = self.idom.get(current).copied() else {
+                    break;
+                };
+                if parent == current {
+                    break;
+                }
+                current = parent;
+            }
+            sets.insert(node, set);
+        }
+        sets
     }
 
     /// Immediate postdominator of `n`, or `None` if `n` has no strict postdominator
@@ -396,5 +426,46 @@ mod tests {
             Some(CommonPostdominator::Block(3))
         );
         assert_eq!(tree.nearest_common_postdominator(&[1, 2]), Some(3));
+    }
+
+    #[test]
+    fn multi_exit_postdominator_sets_intersect_at_the_virtual_exit() {
+        let successors = vec![vec![1, 2], vec![], vec![]];
+        let predecessors = predecessors(&successors);
+        let tree = PostDomTree::analyze(&successors, &predecessors);
+
+        assert_eq!(
+            tree.postdominators().get(&0),
+            Some(&[0].into_iter().collect())
+        );
+        assert_eq!(
+            tree.postdominators().get(&1),
+            Some(&[1].into_iter().collect())
+        );
+        assert_eq!(
+            tree.postdominators().get(&2),
+            Some(&[2].into_iter().collect())
+        );
+        assert_eq!(tree.nearest_common_postdominator(&[1, 2]), None);
+    }
+
+    #[test]
+    fn disconnected_cycle_has_no_bogus_postdominator_chain() {
+        let successors = vec![vec![1], vec![0], vec![]];
+        let predecessors = predecessors(&successors);
+        let tree = PostDomTree::analyze(&successors, &predecessors);
+
+        assert_eq!(
+            tree.postdominators().get(&0),
+            Some(&[0].into_iter().collect())
+        );
+        assert_eq!(
+            tree.postdominators().get(&1),
+            Some(&[1].into_iter().collect())
+        );
+        assert_eq!(
+            tree.postdominators().get(&2),
+            Some(&[2].into_iter().collect())
+        );
     }
 }
