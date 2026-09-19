@@ -40,7 +40,7 @@ pub struct OneShotArgs {
     /// Pseudocode layer: `nir` | `hir` | `both` (see `fission_pcode::PseudocodeLayer`).
     pub layer: Option<String>,
     /// Also capture/emit the pre-structuring snapshot returned by
-    /// `fission_pcode::take_last_prehir_snapshot` (`decomp --prehir`).
+    /// `fission_pcode::last_prehir_snapshot` (`decomp --prehir`).
     pub prehir: bool,
     pub engine: Option<String>,
     pub output: Option<PathBuf>,

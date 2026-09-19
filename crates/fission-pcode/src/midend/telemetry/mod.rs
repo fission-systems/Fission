@@ -28,17 +28,56 @@ pub(super) fn store_preview_hint_stats(stats: PreviewHintStats) {
 }
 
 pub fn take_last_preview_build_stats() -> Option<PreviewBuildStats> {
+    // Legacy destructive accessor retained for compatibility. Production
+    // readers should use `last_preview_build_stats`.
     LAST_PREVIEW_BUILD_STATS.with(|slot| slot.borrow_mut().take())
 }
 
+pub fn last_preview_build_stats() -> Option<PreviewBuildStats> {
+    LAST_PREVIEW_BUILD_STATS.with(|slot| slot.borrow().clone())
+}
+
 pub fn take_last_preview_hint_stats() -> Option<PreviewHintStats> {
+    // Legacy destructive accessor retained for compatibility. Production
+    // readers should use `last_preview_hint_stats`.
     LAST_PREVIEW_HINT_STATS.with(|slot| slot.borrow_mut().take())
+}
+
+pub fn last_preview_hint_stats() -> Option<PreviewHintStats> {
+    LAST_PREVIEW_HINT_STATS.with(|slot| slot.borrow().clone())
 }
 
 pub fn take_last_nir_build_stats() -> Option<NirBuildStats> {
     take_last_preview_build_stats()
 }
 
+pub fn last_nir_build_stats() -> Option<NirBuildStats> {
+    last_preview_build_stats()
+}
+
 pub fn take_last_nir_hint_stats() -> Option<NirHintStats> {
     take_last_preview_hint_stats()
+}
+
+pub fn last_nir_hint_stats() -> Option<NirHintStats> {
+    last_preview_hint_stats()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn telemetry_observation_does_not_drain_the_slot() {
+        reset_preview_telemetry();
+        store_preview_build_stats(PreviewBuildStats {
+            rendered_code_len: 7,
+            ..PreviewBuildStats::default()
+        });
+
+        assert_eq!(last_preview_build_stats().unwrap().rendered_code_len, 7);
+        assert_eq!(last_nir_build_stats().unwrap().rendered_code_len, 7);
+
+        reset_preview_telemetry();
+    }
 }

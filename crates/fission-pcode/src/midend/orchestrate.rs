@@ -136,7 +136,7 @@ pub fn render_mlil_preview_dual_layer(
     {
         return Ok(scored);
     }
-    let Some(scored_layers) = take_last_layered_pseudocode() else {
+    let Some(scored_layers) = last_layered_pseudocode() else {
         return Ok(scored);
     };
     let mut readable_options = options.clone();
@@ -154,7 +154,7 @@ pub fn render_mlil_preview_dual_layer(
         type_context,
         None,
     );
-    let hir = match readable.ok().and_then(|_| take_last_layered_pseudocode()) {
+    let hir = match readable.ok().and_then(|_| last_layered_pseudocode()) {
         Some(readable_layers) => readable_layers.hir,
         None => scored_layers.hir.clone(),
     };
@@ -243,6 +243,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
     let _ = decomp_facts;
+    reset_last_render_observations();
     // Two output modes, two structurings. Handled here rather than in a
     // wrapper because the pipeline calls this entry point directly; the
     // recursive calls below clear the flag so each is a single-tree build.
@@ -574,7 +575,16 @@ fn store_last_layered_pseudocode(layered: LayeredPseudocode) {
 /// Take the dual NIR/HIR strings produced by the most recent `render_nir*` call
 /// on this thread (observation / CLI layer selection).
 pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
+    // Legacy destructive accessor retained for compatibility. Production
+    // readers should use `last_layered_pseudocode`.
     LAST_LAYERED_PSEUDOCODE.with(|slot| slot.borrow_mut().take())
+}
+
+/// Clone the latest layered pseudocode without consuming it. Production
+/// consumers should use this accessor so telemetry and CLI/verification
+/// readers can coexist on the same render result.
+pub fn last_layered_pseudocode() -> Option<LayeredPseudocode> {
+    LAST_LAYERED_PSEUDOCODE.with(|slot| slot.borrow().clone())
 }
 
 thread_local! {
@@ -595,7 +605,14 @@ fn store_last_raw_hir_snapshot(func: super::PreHirFunction) {
 /// be wider (more accurate) than what [`take_last_prehir_snapshot`]'s
 /// post-normalize `callee_observed_max_arity` field ever sees.
 pub fn take_last_raw_hir_snapshot() -> Option<super::PreHirFunction> {
+    // Legacy destructive accessor retained for compatibility. Production
+    // readers should use `last_raw_hir_snapshot`.
     LAST_RAW_HIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
+}
+
+/// Clone the latest raw PreHIR snapshot without consuming it.
+pub fn last_raw_hir_snapshot() -> Option<super::PreHirFunction> {
+    LAST_RAW_HIR_SNAPSHOT.with(|slot| slot.borrow().clone())
 }
 
 thread_local! {
@@ -623,7 +640,14 @@ fn store_last_prehir_snapshot(func: super::PreHirFunction) {
 /// computes -- purely observational, same pattern as
 /// `take_last_layered_pseudocode` above.
 pub fn take_last_prehir_snapshot() -> Option<super::PreHirFunction> {
+    // Legacy destructive accessor retained for compatibility. Production
+    // readers should use `last_prehir_snapshot`.
     LAST_PREHIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
+}
+
+/// Clone the latest normalized PreHIR snapshot without consuming it.
+pub fn last_prehir_snapshot() -> Option<super::PreHirFunction> {
+    LAST_PREHIR_SNAPSHOT.with(|slot| slot.borrow().clone())
 }
 
 thread_local! {
@@ -646,7 +670,14 @@ fn store_last_hir_function_snapshot(func: super::HirFunction) {
 /// `params`/`locals`. Same observational side-channel pattern as
 /// `take_last_layered_pseudocode`/`take_last_prehir_snapshot` above.
 pub fn take_last_hir_function_snapshot() -> Option<super::HirFunction> {
+    // Legacy destructive accessor retained for compatibility. Production
+    // readers should use `last_hir_function_snapshot`.
     LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| slot.borrow_mut().take())
+}
+
+/// Clone the latest structured HIR snapshot without consuming it.
+pub fn last_hir_function_snapshot() -> Option<super::HirFunction> {
+    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| slot.borrow().clone())
 }
 
 thread_local! {
@@ -668,7 +699,32 @@ fn store_last_recovered_variables(variables: Vec<crate::render::RecoveredVariabl
 /// fallback, say), which is not the same as a function that genuinely has no
 /// variables -- that returns an empty vector.
 pub fn take_last_recovered_variables() -> Option<Vec<crate::render::RecoveredVariable>> {
+    // Legacy destructive accessor retained for compatibility. Production
+    // readers should use `last_recovered_variables`.
     LAST_RECOVERED_VARIABLES.with(|slot| slot.borrow_mut().take())
+}
+
+/// Clone the latest recovered-variable list without consuming it.
+pub fn last_recovered_variables() -> Option<Vec<crate::render::RecoveredVariable>> {
+    LAST_RECOVERED_VARIABLES.with(|slot| slot.borrow().clone())
+}
+
+fn reset_last_render_observations() {
+    LAST_LAYERED_PSEUDOCODE.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    LAST_RAW_HIR_SNAPSHOT.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    LAST_PREHIR_SNAPSHOT.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    LAST_RECOVERED_VARIABLES.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -738,6 +794,22 @@ mod normalize_context_guard_tests {
         normalize_pipeline::PROTECTED_LSDA_LABELS.with(|slot| {
             *slot.borrow_mut() = previous_protected;
         });
+    }
+
+    #[test]
+    fn layered_observation_can_be_read_by_multiple_consumers() {
+        reset_last_render_observations();
+        store_last_layered_pseudocode(LayeredPseudocode {
+            nir: "nir".to_string(),
+            hir: "hir".to_string(),
+        });
+
+        let first_read = last_layered_pseudocode().expect("first observation read");
+        let second_read = last_layered_pseudocode().expect("second observation read");
+        assert_eq!(first_read.nir, "nir");
+        assert_eq!(second_read.hir, "hir");
+
+        reset_last_render_observations();
     }
 }
 

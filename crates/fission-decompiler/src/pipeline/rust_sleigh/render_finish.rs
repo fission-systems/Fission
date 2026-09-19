@@ -134,7 +134,7 @@ pub(crate) fn finish_rust_sleigh_render(
         evidence
             .pipeline_stage_status
             .insert("nir_render".into(), "success".into());
-        let layered = fission_pcode::take_last_layered_pseudocode();
+        let layered = fission_pcode::last_layered_pseudocode();
         return Ok(RustSleighDecompileResult {
             code,
             code_nir: layered.as_ref().map(|l| l.nir.clone()),

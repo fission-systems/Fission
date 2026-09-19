@@ -5,7 +5,7 @@ use crate::taxonomy::{classify_nir_failure_refined, structuring_failure_signatur
 use crate::types::{NirRoutingResolver, NirSelection};
 use crate::{
     NirBuildStats, NirRenderOptions, NirTypeContext, PcodeFunction, RecoveryMode,
-    structuring_outcome_for_signature, take_last_nir_build_stats,
+    last_nir_build_stats, structuring_outcome_for_signature,
 };
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
@@ -79,7 +79,7 @@ pub(crate) fn try_structuring_recovery(
                 outcome.retryable,
             )));
         }
-        Ok(None) | Err(_) => take_last_nir_build_stats(),
+        Ok(None) | Err(_) => last_nir_build_stats(),
     };
 
     match render_nir_from_json_with_type_context(
@@ -187,7 +187,7 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
                 Some(learned_facts),
             )));
         }
-        Ok(None) | Err(_) => take_last_nir_build_stats(),
+        Ok(None) | Err(_) => last_nir_build_stats(),
     };
 
     match render_nir_from_pcode_with_decomp_context(

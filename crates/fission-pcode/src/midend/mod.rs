@@ -69,6 +69,7 @@ pub use labels::SWITCH_FALLTHROUGH_SENTINEL;
 
 pub(super) use self::support::*;
 pub use self::telemetry::{
+    last_nir_build_stats, last_nir_hint_stats, last_preview_build_stats, last_preview_hint_stats,
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,
 };
@@ -140,11 +141,13 @@ pub use fission_midend_normalize::{
 
 // Top-level preview/NIR entrypoints (builder → normalize → structure → print).
 pub use self::orchestrate::{
-    build_raw_hir, render_mlil_preview, render_mlil_preview_dual_layer,
-    render_mlil_preview_with_binary_and_context, render_mlil_preview_with_context, render_nir,
-    render_nir_with_binary_and_context, render_nir_with_context, take_last_hir_function_snapshot,
-    take_last_layered_pseudocode, take_last_prehir_snapshot, take_last_raw_hir_snapshot,
-    take_last_recovered_variables, test_refine_partitions,
+    build_raw_hir, last_hir_function_snapshot, last_layered_pseudocode, last_prehir_snapshot,
+    last_raw_hir_snapshot, last_recovered_variables, render_mlil_preview,
+    render_mlil_preview_dual_layer, render_mlil_preview_with_binary_and_context,
+    render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
+    render_nir_with_context, take_last_hir_function_snapshot, take_last_layered_pseudocode,
+    take_last_prehir_snapshot, take_last_raw_hir_snapshot, take_last_recovered_variables,
+    test_refine_partitions,
 };
 
 /// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.

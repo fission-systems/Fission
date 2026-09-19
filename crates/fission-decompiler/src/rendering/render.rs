@@ -4,8 +4,8 @@ use crate::types::NirWorkerRequest;
 use crate::worker::{execute_nir_worker_request, nir_worker_timeout_ms};
 use crate::{
     NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOptimizer,
-    PcodeOptimizerConfig, render_nir_with_binary_and_context, render_nir_with_context,
-    take_last_nir_build_stats, take_last_nir_hint_stats,
+    PcodeOptimizerConfig, last_nir_build_stats, last_nir_hint_stats,
+    render_nir_with_binary_and_context, render_nir_with_context,
 };
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
@@ -167,9 +167,9 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                     }
                     continue;
                 }
-                let build_stats = take_last_nir_build_stats();
-                let hint_stats = take_last_nir_hint_stats();
-                if let Some(raw_hir) = fission_pcode::take_last_raw_hir_snapshot() {
+                let build_stats = last_nir_build_stats();
+                let hint_stats = last_nir_hint_stats();
+                if let Some(raw_hir) = fission_pcode::last_raw_hir_snapshot() {
                     crate::facts::record_interprocedural_arity_facts(
                         &mut decomp_ctx.facts,
                         &decomp_ctx.type_context,
@@ -308,8 +308,8 @@ pub(crate) fn render_nir_request(
         )
     })) {
         Ok(Ok(code)) => {
-            let build_stats = take_last_nir_build_stats();
-            let hint_stats = take_last_nir_hint_stats();
+            let build_stats = last_nir_build_stats();
+            let hint_stats = last_nir_hint_stats();
             nir_diag_stage(request.address, "render_preview_done", render_start);
             if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
                 let _ = std::fs::OpenOptions::new()

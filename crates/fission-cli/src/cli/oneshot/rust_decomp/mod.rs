@@ -70,19 +70,16 @@ fn render_with_rust_sleigh(
     )
     .map_err(FissionError::decompiler)?;
 
-    // Must read the thread-local snapshot immediately after the decompile
-    // call above and before any other decompile runs on this thread (the
-    // hook is overwritten on every call) -- see
-    // `fission_pcode::take_last_prehir_snapshot`'s own doc comment.
+    // Read the per-render observation after the decompile call. The accessor
+    // clones it, so another consumer cannot drain this result.
     let code_prehir = if want_prehir {
-        fission_decompiler::take_last_prehir_snapshot()
+        fission_decompiler::last_prehir_snapshot()
             .map(|dir| fission_decompiler::print_prehir_function(&dir))
     } else {
         None
     };
-    // Same immediacy requirement as the PreHIR snapshot above, and the same
-    // reason: one thread-local slot, overwritten by the next decompile.
-    let variables = fission_decompiler::take_last_recovered_variables().unwrap_or_default();
+    // The accessor is non-consuming; the next render resets the observation.
+    let variables = fission_decompiler::last_recovered_variables().unwrap_or_default();
 
     Ok(RustSleighRender {
         code: result.code,
