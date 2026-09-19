@@ -1,7 +1,7 @@
 //! Address-keyed CFG snapshots for Ghidra parity and regression fixtures.
 
-use super::{CfgBuilder, CfgResult, ControlFlowGraph};
-use crate::PcodeFunction;
+use super::{CfgError, CfgResult};
+use crate::{PcodeFunction, PcodeOpcode};
 use serde::{Deserialize, Serialize};
 
 /// Directed CFG edge keyed by basic-block start addresses.
@@ -23,8 +23,100 @@ pub struct AddressCfgSnapshot {
 
 impl AddressCfgSnapshot {
     pub fn from_pcode_cfg_builder(func: &PcodeFunction) -> CfgResult<Self> {
-        let cfg = CfgBuilder::from_pcode(func)?;
-        Ok(Self::from_cfg_graph("pcode_cfg_builder", func, &cfg))
+        if func.blocks.is_empty() {
+            return Err(CfgError::NoEntryPoint);
+        }
+
+        let block_starts = func
+            .blocks
+            .iter()
+            .map(|block| block.start_address)
+            .collect::<Vec<_>>();
+        let known_starts = block_starts
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        let mut snapshot = Self {
+            model: "pcode_cfg_builder".to_string(),
+            function_address: block_starts[0],
+            block_starts,
+            edges: Vec::new(),
+            exit_blocks: Vec::new(),
+        };
+
+        for (index, block) in func.blocks.iter().enumerate() {
+            let has_branch = block
+                .ops
+                .iter()
+                .any(|op| matches!(op.opcode, PcodeOpcode::Branch));
+            let has_cbranch = block
+                .ops
+                .iter()
+                .any(|op| matches!(op.opcode, PcodeOpcode::CBranch));
+            let has_return = block
+                .ops
+                .iter()
+                .any(|op| matches!(op.opcode, PcodeOpcode::Return));
+
+            if has_return {
+                snapshot.exit_blocks.push(block.start_address);
+            }
+
+            for op in &block.ops {
+                match op.opcode {
+                    PcodeOpcode::Branch => {
+                        if let Some(target) = branch_target(op)
+                            && known_starts.contains(&target)
+                        {
+                            snapshot.edges.push(AddressEdge {
+                                from: block.start_address,
+                                to: target,
+                            });
+                        }
+                    }
+                    PcodeOpcode::CBranch => {
+                        if let Some(target) = branch_target(op)
+                            && known_starts.contains(&target)
+                        {
+                            snapshot.edges.push(AddressEdge {
+                                from: block.start_address,
+                                to: target,
+                            });
+                        }
+                        if let Some(next) = func.blocks.get(index + 1) {
+                            snapshot.edges.push(AddressEdge {
+                                from: block.start_address,
+                                to: next.start_address,
+                            });
+                        }
+                    }
+                    PcodeOpcode::Call | PcodeOpcode::CallInd => {
+                        if !has_return && let Some(next) = func.blocks.get(index + 1) {
+                            snapshot.edges.push(AddressEdge {
+                                from: block.start_address,
+                                to: next.start_address,
+                            });
+                        }
+                    }
+                    PcodeOpcode::Return | PcodeOpcode::BranchInd => {}
+                    _ => {}
+                }
+            }
+
+            if !has_branch
+                && !has_return
+                && !has_cbranch
+                && let Some(next) = func.blocks.get(index + 1)
+            {
+                snapshot.edges.push(AddressEdge {
+                    from: block.start_address,
+                    to: next.start_address,
+                });
+            }
+        }
+
+        snapshot.canonicalize();
+        Ok(snapshot)
     }
 
     pub fn from_pcode_structuring(func: &PcodeFunction) -> Self {
@@ -38,42 +130,6 @@ impl AddressCfgSnapshot {
         self.edges.dedup();
         self.exit_blocks.sort_unstable();
         self.exit_blocks.dedup();
-    }
-
-    fn from_cfg_graph(model: &str, func: &PcodeFunction, cfg: &ControlFlowGraph) -> Self {
-        let mut snapshot = Self {
-            model: model.to_string(),
-            function_address: func
-                .blocks
-                .first()
-                .map(|block| block.start_address)
-                .unwrap_or(cfg.function_address),
-            block_starts: func
-                .blocks
-                .iter()
-                .map(|block| block.start_address)
-                .collect(),
-            edges: Vec::new(),
-            exit_blocks: Vec::new(),
-        };
-
-        for block in &cfg.blocks {
-            if block.is_exit {
-                snapshot.exit_blocks.push(block.start_address);
-            }
-            for edge in &block.successors {
-                let Some(target) = cfg.blocks.get(edge.target) else {
-                    continue;
-                };
-                snapshot.edges.push(AddressEdge {
-                    from: block.start_address,
-                    to: target.start_address,
-                });
-            }
-        }
-
-        snapshot.canonicalize();
-        snapshot
     }
 
     fn from_structuring_edges(model: &str, func: &PcodeFunction) -> Self {
@@ -108,6 +164,13 @@ impl AddressCfgSnapshot {
         snapshot.canonicalize();
         snapshot
     }
+}
+
+fn branch_target(op: &crate::PcodeOp) -> Option<u64> {
+    op.inputs
+        .first()
+        .filter(|input| input.is_constant)
+        .map(|input| input.offset)
 }
 
 #[cfg(test)]
@@ -188,5 +251,64 @@ mod tests {
             ]
         );
         assert_eq!(snapshot.exit_blocks, vec![0x1020]);
+    }
+
+    #[test]
+    fn address_cfg_snapshot_preserves_branch_fallthrough_and_calls() {
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1000,
+                        output: None,
+                        inputs: vec![const_vn(0x1020)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![],
+                    ops: vec![PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x1010,
+                        output: None,
+                        inputs: vec![const_vn(0x2000)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: vec![],
+                    ops: vec![ret_op(0x1020)],
+                },
+            ],
+        };
+
+        let snapshot = AddressCfgSnapshot::from_pcode_cfg_builder(&func).expect("cfg");
+        assert_eq!(
+            snapshot.edges,
+            vec![
+                AddressEdge {
+                    from: 0x1000,
+                    to: 0x1010,
+                },
+                AddressEdge {
+                    from: 0x1000,
+                    to: 0x1020,
+                },
+                AddressEdge {
+                    from: 0x1010,
+                    to: 0x1020,
+                },
+            ]
+        );
     }
 }

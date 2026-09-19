@@ -6,9 +6,7 @@
 //! assume the repo `benchmark/` tree.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use fission_pcode::{
-    PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode, cfg::CfgAnalysis,
-};
+use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::fs;
 use std::path::PathBuf;
 
@@ -90,15 +88,15 @@ fn build_complex_cfg(depth: usize, branches: usize) -> PcodeFunction {
     PcodeFunction { blocks }
 }
 
-fn cfg_analysis_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("cfg_analysis");
+fn structuring_cfg_edges_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("structuring_cfg_edges");
 
     // Benchmark different CFG sizes
     for size in [16, 64, 256].iter() {
         let func = build_diamond_cfg(*size);
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter(|| {
-                let result = CfgAnalysis::from_pcode(black_box(&func));
+                let result = fission_pcode::structuring_cfg_edges(black_box(&func));
                 black_box(result)
             })
         });
@@ -110,7 +108,7 @@ fn cfg_analysis_benchmark(c: &mut Criterion) {
         let name = format!("complex_d{}_b{}", depth, branches);
         group.bench_with_input(BenchmarkId::from_parameter(&name), &name, |b, _| {
             b.iter(|| {
-                let result = CfgAnalysis::from_pcode(black_box(&func));
+                let result = fission_pcode::structuring_cfg_edges(black_box(&func));
                 black_box(result)
             })
         });
@@ -223,5 +221,9 @@ fn binary_load_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, cfg_analysis_benchmark, binary_load_benchmark);
+criterion_group!(
+    benches,
+    structuring_cfg_edges_benchmark,
+    binary_load_benchmark
+);
 criterion_main!(benches);
