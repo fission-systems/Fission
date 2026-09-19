@@ -345,14 +345,14 @@ fn x86_64_argument_registers_do_not_survive_an_intervening_call() {
     );
 }
 
-/// Minimal reproduction of a live defect: a loop-latch arm loses its body.
+/// Regression for a loop-latch arm carrying a mapped-global write.
 ///
 /// Three blocks -- a header that branches out or falls through, an arm whose
 /// only statement is a write to a mapped global and whose terminator is an
-/// unconditional branch back to the header, and an exit. The write reaches
-/// `lower_block_stmts` (the builder emits it) and is absent from the body
-/// structuring assembles, so `normalize` never sees it. Rendered today as
-/// `while (!rax) { }` -- an empty loop.
+/// unconditional branch back to the header, and an exit. The fixture uses
+/// the runtime Sleigh numbering (RAM space 3, register space 4), so the
+/// global-write materialization path is exercised rather than the legacy
+/// unique-space path.
 ///
 /// On the sample set this owns the last of the dropped global writes: every
 /// one of them sits in a block that ends in an unconditional branch to its
@@ -360,7 +360,6 @@ fn x86_64_argument_registers_do_not_survive_an_intervening_call() {
 /// `bin_009 sub_3920` blocks 38/46 both target 0x3b75). The pattern is the
 /// `case ...: global++; continue;` arm of an option-parsing loop.
 #[test]
-#[ignore = "known defect: structuring drops a loop-latch arm's statements"]
 fn backedge_arm_keeps_its_global_write() {
     let mut options = preview_options_for(CallingConvention::SystemVAmd64);
     options.format = "ELF64".to_string();
@@ -386,7 +385,19 @@ fn backedge_arm_keeps_its_global_write() {
                     opcode: PcodeOpcode::CBranch,
                     address: 0x1000,
                     output: None,
-                    inputs: vec![ram(0x1020, 8), reg(0x0, 1)],
+                    // Runtime Sleigh uses register space 4; keeping the
+                    // condition in that space makes the fixture use the same
+                    // space numbering as its RAM-space global write (space 3).
+                    inputs: vec![
+                        ram(0x1020, 8),
+                        Varnode {
+                            space_id: 4,
+                            offset: 0x0,
+                            size: 1,
+                            is_constant: false,
+                            constant_val: 0,
+                        },
+                    ],
                     asm_mnemonic: Some("jne 0x1020".to_string()),
                 }],
             },

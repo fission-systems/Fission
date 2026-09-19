@@ -5,10 +5,11 @@
 #[cfg(test)]
 mod tests {
     use super::super::super::cleanup::{has_orphan_goto_labels, orphan_goto_labels};
-    use crate::PcodeFunction;
     use crate::midend::PreviewBuilder;
     use crate::midend::ir::{MlilPreviewOptions, StructuringEngineKind};
-    use fission_midend_prehir::PreHirStmt;
+    use crate::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use fission_midend_core::ir::NirType;
+    use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
     use fission_midend_structuring::try_repair_orphan_gotos;
 
     fn test_options() -> MlilPreviewOptions {
@@ -73,5 +74,78 @@ mod tests {
         assert!(!has_orphan_goto_labels(&body));
         let repaired = try_repair_orphan_gotos(&mut builder, body.clone()).expect("noop repair");
         assert!(!has_orphan_goto_labels(&repaired));
+    }
+
+    #[test]
+    fn orphan_repair_does_not_hijack_identical_unrelated_statement() {
+        let target = PcodeBasicBlock {
+            index: 1,
+            start_address: 0x1010,
+            successors: Vec::new(),
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1010,
+                    output: Some(Varnode {
+                        space_id: 1,
+                        offset: 0,
+                        size: 8,
+                        is_constant: false,
+                        constant_val: 0,
+                    }),
+                    inputs: vec![Varnode::constant(0, 8)],
+                    asm_mnemonic: Some("mov rax, 0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1018,
+                    output: None,
+                    inputs: vec![Varnode::constant(7, 8)],
+                    asm_mnemonic: Some("ret".to_string()),
+                },
+            ],
+        };
+        let function = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: Vec::new(),
+                },
+                target,
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&function, &options, None);
+        let duplicate = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("rax".to_string()),
+            rhs: PreHirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            ),
+        };
+        let body = vec![duplicate, PreHirStmt::Goto("block_1010".to_string())];
+
+        let repaired = try_repair_orphan_gotos(&mut builder, body).expect("repair");
+        let assignment_count = repaired
+            .iter()
+            .filter(|stmt| matches!(stmt, PreHirStmt::Assign { .. }))
+            .count();
+        assert_eq!(
+            assignment_count, 2,
+            "the unrelated assignment and the target assignment must both survive repair: {repaired:?}"
+        );
+        assert!(
+            repaired
+                .iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::Return(Some(PreHirExpr::Var(name))) if name == "rax")),
+            "the target terminator must remain attached to the repaired block: {repaired:?}"
+        );
     }
 }
