@@ -4,8 +4,8 @@ use crate::types::NirWorkerRequest;
 use crate::worker::{execute_nir_worker_request, nir_worker_timeout_ms};
 use crate::{
     NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOptimizer,
-    PcodeOptimizerConfig, last_nir_build_stats, last_nir_hint_stats,
-    render_nir_with_binary_and_context, render_nir_with_context,
+    PcodeOptimizerConfig, render_nir_with_binary_and_context_output,
+    render_nir_with_context_output,
 };
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
@@ -147,7 +147,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
 
         let type_context_cloned = decomp_ctx.type_context.clone();
         match catch_unwind(AssertUnwindSafe(|| {
-            render_nir_with_binary_and_context(
+            render_nir_with_binary_and_context_output(
                 pcode,
                 name,
                 address,
@@ -157,7 +157,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                 Some(&mut decomp_ctx as &mut dyn fission_pcode::midend::DecompFacts),
             )
         })) {
-            Ok(Ok(code)) => {
+            Ok(Ok(output)) => {
                 if decomp_ctx.hints_changed && round < max_rounds - 1 {
                     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
                         eprintln!(
@@ -167,9 +167,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                     }
                     continue;
                 }
-                let build_stats = last_nir_build_stats();
-                let hint_stats = last_nir_hint_stats();
-                if let Some(raw_hir) = fission_pcode::last_raw_hir_snapshot() {
+                if let Some(raw_hir) = output.raw_hir.as_ref() {
                     crate::facts::record_interprocedural_arity_facts(
                         &mut decomp_ctx.facts,
                         &decomp_ctx.type_context,
@@ -178,7 +176,12 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                     );
                 }
                 nir_diag_stage(address, "render_preview_done", render_start);
-                return Ok(Some((code, build_stats, hint_stats, decomp_ctx.facts)));
+                return Ok(Some((
+                    output.code,
+                    output.build_stats,
+                    output.hint_stats,
+                    decomp_ctx.facts,
+                )));
             }
             Ok(Err(err)) => {
                 let surfaced_error = err
@@ -298,7 +301,7 @@ pub(crate) fn render_nir_request(
     }
     let render_start = Instant::now();
     match catch_unwind(AssertUnwindSafe(|| {
-        render_nir_with_context(
+        render_nir_with_context_output(
             &pcode,
             &request.name,
             request.address,
@@ -307,9 +310,7 @@ pub(crate) fn render_nir_request(
             None,
         )
     })) {
-        Ok(Ok(code)) => {
-            let build_stats = last_nir_build_stats();
-            let hint_stats = last_nir_hint_stats();
+        Ok(Ok(output)) => {
             nir_diag_stage(request.address, "render_preview_done", render_start);
             if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
                 let _ = std::fs::OpenOptions::new()
@@ -320,7 +321,7 @@ pub(crate) fn render_nir_request(
                         std::io::Write::write_all(&mut f, b"[mlil-preview] stage=render_ok\n")
                     });
             }
-            Ok((code, build_stats, hint_stats))
+            Ok((output.code, output.build_stats, output.hint_stats))
         }
         Ok(Err(err)) => {
             let surfaced_error = err

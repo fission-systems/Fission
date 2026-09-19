@@ -11,8 +11,8 @@
 
 use super::{
     DecompFacts, GhidraActionConcept, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
-    NirRenderOptions, NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewTypeContext,
-    apply_preview_type_hints, discover_guarded_tail_candidates_for_stats,
+    NirRenderOptions, NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewHintStats,
+    PreviewTypeContext, apply_preview_type_hints, discover_guarded_tail_candidates_for_stats,
     record_ghidra_action_stage, record_ghidra_clean_room_pipeline_complete,
     recover_global_symbol_accesses, render_layered_pseudocode, structuring, telemetry,
 };
@@ -28,6 +28,24 @@ use std::time::Instant;
 
 pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     super::builder::test_refine_partitions(accesses)
+}
+
+/// Typed result for one successful NIR/MLIL render.
+///
+/// The legacy render functions still return only their primary code for API
+/// compatibility. New orchestration code should use this result so snapshots
+/// and telemetry travel with the render that produced them instead of being
+/// consumed from separate observation calls.
+#[derive(Debug, Clone)]
+pub struct NirDecompileOutput {
+    pub code: String,
+    pub layered: Option<LayeredPseudocode>,
+    pub raw_hir: Option<super::PreHirFunction>,
+    pub prehir: Option<super::PreHirFunction>,
+    pub hir_function: Option<super::HirFunction>,
+    pub recovered_variables: Option<Vec<crate::render::RecoveredVariable>>,
+    pub build_stats: Option<PreviewBuildStats>,
+    pub hint_stats: Option<PreviewHintStats>,
 }
 
 /// Decode `pcode` into a raw `PreHirFunction` only -- no normalize,
@@ -850,4 +868,58 @@ pub fn render_nir_with_binary_and_context(
         type_context,
         decomp_facts,
     )
+}
+
+/// Render NIR and return the primary code together with all observations from
+/// that same render. This is the typed successor for orchestration callers;
+/// the legacy `render_nir_*` functions remain string-returning wrappers.
+pub fn render_nir_with_context_output(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &NirRenderOptions,
+    type_context: Option<&NirTypeContext>,
+    decomp_facts: Option<&mut dyn DecompFacts>,
+) -> Result<NirDecompileOutput, MlilPreviewError> {
+    render_nir_with_binary_and_context_output(
+        pcode,
+        name,
+        address,
+        options,
+        None,
+        type_context,
+        decomp_facts,
+    )
+}
+
+/// Binary-aware typed NIR render result. The compatibility observation cells
+/// are read without consuming them while this bridge remains in place.
+pub fn render_nir_with_binary_and_context_output(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &NirRenderOptions,
+    binary: Option<&LoadedBinary>,
+    type_context: Option<&NirTypeContext>,
+    decomp_facts: Option<&mut dyn DecompFacts>,
+) -> Result<NirDecompileOutput, MlilPreviewError> {
+    let code = render_nir_with_binary_and_context(
+        pcode,
+        name,
+        address,
+        options,
+        binary,
+        type_context,
+        decomp_facts,
+    )?;
+    Ok(NirDecompileOutput {
+        code,
+        layered: last_layered_pseudocode(),
+        raw_hir: last_raw_hir_snapshot(),
+        prehir: last_prehir_snapshot(),
+        hir_function: last_hir_function_snapshot(),
+        recovered_variables: last_recovered_variables(),
+        build_stats: telemetry::last_nir_build_stats(),
+        hint_stats: telemetry::last_nir_hint_stats(),
+    })
 }
