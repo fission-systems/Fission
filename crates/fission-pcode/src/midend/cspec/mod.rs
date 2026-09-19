@@ -1016,12 +1016,12 @@ mod arm_stack_pentry_tests {
     use std::path::Path;
 
     /// ARM's own `.cspec` says where stack-passed arguments begin, so the ABI
-    /// data behind `param_5` is present even though no ARM function ever
-    /// recovers one.
+    /// data behind `param_5` is present in the resolved prototype.
     ///
-    /// This pins the *data* half of that gap. The gap itself is in the
-    /// consumers (`midend/abi.rs`), which gate stack-argument recovery on
-    /// `is_64bit` or `X86_32` and so reject ARM32 whatever this resolves to.
+    /// This pins the cspec half of the entry-stack recovery contract. The
+    /// consumer must use this value together with the four resolved integer
+    /// register slots and pointer size; it must not infer the base from an
+    /// ARM-specific address pattern.
     #[test]
     fn arm_default_proto_declares_a_stack_argument_base() {
         let dir =

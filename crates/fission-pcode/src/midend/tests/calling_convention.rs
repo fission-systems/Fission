@@ -2880,19 +2880,19 @@ fn x64_incoming_stack_slots_follow_cspec_register_and_frame_layout() {
         Some(8),
     );
     assert_eq!(
-        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x08),
+        sysv.incoming_stack_parameter_index_from_entry_offset(0x08),
         Some(6)
     );
     assert_eq!(
-        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x10),
+        sysv.incoming_stack_parameter_index_from_entry_offset(0x10),
         Some(7)
     );
     assert_eq!(
-        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x04),
+        sysv.incoming_stack_parameter_index_from_entry_offset(0x04),
         None
     );
     assert_eq!(
-        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x0c),
+        sysv.incoming_stack_parameter_index_from_entry_offset(0x0c),
         None
     );
     assert_eq!(
@@ -2910,7 +2910,7 @@ fn x64_incoming_stack_slots_follow_cspec_register_and_frame_layout() {
         Some(8),
     );
     assert_eq!(
-        win64.incoming_x64_stack_parameter_index_from_entry_offset(0x28),
+        win64.incoming_stack_parameter_index_from_entry_offset(0x28),
         Some(4)
     );
     assert_eq!(
@@ -3086,6 +3086,198 @@ fn sysv_x64_incoming_stack_load_becomes_seventh_formal_parameter() {
             || (code.contains("= param_7;") && code.contains("return ")),
         "{code}"
     );
+}
+
+#[test]
+fn arm32_incoming_stack_load_becomes_fifth_formal_parameter() {
+    let options = preview_options_for(CallingConvention::Arm32);
+    assert_eq!(options.cspec_param_offsets.as_ref().map(Vec::len), Some(4));
+    assert_eq!(options.cspec_stack_arg_base, Some(0));
+    assert_eq!(options.pointer_size, 4);
+
+    let sp = reg(0x54, 4);
+    let loaded = uniq(0x600, 4);
+    let result = reg(0x20, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x0800_1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x0800_1000,
+                    output: Some(loaded.clone()),
+                    inputs: vec![cst(3, 4), sp],
+                    asm_mnemonic: Some("LDR value,[SP,#0]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x0800_1004,
+                    output: Some(result.clone()),
+                    inputs: vec![loaded],
+                    asm_mnemonic: Some("COPY".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x0800_1008,
+                    output: None,
+                    inputs: vec![cst(0, 4), result],
+                    asm_mnemonic: Some("RETURN".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "arm32_stack_param", 0x0800_1000, &options)
+        .expect("ARM32 stack parameter preview");
+    assert!(code.contains("param_5"), "{code}");
+    assert!(
+        code.contains("return param_5;")
+            || (code.contains("= param_5;") && code.contains("return ")),
+        "{code}"
+    );
+}
+
+#[test]
+fn arm32_incoming_stack_load_follows_a_materialized_prologue_immediate() {
+    let options = preview_options_for(CallingConvention::Arm32);
+    let sp = reg(0x54, 4);
+    let frame_sp = uniq(0x700, 4);
+    let frame_size = uniq(0x704, 4);
+    let stack_address = uniq(0x708, 4);
+    let loaded = uniq(0x70c, 1);
+    let result = reg(0x20, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x0800_1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x0800_1000,
+                    output: Some(frame_sp.clone()),
+                    inputs: vec![sp.clone()],
+                    asm_mnemonic: Some("PUSH SP COPY".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x0800_1000,
+                    output: Some(frame_size.clone()),
+                    inputs: vec![cst(0x44, 4)],
+                    asm_mnemonic: Some("MOV TEMP,#0x44".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x0800_1002,
+                    output: Some(sp.clone()),
+                    inputs: vec![frame_sp, frame_size],
+                    asm_mnemonic: Some("SUB SP,TEMP".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x0800_1004,
+                    output: Some(stack_address),
+                    inputs: vec![sp, cst(0x44, 4)],
+                    asm_mnemonic: Some("ADD ADDRESS,SP,#0x44".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x0800_1006,
+                    output: Some(loaded.clone()),
+                    inputs: vec![cst(3, 4), uniq(0x708, 4)],
+                    asm_mnemonic: Some("LDRB VALUE,[SP,#0x44]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x0800_1008,
+                    output: Some(result.clone()),
+                    inputs: vec![loaded],
+                    asm_mnemonic: Some("UXTB R0,VALUE".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x0800_100a,
+                    output: None,
+                    inputs: vec![cst(0, 4), result],
+                    asm_mnemonic: Some("RETURN".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(
+        &func,
+        "arm32_materialized_stack_param",
+        0x0800_1000,
+        &options,
+    )
+    .expect("ARM32 materialized stack parameter preview");
+    assert!(code.contains("param_5"), "{code}");
+}
+
+#[test]
+fn arm32_overwritten_entry_stack_slot_does_not_become_formal_parameter() {
+    let options = preview_options_for(CallingConvention::Arm32);
+    let sp = reg(0x54, 4);
+    let loaded = uniq(0x600, 4);
+    let result = reg(0x20, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x0800_1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x0800_1000,
+                    output: None,
+                    inputs: vec![cst(3, 4), sp.clone(), cst(42, 4)],
+                    asm_mnemonic: Some("STR value,[SP,#0]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x0800_1004,
+                    output: Some(loaded.clone()),
+                    inputs: vec![cst(3, 4), sp],
+                    asm_mnemonic: Some("LDR value,[SP,#0]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x0800_1008,
+                    output: Some(result.clone()),
+                    inputs: vec![loaded],
+                    asm_mnemonic: Some("COPY".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x0800_100c,
+                    output: None,
+                    inputs: vec![cst(0, 4), result],
+                    asm_mnemonic: Some("RETURN".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "arm32_local_stack", 0x0800_1000, &options)
+        .expect("ARM32 overwritten stack slot preview");
+    assert!(!code.contains("param_5"), "{code}");
 }
 
 #[test]

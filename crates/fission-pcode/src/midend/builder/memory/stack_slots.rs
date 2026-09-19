@@ -45,7 +45,7 @@ fn signed_const_displacement(vn: &Varnode) -> Option<i64> {
 impl<'a> PreviewBuilder<'a> {
     /// Entry-SP-relative offset for a load whose reaching memory value is
     /// proven to come from function entry rather than a store in this
-    /// function. This is the ownership proof required before an x64 stack
+    /// function. This is the ownership proof required before an ABI stack
     /// access may become a formal parameter.
     fn current_load_entry_stack_value_offset(&self) -> Option<i64> {
         let site = self.current_lowering_site?;
@@ -141,10 +141,8 @@ impl<'a> PreviewBuilder<'a> {
         offset: i64,
     ) -> NirBindingOrigin {
         let abi = self.abi_state();
-        if self.options.is_64bit
-            && let Some(entry_offset) = self.current_load_entry_stack_value_offset()
-            && let Some(index) =
-                abi.incoming_x64_stack_parameter_index_from_entry_offset(entry_offset)
+        if let Some(entry_offset) = self.current_load_entry_stack_value_offset()
+            && let Some(index) = abi.incoming_stack_parameter_index_from_entry_offset(entry_offset)
         {
             return NirBindingOrigin::ParamIndex(index);
         }

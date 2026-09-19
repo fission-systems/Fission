@@ -1004,6 +1004,84 @@ fn resolve_pointer_input(
     resolve_pointer_value(pcode, ssa, options, value.id, visiting, budget - 1)
 }
 
+/// Resolve an arithmetic operand to a signed constant even when SLEIGH has
+/// materialized the literal through a scalar temporary first. Many ARM
+/// prologues lift an immediate as `Copy unique <- const(k)` followed by
+/// `IntSub sp, unique`; treating only literal operands as constants makes the
+/// later stack pointer chain look unknown even though scalar SSA proves the
+/// temporary's definition exactly.
+fn resolve_constant_input(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    site: SsaOpSite,
+    input_index: usize,
+    visiting: &mut BTreeSet<SsaValueId>,
+    budget: usize,
+) -> Option<i64> {
+    if budget == 0 {
+        return None;
+    }
+    let op = pcode
+        .blocks
+        .get(site.block as usize)?
+        .ops
+        .get(site.op as usize)?;
+    let input = op.inputs.get(input_index)?;
+    if let Some(value) = signed_constant_delta(input) {
+        return Some(value);
+    }
+    if !is_register_space_id(input.space_id) && !is_unique_space_id(input.space_id) {
+        return None;
+    }
+    let pieces = ssa.operation_inputs.get(&SsaUseSite {
+        block: site.block,
+        op: site.op,
+        input: input_index as u32,
+    })?;
+    if pieces.len() != 1 {
+        return None;
+    }
+    let value = ssa.value(pieces[0].value)?;
+    if value.storage.size != input.size {
+        return None;
+    }
+    resolve_constant_value(pcode, ssa, value.id, visiting, budget - 1)
+}
+
+fn resolve_constant_value(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    value_id: SsaValueId,
+    visiting: &mut BTreeSet<SsaValueId>,
+    budget: usize,
+) -> Option<i64> {
+    if budget == 0 || !visiting.insert(value_id) {
+        return None;
+    }
+    let value = ssa.value(value_id)?;
+    let resolved = match value.definition {
+        SsaValueDefinition::Operation(site) => {
+            let op = pcode
+                .blocks
+                .get(site.block as usize)?
+                .ops
+                .get(site.op as usize)?;
+            match op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt => {
+                    resolve_constant_input(pcode, ssa, site, 0, visiting, budget - 1)
+                }
+                _ => None,
+            }
+        }
+        SsaValueDefinition::Input | SsaValueDefinition::Phi { .. } => None,
+    };
+    visiting.remove(&value_id);
+    resolved
+}
+
 fn resolve_pointer_value(
     pcode: &PcodeFunction,
     ssa: &NirScalarSsa,
@@ -1062,7 +1140,14 @@ fn resolve_pointer_value(
                         resolve_pointer_input(pcode, ssa, options, site, 0, visiting, budget - 1)
                     }
                     PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
-                        if let Some(delta) = signed_constant_delta(&op.inputs[0]) {
+                        if let Some(delta) = resolve_constant_input(
+                            pcode,
+                            ssa,
+                            site,
+                            0,
+                            &mut BTreeSet::new(),
+                            budget - 1,
+                        ) {
                             resolve_pointer_input(
                                 pcode,
                                 ssa,
@@ -1073,7 +1158,14 @@ fn resolve_pointer_value(
                                 budget - 1,
                             )?
                             .shifted(delta)
-                        } else if let Some(delta) = signed_constant_delta(&op.inputs[1]) {
+                        } else if let Some(delta) = resolve_constant_input(
+                            pcode,
+                            ssa,
+                            site,
+                            1,
+                            &mut BTreeSet::new(),
+                            budget - 1,
+                        ) {
                             resolve_pointer_input(
                                 pcode,
                                 ssa,
@@ -1101,7 +1193,14 @@ fn resolve_pointer_value(
                         if is_call_return_address_scaffold_sub(pcode, options, site, op) {
                             Some(base)
                         } else {
-                            let delta = signed_constant_delta(&op.inputs[1])?;
+                            let delta = resolve_constant_input(
+                                pcode,
+                                ssa,
+                                site,
+                                1,
+                                &mut BTreeSet::new(),
+                                budget - 1,
+                            )?;
                             base.shifted(delta.checked_neg()?)
                         }
                     }
