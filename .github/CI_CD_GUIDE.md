@@ -66,7 +66,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 | `scripts` | `scripts/**` only | pass-gate + script syntax | ~2–4 min |
 | `ci` | `.github/**` / deny meta only | pass-gate + YAML parse (+ security if deny) | ~2–5 min |
 | `rust` (PR) | crates/utils/Cargo | Linux tests + smoke + NIR + lint | ~15–25 min |
-| `rust` (main) | same | + macOS/Windows | ~35–45 min |
+| `rust` (main) | same | + macOS/Windows tests | ~25–35 min |
 
 **Validation steps (rust lane):**
 ```
@@ -76,7 +76,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 ✓ Pass-gate / owner-boundary scripts
 ✓ Core + midend Tests (Linux, single nextest multi -p, sccache)
 ✓ CLI smoke + NIR regression gate
-✓ Multi-OS (main push only)
+✓ macOS/Windows tests (main push only; release CLI builds run in Heavy)
 ```
 
 **Success criteria:**
@@ -85,7 +85,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 - [ ] No lint warnings (`-D warnings`)
 - [ ] Linux core+midend tests passed
 - [ ] CLI smoke + NIR regression gate passed
-- [ ] On main: macOS + Windows Fast Gate jobs passed
+- [ ] On main: macOS + Windows Fast Gate tests passed
 
 **If it fails:**
 ```bash

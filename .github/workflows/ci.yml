@@ -25,7 +25,7 @@ jobs:
   #   docs     — docs/wiki/markdown only → short-circuit
   #   scripts  — scripts/** only → pass-gate + script syntax
   #   ci       — .github/** (and CI meta) only → pass-gate + workflow sanity
-  #   rust     — crates/utils/Cargo/* → full Linux (and multi-OS on main)
+  #   rust     — crates/utils/Cargo/* → full Linux (and cross-OS tests on main)
   changes:
     name: 🔎 Detect changes
     runs-on: ubuntu-latest
@@ -370,20 +370,12 @@ jobs:
     with:
       profile: debug
 
-  # Multi-OS: main push + dispatch, rust/utils lane only
-  build-macos:
-    name: 🍎 Build (macOS)
-    needs: [changes]
-    if: needs.changes.outputs.run_multi_os == 'true'
-    uses: ./.github/workflows/reusable-build-cli.yml
-    with:
-      os: macos-latest
-      profile: release
-      upload_artifact: false
-
+  # Cross-OS tests: main push + dispatch, rust/utils lane only.
+  # Release CLI builds are owned by CI Heavy; these jobs keep platform test
+  # coverage without compiling the same CLI a second time in Fast Gate.
   test-macos:
     name: 🧪 Tests (macOS)
-    needs: [changes, build-macos]
+    needs: [changes]
     if: needs.changes.outputs.run_multi_os == 'true'
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
@@ -391,19 +383,9 @@ jobs:
       crates: "fission-midend-structuring,fission-pcode,fission-loader"
       profile: debug
 
-  build-windows:
-    name: 🪟 Build (Windows)
-    needs: [changes]
-    if: needs.changes.outputs.run_multi_os == 'true'
-    uses: ./.github/workflows/reusable-build-cli.yml
-    with:
-      os: windows-latest
-      profile: release
-      upload_artifact: false
-
   test-windows:
     name: 🧪 Tests (Windows)
-    needs: [changes, build-windows]
+    needs: [changes]
     if: needs.changes.outputs.run_multi_os == 'true'
     uses: ./.github/workflows/reusable-run-tests.yml
     with:

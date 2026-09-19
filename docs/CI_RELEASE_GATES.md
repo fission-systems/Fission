@@ -18,7 +18,7 @@ This document is the policy source for how Fission promotes a git commit to a
 
 | Layer | Workflow | When | Role |
 |-------|----------|------|------|
-| **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core+midend tests, CLI smoke, NIR gate. **PR = Linux-first**; multi-OS on `main` push. Docs/wiki-only short-circuits |
+| **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core+midend tests, CLI smoke, NIR gate. **PR = Linux-first**; cross-OS tests on `main` push. Docs/wiki-only short-circuits |
 | **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every `main` push + nightly + dispatch | **Push:** release-critical crates, platforms, NIR-check, MSRV. **Nightly/dispatch:** also full workspace tests, Miri, coverage |
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
@@ -118,8 +118,10 @@ L1 is achievable and meaningful for decompiler releases):
   - `docs` — short-circuit green
   - `scripts` — pass-gate + Python/shell syntax only
   - `ci` — pass-gate + workflow YAML parse (+ security if `deny.toml`/dependabot)
-  - `rust` — full Linux Fast Gate (multi-OS on `main` push)
-- PR Fast Gate no longer runs macOS/Windows matrices (covered on `main` L0 + L1).
+  - `rust` — full Linux Fast Gate (cross-OS tests on `main` push)
+- PR Fast Gate no longer runs macOS/Windows tests (covered on `main` L0 + L1).
+- Fast Gate no longer performs separate macOS/Windows CLI release builds on `main`;
+  those release builds remain in L1 Heavy while L0 keeps the cross-OS test signal.
 - `reusable-run-tests` runs multi-package nextest in **one** cargo process and
   skips webkit/GTK sysdeps unless GUI packages are required.
 - **sccache** (GitHub Actions backend) on lint / test / CLI build reusables via

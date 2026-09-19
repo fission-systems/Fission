@@ -6,6 +6,16 @@ on:
   # Policy: docs/CI_RELEASE_GATES.md
   push:
     branches: ["main"]
+    # Documentation-only commits already short-circuit CI Fast Gate and do
+    # not change release-critical binaries or tests.
+    paths-ignore:
+      - "*.md"
+      - "**/*.md"
+      - "docs/**"
+      - "wiki/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
+      - ".github/prompts/**"
   schedule:
     - cron: "30 2 * * *"
   workflow_dispatch:
