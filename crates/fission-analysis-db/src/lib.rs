@@ -170,6 +170,88 @@ pub struct RelocationRecord {
     pub provenance: Provenance,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AddressInterval {
+    start: u64,
+    end: u64,
+    index: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct AddressIntervalIndex {
+    intervals: Vec<AddressInterval>,
+    prefix_max_end: Vec<u64>,
+}
+
+impl AddressIntervalIndex {
+    fn from_items<T>(items: &[T], mut range: impl FnMut(&T) -> Option<(u64, u64)>) -> Self {
+        let mut intervals = items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let (start, end) = range(item)?;
+                (start < end).then_some(AddressInterval { start, end, index })
+            })
+            .collect::<Vec<_>>();
+        intervals.sort_unstable_by_key(|interval| (interval.start, interval.end, interval.index));
+
+        let mut prefix_max_end = Vec::with_capacity(intervals.len());
+        let mut max_end = 0;
+        for interval in &intervals {
+            max_end = max_end.max(interval.end);
+            prefix_max_end.push(max_end);
+        }
+
+        Self {
+            intervals,
+            prefix_max_end,
+        }
+    }
+
+    fn find_best(
+        &self,
+        address: u64,
+        mut is_better: impl FnMut(usize, Option<usize>) -> bool,
+    ) -> Option<usize> {
+        let mut cursor = self
+            .intervals
+            .partition_point(|interval| interval.start <= address);
+        let mut best = None;
+
+        while cursor > 0 {
+            if self.prefix_max_end[cursor - 1] <= address {
+                break;
+            }
+            cursor -= 1;
+            let interval = self.intervals[cursor];
+            if address < interval.end && is_better(interval.index, best) {
+                best = Some(interval.index);
+            }
+        }
+
+        best
+    }
+
+    fn any_containing(&self, address: u64, mut predicate: impl FnMut(usize) -> bool) -> bool {
+        let mut cursor = self
+            .intervals
+            .partition_point(|interval| interval.start <= address);
+
+        while cursor > 0 {
+            if self.prefix_max_end[cursor - 1] <= address {
+                break;
+            }
+            cursor -= 1;
+            let interval = self.intervals[cursor];
+            if address < interval.end && predicate(interval.index) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProgramSnapshot {
     pub schema: &'static str,
@@ -178,6 +260,10 @@ pub struct ProgramSnapshot {
     pub functions: Vec<FunctionRecord>,
     pub symbols: Vec<SymbolRecord>,
     pub relocations: Vec<RelocationRecord>,
+    #[serde(skip)]
+    function_intervals: AddressIntervalIndex,
+    #[serde(skip)]
+    memory_block_intervals: AddressIntervalIndex,
 }
 
 impl ProgramSnapshot {
@@ -200,12 +286,26 @@ impl ProgramSnapshot {
             functions: Vec::new(),
             symbols: Vec::new(),
             relocations: Vec::new(),
+            function_intervals: AddressIntervalIndex::default(),
+            memory_block_intervals: AddressIntervalIndex::default(),
         }
     }
 
     pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
         let memory_blocks = build_memory_blocks(binary);
-        let functions = build_functions(&binary.functions, &memory_blocks);
+        let memory_block_intervals = AddressIntervalIndex::from_items(&memory_blocks, |block| {
+            block
+                .start
+                .checked_add(block.size)
+                .map(|end| (block.start, end))
+        });
+        let functions = build_functions(&binary.functions, &memory_blocks, &memory_block_intervals);
+        let function_intervals = AddressIntervalIndex::from_items(&functions, |function| {
+            function
+                .entry
+                .checked_add(function.size)
+                .map(|end| (function.entry, end))
+        });
         let symbols = build_symbols(binary, &functions);
         let relocations = build_relocations(binary, &symbols);
         let architecture = binary.architecture.as_ref();
@@ -230,6 +330,8 @@ impl ProgramSnapshot {
             functions,
             symbols,
             relocations,
+            function_intervals,
+            memory_block_intervals,
         }
     }
 
@@ -266,28 +368,30 @@ impl ProgramSnapshot {
     /// wins and stable IDs break ties, keeping the query deterministic.
     pub fn function_containing(&self, address: u64) -> Option<&FunctionRecord> {
         self.function_at(address).or_else(|| {
-            self.functions
-                .iter()
-                .filter(|function| {
-                    function.size != 0
-                        && function.entry < address
-                        && function
-                            .entry
-                            .checked_add(function.size)
-                            .is_some_and(|end| address < end)
+            let functions = &self.functions;
+            self.function_intervals
+                .find_best(address, |candidate, current| {
+                    let candidate = &functions[candidate];
+                    current.is_none_or(|current| {
+                        let current = &functions[current];
+                        (candidate.size, candidate.entry, candidate.id)
+                            < (current.size, current.entry, current.id)
+                    })
                 })
-                .min_by_key(|function| (function.size, function.entry, function.id))
+                .and_then(|index| functions.get(index))
         })
     }
 
     pub fn memory_block_containing(&self, address: u64) -> Option<&MemoryBlock> {
-        self.memory_blocks.iter().find(|block| {
-            address >= block.start
-                && block
-                    .start
-                    .checked_add(block.size)
-                    .is_some_and(|end| address < end)
-        })
+        let blocks = &self.memory_blocks;
+        self.memory_block_intervals
+            .find_best(address, |candidate, current| {
+                current.is_none_or(|current| {
+                    (blocks[candidate].start, blocks[candidate].id)
+                        < (blocks[current].start, blocks[current].id)
+                })
+            })
+            .and_then(|index| blocks.get(index))
     }
 
     pub fn symbols_at(&self, address: u64) -> impl Iterator<Item = &SymbolRecord> {
@@ -411,15 +515,16 @@ fn is_pe_format(format: &str) -> bool {
     normalized == "pe" || normalized == "portable executable"
 }
 
-fn build_functions(functions: &[FunctionInfo], blocks: &[MemoryBlock]) -> Vec<FunctionRecord> {
+fn build_functions(
+    functions: &[FunctionInfo],
+    blocks: &[MemoryBlock],
+    block_intervals: &AddressIntervalIndex,
+) -> Vec<FunctionRecord> {
     let mut sorted = functions.to_vec();
     sorted.retain(|function| {
         !function.is_import
-            || blocks.iter().any(|block| {
-                block.permissions.execute
-                    && function.address >= block.start
-                    && function.address < block.start.saturating_add(block.size)
-            })
+            || block_intervals
+                .any_containing(function.address, |index| blocks[index].permissions.execute)
     });
     sorted.sort_by(|left, right| {
         left.address
@@ -433,10 +538,14 @@ fn build_functions(functions: &[FunctionInfo], blocks: &[MemoryBlock]) -> Vec<Fu
         .map(|(index, function)| {
             let source = fact_source(function.origin.as_deref());
             let kind = function_kind(&function);
-            let block = blocks.iter().find(|block| {
-                function.address >= block.start
-                    && function.address < block.start.saturating_add(block.size)
-            });
+            let block = block_intervals
+                .find_best(function.address, |candidate, current| {
+                    current.is_none_or(|current| {
+                        (blocks[candidate].start, blocks[candidate].id)
+                            < (blocks[current].start, blocks[current].id)
+                    })
+                })
+                .and_then(|index| blocks.get(index));
             FunctionRecord {
                 id: FunctionId(index as u32),
                 name: function.name,
@@ -773,6 +882,26 @@ mod tests {
             snapshot.memory_blocks_overlapping(0x1030, 0x1030).count(),
             0
         );
+    }
+
+    #[test]
+    fn address_interval_index_preserves_specificity_and_candidate_filtering() {
+        let ranges = [(0x1000, 0x1100), (0x1020, 0x1030), (0x2000, 0x2010)];
+        let index = AddressIntervalIndex::from_items(&ranges, |range| Some(*range));
+
+        let best = index.find_best(0x1028, |candidate, current| {
+            current.is_none_or(|current| {
+                (ranges[candidate].1 - ranges[candidate].0)
+                    < (ranges[current].1 - ranges[current].0)
+            })
+        });
+        assert_eq!(best, Some(1));
+        assert_eq!(
+            index.find_best(0x1050, |candidate, _| candidate == 0),
+            Some(0)
+        );
+        assert!(index.any_containing(0x1028, |candidate| candidate == 1));
+        assert!(!index.any_containing(0x1800, |_| true));
     }
 
     #[test]
