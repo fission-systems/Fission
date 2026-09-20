@@ -2,22 +2,63 @@ use cpp_demangle::DemangleOptions;
 use cpp_demangle::Symbol as CppSymbol;
 use msvc_demangler::demangle as msvc_demangle;
 use rustc_demangle::demangle as rust_demangle;
+use std::collections::HashMap;
 use std::process::Command;
+use std::sync::OnceLock;
+
+const SWIFT_BATCH_SIZE: usize = 256;
+static SWIFT_AVAILABLE: OnceLock<bool> = OnceLock::new();
 
 /// Demangles a symbol name if possible.
 /// Supports Rust, C++ (Itanium/GNU), MSVC, and Swift.
 pub fn demangle(name: &str) -> String {
-    // 0. Swift demangling (Starts with _$s, _$S, _T, __T)
-    if name.starts_with("_$s")
-        || name.starts_with("_$S")
-        || name.starts_with("_T")
-        || name.starts_with("__T")
-    {
+    if is_swift_symbol(name) {
         if let Some(demangled) = swift_demangle(name) {
             return demangled;
         }
     }
 
+    demangle_without_swift(name)
+}
+
+/// Demangle a collection while batching Swift symbols into a small number of
+/// external invocations. Other demanglers remain in-process and retain the
+/// same per-name behavior as `demangle`.
+pub fn demangle_many(names: &[&str]) -> Vec<String> {
+    let mut results: Vec<String> = names
+        .iter()
+        .map(|name| {
+            if is_swift_symbol(name) {
+                (*name).to_string()
+            } else {
+                demangle_without_swift(name)
+            }
+        })
+        .collect();
+
+    let mut unique_swift_names = Vec::new();
+    let mut seen_swift_names = HashMap::new();
+    for (index, name) in names.iter().enumerate() {
+        if is_swift_symbol(name) && seen_swift_names.insert(*name, index).is_none() {
+            unique_swift_names.push(*name);
+        }
+    }
+
+    let demangled_swift_names = swift_demangle_batch(&unique_swift_names);
+    let demangled_by_name: HashMap<&str, Option<String>> = unique_swift_names
+        .into_iter()
+        .zip(demangled_swift_names)
+        .collect();
+    for (index, name) in names.iter().enumerate() {
+        if let Some(Some(demangled)) = demangled_by_name.get(name) {
+            results[index] = demangled.clone();
+        }
+    }
+
+    results
+}
+
+fn demangle_without_swift(name: &str) -> String {
     // 1. Rust demangling (Starts with _R or _ZN)
     if name.starts_with("_R")
         || (name.starts_with("_ZN") && (name.contains("rust") || name.contains("E")))
@@ -53,27 +94,62 @@ pub fn demangle(name: &str) -> String {
     name.to_string()
 }
 
-/// Helper to demangle Swift symbols using system 'swift' tool
+fn is_swift_symbol(name: &str) -> bool {
+    name.starts_with("_$s")
+        || name.starts_with("_$S")
+        || name.starts_with("_T")
+        || name.starts_with("__T")
+}
+
+fn swift_available() -> bool {
+    *SWIFT_AVAILABLE.get_or_init(|| {
+        Command::new("swift")
+            .args(["demangle", "--version"])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    })
+}
+
+/// Helper to demangle one Swift symbol using the system `swift` tool.
 fn swift_demangle(name: &str) -> Option<String> {
-    // Avoid launching process for short strings or obviously non-mangled names
-    if name.len() < 4 {
-        return None;
+    swift_demangle_batch(&[name]).into_iter().next().flatten()
+}
+
+/// Run Swift's demangler over a bounded batch so argv size stays predictable.
+/// The compact mode emits one result per input symbol, preserving positional
+/// correspondence for the caller. A failed batch is represented by `None`
+/// entries and falls back to the original mangled symbol.
+fn swift_demangle_batch(names: &[&str]) -> Vec<Option<String>> {
+    if names.is_empty() || !swift_available() {
+        return vec![None; names.len()];
     }
 
-    // Use 'swift demangle -compact -simplified <name>'
-    match Command::new("swift")
-        .args(&["demangle", "--compact", "--simplified", name])
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !s.is_empty() && s != name {
-                return Some(s);
+    let mut results = vec![None; names.len()];
+    for (batch_index, batch) in names.chunks(SWIFT_BATCH_SIZE).enumerate() {
+        let Ok(output) = Command::new("swift")
+            .args(["demangle", "--compact", "--simplified"])
+            .args(batch)
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+
+        let start = batch_index * SWIFT_BATCH_SIZE;
+        for (offset, line) in String::from_utf8_lossy(&output.stdout).lines().enumerate() {
+            let Some(name) = batch.get(offset) else {
+                break;
+            };
+            let demangled = line.trim();
+            if !demangled.is_empty() && demangled != *name {
+                results[start + offset] = Some(demangled.to_string());
             }
         }
-        _ => {}
     }
-    None
+    results
 }
 
 #[cfg(test)]
@@ -96,6 +172,28 @@ mod tests {
     fn test_msvc_demangle() {
         let manged = "?foo@@YAXH@Z";
         assert_eq!(demangle(manged), "void __cdecl foo(int)");
+    }
+
+    #[test]
+    fn demangle_many_preserves_order_for_in_process_demanglers() {
+        let names = ["_Z3fooi", "plain_name", "_RNvCs6id789_4core4main"];
+        let demangled = demangle_many(&names);
+        assert_eq!(demangled[0], "foo(int)");
+        assert_eq!(demangled[1], "plain_name");
+        assert_ne!(demangled[2], names[2]);
+    }
+
+    #[test]
+    fn demangle_many_batches_swift_symbols_when_tool_is_available() {
+        if !swift_available() {
+            return;
+        }
+
+        let names = ["_$s4main3fooyyF", "_$s4main3baryyF"];
+        assert_eq!(
+            demangle_many(&names),
+            vec!["foo()".to_string(), "bar()".to_string()]
+        );
     }
 }
 

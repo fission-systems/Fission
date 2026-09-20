@@ -196,6 +196,28 @@ impl LoadedBinaryBuilder {
                 .then_with(|| left.name.cmp(&right.name))
         });
 
+        let mut raw_symbol_names = Vec::new();
+        raw_symbol_names.extend(
+            functions
+                .iter()
+                .filter(|function| !function.name.is_empty())
+                .map(|function| function.name.as_str()),
+        );
+        raw_symbol_names.extend(self.iat_symbols.values().map(String::as_str));
+        raw_symbol_names.extend(self.global_symbols.values().map(String::as_str));
+        raw_symbol_names.extend(
+            self.loader_symbols
+                .iter()
+                .map(|symbol| symbol.name.as_str()),
+        );
+        raw_symbol_names.extend(self.relocation_symbols.values().map(String::as_str));
+        let demangled_names = crate::loader::demangle::demangle_many(&raw_symbol_names);
+        let demangled_by_name: std::collections::HashMap<String, String> = raw_symbol_names
+            .into_iter()
+            .zip(demangled_names)
+            .map(|(raw, demangled)| (raw.to_string(), demangled))
+            .collect();
+
         let mut function_addr_index = std::collections::HashMap::new();
         let mut function_name_index = std::collections::HashMap::new();
         // Collected first: choosing between two entries at one address needs
@@ -203,7 +225,10 @@ impl LoadedBinaryBuilder {
         let mut entry_order: Vec<(u64, usize)> = Vec::with_capacity(functions.len());
         for (idx, func) in functions.iter_mut().enumerate() {
             if !func.name.is_empty() {
-                let demangled = crate::loader::demangle::demangle(&func.name);
+                let demangled = demangled_by_name
+                    .get(func.name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| func.name.clone());
                 if demangled != func.name {
                     func.name = demangled;
                 }
@@ -226,19 +251,28 @@ impl LoadedBinaryBuilder {
 
         let mut iat_symbols = std::collections::HashMap::new();
         for (addr, name) in self.iat_symbols {
-            let demangled = crate::loader::demangle::demangle(&name);
+            let demangled = demangled_by_name
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or(name);
             iat_symbols.insert(addr, demangled);
         }
 
         let mut global_symbols = std::collections::HashMap::new();
         for (addr, name) in self.global_symbols {
-            let demangled = crate::loader::demangle::demangle(&name);
+            let demangled = demangled_by_name
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or(name);
             global_symbols.insert(addr, demangled);
         }
 
         let mut loader_symbols = self.loader_symbols;
         for symbol in &mut loader_symbols {
-            symbol.name = crate::loader::demangle::demangle(&symbol.name);
+            symbol.name = demangled_by_name
+                .get(symbol.name.as_str())
+                .cloned()
+                .unwrap_or_else(|| symbol.name.clone());
         }
         loader_symbols.sort_by(|left, right| {
             left.address
@@ -255,7 +289,10 @@ impl LoadedBinaryBuilder {
 
         let mut relocation_symbols = std::collections::HashMap::new();
         for (addr, name) in self.relocation_symbols {
-            let demangled = crate::loader::demangle::demangle(&name);
+            let demangled = demangled_by_name
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or(name);
             relocation_symbols.insert(addr, demangled);
         }
 
