@@ -204,9 +204,14 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
             relocation.address,
             u64::from(relocation.size),
         );
-        if let Some(symbol_id) = relocation.symbol
-            && !snapshot.symbols.iter().any(|row| row.id == symbol_id)
-        {
+        if let Some(symbol_id) = relocation.symbol {
+            let valid_symbol_id = usize::try_from(symbol_id.0)
+                .ok()
+                .and_then(|index| snapshot.symbols.get(index))
+                .is_some_and(|symbol| symbol.id == symbol_id);
+            if valid_symbol_id {
+                continue;
+            }
             report
                 .issues
                 .push(SnapshotIntegrityIssue::DanglingReference {

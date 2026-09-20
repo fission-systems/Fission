@@ -6,7 +6,7 @@
 
 use fission_loader::{FunctionInfo, LoadedBinary, LoaderSymbolKind};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 mod integrity;
 pub use integrity::{
@@ -253,10 +253,11 @@ impl ProgramSnapshot {
     }
 
     pub fn functions_at(&self, entry: u64) -> impl Iterator<Item = &FunctionRecord> {
-        self.functions
-            .iter()
-            .skip_while(move |function| function.entry < entry)
-            .take_while(move |function| function.entry == entry)
+        let start = self
+            .functions
+            .partition_point(|function| function.entry < entry);
+        let count = self.functions[start..].partition_point(|function| function.entry == entry);
+        self.functions[start..start + count].iter()
     }
 
     /// Return the most specific function range containing `address`.
@@ -290,16 +291,20 @@ impl ProgramSnapshot {
     }
 
     pub fn symbols_at(&self, address: u64) -> impl Iterator<Item = &SymbolRecord> {
-        self.symbols
-            .iter()
-            .filter(move |symbol| symbol.address == address)
+        let start = self
+            .symbols
+            .partition_point(|symbol| symbol.address < address);
+        let count = self.symbols[start..].partition_point(|symbol| symbol.address == address);
+        self.symbols[start..start + count].iter()
     }
 
     pub fn relocations_at(&self, address: u64) -> impl Iterator<Item = &RelocationRecord> {
-        self.relocations
-            .iter()
-            .skip_while(move |relocation| relocation.address < address)
-            .take_while(move |relocation| relocation.address == address)
+        let start = self
+            .relocations
+            .partition_point(|relocation| relocation.address < address);
+        let count =
+            self.relocations[start..].partition_point(|relocation| relocation.address == address);
+        self.relocations[start..start + count].iter()
     }
 
     pub fn memory_blocks_overlapping(
@@ -535,10 +540,16 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
 }
 
 fn build_relocations(binary: &LoadedBinary, symbols: &[SymbolRecord]) -> Vec<RelocationRecord> {
-    let symbol_ids: BTreeMap<(u64, &str), SymbolId> = symbols
+    let symbol_ids_at_address: HashMap<(u64, &str), SymbolId> = symbols
         .iter()
         .map(|symbol| ((symbol.address, symbol.name.as_str()), symbol.id))
         .collect();
+    let mut first_symbol_id_by_name = HashMap::with_capacity(symbols.len());
+    for symbol in symbols {
+        first_symbol_id_by_name
+            .entry(symbol.name.as_str())
+            .or_insert(symbol.id);
+    }
     let mut rows = binary.relocations.clone();
     rows.sort_by(|left, right| {
         left.address
@@ -550,15 +561,10 @@ fn build_relocations(binary: &LoadedBinary, symbols: &[SymbolRecord]) -> Vec<Rel
         .enumerate()
         .map(|(index, relocation)| {
             let symbol = relocation.symbol_name.as_deref().and_then(|name| {
-                symbol_ids
+                symbol_ids_at_address
                     .get(&(relocation.address, name))
                     .copied()
-                    .or_else(|| {
-                        symbols
-                            .iter()
-                            .find(|value| value.name == name)
-                            .map(|value| value.id)
-                    })
+                    .or_else(|| first_symbol_id_by_name.get(name).copied())
             });
             RelocationRecord {
                 id: RelocationId(index as u32),
