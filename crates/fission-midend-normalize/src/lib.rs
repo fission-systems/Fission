@@ -86,6 +86,21 @@ pub fn normalize_function_body(body: &mut Vec<prelude::PreHirStmt>) {
 
 /// Run the full normalize pipeline on a structured function.
 pub fn normalize_hir_function(func: &mut prelude::PreHirFunction) {
+    normalize_hir_function_with_context(func, &NormalizeContext::default());
+}
+
+/// Run the full normalize pipeline with the per-function facts it needs.
+///
+/// The context is owned by this crate and installed only for the duration of
+/// the normalize pipeline. Callers therefore pass function inputs explicitly
+/// without reaching into the leaf passes' compatibility storage, and a
+/// failed/panicking function cannot leave its symbols or landing-pad labels
+/// active for the next function on the same worker thread.
+pub fn normalize_hir_function_with_context(
+    func: &mut prelude::PreHirFunction,
+    context: &NormalizeContext,
+) {
+    let _guard = NormalizeContextGuard::install(context);
     pipeline::normalize_hir_function(func);
 }
 

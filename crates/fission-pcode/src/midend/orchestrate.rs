@@ -21,8 +21,8 @@ use fission_loader::loader::LoadedBinary;
 use fission_midend_structuring::StructuringHost;
 // Owner crate (not pcode re-export path) — keeps orchestrate boundary explicit.
 use fission_midend_normalize::{
-    GlobalSymbolContext, NormalizeContext, NormalizeContextGuard, apply_callsite_type_prop_pass,
-    normalize_hir_function, take_normalize_wave_stats,
+    GlobalSymbolContext, NormalizeContext, apply_callsite_type_prop_pass,
+    normalize_hir_function_with_context, take_normalize_wave_stats,
 };
 use std::time::Instant;
 
@@ -375,12 +375,11 @@ fn render_mlil_preview_with_binary_and_context_output(
         },
         builder.lsda_landing_pad_labels(),
     );
-    let mut normalize_context_guard = NormalizeContextGuard::install(&normalize_context);
     // Stage: midend-normalize (owner crate). `hir` is a real `PreHirFunction`
     // here (builder's native output) -- kept named `hir` through this
     // function for minimal diff, but its type is PreHIR until the explicit
     // conversion below.
-    normalize_hir_function(&mut hir);
+    normalize_hir_function_with_context(&mut hir, &normalize_context);
     // Observation side channel (mirrors `take_last_layered_pseudocode`
     // below): the real `PreHirFunction` structuring is about to consume,
     // captured before any structuring rewrite touches it. Zero effect on
@@ -497,7 +496,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     // steps below this point are printer-facing, not semantic (see
     // `midend/AGENTS.md`: "Do not fix structuring bugs only in printer.rs").
     let hir_function = hir.clone();
-    normalize_context_guard.clear();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
     build_stats.merge_assign(&take_normalize_wave_stats());
