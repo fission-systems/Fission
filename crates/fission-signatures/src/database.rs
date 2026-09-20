@@ -3,6 +3,7 @@
 //! Core database structure with indexing and matching logic
 
 use super::msvc_sigs;
+use super::relation::CallGraphView;
 use super::signature::FunctionSignature;
 use std::collections::HashMap;
 
@@ -108,11 +109,11 @@ impl SignatureDatabase {
     /// 1. First matching byte patterns
     /// 2. Then validating call graph relations if signature has constraints
     /// 3. Rejecting matches that don't pass relation checks (if force_relation is set)
-    pub fn identify_with_relation(
+    pub fn identify_with_relation<G: CallGraphView + ?Sized>(
         &self,
         bytes: &[u8],
         func_addr: u64,
-        call_graph: &super::relation::CallGraph,
+        call_graph: &G,
     ) -> Option<IdentifyResult> {
         // First, find all byte-pattern matches
         let candidates = self.find_all_matches(bytes);

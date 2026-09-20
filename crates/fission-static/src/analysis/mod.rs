@@ -25,7 +25,7 @@ pub use fission_loader::{
     detect,
 };
 
-pub use callgraph::{CallEdge, CallGraph};
+pub use callgraph::{CallEdge, CallGraph, NamedCallGraphView};
 pub use control_flow_facts::{
     ControlFlowFacts, FunctionControlFlowFacts, control_flow_facts_for, decode_memory_context_for,
     function_max_bytes,

@@ -43,7 +43,7 @@ pub mod prelude;
 
 // Re-export main types
 pub use database::{IdentifyResult, SignatureDatabase};
-pub use relation::{CallGraph, RelationValidation, validate_relation};
+pub use relation::{CallGraphView, RelationValidation, validate_relation};
 pub use signature::FunctionSignature;
 
 pub static SIGNATURE_DB: std::sync::LazyLock<SignatureDatabase> =

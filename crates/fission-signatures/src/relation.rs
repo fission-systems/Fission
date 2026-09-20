@@ -4,7 +4,6 @@
 //! similar to Ghidra's FidProgramSeeker relation matching.
 
 use crate::signature::FunctionSignature;
-use std::collections::{HashMap, HashSet};
 
 /// Result of a relation validation check
 #[derive(Debug, Clone)]
@@ -21,100 +20,17 @@ pub struct RelationValidation {
     pub reason: Option<String>,
 }
 
-/// Call Graph for a binary, used to validate FID matches
-pub struct CallGraph {
-    /// Map of function address to list of addresses it calls
-    pub callees: HashMap<u64, HashSet<u64>>,
-    /// Map of function address to list of addresses that call it
-    pub callers: HashMap<u64, HashSet<u64>>,
-    /// Map of function address to resolved name (if known)
-    pub function_names: HashMap<u64, String>,
-    /// Reverse map: name to address
-    name_to_addr: HashMap<String, u64>,
-}
+/// The minimal graph capability needed by legacy name-based signatures.
+///
+/// The concrete call graph belongs to the static-analysis crate, where xrefs
+/// and function metadata are owned. Keeping only this capability here avoids a
+/// second graph with a different edge representation in the signatures crate.
+pub trait CallGraphView {
+    /// Return whether `function` calls a function with `name`.
+    fn has_callee_named(&self, function: u64, name: &str) -> bool;
 
-impl CallGraph {
-    /// Create a new empty call graph
-    pub fn new() -> Self {
-        Self {
-            callees: HashMap::new(),
-            callers: HashMap::new(),
-            function_names: HashMap::new(),
-            name_to_addr: HashMap::new(),
-        }
-    }
-
-    /// Add a call edge from caller_addr to callee_addr
-    pub fn add_call(&mut self, caller_addr: u64, callee_addr: u64) {
-        self.callees
-            .entry(caller_addr)
-            .or_insert_with(HashSet::new)
-            .insert(callee_addr);
-        self.callers
-            .entry(callee_addr)
-            .or_insert_with(HashSet::new)
-            .insert(caller_addr);
-    }
-
-    /// Set the name for a function address
-    pub fn set_function_name(&mut self, addr: u64, name: String) {
-        if !name.is_empty() {
-            self.name_to_addr.insert(name.clone(), addr);
-            self.function_names.insert(addr, name);
-        }
-    }
-
-    /// Get callees of a function by address
-    pub fn get_callees(&self, addr: u64) -> Option<&HashSet<u64>> {
-        self.callees.get(&addr)
-    }
-
-    /// Get callers of a function by address
-    pub fn get_callers(&self, addr: u64) -> Option<&HashSet<u64>> {
-        self.callers.get(&addr)
-    }
-
-    /// Look up function address by name
-    pub fn get_addr_by_name(&self, name: &str) -> Option<u64> {
-        self.name_to_addr.get(name).copied()
-    }
-
-    /// Look up function name by address
-    pub fn get_name_by_addr(&self, addr: u64) -> Option<&String> {
-        self.function_names.get(&addr)
-    }
-
-    /// Get the set of callee names for a function
-    pub fn get_callee_names(&self, addr: u64) -> HashSet<String> {
-        let mut names = HashSet::new();
-        if let Some(callee_addrs) = self.callees.get(&addr) {
-            for &callee_addr in callee_addrs {
-                if let Some(name) = self.function_names.get(&callee_addr) {
-                    names.insert(name.clone());
-                }
-            }
-        }
-        names
-    }
-
-    /// Get the set of caller names for a function
-    pub fn get_caller_names(&self, addr: u64) -> HashSet<String> {
-        let mut names = HashSet::new();
-        if let Some(caller_addrs) = self.callers.get(&addr) {
-            for &caller_addr in caller_addrs {
-                if let Some(name) = self.function_names.get(&caller_addr) {
-                    names.insert(name.clone());
-                }
-            }
-        }
-        names
-    }
-}
-
-impl Default for CallGraph {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// Return whether a function with `name` calls `function`.
+    fn has_caller_named(&self, function: u64, name: &str) -> bool;
 }
 
 /// Validate a signature match against the call graph
@@ -124,10 +40,10 @@ impl Default for CallGraph {
 /// 2. If signature has expected_callers, check if any expected caller calls this function
 /// 3. If force_relation is set and no callees found, reject the match
 /// 4. Adjust confidence based on relation matches
-pub fn validate_relation(
+pub fn validate_relation<G: CallGraphView + ?Sized>(
     sig: &FunctionSignature,
     func_addr: u64,
-    call_graph: &CallGraph,
+    call_graph: &G,
 ) -> RelationValidation {
     // If no relation constraints, pass with full confidence
     if sig.expected_callees.is_empty() && sig.expected_callers.is_empty() {
@@ -140,22 +56,19 @@ pub fn validate_relation(
         };
     }
 
-    let callee_names = call_graph.get_callee_names(func_addr);
-    let caller_names = call_graph.get_caller_names(func_addr);
-
     let mut matched_callees: Vec<String> = Vec::new();
     let mut matched_callers: Vec<String> = Vec::new();
 
     // Check expected callees
     for expected in &sig.expected_callees {
-        if callee_names.contains(expected) {
+        if call_graph.has_callee_named(func_addr, expected) {
             matched_callees.push(expected.clone());
         }
     }
 
     // Check expected callers
     for expected in &sig.expected_callers {
-        if caller_names.contains(expected) {
+        if call_graph.has_caller_named(func_addr, expected) {
             matched_callers.push(expected.clone());
         }
     }
@@ -216,24 +129,40 @@ pub fn validate_relation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{HashMap, HashSet};
+
+    #[derive(Default)]
+    struct TestGraph {
+        callees: HashMap<u64, HashSet<String>>,
+        callers: HashMap<u64, HashSet<String>>,
+    }
+
+    impl CallGraphView for TestGraph {
+        fn has_callee_named(&self, function: u64, name: &str) -> bool {
+            self.callees
+                .get(&function)
+                .is_some_and(|names| names.contains(name))
+        }
+
+        fn has_caller_named(&self, function: u64, name: &str) -> bool {
+            self.callers
+                .get(&function)
+                .is_some_and(|names| names.contains(name))
+        }
+    }
 
     #[test]
-    fn test_call_graph_basic() {
-        let mut cg = CallGraph::new();
-        cg.add_call(0x1000, 0x2000);
-        cg.add_call(0x1000, 0x3000);
-        cg.set_function_name(0x2000, "malloc".to_string());
-        cg.set_function_name(0x3000, "free".to_string());
-
-        let Some(callees) = cg.get_callees(0x1000) else {
-            panic!("callees for caller 0x1000 should exist")
+    fn test_call_graph_view_basic() {
+        let graph = TestGraph {
+            callees: HashMap::from([(
+                0x1000,
+                HashSet::from(["malloc".to_string(), "free".to_string()]),
+            )]),
+            ..Default::default()
         };
-        assert!(callees.contains(&0x2000));
-        assert!(callees.contains(&0x3000));
-
-        let callee_names = cg.get_callee_names(0x1000);
-        assert!(callee_names.contains("malloc"));
-        assert!(callee_names.contains("free"));
+        assert!(graph.has_callee_named(0x1000, "malloc"));
+        assert!(graph.has_callee_named(0x1000, "free"));
+        assert!(!graph.has_callee_named(0x1000, "realloc"));
     }
 
     #[test]
@@ -241,11 +170,12 @@ mod tests {
         let sig = FunctionSignature::from_hex("_malloc_base", "48 89 5C 24")
             .with_callees(&["HeapAlloc", "GetProcessHeap"]);
 
-        let mut cg = CallGraph::new();
-        cg.add_call(0x1000, 0x2000);
-        cg.set_function_name(0x2000, "HeapAlloc".to_string());
+        let graph = TestGraph {
+            callees: HashMap::from([(0x1000, HashSet::from(["HeapAlloc".to_string()]))]),
+            ..Default::default()
+        };
 
-        let result = validate_relation(&sig, 0x1000, &cg);
+        let result = validate_relation(&sig, 0x1000, &graph);
         assert!(result.passed);
         assert!(!result.matched_callees.is_empty());
     }
@@ -256,9 +186,9 @@ mod tests {
             .with_callees(&["HeapAlloc", "GetProcessHeap"])
             .force_relation();
 
-        let cg = CallGraph::new(); // Empty call graph
+        let graph = TestGraph::default();
 
-        let result = validate_relation(&sig, 0x1000, &cg);
+        let result = validate_relation(&sig, 0x1000, &graph);
         assert!(!result.passed);
         assert!(result.reason.is_some());
     }

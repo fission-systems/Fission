@@ -269,8 +269,10 @@ fn parse_relation_table(
     Ok(records
         .into_iter()
         .map(|record| FidbfRelation {
-            function_id: record.key,
-            related_id: 0,
+            // Ghidra stores the relation-smash directly as the key.  The
+            // relation table schema has no columns, so there is no separate
+            // related-function id to recover here.
+            key: record.key as u64,
             relation_type,
         })
         .collect())

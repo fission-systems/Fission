@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 #[derive(Debug, Clone)]
 pub struct FidbfLibrary {
     pub key: i64,
@@ -53,9 +55,22 @@ impl From<i32> for FidbfRelationType {
 
 #[derive(Debug, Clone)]
 pub struct FidbfRelation {
-    pub function_id: i64,
-    pub related_id: i64,
+    /// Ghidra's relation-smash key.  Relation tables intentionally have no
+    /// columns: the key combines one function id with the other function's
+    /// full hash (see `FidDBUtils.generate*FullHashSmash`).
+    pub key: u64,
     pub relation_type: FidbfRelationType,
+}
+
+/// Hash neighbourhood of a function in the loaded program.
+///
+/// FID relation records do not identify a callee by address.  They identify
+/// the caller/callee pair by the candidate database key and the neighbouring
+/// function's full hash, so this is the smallest context the matcher needs.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FidRelationContext<'a> {
+    pub children: &'a [(u64, u16)],
+    pub parents: &'a [(u64, u16)],
 }
 
 /// Score above which a FID match is considered high-confidence (mirrors Ghidra's
@@ -72,6 +87,42 @@ pub struct FidbfDatabase {
     /// Empty until `build_hash_index` is called (done automatically by the
     /// `parse_fidbf` loader).
     full_hash_index: std::collections::HashMap<u64, Vec<usize>>,
+    relation_index: RelationIndex,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RelationIndex {
+    inferior: HashSet<u64>,
+    superior: HashSet<u64>,
+}
+
+impl RelationIndex {
+    fn from_relations(relations: &[FidbfRelation]) -> Self {
+        let mut index = Self::default();
+        for relation in relations {
+            match relation.relation_type {
+                FidbfRelationType::Inferior => {
+                    index.inferior.insert(relation.key);
+                }
+                FidbfRelationType::Superior => {
+                    index.superior.insert(relation.key);
+                }
+                // Call/Jump are not emitted by the current raw-table parser,
+                // but keeping them out of the FID hash-smash index prevents an
+                // unknown relation encoding from becoming an acceptance path.
+                FidbfRelationType::Call
+                | FidbfRelationType::Jump
+                | FidbfRelationType::Unknown(_) => {}
+            }
+        }
+        index
+    }
+}
+
+const FNV_64_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+pub(crate) fn relation_smash(function_key: i64, other_full_hash: u64) -> u64 {
+    (function_key as u64).wrapping_mul(FNV_64_PRIME) ^ other_full_hash
 }
 
 impl FidbfDatabase {
@@ -88,8 +139,10 @@ impl FidbfDatabase {
             functions,
             relations,
             full_hash_index: std::collections::HashMap::new(),
+            relation_index: RelationIndex::default(),
         };
         db.build_hash_index();
+        db.relation_index = RelationIndex::from_relations(&db.relations);
         db
     }
 
@@ -143,11 +196,75 @@ impl FidbfDatabase {
         (base + bonus).min(100.0)
     }
 
+    fn hash_candidate_is_eligible(&self, func: &FidbfFunction, specific_hash: u64) -> bool {
+        !func.auto_fail && (!func.force_specific || func.specific_hash == specific_hash)
+    }
+
+    fn relation_scores(&self, func: &FidbfFunction, context: FidRelationContext<'_>) -> (u32, u32) {
+        // Ghidra's HashFamily de-duplicates neighbouring functions by full
+        // hash before scoring.  Do the same here so repeated call sites do not
+        // inflate a match's relation score.
+        let mut child_hashes = HashSet::new();
+        let child_score = context
+            .children
+            .iter()
+            .filter(|(hash, _)| child_hashes.insert(*hash))
+            .filter(|(hash, _)| {
+                self.relation_index
+                    .superior
+                    .contains(&relation_smash(func.key, *hash))
+            })
+            .map(|(_, code_units)| u32::from(*code_units))
+            .sum();
+
+        let mut parent_hashes = HashSet::new();
+        let parent_score = context
+            .parents
+            .iter()
+            .filter(|(hash, _)| parent_hashes.insert(*hash))
+            .filter(|(hash, _)| {
+                self.relation_index
+                    .inferior
+                    .contains(&relation_smash(func.key, *hash))
+            })
+            .map(|(_, code_units)| u32::from(*code_units))
+            .sum();
+
+        (child_score, parent_score)
+    }
+
+    /// Whether a full-hash lookup contains an eligible forced-relation
+    /// candidate.  This lets callers defer building a whole-binary call graph
+    /// unless the current program actually needs relation context.
+    pub fn has_force_relation_candidate(&self, full_hash: u64, specific_hash: u64) -> bool {
+        self.find_by_full_hash(full_hash).into_iter().any(|func| {
+            func.force_relation
+                && self.hash_candidate_is_eligible(func, specific_hash)
+                && (func.auto_pass || self.score_match(func, specific_hash) >= FID_ACCEPT_THRESHOLD)
+        })
+    }
+
     /// Identify a function by its dual FID hashes and return matching library
     /// function names.  Only returns matches with a score above `FID_ACCEPT_THRESHOLD`.
     ///
     /// Results are sorted by score descending.
     pub fn identify_by_hashes(&self, full_hash: u64, specific_hash: u64) -> Vec<FidbfMatch> {
+        self.identify_by_hashes_with_relations(
+            full_hash,
+            specific_hash,
+            FidRelationContext::default(),
+        )
+    }
+
+    /// Identify a function and score the candidate against its caller/callee
+    /// hash neighbourhood.  Forced-relation candidates are accepted only when
+    /// at least one known child satisfies the database's superior relation.
+    pub fn identify_by_hashes_with_relations(
+        &self,
+        full_hash: u64,
+        specific_hash: u64,
+        context: FidRelationContext<'_>,
+    ) -> Vec<FidbfMatch> {
         let mut results: Vec<FidbfMatch> = self
             .find_by_full_hash(full_hash)
             .into_iter()
@@ -158,10 +275,16 @@ impl FidbfDatabase {
             // so 38,465 of the corpus's 1,832,079 functions (2.10%) were
             // returnable when the database says they never are.
             .filter(|func| !func.auto_fail)
-            .filter(|func| !func.force_relation)
-            .filter(|func| !func.force_specific || func.specific_hash == specific_hash)
+            .filter(|func| self.hash_candidate_is_eligible(func, specific_hash))
             .filter_map(|func| {
-                let score = self.score_match(func, specific_hash);
+                let (child_score, parent_score) = self.relation_scores(func, context);
+                if func.force_relation && child_score == 0 {
+                    return None;
+                }
+                let score = (self.score_match(func, specific_hash)
+                    + child_score as f32
+                    + parent_score as f32)
+                    .min(100.0);
                 // Auto-pass is "a full-hash match is always returned, even if
                 // the function is tiny", which is exactly a waiver of the size
                 // threshold: all 156 auto-pass functions in the corpus score
@@ -293,5 +416,42 @@ mod flag_tests {
         let db = db(vec![f]);
         assert_eq!(db.identify_by_hashes(0xabc, 0xdef).len(), 1);
         assert!(db.identify_by_hashes(0xabc, 0x999).is_empty());
+    }
+
+    #[test]
+    fn forced_relation_requires_the_matching_child_hash() {
+        let mut candidate = func("relation", 0xabc, 0xdef, 20);
+        candidate.key = 7;
+        candidate.force_relation = true;
+        let child_hash = 0x1234_u64;
+        let relation = FidbfRelation {
+            key: relation_smash(candidate.key, child_hash),
+            relation_type: FidbfRelationType::Superior,
+        };
+        let database = FidbfDatabase::new(
+            "test".to_string(),
+            vec![FidbfLibrary {
+                key: 1,
+                family_name: "TEST".to_string(),
+                version: String::new(),
+                variant: String::new(),
+                ghidra_version: String::new(),
+                language_id: String::new(),
+                language_version: 0,
+                language_minor_version: 0,
+                compiler_spec_id: String::new(),
+            }],
+            vec![candidate],
+            vec![relation],
+        );
+
+        assert!(database.identify_by_hashes(0xabc, 0xdef).is_empty());
+        let context = FidRelationContext {
+            children: &[(child_hash, 4)],
+            parents: &[],
+        };
+        let matches = database.identify_by_hashes_with_relations(0xabc, 0xdef, context);
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].score > 20.0);
     }
 }

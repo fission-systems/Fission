@@ -1,4 +1,6 @@
+use crate::analysis::callgraph::CallGraph;
 use crate::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
+use crate::analysis::xrefs::XrefDatabase;
 use fission_analysis_db::{FactSource, ProgramSnapshot, SymbolKind};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
@@ -8,7 +10,7 @@ use fission_pcode::midend::cspec::register_model_for_language;
 use fission_pcode::{
     PcodeFunction, PcodeOp, PcodeOpcode, RegisterNamer, Varnode, infer_entry_register_param_arity,
 };
-use fission_signatures::fidbf::FidbfDatabase;
+use fission_signatures::fidbf::{FidRelationContext, FidbfDatabase};
 use fission_signatures::{FidDatabaseSet, fid::FidDatabase};
 use fission_sleigh::runtime::{
     DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
@@ -24,6 +26,15 @@ use self::fact_store_state::{DecodeCache, LearnedFactOverlay};
 /// hashing -- mirrors `fission_decompiler::fid`'s decode safety valve, not a
 /// tuning knob.
 const FID_INSTRUCTION_LIMIT: usize = 4000;
+
+#[derive(Debug, Clone, Copy)]
+struct HashedFidFunction {
+    address: u64,
+    full_hash: u64,
+    specific_hash: u64,
+    code_unit_count: u16,
+    eligible_for_name: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactProvenance {
@@ -708,15 +719,10 @@ impl FactStore {
         use rayon::prelude::*;
         let n_decoded = std::sync::atomic::AtomicUsize::new(0);
         let n_hashed = std::sync::atomic::AtomicUsize::new(0);
-        let matches: Vec<(u64, String)> = binary
+        let hashed_functions: Vec<HashedFidFunction> = binary
             .functions
             .par_iter()
-            .filter(|func| {
-                // Skip imports/exports and already resolved PDB/Dwarf metadata
-                !(func.is_import
-                    || func.is_export
-                    || self.pdb_functions.contains_key(&func.address))
-            })
+            .filter(|func| !func.is_import)
             .filter_map(|func| {
                 let diag_start = std::time::Instant::now();
                 // Same decode-mode question every other path answers with
@@ -775,12 +781,79 @@ impl FactStore {
                     n_hashed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
+                Some(HashedFidFunction {
+                    address: func.address,
+                    full_hash,
+                    specific_hash,
+                    code_unit_count: _full_count,
+                    // Preserve the old naming policy: loader exports and PDB
+                    // facts remain authoritative, but their hashes still
+                    // participate in relation context for neighbouring FID
+                    // candidates.
+                    eligible_for_name: !func.is_export
+                        && !self.pdb_functions.contains_key(&func.address),
+                })
+            })
+            .collect();
+
+        // Relation records are keyed by a candidate function id and a
+        // neighbouring function's FID full hash.  Build the canonical static
+        // call graph only when a matched hash actually contains a forced
+        // relation candidate; ordinary FID scans keep their previous cost.
+        let needs_relation_context = hashed_functions.iter().any(|function| {
+            databases.iter().any(|db| {
+                db.has_force_relation_candidate(function.full_hash, function.specific_hash)
+            })
+        });
+        let call_graph = needs_relation_context.then(|| {
+            let xrefs = XrefDatabase::build_from_binary(binary);
+            CallGraph::build_from_xrefs(&binary.functions, &xrefs, 0x40)
+        });
+        let hash_by_address: HashMap<u64, (u64, u16)> = hashed_functions
+            .iter()
+            .map(|function| {
+                (
+                    function.address,
+                    (function.full_hash, function.code_unit_count),
+                )
+            })
+            .collect();
+
+        let matches: Vec<(u64, String)> = hashed_functions
+            .par_iter()
+            .filter(|function| function.eligible_for_name)
+            .filter_map(|function| {
+                let (children, parents) = if let Some(graph) = call_graph.as_ref() {
+                    let children = graph
+                        .callees_of(function.address)
+                        .iter()
+                        .filter_map(|edge| hash_by_address.get(&edge.addr).copied())
+                        .collect::<Vec<_>>();
+                    let parents = graph
+                        .callers_of(function.address)
+                        .iter()
+                        .filter_map(|edge| hash_by_address.get(&edge.addr).copied())
+                        .collect::<Vec<_>>();
+                    (children, parents)
+                } else {
+                    (Vec::new(), Vec::new())
+                };
+                let context = FidRelationContext {
+                    children: &children,
+                    parents: &parents,
+                };
                 let best_match = databases
                     .iter()
-                    .flat_map(|db| db.identify_by_hashes(full_hash, specific_hash))
+                    .flat_map(|db| {
+                        db.identify_by_hashes_with_relations(
+                            function.full_hash,
+                            function.specific_hash,
+                            context,
+                        )
+                    })
                     .max_by(|a, b| a.score.total_cmp(&b.score))?;
 
-                Some((func.address, best_match.name))
+                Some((function.address, best_match.name))
             })
             .collect();
 

@@ -7,6 +7,7 @@
 use rustc_hash::FxHashMap;
 
 use fission_loader::loader::FunctionInfo;
+use fission_signatures::CallGraphView;
 
 use super::xref_index::{XrefIndex, XrefKind, resolve_enclosing_function};
 use super::xrefs::{XrefDatabase, XrefType};
@@ -22,6 +23,46 @@ pub struct CallGraph {
     callers: FxHashMap<u64, Vec<CallEdge>>,
     callees: FxHashMap<u64, Vec<CallEdge>>,
     total_call_sites: usize,
+}
+
+/// Name-aware view over the canonical static-analysis call graph.
+///
+/// The graph owns only address edges. Function names remain owned by the
+/// loader/program metadata, so relation matching receives a short-lived view
+/// instead of making the graph responsible for a second name table.
+pub struct NamedCallGraphView<'a> {
+    graph: &'a CallGraph,
+    functions: &'a [FunctionInfo],
+}
+
+impl<'a> NamedCallGraphView<'a> {
+    pub fn new(graph: &'a CallGraph, functions: &'a [FunctionInfo]) -> Self {
+        Self { graph, functions }
+    }
+
+    fn name_at(&self, address: u64) -> Option<&str> {
+        self.functions
+            .iter()
+            .find(|function| function.address == address)
+            .map(|function| function.name.as_str())
+            .filter(|name| !name.is_empty())
+    }
+}
+
+impl CallGraphView for NamedCallGraphView<'_> {
+    fn has_callee_named(&self, function: u64, name: &str) -> bool {
+        self.graph
+            .callees_of(function)
+            .iter()
+            .any(|edge| self.name_at(edge.addr) == Some(name))
+    }
+
+    fn has_caller_named(&self, function: u64, name: &str) -> bool {
+        self.graph
+            .callers_of(function)
+            .iter()
+            .any(|edge| self.name_at(edge.addr) == Some(name))
+    }
 }
 
 impl CallGraph {
@@ -243,10 +284,18 @@ mod tests {
             flow_kind: Some(DecodedFlowKind::Jump),
         });
 
-        let g = CallGraph::build_from_xrefs(&sample_functions(), &db, 0x40);
+        let functions = sample_functions();
+        let g = CallGraph::build_from_xrefs(&functions, &db, 0x40);
         assert_eq!(g.total_call_sites(), 1);
         let callees = g.callees_of(0x1000);
         assert_eq!(callees.len(), 1);
         assert_eq!(callees[0].addr, 0x2000);
+
+        let view = NamedCallGraphView::new(&g, &functions);
+        let signature = fission_signatures::FunctionSignature::from_hex("caller", "e8 ?? ?? ?? ??")
+            .with_callees(&["callee"]);
+        let validation = fission_signatures::validate_relation(&signature, 0x1000, &view);
+        assert!(validation.passed);
+        assert_eq!(validation.matched_callees, vec!["callee"]);
     }
 }

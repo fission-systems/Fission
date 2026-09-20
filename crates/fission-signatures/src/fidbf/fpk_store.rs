@@ -19,14 +19,16 @@
 //! build process.
 
 use super::types::{
-    FID_ACCEPT_THRESHOLD, FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfMatch, FidbfRelation,
-    FidbfRelationType,
+    FID_ACCEPT_THRESHOLD, FidRelationContext, FidbfDatabase, FidbfFunction, FidbfLibrary,
+    FidbfMatch, FidbfRelation, FidbfRelationType, relation_smash,
 };
 use crate::fpk::{
     BLOCK_TARGET_BULK, CODEC_ZSTD_COLUMNAR, FpkError, FpkReader, HashEntry, append_hash_index,
     pack_with, pack_with_locators,
 };
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::OnceLock;
 
 pub const KIND_FID_LIBRARY: u16 = 10;
 pub const KIND_FID_FUNCTION: u16 = 11;
@@ -170,8 +172,8 @@ pub fn encode(db: &FidbfDatabase) -> FidFpkImages {
         .map(|r| {
             format!(
                 "{:016x}:{:016x}|{}",
-                r.function_id,
-                r.related_id,
+                r.key,
+                0,
                 relation_code(r.relation_type)
             )
         })
@@ -303,12 +305,14 @@ pub fn decode(
         let Some((ids, code)) = line.split_once('|') else {
             continue;
         };
-        let Some((function_id, related_id)) = ids.split_once(':') else {
+        let Some((function_id, _related_id)) = ids.split_once(':') else {
             continue;
         };
         relations.push(FidbfRelation {
-            function_id: parse_i64_hex(function_id),
-            related_id: parse_i64_hex(related_id),
+            // Older packed tables wrote the raw smash key in the first field
+            // and a placeholder zero in the second.  Keep accepting that
+            // shape while treating the first field as the canonical key.
+            key: parse_u64_hex(function_id),
             relation_type: relation_kind(code),
         });
     }
@@ -422,6 +426,67 @@ mod tests {
             assert_eq!(unesc(&esc(raw)), raw, "escaping lost {raw:?}");
         }
     }
+
+    #[test]
+    fn packed_relation_smash_is_used_by_lazy_matching() {
+        let candidate = FidbfFunction {
+            key: 7,
+            library_id: 1,
+            name: "forced".to_string(),
+            full_hash: 0xabc,
+            specific_hash: 0xdef,
+            code_unit_size: 20,
+            entry_point: 0,
+            has_terminator: true,
+            specific_hash_additional_size: 0,
+            domain_path: String::new(),
+            flags: 0,
+            auto_pass: false,
+            auto_fail: false,
+            force_specific: false,
+            force_relation: true,
+        };
+        let child_hash = 0x1234_u64;
+        let database = FidbfDatabase::new(
+            "test".to_string(),
+            vec![FidbfLibrary {
+                key: 1,
+                family_name: "TEST".to_string(),
+                version: String::new(),
+                variant: String::new(),
+                ghidra_version: String::new(),
+                language_id: String::new(),
+                language_version: 0,
+                language_minor_version: 0,
+                compiler_spec_id: String::new(),
+            }],
+            vec![candidate],
+            vec![FidbfRelation {
+                key: relation_smash(7, child_hash),
+                relation_type: FidbfRelationType::Superior,
+            }],
+        );
+        let images = encode(&database);
+        let dir = std::env::temp_dir().join(format!("fidfpk_relation_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test directory");
+        write(&dir, "test.lib.fpk", &images.libraries);
+        write(&dir, "test.fn.fpk", &images.functions);
+        write(&dir, "test.rel.fpk", &images.relations);
+        write(&dir, "test.dom.fpk", &images.domain_paths);
+
+        let lazy = LazyFidDatabase::open(&dir.join("test.fidbf")).expect("open packed FID");
+        assert!(lazy.identify_by_hashes(0xabc, 0xdef).is_empty());
+        let context = FidRelationContext {
+            children: &[(child_hash, 4)],
+            parents: &[],
+        };
+        assert_eq!(
+            lazy.identify_by_hashes_with_relations(0xabc, 0xdef, context)
+                .len(),
+            1
+        );
+        std::fs::remove_dir_all(&dir).expect("remove test directory");
+    }
 }
 
 // ── Lazy lookup ─────────────────────────────────────────────────────────────
@@ -439,7 +504,15 @@ mod tests {
 pub struct LazyFidDatabase {
     functions: FpkReader,
     libraries: Vec<FidbfLibrary>,
+    relations: Option<FpkReader>,
+    relation_index: OnceLock<LazyRelationIndex>,
     source_path: String,
+}
+
+#[derive(Debug, Default)]
+struct LazyRelationIndex {
+    inferior: HashSet<u64>,
+    superior: HashSet<u64>,
 }
 
 impl LazyFidDatabase {
@@ -462,6 +535,8 @@ impl LazyFidDatabase {
         Some(Self {
             functions,
             libraries,
+            relations: FpkReader::open(&table("rel")).ok(),
+            relation_index: OnceLock::new(),
             source_path: path.display().to_string(),
         })
     }
@@ -487,9 +562,115 @@ impl LazyFidDatabase {
             .any(|l| l.language_id.is_empty() || l.language_id == language_id)
     }
 
+    fn relation_index(&self) -> &LazyRelationIndex {
+        self.relation_index.get_or_init(|| {
+            let mut index = LazyRelationIndex::default();
+            let Some(reader) = self.relations.as_ref() else {
+                return index;
+            };
+            let Ok(records) = reader.read_all() else {
+                return index;
+            };
+            for line in records {
+                let Some((ids, code)) = line.split_once('|') else {
+                    continue;
+                };
+                let Some((key, _legacy_related_id)) = ids.split_once(':') else {
+                    continue;
+                };
+                let Ok(key) = u64::from_str_radix(key, 16) else {
+                    continue;
+                };
+                match relation_kind(code) {
+                    FidbfRelationType::Inferior => {
+                        index.inferior.insert(key);
+                    }
+                    FidbfRelationType::Superior => {
+                        index.superior.insert(key);
+                    }
+                    FidbfRelationType::Call
+                    | FidbfRelationType::Jump
+                    | FidbfRelationType::Unknown(_) => {}
+                }
+            }
+            index
+        })
+    }
+
+    fn relation_scores(
+        &self,
+        function: &FidbfFunction,
+        context: FidRelationContext<'_>,
+    ) -> (u32, u32) {
+        let index = self.relation_index();
+        let mut child_hashes = HashSet::new();
+        let child_score = context
+            .children
+            .iter()
+            .filter(|(hash, _)| child_hashes.insert(*hash))
+            .filter(|(hash, _)| {
+                index
+                    .superior
+                    .contains(&relation_smash(function.key, *hash))
+            })
+            .map(|(_, code_units)| u32::from(*code_units))
+            .sum();
+
+        let mut parent_hashes = HashSet::new();
+        let parent_score = context
+            .parents
+            .iter()
+            .filter(|(hash, _)| parent_hashes.insert(*hash))
+            .filter(|(hash, _)| {
+                index
+                    .inferior
+                    .contains(&relation_smash(function.key, *hash))
+            })
+            .map(|(_, code_units)| u32::from(*code_units))
+            .sum();
+
+        (child_score, parent_score)
+    }
+
+    pub fn has_force_relation_candidate(&self, full_hash: u64, specific_hash: u64) -> bool {
+        let Ok(records) = self.functions.records_by_key(full_hash) else {
+            return false;
+        };
+        records
+            .iter()
+            .filter_map(|line| decode_function_for_match(line))
+            .any(|func| {
+                func.force_relation
+                    && !func.auto_fail
+                    && (!func.force_specific || func.specific_hash == specific_hash)
+                    && (func.auto_pass
+                        || (func.code_unit_size as f32
+                            + if func.specific_hash == specific_hash {
+                                10.0
+                            } else {
+                                0.0
+                            })
+                        .min(100.0)
+                            >= FID_ACCEPT_THRESHOLD)
+            })
+    }
+
     /// Same contract as [`FidbfDatabase::identify_by_hashes`], including the
     /// auto_fail / auto_pass / force_specific / force_relation rules.
     pub fn identify_by_hashes(&self, full_hash: u64, specific_hash: u64) -> Vec<FidbfMatch> {
+        self.identify_by_hashes_with_relations(
+            full_hash,
+            specific_hash,
+            FidRelationContext::default(),
+        )
+    }
+
+    pub fn identify_by_hashes_with_relations(
+        &self,
+        full_hash: u64,
+        specific_hash: u64,
+        context: FidRelationContext<'_>,
+    ) -> Vec<FidbfMatch> {
         let Ok(records) = self.functions.records_by_key(full_hash) else {
             return Vec::new();
         };
@@ -497,16 +678,21 @@ impl LazyFidDatabase {
             .iter()
             .filter_map(|line| decode_function_for_match(line))
             .filter(|f| !f.auto_fail)
-            .filter(|f| !f.force_relation)
             .filter(|f| !f.force_specific || f.specific_hash == specific_hash)
             .filter_map(|f| {
+                let (child_score, parent_score) = self.relation_scores(&f, context);
+                if f.force_relation && child_score == 0 {
+                    return None;
+                }
                 let score = (f.code_unit_size as f32
                     + if f.specific_hash == specific_hash {
                         10.0
                     } else {
                         0.0
                     })
-                .min(100.0);
+                    + child_score as f32
+                    + parent_score as f32;
+                let score = score.min(100.0);
                 if !f.auto_pass && score < FID_ACCEPT_THRESHOLD {
                     return None;
                 }
