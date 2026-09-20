@@ -228,19 +228,24 @@ impl CircleRange {
         }
     }
 
-    /// Widening operator: if the new range is strictly larger than the old
-    /// (lattice height increased), jump to top to guarantee termination.
+    /// Widening operator for the finite circle-interval domain.
+    ///
+    /// A new approximation that is contained in the previous one is not
+    /// progress and must not narrow the fixed-point state. Any other change
+    /// may keep moving a wrapping interval (including an equal-sized lateral
+    /// slide), so jump to top to guarantee convergence.
     pub fn widen(&self, prev: &Self) -> Self {
+        if self.bits != prev.bits {
+            return Self::top(self.bits);
+        }
         if prev.is_top {
             return *prev;
         }
-        if prev.is_bottom() {
-            return *self;
+        if prev.contains_range(self) {
+            return *prev;
         }
-        if self.count() <= prev.count() {
-            return *self;
-        }
-        // The set grew — widen to top.
+        // The new range is not contained in the previous approximation. This
+        // includes growth, disjoint movement, and equal-sized lateral slides.
         Self::top(self.bits)
     }
 
@@ -381,6 +386,26 @@ impl CircleRange {
         }
     }
 
+    /// True if this finite arc contains `other` on the modular number line.
+    fn contains_range(&self, other: &Self) -> bool {
+        if self.bits != other.bits {
+            return false;
+        }
+        if other.is_bottom() {
+            return true;
+        }
+        if self.is_top {
+            return true;
+        }
+        if self.is_bottom() || other.is_top {
+            return false;
+        }
+
+        let mask = Self::mask(self.bits);
+        let offset = other.lo.wrapping_sub(self.lo) & mask;
+        u128::from(offset) + other.count() <= self.count()
+    }
+
     /// Smallest arc covering both `[a_lo, a_hi)` and `[b_lo, b_hi)` starting at `a_lo`.
     fn arc_cover(a_lo: u64, a_hi: u64, b_lo: u64, b_hi: u64, mask: u64, bits: u32) -> Self {
         // If b_hi is "further" from a_lo than a_hi, extend to b_hi.
@@ -396,5 +421,51 @@ impl CircleRange {
             return Self::top(bits);
         }
         Self::interval(a_lo, final_hi, bits)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CircleRange;
+
+    #[test]
+    fn widening_lateral_slide_reaches_top() {
+        let previous = CircleRange::interval(0, 10, 8);
+        let next = CircleRange::interval(5, 15, 8);
+
+        assert_eq!(next.widen(&previous), CircleRange::top(8));
+    }
+
+    #[test]
+    fn widening_shrink_keeps_previous_range() {
+        let previous = CircleRange::interval(0, 10, 8);
+        let next = CircleRange::interval(2, 8, 8);
+
+        assert_eq!(next.widen(&previous), previous);
+    }
+
+    #[test]
+    fn widening_growth_reaches_top() {
+        let previous = CircleRange::interval(0, 10, 8);
+        let next = CircleRange::interval(0, 15, 8);
+
+        assert_eq!(next.widen(&previous), CircleRange::top(8));
+    }
+
+    #[test]
+    fn widening_handles_contained_wrapping_arc() {
+        let previous = CircleRange::interval(250, 10, 8);
+        let next = CircleRange::interval(252, 4, 8);
+
+        assert_eq!(next.widen(&previous), previous);
+    }
+
+    #[test]
+    fn widening_preserves_lattice_boundaries() {
+        let previous = CircleRange::interval(0, 10, 8);
+
+        assert_eq!(previous.widen(&CircleRange::bottom(8)), CircleRange::top(8));
+        assert_eq!(CircleRange::bottom(8).widen(&previous), previous);
+        assert_eq!(previous.widen(&CircleRange::top(8)), CircleRange::top(8));
     }
 }
