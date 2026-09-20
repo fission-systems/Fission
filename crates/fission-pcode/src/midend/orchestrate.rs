@@ -14,7 +14,7 @@ use super::{
     NirRenderOptions, NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewHintStats,
     PreviewTypeContext, apply_preview_type_hints, discover_guarded_tail_candidates_for_stats,
     record_ghidra_action_stage, record_ghidra_clean_room_pipeline_complete,
-    recover_global_symbol_accesses, render_layered_pseudocode, structuring, telemetry,
+    recover_global_symbol_accesses, render_layered_pseudocode, structuring,
 };
 use crate::pcode::PcodeFunction;
 use fission_loader::loader::LoadedBinary;
@@ -138,12 +138,8 @@ pub fn render_mlil_preview_dual_layer(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
-    prepare_legacy_render_observations();
-    let output =
-        render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context)?;
-    let code = output.code.clone();
-    store_render_observations(&output);
-    Ok(code)
+    render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context)
+        .map(|output| output.code)
 }
 
 fn render_mlil_preview_dual_layer_output(
@@ -226,8 +222,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     type_context: Option<&PreviewTypeContext>,
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
-    prepare_legacy_render_observations();
-    let output = render_mlil_preview_with_binary_and_context_output(
+    render_mlil_preview_with_binary_and_context_output(
         pcode,
         name,
         address,
@@ -235,10 +230,8 @@ pub fn render_mlil_preview_with_binary_and_context(
         binary,
         type_context,
         decomp_facts,
-    )?;
-    let code = output.code.clone();
-    store_render_observations(&output);
-    Ok(code)
+    )
+    .map(|output| output.code)
 }
 
 fn render_mlil_preview_with_binary_and_context_output(
@@ -286,9 +279,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     }
     let target_profile = options.target_profile();
     if !target_profile.preview_eligible {
-        let mut stats = PreviewBuildStats::default();
-        stats.pe_admission_profile_mismatch_count = 1;
-        telemetry::store_preview_build_stats(stats);
         return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
 
@@ -296,11 +286,6 @@ fn render_mlil_preview_with_binary_and_context_output(
         if debug.diag || debug.preview_debug {
             eprintln!("[mlil-preview] invalid pcode shape fn=0x{address:x} err={err}");
         }
-        let stats = PreviewBuildStats {
-            invalid_pcode_shape_count: 1,
-            ..PreviewBuildStats::default()
-        };
-        telemetry::store_preview_build_stats(stats);
         return Err(MlilPreviewError::UnsupportedPattern("invalid pcode shape"));
     }
 
@@ -311,9 +296,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     debug_log("build_hir_start");
     let mut builder = PreviewBuilder::new_with_binary(pcode, options, binary, type_context);
     let mut hir = builder.build_hir(name, address).map_err(|err| {
-        let mut stats = builder.preview_build_stats();
-        stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
-        telemetry::store_preview_build_stats(stats);
         if debug.preview_debug {
             eprintln!("[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}");
         }
@@ -381,11 +363,11 @@ fn render_mlil_preview_with_binary_and_context_output(
     // function for minimal diff, but its type is PreHIR until the explicit
     // conversion below.
     normalize_hir_function_with_context(&mut hir, &normalize_context);
-    // Returned observation (mirrors `last_layered_pseudocode`
+    // Returned observation (the typed output owns this snapshot)
     // below): the real `PreHirFunction` structuring is about to consume,
     // captured before any structuring rewrite touches it. Zero effect on
     // `hir` itself -- purely a clone for whoever reads it back via
-    // `last_prehir_snapshot`.
+    // `NirDecompileOutput::prehir`.
     let prehir = hir.clone();
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
@@ -586,177 +568,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     })
 }
 
-thread_local! {
-    static LAST_LAYERED_PSEUDOCODE: std::cell::RefCell<Option<LayeredPseudocode>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-fn store_last_layered_pseudocode(layered: LayeredPseudocode) {
-    LAST_LAYERED_PSEUDOCODE.with(|slot| {
-        *slot.borrow_mut() = Some(layered);
-    });
-}
-
-/// Clone the latest layered pseudocode without consuming it. Production
-/// consumers should use this accessor so telemetry and CLI/verification
-/// readers can coexist on the same render result.
-pub fn last_layered_pseudocode() -> Option<LayeredPseudocode> {
-    LAST_LAYERED_PSEUDOCODE.with(|slot| slot.borrow().clone())
-}
-
-thread_local! {
-    static LAST_RAW_HIR_SNAPSHOT: std::cell::RefCell<Option<super::PreHirFunction>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-fn store_last_raw_hir_snapshot(func: super::PreHirFunction) {
-    LAST_RAW_HIR_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = Some(func);
-    });
-}
-
-/// Read the builder's raw [`super::PreHirFunction`] output from the most
-/// recent `render_mlil_preview*`/`render_nir*` call on this thread, captured
-/// before `normalize_hir_function` runs any pass on it -- see the comment at
-/// this snapshot's capture site for why call-site argument counts here can
-/// be wider (more accurate) than what [`last_prehir_snapshot`]'s
-/// post-normalize `callee_observed_max_arity` field ever sees.
-/// Clone the latest raw PreHIR snapshot without consuming it.
-pub fn last_raw_hir_snapshot() -> Option<super::PreHirFunction> {
-    LAST_RAW_HIR_SNAPSHOT.with(|slot| slot.borrow().clone())
-}
-
-thread_local! {
-    static LAST_PREHIR_SNAPSHOT: std::cell::RefCell<Option<super::PreHirFunction>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-fn store_last_prehir_snapshot(func: super::PreHirFunction) {
-    LAST_PREHIR_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = Some(func);
-    });
-}
-
-/// Read the real [`super::PreHirFunction`] (builder's native output, the same
-/// one normalize/structuring's own internal passes read and rewrite) that
-/// structuring consumed as input on the most recent
-/// `render_mlil_preview*`/`render_nir*` call on this thread -- captured
-/// immediately before structuring's CFG-to-AST rewrite runs. `PreHirFunction`
-/// is a genuinely independent type from [`super::HirFunction`] (see
-/// `fission_midend_core::ir::hir`'s module doc), not the same type under a
-/// different name, so callers can't accidentally swap this with the
-/// structured HIR `last_hir_function_snapshot` returns. Pairing the
-/// two lets an external verifier interpret both and diff results for the
-/// same concrete inputs, without any change to what structuring itself
-/// computes -- purely observational, same pattern as
-/// `last_layered_pseudocode` above.
-
-/// Clone the latest normalized PreHIR snapshot without consuming it.
-pub fn last_prehir_snapshot() -> Option<super::PreHirFunction> {
-    LAST_PREHIR_SNAPSHOT.with(|slot| slot.borrow().clone())
-}
-
-thread_local! {
-    static LAST_HIR_FUNCTION_SNAPSHOT: std::cell::RefCell<Option<super::HirFunction>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-fn store_last_hir_function_snapshot(func: super::HirFunction) {
-    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = Some(func);
-    });
-}
-
-/// Read the fully-finalized `HirFunction` (structured body, `params`,
-/// `locals`) from the most recent `render_mlil_preview*`/`render_nir*` call
-/// on this thread -- the counterpart to [`last_prehir_snapshot`]: a
-/// caller that wants to differentially verify structuring calls both after
-/// one decompile call, wraps the returned `HirFunction::body` in
-/// [`super::Hir`], and diffs it against the PreHIR snapshot using the same
-/// `params`/`locals`. Same observational side-channel pattern as
-/// `last_layered_pseudocode`/`last_prehir_snapshot` above.
-
-/// Clone the latest structured HIR snapshot without consuming it.
-pub fn last_hir_function_snapshot() -> Option<super::HirFunction> {
-    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| slot.borrow().clone())
-}
-
-thread_local! {
-    static LAST_RECOVERED_VARIABLES: std::cell::RefCell<Option<Vec<crate::render::RecoveredVariable>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-fn store_last_recovered_variables(variables: Vec<crate::render::RecoveredVariable>) {
-    LAST_RECOVERED_VARIABLES.with(|slot| {
-        *slot.borrow_mut() = Some(variables);
-    });
-}
-
-/// The variables the last legacy string render on this thread recovered.
-///
-/// Same one-slot discipline as the snapshots above: read it immediately after
-/// the decompile call, before another one on this thread overwrites it.
-/// `None` means no decompile got as far as the typed HIR (an architecture
-/// fallback, say), which is not the same as a function that genuinely has no
-/// variables -- that returns an empty vector.
-/// Clone the latest recovered-variable list without consuming it.
-pub fn last_recovered_variables() -> Option<Vec<crate::render::RecoveredVariable>> {
-    LAST_RECOVERED_VARIABLES.with(|slot| slot.borrow().clone())
-}
-
-fn store_render_observations(output: &NirDecompileOutput) {
-    if let Some(layered) = output.layered.as_ref() {
-        store_last_layered_pseudocode(layered.clone());
-    }
-    if let Some(raw_hir) = output.raw_hir.as_ref() {
-        store_last_raw_hir_snapshot(raw_hir.clone());
-    }
-    if let Some(prehir) = output.prehir.as_ref() {
-        store_last_prehir_snapshot(prehir.clone());
-    }
-    if let Some(hir_function) = output.hir_function.as_ref() {
-        store_last_hir_function_snapshot(hir_function.clone());
-    }
-    if let Some(recovered_variables) = output.recovered_variables.as_ref() {
-        store_last_recovered_variables(recovered_variables.clone());
-    }
-    if let Some(build_stats) = output.build_stats.as_ref() {
-        telemetry::store_preview_build_stats(build_stats.clone());
-    }
-    if let Some(hint_stats) = output.hint_stats.as_ref() {
-        telemetry::store_preview_hint_stats(hint_stats.clone());
-    }
-}
-
-fn reset_last_render_observations() {
-    LAST_LAYERED_PSEUDOCODE.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
-    LAST_RAW_HIR_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
-    LAST_PREHIR_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
-    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
-    LAST_RECOVERED_VARIABLES.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
-}
-
-/// Prepare the legacy observation cells for a string-returning render call.
-///
-/// The typed render API deliberately does not touch these cells. Keeping the
-/// reset/store pair at this compatibility boundary makes the remaining TLS
-/// behavior explicit and prevents a typed consumer from overwriting a legacy
-/// consumer's in-flight observation.
-fn prepare_legacy_render_observations() {
-    reset_last_render_observations();
-    telemetry::reset_preview_telemetry();
-}
-
 #[derive(Debug, Clone, Copy)]
 struct RenderDebugFlags {
     diag: bool,
@@ -769,27 +580,6 @@ impl RenderDebugFlags {
             diag: std::env::var_os("FISSION_PREVIEW_DIAG").is_some(),
             preview_debug: std::env::var_os("FISSION_PREVIEW_DEBUG").is_some(),
         }
-    }
-}
-
-#[cfg(test)]
-mod render_observation_tests {
-    use super::*;
-
-    #[test]
-    fn layered_observation_can_be_read_by_multiple_consumers() {
-        reset_last_render_observations();
-        store_last_layered_pseudocode(LayeredPseudocode {
-            nir: "nir".to_string(),
-            hir: "hir".to_string(),
-        });
-
-        let first_read = last_layered_pseudocode().expect("first observation read");
-        let second_read = last_layered_pseudocode().expect("second observation read");
-        assert_eq!(first_read.nir, "nir");
-        assert_eq!(second_read.hir, "hir");
-
-        reset_last_render_observations();
     }
 }
 
@@ -855,8 +645,8 @@ pub fn render_nir_with_context_output(
 }
 
 /// Binary-aware typed NIR render result. This calls the canonical pipeline
-/// directly; the legacy observation cells are populated as compatibility
-/// adapters, not used to assemble this result.
+/// directly and returns every observation owned by that render; legacy string
+/// wrappers only project the primary code from this value.
 pub fn render_nir_with_binary_and_context_output(
     pcode: &PcodeFunction,
     name: &str,

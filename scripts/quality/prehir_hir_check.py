@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """PreHIR-vs-HIR structural check: does structuring look like it changed behavior?
 
-PreHIR is the flattened, goto/label-based body `fission-pcode`'s structuring
-stage receives as input (`fission_pcode::take_last_prehir_snapshot`); HIR is
-its final structured output (if/while/for). Both are exposed by
-`fission_cli decomp --prehir --json` (`code_prehir`/`code_hir` fields, added
-alongside the existing NIR/HIR layer output).
+PreHIR is the flattened, goto/label-based body the structuring stage receives
+as input; HIR is its final structured output (if/while/for). Both are exposed
+by `fission_cli decomp --prehir --json` (`code_prehir`/`code_hir` fields),
+which are projected from the typed render result rather than ambient snapshot
+state.
 
 This does NOT interpret either side. The comparison is intentionally the
 cheap "does the rendered text look structurally consistent" check used as a

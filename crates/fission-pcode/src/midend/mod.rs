@@ -43,7 +43,6 @@ mod piece;
 pub mod structuring;
 mod support;
 mod tail_wrapper;
-mod telemetry;
 #[cfg(test)]
 mod tests;
 mod var_rename;
@@ -68,9 +67,6 @@ pub(crate) use action_pipeline::STRUCTURING_TIME_CEILING_SECS;
 pub use labels::SWITCH_FALLTHROUGH_SENTINEL;
 
 pub(super) use self::support::*;
-pub use self::telemetry::{
-    last_nir_build_stats, last_nir_hint_stats, last_preview_build_stats, last_preview_hint_stats,
-};
 use self::{action_pipeline::*, builder::*, cfg::*, structuring::*};
 /// PreHIR-side IR types (`PreHirStmt`/`PreHirExpr`/etc, from `fission-midend-prehir`) --
 /// `builder`/`structuring` submodules construct these directly via
@@ -105,7 +101,7 @@ pub(crate) fn print_prehir_expr(expr: &fission_midend_prehir::PreHirExpr) -> Str
     ))
 }
 
-/// Render a captured PreHIR snapshot (see `last_prehir_snapshot`) as C-like
+/// Render a caller-owned PreHIR function as C-like
 /// text, via the same printer HIR output goes through. `PreHirStmt` and
 /// `HirStmt` share the identical `Goto`/`Label` variants (the printer
 /// already has to render those for any real HIR that structuring couldn't
@@ -139,12 +135,10 @@ pub use fission_midend_normalize::{
 
 // Top-level preview/NIR entrypoints (builder → normalize → structure → print).
 pub use self::orchestrate::{
-    NirDecompileOutput, build_raw_hir, last_hir_function_snapshot, last_layered_pseudocode,
-    last_prehir_snapshot, last_raw_hir_snapshot, last_recovered_variables, render_mlil_preview,
-    render_mlil_preview_dual_layer, render_mlil_preview_with_binary_and_context,
-    render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
-    render_nir_with_binary_and_context_output, render_nir_with_context,
-    render_nir_with_context_output, test_refine_partitions,
+    NirDecompileOutput, build_raw_hir, render_mlil_preview, render_mlil_preview_dual_layer,
+    render_mlil_preview_with_binary_and_context, render_mlil_preview_with_context, render_nir,
+    render_nir_with_binary_and_context, render_nir_with_binary_and_context_output,
+    render_nir_with_context, render_nir_with_context_output, test_refine_partitions,
 };
 
 /// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.

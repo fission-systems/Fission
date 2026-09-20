@@ -40,9 +40,8 @@ use tracing::trace_span;
 // hint by binding *name* only catches the narrow case where the raw hw name survived
 // (call-result registers). Carrying the real `(offset, size)` alongside lets the
 // DWARF-register-local rename in `type_hints.rs` match by identity instead, without
-// adding a field to `PreHirBinding` (constructed at ~300 call sites across the workspace --
-// far riskier to touch than this thread-local, mirroring the existing
-// `LAST_LAYERED_PSEUDOCODE` pattern in `orchestrate.rs`). Explicit `take` + pass-as-parameter
+// adding a field to `PreHirBinding` (constructed at ~300 call sites across the workspace).
+// Explicit `take` + pass-as-parameter
 // into `apply_preview_type_hints` (rather than reading the thread-local inside
 // `type_hints.rs`) keeps that function's tests deterministic and thread-independent.
 thread_local! {

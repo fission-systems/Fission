@@ -1,5 +1,20 @@
 use super::*;
 
+fn render_with_stats(
+    func: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &NirRenderOptions,
+    type_context: Option<&NirTypeContext>,
+) -> (String, NirBuildStats) {
+    let output = render_nir_with_context_output(func, name, address, options, type_context, None)
+        .expect("preview render should succeed");
+    (
+        output.code,
+        output.build_stats.expect("typed render build stats"),
+    )
+}
+
 fn exact_import_context(target: u64, symbol: &str, arity: usize) -> PreviewTypeContext {
     let mut context = PreviewTypeContext::default();
     context.call_targets.insert(target, symbol.to_string());
@@ -461,15 +476,13 @@ fn preview_call_target_refs_resolve_direct_import_call_target() {
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_exact_index_hit_count, 1);
@@ -719,15 +732,13 @@ fn preview_call_target_refs_resolve_direct_symbol_call_target() {
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("sqlite3Malloc()"), "{rendered}");
     assert_eq!(stats.call_target_exact_index_hit_count, 1);
@@ -778,15 +789,13 @@ fn preview_call_target_refs_resolve_zero_address_direct_symbol_call_target() {
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "recursive_fib",
         0,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("recursive_fib()"), "{rendered}");
     assert!(!rendered.contains("sub_0()"), "{rendered}");
@@ -823,15 +832,13 @@ fn preview_call_target_missing_context_keeps_sub_fallback() {
         }],
     };
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         None,
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("sub_140010000()"), "{rendered}");
     assert_eq!(stats.call_target_import_resolved_count, 0);
@@ -873,15 +880,13 @@ fn preview_call_target_legacy_map_does_not_promote_exact_identity() {
         .call_targets
         .insert(0x140010000, "LegacyOnly".to_string());
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("sub_140010000()"), "{rendered}");
     assert!(!rendered.contains("LegacyOnly("), "{rendered}");
@@ -939,15 +944,13 @@ fn preview_callind_copy_only_constant_chain_resolves_exact_target() {
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_exact_index_hit_count, 1);
@@ -1005,15 +1008,13 @@ fn preview_callind_load_from_iat_slot_resolves_exact_import_target() {
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 1);
@@ -1079,15 +1080,13 @@ fn preview_callind_load_from_copy_folded_iat_slot_resolves_exact_import_target()
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 1);
@@ -1154,15 +1153,13 @@ fn preview_callind_load_from_add_folded_iat_slot_resolves_exact_import_target() 
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 1);
@@ -1225,15 +1222,8 @@ fn preview_callind_shift_add_constant_chain_resolves_exact_target() {
         }],
     };
 
-    let rendered = render_mlil_preview_with_context(
-        &func,
-        "recursive_fib",
-        0x100000,
-        &preview_options(),
-        None,
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    let (rendered, stats) =
+        render_with_stats(&func, "recursive_fib", 0x100000, &preview_options(), None);
 
     assert!(rendered.contains("recursive_fib()"), "{rendered}");
     assert_eq!(stats.call_target_indirect_const_resolved_count, 1);
@@ -1291,15 +1281,13 @@ fn preview_callind_load_from_unsupported_fold_opcode_keeps_existing_surface() {
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(!rendered.contains("CloseHandle"), "{rendered}");
     assert_eq!(stats.call_target_indirect_ptr_const_folded_count, 0);
@@ -1339,15 +1327,13 @@ fn preview_callind_load_from_non_iat_slot_keeps_existing_surface() {
         }],
     };
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "FUN_0x140006260",
         0x140006260,
         &preview_options(),
         Some(&PreviewTypeContext::default()),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(!rendered.contains("CloseHandle"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 0);
@@ -1410,15 +1396,13 @@ fn preview_builder_resolves_callind_through_copy_from_ram_space_iat_slot() {
         },
     );
 
-    let rendered = render_mlil_preview_with_context(
+    let (rendered, stats) = render_with_stats(
         &func,
         "setup_sync",
         0x140001450,
         &preview_options(),
         Some(&context),
-    )
-    .expect("preview render should succeed");
-    let stats = last_nir_build_stats().expect("build stats");
+    );
 
     assert!(
         rendered.contains("InitializeCriticalSection"),

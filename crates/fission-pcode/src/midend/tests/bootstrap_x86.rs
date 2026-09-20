@@ -548,16 +548,16 @@ fn preview_x64_ret_recovers_predecessor_computed_return_register() {
         ],
     };
 
-    let _nir = render_mlil_preview(
+    let output = render_nir_with_context_output(
         &func,
         "x64_predecessor_computed_value_ret",
         0x140002300,
         &preview_options_win64(),
+        None,
+        None,
     )
     .expect("preview render");
-    let code = crate::midend::orchestrate::last_layered_pseudocode()
-        .expect("layered pseudocode")
-        .hir;
+    let code = output.layered.expect("layered pseudocode").hir;
     assert!(code.contains("return param_1 + 5;"), "{code}");
     assert!(!code.contains("return;"), "{code}");
     assert!(!code.contains("return *"), "{code}");
@@ -712,11 +712,10 @@ fn preview_inlines_lea_register_return() {
         }],
     };
 
-    let _nir =
-        render_mlil_preview(&func, "lea_add", 0x140001450, &options).expect("preview render");
-    let code = crate::midend::orchestrate::last_layered_pseudocode()
-        .expect("layered pseudocode")
-        .hir;
+    let output =
+        render_nir_with_context_output(&func, "lea_add", 0x140001450, &options, None, None)
+            .expect("preview render");
+    let code = output.layered.expect("layered pseudocode").hir;
     // Win64 register args surface as pointer-width integers on the HIR profile.
     assert!(
         code.contains("lea_add(int param_1, int param_2)")
@@ -2284,17 +2283,16 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
         },
     );
 
-    let _nir = render_mlil_preview_with_context(
+    let output = render_nir_with_context_output(
         &func,
         "x64_live_call_result_arg",
         0x140006300,
         &preview_options_win64(),
         Some(&context),
+        None,
     )
     .expect("preview render");
-    let code = crate::midend::orchestrate::last_layered_pseudocode()
-        .expect("layered pseudocode")
-        .hir;
+    let code = output.layered.expect("layered pseudocode").hir;
     // Call targets recovered (fibonacci / printf). Full CSE of the live call
     // result into the printf argument list is HIR-quality polish; accept either
     // fully inlined or temp-mediated forms that keep the recovered names.
@@ -3062,14 +3060,16 @@ fn preview_build_stats_records_structuring_duration() {
         ],
     };
 
-    let _ = render_mlil_preview(
+    let output = render_nir_with_context_output(
         &func,
         "x86_structuring_stats",
         0x5000,
         &preview_options_x86(),
+        None,
+        None,
     )
     .expect("preview render");
-    let stats = last_preview_build_stats().expect("preview build stats");
+    let stats = output.build_stats.expect("preview build stats");
     assert_eq!(stats.max_structuring_scc_component_size, 1);
     assert!(stats.structuring_scc_component_count >= 1);
     assert!(stats.structuring_duration_ms <= stats.build_duration_ms);
@@ -3094,15 +3094,17 @@ fn preview_build_stats_records_render_duration() {
     };
 
     let start = std::time::Instant::now();
-    let _ = render_mlil_preview(
+    let output = render_nir_with_context_output(
         &func,
         "x86_render_duration",
         0x503000,
         &preview_options_x86(),
+        None,
+        None,
     )
     .expect("preview render");
     let elapsed_ms = start.elapsed().as_millis() as usize;
-    let stats = last_preview_build_stats().expect("preview build stats");
+    let stats = output.build_stats.expect("preview build stats");
     assert!(stats.render_duration_ms <= elapsed_ms);
 }
 
@@ -3124,10 +3126,17 @@ fn preview_build_stats_records_rendered_code_len() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "x86_render_len", 0x504000, &preview_options_x86())
-        .expect("preview render");
-    let stats = last_preview_build_stats().expect("preview build stats");
-    assert_eq!(stats.rendered_code_len, code.len());
+    let output = render_nir_with_context_output(
+        &func,
+        "x86_render_len",
+        0x504000,
+        &preview_options_x86(),
+        None,
+        None,
+    )
+    .expect("preview render");
+    let stats = output.build_stats.expect("preview build stats");
+    assert_eq!(stats.rendered_code_len, output.code.len());
 }
 
 #[test]
@@ -3176,9 +3185,16 @@ fn preview_build_stats_records_max_structuring_scc_component_size() {
         ],
     };
 
-    let _ = render_mlil_preview(&func, "x86_scc_size", 0x505000, &preview_options_x86())
-        .expect("preview render");
-    let stats = last_preview_build_stats().expect("preview build stats");
+    let output = render_nir_with_context_output(
+        &func,
+        "x86_scc_size",
+        0x505000,
+        &preview_options_x86(),
+        None,
+        None,
+    )
+    .expect("preview render");
+    let stats = output.build_stats.expect("preview build stats");
     assert_eq!(stats.max_structuring_scc_component_size, 1);
 }
 

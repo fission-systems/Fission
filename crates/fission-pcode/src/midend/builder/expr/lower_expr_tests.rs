@@ -319,11 +319,10 @@ fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def()
         ],
     )]);
 
-    let _nir = render_mlil_preview(&pcode, "partial_zero_extend", 0x1000, &options)
-        .expect("render partial zero-extend");
-    let code = crate::midend::orchestrate::last_layered_pseudocode()
-        .expect("layered pseudocode")
-        .hir;
+    let output =
+        render_nir_with_context_output(&pcode, "partial_zero_extend", 0x1000, &options, None, None)
+            .expect("render partial zero-extend");
+    let code = output.layered.expect("layered pseudocode").hir;
 
     assert!(
         code.contains("return 3;"),
