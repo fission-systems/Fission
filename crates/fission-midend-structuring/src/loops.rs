@@ -1538,6 +1538,12 @@ pub fn try_lower_for(
         lowered
     };
 
+    // The init block is embedded in the for header even though it is outside
+    // the candidate's contiguous region span. Mark that non-contiguous
+    // ownership only after the whole candidate has succeeded, so rejected
+    // attempts cannot consume the predecessor.
+    host.record_extra_absorbed_member(init_idx);
+
     let init_box = Box::new(init_stmts.into_iter().next().unwrap());
     let update_box = Box::new(latch_stmts.into_iter().next().unwrap());
 
@@ -1612,6 +1618,45 @@ fn lower_loop_body_via_sese(
         body.pop();
     }
     Ok(Some(body))
+}
+
+/// Rewrite control-flow labels after lowering any loop-body path.
+///
+/// Some structured reducers can consume the remainder of a body and return
+/// directly at the loop exit. Keeping this postcondition in one helper makes
+/// those early-success paths obey the same break/continue contract as the
+/// ordinary residual walk below.
+fn finalize_loop_body_control(
+    host: &mut impl StructuringHost,
+    mut body: Vec<PreHirStmt>,
+    break_idx: Option<usize>,
+    head_idx: usize,
+) -> Vec<PreHirStmt> {
+    let head_addr = host.block_target_key(head_idx);
+    let continue_labels = std::iter::once(block_label(head_addr)).collect();
+    let break_addr = break_idx.map(|idx| host.block_target_key(idx));
+    let break_labels: std::collections::HashSet<String> = host
+        .get_loop_body(head_idx)
+        .map(|lb| {
+            lb.all_exits
+                .iter()
+                .map(|&exit| block_label(host.block_start_address(exit)))
+                .collect()
+        })
+        .filter(|labels: &std::collections::HashSet<String>| !labels.is_empty())
+        .unwrap_or_else(|| break_addr.map(block_label).into_iter().collect());
+
+    let mut stats = LoopControlRewriteStats::default();
+    rewrite_loop_control_gotos_multi(&mut body, &continue_labels, &break_labels, &mut stats);
+    host.track_loop_control_rewrite_stats(
+        stats.break_rewrites,
+        stats.continue_rewrites,
+        stats.skipped_nested_scope_count,
+    );
+    while body.last() == Some(&PreHirStmt::Continue) {
+        body.pop();
+    }
+    body
 }
 
 /// Lower all blocks in `body_set` (the loop body excluding the head) into a HIR statement
@@ -1757,7 +1802,12 @@ pub fn lower_loop_body_subgraph(
                                     consumed_blocks.insert(bi);
                                 }
                             }
-                            return Ok(Some(result_stmts));
+                            return Ok(Some(finalize_loop_body_control(
+                                host,
+                                result_stmts,
+                                break_idx,
+                                head_idx,
+                            )));
                         }
                         tombstone_range(idx, skip_to, &mut consumed_blocks);
                         consumed_blocks.insert(idx);
@@ -1962,51 +2012,12 @@ pub fn lower_loop_body_subgraph(
         pos += 1;
     }
 
-    // Apply break/continue rewriting to catch any Goto labels that escaped the fallback
-    // (e.g. produced by nested if/else structuring that still emits gotos).
-    //
-    // CFG-based: build break_labels from ALL exits of this loop body, not just the
-    // canonical one.  This converts multi-exit gotos to `break` when they all exit
-    // the loop, keeping the generated code clean without changing semantics.
-    let continue_label_str = block_label(head_addr);
-    let continue_set: std::collections::HashSet<String> =
-        std::iter::once(continue_label_str.clone()).collect();
-    let break_labels: std::collections::HashSet<String> = {
-        if let Some(lb) = host.get_loop_body(head_idx) {
-            let all_exits_labels: std::collections::HashSet<String> = lb
-                .all_exits
-                .iter()
-                .filter_map(|&exit| Some(block_label(host.block_start_address(exit))))
-                .collect();
-            if !all_exits_labels.is_empty() {
-                all_exits_labels
-            } else if let Some(ref bstr) = break_addr.map(block_label) {
-                std::iter::once(bstr.clone()).collect()
-            } else {
-                std::collections::HashSet::default()
-            }
-        } else if let Some(ref bstr) = break_addr.map(block_label) {
-            std::iter::once(bstr.clone()).collect()
-        } else {
-            std::collections::HashSet::default()
-        }
-    };
-    let mut stats = LoopControlRewriteStats::default();
-    rewrite_loop_control_gotos_multi(&mut result_stmts, &continue_set, &break_labels, &mut stats);
-    host.track_loop_control_rewrite_stats(
-        stats.break_rewrites,
-        stats.continue_rewrites,
-        stats.skipped_nested_scope_count,
-    );
-
-    // Strip trailing `Continue` at the end of the body: the latch block naturally jumps back
-    // to the head, so a Continue there is redundant. Only strip at the very end; a Continue
-    // inside an if-branch earlier in the body must be preserved.
-    while result_stmts.last() == Some(&PreHirStmt::Continue) {
-        result_stmts.pop();
-    }
-
-    Ok(Some(result_stmts))
+    Ok(Some(finalize_loop_body_control(
+        host,
+        result_stmts,
+        break_idx,
+        head_idx,
+    )))
 }
 
 /// Structures a **multi-block infinite loop** — a loop whose `all_exits` is empty,

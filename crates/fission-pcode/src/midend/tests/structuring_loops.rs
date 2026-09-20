@@ -1128,7 +1128,7 @@ fn for_loop_simple_counter() {
     let counter = uniq(0x700, 4);
     let lt_cond = uniq(0x701, 1);
     let ptr = uniq(0x702, 8);
-    let func = PcodeFunction {
+    let mut func = PcodeFunction {
         blocks: vec![
             // block 0: init — counter = 0; Branch(→ head)
             PcodeBasicBlock {
@@ -1257,6 +1257,28 @@ fn for_loop_simple_counter() {
             },
         ],
     };
+    // Keep the loop's entry predecessor outside the candidate's contiguous
+    // range. The for reducer must still mark this block as owned by the
+    // generated header, or final reconstruction emits its init twice.
+    func.blocks.insert(
+        0,
+        PcodeBasicBlock {
+            index: 0,
+            start_address: 0x6ff0,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Branch,
+                address: 0x6ff0,
+                output: None,
+                inputs: vec![cst(0x7000, 8)],
+                asm_mnemonic: None,
+            }],
+        },
+    );
+    for (index, block) in func.blocks.iter_mut().enumerate() {
+        block.index = index as u32;
+    }
 
     let code = render_mlil_preview(&func, "for_simple_fn", 0x7000, &preview_options())
         .expect("preview render");
@@ -1273,6 +1295,7 @@ fn for_loop_simple_counter() {
         code.contains("local_10 = 55;"),
         "expected body store: {code}"
     );
+    assert_eq!(code.matches(" = 0;").count(), 1, "{code}");
 }
 
 /// For-loop with a branch inside the body (body has if/else).
