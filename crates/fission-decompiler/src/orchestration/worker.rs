@@ -1,8 +1,8 @@
 use crate::render::{nir_diag_event, render_nir_request};
 use crate::types::{NirWorkerRequest, NirWorkerResponse};
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
-use std::thread;
+use std::process::{Child, Command, Stdio};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const NIR_WORKER_BIN_NAME: &str = "fission_nir_worker";
@@ -52,6 +52,28 @@ fn resolve_nir_worker_path() -> Option<std::path::PathBuf> {
     compat_candidate.is_file().then_some(compat_candidate)
 }
 
+fn drain_worker_stdout(
+    mut pipe: impl Read + Send + 'static,
+) -> JoinHandle<std::io::Result<String>> {
+    thread::spawn(move || {
+        let mut stdout = String::new();
+        pipe.read_to_string(&mut stdout).map(|_| stdout)
+    })
+}
+
+fn join_worker_stdout(reader: JoinHandle<std::io::Result<String>>) -> Result<String, String> {
+    reader
+        .join()
+        .map_err(|_| "Fission NIR worker stdout reader panicked".to_string())?
+        .map_err(|e| format!("Fission NIR worker stdout read failed: {e}"))
+}
+
+fn abort_worker(child: &mut Child, reader: JoinHandle<std::io::Result<String>>) {
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = reader.join();
+}
+
 pub(crate) fn execute_nir_worker_request(
     request: &NirWorkerRequest,
     timeout_ms: u64,
@@ -73,6 +95,9 @@ pub(crate) fn execute_nir_worker_request(
         format!("path={}", worker_path.display()),
     );
 
+    let request_json = serde_json::to_vec(request)
+        .map_err(|e| format!("Fission NIR worker request serialization failed: {e}"))?;
+
     let mut child = Command::new(&worker_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -80,24 +105,45 @@ pub(crate) fn execute_nir_worker_request(
         .spawn()
         .map_err(|e| format!("Fission NIR worker spawn failed: {e}"))?;
 
-    let request_json = serde_json::to_vec(request)
-        .map_err(|e| format!("Fission NIR worker request serialization failed: {e}"))?;
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Fission NIR worker stdout unavailable".to_string());
+        }
+    };
+    // Drain stdout while the child is running. Waiting for process exit before
+    // reading is a pipe deadlock for large JSON responses: the child can block
+    // in write(2) once the OS pipe buffer fills, so it never reaches exit.
+    let stdout_reader = drain_worker_stdout(stdout);
 
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "Fission NIR worker stdin unavailable".to_string())?;
-    stdin
-        .write_all(&request_json)
-        .map_err(|e| format!("Fission NIR worker stdin write failed: {e}"))?;
+    let mut stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => {
+            abort_worker(&mut child, stdout_reader);
+            return Err("Fission NIR worker stdin unavailable".to_string());
+        }
+    };
+    if let Err(error) = stdin.write_all(&request_json) {
+        let message = format!("Fission NIR worker stdin write failed: {error}");
+        drop(stdin);
+        abort_worker(&mut child, stdout_reader);
+        return Err(message);
+    }
     drop(stdin);
 
     let start = Instant::now();
     let exit_status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|e| format!("Fission NIR worker wait failed: {e}"))?
-        {
+        let status = match child.try_wait() {
+            Ok(status) => status,
+            Err(error) => {
+                let message = format!("Fission NIR worker wait failed: {error}");
+                abort_worker(&mut child, stdout_reader);
+                return Err(message);
+            }
+        };
+        if let Some(status) = status {
             nir_diag_event(
                 request.address,
                 "worker_exit",
@@ -114,8 +160,7 @@ pub(crate) fn execute_nir_worker_request(
                 "worker_timeout",
                 format!("budget_ms={timeout_ms}"),
             );
-            let _ = child.kill();
-            let _ = child.wait();
+            abort_worker(&mut child, stdout_reader);
             return Err(format!(
                 "nir_timeout: Fission NIR worker timed out after {timeout_ms}ms"
             ));
@@ -123,11 +168,7 @@ pub(crate) fn execute_nir_worker_request(
         thread::sleep(Duration::from_millis(10));
     };
 
-    let mut stdout = String::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        pipe.read_to_string(&mut stdout)
-            .map_err(|e| format!("Fission NIR worker stdout read failed: {e}"))?;
-    }
+    let stdout = join_worker_stdout(stdout_reader)?;
 
     if stdout.trim().is_empty() {
         return Err(format!(
@@ -151,6 +192,32 @@ pub(crate) fn execute_nir_worker_request(
         Err(response
             .error
             .unwrap_or_else(|| "Fission NIR worker failed without error".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{drain_worker_stdout, join_worker_stdout};
+    use std::process::{Command, Stdio};
+
+    #[cfg(unix)]
+    #[test]
+    fn drains_stdout_larger_than_a_pipe_buffer_before_joining() {
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "i=0; while [ $i -lt 131072 ]; do printf x; i=$((i + 1)); done",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn stdout fixture");
+        let stdout = child.stdout.take().expect("stdout pipe");
+        let reader = drain_worker_stdout(stdout);
+
+        let status = child.wait().expect("wait stdout fixture");
+        assert!(status.success());
+        let output = join_worker_stdout(reader).expect("drain stdout fixture");
+        assert_eq!(output.len(), 131_072);
     }
 }
 
