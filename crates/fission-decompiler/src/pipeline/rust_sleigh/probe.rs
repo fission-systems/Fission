@@ -97,6 +97,7 @@ pub(crate) fn probe_wrapper_contraction(
         code: code.clone(),
         code_nir: Some(code.clone()),
         code_hir: Some(code),
+        render_output: None,
         fell_back: false,
         fallback_reason: None,
         build_stats: Some(build_stats),

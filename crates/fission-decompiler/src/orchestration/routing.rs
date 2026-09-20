@@ -137,8 +137,15 @@ fn render_selection_from_pcode(
         false,
         false,
     ) {
-        Ok(Some((code, build_stats, hint_stats, learned_facts))) => Ok((
-            NirRoutingResolver::nir_success(code, build_stats, hint_stats, false, None),
+        Ok(Some((output, learned_facts))) => Ok((
+            NirRoutingResolver::nir_success(
+                output.code.clone(),
+                output.build_stats.clone(),
+                output.hint_stats.clone(),
+                false,
+                None,
+            )
+            .with_render_output(output),
             Some(learned_facts),
         )),
         Ok(None) => Ok((

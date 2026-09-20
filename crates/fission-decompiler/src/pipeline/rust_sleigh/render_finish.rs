@@ -134,11 +134,15 @@ pub(crate) fn finish_rust_sleigh_render(
         evidence
             .pipeline_stage_status
             .insert("nir_render".into(), "success".into());
-        let layered = fission_pcode::last_layered_pseudocode();
+        let render_output = selection.render_output;
+        let layered = render_output
+            .as_ref()
+            .and_then(|output| output.layered.clone());
         return Ok(RustSleighDecompileResult {
             code,
             code_nir: layered.as_ref().map(|l| l.nir.clone()),
             code_hir: layered.as_ref().map(|l| l.hir.clone()),
+            render_output,
             fell_back: selection.fell_back,
             fallback_reason: selection.fallback_reason,
             build_stats: selection.build_stats,
@@ -165,6 +169,7 @@ pub(crate) fn finish_rust_sleigh_render(
             code: render_pcode_text(name, pcode),
             code_nir: None,
             code_hir: None,
+            render_output: None,
             fell_back: true,
             fallback_reason: Some("nir_unsupported_arch:pcode_dump".to_string()),
             build_stats: None,

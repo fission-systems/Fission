@@ -63,7 +63,7 @@ impl PrintProfile {
 }
 
 /// Dual-layer decompilation strings from one IR build.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LayeredPseudocode {
     /// Semantic-faithful mechanical C.
     pub nir: String,

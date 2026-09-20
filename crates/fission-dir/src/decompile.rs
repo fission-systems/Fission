@@ -1,8 +1,7 @@
 //! Decompile-one-function + snapshot-capture helper shared by every
 //! verification tier. Wraps the same `decompile_with_rust_sleigh_with_facts`
-//! + `last_prehir_snapshot`/`last_hir_function_snapshot` capture used by
-//!   `fission-cli`'s `decomp --prehir` path -- the observations are cloned by
-//!   readers and reset when the next render starts.
+//! call used by every other verification tier and consumes the typed render
+//! artifacts returned by that call.
 
 use fission_decompiler::{HirFunction, PreHirFunction, RustSleighDecompileConfig};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -24,6 +23,8 @@ pub enum DecompileError {
     MissingPreHirSnapshot,
     #[error("decompile succeeded but HIR snapshot was not captured")]
     MissingHirSnapshot,
+    #[error("decompile succeeded but typed render output was not captured")]
+    MissingRenderOutput,
 }
 
 /// Decompile `func` in `binary` and return its PreHIR and HIR
@@ -36,7 +37,7 @@ pub fn decompile_one(
     func: &FunctionInfo,
 ) -> Result<PreHirHirPair, DecompileError> {
     let config = RustSleighDecompileConfig::cli_defaults();
-    fission_decompiler::decompile_with_rust_sleigh_with_facts(
+    let result = fission_decompiler::decompile_with_rust_sleigh_with_facts(
         binary,
         facts,
         func.address,
@@ -47,11 +48,12 @@ pub fn decompile_one(
     )
     .map_err(DecompileError::Decompile)?;
 
-    // Must read both immediately after the call above -- see this module's
-    // own doc comment.
-    let prehir =
-        fission_decompiler::last_prehir_snapshot().ok_or(DecompileError::MissingPreHirSnapshot)?;
-    let hir = fission_decompiler::last_hir_function_snapshot()
+    let output = result
+        .render_output
+        .ok_or(DecompileError::MissingRenderOutput)?;
+    let prehir = output.prehir.ok_or(DecompileError::MissingPreHirSnapshot)?;
+    let hir = output
+        .hir_function
         .ok_or(DecompileError::MissingHirSnapshot)?;
     Ok(PreHirHirPair { prehir, hir })
 }

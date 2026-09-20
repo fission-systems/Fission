@@ -36,7 +36,7 @@ pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
 /// compatibility. New orchestration code should use this result so snapshots
 /// and telemetry travel with the render that produced them instead of being
 /// consumed from separate observation calls.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NirDecompileOutput {
     pub code: String,
     pub layered: Option<LayeredPseudocode>,

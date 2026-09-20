@@ -204,6 +204,7 @@ mod tests {
     fn preview_selection_exposes_routing_decision() {
         let selection = NirSelection {
             nir_code: None,
+            render_output: None,
             build_stats: None,
             hint_stats: None,
             engine_used: NirEngineMode::Legacy,

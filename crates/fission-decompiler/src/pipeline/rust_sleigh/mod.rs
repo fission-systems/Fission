@@ -19,6 +19,10 @@ pub struct RustSleighDecompileResult {
     /// Dual-layer surfaces when available (same IR build).
     pub code_nir: Option<String>,
     pub code_hir: Option<String>,
+    /// Typed artifacts from the same in-process NIR render. This is the
+    /// canonical source for snapshots and recovered variables; compatibility
+    /// TLS accessors remain available for older callers only.
+    pub render_output: Option<crate::NirDecompileOutput>,
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
     pub build_stats: Option<NirBuildStats>,

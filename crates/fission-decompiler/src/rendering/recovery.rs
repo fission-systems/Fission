@@ -170,22 +170,21 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
         false,
     );
     let region_retry_build_stats = match region_retry {
-        Ok(Some((code, build_stats, hint_stats, learned_facts))) => {
-            return Ok(Some((
-                NirRoutingResolver::nir_success_with_recovery(
-                    code,
-                    build_stats,
-                    hint_stats,
-                    RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-                    RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-                    "recovered",
-                    Some(signature.to_string()),
-                    "region_linearized",
-                    outcome.reason_family.as_str(),
-                    outcome.retryable,
-                ),
-                Some(learned_facts),
-            )));
+        Ok(Some((output, learned_facts))) => {
+            let selection = NirRoutingResolver::nir_success_with_recovery(
+                output.code.clone(),
+                output.build_stats.clone(),
+                output.hint_stats.clone(),
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                "recovered",
+                Some(signature.to_string()),
+                "region_linearized",
+                outcome.reason_family.as_str(),
+                outcome.retryable,
+            )
+            .with_render_output(output);
+            return Ok(Some((selection, Some(learned_facts))));
         }
         Ok(None) | Err(_) => last_nir_build_stats(),
     };
@@ -202,9 +201,10 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
         false,
         true,
     ) {
-        Ok(Some((code, build_stats, hint_stats, learned_facts))) => {
+        Ok(Some((mut output, learned_facts))) => {
             let merged_build_stats =
-                merge_optional_build_stats(build_stats, region_retry_build_stats);
+                merge_optional_build_stats(output.build_stats.clone(), region_retry_build_stats);
+            output.build_stats = merged_build_stats.clone();
             let mode = match outcome.mode {
                 RecoveryMode::Structured => "structured",
                 RecoveryMode::RegionLinearized => "region_linearized",
@@ -212,9 +212,9 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
             };
             Ok(Some((
                 NirRoutingResolver::nir_success_with_recovery(
-                    code,
+                    output.code.clone(),
                     merged_build_stats,
-                    hint_stats,
+                    output.hint_stats.clone(),
                     RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
                     RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
                     "recovered",
@@ -222,7 +222,8 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
                     mode,
                     outcome.reason_family.as_str(),
                     outcome.retryable,
-                ),
+                )
+                .with_render_output(output),
                 Some(learned_facts),
             )))
         }

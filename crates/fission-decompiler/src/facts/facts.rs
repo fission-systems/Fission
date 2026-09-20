@@ -642,9 +642,9 @@ fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'static str> 
 /// to the callee's own body-inferred arity (`prune_known_api_call_args_stmts`
 /// in `callsite_type_prop.rs`) -- so by the time it runs, a call site can
 /// never be observed as wider than what the callee's own preview-inferred
-/// signature already implied. Walking the *raw*, pre-normalize body (as
-/// captured by `fission_pcode::last_raw_hir_snapshot`) reads the
-/// builder's real, uncapped argument recovery instead.
+/// signature already implied. Walking the *raw*, pre-normalize body from the
+/// typed render result reads the builder's real, uncapped argument recovery
+/// instead.
 fn collect_raw_call_arities(stmts: &[fission_pcode::PreHirStmt], out: &mut HashMap<String, usize>) {
     use fission_pcode::{PreHirExpr, PreHirStmt};
 

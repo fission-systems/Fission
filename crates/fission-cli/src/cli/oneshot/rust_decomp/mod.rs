@@ -70,16 +70,23 @@ fn render_with_rust_sleigh(
     )
     .map_err(FissionError::decompiler)?;
 
-    // Read the per-render observation after the decompile call. The accessor
-    // clones it, so another consumer cannot drain this result.
+    // Consume the typed artifacts carried by this exact decompile result. The
+    // older thread-local accessors remain only for compatibility with callers
+    // that have not migrated yet.
     let code_prehir = if want_prehir {
-        fission_decompiler::last_prehir_snapshot()
-            .map(|dir| fission_decompiler::print_prehir_function(&dir))
+        result
+            .render_output
+            .as_ref()
+            .and_then(|output| output.prehir.as_ref())
+            .map(fission_decompiler::print_prehir_function)
     } else {
         None
     };
-    // The accessor is non-consuming; the next render resets the observation.
-    let variables = fission_decompiler::last_recovered_variables().unwrap_or_default();
+    let variables = result
+        .render_output
+        .as_ref()
+        .and_then(|output| output.recovered_variables.clone())
+        .unwrap_or_default();
 
     Ok(RustSleighRender {
         code: result.code,

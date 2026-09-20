@@ -107,15 +107,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
     base_options: NirRenderOptions,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
-) -> Result<
-    Option<(
-        String,
-        Option<NirBuildStats>,
-        Option<NirHintStats>,
-        FactStore,
-    )>,
-    String,
-> {
+) -> Result<Option<(crate::NirDecompileOutput, FactStore)>, String> {
     if enforce_auto_gate && !auto_nir_admission_eligible(binary, pcode) {
         return Ok(None);
     }
@@ -176,12 +168,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                     );
                 }
                 nir_diag_stage(address, "render_preview_done", render_start);
-                return Ok(Some((
-                    output.code,
-                    output.build_stats,
-                    output.hint_stats,
-                    decomp_ctx.facts,
-                )));
+                return Ok(Some((output, decomp_ctx.facts)));
             }
             Ok(Err(err)) => {
                 let surfaced_error = err

@@ -2,7 +2,7 @@ use crate::taxonomy::{
     classified_nir_error, classify_native_failure_kind, extract_fallback_kind,
     extract_refined_fallback_kind, fallback_reason_with_kind,
 };
-use crate::{NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext};
+use crate::{NirBuildStats, NirDecompileOutput, NirHintStats, NirRenderOptions, NirTypeContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NirEngineMode {
@@ -24,6 +24,9 @@ impl NirEngineMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NirSelection {
     pub nir_code: Option<String>,
+    /// Typed artifacts from an in-process p-code render. Worker and legacy
+    /// routes do not materialize these snapshots and leave this unset.
+    pub render_output: Option<NirDecompileOutput>,
     pub build_stats: Option<NirBuildStats>,
     pub hint_stats: Option<NirHintStats>,
     pub engine_used: NirEngineMode,
@@ -88,6 +91,7 @@ impl NirRoutingResolver {
     pub fn legacy_mode() -> NirSelection {
         NirSelection {
             nir_code: None,
+            render_output: None,
             build_stats: None,
             hint_stats: None,
             engine_used: NirEngineMode::Legacy,
@@ -116,6 +120,7 @@ impl NirRoutingResolver {
         NirSelection {
             nir_surface: Some(classify_nir_surface(&code)),
             nir_code: Some(code),
+            render_output: None,
             build_stats,
             hint_stats,
             engine_used: NirEngineMode::Nir,
@@ -148,6 +153,7 @@ impl NirRoutingResolver {
         NirSelection {
             nir_surface: Some(classify_nir_surface(&code)),
             nir_code: Some(code),
+            render_output: None,
             build_stats,
             hint_stats,
             engine_used: NirEngineMode::Nir,
@@ -169,6 +175,7 @@ impl NirRoutingResolver {
         let fallback_reason = classified_nir_error(reason.as_ref());
         NirSelection {
             nir_code: None,
+            render_output: None,
             build_stats: None,
             hint_stats: None,
             engine_used: NirEngineMode::Legacy,
@@ -191,6 +198,7 @@ impl NirRoutingResolver {
         let fallback_reason = classified_nir_error(reason.as_ref());
         NirSelection {
             nir_code: None,
+            render_output: None,
             build_stats: None,
             hint_stats: None,
             engine_used: NirEngineMode::Nir,
@@ -222,6 +230,7 @@ impl NirRoutingResolver {
         let fallback_reason = classified_nir_error(reason.as_ref());
         NirSelection {
             nir_code: None,
+            render_output: None,
             build_stats: None,
             hint_stats: None,
             engine_used: NirEngineMode::Legacy,
@@ -261,6 +270,15 @@ impl NirRoutingResolver {
 }
 
 impl NirSelection {
+    pub(crate) fn with_render_output(mut self, output: NirDecompileOutput) -> Self {
+        self.nir_code = Some(output.code.clone());
+        self.build_stats = output.build_stats.clone();
+        self.hint_stats = output.hint_stats.clone();
+        self.nir_surface = Some(classify_nir_surface(&output.code));
+        self.render_output = Some(output);
+        self
+    }
+
     pub fn routing_decision(&self) -> NirRoutingDecision {
         NirRoutingResolver::from_selection(self)
     }
