@@ -249,18 +249,22 @@ impl LoadedBinary {
 
         // 2. Merge Apple/ObjC/Swift Results
         if let Some(Ok(apple_functions)) = apple_funcs_res {
+            let mut addr_to_existing = std::collections::HashMap::new();
+            for (idx, func) in binary.inner().functions.iter().enumerate() {
+                addr_to_existing.insert(func.address, idx);
+            }
+
             for apple_func in apple_functions {
-                if let Some(existing) = binary
-                    .inner_mut()
-                    .functions
-                    .iter_mut()
-                    .find(|f| f.address == apple_func.address)
-                {
+                let address = apple_func.address;
+                if let Some(&idx) = addr_to_existing.get(&address) {
+                    let existing = &mut binary.inner_mut().functions[idx];
                     if existing.name.starts_with("sub_") || existing.name.is_empty() {
                         existing.name = apple_func.name;
                     }
                 } else {
+                    let idx = binary.inner().functions.len();
                     binary.inner_mut().functions.push(apple_func);
+                    addr_to_existing.insert(address, idx);
                 }
             }
             binary.rebuild_indices();
@@ -461,17 +465,21 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires the local benchmark corpus; set FISSION_BENCHMARK_ROOT to override the default checkout path"]
     fn test_profile_loader_on_fixture() {
         use std::time::Instant;
+        let benchmark_root = std::env::var_os("FISSION_BENCHMARK_ROOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmark")
+            });
         let fixture_path =
-            std::path::Path::new("/Users/sjkim1127/Fission/benchmark").join(format!(
-                "binary/x86-64/window/small/binary/c/test_functions.ex{}",
-                "e"
-            ));
-        if !fixture_path.exists() {
-            println!("Fixture not found at {}", fixture_path.display());
-            return;
-        }
+            benchmark_root.join("binary/x86-64/window/small/binary/c/test_functions.exe");
+        assert!(
+            fixture_path.is_file(),
+            "benchmark fixture not found at {}; set FISSION_BENCHMARK_ROOT to the benchmark checkout",
+            fixture_path.display()
+        );
 
         println!("=== Loader profiling on fixture (RUN 1 - COLD) ===");
         let start1 = Instant::now();
