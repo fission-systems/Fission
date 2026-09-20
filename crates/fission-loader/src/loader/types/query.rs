@@ -1,4 +1,5 @@
 use super::{FunctionInfo, LoadedBinary, SectionInfo};
+use crate::loader::reader::Endian;
 use crate::prelude::*;
 
 impl LoadedBinary {
@@ -119,20 +120,74 @@ impl LoadedBinary {
             .filter(|available| *available > 0)
     }
 
-    /// Read a pointer at the given address
-    pub fn read_ptr(&self, address: u64) -> Result<u64> {
-        let size = if self.is_64bit { 8 } else { 4 };
-        let bytes = self.get_bytes(address, size).ok_or_else(|| {
-            FissionError::loader(format!("Could not read pointer at 0x{:x}", address))
+    /// Return the target byte order recorded by the loader.
+    ///
+    /// Fully parsed binaries carry this fact in `ArchitectureDescriptor`. The
+    /// load-spec and legacy language-id fallbacks keep synthetic binaries and
+    /// older snapshots compatible while preserving the historical little-endian
+    /// default for inputs with no architecture metadata.
+    pub fn endian(&self) -> Endian {
+        self.architecture
+            .as_ref()
+            .and_then(|architecture| parse_endian_name(&architecture.endian))
+            .or_else(|| {
+                self.load_spec
+                    .as_ref()
+                    .and_then(|spec| parse_language_endian(spec.pair.language_id.as_str()))
+            })
+            .or_else(|| parse_language_endian(&self.arch_spec))
+            .unwrap_or(Endian::Little)
+    }
+
+    /// Whether target integer fields are encoded most-significant byte first.
+    #[inline]
+    pub fn is_little_endian(&self) -> bool {
+        self.endian() == Endian::Little
+    }
+
+    fn read_exact<const N: usize>(&self, address: u64, kind: &str) -> Result<[u8; N]> {
+        let bytes = self.get_bytes(address, N).ok_or_else(|| {
+            FissionError::loader(format!("Could not read {kind} at 0x{address:x}"))
         })?;
+        bytes
+            .try_into()
+            .map_err(|_| FissionError::loader(format!("Could not read {kind} at 0x{address:x}")))
+    }
 
-        let ptr = if self.is_64bit {
-            u64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
+    /// Read a target-endian 16-bit integer at the given address.
+    pub fn read_u16(&self, address: u64) -> Result<u16> {
+        let raw = self.read_exact::<2>(address, "u16")?;
+        Ok(match self.endian() {
+            Endian::Little => u16::from_le_bytes(raw),
+            Endian::Big => u16::from_be_bytes(raw),
+        })
+    }
+
+    /// Read a target-endian 32-bit integer at the given address.
+    pub fn read_u32(&self, address: u64) -> Result<u32> {
+        let raw = self.read_exact::<4>(address, "u32")?;
+        Ok(match self.endian() {
+            Endian::Little => u32::from_le_bytes(raw),
+            Endian::Big => u32::from_be_bytes(raw),
+        })
+    }
+
+    /// Read a target-endian 64-bit integer at the given address.
+    pub fn read_u64(&self, address: u64) -> Result<u64> {
+        let raw = self.read_exact::<8>(address, "u64")?;
+        Ok(match self.endian() {
+            Endian::Little => u64::from_le_bytes(raw),
+            Endian::Big => u64::from_be_bytes(raw),
+        })
+    }
+
+    /// Read a target-endian pointer at the given address.
+    pub fn read_ptr(&self, address: u64) -> Result<u64> {
+        if self.is_64bit {
+            self.read_u64(address)
         } else {
-            u32::from_le_bytes(bytes.try_into().unwrap_or([0; 4])) as u64
-        };
-
-        Ok(ptr)
+            self.read_u32(address).map(u64::from)
+        }
     }
 
     /// Get executable sections only
@@ -279,6 +334,18 @@ impl LoadedBinary {
     }
 }
 
+fn parse_endian_name(value: &str) -> Option<Endian> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "le" | "little" => Some(Endian::Little),
+        "be" | "big" => Some(Endian::Big),
+        _ => None,
+    }
+}
+
+fn parse_language_endian(language_id: &str) -> Option<Endian> {
+    language_id.split(':').nth(1).and_then(parse_endian_name)
+}
+
 fn section_contains(section: &SectionInfo, address: u64) -> bool {
     let section_size = if section.virtual_size > 0 {
         section.virtual_size
@@ -333,5 +400,43 @@ mod tests {
 
         assert_eq!(binary.va_to_file_offset(0x101f), Some(0x5f));
         assert_eq!(binary.va_to_file_offset(0x1020), None);
+    }
+
+    fn binary_with_integer_bytes(arch_spec: &str, is_64bit: bool, bytes: Vec<u8>) -> LoadedBinary {
+        LoadedBinaryBuilder::new("integer-test".to_string(), DataBuffer::Heap(bytes.clone()))
+            .format("ELF")
+            .arch_spec(arch_spec)
+            .is_64bit(is_64bit)
+            .add_section(SectionInfo {
+                name: ".data".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: bytes.len() as u64,
+                file_offset: 0,
+                file_size: bytes.len() as u64,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .build()
+            .expect("synthetic integer binary should build")
+    }
+
+    #[test]
+    fn read_integer_helpers_follow_target_endianness() {
+        let little =
+            binary_with_integer_bytes("MIPS:LE:32:default", false, vec![0x78, 0x56, 0x34, 0x12]);
+        assert_eq!(little.endian(), Endian::Little);
+        assert!(little.is_little_endian());
+        assert_eq!(little.read_u16(0x1000).unwrap(), 0x5678);
+        assert_eq!(little.read_u32(0x1000).unwrap(), 0x1234_5678);
+        assert_eq!(little.read_ptr(0x1000).unwrap(), 0x1234_5678);
+
+        let big =
+            binary_with_integer_bytes("MIPS:BE:32:default", false, vec![0x12, 0x34, 0x56, 0x78]);
+        assert_eq!(big.endian(), Endian::Big);
+        assert!(!big.is_little_endian());
+        assert_eq!(big.read_u16(0x1000).unwrap(), 0x1234);
+        assert_eq!(big.read_u32(0x1000).unwrap(), 0x1234_5678);
+        assert_eq!(big.read_ptr(0x1000).unwrap(), 0x1234_5678);
     }
 }
