@@ -1277,6 +1277,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#8-measured-implementation-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Measured Implementation Result
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1394,27 +1405,32 @@ that count as a dominance proof.</p>
 </ul>
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] Targeted invariant tests:</li>
+<li>[x] Targeted invariant tests:</li>
 <li>Command: <code>cargo nextest run -p fission-midend-normalize phi_recovery</code></li>
-<li>Expected signal: old implementation fails the conditional constant/copy
-    tests; fixed implementation preserves both branch assignments and reads.</li>
-<li>[ ] Crate-level gate:</li>
+<li>Result: the old implementation failed both initial conditional-definition
+    tests; the fixed implementation passes 9 focused <code>phi_recovery</code> tests,
+    including <code>If</code>, <code>While</code>, and <code>Switch</code> boundaries.</li>
+<li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-midend-normalize -p fission-pcode</code></li>
-<li>Expected signal: existing normalize, builder, and structuring tests remain
-    green.</li>
-<li>[ ] Focused benchmark row:</li>
-<li>Command: the same HF <code>unoptimized</code> full-run row set with caches disabled,
-    including <code>process_config_line_depth</code> above.</li>
-<li>Expected signal: no semantic/compilability regression; any GED/line-count
-    movement is reported as measured, not inferred.</li>
-<li>[ ] Smoke or automation sample:</li>
+<li>Result: <code>fission-midend-normalize</code> 385 passed and <code>fission-pcode</code> 1,052
+    passed / 1 skipped.</li>
+<li>[x] Focused benchmark row:</li>
+<li>Command: release CLI decompilation of the same HF <code>unoptimized</code> stripped
+    binary/address, followed by the repository's actual DecBench published-CFG
+    loader and GED calculator.</li>
+<li>Result: on the exact row, before and after HIR are byte-for-byte equal;
+    GED remains <code>1397.0</code>, source CFG <code>590</code> nodes, and Fission CFG <code>52</code> nodes.
+    This is a measured non-regression, not a quality-score improvement claim;
+    the full 34,406-function corpus was not rerun in this change.</li>
+<li>[x] Smoke or automation sample:</li>
 <li>Command: <code>cargo check</code> and the repository's release CLI build.</li>
-<li>Expected signal: all normalize consumers compile.</li>
-<li>[ ] Optional related checks:</li>
+<li>Result: workspace check and <code>cargo build -p fission-cli --release</code> pass.</li>
+<li>[x] Optional related checks:</li>
 <li>Commands: <code>cargo fmt --all --check</code>, <code>git diff --check</code>.</li>
-<li>[ ] Boundary audit:</li>
+<li>Result: both pass.</li>
+<li>[x] Boundary audit:</li>
 <li>Command: <code>python3 scripts/audit/nir_boundary_scan.py --root .</code></li>
-<li>Expected signal: no new boundary violation.</li>
+<li>Result: 0 findings, 0 violations, 0 migration debt.</li>
 </ul>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1432,6 +1448,24 @@ that count as a dominance proof.</p>
 <li>[x] The change extends the existing normalize owner and does not create a
       duplicate metric or downstream presentation workaround.</li>
 </ul>
+<h2 id="8-measured-implementation-result">8. Measured Implementation Result<a class="headerlink" href="#8-measured-implementation-result" title="Permanent link">&para;</a></h2>
+<p>The production fix is in commit <code>3a127e69a</code> and the proposal/baseline is in
+<code>34b0a5e62</code>. It changes only the normalize owner: replacement maps are now
+scoped to straight-line runs and are cleared at control-flow, label, call, and
+non-trivial memory boundaries. No ISA or corpus-specific condition was added.</p>
+<p>The same stripped HF <code>unoptimized</code> binary and address were run against the
+release CLI built at the parent commit and at the fixed commit. Both emitted
+the same HIR (<code>10,822</code> bytes, identical SHA-256), and both produced the same
+published-CFG score (<code>1397.0</code>). The fixed CLI's three measured runs were
+<code>6.52–6.61s</code>; the parent comparison run was <code>7.51s</code>. This is only a sanity
+check, not a benchmark claim, but it shows no obvious broad slowdown from the
+new normalize walk.</p>
+<p>The real-binary anchor therefore records <strong>no score movement</strong>. The quality
+claim supported by this change is semantic risk reduction: the old code was
+shown by failing regression tests to turn a conditional definition into an
+unconditional value. The HF row confirms that the conservative rule does not
+alter this existing difficult decompilation; a larger corpus sweep is needed
+before claiming a leaderboard or aggregate-quality change.</p>
 
 
 
