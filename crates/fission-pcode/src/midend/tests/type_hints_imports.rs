@@ -469,7 +469,7 @@ fn preview_call_target_refs_resolve_direct_import_call_target() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_exact_index_hit_count, 1);
@@ -727,7 +727,7 @@ fn preview_call_target_refs_resolve_direct_symbol_call_target() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("sqlite3Malloc()"), "{rendered}");
     assert_eq!(stats.call_target_exact_index_hit_count, 1);
@@ -786,7 +786,7 @@ fn preview_call_target_refs_resolve_zero_address_direct_symbol_call_target() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("recursive_fib()"), "{rendered}");
     assert!(!rendered.contains("sub_0()"), "{rendered}");
@@ -831,7 +831,7 @@ fn preview_call_target_missing_context_keeps_sub_fallback() {
         None,
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("sub_140010000()"), "{rendered}");
     assert_eq!(stats.call_target_import_resolved_count, 0);
@@ -881,7 +881,7 @@ fn preview_call_target_legacy_map_does_not_promote_exact_identity() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("sub_140010000()"), "{rendered}");
     assert!(!rendered.contains("LegacyOnly("), "{rendered}");
@@ -947,7 +947,7 @@ fn preview_callind_copy_only_constant_chain_resolves_exact_target() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_exact_index_hit_count, 1);
@@ -1013,7 +1013,7 @@ fn preview_callind_load_from_iat_slot_resolves_exact_import_target() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 1);
@@ -1087,7 +1087,7 @@ fn preview_callind_load_from_copy_folded_iat_slot_resolves_exact_import_target()
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 1);
@@ -1162,7 +1162,7 @@ fn preview_callind_load_from_add_folded_iat_slot_resolves_exact_import_target() 
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("CloseHandle()"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 1);
@@ -1233,7 +1233,7 @@ fn preview_callind_shift_add_constant_chain_resolves_exact_target() {
         None,
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(rendered.contains("recursive_fib()"), "{rendered}");
     assert_eq!(stats.call_target_indirect_const_resolved_count, 1);
@@ -1299,7 +1299,7 @@ fn preview_callind_load_from_unsupported_fold_opcode_keeps_existing_surface() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(!rendered.contains("CloseHandle"), "{rendered}");
     assert_eq!(stats.call_target_indirect_ptr_const_folded_count, 0);
@@ -1347,7 +1347,7 @@ fn preview_callind_load_from_non_iat_slot_keeps_existing_surface() {
         Some(&PreviewTypeContext::default()),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(!rendered.contains("CloseHandle"), "{rendered}");
     assert_eq!(stats.call_target_iat_slot_resolved_count, 0);
@@ -1418,7 +1418,7 @@ fn preview_builder_resolves_callind_through_copy_from_ram_space_iat_slot() {
         Some(&context),
     )
     .expect("preview render should succeed");
-    let stats = take_last_nir_build_stats().expect("build stats");
+    let stats = last_nir_build_stats().expect("build stats");
 
     assert!(
         rendered.contains("InitializeCriticalSection"),

@@ -555,7 +555,7 @@ fn preview_x64_ret_recovers_predecessor_computed_return_register() {
         &preview_options_win64(),
     )
     .expect("preview render");
-    let code = crate::midend::orchestrate::take_last_layered_pseudocode()
+    let code = crate::midend::orchestrate::last_layered_pseudocode()
         .expect("layered pseudocode")
         .hir;
     assert!(code.contains("return param_1 + 5;"), "{code}");
@@ -714,7 +714,7 @@ fn preview_inlines_lea_register_return() {
 
     let _nir =
         render_mlil_preview(&func, "lea_add", 0x140001450, &options).expect("preview render");
-    let code = crate::midend::orchestrate::take_last_layered_pseudocode()
+    let code = crate::midend::orchestrate::last_layered_pseudocode()
         .expect("layered pseudocode")
         .hir;
     // Win64 register args surface as pointer-width integers on the HIR profile.
@@ -2292,7 +2292,7 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
         Some(&context),
     )
     .expect("preview render");
-    let code = crate::midend::orchestrate::take_last_layered_pseudocode()
+    let code = crate::midend::orchestrate::last_layered_pseudocode()
         .expect("layered pseudocode")
         .hir;
     // Call targets recovered (fibonacci / printf). Full CSE of the live call
@@ -3069,7 +3069,7 @@ fn preview_build_stats_records_structuring_duration() {
         &preview_options_x86(),
     )
     .expect("preview render");
-    let stats = take_last_preview_build_stats().expect("preview build stats");
+    let stats = last_preview_build_stats().expect("preview build stats");
     assert_eq!(stats.max_structuring_scc_component_size, 1);
     assert!(stats.structuring_scc_component_count >= 1);
     assert!(stats.structuring_duration_ms <= stats.build_duration_ms);
@@ -3102,7 +3102,7 @@ fn preview_build_stats_records_render_duration() {
     )
     .expect("preview render");
     let elapsed_ms = start.elapsed().as_millis() as usize;
-    let stats = take_last_preview_build_stats().expect("preview build stats");
+    let stats = last_preview_build_stats().expect("preview build stats");
     assert!(stats.render_duration_ms <= elapsed_ms);
 }
 
@@ -3126,7 +3126,7 @@ fn preview_build_stats_records_rendered_code_len() {
 
     let code = render_mlil_preview(&func, "x86_render_len", 0x504000, &preview_options_x86())
         .expect("preview render");
-    let stats = take_last_preview_build_stats().expect("preview build stats");
+    let stats = last_preview_build_stats().expect("preview build stats");
     assert_eq!(stats.rendered_code_len, code.len());
 }
 
@@ -3178,7 +3178,7 @@ fn preview_build_stats_records_max_structuring_scc_component_size() {
 
     let _ = render_mlil_preview(&func, "x86_scc_size", 0x505000, &preview_options_x86())
         .expect("preview render");
-    let stats = take_last_preview_build_stats().expect("preview build stats");
+    let stats = last_preview_build_stats().expect("preview build stats");
     assert_eq!(stats.max_structuring_scc_component_size, 1);
 }
 

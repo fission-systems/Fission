@@ -332,7 +332,8 @@ fn render_mlil_preview_with_binary_and_context_output(
         debug_log("build_hir_error");
         err
     })?;
-    // Observation side channel, same rationale as `store_last_prehir_snapshot`
+    // Returned raw observation, captured for the typed output for the same
+    // reason the legacy compatibility snapshot exists below
     // below, but captured *before* `normalize_hir_function` runs rather than
     // after: `apply_callsite_type_prop_pass` (an early pass inside
     // `normalize_hir_function`'s type-signature fixed point) truncates each
@@ -380,11 +381,11 @@ fn render_mlil_preview_with_binary_and_context_output(
     // function for minimal diff, but its type is PreHIR until the explicit
     // conversion below.
     normalize_hir_function_with_context(&mut hir, &normalize_context);
-    // Observation side channel (mirrors `take_last_layered_pseudocode`
+    // Returned observation (mirrors `last_layered_pseudocode`
     // below): the real `PreHirFunction` structuring is about to consume,
     // captured before any structuring rewrite touches it. Zero effect on
     // `hir` itself -- purely a clone for whoever reads it back via
-    // `take_last_prehir_snapshot`.
+    // `last_prehir_snapshot`.
     let prehir = hir.clone();
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
@@ -489,7 +490,8 @@ fn render_mlil_preview_with_binary_and_context_output(
     // structural conversion (`prehir_stmts_to_hir_stmts`).
     let hir_body = fission_midend_prehir::ir::prehir_stmts_to_hir_stmts(hir.body.clone());
     let mut hir = hir.into_hir_function(hir_body);
-    // Observation side channel, same rationale as `store_last_prehir_snapshot`
+    // Returned structured observation, captured for the typed output for the
+    // same reason the legacy compatibility snapshot exists below
     // above: the fully-finalized `HirFunction` (structured body, plus the
     // `params`/`locals` an interpreter needs) as of the point a real caller
     // would consider structuring's semantic output done -- any remaining
@@ -595,14 +597,6 @@ fn store_last_layered_pseudocode(layered: LayeredPseudocode) {
     });
 }
 
-/// Take the dual NIR/HIR strings produced by the most recent `render_nir*` call
-/// on this thread (observation / CLI layer selection).
-pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
-    // Legacy destructive accessor retained for compatibility. Production
-    // readers should use `last_layered_pseudocode`.
-    LAST_LAYERED_PSEUDOCODE.with(|slot| slot.borrow_mut().take())
-}
-
 /// Clone the latest layered pseudocode without consuming it. Production
 /// consumers should use this accessor so telemetry and CLI/verification
 /// readers can coexist on the same render result.
@@ -621,18 +615,12 @@ fn store_last_raw_hir_snapshot(func: super::PreHirFunction) {
     });
 }
 
-/// Take the builder's raw [`super::PreHirFunction`] output from the most
+/// Read the builder's raw [`super::PreHirFunction`] output from the most
 /// recent `render_mlil_preview*`/`render_nir*` call on this thread, captured
 /// before `normalize_hir_function` runs any pass on it -- see the comment at
 /// this snapshot's capture site for why call-site argument counts here can
-/// be wider (more accurate) than what [`take_last_prehir_snapshot`]'s
+/// be wider (more accurate) than what [`last_prehir_snapshot`]'s
 /// post-normalize `callee_observed_max_arity` field ever sees.
-pub fn take_last_raw_hir_snapshot() -> Option<super::PreHirFunction> {
-    // Legacy destructive accessor retained for compatibility. Production
-    // readers should use `last_raw_hir_snapshot`.
-    LAST_RAW_HIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
-}
-
 /// Clone the latest raw PreHIR snapshot without consuming it.
 pub fn last_raw_hir_snapshot() -> Option<super::PreHirFunction> {
     LAST_RAW_HIR_SNAPSHOT.with(|slot| slot.borrow().clone())
@@ -649,7 +637,7 @@ fn store_last_prehir_snapshot(func: super::PreHirFunction) {
     });
 }
 
-/// Take the real [`super::PreHirFunction`] (builder's native output, the same
+/// Read the real [`super::PreHirFunction`] (builder's native output, the same
 /// one normalize/structuring's own internal passes read and rewrite) that
 /// structuring consumed as input on the most recent
 /// `render_mlil_preview*`/`render_nir*` call on this thread -- captured
@@ -657,16 +645,11 @@ fn store_last_prehir_snapshot(func: super::PreHirFunction) {
 /// is a genuinely independent type from [`super::HirFunction`] (see
 /// `fission_midend_core::ir::hir`'s module doc), not the same type under a
 /// different name, so callers can't accidentally swap this with the
-/// structured HIR `take_last_hir_function_snapshot` returns. Pairing the
+/// structured HIR `last_hir_function_snapshot` returns. Pairing the
 /// two lets an external verifier interpret both and diff results for the
 /// same concrete inputs, without any change to what structuring itself
 /// computes -- purely observational, same pattern as
-/// `take_last_layered_pseudocode` above.
-pub fn take_last_prehir_snapshot() -> Option<super::PreHirFunction> {
-    // Legacy destructive accessor retained for compatibility. Production
-    // readers should use `last_prehir_snapshot`.
-    LAST_PREHIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
-}
+/// `last_layered_pseudocode` above.
 
 /// Clone the latest normalized PreHIR snapshot without consuming it.
 pub fn last_prehir_snapshot() -> Option<super::PreHirFunction> {
@@ -684,19 +667,14 @@ fn store_last_hir_function_snapshot(func: super::HirFunction) {
     });
 }
 
-/// Take the fully-finalized `HirFunction` (structured body, `params`,
+/// Read the fully-finalized `HirFunction` (structured body, `params`,
 /// `locals`) from the most recent `render_mlil_preview*`/`render_nir*` call
-/// on this thread -- the counterpart to [`take_last_prehir_snapshot`]: a
+/// on this thread -- the counterpart to [`last_prehir_snapshot`]: a
 /// caller that wants to differentially verify structuring calls both after
 /// one decompile call, wraps the returned `HirFunction::body` in
 /// [`super::Hir`], and diffs it against the PreHIR snapshot using the same
 /// `params`/`locals`. Same observational side-channel pattern as
-/// `take_last_layered_pseudocode`/`take_last_prehir_snapshot` above.
-pub fn take_last_hir_function_snapshot() -> Option<super::HirFunction> {
-    // Legacy destructive accessor retained for compatibility. Production
-    // readers should use `last_hir_function_snapshot`.
-    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| slot.borrow_mut().take())
-}
+/// `last_layered_pseudocode`/`last_prehir_snapshot` above.
 
 /// Clone the latest structured HIR snapshot without consuming it.
 pub fn last_hir_function_snapshot() -> Option<super::HirFunction> {
@@ -714,19 +692,13 @@ fn store_last_recovered_variables(variables: Vec<crate::render::RecoveredVariabl
     });
 }
 
-/// The variables the last decompilation on this thread recovered.
+/// The variables the last legacy string render on this thread recovered.
 ///
 /// Same one-slot discipline as the snapshots above: read it immediately after
 /// the decompile call, before another one on this thread overwrites it.
 /// `None` means no decompile got as far as the typed HIR (an architecture
 /// fallback, say), which is not the same as a function that genuinely has no
 /// variables -- that returns an empty vector.
-pub fn take_last_recovered_variables() -> Option<Vec<crate::render::RecoveredVariable>> {
-    // Legacy destructive accessor retained for compatibility. Production
-    // readers should use `last_recovered_variables`.
-    LAST_RECOVERED_VARIABLES.with(|slot| slot.borrow_mut().take())
-}
-
 /// Clone the latest recovered-variable list without consuming it.
 pub fn last_recovered_variables() -> Option<Vec<crate::render::RecoveredVariable>> {
     LAST_RECOVERED_VARIABLES.with(|slot| slot.borrow().clone())

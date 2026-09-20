@@ -70,8 +70,6 @@ pub use labels::SWITCH_FALLTHROUGH_SENTINEL;
 pub(super) use self::support::*;
 pub use self::telemetry::{
     last_nir_build_stats, last_nir_hint_stats, last_preview_build_stats, last_preview_hint_stats,
-    take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
-    take_last_preview_hint_stats,
 };
 use self::{action_pipeline::*, builder::*, cfg::*, structuring::*};
 /// PreHIR-side IR types (`PreHirStmt`/`PreHirExpr`/etc, from `fission-midend-prehir`) --
@@ -107,7 +105,7 @@ pub(crate) fn print_prehir_expr(expr: &fission_midend_prehir::PreHirExpr) -> Str
     ))
 }
 
-/// Render a captured PreHIR snapshot (see `take_last_prehir_snapshot`) as C-like
+/// Render a captured PreHIR snapshot (see `last_prehir_snapshot`) as C-like
 /// text, via the same printer HIR output goes through. `PreHirStmt` and
 /// `HirStmt` share the identical `Goto`/`Label` variants (the printer
 /// already has to render those for any real HIR that structuring couldn't
@@ -146,9 +144,7 @@ pub use self::orchestrate::{
     render_mlil_preview_dual_layer, render_mlil_preview_with_binary_and_context,
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
     render_nir_with_binary_and_context_output, render_nir_with_context,
-    render_nir_with_context_output, take_last_hir_function_snapshot, take_last_layered_pseudocode,
-    take_last_prehir_snapshot, take_last_raw_hir_snapshot, take_last_recovered_variables,
-    test_refine_partitions,
+    render_nir_with_context_output, test_refine_partitions,
 };
 
 /// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.

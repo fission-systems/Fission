@@ -27,36 +27,16 @@ pub(super) fn store_preview_hint_stats(stats: PreviewHintStats) {
     });
 }
 
-pub fn take_last_preview_build_stats() -> Option<PreviewBuildStats> {
-    // Legacy destructive accessor retained for compatibility. Production
-    // readers should use `last_preview_build_stats`.
-    LAST_PREVIEW_BUILD_STATS.with(|slot| slot.borrow_mut().take())
-}
-
 pub fn last_preview_build_stats() -> Option<PreviewBuildStats> {
     LAST_PREVIEW_BUILD_STATS.with(|slot| slot.borrow().clone())
-}
-
-pub fn take_last_preview_hint_stats() -> Option<PreviewHintStats> {
-    // Legacy destructive accessor retained for compatibility. Production
-    // readers should use `last_preview_hint_stats`.
-    LAST_PREVIEW_HINT_STATS.with(|slot| slot.borrow_mut().take())
 }
 
 pub fn last_preview_hint_stats() -> Option<PreviewHintStats> {
     LAST_PREVIEW_HINT_STATS.with(|slot| slot.borrow().clone())
 }
 
-pub fn take_last_nir_build_stats() -> Option<NirBuildStats> {
-    take_last_preview_build_stats()
-}
-
 pub fn last_nir_build_stats() -> Option<NirBuildStats> {
     last_preview_build_stats()
-}
-
-pub fn take_last_nir_hint_stats() -> Option<NirHintStats> {
-    take_last_preview_hint_stats()
 }
 
 pub fn last_nir_hint_stats() -> Option<NirHintStats> {
