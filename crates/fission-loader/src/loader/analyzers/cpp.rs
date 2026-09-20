@@ -435,12 +435,7 @@ impl<'a> CppAnalyzer<'a> {
                 // same shape `parse_msvc_col`'s MSVC-side base array already
                 // produces, so this matches existing consumption without
                 // inventing a richer type nothing downstream reads yet.
-                let base_count = self
-                    .binary
-                    .get_bytes(addr + 2 * ptr_size + 4, 4)
-                    .and_then(|b| b.try_into().ok())
-                    .map(u32::from_le_bytes)
-                    .unwrap_or(0);
+                let base_count = self.binary.read_u32(addr + 2 * ptr_size + 4).unwrap_or(0);
                 let base_array_addr = addr + 2 * ptr_size + 8;
                 let entry_size = 2 * ptr_size;
                 for i in 0..u64::from(base_count) {

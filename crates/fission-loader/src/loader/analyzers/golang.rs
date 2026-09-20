@@ -1,3 +1,4 @@
+use crate::loader::reader::ByteReader;
 use crate::loader::{FunctionInfo, LoadedBinary};
 use crate::prelude::*;
 
@@ -27,7 +28,7 @@ impl<'a> GoAnalyzer<'a> {
             return Err(err!(loader, "Failed to read pclntab header"));
         };
 
-        let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let magic = self.read_u32(&data, 0);
         match magic {
             GO_1_16_MAGIC | GO_1_18_MAGIC | GO_1_20_MAGIC => {
                 self.parse_modern_pclntab(pcl_addr, magic)
@@ -86,8 +87,8 @@ impl<'a> GoAnalyzer<'a> {
 
             let (pc_off, func_off) = if magic >= GO_1_18_MAGIC {
                 (
-                    u32::from_le_bytes([ebytes[0], ebytes[1], ebytes[2], ebytes[3]]) as u64,
-                    u32::from_le_bytes([ebytes[4], ebytes[5], ebytes[6], ebytes[7]]) as u64,
+                    self.read_u32(ebytes, 0) as u64,
+                    self.read_u32(ebytes, 4) as u64,
                 )
             } else {
                 (
@@ -109,13 +110,12 @@ impl<'a> GoAnalyzer<'a> {
 
             // Validation: First 4 bytes of _func should be entryOff (matching pc_off)
             if let Some(ref fb) = fbytes {
-                let struct_entry_off = u32::from_le_bytes([fb[0], fb[1], fb[2], fb[3]]) as u64;
+                let struct_entry_off = self.read_u32(fb, 0) as u64;
                 if struct_entry_off != pc_off && i > 0 {
                     // Try relative to addr
                     let alt_addr = addr + func_off;
                     if let Some(alt_fb) = self.binary.view_bytes(alt_addr, 16) {
-                        let alt_entry_off =
-                            u32::from_le_bytes([alt_fb[0], alt_fb[1], alt_fb[2], alt_fb[3]]) as u64;
+                        let alt_entry_off = self.read_u32(alt_fb, 0) as u64;
                         if alt_entry_off == pc_off {
                             func_struct_addr = alt_addr;
                             fbytes = Some(alt_fb.to_vec());
@@ -126,7 +126,7 @@ impl<'a> GoAnalyzer<'a> {
             let _ = func_struct_addr;
 
             if let Some(fb) = fbytes {
-                let name_off = u32::from_le_bytes([fb[4], fb[5], fb[6], fb[7]]) as u64;
+                let name_off = self.read_u32(&fb, 4) as u64;
                 let name_addr = addr + funcname_offset + name_off;
 
                 if let Some(name) = self.read_string(name_addr) {
@@ -182,28 +182,23 @@ impl<'a> GoAnalyzer<'a> {
     }
 
     fn read_ptr(&self, data: &[u8], offset: usize, size: usize) -> u64 {
-        if offset + size > data.len() {
-            return 0;
+        match size {
+            8 => self.read_u64(data, offset),
+            4 => self.read_u32(data, offset) as u64,
+            _ => 0,
         }
-        if size == 8 {
-            u64::from_le_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-                data[offset + 4],
-                data[offset + 5],
-                data[offset + 6],
-                data[offset + 7],
-            ])
-        } else {
-            u32::from_le_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ]) as u64
-        }
+    }
+
+    fn read_u32(&self, data: &[u8], offset: usize) -> u32 {
+        ByteReader::new(data, self.binary.endian())
+            .u32(offset)
+            .unwrap_or(0)
+    }
+
+    fn read_u64(&self, data: &[u8], offset: usize) -> u64 {
+        ByteReader::new(data, self.binary.endian())
+            .u64(offset)
+            .unwrap_or(0)
     }
 
     fn read_string(&self, addr: u64) -> Option<String> {
@@ -289,11 +284,9 @@ impl<'a> GoAnalyzer<'a> {
         };
 
         let size = if ptr_size == 8 {
-            u64::from_le_bytes([
-                data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
-            ]) as u32
+            self.read_u64(data, 8) as u32
         } else {
-            u32::from_le_bytes([data[4], data[5], data[6], data[7]])
+            self.read_u32(data, 4)
         };
 
         // Try to find struct name - it's usually in a name pointer field
@@ -618,19 +611,12 @@ impl<'a> GoAnalyzer<'a> {
             while offset + struct_size <= data.len() {
                 // Read pointer and length
                 let (ptr_val, len_val): (u64, u64) = if is_64bit {
-                    let p =
-                        u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap_or([0; 8]));
-                    let l = u64::from_le_bytes(
-                        data[offset + 8..offset + 16].try_into().unwrap_or([0; 8]),
-                    );
+                    let p = self.read_u64(data, offset);
+                    let l = self.read_u64(data, offset + 8);
                     (p, l)
                 } else {
-                    let p =
-                        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap_or([0; 4]))
-                            as u64;
-                    let l = u32::from_le_bytes(
-                        data[offset + 4..offset + 8].try_into().unwrap_or([0; 4]),
-                    ) as u64;
+                    let p = self.read_u32(data, offset) as u64;
+                    let l = self.read_u32(data, offset + 4) as u64;
                     (p, l)
                 };
 
@@ -719,6 +705,7 @@ impl GoTypeInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
 
     /// Load the Go test binary built at /tmp/go_test_bin/go_test_binary and
     /// verify that detect_go_version() returns a valid "go1.X.Y" string.
@@ -748,5 +735,37 @@ mod tests {
         let analyzer = GoAnalyzer::new(&binary);
         let detected = analyzer.detect_go_version();
         assert_eq!(detected.as_deref(), binary.go_version.as_deref());
+    }
+
+    #[test]
+    fn scan_go_strings_respects_big_endian_target() {
+        let mut data = vec![0u8; 0x30];
+        data[0..8].copy_from_slice(&0x1020u64.to_be_bytes());
+        data[8..16].copy_from_slice(&5u64.to_be_bytes());
+        data[0x20..0x25].copy_from_slice(b"hello");
+
+        let binary = LoadedBinaryBuilder::new(
+            "big-endian-go-string-test".to_string(),
+            DataBuffer::Heap(data),
+        )
+        .format("ELF")
+        .image_base(0x1000)
+        .arch_spec("MIPS:BE:64:default")
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".rodata".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 0x30,
+            file_offset: 0,
+            file_size: 0x30,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("synthetic big-endian Go binary should build");
+
+        let strings = GoAnalyzer::new(&binary).scan_go_strings();
+        assert_eq!(strings.get(&0x1000), Some(&"\"hello\"".to_string()));
     }
 }

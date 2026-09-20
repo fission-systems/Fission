@@ -25,11 +25,7 @@ impl PointerSweeper {
         // Default to 8 bytes for 64-bit, 4 bytes for 32-bit.
         let pointer_size = if binary.is_64bit { 8 } else { 4 };
 
-        // We assume little endian by default. If we need big endian support, we can check the format/arch.
-        // Fission load_spec usually handles it, but for raw pointer sweeping we'll assume little-endian
-        // unless it's explicitly a big-endian architecture. Fission doesn't explicitly expose endianness
-        // cleanly on LoadedBinary yet, so we assume LE which covers x86/x64 and most ARM.
-        let is_little_endian = true;
+        let is_little_endian = binary.is_little_endian();
 
         Self {
             valid_regions,
@@ -117,7 +113,7 @@ impl PointerSweeper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_loader::loader::{DataBuffer, LoadedBinaryInner, SectionInfo};
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, LoadedBinaryInner, SectionInfo};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -213,5 +209,58 @@ mod tests {
         assert_eq!(xrefs[1].from_addr, 0x2008);
         assert_eq!(xrefs[1].to_addr, 0x2050);
         assert_eq!(xrefs[1].xref_type, XrefType::Data);
+    }
+
+    #[test]
+    fn test_pointer_sweeper_respects_big_endian_target() {
+        let sections = vec![
+            SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x10,
+                file_offset: 0,
+                file_size: 0x10,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            },
+            SectionInfo {
+                name: ".data".to_string(),
+                virtual_address: 0x2000,
+                virtual_size: 0x1000,
+                file_offset: 0x10,
+                file_size: 0x18,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            },
+        ];
+        let mut file_data = vec![0u8; 0x28];
+        file_data[0x10..0x18].copy_from_slice(&0x1008u64.to_be_bytes());
+        file_data[0x18..0x20].copy_from_slice(&0x2050u64.to_be_bytes());
+        file_data[0x20..0x28].copy_from_slice(&0x5000u64.to_be_bytes());
+
+        let binary = LoadedBinaryBuilder::new(
+            "big-endian-pointer-test".to_string(),
+            DataBuffer::Heap(file_data),
+        )
+        .format("ELF")
+        .arch_spec("MIPS:BE:64:default")
+        .is_64bit(true)
+        .add_sections(sections)
+        .build()
+        .expect("synthetic big-endian binary should build");
+
+        let sweeper = PointerSweeper::new(&binary);
+        assert!(!sweeper.is_little_endian);
+
+        let xrefs = sweeper.sweep(&binary);
+        assert_eq!(
+            xrefs
+                .iter()
+                .map(|xref| (xref.from_addr, xref.to_addr))
+                .collect::<Vec<_>>(),
+            vec![(0x2000, 0x1008), (0x2008, 0x2050)]
+        );
     }
 }
