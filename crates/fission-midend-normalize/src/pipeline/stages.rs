@@ -43,8 +43,9 @@ use super::super::recovery::{
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{apply_interproc_callsite_arity_pass, apply_variadic_stack_region_pass};
+use super::context::PROTECTED_LSDA_LABELS;
 use super::run::{
-    PROTECTED_LSDA_LABELS, apply_type_signature_fixed_point, body_contains_popcount_call,
+    apply_type_signature_fixed_point, body_contains_popcount_call,
     body_has_loopish_shapes, cleanup_func_stmt_list, contains_call_stmts, hir_shape,
     is_large_hir_function, jump_resolver_admission, memory_fact_prefilter_allows_full,
     run_cleanup_block, run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,

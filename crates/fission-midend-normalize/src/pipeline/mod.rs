@@ -1,12 +1,14 @@
 //! Pass pipeline orchestration (`normalize_hir_function` and helpers).
 
+mod context;
 mod groups;
 mod heritage_contracts;
 mod run;
 mod stages;
 
+pub use context::{GLOBAL_SYMBOL_CONTEXT, PROTECTED_LSDA_LABELS};
+pub use context::{GlobalSymbolContext, NormalizeContext, NormalizeContextGuard};
 pub use groups::{build_normalize_pipeline, run_normalize_pipeline};
-pub use run::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext, PROTECTED_LSDA_LABELS};
 pub use run::{
     is_large_hir_function, normalize_expr, normalize_function_body, normalize_hir_function,
     normalize_stmt,

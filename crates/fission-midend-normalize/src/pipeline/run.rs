@@ -372,42 +372,8 @@ pub fn contains_call_stmts(stmts: &[PreHirStmt]) -> bool {
     stmts.iter().any(contains_call_stmt)
 }
 
+use super::context::PROTECTED_LSDA_LABELS;
 use crate::HashMap;
-use std::cell::RefCell;
-
-thread_local! {
-    pub static GLOBAL_SYMBOL_CONTEXT: RefCell<Option<GlobalSymbolContext>> = RefCell::new(None);
-    /// Labels reachable only via an out-of-band edge with no textual `Goto`
-    /// anywhere -- currently just C++ exception landing pads (see
-    /// `fission_loader::loader::gcc_lsda`, and `StructuringHost::
-    /// lsda_landing_pad_labels` in `fission-midend-structuring`, which this
-    /// mirrors on the normalize side of the same problem). Same
-    /// thread-local-side-channel shape as `GLOBAL_SYMBOL_CONTEXT` above --
-    /// used instead of threading a parameter through every
-    /// `cleanup_func_stmt_list` call site (~30, all internal to this
-    /// crate's `pipeline/stages.rs`) for the same reason: this is
-    /// per-function context a handful of leaf passes need, not something
-    /// every pass in the pipeline should have to carry. Kept std-based
-    /// (not this crate's `HashSet` FxBuildHasher alias) to match
-    /// `GLOBAL_SYMBOL_CONTEXT`'s own precedent for a cross-crate boundary
-    /// value. Empty for every function in every binary without C++
-    /// exception handling -- the overwhelming majority of all decompiled
-    /// code -- so leaving it unset is always safe.
-    pub static PROTECTED_LSDA_LABELS: RefCell<std::collections::HashSet<String>> =
-        RefCell::new(std::collections::HashSet::new());
-}
-
-// Cross-crate DTO populated from fission-pcode's `NirRenderOptions::
-// global_names`/`global_sizes`, both std-hashed -- kept std-based here to
-// match the producer rather than propagating this crate's FxBuildHasher
-// alias across that boundary. Only ever consumed via point `.get(&addr)`
-// lookups (memory::constant_ptr::find_global_symbol), never iterated, so
-// this isn't part of the determinism surface anyway.
-#[derive(Clone)]
-pub struct GlobalSymbolContext {
-    pub names: std::collections::HashMap<u64, String>,
-    pub sizes: std::collections::HashMap<u64, u64>,
-}
 
 pub fn normalize_hir_function(func: &mut PreHirFunction) {
     super::groups::run_normalize_pipeline(func, normalize_diag_enabled(), normalize_perf_enabled());

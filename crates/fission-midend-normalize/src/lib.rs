@@ -68,6 +68,8 @@ pub use types::set_operand_metatype_names;
 
 pub use rule_normalizer::apply_rule_normalization;
 
+pub use pipeline::{GlobalSymbolContext, NormalizeContext, NormalizeContextGuard};
+
 pub use types::apply_callsite_type_prop_pass;
 pub use types::is_known_api_signature;
 

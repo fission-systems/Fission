@@ -21,8 +21,8 @@ use fission_loader::loader::LoadedBinary;
 use fission_midend_structuring::StructuringHost;
 // Owner crate (not pcode re-export path) — keeps orchestrate boundary explicit.
 use fission_midend_normalize::{
-    apply_callsite_type_prop_pass, normalize_hir_function, pipeline as normalize_pipeline,
-    take_normalize_wave_stats,
+    GlobalSymbolContext, NormalizeContext, NormalizeContextGuard, apply_callsite_type_prop_pass,
+    normalize_hir_function, take_normalize_wave_stats,
 };
 use std::time::Instant;
 
@@ -214,65 +214,6 @@ fn render_mlil_preview_dual_layer_output(
     Ok(output)
 }
 
-/// Owns the normalize-side per-function context for the duration of the
-/// normalize/structuring stages.
-///
-/// The normalize crate exposes these values at a cross-crate boundary because
-/// leaf cleanup passes consume them. The guard keeps that boundary from
-/// leaking state when a pass panics and also restores an outer context if a
-/// render is re-entered on the same thread.
-struct NormalizeContextGuard {
-    previous_global: Option<normalize_pipeline::GlobalSymbolContext>,
-    previous_protected: std::collections::HashSet<String>,
-    active: bool,
-}
-
-impl NormalizeContextGuard {
-    fn install(
-        context: normalize_pipeline::GlobalSymbolContext,
-        protected_labels: impl IntoIterator<Item = String>,
-    ) -> Self {
-        let previous_global = normalize_pipeline::GLOBAL_SYMBOL_CONTEXT
-            .with(|slot| slot.borrow_mut().replace(context));
-        let previous_protected = normalize_pipeline::PROTECTED_LSDA_LABELS.with(|slot| {
-            std::mem::replace(
-                &mut *slot.borrow_mut(),
-                protected_labels.into_iter().collect(),
-            )
-        });
-        Self {
-            previous_global,
-            previous_protected,
-            active: true,
-        }
-    }
-
-    /// End the context at the same stage as the old explicit cleanup. `Drop`
-    /// remains the panic-safety net for any earlier unwind.
-    fn clear(&mut self) {
-        self.restore();
-    }
-
-    fn restore(&mut self) {
-        if !self.active {
-            return;
-        }
-        normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|slot| {
-            *slot.borrow_mut() = self.previous_global.take();
-        });
-        normalize_pipeline::PROTECTED_LSDA_LABELS.with(|slot| {
-            *slot.borrow_mut() = std::mem::take(&mut self.previous_protected);
-        });
-        self.active = false;
-    }
-}
-
-impl Drop for NormalizeContextGuard {
-    fn drop(&mut self) {
-        self.restore();
-    }
-}
-
 pub fn render_mlil_preview_with_binary_and_context(
     pcode: &PcodeFunction,
     name: &str,
@@ -422,12 +363,14 @@ fn render_mlil_preview_with_binary_and_context_output(
     }
     debug_log("normalize_start");
     let normalize_start = Instant::now();
-    let context = normalize_pipeline::GlobalSymbolContext {
-        names: options.global_names.clone(),
-        sizes: options.global_sizes.clone(),
-    };
-    let mut normalize_context_guard =
-        NormalizeContextGuard::install(context, builder.lsda_landing_pad_labels());
+    let normalize_context = NormalizeContext::new(
+        GlobalSymbolContext {
+            names: options.global_names.clone(),
+            sizes: options.global_sizes.clone(),
+        },
+        builder.lsda_landing_pad_labels(),
+    );
+    let mut normalize_context_guard = NormalizeContextGuard::install(&normalize_context);
     // Stage: midend-normalize (owner crate). `hir` is a real `PreHirFunction`
     // here (builder's native output) -- kept named `hir` through this
     // function for minimal diff, but its type is PreHIR until the explicit
@@ -850,58 +793,8 @@ impl RenderDebugFlags {
 }
 
 #[cfg(test)]
-mod normalize_context_guard_tests {
+mod render_observation_tests {
     use super::*;
-    use std::collections::{HashMap, HashSet};
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    #[test]
-    fn restores_outer_context_when_normalization_unwinds() {
-        let outer_global = normalize_pipeline::GlobalSymbolContext {
-            names: HashMap::from([(0x1000, "outer_global".to_string())]),
-            sizes: HashMap::from([(0x1000, 4)]),
-        };
-        let previous_global = normalize_pipeline::GLOBAL_SYMBOL_CONTEXT
-            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), Some(outer_global.clone())));
-        let previous_protected = normalize_pipeline::PROTECTED_LSDA_LABELS.with(|slot| {
-            std::mem::replace(
-                &mut *slot.borrow_mut(),
-                HashSet::from(["outer_landing_pad".to_string()]),
-            )
-        });
-
-        let unwind = catch_unwind(AssertUnwindSafe(|| {
-            let _guard = NormalizeContextGuard::install(
-                normalize_pipeline::GlobalSymbolContext {
-                    names: HashMap::from([(0x2000, "inner_global".to_string())]),
-                    sizes: HashMap::from([(0x2000, 8)]),
-                },
-                ["inner_landing_pad".to_string()],
-            );
-            panic!("synthetic normalize failure");
-        }));
-        assert!(unwind.is_err());
-
-        let restored_global =
-            normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|slot| slot.borrow().clone());
-        assert_eq!(
-            restored_global.map(|ctx| ctx.names),
-            Some(outer_global.names)
-        );
-        let restored_protected =
-            normalize_pipeline::PROTECTED_LSDA_LABELS.with(|slot| slot.borrow().clone());
-        assert_eq!(
-            restored_protected,
-            HashSet::from(["outer_landing_pad".to_string()])
-        );
-
-        normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|slot| {
-            *slot.borrow_mut() = previous_global;
-        });
-        normalize_pipeline::PROTECTED_LSDA_LABELS.with(|slot| {
-            *slot.borrow_mut() = previous_protected;
-        });
-    }
 
     #[test]
     fn layered_observation_can_be_read_by_multiple_consumers() {
