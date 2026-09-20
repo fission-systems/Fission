@@ -267,6 +267,9 @@ impl Emulator {
                     if self.halt_requested {
                         return Ok(InterpExit::Halt);
                     }
+                    if let Some(pc) = self.pc_override.take() {
+                        return Ok(InterpExit::Branch(pc));
+                    }
                     idx += 1;
                 }
             }
@@ -291,7 +294,7 @@ mod tests {
     use super::*;
     use crate::arch::ArchInfo;
     use crate::core::Emulator;
-    use crate::os::LinuxEnv;
+    use crate::os::{HleResult, LinuxEnv, OsEnvironment};
     use crate::pcode::state::MachineState;
     use fission_loader::loader::LoadedBinary;
     use fission_sleigh::runtime::RuntimeSleighFrontend;
@@ -334,6 +337,32 @@ mod tests {
         }
     }
 
+    struct JumpToEnv;
+
+    impl OsEnvironment for JumpToEnv {
+        fn patch_imports(&self, _state: &mut MachineState, _binary: &LoadedBinary) -> Result<()> {
+            Ok(())
+        }
+
+        fn resolve_stub(&self, _binary: &LoadedBinary, _magic_addr: u64) -> Option<String> {
+            None
+        }
+
+        fn dispatch_hle(&self, _emu: &mut Emulator, _func_name: &str) -> Result<HleResult> {
+            Ok(HleResult::Continue)
+        }
+
+        fn dispatch_userop(
+            &self,
+            _emu: &mut Emulator,
+            _userop_name: &str,
+            _input_vals: &[u64],
+            _output_size: u32,
+        ) -> Result<HleResult> {
+            Ok(HleResult::JumpTo(0x2000))
+        }
+    }
+
     #[test]
     fn interpreter_writes_callother_data_result_not_control_result() {
         let mut emu = test_emulator();
@@ -366,5 +395,47 @@ mod tests {
             u64::from_le_bytes(value.try_into().unwrap()),
             emu.fs_base + 0x2A
         );
+    }
+
+    #[test]
+    fn interpreter_hle_jump_to_exits_translation_block() {
+        let mut emu = test_emulator();
+        let userop_id = 0xD00E;
+        emu.os = Box::new(JumpToEnv);
+        emu.userop_map.insert(userop_id, "jump_to_test".to_string());
+
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CallOther,
+                    address: 0x1000,
+                    output: None,
+                    inputs: vec![constant(userop_id as i64, 4)],
+                    asm_mnemonic: Some("CALLOTHER".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(register(0, 8)),
+                    inputs: vec![constant(0xBAD, 8)],
+                    asm_mnemonic: Some("COPY after JumpTo".to_string()),
+                },
+            ],
+        }];
+
+        let exit = emu
+            .interpret_translation_block(&insns)
+            .expect("interpret JumpTo CallOther");
+        assert!(matches!(exit, InterpExit::Branch(0x2000)));
+
+        let value = emu
+            .state
+            .read_space(emu.state.register_space(), 0, 8)
+            .expect("read untouched register");
+        assert_eq!(u64::from_le_bytes(value.try_into().unwrap()), 0);
     }
 }

@@ -1785,9 +1785,11 @@ impl Emulator {
     fn run_block_interpreted(&mut self, insns: &[crate::jit::compiler::GuestInsn]) -> Result<bool> {
         use crate::interp::InterpExit;
         self.interpreted_blocks = self.interpreted_blocks.saturating_add(1);
-        match self.interpret_translation_block(insns)? {
+        let exit = self.interpret_translation_block(insns)?;
+        let pc_override = self.pc_override.take();
+        match exit {
             InterpExit::Branch(pc) | InterpExit::FallThrough(pc) => {
-                self.pc = pc;
+                self.pc = pc_override.unwrap_or(pc);
                 Ok(!self.halt_requested)
             }
             InterpExit::Halt => {
