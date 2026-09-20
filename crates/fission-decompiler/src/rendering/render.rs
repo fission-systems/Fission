@@ -130,14 +130,10 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
     let max_rounds = 3;
 
     for round in 0..max_rounds {
-        decomp_ctx.hints_changed = false;
-        refine_nir_type_context_with_callee_effect_summaries(
-            binary,
-            pcode,
-            &mut decomp_ctx.type_context,
-        );
+        decomp_ctx.begin_round();
+        decomp_ctx.refine_type_context(pcode);
 
-        let type_context_cloned = decomp_ctx.type_context.clone();
+        let type_context_cloned = decomp_ctx.type_context().clone();
         match catch_unwind(AssertUnwindSafe(|| {
             render_nir_with_binary_and_context_output(
                 pcode,
@@ -150,7 +146,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
             )
         })) {
             Ok(Ok(output)) => {
-                if decomp_ctx.hints_changed && round < max_rounds - 1 {
+                if decomp_ctx.hints_changed() && round < max_rounds - 1 {
                     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
                         eprintln!(
                             "[PREVIEW-DIAG] fn=0x{address:x} round={} hints_changed, triggering feedback loop",
@@ -160,15 +156,10 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                     continue;
                 }
                 if let Some(raw_hir) = output.raw_hir.as_ref() {
-                    crate::facts::record_interprocedural_arity_facts(
-                        &mut decomp_ctx.facts,
-                        &decomp_ctx.type_context,
-                        &raw_hir,
-                        address,
-                    );
+                    decomp_ctx.record_interprocedural_arity_facts(raw_hir, address);
                 }
                 nir_diag_stage(address, "render_preview_done", render_start);
-                return Ok(Some((output, decomp_ctx.facts)));
+                return Ok(Some((output, decomp_ctx.into_facts())));
             }
             Ok(Err(err)) => {
                 let surfaced_error = err
