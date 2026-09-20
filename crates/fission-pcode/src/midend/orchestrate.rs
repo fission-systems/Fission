@@ -138,9 +138,21 @@ pub fn render_mlil_preview_dual_layer(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
+    render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context)
+        .map(|output| output.code)
+}
+
+fn render_mlil_preview_dual_layer_output(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+    binary: Option<&LoadedBinary>,
+    type_context: Option<&PreviewTypeContext>,
+) -> Result<NirDecompileOutput, MlilPreviewError> {
     let mut scored_options = options.clone();
     scored_options.dual_layer_structuring = false;
-    let scored = render_mlil_preview_with_binary_and_context(
+    let scored = render_mlil_preview_with_binary_and_context_output(
         pcode,
         name,
         address,
@@ -154,7 +166,7 @@ pub fn render_mlil_preview_dual_layer(
     {
         return Ok(scored);
     }
-    let Some(scored_layers) = last_layered_pseudocode() else {
+    let Some(scored_layers) = scored.layered.clone() else {
         return Ok(scored);
     };
     let mut readable_options = options.clone();
@@ -163,7 +175,7 @@ pub fn render_mlil_preview_dual_layer(
     // A failure here is not a failure of the decompilation -- the scored
     // surface is already built. Fall back to sharing its tree, which is what
     // every caller got before this existed.
-    let readable = render_mlil_preview_with_binary_and_context(
+    let readable = render_mlil_preview_with_binary_and_context_output(
         pcode,
         name,
         address,
@@ -172,9 +184,16 @@ pub fn render_mlil_preview_dual_layer(
         type_context,
         None,
     );
-    let hir = match readable.ok().and_then(|_| last_layered_pseudocode()) {
-        Some(readable_layers) => readable_layers.hir,
-        None => scored_layers.hir.clone(),
+    let (mut output, hir) = match readable {
+        Ok(output) => {
+            let hir = output
+                .layered
+                .as_ref()
+                .map(|layers| layers.hir.clone())
+                .unwrap_or_else(|| scored_layers.hir.clone());
+            (output, hir)
+        }
+        Err(_) => (scored.clone(), scored_layers.hir.clone()),
     };
     // Both surfaces are presented. The two modes differ in *structuring* --
     // which is the difference that exists -- not in whether they went
@@ -185,11 +204,14 @@ pub fn render_mlil_preview_dual_layer(
     // Under this flag NIR is therefore the *accuracy* surface rather than
     // the mechanical one. The mechanical surface is what you get with the
     // flag off, which is the default.
-    store_last_layered_pseudocode(LayeredPseudocode {
+    let layered = LayeredPseudocode {
         nir: scored_layers.hir,
         hir,
-    });
-    Ok(scored)
+    };
+    output.code = scored.code;
+    output.layered = Some(layered.clone());
+    store_render_observations(&output);
+    Ok(output)
 }
 
 /// Owns the normalize-side per-function context for the duration of the
@@ -260,13 +282,41 @@ pub fn render_mlil_preview_with_binary_and_context(
     type_context: Option<&PreviewTypeContext>,
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
+    render_mlil_preview_with_binary_and_context_output(
+        pcode,
+        name,
+        address,
+        options,
+        binary,
+        type_context,
+        decomp_facts,
+    )
+    .map(|output| output.code)
+}
+
+fn render_mlil_preview_with_binary_and_context_output(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+    binary: Option<&LoadedBinary>,
+    type_context: Option<&PreviewTypeContext>,
+    decomp_facts: Option<&mut dyn DecompFacts>,
+) -> Result<NirDecompileOutput, MlilPreviewError> {
     let _ = decomp_facts;
     reset_last_render_observations();
     // Two output modes, two structurings. Handled here rather than in a
     // wrapper because the pipeline calls this entry point directly; the
     // recursive calls below clear the flag so each is a single-tree build.
     if options.dual_layer_structuring {
-        return render_mlil_preview_dual_layer(pcode, name, address, options, binary, type_context);
+        return render_mlil_preview_dual_layer_output(
+            pcode,
+            name,
+            address,
+            options,
+            binary,
+            type_context,
+        );
     }
     let debug = RenderDebugFlags::from_env();
     telemetry::reset_preview_telemetry();
@@ -351,7 +401,8 @@ pub fn render_mlil_preview_with_binary_and_context(
     // the builder's raw argument recovery (`call_recovery.rs`, which reads
     // real register writes at each call site with no arity cap at all) and
     // before any pruning touches it.
-    store_last_raw_hir_snapshot(hir.clone());
+    let raw_hir = hir.clone();
+    store_last_raw_hir_snapshot(raw_hir.clone());
     let mut build_stats = builder.preview_build_stats();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::FuncdataBuild);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::HeritageValueRecovery);
@@ -387,7 +438,8 @@ pub fn render_mlil_preview_with_binary_and_context(
     // captured before any structuring rewrite touches it. Zero effect on
     // `hir` itself -- purely a clone for whoever reads it back via
     // `take_last_prehir_snapshot`.
-    store_last_prehir_snapshot(hir.clone());
+    let prehir = hir.clone();
+    store_last_prehir_snapshot(prehir.clone());
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
     structuring::passes::pipeline::run_structuring_pipeline(
@@ -497,7 +549,8 @@ pub fn render_mlil_preview_with_binary_and_context(
     // would consider structuring's semantic output done -- any remaining
     // steps below this point are printer-facing, not semantic (see
     // `midend/AGENTS.md`: "Do not fix structuring bugs only in printer.rs").
-    store_last_hir_function_snapshot(hir.clone());
+    let hir_function = hir.clone();
+    store_last_hir_function_snapshot(hir_function.clone());
     normalize_context_guard.clear();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
@@ -528,14 +581,16 @@ pub fn render_mlil_preview_with_binary_and_context(
     // thread (register-derived binding names like a generic `uVar0` are
     // reused across unrelated functions' compilations).
     let register_origins = super::builder::take_register_origins();
+    let mut hint_stats = None;
     if let Some(context) = type_context {
         if debug.preview_debug {
             eprintln!("[mlil-preview] stage=type_hints start fn=0x{address:x}");
         }
         debug_log("type_hints_start");
         let type_hints_start = Instant::now();
-        let hint_stats = apply_preview_type_hints(&mut hir, context, &register_origins);
-        telemetry::store_preview_hint_stats(hint_stats);
+        let stats = apply_preview_type_hints(&mut hir, context, &register_origins);
+        telemetry::store_preview_hint_stats(stats.clone());
+        hint_stats = Some(stats);
         if debug.diag {
             eprintln!(
                 "[DIAG] type_hints done: fn=0x{address:x} elapsed={:.3}s",
@@ -549,7 +604,8 @@ pub fn render_mlil_preview_with_binary_and_context(
     // above: this is after the DWARF/signature overlay has put real names and
     // real type names on the bindings, which is what the printed declarations
     // will carry and what a consumer comparing against debug info needs.
-    store_last_recovered_variables(crate::render::recovered_variables(&hir));
+    let recovered_variables = crate::render::recovered_variables(&hir);
+    store_last_recovered_variables(recovered_variables.clone());
     if debug.preview_debug {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
@@ -560,12 +616,12 @@ pub fn render_mlil_preview_with_binary_and_context(
     // `render_nir` which returns the NIR-faithful surface for oracle compat.
     let layered = render_layered_pseudocode(&hir, options);
     store_last_layered_pseudocode(layered.clone());
-    let rendered = layered.nir;
+    let rendered = layered.nir.clone();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrintC);
     record_ghidra_clean_room_pipeline_complete(&mut build_stats);
     build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
     build_stats.rendered_code_len = rendered.len();
-    telemetry::store_preview_build_stats(build_stats);
+    telemetry::store_preview_build_stats(build_stats.clone());
     if debug.diag {
         eprintln!(
             "[DIAG] print done: fn=0x{address:x} elapsed={:.3}s",
@@ -576,7 +632,16 @@ pub fn render_mlil_preview_with_binary_and_context(
         eprintln!("[mlil-preview] stage=print done fn=0x{address:x}");
     }
     debug_log("print_done");
-    Ok(rendered)
+    Ok(NirDecompileOutput {
+        code: rendered,
+        layered: Some(layered),
+        raw_hir: Some(raw_hir),
+        prehir: Some(prehir),
+        hir_function: Some(hir_function),
+        recovered_variables: Some(recovered_variables),
+        build_stats: Some(build_stats),
+        hint_stats,
+    })
 }
 
 thread_local! {
@@ -725,6 +790,30 @@ pub fn take_last_recovered_variables() -> Option<Vec<crate::render::RecoveredVar
 /// Clone the latest recovered-variable list without consuming it.
 pub fn last_recovered_variables() -> Option<Vec<crate::render::RecoveredVariable>> {
     LAST_RECOVERED_VARIABLES.with(|slot| slot.borrow().clone())
+}
+
+fn store_render_observations(output: &NirDecompileOutput) {
+    if let Some(layered) = output.layered.as_ref() {
+        store_last_layered_pseudocode(layered.clone());
+    }
+    if let Some(raw_hir) = output.raw_hir.as_ref() {
+        store_last_raw_hir_snapshot(raw_hir.clone());
+    }
+    if let Some(prehir) = output.prehir.as_ref() {
+        store_last_prehir_snapshot(prehir.clone());
+    }
+    if let Some(hir_function) = output.hir_function.as_ref() {
+        store_last_hir_function_snapshot(hir_function.clone());
+    }
+    if let Some(recovered_variables) = output.recovered_variables.as_ref() {
+        store_last_recovered_variables(recovered_variables.clone());
+    }
+    if let Some(build_stats) = output.build_stats.as_ref() {
+        telemetry::store_preview_build_stats(build_stats.clone());
+    }
+    if let Some(hint_stats) = output.hint_stats.as_ref() {
+        telemetry::store_preview_hint_stats(hint_stats.clone());
+    }
 }
 
 fn reset_last_render_observations() {
@@ -892,8 +981,9 @@ pub fn render_nir_with_context_output(
     )
 }
 
-/// Binary-aware typed NIR render result. The compatibility observation cells
-/// are read without consuming them while this bridge remains in place.
+/// Binary-aware typed NIR render result. This calls the canonical pipeline
+/// directly; the legacy observation cells are populated as compatibility
+/// adapters, not used to assemble this result.
 pub fn render_nir_with_binary_and_context_output(
     pcode: &PcodeFunction,
     name: &str,
@@ -903,7 +993,7 @@ pub fn render_nir_with_binary_and_context_output(
     type_context: Option<&NirTypeContext>,
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<NirDecompileOutput, MlilPreviewError> {
-    let code = render_nir_with_binary_and_context(
+    render_mlil_preview_with_binary_and_context_output(
         pcode,
         name,
         address,
@@ -911,15 +1001,5 @@ pub fn render_nir_with_binary_and_context_output(
         binary,
         type_context,
         decomp_facts,
-    )?;
-    Ok(NirDecompileOutput {
-        code,
-        layered: last_layered_pseudocode(),
-        raw_hir: last_raw_hir_snapshot(),
-        prehir: last_prehir_snapshot(),
-        hir_function: last_hir_function_snapshot(),
-        recovered_variables: last_recovered_variables(),
-        build_stats: telemetry::last_nir_build_stats(),
-        hint_stats: telemetry::last_nir_hint_stats(),
-    })
+    )
 }
