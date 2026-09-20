@@ -11,15 +11,15 @@ use super::super::analysis::preservation::{
 /// ## Copy Propagation (`copy_propagation_pass`)
 ///
 /// For every assignment `x = y` where `y` is a named variable and `x` is a
-/// pure temporary with a single definition, substitutes `y` for every use of
-/// `x` throughout the function and removes the assignment.
+/// pure temporary with a single definition, substitutes `y` for later uses of
+/// `x` in the same straight-line statement run and removes the assignment when
+/// all of its uses are covered by that run. Constant propagation follows the
+/// same scope rule.
 ///
-/// This is safe when:
-/// - `x` has exactly one definition in the entire function body
-/// - `y` is never re-assigned between the definition of `x` and any use of `x`
-///   (conservatively approximated by requiring `y` to have no assignment at all
-///   in the subtree between the definition and the last use — for the linear
-///   case we simply require that `y` is not a pure temp that gets redefined)
+/// A whole-function definition count is only an admission guard. It is not a
+/// dominance proof: a single definition can still live in one branch or one
+/// loop iteration. The active replacement map is therefore cleared at every
+/// control-flow boundary, label, goto, call, and nested statement list.
 ///
 /// ## Join Variable Coalescing (`join_coalescing_pass`)
 ///
@@ -47,60 +47,46 @@ pub fn copy_propagation_pass(func: &mut PreHirFunction) -> bool {
 
     // --- Phase 1: Standard Copy Propagation ---
     let preserved_temps = preserved_materialization_names(&func.locals);
-    let temp_names: HashSet<&str> = func
+    let temp_names: HashSet<String> = func
         .locals
         .iter()
         .filter(|b| b.is_temp_like() && !address_taken.contains(&b.name))
-        .map(|b| b.name.as_str())
+        .map(|b| b.name.clone())
         .collect();
 
     if !temp_names.is_empty() {
-        let def_count = count_definitions_in_stmts(&func.body, &temp_names);
-        let mut copy_map: HashMap<String, String> = HashMap::default();
-        collect_copies(&func.body, &temp_names, &def_count, &mut copy_map);
+        let defuse = DefUseMap::build(&func.body);
+        let def_count = defuse.def_count;
+        let global_reads = defuse.use_count;
+        let mut predicate_vars = HashSet::default();
+        collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
+        let mut excluded_names: HashSet<String> =
+            predicate_vars.into_iter().map(str::to_owned).collect();
+        excluded_names.extend(preserved_temps.iter().map(|name| (*name).to_owned()));
+        excluded_names.extend(loop_preservation_vars.iter().cloned());
+        let preserved_skip_count = count_preserved_copyprop_candidates(
+            &func.body,
+            &temp_names,
+            &preserved_temps,
+            &def_count,
+        );
 
-        if !copy_map.is_empty() {
-            let mut predicate_vars = HashSet::default();
-            collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
-            copy_map.retain(|name, _| !predicate_vars.contains(name.as_str()));
-            let preserved_skip_count = copy_map
-                .iter()
-                .filter(|(name, source)| {
-                    should_skip_copyprop_for_preserved_name(name, &preserved_temps)
-                        || should_skip_copyprop_for_preserved_name(source, &preserved_temps)
-                })
-                .count();
-            copy_map.retain(|name, source| {
-                !should_skip_copyprop_for_preserved_name(name, &preserved_temps)
-                    && !should_skip_copyprop_for_preserved_name(source, &preserved_temps)
-                    && !loop_preservation_vars.contains(name.as_str())
-                    && !loop_preservation_vars.contains(source.as_str())
-            });
-            wave_stats::add_preserved_temp_copyprop_skip(preserved_skip_count);
-
-            if !copy_map.is_empty() {
-                copy_map.retain(|_x, y| {
-                    let y_def_count = def_count.get(y.as_str()).copied().unwrap_or(0);
-                    y_def_count <= 1
-                });
-
-                // Both `edx = param_3` and `uVar8 = edx` can be in the map at
-                // once. Every entry's definition is removed, but substitution
-                // runs once, so replacing `uVar8` with `edx` re-introduces a
-                // name whose own definition has just gone -- `bounded_checksum`
-                // at gcc-m32 -O0 ended up returning an undefined `edx`.
-                // Resolve each target to the end of its chain first.
-                resolve_copy_chains(&mut copy_map);
-                if !copy_map.is_empty() {
-                    remove_copy_assigns(&mut func.body, &copy_map, &mut changed);
-                    substitute_copies_in_stmts(&mut func.body, &copy_map, &mut changed);
-                }
-            }
-        }
+        let kind = LinearReplacementKind::Copies {
+            destinations: &temp_names,
+            excluded: &excluded_names,
+        };
+        propagate_linear_replacements(
+            &mut func.body,
+            &kind,
+            &def_count,
+            &global_reads,
+            &mut changed,
+        );
+        wave_stats::add_preserved_temp_copyprop_skip(preserved_skip_count);
     }
 
     // --- Phase 2: Constant Propagation for Primitive Variables ---
-    let eligible_vars: HashSet<&str> = func
+    let eligible_vars: HashSet<String> = func
         .locals
         .iter()
         .filter(|b| {
@@ -111,18 +97,23 @@ pub fn copy_propagation_pass(func: &mut PreHirFunction) -> bool {
                 && !loop_preservation_vars.contains(b.name.as_str())
                 && !address_taken.contains(&b.name)
         })
-        .map(|b| b.name.as_str())
+        .map(|b| b.name.clone())
         .collect();
 
     if !eligible_vars.is_empty() {
-        let def_count = count_definitions_in_stmts(&func.body, &eligible_vars);
-        let mut const_map = HashMap::default();
-        collect_constants(&func.body, &eligible_vars, &def_count, &mut const_map);
-
-        if !const_map.is_empty() {
-            remove_constant_assigns(&mut func.body, &const_map, &mut changed);
-            substitute_constants_in_stmts(&mut func.body, &const_map, &mut changed);
-        }
+        let defuse = DefUseMap::build(&func.body);
+        let def_count = defuse.def_count;
+        let global_reads = defuse.use_count;
+        let kind = LinearReplacementKind::Constants {
+            destinations: &eligible_vars,
+        };
+        propagate_linear_replacements(
+            &mut func.body,
+            &kind,
+            &def_count,
+            &global_reads,
+            &mut changed,
+        );
     }
 
     if changed {
@@ -290,6 +281,622 @@ mod tests {
             PreHirStmt::Return(Some(PreHirExpr::Const(0, _)))
         ));
         assert!(func.locals.is_empty());
+    }
+
+    #[test]
+    fn constant_propagation_does_not_cross_conditional_definition() {
+        let mut func = PreHirFunction {
+            name: "test_conditional_constant_definition".to_string(),
+            locals: vec![PreHirBinding {
+                name: "result".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(4)),
+                initializer: None,
+            }],
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("condition".to_string()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("result".to_string()),
+                        rhs: PreHirExpr::Const(42, int(32)),
+                    }]
+                    .into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("result".to_string()))),
+            ],
+            ..Default::default()
+        };
+        let before = func.clone();
+
+        assert!(!copy_propagation_pass(&mut func));
+        assert_eq!(func, before);
+    }
+
+    #[test]
+    fn copy_propagation_does_not_cross_conditional_definition() {
+        let mut func = PreHirFunction {
+            name: "test_conditional_copy_definition".to_string(),
+            locals: vec![PreHirBinding {
+                name: "uVar0".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("condition".to_string()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("uVar0".to_string()),
+                        rhs: PreHirExpr::Var("source".to_string()),
+                    }]
+                    .into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("uVar0".to_string()))),
+            ],
+            ..Default::default()
+        };
+        let before = func.clone();
+
+        assert!(!copy_propagation_pass(&mut func));
+        assert_eq!(func, before);
+    }
+
+    #[test]
+    fn constant_propagation_does_not_cross_loop_definition() {
+        let mut func = PreHirFunction {
+            name: "test_loop_constant_definition".to_string(),
+            locals: vec![PreHirBinding {
+                name: "result".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(4)),
+                initializer: None,
+            }],
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::While {
+                    cond: PreHirExpr::Var("condition".to_string()),
+                    body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("result".to_string()),
+                        rhs: PreHirExpr::Const(42, int(32)),
+                    }]
+                    .into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("result".to_string()))),
+            ],
+            ..Default::default()
+        };
+        let before = func.clone();
+
+        assert!(!copy_propagation_pass(&mut func));
+        assert_eq!(func, before);
+    }
+
+    #[test]
+    fn constant_propagation_does_not_cross_switch_definition() {
+        let mut func = PreHirFunction {
+            name: "test_switch_constant_definition".to_string(),
+            locals: vec![PreHirBinding {
+                name: "result".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(4)),
+                initializer: None,
+            }],
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Switch {
+                    expr: PreHirExpr::Var("selector".to_string()),
+                    cases: vec![PreHirSwitchCase {
+                        values: vec![1],
+                        body: vec![PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("result".to_string()),
+                            rhs: PreHirExpr::Const(42, int(32)),
+                        }]
+                        .into(),
+                    }],
+                    default: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("result".to_string()))),
+            ],
+            ..Default::default()
+        };
+        let before = func.clone();
+
+        assert!(!copy_propagation_pass(&mut func));
+        assert_eq!(func, before);
+    }
+}
+
+fn count_preserved_copyprop_candidates(
+    stmts: &[PreHirStmt],
+    destinations: &HashSet<String>,
+    preserved: &HashSet<&str>,
+    def_count: &HashMap<String, usize>,
+) -> usize {
+    fn visit(
+        stmt: &PreHirStmt,
+        destinations: &HashSet<String>,
+        preserved: &HashSet<&str>,
+        def_count: &HashMap<String, usize>,
+    ) -> usize {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Var(source),
+            } if destinations.contains(name)
+                && def_count.get(name).copied().unwrap_or(0) == 1
+                && name != source
+                && (preserved.contains(name.as_str()) || preserved.contains(source.as_str())) =>
+            {
+                1
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => body
+                .iter()
+                .map(|stmt| visit(stmt, destinations, preserved, def_count))
+                .sum(),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => then_body
+                .iter()
+                .chain(else_body.iter())
+                .map(|stmt| visit(stmt, destinations, preserved, def_count))
+                .sum(),
+            PreHirStmt::For {
+                init, update, body, ..
+            } => init
+                .iter()
+                .chain(update.iter())
+                .map(|stmt| visit(stmt, destinations, preserved, def_count))
+                .chain(
+                    body.iter()
+                        .map(|stmt| visit(stmt, destinations, preserved, def_count)),
+                )
+                .sum(),
+            PreHirStmt::Switch { cases, default, .. } => cases
+                .iter()
+                .flat_map(|case| case.body.iter())
+                .chain(default.iter())
+                .map(|stmt| visit(stmt, destinations, preserved, def_count))
+                .sum(),
+            _ => 0,
+        }
+    }
+
+    stmts
+        .iter()
+        .map(|stmt| visit(stmt, destinations, preserved, def_count))
+        .sum()
+}
+
+/// The old propagation phases used a function-wide replacement map.  That map
+/// was populated by walking into branches and loops, even though a
+/// whole-function definition count does not prove that the definition
+/// dominates its uses.  Keep the two replacement kinds separate at the
+/// admission point, but share the control-flow-scoped walk below.
+enum LinearReplacementKind<'a> {
+    Copies {
+        destinations: &'a HashSet<String>,
+        excluded: &'a HashSet<String>,
+    },
+    Constants {
+        destinations: &'a HashSet<String>,
+    },
+}
+
+impl LinearReplacementKind<'_> {
+    fn candidate(
+        &self,
+        stmt: &PreHirStmt,
+        def_count: &HashMap<String, usize>,
+    ) -> Option<(String, PreHirExpr)> {
+        match self {
+            Self::Copies {
+                destinations,
+                excluded,
+            } => {
+                let PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs: PreHirExpr::Var(source),
+                } = stmt
+                else {
+                    return None;
+                };
+                if !destinations.contains(name)
+                    || excluded.contains(name)
+                    || excluded.contains(source)
+                    || name == source
+                    || def_count.get(name).copied().unwrap_or(0) != 1
+                    || def_count.get(source).copied().unwrap_or(0) > 1
+                {
+                    return None;
+                }
+                Some((name.clone(), PreHirExpr::Var(source.clone())))
+            }
+            Self::Constants { destinations } => {
+                let PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs: rhs @ PreHirExpr::Const(_, _),
+                } = stmt
+                else {
+                    return None;
+                };
+                if !destinations.contains(name) || def_count.get(name).copied().unwrap_or(0) != 1 {
+                    return None;
+                }
+                Some((name.clone(), rhs.clone()))
+            }
+        }
+    }
+}
+
+/// Apply replacements only inside straight-line statement runs.
+///
+/// A replacement assignment is removed only when every read of its destination
+/// is in the same run, after the definition, and the active replacement is not
+/// invalidated before the run ends.  This makes the transform conservative in
+/// the presence of residual labels/gotos and structured control flow while
+/// retaining the useful straight-line copy/constant cleanup.
+fn propagate_linear_replacements(
+    stmts: &mut Vec<PreHirStmt>,
+    kind: &LinearReplacementKind<'_>,
+    def_count: &HashMap<String, usize>,
+    global_reads: &HashMap<String, usize>,
+    changed: &mut bool,
+) {
+    let direct_reads = count_direct_linear_reads(stmts);
+    let mut seen_names: HashSet<String> = HashSet::default();
+    let mut active: HashMap<String, PreHirExpr> = HashMap::default();
+    let mut active_indices: HashMap<String, usize> = HashMap::default();
+    let mut removable: HashMap<usize, bool> = HashMap::default();
+
+    for index in 0..stmts.len() {
+        let names_here = statement_names(&stmts[index]);
+
+        match &mut stmts[index] {
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Return(_) => {
+                substitute_constants_in_stmt(&mut stmts[index], &active, changed);
+                let has_call = stmt_contains_call(&stmts[index]);
+                let candidate = kind.candidate(&stmts[index], def_count);
+
+                if let PreHirStmt::Assign { lhs, .. } = &stmts[index] {
+                    if let PreHirLValue::Var(destination) = lhs {
+                        let destination = destination.clone();
+                        let mut writes = HashSet::default();
+                        writes.insert(destination.clone());
+                        invalidate_active_replacements(
+                            &mut active,
+                            &mut active_indices,
+                            &mut removable,
+                            &writes,
+                        );
+
+                        if let Some((name, replacement)) = candidate {
+                            let can_remove = !seen_names.contains(name.as_str())
+                                && global_reads.get(&name).copied().unwrap_or(0)
+                                    == direct_reads.get(&name).copied().unwrap_or(0);
+                            active_indices.insert(name.clone(), index);
+                            active.insert(name, replacement);
+                            removable.insert(index, can_remove);
+                        }
+                    } else {
+                        clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+                    }
+                }
+
+                if has_call {
+                    clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+                }
+                // A return is terminal. Keep the active map long enough for
+                // `x = 1; return x` to retire the pure defining assignment;
+                // a later label/goto still clears it before any re-entry path.
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                substitute_constants_expr(cond, &active, changed);
+                propagate_linear_replacements(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    kind,
+                    def_count,
+                    global_reads,
+                    changed,
+                );
+                propagate_linear_replacements(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    kind,
+                    def_count,
+                    global_reads,
+                    changed,
+                );
+                clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+            }
+            PreHirStmt::While { cond, body } => {
+                substitute_constants_expr(cond, &active, changed);
+                propagate_linear_replacements(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    kind,
+                    def_count,
+                    global_reads,
+                    changed,
+                );
+                clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+            }
+            PreHirStmt::DoWhile { body, .. } => {
+                propagate_linear_replacements(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    kind,
+                    def_count,
+                    global_reads,
+                    changed,
+                );
+                clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    substitute_constants_in_stmt(init, &active, changed);
+                    propagate_linear_replacement_slot(init, kind, def_count, global_reads, changed);
+                }
+                if let Some(cond) = cond {
+                    substitute_constants_expr(cond, &active, changed);
+                }
+                if let Some(update) = update {
+                    propagate_linear_replacement_slot(
+                        update,
+                        kind,
+                        def_count,
+                        global_reads,
+                        changed,
+                    );
+                }
+                propagate_linear_replacements(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    kind,
+                    def_count,
+                    global_reads,
+                    changed,
+                );
+                clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                substitute_constants_expr(expr, &active, changed);
+                for case in cases {
+                    propagate_linear_replacements(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        kind,
+                        def_count,
+                        global_reads,
+                        changed,
+                    );
+                }
+                propagate_linear_replacements(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    kind,
+                    def_count,
+                    global_reads,
+                    changed,
+                );
+                clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+            }
+            PreHirStmt::Block(body) => {
+                propagate_linear_replacements(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    kind,
+                    def_count,
+                    global_reads,
+                    changed,
+                );
+                clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+            }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {
+                clear_active_replacements(&mut active, &mut active_indices, &mut removable);
+            }
+        }
+
+        // Names observed before the next definition make that later
+        // definition non-removable, even if the use is in a nested construct.
+        seen_names.extend(names_here);
+    }
+
+    let mut remove_indices = HashSet::default();
+    for (index, can_remove) in removable {
+        if can_remove {
+            remove_indices.insert(index);
+        }
+    }
+    if !remove_indices.is_empty() {
+        let old = std::mem::take(stmts);
+        *stmts = old
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, stmt)| {
+                if remove_indices.contains(&index) {
+                    *changed = true;
+                    None
+                } else {
+                    Some(stmt)
+                }
+            })
+            .collect();
+    }
+}
+
+fn propagate_linear_replacement_slot(
+    slot: &mut Box<PreHirStmt>,
+    kind: &LinearReplacementKind<'_>,
+    def_count: &HashMap<String, usize>,
+    global_reads: &HashMap<String, usize>,
+    changed: &mut bool,
+) {
+    let owned = std::mem::replace(slot, Box::new(PreHirStmt::Return(None)));
+    let original = (*owned).clone();
+    let mut stmts = vec![*owned];
+    propagate_linear_replacements(&mut stmts, kind, def_count, global_reads, changed);
+    if let Some(stmt) = stmts.pop() {
+        *slot = Box::new(stmt);
+    } else {
+        // A `For` header is part of the loop contract. Keep an elided pure
+        // assignment when the generic run walker proved it dead rather than
+        // changing the header's shape here.
+        *slot = Box::new(original);
+    }
+}
+
+fn count_direct_linear_reads(stmts: &[PreHirStmt]) -> HashMap<String, usize> {
+    let mut counts = HashMap::default();
+    for stmt in stmts {
+        if is_linear_propagation_stmt(stmt) {
+            for (name, count) in DefUseMap::build(std::slice::from_ref(stmt)).use_count {
+                *counts.entry(name).or_default() += count;
+            }
+        }
+    }
+    counts
+}
+
+fn is_linear_propagation_stmt(stmt: &PreHirStmt) -> bool {
+    matches!(
+        stmt,
+        PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Return(_)
+    )
+}
+
+fn statement_names(stmt: &PreHirStmt) -> HashSet<String> {
+    let mut names = HashSet::default();
+    let mut borrowed = HashSet::default();
+    collect_all_vars_in_stmt(stmt, &mut borrowed);
+    names.extend(borrowed.into_iter().map(str::to_owned));
+    names
+}
+
+fn invalidate_active_replacements(
+    active: &mut HashMap<String, PreHirExpr>,
+    active_indices: &mut HashMap<String, usize>,
+    removable: &mut HashMap<usize, bool>,
+    writes: &HashSet<String>,
+) {
+    let invalidated: Vec<String> = active
+        .iter()
+        .filter_map(|(destination, replacement)| {
+            let mut replacement_names = HashSet::default();
+            collect_vars_in_expr(replacement, &mut replacement_names);
+            if writes.contains(destination)
+                || replacement_names.iter().any(|name| writes.contains(*name))
+            {
+                Some(destination.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    for destination in invalidated {
+        if let Some(index) = active_indices.remove(&destination) {
+            removable.insert(index, false);
+        }
+        active.remove(&destination);
+    }
+}
+
+fn clear_active_replacements(
+    active: &mut HashMap<String, PreHirExpr>,
+    active_indices: &mut HashMap<String, usize>,
+    removable: &mut HashMap<usize, bool>,
+) {
+    for index in active_indices.values().copied() {
+        removable.insert(index, false);
+    }
+    active.clear();
+    active_indices.clear();
+}
+
+fn stmt_contains_call(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => lvalue_contains_call(lhs) || expr_contains_call(rhs),
+        PreHirStmt::VaStart { va_list, .. }
+        | PreHirStmt::Expr(va_list)
+        | PreHirStmt::Return(Some(va_list)) => expr_contains_call(va_list),
+        PreHirStmt::Return(None)
+        | PreHirStmt::Block(_)
+        | PreHirStmt::Switch { .. }
+        | PreHirStmt::If { .. }
+        | PreHirStmt::While { .. }
+        | PreHirStmt::DoWhile { .. }
+        | PreHirStmt::For { .. }
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
+    }
+}
+
+fn lvalue_contains_call(lhs: &PreHirLValue) -> bool {
+    match lhs {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_contains_call(ptr),
+        PreHirLValue::Index { base, index, .. } => {
+            expr_contains_call(base) || expr_contains_call(index)
+        }
+        PreHirLValue::FieldAccess { base, .. } => expr_contains_call(base),
+    }
+}
+
+fn expr_contains_call(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_contains_call(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_contains_call(lhs) || expr_contains_call(rhs),
+        PreHirExpr::Index { base, index, .. } => {
+            expr_contains_call(base) || expr_contains_call(index)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_call(cond)
+                || expr_contains_call(then_expr)
+                || expr_contains_call(else_expr)
+        }
     }
 }
 
