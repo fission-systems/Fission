@@ -106,6 +106,8 @@ pub struct DebugSession {
 pub struct DebugSessionBuilder {
     with_timeline: bool,
     use_emulator: bool,
+    #[cfg(target_os = "linux")]
+    rr: Option<crate::debug::rr::RRDebugger>,
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -119,35 +121,69 @@ impl DebugSessionBuilder {
     /// Use the emulator backend instead of the native platform debugger.
     pub fn with_emulator(mut self) -> Self {
         self.use_emulator = true;
+        #[cfg(target_os = "linux")]
+        {
+            self.rr = None;
+        }
+        self
+    }
+
+    /// Use an already-opened Mozilla RR replay as the session timeline.
+    ///
+    /// RR owns process replay rather than live ptrace execution, so selecting
+    /// it also selects the native debugger session and cannot be combined with
+    /// [`Self::with_emulator`].  Call [`crate::debug::rr::RRDebugger::replay`]
+    /// before passing the debugger here so replay errors remain explicit.
+    #[cfg(target_os = "linux")]
+    pub fn with_rr(mut self, rr: crate::debug::rr::RRDebugger) -> Self {
+        self.rr = Some(rr);
+        self.use_emulator = false;
+        self.with_timeline = true;
         self
     }
 
     /// Build the [`DebugSession`], wiring up the timeline if requested.
     pub fn build(self) -> DebugSession {
         if self.use_emulator {
-            let debugger = crate::debug::EmulatorBackend::new();
+            let timeline = make_timeline(self.with_timeline);
+            let mut debugger = crate::debug::EmulatorBackend::new();
+            if let Some(arc) = &timeline {
+                debugger.set_timeline(arc.clone());
+            }
             return DebugSession {
                 debugger: Box::new(debugger),
-                timeline: None, // Timeline recording with emulator not yet supported
+                timeline,
             };
         }
 
-        let debugger = PlatformDebugger::default();
-        let timeline = if self.with_timeline {
-            let arc = Arc::new(Mutex::new(Timeline::new()));
-            // Only the Win32 backend records into a timeline, and it is not
-            // in every build (see `windows_native_debugger`).
-            #[cfg(all(target_os = "windows", feature = "windows_native_debugger"))]
-            debugger.set_ttd_timeline(arc.clone());
-            Some(arc)
-        } else {
-            None
-        };
+        #[cfg(target_os = "linux")]
+        let timeline = self
+            .rr
+            .map(|rr| Arc::new(Mutex::new(Timeline::new_rr(rr))))
+            .or_else(|| make_timeline(self.with_timeline));
+        #[cfg(not(target_os = "linux"))]
+        let timeline = make_timeline(self.with_timeline);
+        let mut debugger = PlatformDebugger::default();
+        if let Some(arc) = &timeline {
+            debugger.set_timeline(arc.clone());
+        }
         DebugSession {
             debugger: Box::new(debugger),
             timeline,
         }
     }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+fn make_timeline(enabled: bool) -> Option<Arc<Mutex<Timeline>>> {
+    if !enabled {
+        return None;
+    }
+    let timeline = Arc::new(Mutex::new(Timeline::new()));
+    if let Ok(mut timeline_guard) = timeline.lock() {
+        timeline_guard.start_recording();
+    }
+    Some(timeline)
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -157,6 +193,8 @@ impl DebugSession {
         DebugSessionBuilder {
             with_timeline: false,
             use_emulator: false,
+            #[cfg(target_os = "linux")]
+            rr: None,
         }
     }
 
@@ -182,6 +220,39 @@ impl DebugSession {
     /// Convenience: launch a new process under the debugger.
     pub fn launch(&mut self, path: &str, args: &[String]) -> fission_core::Result<u32> {
         self.debugger.launch(path, args)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_timeline_exposes_a_recording_session_timeline() {
+        let native = DebugSession::new().with_timeline().build();
+        let native_timeline = native.timeline.expect("native timeline");
+        assert!(native_timeline.lock().unwrap().is_recording());
+
+        let emulator = DebugSession::new().with_emulator().with_timeline().build();
+        let emulator_timeline = emulator.timeline.expect("emulator timeline");
+        assert!(emulator_timeline.lock().unwrap().is_recording());
+    }
+
+    #[test]
+    fn emulator_backend_records_each_execution_stop() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../fission-emulator/testdata/x64_concolic_branch_sys.elf");
+        let mut session = DebugSession::new().with_emulator().with_timeline().build();
+        session
+            .launch(path.to_str().expect("fixture path"), &[])
+            .expect("launch emulator fixture");
+        session
+            .debugger
+            .single_step()
+            .expect("single-step emulator fixture");
+
+        let timeline = session.timeline.expect("emulator timeline");
+        assert_eq!(timeline.lock().unwrap().snapshot_count(), 1);
     }
 }
 pub mod emulator_backend;

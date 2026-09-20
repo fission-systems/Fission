@@ -906,6 +906,10 @@ impl Default for WindowsDebugger {
 unsafe impl Send for WindowsDebugger {}
 
 impl ExecutionBackend for WindowsDebugger {
+    fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
+        self.set_ttd_timeline(timeline);
+    }
+
     fn enumerate_processes() -> Vec<ProcessInfo> {
         process::enumerate_processes()
     }

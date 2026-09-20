@@ -1,7 +1,9 @@
+use crate::debug::timeline::Timeline;
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{ProcessInfo, RegisterState};
 use fission_core::Result as FissionResult;
 use fission_emulator::core::{Emulator, InstructionShape, RunOutcome};
+use std::sync::{Arc, Mutex};
 
 /// The handle the debug layer uses for "the emulated process".
 ///
@@ -19,6 +21,8 @@ pub const EMULATED_THREAD_ID: u32 = 1;
 
 pub struct EmulatorBackend {
     pub emulator: Option<Emulator>,
+    /// Session-owned timeline receiving one snapshot for each emulated stop.
+    timeline: Option<Arc<Mutex<Timeline>>>,
     /// Why the last `continue` stopped. `run` discards this, and a front end
     /// that cannot tell a breakpoint from a finished program cannot drive a
     /// session.
@@ -34,6 +38,7 @@ impl EmulatorBackend {
     pub fn new() -> Self {
         Self {
             emulator: None,
+            timeline: None,
             last_outcome: None,
             events: std::collections::VecDeque::new(),
             stdout_reported: 0,
@@ -48,6 +53,7 @@ impl EmulatorBackend {
     fn record_stop(&mut self, outcome: RunOutcome) {
         use crate::debug::types::DebugEvent;
         self.last_outcome = Some(outcome);
+        self.record_timeline_stop();
         self.drain_guest_output();
         let event = match outcome {
             RunOutcome::HitBreakpoint(address) => Some(DebugEvent::BreakpointHit {
@@ -79,6 +85,27 @@ impl EmulatorBackend {
         };
         if let Some(event) = event {
             self.events.push_back(event);
+        }
+    }
+
+    fn record_timeline_stop(&mut self) {
+        let Some(timeline) = self.timeline.clone() else {
+            return;
+        };
+        let recording = timeline
+            .lock()
+            .map(|timeline| timeline.is_recording())
+            .unwrap_or(false);
+        if !recording {
+            return;
+        }
+        let Some(registers) = self.emulator.as_mut().map(Emulator::debug_register_state) else {
+            return;
+        };
+        if let Ok(mut timeline) = timeline.lock() {
+            if timeline.is_recording() {
+                timeline.record_event(registers, EMULATED_THREAD_ID);
+            }
         }
     }
 
@@ -159,6 +186,10 @@ impl Default for EmulatorBackend {
 }
 
 impl ExecutionBackend for EmulatorBackend {
+    fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
+        self.timeline = Some(timeline);
+    }
+
     fn enumerate_processes() -> Vec<ProcessInfo> {
         // Emulators don't have OS processes to enumerate
         Vec::new()
@@ -244,6 +275,11 @@ impl ExecutionBackend for EmulatorBackend {
         // The machine goes with it: an emulated process has nowhere else to
         // live, so detaching is the end of it and the leftover events and
         // output position belong to a process that no longer exists.
+        if let Some(timeline) = &self.timeline {
+            if let Ok(mut timeline) = timeline.lock() {
+                timeline.stop_recording();
+            }
+        }
         self.emulator = None;
         self.last_outcome = None;
         self.events.clear();
@@ -516,6 +552,11 @@ impl ExecutionBackend for EmulatorBackend {
                 .map_err(|e| fission_core::err!(debug, "ELF image failed: {}", e))?,
         }
         self.emulator = Some(emu);
+        if let Some(timeline) = &self.timeline {
+            if let Ok(mut timeline) = timeline.lock() {
+                timeline.start_recording();
+            }
+        }
         // A fresh machine: nothing it did before this belongs to it.
         self.last_outcome = None;
         self.events.clear();

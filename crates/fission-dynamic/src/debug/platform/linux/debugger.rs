@@ -2,9 +2,12 @@
 //!
 //! This module provides debugging capabilities on Linux using the ptrace system call.
 
+use crate::debug::timeline::Timeline;
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Linux debugger implementation using ptrace
 pub struct LinuxDebugger {
@@ -12,6 +15,8 @@ pub struct LinuxDebugger {
     state: DebugState,
     /// Target process ID
     target_pid: Option<u32>,
+    /// Session-owned timeline for snapshots at ptrace stop boundaries.
+    ttd_timeline: Option<Arc<Mutex<Timeline>>>,
 }
 
 impl LinuxDebugger {
@@ -20,12 +25,32 @@ impl LinuxDebugger {
         Self {
             state: DebugState::default(),
             target_pid: None,
+            ttd_timeline: None,
         }
     }
 
     /// Get current state
     pub fn state(&self) -> &DebugState {
         &self.state
+    }
+
+    fn record_ttd_snapshot(&mut self, thread_id: u32, registers: RegisterState) {
+        let Some(timeline) = &self.ttd_timeline else {
+            return;
+        };
+        if let Ok(mut timeline) = timeline.lock() {
+            if timeline.is_recording() {
+                timeline.record_event(registers, thread_id);
+            }
+        }
+    }
+
+    fn stop_ttd_recording(&self) {
+        if let Some(timeline) = &self.ttd_timeline {
+            if let Ok(mut timeline) = timeline.lock() {
+                timeline.stop_recording();
+            }
+        }
     }
 }
 
@@ -72,6 +97,10 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
 }
 
 impl ExecutionBackend for LinuxDebugger {
+    fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
+        self.ttd_timeline = Some(timeline);
+    }
+
     fn enumerate_processes() -> Vec<ProcessInfo> {
         enumerate_processes()
     }
@@ -90,6 +119,11 @@ impl ExecutionBackend for LinuxDebugger {
         self.state.attached_pid = Some(pid);
         self.state.status = DebugStatus::Suspended; // ptrace attach sends SIGSTOP
         self.state.last_event = Some(format!("Attached to PID {}", pid));
+        if let Some(timeline) = &self.ttd_timeline {
+            if let Ok(mut timeline) = timeline.lock() {
+                timeline.start_recording();
+            }
+        }
 
         Ok(())
     }
@@ -110,6 +144,7 @@ impl ExecutionBackend for LinuxDebugger {
         self.state.attached_pid = None;
         self.state.status = DebugStatus::Detached;
         self.state.last_event = Some("Detached".to_string());
+        self.stop_ttd_recording();
 
         Ok(())
     }
@@ -150,6 +185,85 @@ impl ExecutionBackend for LinuxDebugger {
 
         self.state.status = DebugStatus::Running;
         Ok(())
+    }
+
+    fn poll_event(
+        &mut self,
+        timeout_ms: u32,
+    ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
+        use nix::sys::signal::Signal;
+        use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+        use nix::unistd::Pid;
+
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
+        let start = Instant::now();
+        let timeout = Duration::from_millis(u64::from(timeout_ms));
+
+        loop {
+            let status = waitpid(Pid::from_raw(pid as i32), Some(WaitPidFlag::WNOHANG))
+                .map_err(|e| FissionError::debug(format!("waitpid failed: {}", e)))?;
+            match status {
+                WaitStatus::StillAlive => {
+                    if timeout_ms == 0 || start.elapsed() >= timeout {
+                        return Ok(None);
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                WaitStatus::Exited(_, code) => {
+                    self.state.status = DebugStatus::Terminated;
+                    self.state.event_count = self.state.event_count.saturating_add(1);
+                    self.stop_ttd_recording();
+                    return Ok(Some(crate::debug::types::DebugEvent::ProcessExited {
+                        exit_code: code as u32,
+                    }));
+                }
+                WaitStatus::Signaled(_, signal, _) => {
+                    self.state.status = DebugStatus::Terminated;
+                    self.state.event_count = self.state.event_count.saturating_add(1);
+                    self.stop_ttd_recording();
+                    return Ok(Some(crate::debug::types::DebugEvent::ProcessExited {
+                        exit_code: 128 + signal as u32,
+                    }));
+                }
+                WaitStatus::Stopped(_, signal) => {
+                    self.state.status = DebugStatus::Suspended;
+                    self.state.last_thread_id = Some(pid);
+                    self.state.current_thread_id = Some(pid);
+                    self.state.event_count = self.state.event_count.saturating_add(1);
+                    let registers = self.fetch_registers(pid)?;
+                    self.state.registers = Some(registers.clone());
+                    self.record_ttd_snapshot(pid, registers.clone());
+
+                    if signal == Signal::SIGTRAP {
+                        let breakpoint_address = registers
+                            .pc
+                            .checked_sub(1)
+                            .filter(|address| self.state.breakpoints.contains_key(address));
+                        if let Some(address) = breakpoint_address {
+                            if let Some(breakpoint) = self.state.breakpoints.get_mut(&address) {
+                                breakpoint.hits = breakpoint.hits.saturating_add(1);
+                            }
+                            return Ok(Some(crate::debug::types::DebugEvent::BreakpointHit {
+                                address,
+                                thread_id: pid,
+                            }));
+                        }
+                        return Ok(Some(crate::debug::types::DebugEvent::SingleStep {
+                            thread_id: pid,
+                        }));
+                    }
+
+                    return Ok(Some(crate::debug::types::DebugEvent::Exception {
+                        code: signal as u32,
+                        address: registers.pc,
+                        first_chance: true,
+                    }));
+                }
+                _ => {}
+            }
+        }
     }
 
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {

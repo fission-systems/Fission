@@ -26,14 +26,24 @@
 //! dbg.continue_execution()?;
 //! ```
 
+use super::timeline::Timeline;
 use super::types::{ProcessInfo, RegisterState};
 use fission_core::Result as FissionResult;
+use std::sync::{Arc, Mutex};
 
 /// Platform-agnostic debugger trait
 ///
 /// This trait defines the common interface for all platform-specific debugger implementations.
 /// Each platform (Windows, Linux, macOS) provides its own implementation.
 pub trait ExecutionBackend: Send {
+    /// Attach the session-owned timeline used for stop snapshots.
+    ///
+    /// Backends that do not execute a target can keep the default no-op.  A
+    /// live debugger or emulator that supports recording stores the shared
+    /// handle and records at its natural stop boundary; the session remains
+    /// the owner of the public timeline value.
+    fn set_timeline(&mut self, _timeline: Arc<Mutex<Timeline>>) {}
+
     /// Enumerate running processes on the system
     fn enumerate_processes() -> Vec<ProcessInfo>
     where
