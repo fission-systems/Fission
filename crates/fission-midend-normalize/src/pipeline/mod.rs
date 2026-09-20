@@ -11,7 +11,7 @@ pub use context::{GlobalSymbolContext, NormalizeContext, NormalizeContextGuard};
 pub use groups::{build_normalize_pipeline, run_normalize_pipeline};
 pub use run::{
     is_large_hir_function, normalize_expr, normalize_function_body, normalize_hir_function,
-    normalize_stmt,
+    normalize_hir_function_with_facts, normalize_stmt,
 };
 pub use stages::{
     run_stage_cleanup, run_stage_heritage_value_recovery, run_stage_memory_recovery,

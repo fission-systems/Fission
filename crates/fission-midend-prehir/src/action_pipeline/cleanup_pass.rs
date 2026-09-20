@@ -32,7 +32,7 @@ impl Pass for CleanupPass {
         self.concept
     }
 
-    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
+    fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
         if body_exceeds_early_cleanup_budget(&ctx.func.body) {
             fission_midend_core::wave_stats::add_cleanup_budget_skips(1);
             return PassOutcome::Unchanged;
@@ -77,7 +77,7 @@ impl Pass for GatedFollowupPass {
         self.cond.concept()
     }
 
-    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
+    fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
         let cond_changed = self.cond.run(ctx).changed();
         if cond_changed {
             for step in &self.then {
@@ -113,7 +113,7 @@ impl Pass for AdmissionGatedPass {
         self.inner.concept()
     }
 
-    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
+    fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
         if !(self.admits)(ctx.func) {
             if let Some(on_skip) = self.on_skip {
                 on_skip();

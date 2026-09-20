@@ -100,8 +100,21 @@ pub fn normalize_hir_function_with_context(
     func: &mut prelude::PreHirFunction,
     context: &NormalizeContext,
 ) {
+    normalize_hir_function_with_context_and_facts(func, context, None);
+}
+
+/// Run the normalize pipeline with an optional caller-owned fact sink.
+///
+/// The sink is borrowed only for this invocation and is reborrowed by the
+/// action-pipeline context. This keeps `DecompFacts` an orchestration boundary
+/// rather than making normalize depend on a concrete decompiler context.
+pub fn normalize_hir_function_with_context_and_facts(
+    func: &mut prelude::PreHirFunction,
+    context: &NormalizeContext,
+    decomp_facts: Option<&mut dyn prelude::DecompFacts>,
+) {
     let _guard = NormalizeContextGuard::install(context);
-    pipeline::normalize_hir_function(func);
+    pipeline::normalize_hir_function_with_facts(func, decomp_facts);
 }
 
 /// Take and reset normalize-wave telemetry counters for the current thread.

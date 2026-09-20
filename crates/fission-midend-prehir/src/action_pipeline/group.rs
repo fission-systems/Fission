@@ -68,7 +68,7 @@ impl ActionGroup {
         self
     }
 
-    pub fn run(&self, ctx: &mut PassCtx<'_>) -> bool {
+    pub fn run(&self, ctx: &mut PassCtx<'_, '_>) -> bool {
         if !self.gate.allows(ctx.func) {
             return false;
         }
@@ -124,7 +124,7 @@ impl ActionGroup {
         group_changed
     }
 
-    fn run_passes_once(&self, ctx: &mut PassCtx<'_>) -> bool {
+    fn run_passes_once(&self, ctx: &mut PassCtx<'_, '_>) -> bool {
         let mut changed = false;
         for pass in &self.passes {
             changed |= run_pass_logged(ctx, pass.as_ref()).changed();

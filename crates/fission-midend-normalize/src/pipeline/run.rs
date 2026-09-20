@@ -376,7 +376,19 @@ use super::context::PROTECTED_LSDA_LABELS;
 use crate::HashMap;
 
 pub fn normalize_hir_function(func: &mut PreHirFunction) {
-    super::groups::run_normalize_pipeline(func, normalize_diag_enabled(), normalize_perf_enabled());
+    normalize_hir_function_with_facts(func, None);
+}
+
+pub fn normalize_hir_function_with_facts(
+    func: &mut PreHirFunction,
+    decomp_facts: Option<&mut dyn DecompFacts>,
+) {
+    super::groups::run_normalize_pipeline(
+        func,
+        normalize_diag_enabled(),
+        normalize_perf_enabled(),
+        decomp_facts,
+    );
 }
 
 pub fn is_large_hir_function(func: &PreHirFunction) -> bool {

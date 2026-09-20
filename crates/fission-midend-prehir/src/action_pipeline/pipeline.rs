@@ -23,7 +23,7 @@ impl Pipeline {
         self
     }
 
-    pub fn run(&self, ctx: &mut PassCtx<'_>) {
+    pub fn run(&self, ctx: &mut PassCtx<'_, '_>) {
         let total_start = if ctx.perf { Some(Instant::now()) } else { None };
 
         if ctx.diag {

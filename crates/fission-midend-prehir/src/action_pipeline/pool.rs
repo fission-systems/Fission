@@ -51,7 +51,7 @@ impl Pass for ActionPool {
         self.concept
     }
 
-    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
+    fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
         let mut changed = false;
         let mut loop_changed = true;
         let mut round = 0;

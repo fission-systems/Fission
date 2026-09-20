@@ -22,7 +22,7 @@ use fission_midend_structuring::StructuringHost;
 // Owner crate (not pcode re-export path) — keeps orchestrate boundary explicit.
 use fission_midend_normalize::{
     GlobalSymbolContext, NormalizeContext, apply_callsite_type_prop_pass,
-    normalize_hir_function_with_context, take_normalize_wave_stats,
+    normalize_hir_function_with_context_and_facts, take_normalize_wave_stats,
 };
 use std::time::Instant;
 
@@ -138,7 +138,7 @@ pub fn render_mlil_preview_dual_layer(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context)
+    render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context, None)
         .map(|output| output.code)
 }
 
@@ -149,6 +149,7 @@ fn render_mlil_preview_dual_layer_output(
     options: &MlilPreviewOptions,
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
+    mut decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<NirDecompileOutput, MlilPreviewError> {
     let mut scored_options = options.clone();
     scored_options.dual_layer_structuring = false;
@@ -159,7 +160,7 @@ fn render_mlil_preview_dual_layer_output(
         &scored_options,
         binary,
         type_context,
-        None,
+        reborrow_decomp_facts(&mut decomp_facts),
     )?;
     if !options.dual_layer_structuring
         || options.selection_axis == fission_midend_core::ir::SelectionAxis::Jumps
@@ -213,6 +214,18 @@ fn render_mlil_preview_dual_layer_output(
     Ok(output)
 }
 
+fn reborrow_decomp_facts<'borrow, 'facts>(
+    decomp_facts: &'borrow mut Option<&'facts mut (dyn DecompFacts + 'facts)>,
+) -> Option<&'borrow mut (dyn DecompFacts + 'borrow)>
+where
+    'facts: 'borrow,
+{
+    match decomp_facts {
+        Some(facts) => Some(&mut **facts),
+        None => None,
+    }
+}
+
 pub fn render_mlil_preview_with_binary_and_context(
     pcode: &PcodeFunction,
     name: &str,
@@ -243,7 +256,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     type_context: Option<&PreviewTypeContext>,
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<NirDecompileOutput, MlilPreviewError> {
-    let _ = decomp_facts;
     // Two output modes, two structurings. Handled here rather than in a
     // wrapper because the pipeline calls this entry point directly. Legacy
     // string-returning wrappers install their observation compatibility state
@@ -257,6 +269,7 @@ fn render_mlil_preview_with_binary_and_context_output(
             options,
             binary,
             type_context,
+            decomp_facts,
         );
     }
     let debug = RenderDebugFlags::from_env();
@@ -362,7 +375,12 @@ fn render_mlil_preview_with_binary_and_context_output(
     // here (builder's native output) -- kept named `hir` through this
     // function for minimal diff, but its type is PreHIR until the explicit
     // conversion below.
-    normalize_hir_function_with_context(&mut hir, &normalize_context);
+    let mut decomp_facts = decomp_facts;
+    normalize_hir_function_with_context_and_facts(
+        &mut hir,
+        &normalize_context,
+        reborrow_decomp_facts(&mut decomp_facts),
+    );
     // Returned observation (the typed output owns this snapshot)
     // below): the real `PreHirFunction` structuring is about to consume,
     // captured before any structuring rewrite touches it. Zero effect on
@@ -371,10 +389,11 @@ fn render_mlil_preview_with_binary_and_context_output(
     let prehir = hir.clone();
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
-    structuring::passes::pipeline::run_structuring_pipeline(
+    structuring::passes::pipeline::run_structuring_pipeline_with_facts(
         &mut hir,
         debug.diag,
         std::env::var_os("FISSION_PREVIEW_PERF").is_some(),
+        reborrow_decomp_facts(&mut decomp_facts),
     );
     // Structuring may wrap/rearrange after normalize; drop pure identity
     // assigns that only become adjacent post-layout.

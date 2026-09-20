@@ -64,7 +64,7 @@ impl Pass for CanonicalStagePass {
         self.concept
     }
 
-    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
+    fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
         (self.run)(ctx.func, ctx.diag, ctx.perf);
         PassOutcome::Unchanged
     }
@@ -597,7 +597,12 @@ pub fn build_normalize_pipeline() -> Pipeline {
         )
 }
 
-pub fn run_normalize_pipeline(func: &mut PreHirFunction, diag: bool, perf: bool) {
+pub fn run_normalize_pipeline(
+    func: &mut PreHirFunction,
+    diag: bool,
+    perf: bool,
+    decomp_facts: Option<&mut dyn fission_midend_core::ir::DecompFacts>,
+) {
     let total_start = Instant::now();
     wave_stats::reset_normalize_wave_stats();
 
@@ -610,15 +615,17 @@ pub fn run_normalize_pipeline(func: &mut PreHirFunction, diag: bool, perf: bool)
         );
     }
 
-    let pipeline = build_normalize_pipeline();
-    let mut ctx = PassCtx {
-        func,
-        perf,
-        diag,
-        stats: None,
-        decomp_facts: None,
-    };
-    pipeline.run(&mut ctx);
+    {
+        let pipeline = build_normalize_pipeline();
+        let mut ctx = PassCtx {
+            func,
+            perf,
+            diag,
+            stats: None,
+            decomp_facts,
+        };
+        pipeline.run(&mut ctx);
+    }
 
     if perf {
         let (final_stmts, final_locals) = fission_midend_prehir::action_pipeline::hir_shape(func);

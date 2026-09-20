@@ -57,15 +57,15 @@ impl PassOutcome {
     }
 }
 
-pub struct PassCtx<'a> {
-    pub func: &'a mut PreHirFunction,
+pub struct PassCtx<'func, 'facts> {
+    pub func: &'func mut PreHirFunction,
     pub perf: bool,
     pub diag: bool,
-    pub stats: Option<&'a mut NirBuildStats>,
-    pub decomp_facts: Option<&'a mut dyn DecompFacts>,
+    pub stats: Option<&'func mut NirBuildStats>,
+    pub decomp_facts: Option<&'facts mut dyn DecompFacts>,
 }
 
-impl<'a> PassCtx<'a> {
+impl<'func, 'facts> PassCtx<'func, 'facts> {
     pub fn record_stage(&mut self, concept: GhidraActionConcept) {
         if let Some(stats) = self.stats.as_deref_mut() {
             record_ghidra_action_stage(stats, concept);
@@ -76,7 +76,7 @@ impl<'a> PassCtx<'a> {
 pub trait Pass {
     fn name(&self) -> &'static str;
     fn concept(&self) -> GhidraActionConcept;
-    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome;
+    fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome;
 }
 
 /// Wraps an existing `fn(&mut PreHirFunction) -> bool` pass.
@@ -95,7 +95,7 @@ impl Pass for FnPass {
         self.concept
     }
 
-    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
+    fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
         PassOutcome::from_bool((self.f)(ctx.func))
     }
 }
@@ -109,7 +109,7 @@ pub fn fn_pass(
 }
 
 /// Runs a pass with telemetry, timing, and wave stats recording.
-pub fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_>, pass: &P) -> PassOutcome {
+pub fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_, '_>, pass: &P) -> PassOutcome {
     let pass_name = pass.name();
     let _span = debug_span!(
         "normalize_pass",

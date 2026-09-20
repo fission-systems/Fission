@@ -43,7 +43,7 @@ impl Pass for PostStructuringCleanupPass {
         GhidraActionConcept::BlockGraphStructuring
     }
 
-    fn run(&self, _ctx: &mut PassCtx<'_>) -> PassOutcome {
+    fn run(&self, _ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
         // Currently a no-op shim.  The structuring work is embedded in
         // PreviewBuilder::build_hir.  This Pass exists to:
         //   a) make the structuring stage visible in PassTrace / telemetry, and
@@ -73,13 +73,22 @@ pub(crate) fn build_structuring_pipeline() -> Pipeline {
 /// Called from `render_mlil_preview_with_binary_and_context` after
 /// `PreviewBuilder::build_hir` returns the initial HIR.
 pub(crate) fn run_structuring_pipeline(func: &mut PreHirFunction, diag: bool, perf: bool) {
+    run_structuring_pipeline_with_facts(func, diag, perf, None);
+}
+
+pub(crate) fn run_structuring_pipeline_with_facts(
+    func: &mut PreHirFunction,
+    diag: bool,
+    perf: bool,
+    decomp_facts: Option<&mut dyn crate::midend::DecompFacts>,
+) {
     let pipeline = build_structuring_pipeline();
     let mut ctx = PassCtx {
         func,
         diag,
         perf,
         stats: None,
-        decomp_facts: None,
+        decomp_facts,
     };
     pipeline.run(&mut ctx);
 }
