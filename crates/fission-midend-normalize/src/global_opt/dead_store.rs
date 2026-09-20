@@ -252,13 +252,17 @@ fn recurse_remove(stmt: &mut PreHirStmt, paths: &[&StmtPath], depth: usize) {
                 0,
             );
         }
-        PreHirStmt::For { body, .. } => {
+        PreHirStmt::For {
+            init, body, update, ..
+        } => {
+            remove_at_optional_branch(init, paths, depth, 0);
             remove_at_branch(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 paths,
                 depth,
                 1,
             );
+            remove_at_optional_branch(update, paths, depth, 2);
         }
         PreHirStmt::Block(stmts) => {
             let top: crate::HashSet<usize> = paths
@@ -280,6 +284,33 @@ fn recurse_remove(stmt: &mut PreHirStmt, paths: &[&StmtPath], depth: usize) {
             }
         }
         _ => {}
+    }
+}
+
+/// Remove a selected statement from a single-statement `For` header, or
+/// recurse into it when the collector recorded a nested path. `init` and
+/// `update` use the same path branch convention as the vector-backed body, but
+/// need an optional-slot adapter because they are not statement lists.
+fn remove_at_optional_branch(
+    slot: &mut Option<Box<PreHirStmt>>,
+    paths: &[&StmtPath],
+    depth: usize,
+    branch: usize,
+) {
+    let relevant: Vec<&StmtPath> = paths
+        .iter()
+        .copied()
+        .filter(|p| p.0.len() > depth && p.0[depth] == branch)
+        .collect();
+    if relevant.is_empty() {
+        return;
+    }
+    if relevant.iter().any(|p| p.0.len() == depth + 1) {
+        *slot = None;
+        return;
+    }
+    if let Some(stmt) = slot.as_mut() {
+        recurse_remove(stmt, &relevant, depth + 1);
     }
 }
 
@@ -318,6 +349,7 @@ fn remove_at_branch(body: &mut Vec<PreHirStmt>, paths: &[&StmtPath], depth: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
 
     fn ptr_binding(name: &str) -> PreHirBinding {
         PreHirBinding {
@@ -342,6 +374,25 @@ mod tests {
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
+        }
+    }
+
+    fn dead_stack_store(name: &str, value: i64) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var(name.to_string())),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            },
+            rhs: PreHirExpr::Const(
+                value,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
         }
     }
 
@@ -543,5 +594,27 @@ mod tests {
             "a provably-dead, never-read local write should still be removed"
         );
         assert!(func.body.is_empty(), "{:?}", func.body);
+    }
+
+    #[test]
+    fn dead_store_elimination_removes_for_init_and_update_writes() {
+        let mut func = base_func(
+            vec![PreHirStmt::For {
+                init: Some(Box::new(dead_stack_store("local_init", 1))),
+                cond: Some(PreHirExpr::Const(1, NirType::Bool)),
+                update: Some(Box::new(dead_stack_store("local_update", 2))),
+                body: Rc::new(Vec::new()),
+            }],
+            vec![int_binding("local_init"), int_binding("local_update")],
+        );
+
+        let changed = apply_dead_store_elimination(&mut func);
+
+        assert!(changed, "dead For-header stores should be removed");
+        let PreHirStmt::For { init, update, .. } = &func.body[0] else {
+            panic!("expected For statement, got {:?}", func.body);
+        };
+        assert!(init.is_none(), "dead For init should be removed");
+        assert!(update.is_none(), "dead For update should be removed");
     }
 }
