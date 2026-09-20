@@ -40,8 +40,25 @@ pub fn decide_structuring_admission(
     // gotos for the same functions). New thresholds keep ~3x headroom over
     // the largest confirmed-safe case (207 blocks) in that corpus rather
     // than removing the guard outright.
+    //
+    // Operation count is not structural complexity by itself. A dense
+    // switch can have many independent case bodies while remaining reducible
+    // and cheap for the CFG algorithms; a large loop SCC or an edge-dense
+    // graph is the shape that makes the collapse work grow unpredictably.
+    // Keep the hard block-count cap, and couple the operation cap to those
+    // structural signals instead of linearizing every large switch arm.
+    //
+    // A large, shallow CFG is a separate risk: it can make region discovery
+    // enumerate hundreds of candidates without changing the final emitted
+    // CFG. Keep that shape on the bounded linear path until it has a
+    // substantial SCC or another structural signal to justify the work.
+    let high_operation_count_on_large_shallow_cfg =
+        input.total_ops > 10_000 && input.block_count > 256 && input.max_scc_component_size < 32;
     let extreme_budget = input.block_count > 600
-        || input.total_ops > 10_000
+        || high_operation_count_on_large_shallow_cfg
+        || (input.total_ops > 10_000
+            && (input.edge_count > input.block_count.saturating_mul(4)
+                || input.max_scc_component_size > 64))
         || (input.edge_count > input.block_count.saturating_mul(4)
             && input.max_predecessors >= 6
             && input.max_scc_component_size > 64);

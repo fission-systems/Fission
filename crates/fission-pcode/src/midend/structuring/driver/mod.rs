@@ -483,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn structuring_admission_forces_linear_above_raised_total_ops_budget() {
+    fn high_operation_count_alone_does_not_force_linear_structuring() {
         let decision = decide_structuring_admission(StructuringAdmissionInput {
             block_count: 150,
             total_ops: 10_001,
@@ -492,6 +492,36 @@ mod tests {
             max_predecessors: 4,
             scc_irreducible_count: 0,
             max_scc_component_size: 30,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::GraphCollapse);
+    }
+
+    #[test]
+    fn high_operation_count_with_large_scc_stays_extreme() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 412,
+            total_ops: 13_823,
+            edge_count: 641,
+            multi_pred_blocks: 80,
+            max_predecessors: 6,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 330,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
+    }
+
+    #[test]
+    fn high_operation_count_on_large_shallow_cfg_stays_extreme() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 583,
+            total_ops: 12_878,
+            edge_count: 848,
+            multi_pred_blocks: 120,
+            max_predecessors: 5,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 24,
             explicit_force_linear: false,
         });
         assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
