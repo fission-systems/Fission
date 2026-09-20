@@ -13,10 +13,11 @@ the widening contract used by the VSA solver at loop back-edges.
 
 ## Invariant
 
-For `new.widen(old)`, the result must contain both `new` and `old`. If one
-finite circle arc contains the other, preserve that containing arc. If the
-arcs overlap without containment, return `top` to guarantee convergence. Top
-and bottom retain their lattice identities.
+For `new.widen(old)`, the result must contain both `new` and `old`. If the new
+arc is contained in the previous arc, retain the previous arc; otherwise jump
+to `top`. This is the standard finite-height escape needed to guarantee
+convergence for growing or laterally moving loop ranges. Top and bottom retain
+their lattice identities.
 
 The implementation will use modular arc distance, not architecture,
 instruction, function, or benchmark-specific conditions.
