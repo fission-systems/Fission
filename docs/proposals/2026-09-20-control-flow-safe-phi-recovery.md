@@ -109,27 +109,30 @@ Comparable coverage:
 
 ## 5. Validation Matrix
 
-- [ ] Targeted invariant tests:
+- [x] Targeted invariant tests:
   - Command: `cargo nextest run -p fission-midend-normalize phi_recovery`
-  - Expected signal: old implementation fails the conditional constant/copy
-    tests; fixed implementation preserves both branch assignments and reads.
-- [ ] Crate-level gate:
+  - Result: the old implementation failed both initial conditional-definition
+    tests; the fixed implementation passes 9 focused `phi_recovery` tests,
+    including `If`, `While`, and `Switch` boundaries.
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-midend-normalize -p fission-pcode`
-  - Expected signal: existing normalize, builder, and structuring tests remain
-    green.
-- [ ] Focused benchmark row:
+  - Result: `fission-midend-normalize` 385 passed and `fission-pcode` 1,052
+    passed / 1 skipped.
+- [x] Focused benchmark row:
   - Command: the same HF `unoptimized` full-run row set with caches disabled,
     including `process_config_line_depth` above.
-  - Expected signal: no semantic/compilability regression; any GED/line-count
-    movement is reported as measured, not inferred.
-- [ ] Smoke or automation sample:
+  - Result: on the exact row, before and after HIR are byte-for-byte equal;
+    GED remains `1397.0`, source CFG `590` nodes, and Fission CFG `52` nodes.
+    This is a measured non-regression, not a quality-score improvement claim.
+- [x] Smoke or automation sample:
   - Command: `cargo check` and the repository's release CLI build.
-  - Expected signal: all normalize consumers compile.
-- [ ] Optional related checks:
+  - Result: workspace check and `cargo build -p fission-cli --release` pass.
+- [x] Optional related checks:
   - Commands: `cargo fmt --all --check`, `git diff --check`.
-- [ ] Boundary audit:
+  - Result: both pass.
+- [x] Boundary audit:
   - Command: `python3 scripts/audit/nir_boundary_scan.py --root .`
-  - Expected signal: no new boundary violation.
+  - Result: 0 findings, 0 violations, 0 migration debt.
 
 ## 6. AI Review / Prompt Firewall
 
@@ -146,3 +149,25 @@ Comparable coverage:
 - [x] No quality improvement claim will be made from synthetic tests alone.
 - [x] The change extends the existing normalize owner and does not create a
       duplicate metric or downstream presentation workaround.
+
+## 8. Measured Implementation Result
+
+The production fix is in commit `3a127e69a` and the proposal/baseline is in
+`34b0a5e62`. It changes only the normalize owner: replacement maps are now
+scoped to straight-line runs and are cleared at control-flow, label, call, and
+non-trivial memory boundaries. No ISA or corpus-specific condition was added.
+
+The same stripped HF `unoptimized` binary and address were run against the
+release CLI built at the parent commit and at the fixed commit. Both emitted
+the same HIR (`10,822` bytes, identical SHA-256), and both produced the same
+published-CFG score (`1397.0`). The fixed CLI's three measured runs were
+`6.52–6.61s`; the parent comparison run was `7.51s`. This is only a sanity
+check, not a benchmark claim, but it shows no obvious broad slowdown from the
+new normalize walk.
+
+The real-binary anchor therefore records **no score movement**. The quality
+claim supported by this change is semantic risk reduction: the old code was
+shown by failing regression tests to turn a conditional definition into an
+unconditional value. The HF row confirms that the conservative rule does not
+alter this existing difficult decompilation; a larger corpus sweep is needed
+before claiming a leaderboard or aggregate-quality change.
