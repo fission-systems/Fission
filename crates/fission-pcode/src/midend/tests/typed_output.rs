@@ -30,19 +30,25 @@ fn typed_render_output_owns_all_pipeline_observations() {
     };
     let options = preview_options();
 
+    let legacy_code = render_nir_with_context(&func, "mod_ll", 0x2000, &options, None, None)
+        .expect("legacy preview render");
+    let legacy_layered =
+        crate::midend::orchestrate::last_layered_pseudocode().expect("legacy layered observation");
+
     let output = render_nir_with_context_output(&func, "mod_ll", 0x2000, &options, None, None)
         .expect("typed preview render");
     let layered = output.layered.as_ref().expect("layered output");
 
     assert_eq!(output.code, layered.nir);
+    assert_eq!(legacy_code, output.code);
     assert!(output.raw_hir.is_some());
     assert!(output.prehir.is_some());
     assert!(output.hir_function.is_some());
     assert!(output.recovered_variables.is_some());
     assert!(output.build_stats.is_some());
     assert_eq!(
-        output.code,
-        render_nir_with_context(&func, "mod_ll", 0x2000, &options, None, None)
-            .expect("legacy preview render")
+        crate::midend::orchestrate::last_layered_pseudocode()
+            .expect("legacy observation remains available"),
+        legacy_layered
     );
 }

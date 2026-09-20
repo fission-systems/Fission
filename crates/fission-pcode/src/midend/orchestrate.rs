@@ -138,8 +138,12 @@ pub fn render_mlil_preview_dual_layer(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context)
-        .map(|output| output.code)
+    prepare_legacy_render_observations();
+    let output =
+        render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context)?;
+    let code = output.code.clone();
+    store_render_observations(&output);
+    Ok(code)
 }
 
 fn render_mlil_preview_dual_layer_output(
@@ -210,7 +214,6 @@ fn render_mlil_preview_dual_layer_output(
     };
     output.code = scored.code;
     output.layered = Some(layered.clone());
-    store_render_observations(&output);
     Ok(output)
 }
 
@@ -223,7 +226,8 @@ pub fn render_mlil_preview_with_binary_and_context(
     type_context: Option<&PreviewTypeContext>,
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_binary_and_context_output(
+    prepare_legacy_render_observations();
+    let output = render_mlil_preview_with_binary_and_context_output(
         pcode,
         name,
         address,
@@ -231,8 +235,10 @@ pub fn render_mlil_preview_with_binary_and_context(
         binary,
         type_context,
         decomp_facts,
-    )
-    .map(|output| output.code)
+    )?;
+    let code = output.code.clone();
+    store_render_observations(&output);
+    Ok(code)
 }
 
 fn render_mlil_preview_with_binary_and_context_output(
@@ -245,10 +251,11 @@ fn render_mlil_preview_with_binary_and_context_output(
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<NirDecompileOutput, MlilPreviewError> {
     let _ = decomp_facts;
-    reset_last_render_observations();
     // Two output modes, two structurings. Handled here rather than in a
-    // wrapper because the pipeline calls this entry point directly; the
-    // recursive calls below clear the flag so each is a single-tree build.
+    // wrapper because the pipeline calls this entry point directly. Legacy
+    // string-returning wrappers install their observation compatibility state
+    // before entering here; typed callers receive all successful observations
+    // in the returned value and do not mutate that state.
     if options.dual_layer_structuring {
         return render_mlil_preview_dual_layer_output(
             pcode,
@@ -260,7 +267,6 @@ fn render_mlil_preview_with_binary_and_context_output(
         );
     }
     let debug = RenderDebugFlags::from_env();
-    telemetry::reset_preview_telemetry();
     let debug_log = |stage: &str| {
         if debug.preview_debug {
             let _ = std::fs::OpenOptions::new()
@@ -343,7 +349,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     // real register writes at each call site with no arity cap at all) and
     // before any pruning touches it.
     let raw_hir = hir.clone();
-    store_last_raw_hir_snapshot(raw_hir.clone());
     let mut build_stats = builder.preview_build_stats();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::FuncdataBuild);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::HeritageValueRecovery);
@@ -382,7 +387,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     // `hir` itself -- purely a clone for whoever reads it back via
     // `take_last_prehir_snapshot`.
     let prehir = hir.clone();
-    store_last_prehir_snapshot(prehir.clone());
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
     structuring::passes::pipeline::run_structuring_pipeline(
@@ -493,7 +497,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     // steps below this point are printer-facing, not semantic (see
     // `midend/AGENTS.md`: "Do not fix structuring bugs only in printer.rs").
     let hir_function = hir.clone();
-    store_last_hir_function_snapshot(hir_function.clone());
     normalize_context_guard.clear();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
@@ -532,7 +535,6 @@ fn render_mlil_preview_with_binary_and_context_output(
         debug_log("type_hints_start");
         let type_hints_start = Instant::now();
         let stats = apply_preview_type_hints(&mut hir, context, &register_origins);
-        telemetry::store_preview_hint_stats(stats.clone());
         hint_stats = Some(stats);
         if debug.diag {
             eprintln!(
@@ -548,7 +550,6 @@ fn render_mlil_preview_with_binary_and_context_output(
     // real type names on the bindings, which is what the printed declarations
     // will carry and what a consumer comparing against debug info needs.
     let recovered_variables = crate::render::recovered_variables(&hir);
-    store_last_recovered_variables(recovered_variables.clone());
     if debug.preview_debug {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
@@ -558,13 +559,11 @@ fn render_mlil_preview_with_binary_and_context_output(
     // only need a single string use `LayeredPseudocode::primary` / legacy
     // `render_nir` which returns the NIR-faithful surface for oracle compat.
     let layered = render_layered_pseudocode(&hir, options);
-    store_last_layered_pseudocode(layered.clone());
     let rendered = layered.nir.clone();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrintC);
     record_ghidra_clean_room_pipeline_complete(&mut build_stats);
     build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
     build_stats.rendered_code_len = rendered.len();
-    telemetry::store_preview_build_stats(build_stats.clone());
     if debug.diag {
         eprintln!(
             "[DIAG] print done: fn=0x{address:x} elapsed={:.3}s",
@@ -775,6 +774,17 @@ fn reset_last_render_observations() {
     LAST_RECOVERED_VARIABLES.with(|slot| {
         *slot.borrow_mut() = None;
     });
+}
+
+/// Prepare the legacy observation cells for a string-returning render call.
+///
+/// The typed render API deliberately does not touch these cells. Keeping the
+/// reset/store pair at this compatibility boundary makes the remaining TLS
+/// behavior explicit and prevents a typed consumer from overwriting a legacy
+/// consumer's in-flight observation.
+fn prepare_legacy_render_observations() {
+    reset_last_render_observations();
+    telemetry::reset_preview_telemetry();
 }
 
 #[derive(Debug, Clone, Copy)]
