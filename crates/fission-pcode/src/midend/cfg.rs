@@ -96,6 +96,12 @@ pub(super) fn build_successor_index_map(
     address_to_index: &HashMap<u64, usize>,
     layout_fallthrough: &[Option<usize>],
 ) -> Vec<Vec<usize>> {
+    let block_id_to_position: HashMap<u32, usize> = pcode
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(position, block)| (block.index, position))
+        .collect();
     pcode
         .blocks
         .iter()
@@ -124,7 +130,19 @@ pub(super) fn build_successor_index_map(
                         succs.push(next_idx);
                     }
                 }
-                Some(op) if op.opcode == PcodeOpcode::BranchInd => {}
+                Some(op) if op.opcode == PcodeOpcode::BranchInd => {
+                    // Indirect-branch discovery runs after lifting and records
+                    // proven targets on the block as logical block IDs. The
+                    // opcode itself carries only the computed destination, so
+                    // reconstructing this edge map from the terminator alone
+                    // silently disconnects every jump-table case.
+                    succs.extend(
+                        block
+                            .successors
+                            .iter()
+                            .filter_map(|successor| block_id_to_position.get(successor).copied()),
+                    );
+                }
                 _ => {
                     if let Some(next_idx) = layout_fallthrough[idx] {
                         succs.push(next_idx);
@@ -757,6 +775,68 @@ mod same_block_forward_tests {
             idx,
             Some(block.ops.len()),
             "tail cmov should skip remaining ops through block end"
+        );
+    }
+}
+
+#[cfg(test)]
+mod indirect_successor_tests {
+    use super::*;
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+
+    fn branch_ind_block(index: u32, start_address: u64, successors: Vec<u32>) -> PcodeBasicBlock {
+        PcodeBasicBlock {
+            index,
+            start_address,
+            successors,
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::BranchInd,
+                address: start_address,
+                output: None,
+                inputs: vec![Varnode::constant(0, 8)],
+                asm_mnemonic: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn branch_ind_preserves_explicit_successors_with_non_contiguous_ids() {
+        let pcode = PcodeFunction {
+            blocks: vec![
+                branch_ind_block(10, 0x1000, vec![30, 30, 999]),
+                PcodeBasicBlock {
+                    index: 20,
+                    start_address: 0x1010,
+                    successors: vec![],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1010,
+                        output: None,
+                        inputs: vec![],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 30,
+                    start_address: 0x1020,
+                    successors: vec![],
+                    ops: vec![],
+                },
+            ],
+        };
+        let address_to_index = build_address_to_index_map(&pcode);
+        let successors =
+            build_successor_index_map(&pcode, &address_to_index, &[Some(1), None, None]);
+
+        assert_eq!(successors, vec![vec![2], vec![], vec![]]);
+        assert_eq!(
+            structuring_cfg_edges(&pcode),
+            vec![crate::cfg::AddressEdge {
+                from: 0x1000,
+                to: 0x1020,
+            }]
         );
     }
 }
