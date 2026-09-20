@@ -119,11 +119,13 @@ Comparable coverage:
   - Result: `fission-midend-normalize` 385 passed and `fission-pcode` 1,052
     passed / 1 skipped.
 - [x] Focused benchmark row:
-  - Command: the same HF `unoptimized` full-run row set with caches disabled,
-    including `process_config_line_depth` above.
+  - Command: release CLI decompilation of the same HF `unoptimized` stripped
+    binary/address, followed by the repository's actual DecBench published-CFG
+    loader and GED calculator.
   - Result: on the exact row, before and after HIR are byte-for-byte equal;
     GED remains `1397.0`, source CFG `590` nodes, and Fission CFG `52` nodes.
-    This is a measured non-regression, not a quality-score improvement claim.
+    This is a measured non-regression, not a quality-score improvement claim;
+    the full 34,406-function corpus was not rerun in this change.
 - [x] Smoke or automation sample:
   - Command: `cargo check` and the repository's release CLI build.
   - Result: workspace check and `cargo build -p fission-cli --release` pass.
