@@ -50,6 +50,22 @@ use crate::HashMap;
 ///            RetDec `DerefToArrayIndexOptimizer`.
 use crate::prelude::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PointerLayout {
+    bytes: u64,
+    bits: u32,
+}
+
+impl PointerLayout {
+    fn from_function(func: &PreHirFunction) -> Self {
+        if func.is_64bit {
+            Self { bytes: 8, bits: 64 }
+        } else {
+            Self { bytes: 4, bits: 32 }
+        }
+    }
+}
+
 /// Build a map from variable name → NirType for all locals and params.
 fn build_binding_type_map(func: &PreHirFunction) -> HashMap<String, NirType> {
     func.locals
@@ -69,11 +85,11 @@ fn pointee_ty(ty: &NirType) -> Option<&NirType> {
 }
 
 /// Return the byte size of a type, if known.
-fn type_byte_size(ty: &NirType) -> Option<u64> {
+fn type_byte_size(ty: &NirType, pointer_layout: PointerLayout) -> Option<u64> {
     match ty {
         NirType::Int { bits, .. } | NirType::Float { bits } => Some(u64::from(*bits / 8)),
         NirType::Bool => Some(1),
-        NirType::Ptr(_) => Some(8), // assume 64-bit
+        NirType::Ptr(_) => Some(pointer_layout.bytes),
         _ => None,
     }
 }
@@ -133,22 +149,26 @@ fn typed_pointer_base(
     }
 }
 
-fn pointer_const_expr(value: i64, sample: &PreHirExpr) -> PreHirExpr {
+fn pointer_const_expr(
+    value: i64,
+    sample: &PreHirExpr,
+    pointer_layout: PointerLayout,
+) -> PreHirExpr {
     match sample {
         PreHirExpr::Const(_, ty) => PreHirExpr::Const(value, ty.clone()),
         _ => PreHirExpr::Const(
             value,
             NirType::Int {
-                bits: 64,
+                bits: pointer_layout.bits,
                 signed: value < 0,
             },
         ),
     }
 }
 
-fn pointer_sized_uint_ty() -> NirType {
+fn pointer_sized_uint_ty(pointer_layout: PointerLayout) -> NirType {
     NirType::Int {
-        bits: 64,
+        bits: pointer_layout.bits,
         signed: false,
     }
 }
@@ -156,10 +176,11 @@ fn pointer_sized_uint_ty() -> NirType {
 fn cast_pointer_operand_to_uint(
     expr: &PreHirExpr,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     typed_pointer_base(expr, binding_types)?;
     Some(PreHirExpr::Cast {
-        ty: pointer_sized_uint_ty(),
+        ty: pointer_sized_uint_ty(pointer_layout),
         expr: Box::new(expr.clone()),
     })
 }
@@ -167,6 +188,7 @@ fn cast_pointer_operand_to_uint(
 fn cast_pointer_operands_for_integer_arith(
     expr: &PreHirExpr,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     let PreHirExpr::Binary { op, lhs, rhs, ty } = expr else {
         return None;
@@ -176,8 +198,8 @@ fn cast_pointer_operands_for_integer_arith(
     {
         return None;
     }
-    let new_lhs = cast_pointer_operand_to_uint(lhs, binding_types);
-    let new_rhs = cast_pointer_operand_to_uint(rhs, binding_types);
+    let new_lhs = cast_pointer_operand_to_uint(lhs, binding_types, pointer_layout);
+    let new_rhs = cast_pointer_operand_to_uint(rhs, binding_types, pointer_layout);
     if new_lhs.is_none() && new_rhs.is_none() {
         return None;
     }
@@ -195,11 +217,12 @@ fn recover_const_offset_as_typed_pointer_add(
     elem_ty: &NirType,
     offset: i64,
     rhs_expr: &PreHirExpr,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     if matches!(elem_ty, NirType::Unknown | NirType::Aggregate { .. }) {
         return None;
     }
-    let elem_size = type_byte_size(elem_ty)?;
+    let elem_size = type_byte_size(elem_ty, pointer_layout)?;
     if elem_size == 0 {
         return None;
     }
@@ -219,7 +242,11 @@ fn recover_const_offset_as_typed_pointer_add(
     Some(PreHirExpr::Binary {
         op,
         lhs: Box::new(ptr_expr.clone()),
-        rhs: Box::new(pointer_const_expr(elem_offset.abs(), rhs_expr)),
+        rhs: Box::new(pointer_const_expr(
+            elem_offset.abs(),
+            rhs_expr,
+            pointer_layout,
+        )),
         ty: ptr_ty.clone(),
     })
 }
@@ -328,8 +355,12 @@ fn recover_negated_pointer_difference_condition(
     recover_pointer_difference_zero_compare(expr, binding_types).map(negate_expr)
 }
 
-fn recover_condition_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirType>) -> bool {
-    let mut changed = recover_in_expr(expr, binding_types);
+fn recover_condition_expr(
+    expr: &mut PreHirExpr,
+    binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
+) -> bool {
+    let mut changed = recover_in_expr(expr, binding_types, pointer_layout);
     if let Some(new_expr) = recover_pointer_difference_condition(expr, binding_types)
         .or_else(|| recover_pointer_difference_zero_compare(expr, binding_types))
         .or_else(|| recover_negated_pointer_difference_condition(expr, binding_types))
@@ -404,6 +435,7 @@ fn fold_ptr_offset_chains(expr: &mut PreHirExpr) -> bool {
 struct AddTreeState {
     ptr_expr: PreHirExpr,
     ptr_ty: NirType,
+    pointer_layout: PointerLayout,
     elem_size: i64,
     multiples: Vec<(PreHirExpr, i64)>,
     mult_const: i64,
@@ -414,13 +446,14 @@ struct AddTreeState {
 }
 
 impl AddTreeState {
-    fn new(ptr_expr: PreHirExpr, ptr_ty: NirType) -> Self {
+    fn new(ptr_expr: PreHirExpr, ptr_ty: NirType, pointer_layout: PointerLayout) -> Self {
         let elem_ty = pointee_ty(&ptr_ty).cloned().unwrap_or(NirType::Unknown);
-        let elem_size = type_byte_size(&elem_ty).unwrap_or(1) as i64;
+        let elem_size = type_byte_size(&elem_ty, pointer_layout).unwrap_or(1) as i64;
         let elem_size = if elem_size <= 0 { 1 } else { elem_size };
         Self {
             ptr_expr,
             ptr_ty,
+            pointer_layout,
             elem_size,
             multiples: Vec::new(),
             mult_const: 0,
@@ -561,7 +594,7 @@ impl AddTreeState {
             index_terms.push(PreHirExpr::Const(
                 mult_const_elements,
                 NirType::Int {
-                    bits: 64,
+                    bits: self.pointer_layout.bits,
                     signed: mult_const_elements < 0,
                 },
             ));
@@ -635,6 +668,7 @@ impl AddTreeState {
 fn try_recover_ptr_arith_tree(
     expr: &PreHirExpr,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     // Only applies to Add/Sub trees.
     if !matches!(
@@ -669,7 +703,7 @@ fn try_recover_ptr_arith_tree(
         return None;
     }
 
-    let mut state = AddTreeState::new(ptr_expr, ptr_ty);
+    let mut state = AddTreeState::new(ptr_expr, ptr_ty, pointer_layout);
     for term in non_ptr_accum {
         state.span_add_tree(&term, 1);
     }
@@ -745,6 +779,7 @@ impl StructuralEq for PreHirExpr {
 fn try_recover_ptr_arith(
     expr: &PreHirExpr,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     let PreHirExpr::Binary { op, lhs, rhs, ty } = expr else {
         return None;
@@ -807,7 +842,7 @@ fn try_recover_ptr_arith(
     // Pattern 1: Add(ptr, Mul(idx, Const(stride))) → pointer add when stride matches.
     if !neg {
         if let Some((idx_expr, stride)) = try_extract_index_mul(rhs_expr) {
-            let stride_matches = match type_byte_size(&elem_ty) {
+            let stride_matches = match type_byte_size(&elem_ty, pointer_layout) {
                 Some(sz) => stride as u64 == sz,
                 None => stride == 1, // unknown elem_ty → only allow stride-1
             };
@@ -854,6 +889,7 @@ fn try_recover_ptr_arith(
             &elem_ty,
             offset,
             rhs_expr,
+            pointer_layout,
         ) {
             return Some(recovered);
         }
@@ -866,7 +902,7 @@ fn try_recover_ptr_arith(
         // rescale to element*size so PtrOffset stays byte-correct for the
         // printer.
         if from_byte_cast {
-            if let Some(elem_size) = type_byte_size(&elem_ty).filter(|&sz| sz > 1) {
+            if let Some(elem_size) = type_byte_size(&elem_ty, pointer_layout).filter(|&sz| sz > 1) {
                 let elem_size_i = i64::try_from(elem_size).ok()?;
                 let byte_offset = if offset > 0 && offset < elem_size_i {
                     offset.checked_mul(elem_size_i)?
@@ -934,6 +970,7 @@ fn try_recover_index_access(
     ptr: &PreHirExpr,
     access_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     let mut current_ptr = ptr;
     if let PreHirExpr::Cast { expr, .. } = ptr {
@@ -1002,7 +1039,8 @@ fn try_recover_index_access(
         };
     }
 
-    let access_size = type_byte_size(access_ty).or_else(|| type_byte_size(&elem_ty))?;
+    let access_size = type_byte_size(access_ty, pointer_layout)
+        .or_else(|| type_byte_size(&elem_ty, pointer_layout))?;
     if stride > 0 && stride as u64 == access_size {
         Some(PreHirExpr::Index {
             base: lhs.clone(),
@@ -1043,17 +1081,18 @@ fn pointer_index_base_for_access(
     expr: &PreHirExpr,
     access_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<(Box<PreHirExpr>, i64)> {
     let (_base, ptr_ty, _from_byte_cast) = typed_pointer_base(expr, binding_types)?;
     let elem_ty = pointee_ty(&ptr_ty)?;
     if matches!(elem_ty, NirType::Aggregate { .. } | NirType::Unknown) {
         return None;
     }
-    let access_size = i64::try_from(type_byte_size(access_ty)?).ok()?;
+    let access_size = i64::try_from(type_byte_size(access_ty, pointer_layout)?).ok()?;
     if access_size == 0 {
         return None;
     }
-    let elem_size = i64::try_from(type_byte_size(elem_ty)?).ok()?;
+    let elem_size = i64::try_from(type_byte_size(elem_ty, pointer_layout)?).ok()?;
     if elem_size != access_size {
         return None;
     }
@@ -1064,6 +1103,7 @@ fn try_recover_const_index_access(
     ptr: &PreHirExpr,
     access_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     let mut current_ptr = ptr;
     if let PreHirExpr::Cast { expr, .. } = ptr {
@@ -1080,7 +1120,8 @@ fn try_recover_const_index_access(
         PreHirBinaryOp::Sub => raw_index.checked_neg()?,
         _ => return None,
     };
-    let (base, elem_size) = pointer_index_base_for_access(lhs, access_ty, binding_types)?;
+    let (base, elem_size) =
+        pointer_index_base_for_access(lhs, access_ty, binding_types, pointer_layout)?;
     if raw_offset % elem_size != 0 {
         return None;
     }
@@ -1096,6 +1137,7 @@ fn try_recover_field_access(
     ptr: &PreHirExpr,
     access_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
 ) -> Option<PreHirExpr> {
     let mut current_ptr = ptr;
     if let PreHirExpr::Cast { expr, .. } = ptr {
@@ -1118,7 +1160,7 @@ fn try_recover_field_access(
             // the unit witness even when the binding has just been promoted
             // to `Ptr(Aggregate)` by object-shape recovery.
             let offset = match ty {
-                NirType::Ptr(pointee) => type_byte_size(pointee)
+                NirType::Ptr(pointee) => type_byte_size(pointee, pointer_layout)
                     .filter(|size| *size > 1)
                     .and_then(|size| i64::try_from(size).ok())
                     .and_then(|size| element_offset.checked_mul(size))
@@ -1166,21 +1208,27 @@ fn try_recover_field_access(
 }
 
 /// Recursively rewrite all pointer-arithmetic sub-expressions in `expr`.
-fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirType>) -> bool {
+fn recover_in_expr(
+    expr: &mut PreHirExpr,
+    binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
+) -> bool {
     // Try the top-level single-level pattern first.
-    if let Some(new_expr) = try_recover_ptr_arith(expr, binding_types) {
+    if let Some(new_expr) = try_recover_ptr_arith(expr, binding_types, pointer_layout) {
         *expr = new_expr;
         // After single-level recovery, try PtrOffset chain folding.
         fold_ptr_offset_chains(expr);
         return true;
     }
     // Try multi-level ADD tree (Ghidra AddTreeState::spanAddTree analog).
-    if let Some(new_expr) = try_recover_ptr_arith_tree(expr, binding_types) {
+    if let Some(new_expr) = try_recover_ptr_arith_tree(expr, binding_types, pointer_layout) {
         *expr = new_expr;
         fold_ptr_offset_chains(expr);
         return true;
     }
-    if let Some(new_expr) = cast_pointer_operands_for_integer_arith(expr, binding_types) {
+    if let Some(new_expr) =
+        cast_pointer_operands_for_integer_arith(expr, binding_types, pointer_layout)
+    {
         *expr = new_expr;
         return true;
     }
@@ -1188,14 +1236,14 @@ fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirTyp
     let mut changed = false;
     match expr {
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            changed |= recover_in_expr(lhs, binding_types);
-            changed |= recover_in_expr(rhs, binding_types);
+            changed |= recover_in_expr(lhs, binding_types, pointer_layout);
+            changed |= recover_in_expr(rhs, binding_types, pointer_layout);
         }
         PreHirExpr::Unary { expr: inner, .. } => {
-            changed |= recover_in_expr(inner, binding_types);
+            changed |= recover_in_expr(inner, binding_types, pointer_layout);
         }
         PreHirExpr::Cast { expr: inner, .. } => {
-            changed |= recover_in_expr(inner, binding_types);
+            changed |= recover_in_expr(inner, binding_types, pointer_layout);
             // After recursing: if we now have Cast(Ptr(Int8), PtrOffset { base, .. })
             // and base is already pointer-typed, strip the cast.
             if let PreHirExpr::Cast {
@@ -1216,21 +1264,25 @@ fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirTyp
             }
         }
         PreHirExpr::Load { ptr, ty } => {
-            if let Some(field_expr) = try_recover_field_access(ptr, ty, binding_types) {
+            if let Some(field_expr) =
+                try_recover_field_access(ptr, ty, binding_types, pointer_layout)
+            {
                 *expr = field_expr;
                 return true;
             }
-            if let Some(index_expr) = try_recover_index_access(ptr, ty, binding_types)
-                .or_else(|| try_recover_const_index_access(ptr, ty, binding_types))
+            if let Some(index_expr) =
+                try_recover_index_access(ptr, ty, binding_types, pointer_layout).or_else(|| {
+                    try_recover_const_index_access(ptr, ty, binding_types, pointer_layout)
+                })
             {
                 *expr = index_expr;
                 return true;
             }
-            changed |= recover_in_expr(ptr, binding_types);
+            changed |= recover_in_expr(ptr, binding_types, pointer_layout);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args.iter_mut() {
-                changed |= recover_in_expr(arg, binding_types);
+                changed |= recover_in_expr(arg, binding_types, pointer_layout);
             }
         }
         PreHirExpr::PtrOffset { base, .. } => {
@@ -1239,17 +1291,17 @@ fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirTyp
             // safely recover whether an earlier scalar was an element count.
             // Rescaling here therefore corrupts proven byte advances whenever
             // the new pointee is wider than the offset.
-            changed |= recover_in_expr(base, binding_types);
+            changed |= recover_in_expr(base, binding_types, pointer_layout);
         }
         PreHirExpr::FieldAccess { base, .. } => {
-            changed |= recover_in_expr(base, binding_types);
+            changed |= recover_in_expr(base, binding_types, pointer_layout);
         }
         PreHirExpr::Index { base, index, .. } => {
-            changed |= recover_in_expr(base, binding_types);
-            changed |= recover_in_expr(index, binding_types);
+            changed |= recover_in_expr(base, binding_types, pointer_layout);
+            changed |= recover_in_expr(index, binding_types, pointer_layout);
         }
         PreHirExpr::AggregateCopy { src, .. } => {
-            changed |= recover_in_expr(src, binding_types);
+            changed |= recover_in_expr(src, binding_types, pointer_layout);
         }
         PreHirExpr::Select {
             cond,
@@ -1257,9 +1309,9 @@ fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirTyp
             else_expr,
             ..
         } => {
-            changed |= recover_in_expr(cond, binding_types);
-            changed |= recover_in_expr(then_expr, binding_types);
-            changed |= recover_in_expr(else_expr, binding_types);
+            changed |= recover_in_expr(cond, binding_types, pointer_layout);
+            changed |= recover_in_expr(then_expr, binding_types, pointer_layout);
+            changed |= recover_in_expr(else_expr, binding_types, pointer_layout);
         }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -1269,10 +1321,16 @@ fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirTyp
     changed
 }
 
-fn recover_in_lvalue(lhs: &mut PreHirLValue, binding_types: &HashMap<String, NirType>) -> bool {
+fn recover_in_lvalue(
+    lhs: &mut PreHirLValue,
+    binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
+) -> bool {
     match lhs {
         PreHirLValue::Deref { ptr, ty } => {
-            if let Some(field_expr) = try_recover_field_access(ptr, ty, binding_types) {
+            if let Some(field_expr) =
+                try_recover_field_access(ptr, ty, binding_types, pointer_layout)
+            {
                 let PreHirExpr::FieldAccess {
                     base,
                     field_name,
@@ -1293,8 +1351,8 @@ fn recover_in_lvalue(lhs: &mut PreHirLValue, binding_types: &HashMap<String, Nir
                 base,
                 index,
                 elem_ty,
-            }) = try_recover_index_access(ptr, ty, binding_types)
-                .or_else(|| try_recover_const_index_access(ptr, ty, binding_types))
+            }) = try_recover_index_access(ptr, ty, binding_types, pointer_layout)
+                .or_else(|| try_recover_const_index_access(ptr, ty, binding_types, pointer_layout))
             {
                 *lhs = PreHirLValue::Index {
                     base,
@@ -1303,16 +1361,18 @@ fn recover_in_lvalue(lhs: &mut PreHirLValue, binding_types: &HashMap<String, Nir
                 };
                 true
             } else {
-                recover_in_expr(ptr, binding_types)
+                recover_in_expr(ptr, binding_types, pointer_layout)
             }
         }
         PreHirLValue::Index { base, index, .. } => {
-            let a = recover_in_expr(base, binding_types);
-            let b = recover_in_expr(index, binding_types);
+            let a = recover_in_expr(base, binding_types, pointer_layout);
+            let b = recover_in_expr(index, binding_types, pointer_layout);
             a || b
         }
         PreHirLValue::Var(_) => false,
-        PreHirLValue::FieldAccess { base, .. } => recover_in_expr(base, binding_types),
+        PreHirLValue::FieldAccess { base, .. } => {
+            recover_in_expr(base, binding_types, pointer_layout)
+        }
     }
 }
 
@@ -1410,28 +1470,37 @@ fn propagate_pointer_assignment_types(func: &mut PreHirFunction) -> bool {
     changed
 }
 
-fn recover_in_stmts(stmts: &mut Vec<PreHirStmt>, binding_types: &HashMap<String, NirType>) -> bool {
+fn recover_in_stmts(
+    stmts: &mut Vec<PreHirStmt>,
+    binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
-        changed |= recover_in_stmt(stmt, binding_types);
+        changed |= recover_in_stmt(stmt, binding_types, pointer_layout);
     }
     changed
 }
 
-fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirType>) -> bool {
+fn recover_in_stmt(
+    stmt: &mut PreHirStmt,
+    binding_types: &HashMap<String, NirType>,
+    pointer_layout: PointerLayout,
+) -> bool {
     let mut changed = false;
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
-            changed |= recover_in_lvalue(lhs, binding_types);
-            changed |= recover_in_expr(rhs, binding_types);
+            changed |= recover_in_lvalue(lhs, binding_types, pointer_layout);
+            changed |= recover_in_expr(rhs, binding_types, pointer_layout);
         }
         PreHirStmt::Expr(expr) => {
-            changed |= recover_in_expr(expr, binding_types);
+            changed |= recover_in_expr(expr, binding_types, pointer_layout);
         }
         PreHirStmt::Block(body) => {
             changed |= recover_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 binding_types,
+                pointer_layout,
             );
         }
         PreHirStmt::If {
@@ -1439,29 +1508,33 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             then_body,
             else_body,
         } => {
-            changed |= recover_condition_expr(cond, binding_types);
+            changed |= recover_condition_expr(cond, binding_types, pointer_layout);
             changed |= recover_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 binding_types,
+                pointer_layout,
             );
             changed |= recover_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 binding_types,
+                pointer_layout,
             );
         }
         PreHirStmt::While { cond, body } => {
-            changed |= recover_condition_expr(cond, binding_types);
+            changed |= recover_condition_expr(cond, binding_types, pointer_layout);
             changed |= recover_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 binding_types,
+                pointer_layout,
             );
         }
         PreHirStmt::DoWhile { body, cond } => {
             changed |= recover_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 binding_types,
+                pointer_layout,
             );
-            changed |= recover_condition_expr(cond, binding_types);
+            changed |= recover_condition_expr(cond, binding_types, pointer_layout);
         }
         PreHirStmt::For {
             init,
@@ -1470,17 +1543,18 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             body,
         } => {
             if let Some(i) = init {
-                changed |= recover_in_stmt(i, binding_types);
+                changed |= recover_in_stmt(i, binding_types, pointer_layout);
             }
             if let Some(c) = cond {
-                changed |= recover_condition_expr(c, binding_types);
+                changed |= recover_condition_expr(c, binding_types, pointer_layout);
             }
             if let Some(u) = update {
-                changed |= recover_in_stmt(u, binding_types);
+                changed |= recover_in_stmt(u, binding_types, pointer_layout);
             }
             changed |= recover_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 binding_types,
+                pointer_layout,
             );
         }
         PreHirStmt::Switch {
@@ -1488,20 +1562,22 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             cases,
             default,
         } => {
-            changed |= recover_in_expr(expr, binding_types);
+            changed |= recover_in_expr(expr, binding_types, pointer_layout);
             for case in cases.iter_mut() {
                 changed |= recover_in_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     binding_types,
+                    pointer_layout,
                 );
             }
             changed |= recover_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                 binding_types,
+                pointer_layout,
             );
         }
         PreHirStmt::Return(Some(expr)) => {
-            changed |= recover_in_expr(expr, binding_types);
+            changed |= recover_in_expr(expr, binding_types, pointer_layout);
         }
         _ => {}
     }
@@ -1603,6 +1679,7 @@ fn infer_pointee_type_from_patterns(
 /// Returns `true` if any expression was rewritten.
 pub fn apply_ptr_arith_recovery_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
+    let pointer_layout = PointerLayout::from_function(func);
 
     // Pre-pass: refine local and parameter pointer types using Scale-Invariant Access Pattern Scorer
     let inventory = super::typed_facts::collect_typed_fact_inventory(func, false);
@@ -1627,7 +1704,7 @@ pub fn apply_ptr_arith_recovery_pass(func: &mut PreHirFunction) -> bool {
         if binding_types.is_empty() {
             break;
         }
-        let recovered = recover_in_stmts(&mut func.body, &binding_types);
+        let recovered = recover_in_stmts(&mut func.body, &binding_types, pointer_layout);
         changed |= recovered;
         if !propagated && !recovered {
             break;
@@ -1829,6 +1906,109 @@ mod tests {
             body,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn recovers_32_bit_pointer_array_stride() {
+        let pointee_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let element_ptr_ty = NirType::Ptr(Box::new(pointee_ty));
+        let table_ty = NirType::Ptr(Box::new(element_ptr_ty.clone()));
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("result".to_owned()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("table".to_owned())),
+                    rhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Mul,
+                        lhs: Box::new(PreHirExpr::Var("index".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(
+                            4,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    }),
+                    ty: table_ty.clone(),
+                }),
+                ty: element_ptr_ty.clone(),
+            },
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("table", table_ty)], body);
+        func.is_64bit = false;
+
+        assert!(super::apply_ptr_arith_recovery_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Index {
+                    base,
+                    index,
+                    elem_ty: recovered_elem_ty,
+                },
+                ..
+            } if matches!(base.as_ref(), PreHirExpr::Var(name) if name == "table")
+                && matches!(index.as_ref(), PreHirExpr::Var(name) if name == "index")
+                && recovered_elem_ty == &element_ptr_ty
+        ));
+    }
+
+    #[test]
+    fn uses_32_bit_pointer_width_for_pointer_to_integer_casts() {
+        let pointer_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: false,
+        }));
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("diff".to_owned()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sub,
+                lhs: Box::new(PreHirExpr::Var("addr".to_owned())),
+                rhs: Box::new(PreHirExpr::Var("ptr".to_owned())),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            },
+        }];
+        let mut func = make_func(
+            vec![
+                make_binding_with_ty(
+                    "addr",
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+                make_binding_with_ty("ptr", pointer_ty),
+            ],
+            body,
+        );
+        func.is_64bit = false;
+
+        assert!(super::apply_ptr_arith_recovery_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary {
+                    rhs,
+                    ty: NirType::Int { bits: 32, signed: false },
+                    ..
+                },
+                ..
+            } if matches!(rhs.as_ref(), PreHirExpr::Cast {
+                ty: NirType::Int { bits: 32, signed: false },
+                expr,
+            } if matches!(expr.as_ref(), PreHirExpr::Var(name) if name == "ptr"))
+        ));
     }
 
     #[test]
