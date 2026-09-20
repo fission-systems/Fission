@@ -148,6 +148,12 @@ impl MachoLoader {
                 let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
                 // entryoff is offset from __TEXT segment start
                 entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+            } else if matches!(cmd_header.cmd, LC_THREAD | LC_UNIXTHREAD) && entry_point == 0 {
+                if let Some(thread_entry) =
+                    parse_macho_thread_entry_point(&reader, cmd_start, cmd_header.cmdsize, cputype)?
+                {
+                    entry_point = thread_entry;
+                }
             } else if cmd_header.cmd == LC_FUNCTION_STARTS {
                 // GAP-8: Parse LC_FUNCTION_STARTS — ULEB128-encoded function addresses.
                 // Equivalent to Ghidra's MachoFunctionStartsAnalyzer which uses this
@@ -351,6 +357,12 @@ impl MachoLoader {
             } else if cmd_header.cmd == LC_MAIN {
                 let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
                 entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+            } else if matches!(cmd_header.cmd, LC_THREAD | LC_UNIXTHREAD) && entry_point == 0 {
+                if let Some(thread_entry) =
+                    parse_macho_thread_entry_point(&reader, cmd_start, cmd_header.cmdsize, cputype)?
+                {
+                    entry_point = thread_entry;
+                }
             }
 
             cursor = cmd_start + cmd_header.cmdsize as usize;
@@ -928,15 +940,75 @@ fn macho_relocation_site(section: &MachoSectionRelocInfo, r_address: u64) -> u64
     }
 }
 
+fn macho_thread_state_layout(cputype: i32) -> Option<(u32, usize, usize)> {
+    match cputype {
+        MACHO_CPU_TYPE_X86 => Some((1, 4, 10)),
+        MACHO_CPU_TYPE_X86_64 => Some((4, 8, 16)),
+        MACHO_CPU_TYPE_ARM => Some((1, 4, 15)),
+        MACHO_CPU_TYPE_ARM64 => Some((6, 8, 32)),
+        _ => None,
+    }
+}
+
+fn parse_macho_thread_entry_point(
+    reader: &ByteReader<'_>,
+    cmd_start: usize,
+    cmd_size: u32,
+    cputype: i32,
+) -> Result<Option<u64>> {
+    let Some((expected_flavor, word_size, pc_index)) = macho_thread_state_layout(cputype) else {
+        return Ok(None);
+    };
+    let Some(command_end) = cmd_start.checked_add(cmd_size as usize) else {
+        return Ok(None);
+    };
+    let Some(mut cursor) = cmd_start.checked_add(8) else {
+        return Ok(None);
+    };
+
+    while let Some(header_end) = cursor.checked_add(8) {
+        if header_end > command_end {
+            break;
+        }
+        let flavor = reader.u32(cursor)?;
+        let count = reader.u32(cursor + 4)? as usize;
+        let state_start = header_end;
+        let Some(state_size) = count.checked_mul(word_size) else {
+            return Ok(None);
+        };
+        let Some(state_end) = state_start.checked_add(state_size) else {
+            return Ok(None);
+        };
+        if state_end > command_end {
+            return Ok(None);
+        }
+
+        if flavor == expected_flavor && count > pc_index {
+            let Some(pc_offset) = state_start.checked_add(pc_index * word_size) else {
+                return Ok(None);
+            };
+            let pc = if word_size == 8 {
+                reader.u64(pc_offset)?
+            } else {
+                reader.u32(pc_offset)? as u64
+            };
+            return Ok(Some(pc));
+        }
+        cursor = state_end;
+    }
+
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         MachoLoader, MachoSectionRelocInfo, infer_macho_function_sizes, macho_section_file_size,
-        macho_section_has_instructions, normalize_macho_symbol_name,
-        parse_macho_relocation_symbols_64,
+        macho_section_has_instructions, macho_thread_state_layout, normalize_macho_symbol_name,
+        parse_macho_relocation_symbols_64, parse_macho_thread_entry_point,
     };
-    use crate::loader::macho::schema::SymtabCommand;
-    use crate::loader::reader::Endian;
+    use crate::loader::macho::schema::{LC_UNIXTHREAD, SymtabCommand};
+    use crate::loader::reader::{ByteReader, Endian};
     use crate::loader::types::{FunctionInfo, SectionInfo};
     use std::collections::HashMap;
 
@@ -960,6 +1032,77 @@ mod tests {
         assert_eq!(
             normalize_macho_symbol_name("__mh_execute_header"),
             "__mh_execute_header"
+        );
+    }
+
+    #[test]
+    fn macho_thread_commands_recover_architecture_program_counters() {
+        let cases = [
+            (
+                fission_core::constants::binary_format::MACHO_CPU_TYPE_X86,
+                0x1234_5678u64,
+            ),
+            (
+                fission_core::constants::binary_format::MACHO_CPU_TYPE_X86_64,
+                0x1234_5678_9abc_def0,
+            ),
+            (
+                fission_core::constants::binary_format::MACHO_CPU_TYPE_ARM,
+                0x8765_4321u64,
+            ),
+            (
+                fission_core::constants::binary_format::MACHO_CPU_TYPE_ARM64,
+                0xfedc_ba98_7654_3210,
+            ),
+        ];
+
+        for (cputype, expected_pc) in cases {
+            let (flavor, word_size, pc_index) = macho_thread_state_layout(cputype).unwrap();
+            let count = pc_index + 1;
+            let command_size = 16 + count * word_size;
+            let mut bytes = vec![0u8; command_size];
+            bytes[0..4].copy_from_slice(&LC_UNIXTHREAD.to_le_bytes());
+            bytes[4..8].copy_from_slice(&(command_size as u32).to_le_bytes());
+            bytes[8..12].copy_from_slice(&flavor.to_le_bytes());
+            bytes[12..16].copy_from_slice(&(count as u32).to_le_bytes());
+            let pc_offset = 16 + pc_index * word_size;
+            if word_size == 8 {
+                bytes[pc_offset..pc_offset + 8].copy_from_slice(&expected_pc.to_le_bytes());
+            } else {
+                bytes[pc_offset..pc_offset + 4]
+                    .copy_from_slice(&(expected_pc as u32).to_le_bytes());
+            }
+
+            let reader = ByteReader::new(&bytes, Endian::Little);
+            assert_eq!(
+                parse_macho_thread_entry_point(&reader, 0, command_size as u32, cputype).unwrap(),
+                Some(expected_pc)
+            );
+        }
+    }
+
+    #[test]
+    fn macho_thread_commands_fail_closed_for_unknown_or_truncated_state() {
+        let bytes = [0u8; 16];
+        let reader = ByteReader::new(&bytes, Endian::Little);
+        assert_eq!(
+            parse_macho_thread_entry_point(&reader, 0, bytes.len() as u32, 0x7fff_ffff,).unwrap(),
+            None
+        );
+
+        let mut truncated = vec![0u8; 16];
+        truncated[8..12].copy_from_slice(&4u32.to_le_bytes());
+        truncated[12..16].copy_from_slice(&17u32.to_le_bytes());
+        let reader = ByteReader::new(&truncated, Endian::Little);
+        assert_eq!(
+            parse_macho_thread_entry_point(
+                &reader,
+                0,
+                truncated.len() as u32,
+                fission_core::constants::binary_format::MACHO_CPU_TYPE_X86_64,
+            )
+            .unwrap(),
+            None
         );
     }
 
