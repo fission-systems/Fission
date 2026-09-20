@@ -1,4 +1,4 @@
-use super::cfg_analysis::{CfgAnalysis, EdgeClass};
+use super::cfg_analysis::{CfgAnalysis, DomTree, EdgeClass};
 use crate::HashMap;
 use crate::HashSet;
 use fission_midend_core::ir::*;
@@ -34,9 +34,26 @@ impl LoopBody {
             }
         }
 
-        let mut bodies = Vec::new();
-        // Process loops inside out (innermost first).
-        for (head, tails) in loops {
+        let dom_tree = DomTree::analyze(successors, predecessors);
+        let mut ordered_loops: Vec<_> = loops.into_iter().collect();
+        for (_, tails) in &mut ordered_loops {
+            tails.sort_unstable();
+        }
+
+        // Process loops inside out (innermost first).  Dominance depth is a
+        // stable structural proxy for nesting: a natural inner-loop header is
+        // dominated by its outer header and therefore has a deeper dominator
+        // set.  The head index is the deterministic tie-breaker for sibling
+        // loops with the same depth.
+        ordered_loops.sort_by(|(left_head, _), (right_head, _)| {
+            dom_tree
+                .dominance_depth(*right_head)
+                .cmp(&dom_tree.dominance_depth(*left_head))
+                .then_with(|| left_head.cmp(right_head))
+        });
+
+        let mut bodies = Vec::with_capacity(ordered_loops.len());
+        for (head, tails) in ordered_loops {
             let mut loop_body = LoopBody {
                 head,
                 tails: tails.clone(),
@@ -317,5 +334,43 @@ impl LoopBody {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cfg_analysis::CfgAnalysis;
+
+    #[test]
+    fn identify_loops_processes_nested_headers_inside_out() {
+        // 0 -> 1 -> 2 -> 3 -> 4 -> 3 -> 5 -> 6 -> 1, with exits from 1 and
+        // 6 to 7.  Headers 1 and 3 are both natural-loop targets; 3 is the
+        // inner loop and must be materialized first.
+        let successors = vec![
+            vec![1],
+            vec![2, 7],
+            vec![3],
+            vec![4, 5],
+            vec![3],
+            vec![6],
+            vec![1, 7],
+            vec![],
+        ];
+        let predecessors = vec![
+            vec![],
+            vec![0, 6],
+            vec![1],
+            vec![2, 4],
+            vec![3],
+            vec![3],
+            vec![5],
+            vec![1, 6],
+        ];
+        let cfg = CfgAnalysis::analyze(&successors, &predecessors);
+        let loops = LoopBody::identify_loops(&successors, &predecessors, &cfg, &HashSet::default());
+
+        let heads: Vec<_> = loops.iter().map(|loop_body| loop_body.head).collect();
+        assert_eq!(heads, vec![3, 1]);
     }
 }
