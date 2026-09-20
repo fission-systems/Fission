@@ -67,6 +67,7 @@ mod tests {
                 info,
                 hooks: Vec::new(),
                 instance: None,
+                library: None,
                 state: None,
             },
         );
@@ -163,5 +164,22 @@ mod tests {
         assert!(pm.register_native_plugin(Box::new(plugin)).is_ok());
 
         assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn load_plugin_does_not_register_an_unopenable_library() {
+        let path = std::env::temp_dir().join(format!(
+            "fission-plugin-missing-{}.dylib",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let mut pm = PluginManager::new();
+        let error = pm
+            .load_plugin(&path)
+            .expect_err("a missing dynamic library must not load");
+
+        assert!(error.contains("Failed to open plugin"), "{error}");
+        assert_eq!(pm.plugin_count(), 0);
     }
 }
