@@ -133,4 +133,41 @@ mod tests {
             out.diagnostics
         );
     }
+
+    #[test]
+    fn run_script_cannot_import_a_filesystem_module() {
+        let bin = prepare_binary_for_script(test_binary());
+        let out = run_script(
+            &bin,
+            r#"import "this-module-does-not-exist" as external;"#,
+            "imports.rhai",
+            ScriptLimits::default(),
+        );
+        assert_eq!(out.status, ScriptRunStatus::Error);
+        assert!(
+            out.diagnostics.iter().any(|d| {
+                let message = d.message.to_lowercase();
+                message.contains("module") || message.contains("import")
+            }),
+            "filesystem import was not rejected: {:?}",
+            out.diagnostics
+        );
+    }
+
+    #[test]
+    fn run_script_enforces_wall_clock_limit_inside_the_evaluator() {
+        let bin = prepare_binary_for_script(test_binary());
+        let limits = ScriptLimits {
+            max_operations: 0,
+            max_runtime_ms: 1,
+            ..ScriptLimits::default()
+        };
+        let out = run_script(
+            &bin,
+            "let x = 0; while x < 100000000 { x += 1; }",
+            "timeout.rhai",
+            limits,
+        );
+        assert_eq!(out.status, ScriptRunStatus::Timeout, "{out:?}");
+    }
 }

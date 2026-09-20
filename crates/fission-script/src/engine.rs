@@ -8,9 +8,8 @@ use crate::result::{
 };
 use crate::sandbox;
 use fission_loader::loader::LoadedBinary;
-use rhai::{Dynamic, Engine};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use rhai::Dynamic;
+use std::sync::{Arc, Mutex, atomic::AtomicBool};
 use std::time::{Duration, Instant};
 
 pub fn check_script(source: &str) -> Result<(), ScriptError> {
@@ -104,7 +103,7 @@ fn run_script_inner(
     let findings = Arc::new(Mutex::new(Vec::new()));
     let halted = Arc::new(Mutex::new(None::<String>));
 
-    let mut engine = Engine::new();
+    let mut engine = sandbox::new_sandbox_engine();
     if let Err(e) = sandbox::configure_engine(&mut engine, &limits) {
         return ScriptRunResult {
             schema_version: SCHEMA_VERSION,
@@ -184,42 +183,38 @@ fn run_script_inner(
     #[cfg(feature = "emulator")]
     crate::api::machine::register(&mut engine);
 
-    let handle = thread::spawn(move || {
-        let mut scope = rhai::Scope::new();
-        scope.push("binary", host_bin);
-        #[cfg(feature = "emulator")]
-        if let Some(machine) = machine {
-            scope.push("machine", machine);
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let deadline = Instant::now() + deadline;
+    let timed_out_for_progress = timed_out.clone();
+    engine.on_progress(move |_| {
+        if Instant::now() >= deadline {
+            timed_out_for_progress.store(true, std::sync::atomic::Ordering::Relaxed);
+            Some("script exceeded max_runtime_ms".into())
+        } else {
+            None
         }
-        engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
     });
 
-    let start = Instant::now();
-    loop {
-        if start.elapsed() > deadline {
-            let mut result = ScriptRunResult::timeout(&limits);
-            result.script = Some(meta);
-            return result;
-        }
-        if handle.is_finished() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(2));
+    let mut scope = rhai::Scope::new();
+    scope.push("binary", host_bin);
+    #[cfg(feature = "emulator")]
+    if let Some(machine) = machine {
+        scope.push("machine", machine);
+    }
+    let eval_result = { engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast) };
+
+    if timed_out.load(std::sync::atomic::Ordering::Relaxed) {
+        let mut result = ScriptRunResult::timeout(&limits);
+        result.script = Some(meta);
+        return result;
     }
 
     let mut diagnostics = Vec::new();
-    let eval_result = handle.join();
-
     match eval_result {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => diagnostics.push(ScriptDiagnostic {
+        Ok(_) => {}
+        Err(e) => diagnostics.push(ScriptDiagnostic {
             severity: "error".into(),
             message: e.to_string(),
-            span: None,
-        }),
-        Err(_) => diagnostics.push(ScriptDiagnostic {
-            severity: "error".into(),
-            message: "script panicked".into(),
             span: None,
         }),
     }
