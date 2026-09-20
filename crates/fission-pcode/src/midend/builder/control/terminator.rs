@@ -2700,6 +2700,19 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn infer_unconditional_branch_successor_target(&self, idx: usize) -> Option<u64> {
+        let use_current_cfg = idx >= self.pcode.blocks.len()
+            || self.successors.get(idx).is_some_and(|successors| {
+                successors
+                    .iter()
+                    .any(|succ| *succ >= self.pcode.blocks.len())
+            });
+        if use_current_cfg {
+            let successors = self.successors.get(idx)?;
+            if successors.len() != 1 {
+                return None;
+            }
+            return Some(self.block_target_key(successors[0]));
+        }
         let block = self.pcode.blocks.get(idx)?;
         if block.successors.len() != 1 {
             return None;
@@ -2709,20 +2722,39 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn infer_cbranch_true_target_from_successors(&self, idx: usize) -> Option<u64> {
-        let block = self.pcode.blocks.get(idx)?;
+        let use_current_cfg = idx >= self.pcode.blocks.len()
+            || self.successors.get(idx).is_some_and(|successors| {
+                successors
+                    .iter()
+                    .any(|succ| *succ >= self.pcode.blocks.len())
+            });
+        let block = self.pcode.blocks.get(idx);
         let fallthrough = self.next_block_address(idx);
         let mut candidates = Vec::new();
-        for succ_idx in &block.successors {
-            let succ_idx = *succ_idx as usize;
-            if succ_idx >= self.pcode.blocks.len() {
-                continue;
+        if use_current_cfg {
+            for succ_idx in self.successors.get(idx)? {
+                let target = self.block_target_key(*succ_idx);
+                if Some(target) == fallthrough {
+                    continue;
+                }
+                if !candidates.contains(&target) {
+                    candidates.push(target);
+                }
             }
-            let target = self.block_target_key(succ_idx);
-            if Some(target) == fallthrough {
-                continue;
-            }
-            if !candidates.contains(&target) {
-                candidates.push(target);
+        } else {
+            let block = block?;
+            for succ_idx in &block.successors {
+                let succ_idx = *succ_idx as usize;
+                if succ_idx >= self.pcode.blocks.len() {
+                    continue;
+                }
+                let target = self.block_target_key(succ_idx);
+                if Some(target) == fallthrough {
+                    continue;
+                }
+                if !candidates.contains(&target) {
+                    candidates.push(target);
+                }
             }
         }
         if candidates.len() == 1 {
@@ -2749,7 +2781,14 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         vn: &Varnode,
     ) -> Option<usize> {
-        resolve_branch_target_index(self.pcode, &self.address_to_index, idx, op, vn).or_else(|| {
+        let target_idx = resolve_branch_target_index(
+            self.pcode,
+            &self.address_to_index,
+            idx,
+            op,
+            vn,
+        )
+        .or_else(|| {
             let peeled = self.peel_passthrough_varnode(vn);
             if peeled != *vn {
                 if let Some(target_idx) = resolve_branch_target_index(
@@ -2765,7 +2804,27 @@ impl<'a> PreviewBuilder<'a> {
 
             let target_addr = self.infer_branch_target_address_one_step(vn)?;
             canonical_block_index_for_address(self.pcode, &self.address_to_index, target_addr)
-        })
+        })?;
+        if self.virtual_block_map.is_empty() {
+            return Some(target_idx);
+        }
+
+        // Address resolution identifies the p-code body, not the current CFG
+        // node. Node splitting deliberately gives a redirected edge a virtual
+        // successor whose body is that same p-code block. Prefer that
+        // successor when the source block's current graph contains one; this
+        // keeps branch lowering aligned with the graph that structuring sees.
+        let Some(successors) = self.successors.get(idx) else {
+            return Some(target_idx);
+        };
+        if successors.contains(&target_idx) {
+            return Some(target_idx);
+        }
+        successors
+            .iter()
+            .copied()
+            .find(|successor| self.pcode_block_idx(*successor) == target_idx)
+            .or(Some(target_idx))
     }
 
     fn infer_branch_target_address_one_step(&self, vn: &Varnode) -> Option<u64> {

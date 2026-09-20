@@ -44,7 +44,82 @@ mod tests {
     use super::*;
     use crate::midend::ir::MlilPreviewOptions;
     use crate::midend::ir::StructuringEngineKind;
-    use crate::pcode::PcodeFunction;
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+
+    fn conditional_function() -> PcodeFunction {
+        PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![2, 1],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1000,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x1020, 8), Varnode::constant(1, 1)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: Vec::new(),
+                    ops: vec![PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1010,
+                        output: None,
+                        inputs: Vec::new(),
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: vec![3],
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 2,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x1020,
+                            output: Some(Varnode {
+                                space_id: crate::midend::support::RUST_SLEIGH_REGISTER_SPACE_ID,
+                                offset: 0,
+                                size: 8,
+                                is_constant: false,
+                                constant_val: 0,
+                            }),
+                            inputs: vec![Varnode::constant(7, 8)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 3,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x1021,
+                            output: None,
+                            inputs: vec![Varnode::constant(0x1030, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 3,
+                    start_address: 0x1030,
+                    successors: Vec::new(),
+                    ops: vec![PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1030,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x1020, 8), Varnode::constant(1, 1)],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        }
+    }
 
     #[test]
     fn apply_virtual_goto_edge_removes_cfg_edge() {
@@ -93,5 +168,48 @@ mod tests {
         assert!(builder.is_virtual_goto_edge(1, 0));
         assert!(builder.successors[1].is_empty());
         assert!(builder.predecessors[0].is_empty());
+    }
+
+    #[test]
+    fn fas_virtual_targets_are_kept_in_jump_target_inventory() {
+        let pcode = conditional_function();
+        let options = MlilPreviewOptions::default();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.successors = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        builder.predecessors = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        builder.fas_virtual_edges.push((0, 2));
+
+        let targets = builder.collect_jump_targets().expect("target inventory");
+        assert!(targets.contains(&builder.block_target_key(2)));
+    }
+
+    #[test]
+    fn linear_fas_materialization_emits_the_removed_conditional_edge_and_label() {
+        let pcode = conditional_function();
+        let options = MlilPreviewOptions::default();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        assert!(builder.apply_virtual_goto_edge(0, 2));
+
+        let body = fission_midend_structuring::build_linear_multiblock_body(&mut builder, false)
+            .expect("linear fallback should preserve the virtual edge");
+        let target_label = fission_midend_structuring::block_label(builder.block_target_key(2));
+        assert!(
+            body.iter().any(|stmt| matches!(
+                stmt,
+                PreHirStmt::Label(label) if label == &target_label
+            )),
+            "removed FAS target must receive a label: {body:?}"
+        );
+        assert!(
+            body.iter().any(|stmt| matches!(
+                stmt,
+                PreHirStmt::If { then_body, .. }
+                    if then_body.iter().any(|nested| matches!(
+                        nested,
+                        PreHirStmt::Goto(label) if label == &target_label
+                    ))
+            )),
+            "removed conditional edge must remain an explicit goto: {body:?}"
+        );
     }
 }

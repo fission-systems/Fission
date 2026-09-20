@@ -715,7 +715,7 @@ fn materialize_virtual_gotos(
         }) else {
             continue;
         };
-        let label = crate::helpers::block_label(host.block_start_address(target_block));
+        let label = crate::helpers::block_label(host.block_target_key(target_block));
         facts.push(VirtualGotoFact {
             source: id,
             target: target_node,

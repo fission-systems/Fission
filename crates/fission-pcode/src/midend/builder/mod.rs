@@ -319,6 +319,26 @@ impl<'a> PreviewBuilder<'a> {
         self.pcode.blocks.len() + self.virtual_block_map.len()
     }
 
+    /// Extend the emitted block-identity table for node-split clones.
+    ///
+    /// `virtual_block_map` preserves the p-code body source, while
+    /// `block_target_keys` preserves the CFG-node identity. Keeping those two
+    /// concerns separate is essential: two CFG nodes may intentionally share
+    /// one p-code block after node splitting, but they must never share a
+    /// label or branch target key in the emitted PreHIR.
+    pub(crate) fn extend_virtual_block_target_keys(&mut self, originals: &[usize]) {
+        for &original_idx in originals {
+            let key = allocate_virtual_block_target_key(
+                self.pcode,
+                &self.block_target_keys,
+                original_idx,
+            );
+            let virtual_idx = self.block_target_keys.len();
+            self.block_target_keys.push(key);
+            self.target_key_to_index.insert(key, virtual_idx);
+        }
+    }
+
     fn should_suppress_entry_register_params(&self, name: &str, address: u64) -> bool {
         if is_compiler_runtime_param_suppressed_name(name) {
             return true;
@@ -925,12 +945,11 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {
         let layout_idx = self.pcode_block_idx(idx);
-        self.layout_fallthrough[layout_idx]
-            .map(|next_idx| self.block_target_keys[self.pcode_block_idx(next_idx)])
+        self.layout_fallthrough[layout_idx].map(|next_idx| self.block_target_key(next_idx))
     }
 
     pub(super) fn block_target_key(&self, idx: usize) -> u64 {
-        self.block_target_keys[self.pcode_block_idx(idx)]
+        self.block_target_keys[idx]
     }
 
     pub(super) fn invalidate_materialization_dependent_caches(&mut self) {

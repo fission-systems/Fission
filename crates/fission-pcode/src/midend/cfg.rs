@@ -30,11 +30,44 @@ pub(super) fn build_block_target_keys(pcode: &PcodeFunction) -> Vec<u64> {
         .collect()
 }
 
-fn encode_duplicate_block_key(start_address: u64, ordinal: u32) -> u64 {
+pub(super) fn encode_duplicate_block_key(start_address: u64, ordinal: u32) -> u64 {
     debug_assert!(ordinal > 0);
     DUPLICATE_BLOCK_KEY_TAG
         | ((u64::from(ordinal) & 0x7fff) << 48)
         | (start_address & 0x0000_ffff_ffff_ffff)
+}
+
+/// Allocate a deterministic target identity for a node-split clone.
+///
+/// A clone has the same p-code start address as its source, but it is a
+/// distinct CFG node and therefore needs a distinct emitted label. Start with
+/// the first duplicate ordinal after the real blocks at that address and
+/// continue until the key is absent from the identities already allocated.
+/// This keeps clone labels in the same namespace as duplicate-address block
+/// labels without relying on a synthetic address or a function-specific rule.
+pub(super) fn allocate_virtual_block_target_key(
+    pcode: &PcodeFunction,
+    existing_keys: &[u64],
+    original_idx: usize,
+) -> u64 {
+    let start_address = pcode
+        .blocks
+        .get(original_idx)
+        .map(|block| block.start_address)
+        .unwrap_or(0);
+    let mut ordinal = pcode
+        .blocks
+        .iter()
+        .filter(|block| block.start_address == start_address)
+        .count()
+        .max(1) as u32;
+    loop {
+        let key = encode_duplicate_block_key(start_address, ordinal);
+        if !existing_keys.contains(&key) {
+            return key;
+        }
+        ordinal = ordinal.saturating_add(1);
+    }
 }
 
 /// Map a code address onto the block that actually contains it.
