@@ -1273,6 +1273,26 @@ pub fn try_lower_multiblock_dowhile(
         host.bump_loop_multi_tail_dowhile_lowered();
     }
 
+    // A single-tail natural do-while lowers through the loop-body subgraph as
+    // `while (1) { body; if (break_cond) break; else continue; }`. When the
+    // terminal conditional is the complete latch decision, it is exactly the
+    // CFG shape of a do-while: the break arm is the exit edge and the continue
+    // arm is the back edge. Recover that structured form here, where the loop
+    // membership and preferred latch have already been proven. Multi-tail
+    // loops stay in the conservative while(1) form because their terminal
+    // control may describe only one of several exits.
+    if !multi_tail && let Some(cond) = terminal_do_while_condition(&lowered) {
+        let mut body = lowered;
+        body.pop();
+        return Ok(Some((
+            PreHirStmt::DoWhile {
+                body: std::rc::Rc::new(body),
+                cond,
+            },
+            exit_idx,
+        )));
+    }
+
     Ok(Some((
         PreHirStmt::While {
             cond: PreHirExpr::Const(1, NirType::Bool),
@@ -1280,6 +1300,35 @@ pub fn try_lower_multiblock_dowhile(
         },
         exit_idx,
     )))
+}
+
+/// Recover a single natural do-while's latch condition from the terminal
+/// control emitted by [`lower_loop_body_subgraph`]. The helper accepts only a
+/// total two-arm decision, so it cannot erase a fall-through statement or
+/// reinterpret an internal one-arm break as a loop condition.
+fn terminal_do_while_condition(body: &[PreHirStmt]) -> Option<PreHirExpr> {
+    let PreHirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = body.last()?
+    else {
+        return None;
+    };
+
+    let is_control = |stmts: &[PreHirStmt], expected: &PreHirStmt| {
+        stmts.len() == 1 && stmts.first() == Some(expected)
+    };
+
+    if is_control(then_body, &PreHirStmt::Break) && is_control(else_body, &PreHirStmt::Continue) {
+        // `if (cond) break; else continue;` repeats while !cond.
+        return Some(negate_expr(cond.clone()));
+    }
+    if is_control(then_body, &PreHirStmt::Continue) && is_control(else_body, &PreHirStmt::Break) {
+        // `if (cond) continue; else break;` repeats while cond.
+        return Some(cond.clone());
+    }
+    None
 }
 
 // -----------------------------------------------------------------------
@@ -2288,5 +2337,43 @@ mod tests {
         let cond = var("zf");
         let body: Vec<PreHirStmt> = Vec::new();
         assert!(try_fold_cond_prefix(&[], &cond, &body).is_none());
+    }
+
+    #[test]
+    fn terminal_total_latch_is_recovered_as_do_while_condition() {
+        let cond = PreHirExpr::Var("done".to_string());
+        let body = vec![
+            PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+            PreHirStmt::If {
+                cond: cond.clone(),
+                then_body: vec![PreHirStmt::Break].into(),
+                else_body: vec![PreHirStmt::Continue].into(),
+            },
+        ];
+
+        let recovered_cond = terminal_do_while_condition(&body).unwrap();
+        assert_eq!(
+            recovered_cond,
+            negate_expr(cond),
+            "break arm means the do-while condition is the continue polarity"
+        );
+    }
+
+    #[test]
+    fn terminal_latch_recovery_preserves_continue_polarity_and_rejects_partial_control() {
+        let cond = PreHirExpr::Var("keep_going".to_string());
+        let inverse = vec![PreHirStmt::If {
+            cond: cond.clone(),
+            then_body: vec![PreHirStmt::Continue].into(),
+            else_body: vec![PreHirStmt::Break].into(),
+        }];
+        assert_eq!(terminal_do_while_condition(&inverse), Some(cond));
+
+        let partial = vec![PreHirStmt::If {
+            cond: PreHirExpr::Var("done".to_string()),
+            then_body: vec![PreHirStmt::Break].into(),
+            else_body: Vec::new().into(),
+        }];
+        assert!(terminal_do_while_condition(&partial).is_none());
     }
 }
