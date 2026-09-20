@@ -33,12 +33,18 @@ impl AbstractValue {
         }
         match (self, other) {
             (Self::Top, _) | (_, Self::Top) => Self::Top,
-            (Self::Constant(a), Self::Constant(b)) => Self::Set(vec![*a, *b]),
+            (Self::Constant(a), Self::Constant(b)) => {
+                let mut values = vec![*a, *b];
+                values.sort_unstable();
+                values.dedup();
+                Self::Set(values)
+            }
             (Self::Set(a), Self::Constant(b)) | (Self::Constant(b), Self::Set(a)) => {
                 let mut s = a.clone();
                 if !s.contains(b) {
                     s.push(*b);
                 }
+                s.sort_unstable();
                 if s.len() > 8 { Self::Top } else { Self::Set(s) }
             }
             (Self::Set(a), Self::Set(b)) => {
@@ -48,6 +54,7 @@ impl AbstractValue {
                         s.push(*val);
                     }
                 }
+                s.sort_unstable();
                 if s.len() > 8 { Self::Top } else { Self::Set(s) }
             }
             _ => Self::Top,
@@ -80,28 +87,33 @@ pub struct ValueState {
 impl ValueState {
     pub fn merge(&mut self, other: &Self) -> bool {
         let mut changed = false;
-        let mut to_remove = Vec::new();
-        for (k, v) in &mut self.varnodes {
-            if let Some(other_v) = other.varnodes.get(k) {
-                let new_v = v.merge(other_v);
-                if *v != new_v {
-                    *v = new_v;
-                    changed = true;
-                }
-            } else {
-                to_remove.push(k.clone());
+        let mut keys: Vec<VarnodeKey> = self.varnodes.keys().cloned().collect();
+        keys.extend(
+            other
+                .varnodes
+                .keys()
+                .filter(|key| !self.varnodes.contains_key(key))
+                .cloned(),
+        );
+        keys.sort_by_key(|key| (key.space_id, key.offset));
+
+        for key in keys {
+            // A missing definition means Top at a join.  The join must be
+            // commutative: inserting a value merely because it arrived in
+            // `other` would make the result depend on predecessor order.
+            let merged = match (self.varnodes.get(&key), other.varnodes.get(&key)) {
+                (Some(left), Some(right)) => left.merge(right),
+                _ => AbstractValue::Top,
+            };
+            let old = self.varnodes.get(&key).cloned().unwrap_or_default();
+            if old == merged {
+                continue;
             }
-        }
-        for k in to_remove {
-            self.varnodes.remove(&k);
             changed = true;
-        }
-        for (k, v) in &other.varnodes {
-            if !self.varnodes.contains_key(k) {
-                // If it's in other but not in self, and we are merging, it means self didn't have it defined.
-                // In strict intersection dataflow, this would be Top, but for reaching definitions we just insert.
-                self.varnodes.insert(k.clone(), v.clone());
-                changed = true;
+            if merged == AbstractValue::Top {
+                self.varnodes.remove(&key);
+            } else {
+                self.varnodes.insert(key, merged);
             }
         }
         changed
@@ -245,8 +257,12 @@ impl ValueSetAnalyzer {
             for &succ_idx in &block.successors {
                 let succ_idx = succ_idx as usize;
                 if succ_idx < function.blocks.len() {
-                    let next_state = self.block_states.entry(succ_idx).or_default();
-                    if next_state.merge(&state) {
+                    if let Some(next_state) = self.block_states.get_mut(&succ_idx) {
+                        if next_state.merge(&state) {
+                            worklist.insert(succ_idx);
+                        }
+                    } else {
+                        self.block_states.insert(succ_idx, state.clone());
                         worklist.insert(succ_idx);
                     }
                 }
@@ -362,6 +378,12 @@ impl ValueSetAnalyzer {
             PcodeOpcode::BranchInd | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
                 if let Some(target_in) = op.inputs.get(0) {
                     match state.get_value(target_in) {
+                        AbstractValue::Constant(target) => {
+                            self.facts.push(VsaFact::JumpTableTarget {
+                                instruction_addr: op.address,
+                                targets: vec![target],
+                            });
+                        }
                         AbstractValue::Set(addrs) => {
                             self.facts.push(VsaFact::JumpTableTarget {
                                 instruction_addr: op.address,
@@ -403,6 +425,65 @@ mod tests {
         let mut analyzer = ValueSetAnalyzer::new();
         let function = PcodeFunction { blocks: vec![] };
         assert!(!analyzer.analyze(&function));
+    }
+
+    #[test]
+    fn value_state_merge_is_commutative_and_missing_is_top() {
+        let var = Varnode {
+            space_id: 1,
+            offset: 0x10,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+
+        let mut left = ValueState::default();
+        left.set_value(&var, AbstractValue::Constant(2));
+        let mut right = ValueState::default();
+        right.set_value(&var, AbstractValue::Constant(1));
+
+        let mut left_then_right = left.clone();
+        left_then_right.merge(&right);
+        let mut right_then_left = right.clone();
+        right_then_left.merge(&left);
+        assert_eq!(left_then_right, right_then_left);
+        assert_eq!(
+            left_then_right.get_value(&var),
+            AbstractValue::Set(vec![1, 2])
+        );
+
+        let empty = ValueState::default();
+        let mut defined_then_empty = left;
+        defined_then_empty.merge(&empty);
+        let mut empty_then_defined = empty;
+        empty_then_defined.merge(&right);
+        assert_eq!(defined_then_empty.get_value(&var), AbstractValue::Top);
+        assert_eq!(empty_then_defined.get_value(&var), AbstractValue::Top);
+    }
+
+    #[test]
+    fn constant_indirect_target_emits_jump_fact() {
+        let mut analyzer = ValueSetAnalyzer::new();
+        let mut state = ValueState::default();
+        analyzer.evaluate_op(
+            &mut state,
+            &PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::BranchInd,
+                address: 0x1000,
+                output: None,
+                inputs: vec![Varnode::constant(0x401000, 8)],
+                asm_mnemonic: None,
+            },
+        );
+
+        assert_eq!(
+            analyzer.facts,
+            vec![VsaFact::JumpTableTarget {
+                instruction_addr: 0x1000,
+                targets: vec![0x401000],
+            }]
+        );
     }
 
     #[test]
