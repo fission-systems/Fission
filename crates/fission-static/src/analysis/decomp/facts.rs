@@ -14,7 +14,11 @@ use fission_sleigh::runtime::{
     DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+#[path = "fact_store_state.rs"]
+mod fact_store_state;
+use self::fact_store_state::{DecodeCache, LearnedFactOverlay};
 
 /// Generous upper bound on a single function's instruction count for FID
 /// hashing -- mirrors `fission_decompiler::fid`'s decode safety valve, not a
@@ -91,37 +95,22 @@ impl FunctionFacts {
 #[derive(Debug, Clone)]
 pub struct FactStore {
     program: Arc<ProgramSnapshot>,
-    name_facts: HashMap<u64, Vec<NameFact>>,
-    native_type_facts: HashMap<u64, Vec<InferredTypeInfo>>,
+    learned: LearnedFactOverlay,
     loader_type_facts: Arc<Vec<InferredTypeInfo>>,
     dwarf_functions: Arc<HashMap<u64, DwarfFunctionInfo>>,
     pdb_functions: Arc<HashMap<u64, PdbFunctionInfo>>,
-    structuring_hints: HashMap<u64, fission_midend_core::NirFunctionHints>,
-    pub calling_conventions: HashMap<u64, fission_core::CallingConvention>,
-    /// Functions whose full raw p-code was already lifted to
-    /// `DecodeStopReason::TerminalControlFlow` completion by FID signature
-    /// matching (see `ingest_signature_matches_with_databases`) -- shared so
-    /// the main decompile pipeline can skip repeating that same decode, the
-    /// dominant cost of a `decomp --all` batch on binaries with many
-    /// unnamed functions. `Arc<Mutex<..>>` rather than a bare field so
-    /// `FactStore` clones keep sharing one cache instead of forking it
-    /// (matches `#[derive(Clone)]`'s existing "cheap shared clone" contract
-    /// for this type, and `Mutex` itself isn't `Clone`).
-    decoded_function_cache: Arc<Mutex<HashMap<u64, Arc<DecodedPcodeFunction>>>>,
+    decode_cache: DecodeCache,
 }
 
 impl Default for FactStore {
     fn default() -> Self {
         Self {
             program: Arc::new(ProgramSnapshot::default()),
-            name_facts: HashMap::new(),
-            native_type_facts: HashMap::new(),
+            learned: LearnedFactOverlay::default(),
             loader_type_facts: Arc::new(Vec::new()),
             dwarf_functions: Arc::new(HashMap::new()),
             pdb_functions: Arc::new(HashMap::new()),
-            structuring_hints: HashMap::new(),
-            calling_conventions: HashMap::new(),
-            decoded_function_cache: Arc::new(Mutex::new(HashMap::new())),
+            decode_cache: DecodeCache::default(),
         }
     }
 }
@@ -274,8 +263,7 @@ impl FactStore {
     pub fn from_program(binary: &LoadedBinary, program: Arc<ProgramSnapshot>) -> Self {
         let mut store = Self {
             program: Arc::clone(&program),
-            name_facts: HashMap::new(),
-            native_type_facts: HashMap::new(),
+            learned: LearnedFactOverlay::default(),
             loader_type_facts: Arc::new(binary.inferred_types.clone()),
             // `binary.dwarf_functions`/`pdb_functions` are already `Arc`-wrapped
             // on `LoadedBinary` -- share the same allocation instead of deep-
@@ -284,9 +272,7 @@ impl FactStore {
             // independent copy here was pure standing duplication.
             dwarf_functions: Arc::clone(&binary.dwarf_functions),
             pdb_functions: Arc::clone(&binary.pdb_functions),
-            structuring_hints: HashMap::new(),
-            calling_conventions: HashMap::new(),
-            decoded_function_cache: Arc::new(Mutex::new(HashMap::new())),
+            decode_cache: DecodeCache::default(),
         };
 
         for function in &program.functions {
@@ -791,7 +777,7 @@ impl FactStore {
     }
 
     pub fn ingest_calling_convention(&mut self, address: u64, cc: fission_core::CallingConvention) {
-        self.calling_conventions.insert(address, cc);
+        self.learned.calling_conventions.insert(address, cc);
     }
 
     /// Returns a previously-cached full raw p-code decode for `address`, if
@@ -808,11 +794,7 @@ impl FactStore {
     /// changes what's reachable, not just how much budget was spent finding
     /// it.
     pub fn get_cached_decoded_function(&self, address: u64) -> Option<Arc<DecodedPcodeFunction>> {
-        self.decoded_function_cache
-            .lock()
-            .ok()?
-            .get(&address)
-            .cloned()
+        self.decode_cache.get(address)
     }
 
     /// Caches `decoded` for `address` if (and only if) it reached
@@ -824,37 +806,20 @@ impl FactStore {
         address: u64,
         decoded: &Arc<DecodedPcodeFunction>,
     ) {
-        if decoded.stop_reason != DecodeStopReason::TerminalControlFlow {
-            return;
-        }
-        if let Ok(mut cache) = self.decoded_function_cache.lock() {
-            cache.entry(address).or_insert_with(|| Arc::clone(decoded));
-        }
+        self.decode_cache.insert_if_complete(address, decoded);
     }
 
     pub fn ingest_name_fact(&mut self, address: u64, name: String, provenance: FactProvenance) {
-        let trimmed = name.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-
-        let fact = NameFact {
-            name: trimmed.to_string(),
-            provenance,
-        };
-        let facts = self.name_facts.entry(address).or_default();
-        if !facts.iter().any(|current| current == &fact) {
-            facts.push(fact);
-        }
+        self.learned.ingest_name_fact(address, name, provenance);
     }
 
     pub fn clear_name_facts_by_provenance(&mut self, address: u64, provenance: FactProvenance) {
-        let Some(facts) = self.name_facts.get_mut(&address) else {
+        let Some(facts) = self.learned.name_facts.get_mut(&address) else {
             return;
         };
         facts.retain(|fact| fact.provenance != provenance);
         if facts.is_empty() {
-            self.name_facts.remove(&address);
+            self.learned.name_facts.remove(&address);
         }
     }
 
@@ -862,7 +827,7 @@ impl FactStore {
         if types.is_empty() {
             return;
         }
-        self.native_type_facts.insert(address, types);
+        self.learned.native_type_facts.insert(address, types);
     }
 
     pub fn resolved_name(&self, address: u64) -> Option<&str> {
@@ -871,21 +836,24 @@ impl FactStore {
     }
 
     pub fn chosen_name_fact(&self, address: u64) -> Option<&NameFact> {
-        self.name_facts
+        self.learned
+            .name_facts
             .get(&address)?
             .iter()
             .max_by_key(|fact| name_fact_priority(fact.provenance))
     }
 
     pub fn iter_resolved_name_facts(&self) -> impl Iterator<Item = (u64, &NameFact)> + '_ {
-        self.name_facts
+        self.learned
+            .name_facts
             .iter()
             .filter_map(|(address, _)| self.chosen_name_fact(*address).map(|fact| (*address, fact)))
     }
 
     pub fn merged_inferred_types(&self, address: u64) -> Vec<InferredTypeInfo> {
         merge_type_fact_layers(
-            self.native_type_facts
+            self.learned
+                .native_type_facts
                 .get(&address)
                 .cloned()
                 .unwrap_or_default(),
@@ -926,7 +894,8 @@ impl FactStore {
         address: u64,
         hints: fission_midend_core::NirFunctionHints,
     ) {
-        self.structuring_hints
+        self.learned
+            .structuring_hints
             .entry(address)
             .and_modify(|current| merge_structuring_hints(current, &hints))
             .or_insert(hints);
@@ -936,11 +905,12 @@ impl FactStore {
         &self,
         address: u64,
     ) -> Option<&fission_midend_core::NirFunctionHints> {
-        self.structuring_hints.get(&address)
+        self.learned.structuring_hints.get(&address)
     }
 
     pub fn function_facts_snapshot(&self, address: u64) -> FunctionFacts {
         let mut type_facts = self
+            .learned
             .native_type_facts
             .get(&address)
             .into_iter()
@@ -959,12 +929,17 @@ impl FactStore {
         FunctionFacts {
             address,
             chosen_name: self.chosen_name_fact(address).cloned(),
-            name_facts: self.name_facts.get(&address).cloned().unwrap_or_default(),
+            name_facts: self
+                .learned
+                .name_facts
+                .get(&address)
+                .cloned()
+                .unwrap_or_default(),
             type_facts,
             dwarf_info: self.dwarf_functions.get(&address).cloned(),
             pdb_info: self.pdb_functions.get(&address).cloned(),
-            structuring_hints: self.structuring_hints.get(&address).cloned(),
-            calling_convention: self.calling_conventions.get(&address).cloned(),
+            structuring_hints: self.learned.structuring_hints.get(&address).cloned(),
+            calling_convention: self.learned.calling_conventions.get(&address).cloned(),
         }
     }
 }
@@ -1403,6 +1378,34 @@ mod tests {
             Arc::ptr_eq(&binary.pdb_functions, &store.pdb_functions),
             "FactStore::from_binary must share the same pdb_functions allocation, not clone it"
         );
+    }
+
+    #[test]
+    fn fact_store_clones_isolate_learned_facts_but_share_decode_cache() {
+        let mut original = FactStore::default();
+        let clone = original.clone();
+        original.ingest_name_fact(
+            0x401000,
+            "learned_name".to_string(),
+            FactProvenance::WeakAutogenerated,
+        );
+
+        assert_eq!(original.resolved_name(0x401000), Some("learned_name"));
+        assert_eq!(clone.resolved_name(0x401000), None);
+
+        let decoded = Arc::new(DecodedPcodeFunction {
+            function: PcodeFunction { blocks: Vec::new() },
+            instructions: Vec::new(),
+            decoded_instructions: 0,
+            stop_reason: DecodeStopReason::TerminalControlFlow,
+            template_source_counts: std::collections::BTreeMap::new(),
+            reachable_instruction_addresses: Vec::new(),
+            instruction_lengths: std::collections::BTreeMap::new(),
+            inferred_indirect_edges: std::collections::BTreeMap::new(),
+            indirect_targets: std::collections::BTreeSet::new(),
+        });
+        original.cache_decoded_function_if_complete(0x401000, &decoded);
+        assert!(clone.get_cached_decoded_function(0x401000).is_some());
     }
 
     #[test]
