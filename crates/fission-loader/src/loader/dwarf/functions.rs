@@ -157,9 +157,8 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                 // Look for DW_TAG_subprogram at any level
                 if entry.tag() == DwTag(0x2e) {
                     // DW_TAG_subprogram — start collecting
-                    let address = match self.get_attr_u64(entry, DwAt(0x11))? {
-                        Some(addr) if addr != 0 => addr,
-                        _ => continue, // Declaration-only / inlined
+                    let Some(address) = self.get_attr_u64(entry, DwAt(0x11))? else {
+                        continue; // Declaration-only / inlined
                     };
 
                     let raw_name = self
@@ -385,7 +384,10 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                 Some(gimli::Operation::RegisterOffset { register, .. }),
                 Some(gimli::Operation::StackValue),
                 None,
-            ) if !matches!(register.0, 6 | 7 | 29 | 31) => {
+            ) if !self
+                .dwarf_stack_base_registers()
+                .contains(&u64::from(register.0)) =>
+            {
                 Ok(LocationListEntryKind::Register(u64::from(register.0)))
             }
             (
@@ -416,9 +418,13 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                 gimli::Operation::RegisterOffset {
                     register, offset, ..
                 } => {
-                    // If base register is frame/stack pointer, treat as stack offset
-                    // x86_64: RBP=6, RSP=7; AArch64: FP=29, SP=31
-                    if register.0 == 6 || register.0 == 7 || register.0 == 29 || register.0 == 31 {
+                    // If the architecture's frame/stack base is used, treat
+                    // the operation as a stack-relative offset. DWARF
+                    // register numbers are target-specific.
+                    if self
+                        .dwarf_stack_base_registers()
+                        .contains(&u64::from(register.0))
+                    {
                         Ok(DwarfLocation::StackOffset(offset))
                     } else {
                         Ok(DwarfLocation::Register(format!("reg{}", register.0)))

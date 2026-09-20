@@ -40,6 +40,56 @@ impl<'a> DwarfAnalyzer<'a> {
         Self::debug_source_of(self.binary)
     }
 
+    /// Return DWARF register numbers that can be used as a stack/frame base
+    /// for this binary. DWARF register numbers are architecture-defined; they
+    /// are not interchangeable across the language IDs below.
+    pub(super) fn dwarf_stack_base_registers(&self) -> &'static [u64] {
+        const AARCH64: &[u64] = &[29, 31];
+        const ARM: &[u64] = &[11, 13];
+        const ARM_THUMB: &[u64] = &[7, 11, 13];
+        const MIPS: &[u64] = &[29, 30];
+        const RISCV: &[u64] = &[2, 8];
+        const X86_32: &[u64] = &[4, 5];
+        const X86_64: &[u64] = &[6, 7];
+
+        let architecture = self.binary.architecture.as_ref();
+        let processor = architecture
+            .map(|arch| arch.processor.as_str())
+            .unwrap_or_default();
+        let language_id = self.binary.arch_spec.as_str();
+        let bitness = architecture.map(|arch| arch.bitness).or_else(|| {
+            language_id
+                .split(':')
+                .nth(2)
+                .and_then(|bits| bits.parse().ok())
+        });
+
+        if processor.eq_ignore_ascii_case("x86") || language_id.starts_with("x86:") {
+            return if bitness == Some(32) { X86_32 } else { X86_64 };
+        }
+        if processor.eq_ignore_ascii_case("aarch64") || language_id.starts_with("AARCH64:") {
+            return AARCH64;
+        }
+        if processor.eq_ignore_ascii_case("arm") || language_id.starts_with("ARM:") {
+            let thumb_default = architecture
+                .map(|arch| arch.variant.ends_with('T'))
+                .unwrap_or(false)
+                || language_id
+                    .split(':')
+                    .nth(3)
+                    .is_some_and(|variant| variant.ends_with('T'));
+            return if thumb_default { ARM_THUMB } else { ARM };
+        }
+        if processor.eq_ignore_ascii_case("mips") || language_id.starts_with("MIPS:") {
+            return MIPS;
+        }
+        if processor.eq_ignore_ascii_case("riscv") || language_id.starts_with("RISCV:") {
+            return RISCV;
+        }
+
+        &[]
+    }
+
     /// Check if DWARF debug information is available
     pub fn has_debug_info(&self) -> bool {
         self.has_debug
@@ -237,6 +287,45 @@ mod tests {
         assert!(!analyzer.has_debug_info());
         assert!(analyzer.analyze_types().is_empty());
         assert!(analyzer.analyze_functions().is_empty());
+    }
+
+    #[test]
+    fn dwarf_stack_base_registers_follow_target_language() {
+        let cases = [
+            ("x86:LE:32:default", false, &[4, 5][..], &[6, 7][..]),
+            ("x86:LE:64:default", true, &[6, 7][..], &[4, 5][..]),
+            ("ARM:LE:32:v8", false, &[11, 13][..], &[6, 7][..]),
+            ("ARM:LE:32:v8T", false, &[7, 11, 13][..], &[6][..]),
+            ("AARCH64:LE:64:v8A", true, &[29, 31][..], &[6, 7][..]),
+            ("RISCV:LE:64:default", true, &[2, 8][..], &[6, 7][..]),
+        ];
+
+        for (arch_spec, is_64bit, expected, rejected) in cases {
+            let binary =
+                LoadedBinaryBuilder::new(format!("{arch_spec}.elf"), DataBuffer::Heap(Vec::new()))
+                    .format("test")
+                    .arch_spec(arch_spec)
+                    .entry_point(0)
+                    .image_base(0)
+                    .is_64bit(is_64bit)
+                    .build()
+                    .expect("build target-language fixture");
+            let analyzer = DwarfAnalyzer::new(&binary);
+            let registers = analyzer.dwarf_stack_base_registers();
+
+            for register in expected {
+                assert!(
+                    registers.contains(register),
+                    "{arch_spec} should classify DWARF register {register} as stack/frame base"
+                );
+            }
+            for register in rejected {
+                assert!(
+                    !registers.contains(register),
+                    "{arch_spec} should not classify DWARF register {register} as stack/frame base"
+                );
+            }
+        }
     }
 
     /// `testdata/x64_dyn_enum_test.elf`: GCC-compiled from a source with
