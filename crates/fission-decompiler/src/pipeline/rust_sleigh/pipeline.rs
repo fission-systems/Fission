@@ -19,7 +19,7 @@ pub fn decompile_with_rust_sleigh(
     max_function_size: Option<u32>,
     max_instructions: Option<u32>,
 ) -> Result<RustSleighDecompileResult, String> {
-    let facts = FactStore::from_binary(binary);
+    let facts = FactStore::from_binary_without_signature_matches(binary);
     decompile_with_rust_sleigh_with_facts(
         binary,
         &facts,

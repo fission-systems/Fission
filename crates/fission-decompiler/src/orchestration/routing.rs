@@ -187,7 +187,7 @@ pub fn select_nir_output<S: NirSource>(
     mode: NirEngineMode,
     timeout_ms: Option<u64>,
 ) -> Result<NirSelection, String> {
-    let fact_store = FactStore::from_binary(binary);
+    let fact_store = FactStore::from_binary_without_signature_matches(binary);
     select_nir_output_with_facts(source, binary, &fact_store, address, name, mode, timeout_ms)
 }
 
@@ -252,7 +252,7 @@ pub fn select_nir_output_from_pcode(
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
-    let fact_store = FactStore::from_binary(binary);
+    let fact_store = FactStore::from_binary_without_signature_matches(binary);
     select_nir_output_from_pcode_with_facts(
         pcode,
         binary,
@@ -365,7 +365,7 @@ pub fn rescue_nir_output<S: NirSource>(
     error: &str,
     timeout_ms: Option<u64>,
 ) -> Result<Option<NirSelection>, String> {
-    let fact_store = FactStore::from_binary(binary);
+    let fact_store = FactStore::from_binary_without_signature_matches(binary);
     rescue_nir_output_with_facts(
         source,
         binary,

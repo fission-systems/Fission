@@ -49,7 +49,7 @@ pub struct DecompContext<'bin> {
 
 impl<'bin> DecompContext<'bin> {
     pub fn new(binary: &'bin LoadedBinary, address: u64) -> Self {
-        let facts = FactStore::from_binary(binary);
+        let facts = FactStore::from_binary_without_signature_matches(binary);
         let type_context = build_nir_type_context(binary, &facts, address);
         Self {
             binary,

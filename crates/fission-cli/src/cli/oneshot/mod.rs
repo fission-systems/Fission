@@ -347,7 +347,10 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
 
     let binary = LoadedBinary::from_file(&args.binary)
         .with_context(|| format!("failed to read binary at {}", args.binary.display()))?;
-    let facts = fission_static::analysis::decomp::facts::FactStore::from_binary(&binary);
+    let facts =
+        fission_static::analysis::decomp::facts::FactStore::from_binary_without_signature_matches(
+            &binary,
+        );
     let func = fission_loader::loader::FunctionInfo {
         name: args.name.clone(),
         address: args.addr,

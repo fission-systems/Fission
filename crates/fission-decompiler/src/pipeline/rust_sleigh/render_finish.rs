@@ -194,7 +194,7 @@ pub fn select_nir_output_from_prebuilt_pcode(
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
-    let fact_store = FactStore::from_binary(binary);
+    let fact_store = FactStore::from_binary_without_signature_matches(binary);
     select_nir_output_from_prebuilt_pcode_with_facts(
         pcode,
         binary,

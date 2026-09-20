@@ -254,13 +254,34 @@ fn runtime_callback_from_entry_pcode(
 
 impl FactStore {
     pub fn from_binary(binary: &LoadedBinary) -> Self {
-        Self::from_program(
+        Self::from_program_with_signature_matching(
             binary,
             Arc::new(ProgramSnapshot::from_loaded_binary(binary)),
+            true,
+        )
+    }
+
+    /// Build the per-function fact view without scanning and hashing every
+    /// function for FID signatures. Single-function decompilation callers use
+    /// this path; whole-program inventory/decompilation keeps using
+    /// [`Self::from_binary`] so its global signature facts remain available.
+    pub fn from_binary_without_signature_matches(binary: &LoadedBinary) -> Self {
+        Self::from_program_with_signature_matching(
+            binary,
+            Arc::new(ProgramSnapshot::from_loaded_binary(binary)),
+            false,
         )
     }
 
     pub fn from_program(binary: &LoadedBinary, program: Arc<ProgramSnapshot>) -> Self {
+        Self::from_program_with_signature_matching(binary, program, true)
+    }
+
+    fn from_program_with_signature_matching(
+        binary: &LoadedBinary,
+        program: Arc<ProgramSnapshot>,
+        include_signature_matches: bool,
+    ) -> Self {
         let mut store = Self {
             program: Arc::clone(&program),
             learned: LearnedFactOverlay::default(),
@@ -308,7 +329,9 @@ impl FactStore {
             }
         }
 
-        store.ingest_signature_matches(binary);
+        if include_signature_matches {
+            store.ingest_signature_matches(binary);
+        }
         store.ingest_elf_runtime_callback_hints(binary);
 
         // Load user-defined renames from sidecar patch file (<binary_name>.fission.json) if it exists
@@ -1340,6 +1363,25 @@ mod tests {
             Some("KnownName")
         );
         assert!(snapshot.dwarf_info.is_some());
+    }
+
+    #[test]
+    fn lightweight_binary_facts_keep_loader_names_without_fid_scan() {
+        let binary = LoadedBinaryBuilder::new("single.bin".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .arch_spec("x86:LE:64:default")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "single_target".to_string(),
+                address: 0x401000,
+                ..Default::default()
+            })
+            .build()
+            .expect("build test binary");
+
+        let store = FactStore::from_binary_without_signature_matches(&binary);
+        assert_eq!(store.resolved_name(0x401000), Some("single_target"));
+        assert!(store.get_cached_decoded_function(0x401000).is_none());
     }
 
     /// Memory regression guard: a long-lived session holds a

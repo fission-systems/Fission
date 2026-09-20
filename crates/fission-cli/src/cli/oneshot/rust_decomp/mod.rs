@@ -353,7 +353,13 @@ fn run_with_functions(
     // the binary, so rebuilding it per function (as `decompile_with_rust_
     // sleigh`'s convenience wrapper does) turned a `--all` batch of N
     // functions into N redundant whole-binary analyses.
-    let facts = Arc::new(fission_static::analysis::decomp::facts::FactStore::from_binary(binary));
+    let facts = Arc::new(if cli.decomp_all || functions.len() > 1 {
+        fission_static::analysis::decomp::facts::FactStore::from_binary(binary)
+    } else {
+        fission_static::analysis::decomp::facts::FactStore::from_binary_without_signature_matches(
+            binary,
+        )
+    });
     let mut results = if use_worker_fanout {
         if cli.verbose {
             eprintln!(
