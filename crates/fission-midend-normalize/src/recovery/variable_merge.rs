@@ -827,6 +827,8 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     let mut live_ranges = LiveRangeCollector {
         stmt_counter: 0,
         ranges: HashMap::default(),
+        reads: HashMap::default(),
+        writes: HashMap::default(),
         labels: HashMap::default(),
         backedges: Vec::new(),
         control_intervals: Vec::new(),
@@ -1045,6 +1047,8 @@ struct VarMeta {
 struct LiveRangeCollector {
     stmt_counter: usize,
     ranges: HashMap<String, (usize, usize)>,
+    reads: HashMap<String, HashSet<usize>>,
+    writes: HashMap<String, HashSet<usize>>,
     labels: HashMap<String, usize>,
     backedges: Vec<(usize, usize)>,
     control_intervals: Vec<(usize, usize)>,
@@ -1150,7 +1154,7 @@ impl LiveRangeCollector {
     fn visit_lvalue(&mut self, lval: &PreHirLValue) {
         match lval {
             PreHirLValue::Var(name) => {
-                self.mark_seen(name);
+                self.mark_write(name);
             }
             PreHirLValue::Deref { ptr, .. } => {
                 self.visit_expr(ptr);
@@ -1168,7 +1172,7 @@ impl LiveRangeCollector {
     fn visit_expr(&mut self, expr: &PreHirExpr) {
         match expr {
             PreHirExpr::Var(name) => {
-                self.mark_seen(name);
+                self.mark_read(name);
             }
             PreHirExpr::Cast { expr: inner, .. }
             | PreHirExpr::Unary { expr: inner, .. }
@@ -1208,11 +1212,45 @@ impl LiveRangeCollector {
     }
 
     fn extend_loop_ranges(&mut self, loop_start: usize, loop_end: usize) {
-        for range in self.ranges.values_mut() {
-            if range.0 < loop_start && range.1 >= loop_start {
+        let loop_carried = self
+            .reads
+            .iter()
+            .filter_map(|(name, reads)| {
+                let writes = self.writes.get(name)?;
+                let read_in_loop = reads
+                    .iter()
+                    .any(|&idx| (loop_start..=loop_end).contains(&idx));
+                let write_in_loop = writes
+                    .iter()
+                    .any(|&idx| (loop_start..=loop_end).contains(&idx));
+                (read_in_loop && write_in_loop).then(|| name.clone())
+            })
+            .collect::<HashSet<_>>();
+
+        for (name, range) in &mut self.ranges {
+            if loop_carried.contains(name) {
+                range.0 = range.0.min(loop_start);
+                range.1 = range.1.max(loop_end);
+            } else if range.0 < loop_start && range.1 >= loop_start {
                 range.1 = range.1.max(loop_end);
             }
         }
+    }
+
+    fn mark_read(&mut self, name: &str) {
+        self.mark_seen(name);
+        self.reads
+            .entry(name.to_string())
+            .or_default()
+            .insert(self.stmt_counter);
+    }
+
+    fn mark_write(&mut self, name: &str) {
+        self.mark_seen(name);
+        self.writes
+            .entry(name.to_string())
+            .or_default()
+            .insert(self.stmt_counter);
     }
 
     fn mark_seen(&mut self, name: &str) {
@@ -1868,6 +1906,65 @@ mod tests {
         // They should NOT be merged because temp_1 is live across the entire loop body,
         // which overlaps with temp_2.
         assert!(!changed);
+        assert_eq!(func.locals.len(), 2);
+    }
+
+    #[test]
+    fn loop_carried_local_is_not_merged_with_an_earlier_loop_temporary() {
+        let int_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let binding = |name: &str| PreHirBinding {
+            name: name.to_string(),
+            ty: int_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+        let mut func = PreHirFunction {
+            name: "loop_carried_merge_guard".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![binding("temp_early"), binding("temp_carried")],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("temp_early".to_string()),
+                        rhs: PreHirExpr::Const(7, int_ty.clone()),
+                    },
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("discard_early".to_string()),
+                        rhs: PreHirExpr::Var("temp_early".to_string()),
+                    },
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("discard_carried".to_string()),
+                        rhs: PreHirExpr::Var("temp_carried".to_string()),
+                    },
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("temp_carried".to_string()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("temp_carried".to_string())),
+                            rhs: Box::new(PreHirExpr::Const(1, int_ty.clone())),
+                            ty: int_ty.clone(),
+                        },
+                    },
+                ]
+                .into(),
+            }],
+            ..Default::default()
+        };
+
+        let changed = apply_variable_merge_pass(&mut func);
+
+        assert!(
+            !changed,
+            "loop-carried state must not share an earlier slot"
+        );
         assert_eq!(func.locals.len(), 2);
     }
 
