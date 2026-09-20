@@ -248,11 +248,20 @@ impl Solver {
     /// Concrete shortcut: if `expr` is a constant, returns `vec![const_val]`
     /// immediately without invoking the SAT core.
     pub fn eval(&mut self, expr: &SymExpr, n: usize) -> Vec<u64> {
+        if n == 0 {
+            return Vec::new();
+        }
+
         // Concrete shortcut (angr pattern #13)
         if let SymExpr::Const { val, .. } = expr {
             return vec![*val];
         }
 
+        // Lower the queried expression before solving.  `check_sat` only
+        // lowers assertions; without this step a compound expression queried
+        // after the path constraints would have no CNF-backed AIG nodes and
+        // model evaluation would read the new gates as zero.
+        self.bv_theory.aig.lower_expr(expr);
         let mut results = Vec::new();
         if !matches!(
             self.check_sat().unwrap_or(SatResult::Unknown),
@@ -261,19 +270,16 @@ impl Solver {
             return results;
         }
 
-        // Get first solution from model by looking up by structure
-        // For a Var node: look it up directly
-        if let SymExpr::Var { id, .. } = expr {
-            if let Some(val) = self.model.get(id) {
-                results.push(*val);
-            }
-        }
+        // Evaluate the complete expression in the satisfying AIG model, not
+        // just a top-level Var lookup.  This also handles Extract, Ite, and
+        // other compound expressions.
+        results.push(self.bv_theory.evaluate_expr_in_model(&self.sat, expr));
 
         // For additional solutions (up to n), exclude each found solution and re-solve
         // This is standard SMT enumeration: assert (expr != prev_val) and re-check
         let mut extra_exclusions: Vec<SymExpr> = Vec::new();
         while results.len() < n {
-            let last = *results.last().unwrap_or(&0);
+            let last = *results.last().expect("the first model value is recorded");
             let exclusion =
                 SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_size()));
             extra_exclusions.push(exclusion);
@@ -284,15 +290,14 @@ impl Solver {
                 SatResult::Sat
             );
             if sat {
-                if let SymExpr::Var { id, .. } = expr {
-                    if let Some(val) = self.model.get(id) {
-                        results.push(*val);
-                    } else {
-                        break;
-                    }
-                } else {
+                let value = self.bv_theory.evaluate_expr_in_model(&self.sat, expr);
+                if results.contains(&value) {
+                    // A repeated value means the model did not move outside
+                    // the accumulated exclusions.  Do not spin indefinitely
+                    // if a future backend reports an inconsistent model.
                     break;
                 }
+                results.push(value);
             } else {
                 break;
             }
@@ -390,7 +395,11 @@ impl Solver {
         }
 
         let mut lo = solutions[0];
-        let size_bits = expr.get_size() * 8;
+        // Bit-vector sizes in SymExpr/AIG are already expressed in bits.
+        // Multiplying by eight makes an 8-bit query search a 64-bit range;
+        // the resulting truncated probe values are not monotonic, so the
+        // binary search can return a value that is not the maximum.
+        let size_bits = expr.get_size();
         let mut hi = if size_bits >= 64 {
             u64::MAX
         } else {
@@ -400,7 +409,8 @@ impl Solver {
 
         // Binary search upward
         while lo < hi {
-            let mid = lo + (hi - lo + 1) / 2;
+            let span = hi - lo;
+            let mid = lo + span / 2 + span % 2;
             let constraint = SymExpr::Ult(
                 Box::new(SymExpr::new_const(mid, expr.get_size())),
                 Box::new(expr.clone()),

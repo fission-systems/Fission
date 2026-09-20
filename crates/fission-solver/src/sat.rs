@@ -798,6 +798,20 @@ impl SatSolver {
 
                 let (learned_clause, mut backtrack_level) = self.analyze(confl);
 
+                // A clause whose derivation has to backtrack below the
+                // assumption levels is conditional on those assumptions.  It
+                // must not be installed as a root fact: doing so turns a
+                // failed probe such as `x > 228` into a permanent constraint
+                // and can make a later, satisfiable probe report the wrong
+                // answer.  This is especially important for the binary
+                // searches used by Solver::min/max.
+                if !assumptions.is_empty()
+                    && (learned_clause.len() == 1 || backtrack_level < assumptions.len() as u32)
+                {
+                    self.cancel_until(0);
+                    return false;
+                }
+
                 // Do not backtrack past assumptions
                 if backtrack_level < assumptions.len() as u32 {
                     backtrack_level = assumptions.len() as u32;
