@@ -1274,10 +1274,11 @@ arcs can therefore replace the previous approximation without containing it,
 and a shrinking arc can narrow the current approximation. Both behaviors break
 the widening contract used by the VSA solver at loop back-edges.</p>
 <h2 id="invariant">Invariant<a class="headerlink" href="#invariant" title="Permanent link">&para;</a></h2>
-<p>For <code>new.widen(old)</code>, the result must contain both <code>new</code> and <code>old</code>. If one
-finite circle arc contains the other, preserve that containing arc. If the
-arcs overlap without containment, return <code>top</code> to guarantee convergence. Top
-and bottom retain their lattice identities.</p>
+<p>For <code>new.widen(old)</code>, the result must contain both <code>new</code> and <code>old</code>. If the new
+arc is contained in the previous arc, retain the previous arc; otherwise jump
+to <code>top</code>. This is the standard finite-height escape needed to guarantee
+convergence for growing or laterally moving loop ranges. Top and bottom retain
+their lattice identities.</p>
 <p>The implementation will use modular arc distance, not architecture,
 instruction, function, or benchmark-specific conditions.</p>
 <h2 id="focused-regression">Focused regression<a class="headerlink" href="#focused-regression" title="Permanent link">&para;</a></h2>
