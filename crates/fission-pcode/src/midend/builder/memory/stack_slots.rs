@@ -196,17 +196,35 @@ impl<'a> PreviewBuilder<'a> {
         if index >= entry_arity {
             return None;
         }
-        let name = abi.param_name(index);
-        self.params.entry(index).or_insert_with(|| PreHirBinding {
-            name: name.clone(),
-            ty: type_from_size(vn.size, false),
-            surface_type_name: None,
-            origin: Some(NirBindingOrigin::ParamIndex(index)),
-            initializer: None,
-        });
+        Some(self.ensure_register_param_binding(vn, index))
+    }
+
+    /// Register an ABI parameter slot as a binding after an owner has proved
+    /// that the slot is consumed, even when ordinary entry-use inference did
+    /// not see the register in the p-code.  This is intentionally separate
+    /// from `register_param`: a resolved exact callee prototype can provide
+    /// the missing use evidence for an entry-owned register, but callers must
+    /// establish that proof before using this helper.
+    pub(in crate::midend::builder) fn ensure_register_param_binding(
+        &mut self,
+        vn: &Varnode,
+        param_index: usize,
+    ) -> String {
+        let abi = self.abi_state();
+        debug_assert_eq!(abi.param_slot_for_varnode(vn), Some(param_index));
+        let name = abi.param_name(param_index);
+        self.params
+            .entry(param_index)
+            .or_insert_with(|| PreHirBinding {
+                name: name.clone(),
+                ty: type_from_size(vn.size, false),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(param_index)),
+                initializer: None,
+            });
         self.used_param_local_names.insert(name.clone());
-        self.refine_register_param_type_from_varnode(index, vn);
-        Some(name)
+        self.refine_register_param_type_from_varnode(param_index, vn);
+        name
     }
 
     pub(in crate::midend::builder) fn try_stack_slot_lvalue_for_memory_op(

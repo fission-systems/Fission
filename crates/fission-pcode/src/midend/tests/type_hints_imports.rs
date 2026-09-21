@@ -1413,3 +1413,78 @@ fn preview_builder_resolves_callind_through_copy_from_ram_space_iat_slot() {
         "iat_slot_resolved_count must be 1"
     );
 }
+
+#[test]
+fn exact_iat_call_arity_recovers_entry_owned_windows_registers() {
+    const IAT_ADDR: u64 = 0x140008328;
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1400015f0,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400015f8,
+                    output: Some(uniq(0x79600, 8)),
+                    inputs: vec![uniq(IAT_ADDR, 8)],
+                    asm_mnemonic: Some("CALL qword ptr [IAT]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::CallInd,
+                    address: 0x1400015f8,
+                    output: None,
+                    inputs: vec![uniq(0x79600, 8)],
+                    asm_mnemonic: Some("CALL qword ptr [IAT]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1400015ff,
+                    output: None,
+                    inputs: vec![cst(1, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context.iat_target_refs.insert(
+        IAT_ADDR,
+        CallTargetRef {
+            address: Some(IAT_ADDR),
+            symbol: "WaitForSingleObject".to_string(),
+            provenance: CallTargetProvenance::Import,
+            edge_kind: CallEdgeKind::Import,
+            confidence: 255,
+        },
+    );
+    context.call_prototype_summaries.insert(
+        "WaitForSingleObject".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 2,
+            max_arity: 2,
+            locked_exact_arity: Some(2),
+            returns_void: false,
+            param_pointer_pointees: vec![None; 2],
+            param_surface_type_names: vec![None; 2],
+        },
+    );
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "wait_for_one",
+        0x1400015f0,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+
+    assert!(
+        rendered.contains("WaitForSingleObject(param_1, param_2)"),
+        "an exact IAT prototype must recover entry-owned RCX/RDX values:\n{rendered}"
+    );
+}

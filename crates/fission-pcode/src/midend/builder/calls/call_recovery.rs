@@ -852,7 +852,7 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    /// Return the declaration-locked register arity for an exact direct call.
+    /// Return the declaration-locked register arity for an exact resolved call.
     ///
     /// A call's basic block may stage only a later ABI slot while an earlier
     /// slot remains live from a dominating predecessor. Ordinary recovery
@@ -860,23 +860,78 @@ impl<'a> PreviewBuilder<'a> {
     /// unknown call gives us no proof that a live register is an argument.
     /// An exact prototype supplies that missing proof: every declared
     /// register-backed slot is consumed at this call site.
-    fn exact_direct_call_register_arity(
-        &self,
+    fn exact_call_register_arity(
+        &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
         param_count: usize,
     ) -> Option<usize> {
         let op = block.ops.get(call_idx)?;
-        if op.opcode != PcodeOpcode::Call {
-            return None;
-        }
-        let target =
-            super::super::resolve_lifted_direct_call_target(op, self.options, self.type_context)?;
+        let target = match op.opcode {
+            PcodeOpcode::Call => super::super::resolve_lifted_direct_call_target(
+                op,
+                self.options,
+                self.type_context,
+            )?,
+            // Rust-Sleigh represents an IAT-backed Windows call as
+            // `Copy unique <- ram:IAT_slot; CallInd unique`. The existing
+            // target resolver already proves that shape and returns the
+            // imported symbol; reuse it here rather than guessing the
+            // prototype from the indirect opcode alone.
+            PcodeOpcode::CallInd => self.resolve_iat_load_call_target(op.inputs.first()?)?,
+            _ => return None,
+        };
         self.type_context?
             .call_prototype_summaries
             .get(&target)?
             .locked_exact_arity
             .map(|arity| arity.min(param_count))
+    }
+
+    /// An exact callee declaration can prove that an ABI register is read by
+    /// the call even when the lifted function body contains no p-code use of
+    /// that register.  Treat it as an entry-owned parameter only when no
+    /// dominating call can have clobbered the caller-saved slot first.
+    fn entry_register_arg_at_exact_call(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+        vn: &Varnode,
+        param_index: usize,
+    ) -> Option<PreHirExpr> {
+        if self.lookup_def_site(vn).is_some()
+            || !self.entry_register_slot_is_live_at_call(block, call_idx)
+        {
+            return None;
+        }
+        let name = self.ensure_register_param_binding(vn, param_index);
+        Some(PreHirExpr::Var(name))
+    }
+
+    fn entry_register_slot_is_live_at_call(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+    ) -> bool {
+        let Some(call_block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+            return false;
+        };
+        for (block_idx, candidate) in self.pcode.blocks.iter().enumerate() {
+            let dominates_call =
+                block_idx == call_block_idx || self.dom_tree.dominates(block_idx, call_block_idx);
+            if !dominates_call {
+                continue;
+            }
+            let end = if block_idx == call_block_idx {
+                call_idx.min(candidate.ops.len())
+            } else {
+                candidate.ops.len()
+            };
+            if candidate.ops[..end].iter().any(|op| op.opcode.is_call()) {
+                return false;
+            }
+        }
+        true
     }
 
     /// Peel same-block Copy/ZExt/SExt/Cast so tail-call arg recovery sees the
@@ -1115,7 +1170,7 @@ impl<'a> PreviewBuilder<'a> {
         // carrier recovery. This does not guess values at joins: when no
         // single realistic reaching definition exists, the slot stays empty.
         if let Some(exact_register_arity) =
-            self.exact_direct_call_register_arity(block, call_idx, param_count)
+            self.exact_call_register_arity(block, call_idx, param_count)
         {
             for param_index in 0..exact_register_arity {
                 if skip_param == Some(param_index) || recovered[param_index].is_some() {
@@ -1130,6 +1185,11 @@ impl<'a> PreviewBuilder<'a> {
                     constant_val: 0,
                 };
                 let Some((site, _)) = self.lookup_def_site(&vn) else {
+                    if let Some(expr) =
+                        self.entry_register_arg_at_exact_call(block, call_idx, &vn, param_index)
+                    {
+                        recovered[param_index] = Some(expr);
+                    }
                     continue;
                 };
                 let def_site = crate::midend::support::DefSite {

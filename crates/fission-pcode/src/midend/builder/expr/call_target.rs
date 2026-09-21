@@ -228,7 +228,10 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    pub(super) fn resolve_iat_load_call_target(&mut self, target: &Varnode) -> Option<String> {
+    pub(in crate::midend::builder) fn resolve_iat_load_call_target(
+        &mut self,
+        target: &Varnode,
+    ) -> Option<String> {
         let Some((_, producer)) = self.lookup_def_site(target) else {
             self.record_call_target_const_reject(CallTargetConstReject::NoDef);
             return None;
