@@ -252,3 +252,113 @@ fn preview_type_hints_propagate_pointer_surface_through_safe_aliases_only() {
     assert!(matches!(func.locals[0].ty, NirType::Ptr(_)));
     assert!(matches!(func.locals[1].ty, NirType::Ptr(_)));
 }
+
+#[test]
+fn preview_type_hints_preserve_byte_scale_for_unresolved_surface_pointer_add() {
+    let wide_pointer = || {
+        NirType::Ptr(Box::new(NirType::Int {
+            bits: 64,
+            signed: false,
+        }))
+    };
+    let index_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let scaled_index = HirExpr::Binary {
+        op: HirBinaryOp::Mul,
+        lhs: Box::new(HirExpr::Var("index".to_string())),
+        rhs: Box::new(HirExpr::Const(4, index_ty.clone())),
+        ty: index_ty.clone(),
+    };
+    let mut func = HirFunction {
+        name: "packed_pointer_add".to_string(),
+        params: vec![NirBinding {
+            name: "arr".to_string(),
+            ty: wide_pointer(),
+            surface_type_name: Some("int *".to_string()),
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        locals: vec![
+            NirBinding {
+                name: "index".to_string(),
+                ty: index_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "end".to_string(),
+                ty: wide_pointer(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "unscaled".to_string(),
+                ty: wide_pointer(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("end".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("arr".to_string())),
+                    rhs: Box::new(scaled_index),
+                    ty: wide_pointer(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("unscaled".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("arr".to_string())),
+                    rhs: Box::new(HirExpr::Var("index".to_string())),
+                    ty: wide_pointer(),
+                },
+            },
+        ],
+        ..Default::default()
+    };
+
+    apply_preview_type_hints(
+        &mut func,
+        &PreviewTypeContext::default(),
+        &crate::midend::HashMap::default(),
+    );
+
+    assert_eq!(func.locals[1].surface_type_name.as_deref(), Some("int *"));
+    let HirStmt::Assign {
+        rhs: HirExpr::Binary {
+            lhs: scaled_base, ..
+        },
+        ..
+    } = &func.body[0]
+    else {
+        panic!("expected scaled pointer add");
+    };
+    assert!(matches!(
+        scaled_base.as_ref(),
+        HirExpr::Cast {
+            ty: NirType::Ptr(inner),
+            expr,
+        } if matches!(inner.as_ref(), NirType::Int { bits: 8, signed: false })
+            && matches!(expr.as_ref(), HirExpr::Var(name) if name == "arr")
+    ));
+
+    let HirStmt::Assign {
+        rhs: HirExpr::Binary {
+            lhs: unscaled_base, ..
+        },
+        ..
+    } = &func.body[1]
+    else {
+        panic!("expected unscaled pointer add");
+    };
+    assert!(matches!(unscaled_base.as_ref(), HirExpr::Var(name) if name == "arr"));
+}

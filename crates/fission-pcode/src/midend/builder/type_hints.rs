@@ -44,6 +44,7 @@ pub(super) fn apply_preview_type_hints(
     let mut stats =
         apply_function_name_hints(func, context, register_origins, debug_cfa_stack_offset_bias);
     stats.local_surface_hits += propagate_pointer_surface_aliases(func);
+    preserve_surface_pointer_byte_offsets(func);
     apply_debug_struct_promotions(func, context, &mut stats);
     apply_debug_struct_field_names(func, context, &mut stats);
     let alias_collector = StackAliasCollector::new(func);
@@ -784,6 +785,302 @@ fn is_definitely_pointer_expr(
 
 fn is_pointer_type(ty: &NirType) -> bool {
     matches!(ty, NirType::Ptr(_))
+}
+
+/// Keep raw machine-address arithmetic byte-scaled after a surface pointer
+/// alias has been recovered.
+///
+/// The normalize pointer-arithmetic pass deliberately leaves
+/// `Add(pointer, index * stride)` alone when the observed internal pointee
+/// width does not match `stride`.  That is the correct choice for a packed
+/// load: changing the internal pointer type would make the load itself
+/// narrower.  Once a trusted surface declaration is available, however, C
+/// pointer arithmetic would apply the declaration's element scale to the
+/// same expression.  Cast only the pointer operand to a byte pointer in that
+/// unresolved, scaled form so the emitted C preserves the p-code address
+/// calculation while the binding keeps its observed wide load type.
+///
+/// This is intentionally narrower than a general pointer-arithmetic rewrite:
+/// normalized `Index`/element-pointer forms are untouched, constant
+/// `PtrOffset` nodes already carry byte units, and unscaled arithmetic is not
+/// guessed.  The rule is driven by surface pointer provenance and a visible
+/// integer multiplication, never by an ISA, function, or address.
+fn preserve_surface_pointer_byte_offsets(func: &mut HirFunction) {
+    let known_surfaces = pointer_surface_bindings(func);
+    if known_surfaces.is_empty() {
+        return;
+    }
+    preserve_surface_pointer_byte_offsets_in_stmts(&mut func.body, &known_surfaces);
+}
+
+fn preserve_surface_pointer_byte_offsets_in_stmts(
+    body: &mut [HirStmt],
+    known_surfaces: &HashMap<String, String>,
+) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                preserve_surface_pointer_byte_offsets_in_lvalue(lhs, known_surfaces);
+                preserve_surface_pointer_byte_offsets_in_expr(rhs, known_surfaces);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                preserve_surface_pointer_byte_offsets_in_expr(va_list, known_surfaces)
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                preserve_surface_pointer_byte_offsets_in_expr(expr, known_surfaces)
+            }
+            HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => {
+                preserve_surface_pointer_byte_offsets_in_stmts(stmts, known_surfaces)
+            }
+            HirStmt::DoWhile { body, cond } => {
+                preserve_surface_pointer_byte_offsets_in_stmts(body, known_surfaces);
+                preserve_surface_pointer_byte_offsets_in_expr(cond, known_surfaces);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    preserve_surface_pointer_byte_offsets_in_stmts(
+                        std::slice::from_mut(init.as_mut()),
+                        known_surfaces,
+                    );
+                }
+                if let Some(cond) = cond {
+                    preserve_surface_pointer_byte_offsets_in_expr(cond, known_surfaces);
+                }
+                if let Some(update) = update {
+                    preserve_surface_pointer_byte_offsets_in_stmts(
+                        std::slice::from_mut(update.as_mut()),
+                        known_surfaces,
+                    );
+                }
+                preserve_surface_pointer_byte_offsets_in_stmts(body, known_surfaces);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                preserve_surface_pointer_byte_offsets_in_expr(expr, known_surfaces);
+                for case in cases {
+                    preserve_surface_pointer_byte_offsets_in_stmts(&mut case.body, known_surfaces);
+                }
+                preserve_surface_pointer_byte_offsets_in_stmts(default, known_surfaces);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                preserve_surface_pointer_byte_offsets_in_expr(cond, known_surfaces);
+                preserve_surface_pointer_byte_offsets_in_stmts(then_body, known_surfaces);
+                preserve_surface_pointer_byte_offsets_in_stmts(else_body, known_surfaces);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn preserve_surface_pointer_byte_offsets_in_lvalue(
+    lvalue: &mut HirLValue,
+    known_surfaces: &HashMap<String, String>,
+) {
+    match lvalue {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(ptr, known_surfaces)
+        }
+        HirLValue::Index { base, index, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(base, known_surfaces);
+            preserve_surface_pointer_byte_offsets_in_expr(index, known_surfaces);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(base, known_surfaces)
+        }
+    }
+}
+
+fn preserve_surface_pointer_byte_offsets_in_expr(
+    expr: &mut HirExpr,
+    known_surfaces: &HashMap<String, String>,
+) {
+    match expr {
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(expr, known_surfaces)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(lhs, known_surfaces);
+            preserve_surface_pointer_byte_offsets_in_expr(rhs, known_surfaces);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            preserve_surface_pointer_byte_offsets_in_expr(cond, known_surfaces);
+            preserve_surface_pointer_byte_offsets_in_expr(then_expr, known_surfaces);
+            preserve_surface_pointer_byte_offsets_in_expr(else_expr, known_surfaces);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                preserve_surface_pointer_byte_offsets_in_expr(arg, known_surfaces);
+            }
+        }
+        HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(ptr, known_surfaces)
+        }
+        HirExpr::Index { base, index, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(base, known_surfaces);
+            preserve_surface_pointer_byte_offsets_in_expr(index, known_surfaces);
+        }
+        HirExpr::FieldAccess { base, .. } => {
+            preserve_surface_pointer_byte_offsets_in_expr(base, known_surfaces)
+        }
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
+    }
+
+    let mut cast_lhs = false;
+    let mut cast_rhs = false;
+    if let HirExpr::Binary { op, lhs, rhs, .. } = expr {
+        let lhs_surface = pointer_surface_from_expr(lhs, known_surfaces);
+        let rhs_surface = pointer_surface_from_expr(rhs, known_surfaces);
+        match op {
+            HirBinaryOp::Add => {
+                if lhs_surface.is_some()
+                    && rhs_surface.is_none()
+                    && surface_pointer_needs_byte_address(lhs_surface, rhs)
+                {
+                    cast_lhs = true;
+                } else if rhs_surface.is_some()
+                    && lhs_surface.is_none()
+                    && surface_pointer_needs_byte_address(rhs_surface, lhs)
+                {
+                    cast_rhs = true;
+                }
+            }
+            HirBinaryOp::Sub => {
+                if lhs_surface.is_some()
+                    && rhs_surface.is_none()
+                    && surface_pointer_needs_byte_address(lhs_surface, rhs)
+                {
+                    cast_lhs = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if cast_lhs {
+        if let HirExpr::Binary { lhs, .. } = expr {
+            *lhs = Box::new(byte_pointer_cast((**lhs).clone()));
+        }
+    } else if cast_rhs {
+        if let HirExpr::Binary { rhs, .. } = expr {
+            *rhs = Box::new(byte_pointer_cast((**rhs).clone()));
+        }
+    }
+}
+
+fn surface_pointer_needs_byte_address(surface_type_name: Option<&str>, offset: &HirExpr) -> bool {
+    surface_type_name
+        .and_then(surface_pointee_byte_size)
+        .is_some_and(|size| size > 1)
+        && contains_scaled_integer_offset(offset)
+}
+
+fn contains_scaled_integer_offset(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } if matches!(lhs.as_ref(), HirExpr::Const(_, _))
+            || matches!(rhs.as_ref(), HirExpr::Const(_, _)) =>
+        {
+            true
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => contains_scaled_integer_offset(expr),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            contains_scaled_integer_offset(lhs) || contains_scaled_integer_offset(rhs)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            contains_scaled_integer_offset(cond)
+                || contains_scaled_integer_offset(then_expr)
+                || contains_scaled_integer_offset(else_expr)
+        }
+        HirExpr::Index { base, index, .. } => {
+            contains_scaled_integer_offset(base) || contains_scaled_integer_offset(index)
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. } => contains_scaled_integer_offset(ptr),
+        HirExpr::Call { .. }
+        | HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => false,
+    }
+}
+
+fn byte_pointer_cast(expr: HirExpr) -> HirExpr {
+    HirExpr::Cast {
+        ty: NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        })),
+        expr: Box::new(expr),
+    }
+}
+
+fn surface_pointee_byte_size(declaration: &str) -> Option<u32> {
+    let (base, stars) = declaration.split_once('*')?;
+    if stars.contains('*') {
+        return Some(8);
+    }
+    let base = base
+        .split_whitespace()
+        .filter(|word| !matches!(*word, "const" | "volatile"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    match base.as_str() {
+        "char" | "signed char" | "unsigned char" | "int8_t" | "uint8_t" | "uchar" => Some(1),
+        "short" | "signed short" | "signed short int" | "unsigned short" | "unsigned short int"
+        | "int16_t" | "uint16_t" | "ushort" => Some(2),
+        "int" | "signed" | "signed int" | "unsigned" | "unsigned int" | "int32_t" | "uint32_t"
+        | "uint" => Some(4),
+        "long long"
+        | "signed long long"
+        | "signed long long int"
+        | "unsigned long long"
+        | "unsigned long long int"
+        | "int64_t"
+        | "uint64_t"
+        | "ulong" => Some(8),
+        "float" => Some(4),
+        "double" => Some(8),
+        _ => None,
+    }
 }
 
 fn promote_field_access_in_stmts(
