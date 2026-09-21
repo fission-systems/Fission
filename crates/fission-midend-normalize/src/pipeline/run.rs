@@ -2064,6 +2064,15 @@ pub fn normalize_expr(expr: &mut PreHirExpr) {
     if let Some(merged) = merge_consecutive_shifts(expr) {
         *expr = merged;
     }
+    // Recognize a wide integer reassembly before child casts are canonicalized.
+    // The two casts are semantic piece boundaries: removing a redundant-looking
+    // widening cast from either lane can hide the high/low shape from the
+    // recombination rule. This is the same top-down ordering requirement as the
+    // shift pre-pass above, and keeps cast cleanup conservative without losing
+    // the structural cancellation.
+    if let Some(recombined) = recognize_wide_integer_recombine(expr) {
+        *expr = recombined;
+    }
     match expr {
         PreHirExpr::Cast { expr: inner, .. } => normalize_expr(inner),
         PreHirExpr::Unary { expr: inner, .. } => normalize_expr(inner),

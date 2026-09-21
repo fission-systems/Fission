@@ -350,7 +350,10 @@ fn should_drop_inner_scalar_cast(
     // a negative low lane into an all-ones 64-bit value.  Keep the inner cast
     // whenever its signedness is known to differ from the source expression.
     let Some((_, source_signed)) = scalar_cast_signature(source_ty) else {
-        return true;
+        // An unknown source type is not proof that the intermediate cast is
+        // redundant. Keep the old conservative behavior; the signed-lane
+        // case above is handled when the source signedness is known.
+        return false;
     };
     if source_signed != inner_signed {
         return false;
