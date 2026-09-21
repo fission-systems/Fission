@@ -13,6 +13,7 @@ pub(super) use state::PreviewBuilder;
 mod calls;
 mod control;
 mod debug;
+mod dynamic_guards;
 mod entry_analysis;
 mod expr;
 mod init;
