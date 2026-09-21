@@ -1,4 +1,13 @@
-use super::*;
+//! Presentation-only recovery of switch-shaped HIR.
+//!
+//! This module owns the two compiler-lowered switch forms handled by the HIR
+//! presentation fixed point: equality if-chains and select-based decision
+//! trees.  Its public surface is intentionally limited to those two entry
+//! points; expression purity and HIR node types remain borrowed from the
+//! presentation owner.
+
+use super::{HirBinaryOp, HirExpr, HirStmt, HirSwitchCase, HirUnaryOp, expr_is_presentation_pure};
+use std::collections::HashSet;
 // ── Switch recovery ─────────────────────────────────────────────────────────
 /// Two cases reads just as naturally as `if`/`else if`; the payoff shows up
 /// once there are enough arms that the repeated `x == ` noise dominates.
