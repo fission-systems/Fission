@@ -12,9 +12,10 @@
 use super::{
     DecompFacts, GhidraActionConcept, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
     NirRenderOptions, NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewHintStats,
-    PreviewTypeContext, apply_preview_type_hints, discover_guarded_tail_candidates_for_stats,
-    record_ghidra_action_stage, record_ghidra_clean_room_pipeline_complete,
-    recover_global_symbol_accesses, render_layered_pseudocode, structuring,
+    PreviewTypeContext, apply_preview_type_hints_with_stack_bias,
+    discover_guarded_tail_candidates_for_stats, record_ghidra_action_stage,
+    record_ghidra_clean_room_pipeline_complete, recover_global_symbol_accesses,
+    render_layered_pseudocode, structuring,
 };
 use crate::pcode::PcodeFunction;
 use fission_loader::loader::LoadedBinary;
@@ -535,7 +536,12 @@ fn render_mlil_preview_with_binary_and_context_output(
         }
         debug_log("type_hints_start");
         let type_hints_start = Instant::now();
-        let stats = apply_preview_type_hints(&mut hir, context, &register_origins);
+        let stats = apply_preview_type_hints_with_stack_bias(
+            &mut hir,
+            context,
+            &register_origins,
+            builder.debug_cfa_stack_offset_bias(),
+        );
         hint_stats = Some(stats);
         if debug.diag {
             eprintln!(

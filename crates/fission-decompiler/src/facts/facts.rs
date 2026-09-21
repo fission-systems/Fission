@@ -3,8 +3,9 @@ use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPointerPointee, NirCallPrototypeSummary,
-    NirFunctionHints, NirRenderOptions, NirStructFieldHint, NirStructTypeHint, NirType,
-    NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer, infer_entry_register_param_arity,
+    NirFunctionHints, NirRenderOptions, NirStackOffsetBase, NirStructFieldHint, NirStructTypeHint,
+    NirType, NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
+    infer_entry_register_param_arity,
 };
 use fission_analysis_db::SymbolKind;
 use fission_core::PATHS;
@@ -47,6 +48,9 @@ fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
         param_type_names,
         stack_local_names: HashMap::new(),
         stack_local_type_names: HashMap::new(),
+        debug_stack_local_names: HashMap::new(),
+        debug_stack_local_type_names: HashMap::new(),
+        debug_stack_offset_base: NirStackOffsetBase::BuilderFrame,
         return_type_name: Some(matched_sig.return_type.clone()),
         register_local_names: HashMap::new(),
         register_local_type_names: HashMap::new(),
@@ -74,6 +78,9 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
         param_type_names,
         stack_local_names: HashMap::new(),
         stack_local_type_names: HashMap::new(),
+        debug_stack_local_names: HashMap::new(),
+        debug_stack_local_type_names: HashMap::new(),
+        debug_stack_offset_base: NirStackOffsetBase::BuilderFrame,
         return_type_name,
         register_local_names: HashMap::new(),
         register_local_type_names: HashMap::new(),
@@ -1758,7 +1765,7 @@ fn nir_hints_from_debug_function(
             (!type_name.is_empty()).then(|| (index, type_name.to_string()))
         })
         .collect::<HashMap<_, _>>();
-    let stack_local_names = debug
+    let debug_stack_local_names = debug
         .local_vars
         .iter()
         .filter_map(|local| match local.location {
@@ -1768,7 +1775,7 @@ fn nir_hints_from_debug_function(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
-    let stack_local_type_names = debug
+    let debug_stack_local_type_names = debug
         .local_vars
         .iter()
         .filter_map(|local| match local.location {
@@ -1790,8 +1797,8 @@ fn nir_hints_from_debug_function(
 
     if param_names.is_empty()
         && param_type_names.is_empty()
-        && stack_local_names.is_empty()
-        && stack_local_type_names.is_empty()
+        && debug_stack_local_names.is_empty()
+        && debug_stack_local_type_names.is_empty()
         && return_type_name.is_none()
         && register_local_names.is_empty()
         && register_local_type_names.is_empty()
@@ -1801,8 +1808,16 @@ fn nir_hints_from_debug_function(
         Some(NirFunctionHints {
             param_names,
             param_type_names,
-            stack_local_names,
-            stack_local_type_names,
+            stack_local_names: HashMap::new(),
+            stack_local_type_names: HashMap::new(),
+            debug_stack_local_names,
+            debug_stack_local_type_names,
+            debug_stack_offset_base: match debug.frame_base {
+                fission_loader::loader::types::DwarfFrameBase::CallFrameCfa => {
+                    NirStackOffsetBase::CallFrameCfa
+                }
+                _ => NirStackOffsetBase::BuilderFrame,
+            },
             return_type_name,
             register_local_names,
             register_local_type_names,
@@ -1818,6 +1833,8 @@ fn merge_nir_function_hints(
     let Some(structural) = structural else {
         return (!nir_function_hints_are_empty(&merged)).then_some(merged);
     };
+    let had_debug_stack_hints = !merged.debug_stack_local_names.is_empty()
+        || !merged.debug_stack_local_type_names.is_empty();
 
     if merged.param_names.len() < structural.param_names.len() {
         merged
@@ -1847,6 +1864,24 @@ fn merge_nir_function_hints(
             .entry(*offset)
             .or_insert_with(|| type_name.clone());
     }
+    for (offset, name) in &structural.debug_stack_local_names {
+        merged
+            .debug_stack_local_names
+            .entry(*offset)
+            .or_insert_with(|| name.clone());
+    }
+    for (offset, type_name) in &structural.debug_stack_local_type_names {
+        merged
+            .debug_stack_local_type_names
+            .entry(*offset)
+            .or_insert_with(|| type_name.clone());
+    }
+    if !had_debug_stack_hints
+        && (!structural.debug_stack_local_names.is_empty()
+            || !structural.debug_stack_local_type_names.is_empty())
+    {
+        merged.debug_stack_offset_base = structural.debug_stack_offset_base;
+    }
     if merged.return_type_name.is_none() {
         merged
             .return_type_name
@@ -1873,6 +1908,8 @@ fn nir_function_hints_are_empty(hints: &NirFunctionHints) -> bool {
         && hints.param_type_names.is_empty()
         && hints.stack_local_names.is_empty()
         && hints.stack_local_type_names.is_empty()
+        && hints.debug_stack_local_names.is_empty()
+        && hints.debug_stack_local_type_names.is_empty()
         && hints.return_type_name.is_none()
         && hints.register_local_names.is_empty()
         && hints.register_local_type_names.is_empty()

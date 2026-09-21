@@ -1,8 +1,8 @@
 use crate::loader::demangle::demangle;
 use crate::loader::pdb_registers;
 use crate::loader::types::{
-    DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo, InferredFieldInfo,
-    InferredTypeInfo, LoadedBinary, PdbDebugInfo, PdbFunctionInfo,
+    DwarfFrameBase, DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
+    InferredFieldInfo, InferredTypeInfo, LoadedBinary, PdbDebugInfo, PdbFunctionInfo,
 };
 use anyhow::{Context, Result};
 use pdb::{FallibleIterator, IdIndex, SymbolData, TypeData, TypeIndex};
@@ -402,6 +402,7 @@ impl PendingFunction {
                 return_type,
                 params,
                 local_vars: Vec::new(),
+                frame_base: DwarfFrameBase::Unknown,
                 size: u64::from(proc.len),
             },
             pending_param_names: Vec::new(),

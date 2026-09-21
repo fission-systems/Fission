@@ -3,7 +3,9 @@
 //! Extracts function names, parameters, return types, and local variables
 //! from DWARF debug information.
 
-use crate::loader::types::{DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo};
+use crate::loader::types::{
+    DwarfFrameBase, DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
+};
 use gimli::{DebuggingInformationEntry, DwAt, DwTag, EndianSlice, RunTimeEndian, UnitOffset};
 use std::collections::HashMap;
 
@@ -14,6 +16,7 @@ struct FuncBuilder {
     return_type: Option<String>,
     params: Vec<DwarfParamInfo>,
     local_vars: Vec<DwarfLocalVar>,
+    frame_base: DwarfFrameBase,
     size: u64,
 }
 
@@ -25,6 +28,7 @@ impl FuncBuilder {
             return_type: self.return_type,
             params: self.params,
             local_vars: self.local_vars,
+            frame_base: self.frame_base,
             size: self.size,
         })
     }
@@ -171,6 +175,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
                     let name = crate::loader::demangle::demangle(&raw_name);
                     let return_type = self.resolve_return_type_ref(entry, &unit, &type_cache)?;
+                    let frame_base = self.extract_frame_base(entry, &unit)?;
                     let size = self.subprogram_size(entry, address)?;
 
                     current_func = Some(FuncBuilder {
@@ -179,6 +184,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                         return_type,
                         params: Vec::new(),
                         local_vars: Vec::new(),
+                        frame_base,
                         size,
                     });
                     func_depth = 1; // We're at depth 1 relative to this subprogram
@@ -224,6 +230,36 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             _ => return Ok(0),
         };
         Ok(end.saturating_sub(low_pc))
+    }
+
+    /// Extract the single-operation form of `DW_AT_frame_base` used by the
+    /// fixed `DW_OP_fbreg` locations this loader exposes.  More complex or
+    /// location-list frame bases remain `Unknown`; applying a guessed offset
+    /// to those locals would be worse than leaving the debug hint unmatched.
+    fn extract_frame_base(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+    ) -> Result<DwarfFrameBase, gimli::Error> {
+        let Some(gimli::AttributeValue::Exprloc(expr)) = entry.attr_value(DwAt(0x40))? else {
+            return Ok(DwarfFrameBase::Unknown);
+        };
+        let mut ops = expr.operations(unit.encoding());
+        let first = ops.next()?;
+        let second = ops.next()?;
+        match (first, second) {
+            (Some(gimli::Operation::CallFrameCFA), None) => Ok(DwarfFrameBase::CallFrameCfa),
+            (Some(gimli::Operation::Register { register }), None) => {
+                Ok(DwarfFrameBase::Register(u64::from(register.0)))
+            }
+            (
+                Some(gimli::Operation::RegisterOffset {
+                    register, offset, ..
+                }),
+                None,
+            ) if offset == 0 => Ok(DwarfFrameBase::Register(u64::from(register.0))),
+            _ => Ok(DwarfFrameBase::Unknown),
+        }
     }
 
     /// Resolve a `DW_TAG_lexical_block`'s PC range from `DW_AT_low_pc`/

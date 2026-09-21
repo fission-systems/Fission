@@ -113,7 +113,7 @@ mod tests {
     };
     use fission_core::common::types::FunctionInfo;
     use fission_loader::loader::types::{
-        DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
+        DwarfFrameBase, DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
     };
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
     use std::collections::HashMap;
@@ -701,6 +701,7 @@ mod tests {
                     location: DwarfLocation::StackOffset(-0x20),
                     scope: None,
                 }],
+                frame_base: DwarfFrameBase::Unknown,
                 size: 0,
             },
         );
@@ -721,7 +722,10 @@ mod tests {
             .expect("function-scoped preview hints");
         assert_eq!(hints.param_names, vec!["hwnd".to_string()]);
         assert_eq!(
-            hints.stack_local_names.get(&-0x20).map(String::as_str),
+            hints
+                .debug_stack_local_names
+                .get(&-0x20)
+                .map(String::as_str),
             Some("rect")
         );
         assert_eq!(hints.return_type_name.as_deref(), Some("BOOL"));

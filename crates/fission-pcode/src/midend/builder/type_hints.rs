@@ -38,9 +38,11 @@ pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
     register_origins: &HashMap<String, (u64, u32)>,
+    debug_cfa_stack_offset_bias: Option<i64>,
 ) -> PreviewHintStats {
     let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
-    let mut stats = apply_function_name_hints(func, context, register_origins);
+    let mut stats =
+        apply_function_name_hints(func, context, register_origins, debug_cfa_stack_offset_bias);
     apply_debug_struct_promotions(func, context, &mut stats);
     apply_debug_struct_field_names(func, context, &mut stats);
     let alias_collector = StackAliasCollector::new(func);
@@ -94,6 +96,7 @@ fn apply_function_name_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
     register_origins: &HashMap<String, (u64, u32)>,
+    debug_cfa_stack_offset_bias: Option<i64>,
 ) -> PreviewHintStats {
     let mut stats = PreviewHintStats::default();
     let Some(hints) = &context.function_hints else {
@@ -140,7 +143,22 @@ fn apply_function_name_hints(
         else {
             continue;
         };
-        let Some(new_name) = hints.stack_local_names.get(&offset) else {
+        let debug_offset = match hints.debug_stack_offset_base {
+            NirStackOffsetBase::BuilderFrame => Some(offset),
+            NirStackOffsetBase::CallFrameCfa => {
+                debug_cfa_stack_offset_bias.and_then(|bias| offset.checked_sub(bias))
+            }
+        };
+        let new_name = debug_offset
+            .and_then(|debug_offset| hints.debug_stack_local_names.get(&debug_offset))
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| {
+                hints
+                    .stack_local_names
+                    .get(&offset)
+                    .filter(|name| !name.trim().is_empty())
+            });
+        let Some(new_name) = new_name else {
             continue;
         };
         let new_name = new_name.trim();
@@ -249,7 +267,22 @@ fn apply_function_name_hints(
         let Some((offset, is_derived)) = stack_origin_offset(binding.origin) else {
             continue;
         };
-        let Some(type_name) = hints.stack_local_type_names.get(&offset) else {
+        let debug_offset = match hints.debug_stack_offset_base {
+            NirStackOffsetBase::BuilderFrame => Some(offset),
+            NirStackOffsetBase::CallFrameCfa => {
+                debug_cfa_stack_offset_bias.and_then(|bias| offset.checked_sub(bias))
+            }
+        };
+        let type_name = debug_offset
+            .and_then(|debug_offset| hints.debug_stack_local_type_names.get(&debug_offset))
+            .filter(|type_name| !type_name.trim().is_empty())
+            .or_else(|| {
+                hints
+                    .stack_local_type_names
+                    .get(&offset)
+                    .filter(|type_name| !type_name.trim().is_empty())
+            });
+        let Some(type_name) = type_name else {
             continue;
         };
         let type_name = type_name.trim();

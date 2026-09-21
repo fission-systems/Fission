@@ -248,8 +248,26 @@ pub struct DwarfFunctionInfo {
     pub params: Vec<DwarfParamInfo>,
     /// Local variables
     pub local_vars: Vec<DwarfLocalVar>,
+    /// Frame-base expression used by `DW_OP_fbreg` locations in this
+    /// subprogram.  A stack offset is not self-describing: the same offset
+    /// has a different address when it is relative to the call-frame address
+    /// versus a concrete frame register.
+    pub frame_base: DwarfFrameBase,
     /// Function body size when known from debug info (high_pc - low_pc).
     pub size: u64,
+}
+
+/// The small subset of `DW_AT_frame_base` expressions needed to interpret
+/// fixed `DW_OP_fbreg` locations safely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DwarfFrameBase {
+    /// No single supported frame-base expression was available.
+    #[default]
+    Unknown,
+    /// The frame base is a concrete target register.
+    Register(u64),
+    /// The frame base is `DW_OP_call_frame_cfa`.
+    CallFrameCfa,
 }
 
 pub type PdbParamInfo = DwarfParamInfo;

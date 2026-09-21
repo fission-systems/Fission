@@ -4,7 +4,7 @@ use crate::analysis::xrefs::XrefDatabase;
 use fission_analysis_db::{FactSource, ProgramSnapshot, SymbolKind};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
-    DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
+    DwarfFrameBase, DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
 use fission_pcode::midend::cspec::register_model_for_language;
 use fission_pcode::{
@@ -1426,6 +1426,7 @@ mod tests {
                 return_type: Some("int".into()),
                 params: Vec::new(),
                 local_vars: Vec::new(),
+                frame_base: DwarfFrameBase::Unknown,
                 size: 0,
             },
         );
@@ -1479,6 +1480,7 @@ mod tests {
                 return_type: None,
                 params: Vec::new(),
                 local_vars: Vec::new(),
+                frame_base: DwarfFrameBase::Unknown,
                 size: 0,
             },
         );
@@ -1559,6 +1561,7 @@ mod tests {
                     location: DwarfLocation::Unknown,
                     scope: None,
                 }],
+                frame_base: DwarfFrameBase::Unknown,
                 size: 0,
             },
         );
@@ -1609,6 +1612,7 @@ mod tests {
                     location: DwarfLocation::Unknown,
                 }],
                 local_vars: Vec::new(),
+                frame_base: DwarfFrameBase::Unknown,
                 size: 0,
             },
         );

@@ -53,6 +53,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
             return_type_name: Some("BOOL".to_string()),
             register_local_names: HashMap::default(),
             register_local_type_names: HashMap::default(),
+            ..Default::default()
         }),
     };
 
@@ -118,6 +119,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
             return_type_name: None,
             register_local_names: HashMap::default(),
             register_local_type_names: HashMap::default(),
+            ..Default::default()
         }),
     };
 
@@ -127,6 +129,48 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
     let rendered = print_hir_function(&func);
     assert!(rendered.contains("rect"));
     assert!(!rendered.contains("local_20"));
+}
+
+#[test]
+fn preview_type_hints_translate_cfa_relative_debug_stack_locals() {
+    let mut func = HirFunction {
+        name: "memory_layouts".to_string(),
+        locals: vec![NirBinding {
+            name: "local_30".to_string(),
+            ty: NirType::Aggregate {
+                size: 16,
+                fields: vec![],
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-0x30)),
+            initializer: None,
+        }],
+        body: vec![HirStmt::Return(None)],
+        ..Default::default()
+    };
+    let mut context = PreviewTypeContext::default();
+    context.function_hints = Some(PreviewFunctionHints {
+        stack_local_names: HashMap::from([(-0x30, "structural_name".to_string())]),
+        debug_stack_local_names: HashMap::from([(-0x40, "source_name".to_string())]),
+        debug_stack_local_type_names: HashMap::from([(-0x40, "float[4]".to_string())]),
+        debug_stack_offset_base: NirStackOffsetBase::CallFrameCfa,
+        ..Default::default()
+    });
+
+    let stats = apply_preview_type_hints_with_stack_bias(
+        &mut func,
+        &context,
+        &crate::midend::HashMap::default(),
+        Some(0x10),
+    );
+
+    assert_eq!(func.locals[0].name, "source_name");
+    assert_eq!(
+        func.locals[0].surface_type_name.as_deref(),
+        Some("float[4]")
+    );
+    assert_eq!(stats.explicit_local_name_hits, 1);
+    assert_eq!(stats.explicit_local_type_hits, 1);
 }
 
 #[test]
@@ -181,6 +225,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
             return_type_name: None,
             register_local_names: HashMap::default(),
             register_local_type_names: HashMap::default(),
+            ..Default::default()
         }),
     };
 
@@ -238,6 +283,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
             return_type_name: None,
             register_local_names: HashMap::default(),
             register_local_type_names: HashMap::default(),
+            ..Default::default()
         }),
     };
 
@@ -280,6 +326,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
             return_type_name: Some("BOOL".to_string()),
             register_local_names: HashMap::default(),
             register_local_type_names: HashMap::default(),
+            ..Default::default()
         }),
     };
 
@@ -356,6 +403,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
             return_type_name: Some("int".to_string()),
             register_local_names: HashMap::default(),
             register_local_type_names: HashMap::default(),
+            ..Default::default()
         }),
     };
 
@@ -397,6 +445,7 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
             return_type_name: Some("int".to_string()),
             register_local_names: HashMap::default(),
             register_local_type_names: HashMap::default(),
+            ..Default::default()
         }),
     };
 
@@ -472,6 +521,7 @@ fn preview_type_hints_explicit_function_types_override_derived_aliases() {
         return_type_name: None,
         register_local_names: HashMap::default(),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
 
     apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
@@ -565,6 +615,7 @@ fn preview_type_hints_collect_hint_stats() {
         return_type_name: Some("BOOL".to_string()),
         register_local_names: HashMap::default(),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
 
     let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
@@ -657,6 +708,7 @@ fn preview_type_hints_overlay_debug_struct_field_names_onto_recovered_aggregate(
         return_type_name: None,
         register_local_names: HashMap::default(),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
 
     let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
@@ -702,6 +754,7 @@ fn preview_type_hints_debug_struct_field_names_reject_multi_level_pointer() {
         return_type_name: None,
         register_local_names: HashMap::default(),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
 
     let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
@@ -763,6 +816,7 @@ fn preview_type_hints_overlay_debug_struct_field_names_rewrites_body_field_acces
         return_type_name: None,
         register_local_names: HashMap::default(),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
 
     let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
@@ -848,6 +902,7 @@ fn preview_type_hints_promotes_pointer_to_aggregate_from_debug_struct() {
         return_type_name: None,
         register_local_names: HashMap::default(),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
 
     let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
@@ -913,6 +968,7 @@ fn preview_type_hints_promotes_through_single_assignment_copy_alias() {
         return_type_name: None,
         register_local_names: HashMap::default(),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
 
     let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
@@ -982,6 +1038,7 @@ fn preview_type_hints_apply_register_resident_dwarf_name_and_type_when_unambiguo
         return_type_name: None,
         register_local_names: HashMap::from([(EBX_ORIGIN.0, "counter".to_string())]),
         register_local_type_names: HashMap::from([(EBX_ORIGIN.0, "int".to_string())]),
+        ..Default::default()
     });
     let register_origins: crate::midend::HashMap<String, (u64, u32)> =
         [("EBX".to_string(), EBX_ORIGIN)].into_iter().collect();
@@ -1036,6 +1093,7 @@ fn preview_type_hints_renames_synthetic_named_register_binding_by_identity() {
         return_type_name: None,
         register_local_names: HashMap::from([(EBX_ORIGIN.0, "total".to_string())]),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
     let register_origins: crate::midend::HashMap<String, (u64, u32)> =
         [("uVar0".to_string(), EBX_ORIGIN)].into_iter().collect();
@@ -1099,6 +1157,7 @@ fn preview_type_hints_renames_register_local_written_more_than_once() {
         return_type_name: None,
         register_local_names: HashMap::from([(EBX_ORIGIN.0, "counter".to_string())]),
         register_local_type_names: HashMap::default(),
+        ..Default::default()
     });
     let register_origins: crate::midend::HashMap<String, (u64, u32)> =
         [("EBX".to_string(), EBX_ORIGIN)].into_iter().collect();

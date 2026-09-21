@@ -400,12 +400,34 @@ pub struct NirCallParamRule {
     pub pointee_sizes: Vec<u32>,
 }
 
+/// Coordinate system used by debug-info stack locations before they are
+/// matched to builder bindings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NirStackOffsetBase {
+    /// The canonical coordinate used by `NirBindingOrigin::StackOffset`.
+    #[default]
+    BuilderFrame,
+    /// The offset is relative to DWARF's `DW_OP_call_frame_cfa`.
+    CallFrameCfa,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NirFunctionHints {
     pub param_names: Vec<String>,
     pub param_type_names: HashMap<usize, String>,
+    /// Stack names supplied by structural analysis. These offsets are already
+    /// in the builder's canonical coordinate system.
     pub stack_local_names: HashMap<i64, String>,
     pub stack_local_type_names: HashMap<i64, String>,
+    /// Stack names supplied by DWARF/PDB debug information. They remain
+    /// separate from structural hints because the two sources can use
+    /// different frame-base coordinates and must not be merged by offset.
+    #[serde(default)]
+    pub debug_stack_local_names: HashMap<i64, String>,
+    #[serde(default)]
+    pub debug_stack_local_type_names: HashMap<i64, String>,
+    #[serde(default)]
+    pub debug_stack_offset_base: NirStackOffsetBase,
     pub return_type_name: Option<String>,
     /// DWARF locals whose `DW_AT_location` is a single register for their
     /// whole visible scope (`DW_OP_reg*`, or a location list where every

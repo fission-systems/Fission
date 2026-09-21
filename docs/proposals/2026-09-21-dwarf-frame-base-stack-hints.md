@@ -1,6 +1,6 @@
 # Proposal: Normalize DWARF CFA stack hints before HIR naming
 
-Status: investigation complete; implementation pending measured validation
+Status: implemented; focused real-binary validation complete
 
 Issue: GitHub #118 (`memory_layouts_gcc_O2.exe`, `main`, `0x140002830`)
 
@@ -45,5 +45,26 @@ rather than being guessed.
    semantic smoke path.
 
 Success requires the real row to recover `a`, `b`, and `c` on their actual
-   slots without regressing existing x86/x64 debug-hint tests.  Synthetic
+slots without regressing existing x86/x64 debug-hint tests.  Synthetic
 tests alone will be reported only as mechanical coverage.
+
+## Result
+
+The release CLI now reports the actual slots as `a=-0x30`, `b=-0x20`, and
+`c=-0x10`, and renders the call as `matrix_multiply(xVar6, xVar5, xVar8,
+2)` with `xVar6=&a`, `xVar5=&b`, and `xVar8=&c`.  Before the fix, the same
+final hint stage assigned `b`, `c`, and `local_80` to those three slots and
+rendered the call through the shifted identities.
+
+The focused CFA-coordinate regression and existing function-hint tests pass.
+The affected loader, decompiler, and static crates pass 296/296 nextest
+tests; workspace `cargo check`, formatting, diff checks, and the release CLI
+build pass.  The full `fission-pcode` suite has two unrelated pre-existing
+`movzx` assertion failures (`movzx_after_byte_add_zero_extends_unsigned` and
+`x64_byte_add_movzx_does_not_double_add_load`), with the remaining 1,054 tests
+passing.
+
+The external Docker benchmark could not be run on this host because no Docker
+daemon is available.  The release CLI row measurement above is therefore
+focused local evidence, not an official DecBench or external benchmark
+ranking claim.

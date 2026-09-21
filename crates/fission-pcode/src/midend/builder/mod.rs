@@ -130,7 +130,21 @@ pub(super) fn apply_preview_type_hints(
     context: &PreviewTypeContext,
     register_origins: &HashMap<String, (u64, u32)>,
 ) -> PreviewHintStats {
-    type_hints::apply_preview_type_hints(func, context, register_origins)
+    type_hints::apply_preview_type_hints(func, context, register_origins, None)
+}
+
+pub(super) fn apply_preview_type_hints_with_stack_bias(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+    register_origins: &HashMap<String, (u64, u32)>,
+    debug_cfa_stack_offset_bias: Option<i64>,
+) -> PreviewHintStats {
+    type_hints::apply_preview_type_hints(
+        func,
+        context,
+        register_origins,
+        debug_cfa_stack_offset_bias,
+    )
 }
 
 fn seed_callee_summaries_from_type_context(
@@ -231,6 +245,38 @@ fn temp_name_trace_enabled() -> bool {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    /// Return the proven translation from a DWARF CFA-relative stack offset
+    /// to the builder's canonical stack-slot coordinate.  The builder keeps
+    /// this knowledge because the CFA relation depends on the entry prologue;
+    /// the loader must not guess it from a raw debug offset.
+    pub(super) fn debug_cfa_stack_offset_bias(&self) -> Option<i64> {
+        let pointer_size = i64::from(self.options.pointer_size);
+        match self.options.calling_convention {
+            CallingConvention::WindowsX64
+            | CallingConvention::SystemVAmd64
+            | CallingConvention::X86_32 => {
+                if self.entry_frame_pointer_established {
+                    // The canonical RBP/RSP coordinate is one word below
+                    // entry RSP, while the x86 CFA is one word above it.
+                    Some(pointer_size.checked_mul(2)?)
+                } else {
+                    // Without a frame pointer, bindings are relative to the
+                    // steady-state RSP established by the prologue.
+                    self.stack_frame_size.checked_add(pointer_size)
+                }
+            }
+            CallingConvention::Arm32 | CallingConvention::AArch64
+                if !self.entry_frame_pointer_established =>
+            {
+                // ARM-family calls keep the return address in a link
+                // register, so CFA is entry SP rather than entry SP plus a
+                // pushed return address.
+                Some(self.stack_frame_size)
+            }
+            _ => None,
+        }
+    }
+
     fn binding_name_exists(&self, name: &str) -> bool {
         self.temps.contains_key(name) || self.used_param_local_names.contains(name)
     }

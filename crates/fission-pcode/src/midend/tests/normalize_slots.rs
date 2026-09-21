@@ -719,6 +719,7 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
             return_type_name: None,
             register_local_names: std::collections::HashMap::default(),
             register_local_type_names: std::collections::HashMap::default(),
+            ..Default::default()
         }),
     };
 
