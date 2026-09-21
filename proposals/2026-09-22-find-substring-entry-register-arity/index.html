@@ -1288,6 +1288,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-post-fix-measured-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Post-Fix Measured Evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1457,6 +1468,22 @@ pass when both the preheader seed and latch use the one phi-carried binding.</p>
 <li>[x] Confirmed</li>
 <li>Any new metric/pass/helper does not duplicate an existing owner:</li>
 <li>[x] Confirmed; the existing ABI arity owner is extended.</li>
+</ul>
+<h2 id="9-post-fix-measured-evidence">9. Post-Fix Measured Evidence<a class="headerlink" href="#9-post-fix-measured-evidence" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Production fix commit: <code>f68db0b48</code> (<code>fix(materialize): share widened loop phi seed bindings</code>).</li>
+<li>Synthetic regression: <code>loop_phi_entry_widening_reuses_narrow_seed_binding</code> fails on the pre-fix implementation because the narrow entry definition has no binding reservation (<code>None</code>) while the widening phi entry receives a fresh temporary (<code>xVar0</code>). It passes after the fix, with both definitions sharing one private scalar binding.</li>
+<li>Focused external rerun: <code>fission-benchmark</code> dev corpus, <code>find_substring</code>, all nine compiler variants, caches disabled, local endpoint provenance <code>local-f68db0b48</code>.</li>
+<li>Result artifact: <code>results/issue105_after_f68db0b48_recreated.json</code> in the local benchmark checkout.</li>
+<li>Semantic cases: <code>44/54</code> (<code>81.48%</code>), up from the baseline <code>27/54</code> (<code>50.0%</code>).</li>
+<li><code>gcc -O1</code>: <code>3/6 → 6/6</code></li>
+<li><code>gcc -O2</code>: <code>0/6 → 6/6</code></li>
+<li><code>gcc -O3</code>: <code>0/6 → 6/6</code></li>
+<li><code>gcc -Os</code>: remains <code>3/6</code></li>
+<li><code>gcc-m32 -O2</code>: remains <code>3/6</code></li>
+<li><code>clang -O2</code>: remains <code>2/6</code></li>
+<li>The measured O1/O2/O3 improvement is caused by restoring the loop-carried <code>needle[j]</code> binding; the remaining variants are separate issues and are not claimed as fixed here.</li>
+<li>Regression gates after the fix: <code>cargo nextest run -p fission-pcode --no-fail-fast</code> (<code>1069 passed, 3 pre-existing failures, 1 skipped</code>), <code>cargo nextest run -p fission-emulator --no-fail-fast</code> (<code>200 passed, 3 skipped</code>), workspace <code>cargo check</code>, <code>cargo fmt --all --check</code>, <code>git diff --check</code>, and <code>cargo build -p fission-cli --release</code> all passed.</li>
 </ul>
 
 
