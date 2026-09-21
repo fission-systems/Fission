@@ -1186,12 +1186,7 @@ fn local_register_write_precedes_loop_carried_read_fallback() {
                     Some(byte.clone()),
                     vec![constant_sized(3, 4), base.clone()],
                 ),
-                op(
-                    3,
-                    PcodeOpcode::IntZExt,
-                    Some(edx.clone()),
-                    vec![byte],
-                ),
+                op(3, PcodeOpcode::IntZExt, Some(edx.clone()), vec![byte]),
                 op(
                     4,
                     PcodeOpcode::IntZExt,
@@ -1219,12 +1214,7 @@ fn local_register_write_precedes_loop_carried_read_fallback() {
                     }),
                     vec![carried_edx.clone()],
                 ),
-                op(
-                    7,
-                    PcodeOpcode::Copy,
-                    Some(rdx.clone()),
-                    vec![constant(8)],
-                ),
+                op(7, PcodeOpcode::Copy, Some(rdx.clone()), vec![constant(8)]),
                 op(8, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
             ],
         ),

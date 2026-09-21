@@ -626,9 +626,7 @@ impl<'a> PreviewBuilder<'a> {
         let has_prior_local_def = self
             .current_lowering_site
             .is_some_and(|site| self.has_prior_local_def_for_varnode(vn, site));
-        if !has_prior_local_def
-            && let Some(name) = self.loop_body_carried_register_read_name(vn)
-        {
+        if !has_prior_local_def && let Some(name) = self.loop_body_carried_register_read_name(vn) {
             let name = self.ensure_live_register_binding(&name, vn.size);
             return Ok(PreHirExpr::Var(name));
         }
