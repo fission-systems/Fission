@@ -731,6 +731,15 @@ fn canonicalize_unsigned_compare_binding_casts_in_expr(
     else {
         return changed;
     };
+    // A direct variable-to-variable comparison already carries the best
+    // available ABI/type information.  Do not introduce casts merely because
+    // an earlier type pass conservatively rewrote those bindings as signed;
+    // this preserves the established flag-recovery surface.  The lost
+    // unsigned provenance this pass repairs is the mixed/compound form (for
+    // example a signed binding compared with a materialized range constant).
+    if matches!(lhs.as_ref(), PreHirExpr::Var(_)) && matches!(rhs.as_ref(), PreHirExpr::Var(_)) {
+        return changed;
+    }
     let Some(bits) = unsigned_compare_binding_width(lhs, rhs, binding_types) else {
         return changed;
     };

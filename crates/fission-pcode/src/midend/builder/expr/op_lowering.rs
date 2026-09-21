@@ -601,6 +601,9 @@ impl<'a> PreviewBuilder<'a> {
         expr: PreHirExpr,
         bits: u32,
     ) -> PreHirExpr {
+        if matches!(expr, PreHirExpr::Var(_)) {
+            return expr;
+        }
         let NirType::Int {
             bits: source_bits,
             signed: true,
