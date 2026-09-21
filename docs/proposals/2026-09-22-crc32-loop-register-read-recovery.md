@@ -11,8 +11,10 @@
   `results/issue103_before_723aecd96_recreated.json`.
 - Current output summary: the raw builder preserves `xVar2 = data + length`
   and the byte load, but renders the CRC update as `rax = (uint)rax ^ param_2`
-  instead of XORing the loaded byte. The loop condition is therefore faithful
-  about the end pointer but the input-byte dataflow is wrong.
+  instead of XORing the loaded byte. After the builder fix, the input-byte
+  dataflow is correct in PreHIR, but structuring still folds the end-pointer
+  prefix into `data + length` even though `data` is incremented by the loop
+  body. The two defects therefore have separate canonical owners.
 - Semantic cases passed / total: the nine `crc32` variants pass `29/54` cases
   in aggregate (`0.4259` mean pass rate); `gcc -O2` is `0/6` with a timeout,
   `clang -O2` is `1/6`, `gcc-m32 -O2` is `3/6`, and the two O0 rows pass `6/6`.
@@ -30,7 +32,7 @@
 - [ ] SLEIGH/raw p-code:
 - [x] Builder/materialize:
 - [ ] Normalize:
-- [ ] Structuring:
+- [x] Structuring:
 - [ ] Type/data recovery:
 - [ ] Printer:
 - [ ] Benchmark/automation:
@@ -66,6 +68,16 @@ the same physical register in the nested loop and returns the entry binding
 definition for that register. The load and pointer end facts are therefore
 not lost by raw lifting or normalize; the builder's loop-carried fallback
 overrides a closer local definition.
+
+The remaining end-pointer error is introduced later by the generic loop
+condition-prefix folder in
+`crates/fission-midend-structuring/src/loops.rs`. It substitutes a prefix
+binding such as `end = data + length` into the loop condition when `end` is
+not itself read in the body. That proof does not account for variables read by
+the prefix RHS: `data` is assigned in the body, so replacing the entry-owned
+snapshot with the current `data` changes the loop predicate on every
+iteration. The conservative result must retain the prefix assignment rather
+than inline an expression whose dependencies are mutable in the loop body.
 ```
 
 ## 3. Generality / Invariant Proof
@@ -100,6 +112,10 @@ Comparable coverage:
 - Synthetic invariant test: the value consumed by same-block XOR is the local
   loaded byte, while the loop-carried name is used only for a later iteration
   read/update.
+- Synthetic loop-condition test: a prefix assignment reads a variable that is
+  updated by the loop body; folding that prefix into the condition must be
+  rejected so an entry-owned pointer/end snapshot is not recomputed from the
+  advancing loop cursor.
 
 ## 4. Risk And Ownership Check
 
@@ -107,6 +123,8 @@ Comparable coverage:
   `loop_body_carried_register_read_name` in
   `crates/fission-pcode/src/midend/builder/materialize/loop_carried/mod.rs`,
   called from `lower_varnode_inner` in `expr/lower_expr.rs`.
+  The end-pointer preservation owner is `try_fold_cond_prefix` in
+  `crates/fission-midend-structuring/src/loops.rs`.
 - Shared analysis/substrate candidate:
   - [x] CFG / dominance / postdominance fact
   - [x] Def-use / reaching-definition fact
@@ -117,8 +135,10 @@ Comparable coverage:
 - Why extending that owner is sufficient, or why a new pass/helper is needed:
   the existing `has_prior_local_def_for_varnode` already computes the required
   same-block reaching-definition fact with the builder's register alias rules.
-  The fix is a narrow precedence check at the existing fallback call; no new
-  pass or representation is needed.
+  The structuring proof can use the existing expression/body walkers to reject
+  condition-prefix substitution when a prefix RHS depends on a body-assigned
+  variable. Both fixes are narrow owner-local proof corrections; no new pass
+  or representation is needed.
 - If adding a new pass/helper/metric, why existing shared analysis cannot
   express the invariant: no new pass/helper/metric is planned.
 - Possible interaction with existing normalize/structuring/materialize passes:
@@ -136,9 +156,12 @@ Comparable coverage:
 
 - [ ] Targeted invariant test:
   - Command: add a builder regression for a same-block byte load/width-alias
-    definition followed by a loop-carried register update.
-  - Expected signal: the old code returns the ABI parameter for the local
-    consumer; the fixed code lowers the load-derived value.
+    definition followed by a loop-carried register update, plus a structuring
+    regression for a loop-condition prefix whose RHS reads a body-mutated
+    cursor.
+  - Expected signal: the old builder returns the ABI parameter for the local
+    consumer and the old structurer folds the mutable cursor expression; the
+    fixed code lowers the load-derived value and preserves the snapshot.
 - [ ] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
   - Expected signal: the new regression and existing builder/materialize tests
@@ -146,11 +169,17 @@ Comparable coverage:
 - [x] Focused benchmark row:
   - Command: cache-disabled local DecBench `dev --function crc32 --decompilers
     fission` before/after matrix.
-  - Expected row-level improvement: CRC updates consume `data[i]`, preserve
-    the end pointer, and improve semantic execution without a row-specific
-    rule.
+  - Expected row-level improvement: CRC updates consume `data[i]` and preserve
+    the end pointer without a row-specific rule.
   - Measured baseline: `results/issue103_before_723aecd96_recreated.json`,
     nine rows, `29/54` cases, mean semantic score `0.4259`.
+  - Measured after builder-only fix: `results/issue103_after_9b25b4ee8_recreated.json`,
+    nine rows, still `29/54` cases and mean semantic score `0.4259`; the
+    focused `gcc -O2` failure moved from timeout to runtime error, while its
+    output changed from `^ length`/uninitialized `xVar2` to the load-derived
+    byte and the still-invalid `data != data + length` predicate. This confirms
+    the builder fix mechanically and identifies the remaining structuring
+    defect; it is not a completed quality claim yet.
 - [ ] Smoke or automation sample:
   - Command: cache-disabled dev smoke after the fix.
   - Expected no-regression signal: clean requested-function outputs and no
