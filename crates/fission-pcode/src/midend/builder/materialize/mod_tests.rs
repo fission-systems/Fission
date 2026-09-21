@@ -3956,6 +3956,136 @@ fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
     );
 }
 
+/// A tail CMOV's guarded return-register write reaches the next block only on
+/// one path. It must not be promoted to the direct-successor merge binding,
+/// because that binding would be read by the shared return join even when the
+/// CMOV skipped the write.
+#[test]
+fn guarded_cmov_return_write_does_not_claim_successor_merge() {
+    use crate::midend::support::CallingConvention;
+
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let cond = register(crate::midend::UNIQUE_SPACE_ID, 0x100, 1);
+    let target = Varnode {
+        space_id: 3,
+        offset: 0x1020,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cmov = block_at(
+        0x1010,
+        1,
+        vec![
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1010,
+                output: Some(rax.clone()),
+                inputs: vec![constant(1)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::CBranch,
+                address: 0x1012,
+                output: None,
+                inputs: vec![target.clone(), cond.clone()],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1012,
+                output: Some(rax.clone()),
+                inputs: vec![constant(2)],
+                asm_mnemonic: None,
+            },
+        ],
+    );
+    let join = block_at(
+        0x1020,
+        2,
+        vec![PcodeOp {
+            seq_num: 4,
+            opcode: PcodeOpcode::Return,
+            address: 0x1020,
+            output: None,
+            inputs: vec![Varnode::constant(0xdead, 8)],
+            asm_mnemonic: None,
+        }],
+    );
+    let alternate = block_at(
+        0x1030,
+        3,
+        vec![
+            PcodeOp {
+                seq_num: 5,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1030,
+                output: Some(rax.clone()),
+                inputs: vec![constant(3)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 6,
+                opcode: PcodeOpcode::Branch,
+                address: 0x1031,
+                output: None,
+                inputs: vec![target.clone()],
+                asm_mnemonic: None,
+            },
+        ],
+    );
+    let entry = block_at(
+        0x1000,
+        0,
+        vec![PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Branch,
+            address: 0x1000,
+            output: None,
+            inputs: vec![Varnode {
+                space_id: 3,
+                offset: 0x1010,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            }],
+            asm_mnemonic: None,
+        }],
+    );
+    let pcode = pcode_function(vec![entry, cmov, join, alternate]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    assert!(
+        builder.op_is_inside_same_block_forward_cmov_body(&pcode.blocks[1], 2),
+        "the guarded definition must be recognized as a tail CMOV body"
+    );
+    assert_eq!(
+        builder.successors[1],
+        vec![2],
+        "the instruction-local branch must leave the block with its layout successor"
+    );
+    assert_eq!(
+        builder.predecessors[2],
+        vec![1, 3],
+        "the return block must be a real multi-predecessor join"
+    );
+
+    let name = builder.merge_binding_name_for_direct_successor_accumulator(
+        &pcode.blocks[1],
+        2,
+        &rax,
+        &PreHirExpr::Const(2, int(64)),
+    );
+    assert_eq!(
+        name, None,
+        "a conditional definition must not claim an unconditional join carrier"
+    );
+}
+
 /// Merge bindings are keyed by `(block, varnode)`, but the value they stand
 /// for is the varnode: two blocks merging the same storage must agree on the
 /// name. The hardware-name promotion only fires on a loop head, so a join

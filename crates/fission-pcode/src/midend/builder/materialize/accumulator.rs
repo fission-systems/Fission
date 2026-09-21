@@ -31,6 +31,20 @@ impl<'a> PreviewBuilder<'a> {
             );
             return None;
         }
+        // A guarded write in an instruction-local forward-CBranch body is not
+        // an unconditional predecessor value. The skipped path reaches the
+        // successor with the prior register value, so assigning this def to a
+        // successor merge binding would create a carrier that is initialized
+        // only on the fall-through path. Leave CMOV bodies to the register
+        // carrier materialization rules instead.
+        if self.op_is_inside_same_block_forward_cmov_body(block, op_idx) {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "instruction_local_conditional_definition",
+            );
+            return None;
+        }
         let output_key = VarnodeKey::from(output);
         if self.gpr_family_index_for_key(&output_key).is_none()
             && !self.register_namer().is_primary_return_register(output)
