@@ -1306,8 +1306,8 @@
 </ul>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[x] P-code lowering / NIR expression construction</li>
-<li>[x] Normalize cast-elision boundary</li>
+<li>[x] Shared NIR normalization of unsigned comparison operands</li>
+<li>[x] P-code mapping and comparison consumer classification</li>
 <li>[ ] Structuring</li>
 <li>[ ] Printer-only</li>
 <li>[ ] Benchmark/automation</li>
@@ -1323,24 +1323,21 @@
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>is added. The printer therefore sees a signed subexpression and emits a signed
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>C comparison, changing the bit-vector semantics for negative inputs.
 </span></code></pre></div>
-<p>The canonical owners are the shared p-code lowering of unsigned integer
-comparisons, the x86 branch-predicate path that reconstructs a comparison from
-CF/ZF, and the normalize cast-elision pass that removes redundant-looking
-casts after type inference. The fix must make the comparison operands
-unsigned at the expression boundary and preserve that boundary through
-single-use-temp cleanup; it must not alter <code>IntSub</code> globally or add a function
-or address guard.</p>
+<p>The canonical owner is the shared normalize pass that sees the final NIR
+comparison after p-code lowering and temporary inlining. P-code lowering
+already distinguishes <code>IntLess</code> from <code>IntSLess</code>, and the x86 branch-predicate
+path already distinguishes unsigned CF/ZF predicates from signed predicates.
+The fix therefore makes the final <code>Lt</code>/<code>Le</code>/<code>Gt</code>/<code>Ge</code> operand boundary
+explicit, without changing the generic <code>IntSub</code> type or adding a function or
+address guard.</p>
 <p>The real row narrowed the failure to this sequence:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>builder output:       unsigned_cast(uVar6) &lt; 98
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>after cleanup fold:   unsigned_cast(uVar6) &lt; 98
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>cast-elision pass:    uVar6 &lt; 98       # uVar6 was inferred as u32
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>temp inlining:        (int)(code - 1)  # the signed producer is now visible
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>before final normalize:  (int)(code - 1) &lt; 98
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>unsigned-boundary pass:  (uint)(code - 1) &lt; 98
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>atomic variable inputs:  unchanged when their type is unknown/already unsigned
 </span></code></pre></div>
-<p>The cast was type-redundant for the inferred variable type but not semantically
-redundant for the producer's 32-bit bit pattern. The fix preserves an explicit
-unsigned integer cast when it is the direct operand boundary of an unsigned
-comparison. Signed comparisons and casts outside that boundary retain the old
-elision behavior.</p>
+<p>The cast is not a conversion of the arithmetic producer; it is a bit-pattern
+reinterpretation at the unsigned comparison boundary. Signed comparisons and
+already-unsigned or untyped atomic operands retain the old output shape.</p>
 <h2 id="3-generalized-rule">3. Generalized Rule<a class="headerlink" href="#3-generalized-rule" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>An unsigned p-code comparison must compare scalar integer operands at the
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>comparison width as unsigned values, even when an operand is a signed-looking
@@ -1349,21 +1346,22 @@ elision behavior.</p>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>change unrelated arithmetic result types.
 </span></code></pre></div>
 <p>This covers direct <code>IntLess</code>/<code>IntLessEqual</code> expressions and x86 CF/ZF-derived
-branch predicates. It is an ISA-agnostic p-code comparison invariant; x86
-only supplies the flag-shaped consumer.</p>
+branch predicates once they are represented as shared NIR comparisons. It is
+an ISA-agnostic comparison invariant; x86 only supplies one flag-shaped
+consumer.</p>
 <h2 id="4-validation-matrix">4. Validation Matrix<a class="headerlink" href="#4-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
 <li>[x] Focused synthetic p-code regression: a signed-looking <code>IntSub</code> used by
   <code>IntLess</code> must render an unsigned operand cast and preserve negative-value
   behavior.</li>
-<li>[x] Normalize regression: the unsigned cast boundary is retained at an
-  inferred-<code>u32</code> variable comparison; the same-type cast is still removed
-  outside that boundary. The retained-cast test fails against the old
-  cast-elision rule.</li>
+<li>[x] Normalize regression: a signed-looking compound operand is reinterpreted
+  at an unsigned comparison boundary, while an untyped atomic operand is left
+  unchanged.</li>
 <li>[x] Real-binary direct output: <code>process_code@0x140001730</code> contains
   unsigned range comparisons for the subtracted operands.</li>
 <li>[ ] Cache-disabled DecBench rerun on the same nine <code>process_code</code> rows.</li>
-<li>[ ] <code>cargo nextest run -p fission-pcode</code> and emulator regression.</li>
+<li>[x] <code>cargo nextest run -p fission-pcode</code> and emulator regression (three
+  pre-existing #103 pcode failures remain).</li>
 <li>[ ] Workspace check, format/diff check, and release CLI build.</li>
 </ul>
 <h2 id="5-measurement-interpretation">5. Measurement Interpretation<a class="headerlink" href="#5-measurement-interpretation" title="Permanent link">&para;</a></h2>
