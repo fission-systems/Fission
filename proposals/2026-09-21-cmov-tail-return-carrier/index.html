@@ -1334,9 +1334,13 @@ definition executes on every path from the current block to the successor
 entry. A definition strictly inside an instruction-local forward-CBranch body
 does not satisfy that condition and must be left to the CMOV/register-carrier
 materialization rules.</p>
-<p>Add this proof guard to the canonical direct-successor accumulator owner:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>if definition is inside an instruction-local forward-CBranch body:
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    decline unconditional successor merge
+<p>Add this proof guard to the canonical direct-successor accumulator owner. The
+proof must apply it both to the definition currently being considered and to
+the selected last definition on every other incoming predecessor; one guarded
+incoming edge is enough to invalidate the unconditional merge candidate:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>if any selected incoming definition is inside an instruction-local
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>forward-CBranch body:
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    decline unconditional successor merge
 </span></code></pre></div>
 <p>No architecture, function, address, string, or compiler guard is needed. The
 existing CFG-local CMOV classifier supplies the control-flow fact, and the
