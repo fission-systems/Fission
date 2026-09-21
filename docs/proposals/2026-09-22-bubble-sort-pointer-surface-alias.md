@@ -12,14 +12,29 @@
 - Failure category: runtime/semantic failure; the focused aggregate had 5 runtime-error rows, 2 assertion-failure rows, and 2 passing rows.
 - Relevant benchmark/static/readability observations: raw p-code is correct and contains the 4-byte cursor increment, 8-byte packed load, lane extraction, swap store, and end-pointer comparison. The first wrong surface fact is the local declaration/type overlay, not the lift or lane semantics.
 
+### Measured follow-up
+
+The same cache-disabled nine-row DecBench matrix was rerun after each owner
+change. The alias/byte-stride work raised the aggregate from 16/45 to 24/45;
+the signed lane and dual-layer fixes then raised it to 27/45 (0.6000), with
+perfect rows changing from 2/9 to 5/9. The motivating `gcc -O2` row changed
+from 0/5 runtime-error to 5/5, and `gcc -O3` changed from 0/5 runtime-error
+to 5/5. The final row taxonomy is 5 `ok`, 1 `assertion_fail`, 1
+`compile_error`, and 2 `runtime_error`.
+
+The remaining failures are compiler/ABI-specific recovery gaps outside the
+motivating x86-64 packed-SSE row: both x86-32 rows still need separate pointer
+address recovery, and the Clang rows expose unrelated scalar/pointer recovery
+problems. They are not used to claim that every matrix variant is solved.
+
 ## 2. Owner Proof
 
 - [ ] SLEIGH/raw p-code:
 - [ ] Builder/materialize:
-- [ ] Normalize:
+- [x] Normalize:
 - [ ] Structuring:
 - [x] Type/data recovery:
-- [ ] Printer:
+- [x] Printer:
 - [ ] Benchmark/automation:
 
 Evidence:
@@ -108,22 +123,24 @@ Comparable coverage:
   - Command: focused `fission-pcode` nextest filter for pointer surface alias propagation.
   - Expected signal: direct-copy and pointer-offset aliases inherit the source
     pointer surface type; unsafe aliases remain unchanged.
-- [ ] Crate-level gate:
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
   - Expected signal: no new failures beyond the known unrelated baseline failures.
-- [ ] Focused benchmark row:
+- [x] Focused benchmark row:
   - Command: cache-disabled DecBench rerun for `bubble_sort` across the same nine
     dev rows.
-  - Expected row-level improvement: the motivating packed-SSE row emits compatible
-    pointer declarations and compiles/executes; report aggregate movement only if
-    the measured cases change.
+  - Result: `results/issue102_after_4cc254460.json`; the motivating `gcc -O2`
+    row is 5/5 and the emitted HIR keeps an `int *` cursor with byte-stride
+    arithmetic while retaining the packed 64-bit load/store.
 - [ ] Smoke or automation sample:
   - Command: bounded dev smoke through the local benchmark runner.
   - Expected no-regression signal: no new failure in the smoke sample.
-- [ ] Optional related checks:
+- [x] Optional related checks:
   - Command: `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`,
     and release CLI build.
-  - Expected signal: all pass.
+  - Result: formatting, diff check, workspace check, and `cargo build -p
+    fission-cli --release` pass; the full pcode nextest retains only the
+    three pre-existing #103 failures.
 - [ ] Boundary audit, if a new pass/helper/dependency was added:
   - Command: `python3 scripts/audit/nir_boundary_scan.py --root .`
   - Expected signal: no boundary violations.
@@ -147,8 +164,11 @@ Comparable coverage:
 - Ghidra guidance confirmed:
   - [x] No Ghidra output-style request was made.
 - Unseen or synthetic validation evidence:
-  - Patch validation pool command/result: pending implementation.
-  - Synthetic invariant test command/result: pending implementation.
+  - Patch validation pool command/result: not run; the focused DecBench matrix
+    is the measured motivating-row gate for this change.
+  - Synthetic invariant test command/result: targeted `fission-pcode` nextest
+    filters passed, including the signed lane, HIR preservation, and dual-layer
+    stitch regressions.
 
 ## 7. Review Notes
 
@@ -159,3 +179,27 @@ Comparable coverage:
   - [x] Confirmed
 - Any new metric/pass/helper does not duplicate an existing owner:
   - [x] Confirmed
+
+## 8. Final Owner Evidence
+
+The raw p-code still contains the explicit 32-bit `IntZExt` operations for
+each packed lane. The first semantic loss was in generic normalize cast
+canonicalization: `u64(u32(signed_lane))` was collapsed to
+`u64(signed_lane)`. The follow-up fix keeps a signedness-changing intermediate
+cast through both normalize cast-elimination paths. A second, independent
+surface bug was in dual-layer orchestration: `code_nir` was populated from the
+scored tree's HIR string, so HIR cast sugar could reintroduce the same loss
+after the NIR AST was correct. The stitch now keeps the scored NIR string, and
+HIR cast cleanup only removes a widening cast when the underlying source is
+known unsigned.
+
+The fixes are generic signedness and layer-contract rules. They contain no
+function, address, binary, architecture, or compiler-tuple guards.
+
+Regression coverage includes:
+
+- normalize idiom and wide-cast tests for preserving signedness-changing
+  intermediate casts;
+- scalar SSA packed-piece reassembly coverage;
+- dual-layer NIR stitching coverage;
+- HIR presentation coverage for signed-lane zero-extension.
