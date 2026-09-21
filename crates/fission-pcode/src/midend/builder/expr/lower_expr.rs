@@ -617,7 +617,18 @@ impl<'a> PreviewBuilder<'a> {
         // Loop body: LOAD/use of a loop-carried register must share the binding
         // that the loop's self-update (e.g. INT_ADD stride) will use — not a
         // frozen preheader snapshot vs a distinct bare hardware name.
-        if let Some(name) = self.loop_body_carried_register_read_name(vn) {
+        // A loop-carried name is only a fallback for a bare register read.
+        // If this use already has a same-block reaching definition, that local
+        // write is the semantic value even when a later update of the same
+        // physical register is carried around a nested loop. Without this
+        // precedence, a byte load into an ABI parameter register can be
+        // replaced by the entry parameter before its consumer is lowered.
+        let has_prior_local_def = self
+            .current_lowering_site
+            .is_some_and(|site| self.has_prior_local_def_for_varnode(vn, site));
+        if !has_prior_local_def
+            && let Some(name) = self.loop_body_carried_register_read_name(vn)
+        {
             let name = self.ensure_live_register_binding(&name, vn.size);
             return Ok(PreHirExpr::Var(name));
         }

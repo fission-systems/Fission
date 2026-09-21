@@ -1125,6 +1125,151 @@ fn movzx_al_index_after_byte_loads_truncates_before_ptr_add() {
     );
 }
 
+/// A same-block byte load may write an ABI parameter register before a later
+/// nested-loop update reuses that physical register as a counter. The local
+/// load definition must win for the consumer; the loop-carried name is only a
+/// fallback for a read with no closer reaching definition.
+#[test]
+fn local_register_write_precedes_loop_carried_read_fallback() {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+
+    let rdx = register(0x10, 8);
+    let edx = register(0x10, 4);
+    let carried_edx = Varnode {
+        space_id: REGISTER_SPACE_ID,
+        offset: 0x10,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rax = register(0x00, 8);
+    let base = register(0x30, 8);
+    let byte = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x900,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let entry_cond = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x910,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                // Establish that RDX is an entry-owned ABI slot without
+                // defining it before the loop's local byte load.
+                op(
+                    0,
+                    PcodeOpcode::IntEqual,
+                    Some(entry_cond.clone()),
+                    vec![carried_edx.clone(), constant_sized(0, 4)],
+                ),
+                op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::Load,
+                    Some(byte.clone()),
+                    vec![constant_sized(3, 4), base.clone()],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::IntZExt,
+                    Some(edx.clone()),
+                    vec![byte],
+                ),
+                op(
+                    4,
+                    PcodeOpcode::IntZExt,
+                    Some(rdx.clone()),
+                    vec![edx.clone()],
+                ),
+                // This is the consumer whose input must remain load-derived.
+                op(
+                    5,
+                    PcodeOpcode::IntXor,
+                    Some(rax),
+                    vec![register(0x00, 8), edx.clone()],
+                ),
+                // Keep the carried alias live so the synthetic loop proof
+                // selects the same register family as the real lift.
+                op(
+                    6,
+                    PcodeOpcode::Copy,
+                    Some(Varnode {
+                        space_id: UNIQUE_SPACE_ID,
+                        offset: 0x920,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }),
+                    vec![carried_edx.clone()],
+                ),
+                op(
+                    7,
+                    PcodeOpcode::Copy,
+                    Some(rdx.clone()),
+                    vec![constant(8)],
+                ),
+                op(8, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                // A later loop-carried update of the same physical register
+                // must not shadow the local definition above.
+                op(
+                    8,
+                    PcodeOpcode::IntSub,
+                    Some(carried_edx.clone()),
+                    vec![carried_edx.clone(), constant_sized(1, 4)],
+                ),
+                op(9, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![2];
+    blocks[2].successors = vec![1];
+    let pcode = pcode_function(blocks);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let lowered = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 1,
+                op_idx: 3,
+            },
+            |this| this.lower_varnode(&edx, &mut HashSet::default()),
+        )
+        .expect("lower local register definition");
+    let debug = format!("{lowered:?}");
+
+    assert!(
+        debug.contains("Load"),
+        "same-block register consumer must retain the loaded byte, got {debug}"
+    );
+    assert!(
+        !debug.contains("param_2") && !debug.contains("Var(\"edx\")"),
+        "loop-carried fallback must not replace the local load definition: {debug}"
+    );
+}
+
 #[test]
 fn join_register_update_read_stays_live_register_instead_of_abi_param() {
     let mut options = test_options();
