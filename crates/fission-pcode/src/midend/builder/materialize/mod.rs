@@ -1741,6 +1741,19 @@ impl<'a> PreviewBuilder<'a> {
             .inputs
             .iter()
             .any(|input| self.varnode_aliases_value(input, output));
+        // A plain same-block register rewrite is not a value join. In
+        // particular, call argument registers are consumed by the ABI even
+        // though the P-code CALL itself does not list those registers as
+        // inputs. Reusing the prior binding across such a rewrite aliases
+        // independent call carriers. The join proof is still valid for an
+        // explicit self-update and for a write inside the guarded body of a
+        // same-block cmov, where the two definitions represent one logical
+        // value.
+        if !current_definition_reads_prior_value
+            && !self.op_is_inside_same_block_forward_cmov_body(block, op_idx)
+        {
+            return None;
+        }
         if Self::output_has_consumed_interval_before_redefinition(block, op_idx, output)
             && !current_definition_reads_prior_value
         {

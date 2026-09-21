@@ -305,6 +305,28 @@ fn same_block_register_binding_keeps_exact_self_update_chain() {
 }
 
 #[test]
+fn same_block_register_binding_does_not_merge_independent_call_carriers() {
+    let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let first = op(1, PcodeOpcode::Copy, Some(rcx.clone()), vec![constant(1)]);
+    let call = op(2, PcodeOpcode::Call, None, vec![constant(0x2000)]);
+    let second = op(3, PcodeOpcode::Copy, Some(rcx.clone()), vec![constant(2)]);
+    let block = block(vec![first.clone(), call, second]);
+    let pcode = pcode_function(vec![block.clone()]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.materialized_vns.insert(
+        MaterializedVarnodeKey::new(&rcx, &block.ops[0]),
+        "first_carrier".to_string(),
+    );
+
+    assert_eq!(
+        builder.same_block_prior_register_binding_name(&block, 2, &rcx),
+        None,
+        "an ABI call consumes the prior carrier even though CALL has no register operands"
+    );
+}
+
+#[test]
 fn same_block_register_binding_never_skips_unmaterialized_definition() {
     let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
     let block = block(vec![
