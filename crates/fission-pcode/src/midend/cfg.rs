@@ -317,7 +317,7 @@ pub(super) fn block_terminator_op(block: &crate::pcode::PcodeBasicBlock) -> Opti
 /// internals as a forward `Branch`/`CBranch` followed by more p-code in the
 /// same block. Treating that branch as an inter-block terminator resolves its
 /// target back onto the current block and fabricates a CFG self-edge.
-fn is_instruction_local_forward_branch(
+pub(super) fn is_instruction_local_forward_branch(
     block: &crate::pcode::PcodeBasicBlock,
     op_idx: usize,
     op: &PcodeOp,

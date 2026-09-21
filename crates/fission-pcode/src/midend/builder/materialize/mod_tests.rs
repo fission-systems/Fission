@@ -3216,12 +3216,13 @@ fn sat_o2_cmov_block_probe_materialize() {
     };
     crate::midend::cspec::test_maps::apply_preview_cspec(&mut options);
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
-    // Raw CFG terminator remains the CBranch; materialize must still wrap the
-    // tail body so INT_MIN is not dropped or applied unconditionally.
+    // The instruction-local CBranch is not a block terminator; materialize
+    // must still wrap the tail body so INT_MIN is not dropped or applied
+    // unconditionally.
     assert_eq!(
         builder.block_terminator_index(&pcode.blocks[0]),
-        Some(7),
-        "raw terminator stays CBranch"
+        None,
+        "instruction-local CBranch must stay in the op stream"
     );
     let stmts = builder.lower_block_stmts(&pcode.blocks[0]).expect("lower");
     let dump = format!("{stmts:?}");

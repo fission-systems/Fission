@@ -80,18 +80,26 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    /// Return the canonical inter-block terminator for `block`.
+    ///
+    /// SLEIGH can encode a conditional move as a forward `Branch`/`CBranch`
+    /// followed by more p-code for the same machine instruction in the same
+    /// basic block. Those branches are consumed by `lower_block_ops_range` as
+    /// guarded intra-block skips; exposing one here would make structuring
+    /// manufacture a loop or conditional edge that is not present in the CFG.
     pub(in crate::midend::builder) fn block_terminator_index(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
     ) -> Option<usize> {
-        block.ops.iter().rposition(|op| {
-            matches!(
+        block.ops.iter().enumerate().rposition(|(idx, op)| {
+            let is_control = matches!(
                 op.opcode,
                 PcodeOpcode::Branch
                     | PcodeOpcode::CBranch
                     | PcodeOpcode::BranchInd
                     | PcodeOpcode::Return
-            )
+            );
+            is_control && !crate::midend::cfg::is_instruction_local_forward_branch(block, idx, op)
         })
     }
 
@@ -99,8 +107,10 @@ impl<'a> PreviewBuilder<'a> {
     ///
     /// Same-block-forward CBranch tails (cmov body after a branch to the next
     /// machine instruction / next BB start) stay in the op stream so
-    /// `lower_block_ops_range` can emit `if (!cond) { body }`. Other consumers
-    /// of [`Self::block_terminator_index`] keep the raw control-flow op.
+    /// `lower_block_ops_range` can emit `if (!cond) { body }`. The canonical
+    /// terminator lookup already excludes those instruction-local branches;
+    /// this helper additionally preserves the historical scan for a real
+    /// control-flow terminator when one follows a guarded tail.
     pub(super) fn materialize_block_terminator_index(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
