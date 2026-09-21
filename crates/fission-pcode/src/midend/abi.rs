@@ -483,6 +483,40 @@ pub fn infer_entry_register_param_arity(
     let mut visited_active_params: HashMap<u32, HashSet<usize>> = HashMap::default();
     let mut queue = VecDeque::new();
 
+    // Some instruction idioms mention the destination register as an input
+    // even though the result is independent of its incoming value. Counting
+    // such an input as entry-parameter evidence turns zeroing instructions
+    // like `xor r9d, r9d` into a phantom formal parameter. Keep this rule in
+    // the p-code semantic layer: register offsets and ABI slots still come
+    // from the register namer, while the operation determines whether the
+    // old value is actually consumed.
+    let input_is_overwritten_without_read = |op: &crate::pcode::PcodeOp, input: &Varnode| -> bool {
+        let Some(output) = op.output.as_ref() else {
+            return false;
+        };
+        let same_storage = |lhs: &Varnode, rhs: &Varnode| {
+            !lhs.is_constant
+                && !rhs.is_constant
+                && lhs.space_id == rhs.space_id
+                && lhs.offset == rhs.offset
+                && lhs.size == rhs.size
+        };
+        if !same_storage(output, input) {
+            return false;
+        }
+        match op.opcode {
+            PcodeOpcode::IntXor | PcodeOpcode::IntSub => op
+                .inputs
+                .get(1)
+                .is_some_and(|other| same_storage(input, other)),
+            PcodeOpcode::IntAnd | PcodeOpcode::IntMult => op
+                .inputs
+                .get(1)
+                .is_some_and(|other| other.is_constant && other.constant_val == 0),
+            _ => false,
+        }
+    };
+
     let initial_active: HashSet<usize> = (0..num_params).collect();
     visited_active_params.insert(entry.index, initial_active.clone());
     queue.push_back((entry.index, initial_active));
@@ -496,7 +530,10 @@ pub fn infer_entry_register_param_arity(
         for op in &block.ops {
             // 1. Check inputs first
             for input in &op.inputs {
-                if input.is_constant || !is_register_varnode(input) {
+                if input.is_constant
+                    || !is_register_varnode(input)
+                    || input_is_overwritten_without_read(op, input)
+                {
                     continue;
                 }
                 if let Some((_, Some(param_index))) =

@@ -60,6 +60,72 @@ fn win64_r9_is_param_4() {
 }
 
 #[test]
+fn win64_self_clearing_register_input_does_not_infer_tail_params() {
+    let r9d = reg(0x88, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntEqual,
+                    address: 0x1000,
+                    output: Some(uniq(0x100, 1)),
+                    inputs: vec![reg(0x08, 8), cst(0, 8)],
+                    asm_mnemonic: Some("test rcx, rcx".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntEqual,
+                    address: 0x1001,
+                    output: Some(uniq(0x101, 1)),
+                    inputs: vec![reg(0x10, 8), cst(0, 8)],
+                    asm_mnemonic: Some("test rdx, rdx".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntXor,
+                    address: 0x1002,
+                    output: Some(r9d.clone()),
+                    inputs: vec![r9d.clone(), r9d],
+                    asm_mnemonic: Some("xor r9d, r9d".to_string()),
+                },
+            ],
+        }],
+    };
+    let mut namer = register_namer_for_abi(CallingConvention::WindowsX64);
+    namer.int_param_offsets = int_params_for(CallingConvention::WindowsX64);
+
+    assert_eq!(infer_entry_register_param_arity(&func, &namer), Some(2));
+}
+
+#[test]
+fn win64_read_modify_write_register_input_still_infers_tail_param() {
+    let r9d = reg(0x88, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::IntAdd,
+                address: 0x1000,
+                output: Some(r9d.clone()),
+                inputs: vec![r9d, cst(1, 4)],
+                asm_mnemonic: Some("add r9d, 1".to_string()),
+            }],
+        }],
+    };
+    let mut namer = register_namer_for_abi(CallingConvention::WindowsX64);
+    namer.int_param_offsets = int_params_for(CallingConvention::WindowsX64);
+
+    assert_eq!(infer_entry_register_param_arity(&func, &namer), Some(4));
+}
+
+#[test]
 fn win64_subregister_aliases_map_to_param_slots() {
     let abi = abi_state_for(CallingConvention::WindowsX64, 0);
     assert_eq!(abi.param_slot_for_name("ecx"), Some(0));
