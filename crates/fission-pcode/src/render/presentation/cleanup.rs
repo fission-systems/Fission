@@ -120,7 +120,14 @@ fn simplify_casts_in_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirTyp
                     },
                 ) = (&*ty, inner_ty)
                 {
-                    if outer_bits >= inner_bits {
+                    // Removing both casts is safe only when the expression
+                    // underneath the inner cast is already unsigned.  A
+                    // signed 32-bit value needs the inner u32 conversion
+                    // before the outer u64 widening, otherwise a negative
+                    // lane is sign-extended to 64 bits.
+                    if outer_bits >= inner_bits
+                        && integer_expr_signedness(deeper, var_types) == Some(false)
+                    {
                         *inner = deeper.clone();
                     }
                 }
@@ -171,6 +178,29 @@ fn simplify_casts_in_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirTyp
         | HirExpr::AddressOfGlobal(_)
         | HirExpr::AddressOfLocal(_)
         | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn integer_expr_signedness(expr: &HirExpr, var_types: &HashMap<String, NirType>) -> Option<bool> {
+    let ty = match expr {
+        HirExpr::Var(name) => var_types.get(name.as_str()),
+        HirExpr::Const(_, ty)
+        | HirExpr::Cast { ty, .. }
+        | HirExpr::Unary { ty, .. }
+        | HirExpr::Binary { ty, .. }
+        | HirExpr::Call { ty, .. }
+        | HirExpr::Load { ty, .. }
+        | HirExpr::FieldAccess { ty, .. }
+        | HirExpr::Select { ty, .. } => Some(ty),
+        HirExpr::Index { elem_ty, .. } => Some(elem_ty),
+        HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::PtrOffset { .. }
+        | HirExpr::AggregateCopy { .. } => None,
+    }?;
+    match ty {
+        NirType::Int { signed, .. } => Some(*signed),
+        _ => None,
     }
 }
 

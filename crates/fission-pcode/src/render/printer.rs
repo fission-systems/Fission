@@ -1497,11 +1497,38 @@ fn try_elide_hir_cast(
         },
     ) = (ty, expr)
     {
-        if *outer_bits >= *inner_bits {
+        // Eliding both casts is safe only when the source is already
+        // unsigned.  For a signed source, `(u64)(u32)x` performs a required
+        // zero-extension at 32 bits; printing just `x` would sign-extend a
+        // negative lane when it is widened to 64 bits.
+        if *outer_bits >= *inner_bits && expr_integer_signedness(inner, ctx) == Some(false) {
             return Some(print_expr_prec_ctx(inner, parent_prec, depth + 1, ctx));
         }
     }
     None
+}
+
+fn expr_integer_signedness(expr: &HirExpr, ctx: &PrintCtx<'_>) -> Option<bool> {
+    let ty = match expr {
+        HirExpr::Var(name) => ctx.var_types.get(name.as_str()).copied(),
+        HirExpr::Const(_, ty)
+        | HirExpr::Cast { ty, .. }
+        | HirExpr::Unary { ty, .. }
+        | HirExpr::Binary { ty, .. }
+        | HirExpr::Call { ty, .. }
+        | HirExpr::Load { ty, .. }
+        | HirExpr::FieldAccess { ty, .. }
+        | HirExpr::Select { ty, .. } => Some(ty),
+        HirExpr::Index { elem_ty, .. } => Some(elem_ty),
+        HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::PtrOffset { .. }
+        | HirExpr::AggregateCopy { .. } => None,
+    }?;
+    match ty {
+        NirType::Int { signed, .. } => Some(*signed),
+        _ => None,
+    }
 }
 
 fn print_expr_with_ctx(expr: &HirExpr, ctx: &PrintCtx<'_>) -> String {

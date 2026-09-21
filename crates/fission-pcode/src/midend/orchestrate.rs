@@ -199,20 +199,27 @@ fn render_mlil_preview_dual_layer_output(
     };
     // Both surfaces are presented. The two modes differ in *structuring* --
     // which is the difference that exists -- not in whether they went
-    // through the presentation pass, which was never a readability/accuracy
-    // distinction: measured, presentation improves the score too, so making
-    // the accuracy layer skip it cost 27 GED distance for nothing.
-    //
-    // Under this flag NIR is therefore the *accuracy* surface rather than
-    // the mechanical one. The mechanical surface is what you get with the
-    // flag off, which is the default.
-    let layered = LayeredPseudocode {
-        nir: scored_layers.hir,
-        hir,
-    };
+    // through the presentation pass. NIR remains the scored tree's
+    // semantic-faithful print, while HIR comes from the jump-minimizing tree
+    // and is allowed to optimize for readability.
+    let layered = stitch_dual_layers(&scored_layers, hir);
     output.code = scored.code;
     output.layered = Some(layered.clone());
     Ok(output)
+}
+
+fn stitch_dual_layers(
+    scored_layers: &LayeredPseudocode,
+    readable_hir: String,
+) -> LayeredPseudocode {
+    // Keep the scored tree's actual NIR print here. The HIR print is a
+    // presentation surface and may elide casts or other syntax; placing it
+    // in `nir` silently changes the semantic oracle exposed through `code_nir`
+    // even though `scored.code` still came from NIR.
+    LayeredPseudocode {
+        nir: scored_layers.nir.clone(),
+        hir: readable_hir,
+    }
 }
 
 fn reborrow_decomp_facts<'borrow, 'facts>(
@@ -690,4 +697,22 @@ pub fn render_nir_with_binary_and_context_output(
         type_context,
         decomp_facts,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dual_layer_stitch_preserves_scored_nir_surface() {
+        let scored = LayeredPseudocode {
+            nir: "(unsigned long long)(uint)lane".into(),
+            hir: "lane".into(),
+        };
+
+        let layered = stitch_dual_layers(&scored, "readable lane".into());
+
+        assert_eq!(layered.nir, scored.nir);
+        assert_eq!(layered.hir, "readable lane");
+    }
 }

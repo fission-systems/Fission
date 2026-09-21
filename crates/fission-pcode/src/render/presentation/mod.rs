@@ -2653,6 +2653,38 @@ mod tests {
     }
 
     #[test]
+    fn hir_presentation_keeps_signed_lane_zero_extension() {
+        let signed_lane = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("lane".into())),
+            rhs: Box::new(HirExpr::Const(1, int_ty(32, true))),
+            ty: int_ty(32, true),
+        };
+        let mut func = HirFunction {
+            name: "packed_lane".into(),
+            params: vec![param("lane")],
+            return_type: int_ty(64, false),
+            body: vec![HirStmt::Return(Some(HirExpr::Cast {
+                ty: int_ty(64, false),
+                expr: Box::new(HirExpr::Cast {
+                    ty: int_ty(32, false),
+                    expr: Box::new(signed_lane),
+                }),
+            }))],
+            ..Default::default()
+        };
+
+        apply_hir_presentation(&mut func);
+        let code = render_layered_pseudocode(&func, &MlilPreviewOptions::default());
+
+        assert!(
+            code.hir.contains("(unsigned long long)(uint)(lane + 1)"),
+            "HIR must retain the signed-to-unsigned lane boundary:\n{}",
+            code.hir
+        );
+    }
+
+    #[test]
     fn hir_presentation_recovers_signum_goto_diamond() {
         let func = HirFunction {
             name: "signum".into(),
