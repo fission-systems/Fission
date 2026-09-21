@@ -27,6 +27,12 @@ motivating x86-64 packed-SSE row: both x86-32 rows still need separate pointer
 address recovery, and the Clang rows expose unrelated scalar/pointer recovery
 problems. They are not used to claim that every matrix variant is solved.
 
+The final cache-disabled run after `23e2095ee` is recorded in
+`results/issue102_after_23e2095ee.json`. It remains 27/45 (0.6000) with 5/9
+perfect rows; the motivating `gcc -O2` row remains 5/5 and `gcc -O3` remains
+5/5. The result is unchanged by the final normalize-order fix, which closes a
+synthetic wide-piece regression without changing the measured bubble-sort row.
+
 ## 2. Owner Proof
 
 - [ ] SLEIGH/raw p-code:
@@ -129,17 +135,20 @@ Comparable coverage:
 - [x] Focused benchmark row:
   - Command: cache-disabled DecBench rerun for `bubble_sort` across the same nine
     dev rows.
-  - Result: `results/issue102_after_4cc254460.json`; the motivating `gcc -O2`
+  - Result: `results/issue102_after_23e2095ee.json`; the motivating `gcc -O2`
     row is 5/5 and the emitted HIR keeps an `int *` cursor with byte-stride
-    arithmetic while retaining the packed 64-bit load/store.
+    arithmetic while retaining the packed 64-bit load/store. The aggregate is
+    27/45 with 5/9 perfect rows, unchanged from the immediately preceding
+    measured build.
 - [ ] Smoke or automation sample:
   - Command: bounded dev smoke through the local benchmark runner.
   - Expected no-regression signal: no new failure in the smoke sample.
 - [x] Optional related checks:
   - Command: `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`,
-    and release CLI build.
-  - Result: formatting, diff check, workspace check, and `cargo build -p
-    fission-cli --release` pass; the full pcode nextest retains only the
+    `cargo nextest run -p fission-emulator`, and release CLI build.
+  - Result: formatting, diff check, workspace check, emulator nextest (200
+    passed / 3 skipped), and `cargo build -p fission-cli --release` pass; the
+    full pcode nextest is 1077 passed / 3 failed / 1 skipped, with only the
     three pre-existing #103 failures.
 - [ ] Boundary audit, if a new pass/helper/dependency was added:
   - Command: `python3 scripts/audit/nir_boundary_scan.py --root .`
@@ -191,7 +200,9 @@ surface bug was in dual-layer orchestration: `code_nir` was populated from the
 scored tree's HIR string, so HIR cast sugar could reintroduce the same loss
 after the NIR AST was correct. The stitch now keeps the scored NIR string, and
 HIR cast cleanup only removes a widening cast when the underlying source is
-known unsigned.
+known unsigned. The final normalize fix restores conservative behavior for an
+unknown source signedness and recognizes wide integer piece recombination
+top-down, before child cast cleanup can erase the high/low piece boundaries.
 
 The fixes are generic signedness and layer-contract rules. They contain no
 function, address, binary, architecture, or compiler-tuple guards.
