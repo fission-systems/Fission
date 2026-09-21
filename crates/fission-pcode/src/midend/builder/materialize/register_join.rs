@@ -17,6 +17,43 @@ impl<'a> PreviewBuilder<'a> {
         Some(proof.binding_name)
     }
 
+    /// Reuse an entry-owned register parameter as the carrier for a guarded
+    /// same-block cmov write when the register has no earlier definition in the
+    /// block.
+    ///
+    /// A same-block-forward CBranch is not represented as a CFG join, so the
+    /// ordinary same-block register-join proof can only see prior *writes*.
+    /// For a conditional write to an incoming register, the prior value is the
+    /// ABI entry value instead. Keeping the parameter name makes both arms of
+    /// the conditional write the same sequential C carrier, and later reads of
+    /// the register therefore observe the selected value.
+    pub(super) fn same_block_cmov_entry_register_binding_name(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<String> {
+        if output.is_constant
+            || !is_register_space_id(output.space_id)
+            || !self.op_is_inside_same_block_forward_cmov_body(block, op_idx)
+        {
+            return None;
+        }
+        // If this register was already written in the block, its current value
+        // is not the entry parameter. A prior same-block materialization should
+        // have claimed that value; do not alias an unrelated rewrite to the
+        // formal parameter as a fallback.
+        if block.ops[..op_idx].iter().any(|prior_op| {
+            prior_op
+                .output
+                .as_ref()
+                .is_some_and(|prior_output| self.varnode_aliases_value(prior_output, output))
+        }) {
+            return None;
+        }
+        self.register_param(output)
+    }
+
     pub(super) fn primary_return_name_from_live_out_proof(
         &self,
         output: &Varnode,

@@ -1090,6 +1090,21 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
+        } else if let Some(name) = self
+            .same_block_cmov_entry_register_binding_name(block, op_idx, output)
+            .filter(|n| name_claim_is_safe(self, n))
+        {
+            // A guarded cmov write may be the first definition of an
+            // entry-owned register in this block. Keep the ABI parameter as
+            // the sequential carrier so the fall-through path retains the
+            // incoming value when the guarded write is skipped.
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
         } else if primary_return_live_out_name.is_some()
             && !Self::output_has_consumed_interval_before_redefinition(block, op_idx, output)
             // ARM/AArch64 r0/x0 are both param and return; forcing the HW name

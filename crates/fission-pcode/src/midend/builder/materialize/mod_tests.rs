@@ -3235,6 +3235,145 @@ fn sat_o2_cmov_block_probe_materialize() {
     );
 }
 
+/// A same-block-forward CBranch is the p-code shape of a conditional move.
+/// When it rewrites an entry register, the guarded write and later reads must
+/// share the entry register's stable carrier. Otherwise the post-cmov read
+/// refers to a binding that is only initialized on the guarded path.
+#[test]
+fn same_block_cmov_entry_register_keeps_selected_value_for_later_read() {
+    use crate::midend::PreviewBuilder;
+    use crate::midend::builder::materialize::test_support::test_options;
+    use crate::midend::support::RUST_SLEIGH_REGISTER_SPACE_ID;
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use fission_midend_prehir::{PreHirLValue, PreHirStmt};
+
+    let r8 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x80,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rcx = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x08,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let prior = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x100,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cond = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x108,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let selected = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x110,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cmov_target = Varnode {
+        space_id: 3,
+        offset: 0x1004,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let pcode = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: Vec::new(),
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(prior.clone()),
+                    inputs: vec![r8.clone()],
+                    asm_mnemonic: Some("cmp".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntLess,
+                    address: 0x1001,
+                    output: Some(cond.clone()),
+                    inputs: vec![prior, rcx.clone()],
+                    asm_mnemonic: Some("cmp".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1002,
+                    output: None,
+                    inputs: vec![cmov_target, cond],
+                    asm_mnemonic: Some("cmov".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1003,
+                    output: Some(r8.clone()),
+                    inputs: vec![rcx],
+                    asm_mnemonic: Some("cmov".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1004,
+                    output: Some(selected.clone()),
+                    inputs: vec![r8, Varnode::constant(1, 8)],
+                    asm_mnemonic: Some("use-selected".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1005,
+                    output: None,
+                    inputs: vec![Varnode::constant(0, 8), selected],
+                    asm_mnemonic: Some("ret".to_string()),
+                },
+            ],
+        }],
+    };
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let stmts = builder
+        .lower_block_stmts(&pcode.blocks[0])
+        .expect("lower conditional register carrier");
+    let dump = format!("{stmts:?}");
+
+    let guarded_lhs = stmts.iter().find_map(|stmt| match stmt {
+        PreHirStmt::If { then_body, .. } => then_body.iter().find_map(|inner| match inner {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } => Some(name.clone()),
+            _ => None,
+        }),
+        _ => None,
+    });
+    assert_eq!(
+        guarded_lhs.as_deref(),
+        Some("param_3"),
+        "guarded entry-register write must update its stable carrier: {dump}"
+    );
+    assert!(
+        dump.contains("Var(\"param_3\")"),
+        "post-cmov read must consume the selected carrier: {dump}"
+    );
+}
+
 /// saturating_add shape: primary return reg gets a+b; must keep the binding even
 /// when the only same-block p-code consumer can inline the add into a compare.
 #[test]
