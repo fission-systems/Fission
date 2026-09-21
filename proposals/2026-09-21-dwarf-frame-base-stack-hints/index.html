@@ -1233,6 +1233,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1254,7 +1265,7 @@
 
 
 <h1 id="proposal-normalize-dwarf-cfa-stack-hints-before-hir-naming">Proposal: Normalize DWARF CFA stack hints before HIR naming<a class="headerlink" href="#proposal-normalize-dwarf-cfa-stack-hints-before-hir-naming" title="Permanent link">&para;</a></h1>
-<p>Status: investigation complete; implementation pending measured validation</p>
+<p>Status: implemented; focused real-binary validation complete</p>
 <p>Issue: GitHub #118 (<code>memory_layouts_gcc_O2.exe</code>, <code>main</code>, <code>0x140002830</code>)</p>
 <h2 id="observed-baseline">Observed baseline<a class="headerlink" href="#observed-baseline" title="Permanent link">&para;</a></h2>
 <p>The real <code>memory_layouts.c</code> row declares <code>a</code>, <code>b</code>, and <code>c</code> at DWARF
@@ -1291,8 +1302,25 @@ rather than being guessed.</p>
    semantic smoke path.</li>
 </ol>
 <p>Success requires the real row to recover <code>a</code>, <code>b</code>, and <code>c</code> on their actual
-   slots without regressing existing x86/x64 debug-hint tests.  Synthetic
+slots without regressing existing x86/x64 debug-hint tests.  Synthetic
 tests alone will be reported only as mechanical coverage.</p>
+<h2 id="result">Result<a class="headerlink" href="#result" title="Permanent link">&para;</a></h2>
+<p>The release CLI now reports the actual slots as <code>a=-0x30</code>, <code>b=-0x20</code>, and
+<code>c=-0x10</code>, and renders the call as <code>matrix_multiply(xVar6, xVar5, xVar8,
+2)</code> with <code>xVar6=&amp;a</code>, <code>xVar5=&amp;b</code>, and <code>xVar8=&amp;c</code>.  Before the fix, the same
+final hint stage assigned <code>b</code>, <code>c</code>, and <code>local_80</code> to those three slots and
+rendered the call through the shifted identities.</p>
+<p>The focused CFA-coordinate regression and existing function-hint tests pass.
+The affected loader, decompiler, and static crates pass 296/296 nextest
+tests; workspace <code>cargo check</code>, formatting, diff checks, and the release CLI
+build pass.  The full <code>fission-pcode</code> suite has two unrelated pre-existing
+<code>movzx</code> assertion failures (<code>movzx_after_byte_add_zero_extends_unsigned</code> and
+<code>x64_byte_add_movzx_does_not_double_add_load</code>), with the remaining 1,054 tests
+passing.</p>
+<p>The external Docker benchmark could not be run on this host because no Docker
+daemon is available.  The release CLI row measurement above is therefore
+focused local evidence, not an official DecBench or external benchmark
+ranking claim.</p>
 
 
 
