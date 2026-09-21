@@ -4084,6 +4084,21 @@ fn guarded_cmov_return_write_does_not_claim_successor_merge() {
         name, None,
         "a conditional definition must not claim an unconditional join carrier"
     );
+
+    // The same proof must reject an unconditional-looking definition from a
+    // different predecessor when another incoming edge ends in a guarded
+    // CMOV write. Otherwise that other predecessor creates the shared binding
+    // and the return join consumes the CMOV RHS as if it were unconditional.
+    let name = builder.merge_binding_name_for_direct_successor_accumulator(
+        &pcode.blocks[3],
+        0,
+        &rax,
+        &PreHirExpr::Const(3, int(64)),
+    );
+    assert_eq!(
+        name, None,
+        "a guarded definition on any incoming edge must reject the shared join carrier"
+    );
 }
 
 /// Merge bindings are keyed by `(block, varnode)`, but the value they stand

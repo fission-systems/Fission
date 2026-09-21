@@ -136,6 +136,22 @@ impl<'a> PreviewBuilder<'a> {
                 );
                 return None;
             }
+            // A predecessor's last storage write may itself be the guarded
+            // body of an instruction-local CMOV.  Although the opcode is a
+            // safe scalar Copy, it is not the value that unconditionally
+            // reaches the successor: the fall-through arm retains the
+            // register value from before the guarded write.  Treating this
+            // predecessor as a normal incoming edge would make another
+            // predecessor synthesize a shared join binding from the wrong
+            // value and leave the join carrier undefined on the skipped arm.
+            if self.op_is_inside_same_block_forward_cmov_body(pred_block, def_idx) {
+                self.trace_direct_successor_accumulator_merge_rejected(
+                    block.start_address,
+                    output,
+                    "conditional_pred_definition",
+                );
+                return None;
+            }
             if Self::has_side_effect_between_ops(pred_block, def_idx + 1, pred_block.ops.len()) {
                 self.trace_direct_successor_accumulator_merge_rejected(
                     block.start_address,

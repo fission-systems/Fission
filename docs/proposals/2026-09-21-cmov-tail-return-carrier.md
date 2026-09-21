@@ -58,10 +58,14 @@ entry. A definition strictly inside an instruction-local forward-CBranch body
 does not satisfy that condition and must be left to the CMOV/register-carrier
 materialization rules.
 
-Add this proof guard to the canonical direct-successor accumulator owner:
+Add this proof guard to the canonical direct-successor accumulator owner. The
+proof must apply it both to the definition currently being considered and to
+the selected last definition on every other incoming predecessor; one guarded
+incoming edge is enough to invalidate the unconditional merge candidate:
 
 ```text
-if definition is inside an instruction-local forward-CBranch body:
+if any selected incoming definition is inside an instruction-local
+forward-CBranch body:
     decline unconditional successor merge
 ```
 
