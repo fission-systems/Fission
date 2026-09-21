@@ -5,3 +5,4 @@ pub(super) use super::*;
 mod call;
 mod call_target;
 mod lower_expr;
+mod register_alias;
