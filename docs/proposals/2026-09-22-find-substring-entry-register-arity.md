@@ -91,7 +91,7 @@ Comparable coverage:
   - [ ] Memory alias / stack-slot fact
   - [x] P-code semantic contract
   - [ ] None; owner-local rule is justified
-- Why extending that owner is sufficient: correcting entry arity removes the false formal slots before loop materialization. Existing loop-carried proof can then bind R8/R9 to their real definitions rather than ABI entry names; no normalize or printer cleanup is needed.
+- Why extending that owner is sufficient: correcting entry arity removes the false formal slots before loop materialization. The same materialize owner must also preserve the existing scalar-SSA phi-latch proof when a backward lowering order reaches the latch before its preheader definition has been materialized. That proof may reserve the canonical temp binding for an ABI slot outside the proven entry arity and reuse it when the preheader definition and later merge are materialized; proven formal slots remain excluded. No normalize or printer cleanup is needed.
 - Possible interaction with existing normalize/structuring/materialize passes: functions that currently rely on a register's self-zero input being counted as a parameter should lose only an unsupported formal slot; genuine read-before-write and read-modify-write cases must remain parameter evidence.
 - New or changed owner-to-owner dependency:
   - [x] None
@@ -118,6 +118,25 @@ Comparable coverage:
 - [ ] Boundary audit, if a new pass/helper/dependency was added:
   - Command: not applicable; no new pass or dependency.
   - Expected signal: no boundary change.
+
+## 8. Follow-up Owner Proof: Preheader Binding Reservation
+
+The arity correction is necessary but not sufficient for this row. The
+existing loop-head phi-latch proof already identifies the exact scalar-SSA
+phi whose latch value is read at the loop head. On the real row, the proof
+reaches the correct R8 and R9 phis but rejects them because the entry
+definitions were not yet visited in the materialization order. The general
+repair is to reserve the same canonical temporary binding that the ordinary
+materializer will use for an entry definition when its ABI slot is not within
+the proven entry arity, and let later merge binding selection reuse that
+reservation. It does not infer a parameter, inspect an address, or rename a
+binary-specific register.
+
+Required regression shape: entry definition -> loop-head phi -> latch
+reload/update -> loop-head read.
+
+The focused test must fail when the latch gets a fresh hardware binding and
+pass when both the preheader seed and latch use the one phi-carried binding.
 
 ## 6. AI Review / Prompt Firewall
 
