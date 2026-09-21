@@ -526,19 +526,36 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(output) = def_op.output.as_ref()
             && VarnodeKey::from(output) == key
             && is_register_varnode(output)
-            && !self.register_namer().is_primary_return_register(output)
-            && !self
+        {
+            if !self
                 .materialized_vns
                 .contains_key(&MaterializedVarnodeKey::new(output, def_op))
-            && matches!(
-                def_op.opcode,
-                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
-            )
-            && def_op.inputs.first().is_some_and(is_register_varnode)
-        {
-            let def_op = def_op.clone();
-            let binding = self.ensure_temp_binding_for_output(&def_op, output, true);
-            return Ok(PreHirExpr::Var(binding.name));
+                && let Some(name) = self.same_block_cmov_entry_register_binding_name_at(
+                    def_site.block_idx,
+                    def_site.op_idx,
+                    output,
+                )
+            {
+                self.ensure_live_register_binding(&name, output.size);
+                return Ok(PreHirExpr::Var(name));
+            }
+            if !self.register_namer().is_primary_return_register(output)
+                && !self
+                    .materialized_vns
+                    .contains_key(&MaterializedVarnodeKey::new(output, def_op))
+                && matches!(
+                    def_op.opcode,
+                    PcodeOpcode::Copy
+                        | PcodeOpcode::Cast
+                        | PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                )
+                && def_op.inputs.first().is_some_and(is_register_varnode)
+            {
+                let def_op = def_op.clone();
+                let binding = self.ensure_temp_binding_for_output(&def_op, output, true);
+                return Ok(PreHirExpr::Var(binding.name));
+            }
         }
         if let Some(expr) = self.try_lower_scalar_ssa_piece_reassembly(vn, &key, visiting)? {
             return Ok(expr);

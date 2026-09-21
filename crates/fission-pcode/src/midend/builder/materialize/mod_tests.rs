@@ -3374,6 +3374,165 @@ fn same_block_cmov_entry_register_keeps_selected_value_for_later_read() {
     );
 }
 
+/// A successor can be lowered before the block containing a same-block cmov.
+/// The successor's register read must still refer to the cmov's entry-owned
+/// carrier; re-expanding the cmov RHS would select the source register's ABI
+/// parameter instead.
+#[test]
+fn successor_read_reuses_same_block_cmov_entry_register_carrier() {
+    use crate::midend::PreviewBuilder;
+    use crate::midend::builder::materialize::test_support::test_options;
+    use crate::midend::support::{PreHirBinaryOp, RUST_SLEIGH_REGISTER_SPACE_ID};
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use fission_midend_prehir::PreHirExpr;
+
+    let r8 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x80,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rdx = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x10,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rcx = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x08,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let selected = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x100,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cond = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x108,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cmov_target = Varnode {
+        space_id: 3,
+        offset: 0x1004,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let sum = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x110,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let entry = PcodeBasicBlock {
+        index: 0,
+        start_address: 0x1000,
+        successors: vec![1],
+        ops: vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(selected.clone()),
+                inputs: vec![rdx.clone()],
+                asm_mnemonic: Some("cmp".to_string()),
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::IntLess,
+                address: 0x1001,
+                output: Some(cond.clone()),
+                inputs: vec![selected.clone(), r8.clone()],
+                asm_mnemonic: Some("cmp".to_string()),
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::CBranch,
+                address: 0x1002,
+                output: None,
+                inputs: vec![cmov_target, cond],
+                asm_mnemonic: Some("cmov".to_string()),
+            },
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1003,
+                output: Some(r8.clone()),
+                inputs: vec![selected],
+                asm_mnemonic: Some("cmov".to_string()),
+            },
+            PcodeOp {
+                seq_num: 4,
+                opcode: PcodeOpcode::Branch,
+                address: 0x1004,
+                output: None,
+                inputs: vec![Varnode::constant(0x2000, 8)],
+                asm_mnemonic: Some("jmp".to_string()),
+            },
+        ],
+    };
+    let successor = PcodeBasicBlock {
+        index: 1,
+        start_address: 0x2000,
+        successors: Vec::new(),
+        ops: vec![PcodeOp {
+            seq_num: 5,
+            opcode: PcodeOpcode::IntAdd,
+            address: 0x2000,
+            output: Some(sum),
+            inputs: vec![r8, rcx],
+            asm_mnemonic: Some("add".to_string()),
+        }],
+    };
+    let pcode = PcodeFunction {
+        blocks: vec![entry, successor.clone()],
+    };
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    // Match the real materializer ordering: lower the successor use before
+    // visiting the predecessor's cmov definition.
+    let rhs = builder
+        .with_lowering_site(
+            crate::midend::builder::LoweringSite {
+                block_idx: 1,
+                op_idx: 0,
+            },
+            |builder| {
+                builder
+                    .try_lower_materialized_output_rhs(successor.start_address, &successor.ops[0])
+            },
+        )
+        .expect("lower successor arithmetic use")
+        .expect("successor arithmetic should have a RHS");
+
+    assert!(
+        matches!(
+            rhs,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                ref lhs,
+                ref rhs,
+                ..
+            } if **lhs == PreHirExpr::Var("param_3".to_string())
+                && **rhs == PreHirExpr::Var("param_1".to_string())
+        ),
+        "successor read must reuse the cmov entry carrier, not re-expand its RDX source: {rhs:?}"
+    );
+}
+
 /// saturating_add shape: primary return reg gets a+b; must keep the binding even
 /// when the only same-block p-code consumer can inline the add into a compare.
 #[test]

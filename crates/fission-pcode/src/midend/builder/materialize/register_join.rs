@@ -33,9 +33,32 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> Option<String> {
+        self.same_block_cmov_entry_register_binding_name_at(
+            self.lowering_block_index(block),
+            op_idx,
+            output,
+        )
+    }
+
+    /// The def-site form of [`Self::same_block_cmov_entry_register_binding_name`].
+    ///
+    /// Cross-block lowering can reach a definition before its block is being
+    /// materialized, so callers there have a block index rather than a borrowed
+    /// block. Keeping the proof here makes both paths use the same cmov and
+    /// entry-register conditions.
+    pub(in crate::midend::builder) fn same_block_cmov_entry_register_binding_name_at(
+        &mut self,
+        block_idx: usize,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<String> {
         if output.is_constant
             || !is_register_space_id(output.space_id)
-            || !self.op_is_inside_same_block_forward_cmov_body(block, op_idx)
+            || !self
+                .pcode
+                .blocks
+                .get(block_idx)
+                .is_some_and(|block| self.op_is_inside_same_block_forward_cmov_body(block, op_idx))
         {
             return None;
         }
@@ -43,12 +66,15 @@ impl<'a> PreviewBuilder<'a> {
         // is not the entry parameter. A prior same-block materialization should
         // have claimed that value; do not alias an unrelated rewrite to the
         // formal parameter as a fallback.
-        if block.ops[..op_idx].iter().any(|prior_op| {
-            prior_op
-                .output
-                .as_ref()
-                .is_some_and(|prior_output| self.varnode_aliases_value(prior_output, output))
-        }) {
+        if self.pcode.blocks[block_idx].ops[..op_idx]
+            .iter()
+            .any(|prior_op| {
+                prior_op
+                    .output
+                    .as_ref()
+                    .is_some_and(|prior_output| self.varnode_aliases_value(prior_output, output))
+            })
+        {
             return None;
         }
         self.register_param(output)
