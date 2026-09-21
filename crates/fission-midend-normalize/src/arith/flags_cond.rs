@@ -13,6 +13,73 @@ pub fn normalize_boolean_logic(expr: &PreHirExpr) -> Option<PreHirExpr> {
         .or_else(|| normalize_boolean_logic_core(expr))
 }
 
+/// Preserve the bit-vector interpretation of a signed-looking expression
+/// when it is consumed by an unsigned integer comparison.
+///
+/// `IntSub` and the other generic integer arithmetic p-code operations do not
+/// carry signedness in their opcode. The builder therefore may materialize a
+/// signed expression such as `Cast(i32, code - 1)` even though `IntLess`
+/// consumes that value as a 32-bit unsigned operand. This boundary is easy to
+/// lose when temporary variables are inlined: an atomic variable can rely on
+/// its inferred type, but a compound signed expression must retain an
+/// explicit unsigned reinterpretation for C's usual arithmetic conversions.
+pub fn canonicalize_unsigned_compare_operands(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: op @ (PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge),
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    let bits = unsigned_compare_width(lhs, rhs)?;
+    let new_lhs = unsigned_compare_operand(lhs, bits);
+    let new_rhs = unsigned_compare_operand(rhs, bits);
+    if new_lhs == **lhs && new_rhs == **rhs {
+        return None;
+    }
+    Some(PreHirExpr::Binary {
+        op: *op,
+        lhs: Box::new(new_lhs),
+        rhs: Box::new(new_rhs),
+        ty: ty.clone(),
+    })
+}
+
+fn unsigned_compare_width(lhs: &PreHirExpr, rhs: &PreHirExpr) -> Option<u32> {
+    let lhs_ty = expr_type(lhs);
+    let rhs_ty = expr_type(rhs);
+    for ty in [&lhs_ty, &rhs_ty] {
+        if !matches!(ty, NirType::Unknown | NirType::Bool | NirType::Int { .. }) {
+            return None;
+        }
+    }
+    Some(
+        int_type_bits(&lhs_ty)
+            .into_iter()
+            .chain(int_type_bits(&rhs_ty))
+            .max()?
+            .max(1),
+    )
+}
+
+fn unsigned_compare_operand(expr: &PreHirExpr, bits: u32) -> PreHirExpr {
+    let NirType::Int { signed: true, .. } = expr_type(expr) else {
+        return expr.clone();
+    };
+    if matches!(expr, PreHirExpr::Const(value, _) if *value >= 0) {
+        return expr.clone();
+    }
+    PreHirExpr::Cast {
+        ty: NirType::Int {
+            bits,
+            signed: false,
+        },
+        expr: Box::new(expr.clone()),
+    }
+}
+
 /// `(x == 0 || x < 0)` / either order → `x <= 0` (signed compares only).
 /// Measured on power-class loops that test `exp > 0` as `!(exp == 0 || exp < 0)`.
 fn fold_signed_zero_or_negative(expr: &PreHirExpr) -> Option<PreHirExpr> {
@@ -618,6 +685,51 @@ pub fn canonicalize_arm_compound_flag_condition(expr: &PreHirExpr) -> Option<Pre
     }
 
     None
+}
+
+#[cfg(test)]
+mod unsigned_compare_tests {
+    use super::*;
+
+    fn int(bits: u32, signed: bool) -> NirType {
+        NirType::Int { bits, signed }
+    }
+
+    #[test]
+    fn wraps_signed_compound_operand_at_unsigned_compare_boundary() {
+        let difference = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
+            lhs: Box::new(PreHirExpr::Var("code".to_string())),
+            rhs: Box::new(PreHirExpr::Const(1, int(32, false))),
+            ty: int(32, true),
+        };
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(difference.clone()),
+            rhs: Box::new(PreHirExpr::Const(98, int(32, false))),
+            ty: NirType::Bool,
+        };
+
+        let canonical = canonicalize_unsigned_compare_operands(&expr).expect("changed");
+        assert!(matches!(
+            canonical,
+            PreHirExpr::Binary { lhs, .. }
+                if matches!(lhs.as_ref(), PreHirExpr::Cast { ty, expr }
+                    if *ty == int(32, false) && expr.as_ref() == &difference)
+        ));
+    }
+
+    #[test]
+    fn leaves_untyped_atomic_operand_without_inventing_a_cast() {
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(PreHirExpr::Var("value".to_string())),
+            rhs: Box::new(PreHirExpr::Const(98, int(32, false))),
+            ty: NirType::Bool,
+        };
+
+        assert!(canonicalize_unsigned_compare_operands(&expr).is_none());
+    }
 }
 
 fn match_ne_comparison<'a>(expr: &'a PreHirExpr) -> Option<(&'a PreHirExpr, &'a PreHirExpr)> {

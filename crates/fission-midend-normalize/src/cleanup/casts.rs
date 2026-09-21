@@ -105,42 +105,30 @@ fn strip_redundant_casts_in_expr(
     expr: &mut PreHirExpr,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
-    strip_redundant_casts_in_expr_with_context(expr, type_map, false)
-}
-
-fn strip_redundant_casts_in_expr_with_context(
-    expr: &mut PreHirExpr,
-    type_map: &HashMap<String, NirType>,
-    is_unsigned_compare_operand: bool,
-) -> bool {
     let mut changed = false;
     match expr {
         PreHirExpr::Cast { expr: inner, .. } => {
-            changed |= strip_redundant_casts_in_expr_with_context(inner, type_map, false);
+            changed |= strip_redundant_casts_in_expr(inner, type_map);
         }
         PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. }
         | PreHirExpr::FieldAccess { base: inner, .. } => {
-            changed |= strip_redundant_casts_in_expr_with_context(inner, type_map, false);
+            changed |= strip_redundant_casts_in_expr(inner, type_map);
         }
-        PreHirExpr::Binary { op, lhs, rhs, .. } => {
-            let preserve_operands = matches!(
-                op,
-                PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge
-            );
-            changed |= strip_redundant_casts_in_expr_with_context(lhs, type_map, preserve_operands);
-            changed |= strip_redundant_casts_in_expr_with_context(rhs, type_map, preserve_operands);
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            changed |= strip_redundant_casts_in_expr(lhs, type_map);
+            changed |= strip_redundant_casts_in_expr(rhs, type_map);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                changed |= strip_redundant_casts_in_expr_with_context(arg, type_map, false);
+                changed |= strip_redundant_casts_in_expr(arg, type_map);
             }
         }
         PreHirExpr::Index { base, index, .. } => {
-            changed |= strip_redundant_casts_in_expr_with_context(base, type_map, false);
-            changed |= strip_redundant_casts_in_expr_with_context(index, type_map, false);
+            changed |= strip_redundant_casts_in_expr(base, type_map);
+            changed |= strip_redundant_casts_in_expr(index, type_map);
         }
         PreHirExpr::Select {
             cond,
@@ -148,9 +136,9 @@ fn strip_redundant_casts_in_expr_with_context(
             else_expr,
             ..
         } => {
-            changed |= strip_redundant_casts_in_expr_with_context(cond, type_map, false);
-            changed |= strip_redundant_casts_in_expr_with_context(then_expr, type_map, false);
-            changed |= strip_redundant_casts_in_expr_with_context(else_expr, type_map, false);
+            changed |= strip_redundant_casts_in_expr(cond, type_map);
+            changed |= strip_redundant_casts_in_expr(then_expr, type_map);
+            changed |= strip_redundant_casts_in_expr(else_expr, type_map);
         }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -160,9 +148,7 @@ fn strip_redundant_casts_in_expr_with_context(
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         if let PreHirExpr::Var(name) = inner.as_ref() {
             if let Some(var_ty) = type_map.get(name) {
-                let is_unsigned_compare_boundary =
-                    is_unsigned_compare_operand && matches!(ty, NirType::Int { signed: false, .. });
-                if var_ty == ty && !is_unsigned_compare_boundary {
+                if var_ty == ty {
                     *expr = (**inner).clone();
                     changed = true;
                 }
@@ -603,51 +589,5 @@ pub fn normalize_pointer_and_struct_casts(expr: &PreHirExpr) -> Option<PreHirExp
         } => Some((**base).clone()),
         PreHirExpr::PtrOffset { base, offset: 0 } => Some((**base).clone()),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn int(bits: u32, signed: bool) -> NirType {
-        NirType::Int { bits, signed }
-    }
-
-    #[test]
-    fn keeps_unsigned_cast_at_unsigned_compare_boundary() {
-        let mut type_map = HashMap::default();
-        type_map.insert("value".to_string(), int(32, false));
-        let mut expr = PreHirExpr::Binary {
-            op: PreHirBinaryOp::Lt,
-            lhs: Box::new(PreHirExpr::Cast {
-                ty: int(32, false),
-                expr: Box::new(PreHirExpr::Var("value".to_string())),
-            }),
-            rhs: Box::new(PreHirExpr::Const(98, int(32, false))),
-            ty: NirType::Bool,
-        };
-
-        assert!(!strip_redundant_casts_in_expr(&mut expr, &type_map));
-        assert!(matches!(
-            expr,
-            PreHirExpr::Binary {
-                lhs,
-                ..
-            } if matches!(lhs.as_ref(), PreHirExpr::Cast { ty, .. } if *ty == int(32, false))
-        ));
-    }
-
-    #[test]
-    fn strips_same_type_cast_outside_unsigned_compare() {
-        let mut type_map = HashMap::default();
-        type_map.insert("value".to_string(), int(32, false));
-        let mut expr = PreHirExpr::Cast {
-            ty: int(32, false),
-            expr: Box::new(PreHirExpr::Var("value".to_string())),
-        };
-
-        assert!(strip_redundant_casts_in_expr(&mut expr, &type_map));
-        assert!(matches!(expr, PreHirExpr::Var(name) if name == "value"));
     }
 }

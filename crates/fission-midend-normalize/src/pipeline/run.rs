@@ -8,12 +8,12 @@ use super::super::arith::{
     apply_conditional_move_pass, apply_double_precision_reconstruction_pass, apply_float_sign_pass,
     apply_ignore_nan_pass, apply_or_compare_pass, apply_subfloat_flow_pass,
     apply_three_way_compare_pass, canonicalize_condition_expr, canonicalize_flag_intrinsics,
-    canonicalize_integer_expr, canonicalize_sub_xor_zero_compare, cleanup_arithmetic_wrappers,
-    collapse_zero_offset_cast, merge_consecutive_shifts, normalize_boolean_logic,
-    recognize_compiler_runtime_division, recognize_concat_zext_or, recognize_dumpty_hump_cast,
-    recognize_dumpty_hump_late, recognize_hi_lo_extract, recognize_humpty_dumpty_or,
-    recognize_magic_number_division, recognize_mod_div_power_of_two,
-    recognize_wide_integer_recombine, simplify_collect_mul_terms,
+    canonicalize_integer_expr, canonicalize_sub_xor_zero_compare,
+    canonicalize_unsigned_compare_operands, cleanup_arithmetic_wrappers, collapse_zero_offset_cast,
+    merge_consecutive_shifts, normalize_boolean_logic, recognize_compiler_runtime_division,
+    recognize_concat_zext_or, recognize_dumpty_hump_cast, recognize_dumpty_hump_late,
+    recognize_hi_lo_extract, recognize_humpty_dumpty_or, recognize_magic_number_division,
+    recognize_mod_div_power_of_two, recognize_wide_integer_recombine, simplify_collect_mul_terms,
     simplify_distribute_common_factor, simplify_double_add, simplify_factor_common_mul,
     simplify_negated_const, simplify_nested_adds_subs, simplify_subpiece_chain,
 };
@@ -2113,7 +2113,8 @@ pub fn normalize_expr(expr: &mut PreHirExpr) {
     }
 
     loop {
-        let next = canonicalize_integer_expr(expr)
+        let next = canonicalize_unsigned_compare_operands(expr)
+            .or_else(|| canonicalize_integer_expr(expr))
             .or_else(|| recognize_dumpty_hump_cast(expr))
             .or_else(|| recognize_humpty_dumpty_or(expr))
             .or_else(|| recognize_concat_zext_or(expr))

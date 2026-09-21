@@ -557,15 +557,6 @@ impl<'a> PreviewBuilder<'a> {
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
         self.note_operand_metatypes(op.opcode, &[&lhs, &rhs]);
-        let (lhs, rhs) = if matches!(op.opcode, PcodeOpcode::IntLess | PcodeOpcode::IntLessEqual) {
-            let bits = op.inputs[0].size.saturating_mul(8);
-            (
-                self.coerce_unsigned_compare_operand(lhs, bits),
-                self.coerce_unsigned_compare_operand(rhs, bits),
-            )
-        } else {
-            (lhs, rhs)
-        };
         let output = op
             .output
             .as_ref()
@@ -589,63 +580,6 @@ impl<'a> PreviewBuilder<'a> {
             rhs: Box::new(rhs),
             ty,
         })
-    }
-
-    /// Make the bit-vector interpretation of an unsigned integer comparison
-    /// explicit at the C expression boundary. Generic p-code arithmetic has
-    /// no signed variant for `IntSub`, so its expression type can be signed
-    /// even when the same bit pattern is consumed by `IntLess`. Without this
-    /// cast, C's usual arithmetic conversions turn a machine unsigned range
-    /// check into a signed comparison for negative values.
-    pub(in crate::midend) fn coerce_unsigned_compare_operand(
-        &self,
-        expr: PreHirExpr,
-        bits: u32,
-    ) -> PreHirExpr {
-        let target = NirType::Int {
-            bits: bits.max(1),
-            signed: false,
-        };
-        let before_type = expr_type(&expr);
-        let force_bit_pattern_cast = matches!(
-            &before_type,
-            NirType::Int {
-                bits: source_bits,
-                signed: false,
-            } if *source_bits == bits
-                && !matches!(
-                    expr,
-                    PreHirExpr::Var(_)
-                        | PreHirExpr::Const(_, _)
-                        | PreHirExpr::AddressOfGlobal(_)
-                        | PreHirExpr::AddressOfLocal(_)
-                )
-        );
-        let expr = if force_bit_pattern_cast {
-            PreHirExpr::Cast {
-                ty: NirType::Int {
-                    bits: bits.max(1),
-                    signed: true,
-                },
-                expr: Box::new(expr),
-            }
-        } else {
-            expr
-        };
-        let needs_unsigned_cast = force_bit_pattern_cast
-            || matches!(
-                &before_type,
-                NirType::Int { signed: true, .. } | NirType::Unknown
-            );
-        let result = if needs_unsigned_cast {
-            PreHirExpr::Cast {
-                ty: target,
-                expr: Box::new(expr),
-            }
-        } else {
-            expr
-        };
-        result
     }
 
     /// CDQ-class dividend low half for signed rem/div.

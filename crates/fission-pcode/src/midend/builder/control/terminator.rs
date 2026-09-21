@@ -2613,19 +2613,19 @@ impl<'a> PreviewBuilder<'a> {
                 bool_binary(PreHirBinaryOp::Ne, lhs, rhs)
             }
             X86BranchPredicate::ULt(operands) => {
-                let (lhs, rhs) = self.lower_unsigned_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Lt, lhs, rhs)
             }
             X86BranchPredicate::ULe(operands) => {
-                let (lhs, rhs) = self.lower_unsigned_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Le, lhs, rhs)
             }
             X86BranchPredicate::UGt(operands) => {
-                let (lhs, rhs) = self.lower_unsigned_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Lt, rhs, lhs)
             }
             X86BranchPredicate::UGe(operands) => {
-                let (lhs, rhs) = self.lower_unsigned_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Le, rhs, lhs)
             }
             X86BranchPredicate::SLt(operands) => {
@@ -2662,19 +2662,6 @@ impl<'a> PreviewBuilder<'a> {
             let rhs = this.lower_wrapped_varnode(&operands.rhs, visiting)?;
             Ok((lhs, rhs))
         })
-    }
-
-    fn lower_unsigned_compare_operands(
-        &mut self,
-        operands: &X86CompareOperands,
-        visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<(PreHirExpr, PreHirExpr), MlilPreviewError> {
-        let (lhs, rhs) = self.lower_compare_operands(operands, visiting)?;
-        let bits = operands.lhs.size.saturating_mul(8);
-        Ok((
-            self.coerce_unsigned_compare_operand(lhs, bits),
-            self.coerce_unsigned_compare_operand(rhs, bits),
-        ))
     }
 
     fn match_test_branch_predicate(&self, vn: &Varnode) -> Option<X86BranchPredicate> {

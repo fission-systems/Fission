@@ -19,8 +19,8 @@
 
 ## 2. Owner Proof
 
-- [x] P-code lowering / NIR expression construction
-- [x] Normalize cast-elision boundary
+- [x] Shared NIR normalization of unsigned comparison operands
+- [x] P-code mapping and comparison consumer classification
 - [ ] Structuring
 - [ ] Printer-only
 - [ ] Benchmark/automation
@@ -39,28 +39,25 @@ is added. The printer therefore sees a signed subexpression and emits a signed
 C comparison, changing the bit-vector semantics for negative inputs.
 ```
 
-The canonical owners are the shared p-code lowering of unsigned integer
-comparisons, the x86 branch-predicate path that reconstructs a comparison from
-CF/ZF, and the normalize cast-elision pass that removes redundant-looking
-casts after type inference. The fix must make the comparison operands
-unsigned at the expression boundary and preserve that boundary through
-single-use-temp cleanup; it must not alter `IntSub` globally or add a function
-or address guard.
+The canonical owner is the shared normalize pass that sees the final NIR
+comparison after p-code lowering and temporary inlining. P-code lowering
+already distinguishes `IntLess` from `IntSLess`, and the x86 branch-predicate
+path already distinguishes unsigned CF/ZF predicates from signed predicates.
+The fix therefore makes the final `Lt`/`Le`/`Gt`/`Ge` operand boundary
+explicit, without changing the generic `IntSub` type or adding a function or
+address guard.
 
 The real row narrowed the failure to this sequence:
 
 ```text
-builder output:       unsigned_cast(uVar6) < 98
-after cleanup fold:   unsigned_cast(uVar6) < 98
-cast-elision pass:    uVar6 < 98       # uVar6 was inferred as u32
-temp inlining:        (int)(code - 1)  # the signed producer is now visible
+before final normalize:  (int)(code - 1) < 98
+unsigned-boundary pass:  (uint)(code - 1) < 98
+atomic variable inputs:  unchanged when their type is unknown/already unsigned
 ```
 
-The cast was type-redundant for the inferred variable type but not semantically
-redundant for the producer's 32-bit bit pattern. The fix preserves an explicit
-unsigned integer cast when it is the direct operand boundary of an unsigned
-comparison. Signed comparisons and casts outside that boundary retain the old
-elision behavior.
+The cast is not a conversion of the arithmetic producer; it is a bit-pattern
+reinterpretation at the unsigned comparison boundary. Signed comparisons and
+already-unsigned or untyped atomic operands retain the old output shape.
 
 ## 3. Generalized Rule
 
@@ -73,22 +70,23 @@ change unrelated arithmetic result types.
 ```
 
 This covers direct `IntLess`/`IntLessEqual` expressions and x86 CF/ZF-derived
-branch predicates. It is an ISA-agnostic p-code comparison invariant; x86
-only supplies the flag-shaped consumer.
+branch predicates once they are represented as shared NIR comparisons. It is
+an ISA-agnostic comparison invariant; x86 only supplies one flag-shaped
+consumer.
 
 ## 4. Validation Matrix
 
 - [x] Focused synthetic p-code regression: a signed-looking `IntSub` used by
   `IntLess` must render an unsigned operand cast and preserve negative-value
   behavior.
-- [x] Normalize regression: the unsigned cast boundary is retained at an
-  inferred-`u32` variable comparison; the same-type cast is still removed
-  outside that boundary. The retained-cast test fails against the old
-  cast-elision rule.
+- [x] Normalize regression: a signed-looking compound operand is reinterpreted
+  at an unsigned comparison boundary, while an untyped atomic operand is left
+  unchanged.
 - [x] Real-binary direct output: `process_code@0x140001730` contains
   unsigned range comparisons for the subtracted operands.
 - [ ] Cache-disabled DecBench rerun on the same nine `process_code` rows.
-- [ ] `cargo nextest run -p fission-pcode` and emulator regression.
+- [x] `cargo nextest run -p fission-pcode` and emulator regression (three
+  pre-existing #103 pcode failures remain).
 - [ ] Workspace check, format/diff check, and release CLI build.
 
 ## 5. Measurement Interpretation
