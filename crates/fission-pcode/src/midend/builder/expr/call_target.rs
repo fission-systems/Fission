@@ -94,6 +94,13 @@ impl<'a> PreviewBuilder<'a> {
         Some(target_ref.symbol.clone())
     }
 
+    fn resolve_call_target_by_iat_slot_without_telemetry(&self, addr: u64) -> Option<String> {
+        self.type_context?
+            .iat_target_refs
+            .get(&addr)
+            .map(|target_ref| target_ref.symbol.clone())
+    }
+
     pub(super) fn resolve_relocation_call_target_name(&mut self, op: &PcodeOp) -> Option<String> {
         if !matches!(op.opcode, PcodeOpcode::Call) {
             return None;
@@ -232,8 +239,25 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         target: &Varnode,
     ) -> Option<String> {
+        self.resolve_iat_load_call_target_with_telemetry(target, true)
+    }
+
+    pub(in crate::midend::builder) fn resolve_iat_load_call_target_without_telemetry(
+        &mut self,
+        target: &Varnode,
+    ) -> Option<String> {
+        self.resolve_iat_load_call_target_with_telemetry(target, false)
+    }
+
+    fn resolve_iat_load_call_target_with_telemetry(
+        &mut self,
+        target: &Varnode,
+        record_telemetry: bool,
+    ) -> Option<String> {
         let Some((_, producer)) = self.lookup_def_site(target) else {
-            self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+            if record_telemetry {
+                self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+            }
             return None;
         };
         // Rust-Sleigh Copy-from-RAM idiom: `CALL qword ptr [IAT_addr]` is lowered as
@@ -244,41 +268,61 @@ impl<'a> PreviewBuilder<'a> {
         // treat its offset as the IAT slot address.
         if producer.opcode == PcodeOpcode::Copy {
             let Some(output) = producer.output.as_ref() else {
-                self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+                if record_telemetry {
+                    self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+                }
                 return None;
             };
             if output.size != self.options.pointer_size {
-                self.telemetry
-                    .call_targets
-                    .call_target_indirect_rejected_width_mismatch_count += 1;
+                if record_telemetry {
+                    self.telemetry
+                        .call_targets
+                        .call_target_indirect_rejected_width_mismatch_count += 1;
+                }
                 return None;
             }
             let Some(src) = producer.inputs.first() else {
-                self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+                if record_telemetry {
+                    self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+                }
                 return None;
             };
             if !src.is_constant && !is_register_space_id(src.space_id) {
-                return self.resolve_call_target_by_iat_slot(src.offset);
+                return if record_telemetry {
+                    self.resolve_call_target_by_iat_slot(src.offset)
+                } else {
+                    self.resolve_call_target_by_iat_slot_without_telemetry(src.offset)
+                };
             }
-            self.record_call_target_const_reject(CallTargetConstReject::UnsupportedOpcode);
+            if record_telemetry {
+                self.record_call_target_const_reject(CallTargetConstReject::UnsupportedOpcode);
+            }
             return None;
         }
         if producer.opcode != PcodeOpcode::Load {
-            self.record_call_target_const_reject(CallTargetConstReject::UnsupportedOpcode);
+            if record_telemetry {
+                self.record_call_target_const_reject(CallTargetConstReject::UnsupportedOpcode);
+            }
             return None;
         }
         let Some(output) = producer.output.as_ref() else {
-            self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+            if record_telemetry {
+                self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+            }
             return None;
         };
         if output.size != self.options.pointer_size {
-            self.telemetry
-                .call_targets
-                .call_target_indirect_rejected_width_mismatch_count += 1;
+            if record_telemetry {
+                self.telemetry
+                    .call_targets
+                    .call_target_indirect_rejected_width_mismatch_count += 1;
+            }
             return None;
         }
         let Some(ptr) = producer.inputs.get(1) else {
-            self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+            if record_telemetry {
+                self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+            }
             return None;
         };
         let ptr_addr = if ptr.is_constant {
@@ -299,18 +343,26 @@ impl<'a> PreviewBuilder<'a> {
                 CALL_TARGET_CONST_FOLD_BUDGET,
             ) {
                 Ok(addr) => {
-                    self.telemetry
-                        .call_targets
-                        .call_target_indirect_ptr_const_folded_count += 1;
+                    if record_telemetry {
+                        self.telemetry
+                            .call_targets
+                            .call_target_indirect_ptr_const_folded_count += 1;
+                    }
                     addr
                 }
                 Err(reason) => {
-                    self.record_call_target_const_reject(reason);
+                    if record_telemetry {
+                        self.record_call_target_const_reject(reason);
+                    }
                     return None;
                 }
             }
         };
-        self.resolve_call_target_by_iat_slot(ptr_addr)
+        if record_telemetry {
+            self.resolve_call_target_by_iat_slot(ptr_addr)
+        } else {
+            self.resolve_call_target_by_iat_slot_without_telemetry(ptr_addr)
+        }
     }
 
     pub(super) fn recover_powerpc64_descriptor_call_target(

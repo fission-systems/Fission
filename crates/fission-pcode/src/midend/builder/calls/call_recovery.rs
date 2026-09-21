@@ -878,7 +878,9 @@ impl<'a> PreviewBuilder<'a> {
             // target resolver already proves that shape and returns the
             // imported symbol; reuse it here rather than guessing the
             // prototype from the indirect opcode alone.
-            PcodeOpcode::CallInd => self.resolve_iat_load_call_target(op.inputs.first()?)?,
+            PcodeOpcode::CallInd => {
+                self.resolve_iat_load_call_target_without_telemetry(op.inputs.first()?)?
+            }
             _ => return None,
         };
         self.type_context?
