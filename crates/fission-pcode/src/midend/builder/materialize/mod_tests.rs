@@ -631,6 +631,68 @@ fn direct_successor_return_register_merge_uses_shared_edge_binding() {
 }
 
 #[test]
+fn direct_successor_accumulator_does_not_claim_primary_return_join() {
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let condition = register(UNIQUE_SPACE_ID, 0x300, 1);
+    let pcode = pcode_function(vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![2, 1],
+            ops: vec![
+                op(1, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(1)]),
+                op(
+                    2,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1020), condition],
+                ),
+            ],
+        },
+        PcodeBasicBlock {
+            index: 1,
+            start_address: 0x1010,
+            successors: vec![2],
+            ops: vec![
+                op(3, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(2)]),
+                op(4, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        },
+        PcodeBasicBlock {
+            index: 2,
+            start_address: 0x1020,
+            successors: Vec::new(),
+            ops: vec![op(
+                5,
+                PcodeOpcode::Return,
+                None,
+                vec![constant(0xdead), constant(0xbeef)],
+            )],
+        },
+    ]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let name = builder.merge_binding_name_for_direct_successor_accumulator(
+        &pcode.blocks[1],
+        0,
+        &rax,
+        &PreHirExpr::Const(2, type_from_size(8, false)),
+    );
+
+    assert_eq!(
+        name, None,
+        "edge-sensitive return recovery must own a primary-return join"
+    );
+    assert!(
+        !builder
+            .explicit_merge_bindings
+            .contains_key(&(2, VarnodeKey::from(&rax))),
+        "a return join must not receive a flat accumulator carrier"
+    );
+}
+
+#[test]
 fn direct_successor_return_register_merge_rejects_side_effect_after_def() {
     let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
     let r12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 4);

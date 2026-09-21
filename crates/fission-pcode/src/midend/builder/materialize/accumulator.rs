@@ -104,11 +104,27 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let succ_block = self.pcode.blocks.get(succ_idx)?;
+        // A shared return block has its own edge-sensitive recovery: each
+        // predecessor's live primary-return expression is lowered before the
+        // common epilogue is emitted.  A direct merge carrier here would
+        // collapse those edge values into one name and can let an earlier
+        // call result outrank a later return-register definition on one arm.
+        // Keep this accumulator proof for data joins and let return recovery
+        // own primary-return joins.
+        let successor_is_return_join = self.register_namer().is_primary_return_register(output)
+            && self.block_returns_without_redefining_output(succ_block, output)
+            && self.return_join_has_primary_return_evidence(succ_idx);
+        if successor_is_return_join {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "return_join_owned_by_return_recovery",
+            );
+            return None;
+        }
         let successor_reads_merge = self
             .block_reads_merge_input_before_redefinition(succ_block, output)
-            || (self.register_namer().is_primary_return_register(output)
-                && self.block_returns_without_redefining_output(succ_block, output)
-                && self.return_join_has_primary_return_evidence(succ_idx));
+            || successor_is_return_join;
         if !successor_reads_merge {
             self.trace_direct_successor_accumulator_merge_rejected(
                 block.start_address,
