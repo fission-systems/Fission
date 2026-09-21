@@ -43,6 +43,7 @@ pub(super) fn apply_preview_type_hints(
     let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
     let mut stats =
         apply_function_name_hints(func, context, register_origins, debug_cfa_stack_offset_bias);
+    stats.local_surface_hits += propagate_pointer_surface_aliases(func);
     apply_debug_struct_promotions(func, context, &mut stats);
     apply_debug_struct_field_names(func, context, &mut stats);
     let alias_collector = StackAliasCollector::new(func);
@@ -509,6 +510,280 @@ fn collect_assign_stats_in_stmts(
             }
         }
     }
+}
+
+/// Propagate a trusted pointer declaration through address-preserving local
+/// aliases without changing the observed internal value type.
+///
+/// Packed loads are allowed to make a cursor's internal type wider than the
+/// element type named by its source declaration.  That internal type is still
+/// needed by the printer for an explicit wide load, but it must not make a
+/// copied/offset cursor itself print as a wide-element pointer.  This helper
+/// therefore overlays only `surface_type_name` and accepts only expressions
+/// whose pointer provenance is unambiguous.
+///
+/// A local may be assigned more than once when every assignment preserves the
+/// same pointer source.  This matters for loop cursors such as
+/// `cursor = arr; cursor = cursor + 4;`: the self-referential update is safe
+/// once the initial source assignment establishes the surface type.  Unknown
+/// pointer sources, memory loads, pointer/ptr arithmetic, and non-pointer
+/// assignments keep the local unannotated.
+fn propagate_pointer_surface_aliases(func: &mut HirFunction) -> usize {
+    let mut assignments: HashMap<String, Vec<HirExpr>> = HashMap::default();
+    collect_pointer_assignments_in_stmts(&func.body, &mut assignments);
+    if assignments.is_empty() {
+        return 0;
+    }
+
+    let mut propagated = 0;
+    for _ in 0..=func.locals.len() {
+        let known_surfaces = pointer_surface_bindings(func);
+        let pointer_bindings = pointer_binding_names(func);
+        let mut updates = Vec::new();
+
+        for (name, rhses) in &assignments {
+            let Some(binding) = func.locals.iter().find(|binding| binding.name == *name) else {
+                continue;
+            };
+            if binding.surface_type_name.is_some() || !is_pointer_type(&binding.ty) {
+                continue;
+            }
+            let Some(surface_type_name) =
+                infer_pointer_alias_surface(name, rhses, &known_surfaces, &pointer_bindings)
+            else {
+                continue;
+            };
+            updates.push((name.clone(), surface_type_name));
+        }
+
+        if updates.is_empty() {
+            break;
+        }
+        for (name, surface_type_name) in updates {
+            if let Some(binding) = func.locals.iter_mut().find(|binding| binding.name == name)
+                && binding.surface_type_name.is_none()
+            {
+                binding.surface_type_name = Some(surface_type_name);
+                propagated += 1;
+            }
+        }
+    }
+    propagated
+}
+
+fn collect_pointer_assignments_in_stmts(
+    body: &[HirStmt],
+    assignments: &mut HashMap<String, Vec<HirExpr>>,
+) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => {
+                assignments
+                    .entry(name.clone())
+                    .or_default()
+                    .push(rhs.clone());
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+            HirStmt::Block(stmts) => collect_pointer_assignments_in_stmts(stmts, assignments),
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_pointer_assignments_in_stmts(body, assignments)
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init_stmt) = init {
+                    collect_pointer_assignments_in_stmts(
+                        std::slice::from_ref(init_stmt.as_ref()),
+                        assignments,
+                    );
+                }
+                if let Some(update_stmt) = update {
+                    collect_pointer_assignments_in_stmts(
+                        std::slice::from_ref(update_stmt.as_ref()),
+                        assignments,
+                    );
+                }
+                collect_pointer_assignments_in_stmts(body, assignments);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_pointer_assignments_in_stmts(&case.body, assignments);
+                }
+                collect_pointer_assignments_in_stmts(default, assignments);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_pointer_assignments_in_stmts(then_body, assignments);
+                collect_pointer_assignments_in_stmts(else_body, assignments);
+            }
+        }
+    }
+}
+
+fn pointer_surface_bindings(func: &HirFunction) -> HashMap<String, String> {
+    func.params
+        .iter()
+        .chain(func.locals.iter())
+        .filter_map(|binding| {
+            is_pointer_type(&binding.ty)
+                .then(|| binding.surface_type_name.as_ref())
+                .flatten()
+                .map(|surface_type_name| (binding.name.clone(), surface_type_name.clone()))
+        })
+        .collect()
+}
+
+fn pointer_binding_names(func: &HirFunction) -> HashSet<String> {
+    func.params
+        .iter()
+        .chain(func.locals.iter())
+        .filter(|binding| is_pointer_type(&binding.ty))
+        .map(|binding| binding.name.clone())
+        .collect()
+}
+
+fn infer_pointer_alias_surface(
+    destination: &str,
+    rhses: &[HirExpr],
+    known_surfaces: &HashMap<String, String>,
+    pointer_bindings: &HashSet<String>,
+) -> Option<String> {
+    let mut candidate: Option<&str> = None;
+    for rhs in rhses {
+        if let Some(surface_type_name) = pointer_surface_from_expr(rhs, known_surfaces) {
+            if let Some(previous) = candidate
+                && previous != surface_type_name
+            {
+                return None;
+            }
+            candidate = Some(surface_type_name);
+        }
+        if !is_pointer_preserving_alias_expr(rhs, destination, known_surfaces, pointer_bindings) {
+            return None;
+        }
+    }
+    candidate.map(str::to_owned)
+}
+
+fn pointer_surface_from_expr<'a>(
+    expr: &HirExpr,
+    known_surfaces: &'a HashMap<String, String>,
+) -> Option<&'a str> {
+    match expr {
+        HirExpr::Var(name) => known_surfaces.get(name).map(String::as_str),
+        HirExpr::Cast { ty, expr } if is_pointer_type(ty) => {
+            pointer_surface_from_expr(expr, known_surfaces)
+        }
+        HirExpr::PtrOffset { base, .. } => pointer_surface_from_expr(base, known_surfaces),
+        HirExpr::Binary {
+            op: HirBinaryOp::Add | HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let lhs_surface = pointer_surface_from_expr(lhs, known_surfaces);
+            let rhs_surface = pointer_surface_from_expr(rhs, known_surfaces);
+            match (lhs_surface, rhs_surface) {
+                (Some(surface), None) => Some(surface),
+                (None, Some(surface)) => Some(surface),
+                _ => None,
+            }
+        }
+        HirExpr::Index { base, .. } => pointer_surface_from_expr(base, known_surfaces),
+        _ => None,
+    }
+}
+
+fn is_pointer_preserving_alias_expr(
+    expr: &HirExpr,
+    destination: &str,
+    known_surfaces: &HashMap<String, String>,
+    pointer_bindings: &HashSet<String>,
+) -> bool {
+    match expr {
+        HirExpr::Var(name) => name == destination || known_surfaces.contains_key(name),
+        HirExpr::Cast { ty, expr } if is_pointer_type(ty) => {
+            is_pointer_preserving_alias_expr(expr, destination, known_surfaces, pointer_bindings)
+        }
+        HirExpr::PtrOffset { base, .. } => {
+            is_pointer_preserving_alias_expr(base, destination, known_surfaces, pointer_bindings)
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add | HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let lhs_pointer = is_definitely_pointer_expr(lhs, destination, pointer_bindings);
+            let rhs_pointer = is_definitely_pointer_expr(rhs, destination, pointer_bindings);
+            lhs_pointer != rhs_pointer
+                && if lhs_pointer {
+                    is_pointer_preserving_alias_expr(
+                        lhs,
+                        destination,
+                        known_surfaces,
+                        pointer_bindings,
+                    )
+                } else {
+                    is_pointer_preserving_alias_expr(
+                        rhs,
+                        destination,
+                        known_surfaces,
+                        pointer_bindings,
+                    )
+                }
+        }
+        HirExpr::Index { base, index, .. } => {
+            !is_definitely_pointer_expr(index, destination, pointer_bindings)
+                && is_pointer_preserving_alias_expr(
+                    base,
+                    destination,
+                    known_surfaces,
+                    pointer_bindings,
+                )
+        }
+        _ => false,
+    }
+}
+
+fn is_definitely_pointer_expr(
+    expr: &HirExpr,
+    destination: &str,
+    pointer_bindings: &HashSet<String>,
+) -> bool {
+    match expr {
+        HirExpr::Var(name) => name == destination || pointer_bindings.contains(name),
+        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => true,
+        HirExpr::Cast { ty, .. } => is_pointer_type(ty),
+        HirExpr::PtrOffset { .. } | HirExpr::Index { .. } => true,
+        HirExpr::Binary {
+            op: HirBinaryOp::Add | HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => {
+            is_definitely_pointer_expr(lhs, destination, pointer_bindings)
+                != is_definitely_pointer_expr(rhs, destination, pointer_bindings)
+        }
+        _ => false,
+    }
+}
+
+fn is_pointer_type(ty: &NirType) -> bool {
+    matches!(ty, NirType::Ptr(_))
 }
 
 fn promote_field_access_in_stmts(

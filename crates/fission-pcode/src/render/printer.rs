@@ -379,10 +379,34 @@ impl<'a> PrintCtx<'a> {
             != matches!(access_ty, NirType::Aggregate { .. })
     }
 
+    /// Whether a scalar access is wider or narrower than the pointee named by
+    /// the declaration. A surface type can intentionally be narrower than the
+    /// observed internal pointer value: a packed machine load through an
+    /// `int *` cursor still needs an explicit 64-bit C load to preserve the
+    /// observed p-code width.
+    fn direct_var_has_scalar_access_width_mismatch(&self, name: &str, access_ty: &NirType) -> bool {
+        if !self.pointer_decl_names.contains(name) {
+            return false;
+        }
+        let Some(declared_size) = self
+            .decl_type_text
+            .get(name)
+            .and_then(|text| surface_pointee_byte_size(text))
+        else {
+            return false;
+        };
+        let Some(access_size) = type_byte_size(access_ty) else {
+            return false;
+        };
+        declared_size != access_size
+    }
+
     fn simple_deref_target_matches_access(&self, expr: &HirExpr, access_ty: &NirType) -> bool {
         self.simple_deref_target_is_declared_pointer(expr)
-            && peel_simple_deref_target(expr)
-                .is_some_and(|name| !self.direct_var_has_aggregate_access_mismatch(name, access_ty))
+            && peel_simple_deref_target(expr).is_some_and(|name| {
+                !self.direct_var_has_aggregate_access_mismatch(name, access_ty)
+                    && !self.direct_var_has_scalar_access_width_mismatch(name, access_ty)
+            })
     }
 }
 
@@ -484,6 +508,53 @@ fn print_binding_type(binding: &NirBinding) -> String {
         .clone()
         .filter(|surface| surface_type_is_definable(surface, &binding.ty))
         .unwrap_or_else(|| print_type(&binding.ty))
+}
+
+fn type_byte_size(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } | NirType::Float { bits } if *bits > 0 && bits % 8 == 0 => {
+            Some(bits / 8)
+        }
+        NirType::Ptr(_) => Some(8),
+        NirType::Aggregate { size, .. } => Some(*size),
+        NirType::Unknown => None,
+        NirType::Int { .. } | NirType::Float { .. } => None,
+    }
+}
+
+/// Return the byte width of a primitive pointee spelled in a surface
+/// declaration. Named library types intentionally return `None`: their
+/// definition may be supplied by the project prelude and the recovered
+/// internal type remains the authority for those accesses.
+fn surface_pointee_byte_size(declaration: &str) -> Option<u32> {
+    let (base, stars) = declaration.split_once('*')?;
+    if stars.contains('*') {
+        return Some(8);
+    }
+    let base = base
+        .split_whitespace()
+        .filter(|word| !matches!(*word, "const" | "volatile"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    match base.as_str() {
+        "char" | "signed char" | "unsigned char" | "int8_t" | "uint8_t" | "uchar" => Some(1),
+        "short" | "signed short" | "signed short int" | "unsigned short" | "unsigned short int"
+        | "int16_t" | "uint16_t" | "ushort" => Some(2),
+        "int" | "signed" | "signed int" | "unsigned" | "unsigned int" | "int32_t" | "uint32_t"
+        | "uint" => Some(4),
+        "long long"
+        | "signed long long"
+        | "signed long long int"
+        | "unsigned long long"
+        | "unsigned long long int"
+        | "int64_t"
+        | "uint64_t"
+        | "ulong" => Some(8),
+        "float" => Some(4),
+        "double" => Some(8),
+        _ => None,
+    }
 }
 
 /// The recovered type a kept `surface_type_name` would be defined from.
@@ -2263,6 +2334,58 @@ mod tests {
 
         assert!(
             rendered.contains("local_10 = (uchar *)((uint)*local_10);"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn surface_pointer_keeps_observed_wide_load_and_store_width() {
+        let hir = HirFunction {
+            name: "packed_pair_cursor".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![
+                NirBinding {
+                    name: "p".to_string(),
+                    ty: NirType::Ptr(Box::new(u64_ty())),
+                    surface_type_name: Some("int *".to_string()),
+                    origin: Some(NirBindingOrigin::TempPreserved),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "wide".to_string(),
+                    ty: u64_ty(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::TempPreserved),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("wide".to_string()),
+                    rhs: HirExpr::Load {
+                        ptr: Box::new(HirExpr::Var("p".to_string())),
+                        ty: u64_ty(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("p".to_string())),
+                        ty: u64_ty(),
+                    },
+                    rhs: HirExpr::Const(7, u64_ty()),
+                },
+            ],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains("wide = *(unsigned long long *)(p);"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("*(unsigned long long *)(p) = 7;"),
             "{rendered}"
         );
     }

@@ -134,3 +134,121 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
     apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
     assert_eq!(func.params[1].surface_type_name.as_deref(), Some("LPRECT"));
 }
+
+#[test]
+fn preview_type_hints_propagate_pointer_surface_through_safe_aliases_only() {
+    let pointer = || {
+        NirType::Ptr(Box::new(NirType::Int {
+            bits: 64,
+            signed: false,
+        }))
+    };
+    let mut func = HirFunction {
+        name: "pointer_aliases".to_string(),
+        params: vec![
+            NirBinding {
+                name: "arr".to_string(),
+                ty: pointer(),
+                surface_type_name: Some("int *".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            },
+            NirBinding {
+                name: "other".to_string(),
+                ty: pointer(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(1)),
+                initializer: None,
+            },
+        ],
+        locals: vec![
+            NirBinding {
+                name: "cursor".to_string(),
+                ty: pointer(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "end".to_string(),
+                ty: pointer(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "loaded".to_string(),
+                ty: pointer(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "ambiguous".to_string(),
+                ty: pointer(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".to_string()),
+                rhs: HirExpr::Var("arr".to_string()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".to_string()),
+                rhs: HirExpr::PtrOffset {
+                    base: Box::new(HirExpr::Var("cursor".to_string())),
+                    offset: 4,
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("end".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("arr".to_string())),
+                    rhs: Box::new(HirExpr::Const(
+                        4,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: pointer(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("arr".to_string())),
+                    ty: pointer(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("ambiguous".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("arr".to_string())),
+                    rhs: Box::new(HirExpr::Var("other".to_string())),
+                    ty: pointer(),
+                },
+            },
+        ],
+        ..Default::default()
+    };
+
+    let stats = apply_preview_type_hints(
+        &mut func,
+        &PreviewTypeContext::default(),
+        &crate::midend::HashMap::default(),
+    );
+
+    assert_eq!(stats.local_surface_hits, 2);
+    assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("int *"));
+    assert_eq!(func.locals[1].surface_type_name.as_deref(), Some("int *"));
+    assert_eq!(func.locals[2].surface_type_name, None);
+    assert_eq!(func.locals[3].surface_type_name, None);
+    assert!(matches!(func.locals[0].ty, NirType::Ptr(_)));
+    assert!(matches!(func.locals[1].ty, NirType::Ptr(_)));
+}
