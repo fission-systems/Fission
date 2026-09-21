@@ -299,16 +299,34 @@ pub(super) fn build_layout_fallthrough_map(pcode: &PcodeFunction) -> Vec<Option<
 }
 
 pub(super) fn block_terminator_op(block: &crate::pcode::PcodeBasicBlock) -> Option<&PcodeOp> {
-    let idx = block.ops.iter().rposition(|op| {
-        matches!(
+    let idx = block.ops.iter().enumerate().rposition(|(idx, op)| {
+        let is_control = matches!(
             op.opcode,
             PcodeOpcode::Branch
                 | PcodeOpcode::CBranch
                 | PcodeOpcode::BranchInd
                 | PcodeOpcode::Return
-        )
+        );
+        is_control && !is_instruction_local_forward_branch(block, idx, op)
     })?;
     block.ops.get(idx)
+}
+
+/// Whether a branch is an instruction-local skip rather than a basic-block
+/// terminator. SLEIGH represents conditional moves and similar instruction
+/// internals as a forward `Branch`/`CBranch` followed by more p-code in the
+/// same block. Treating that branch as an inter-block terminator resolves its
+/// target back onto the current block and fabricates a CFG self-edge.
+fn is_instruction_local_forward_branch(
+    block: &crate::pcode::PcodeBasicBlock,
+    op_idx: usize,
+    op: &PcodeOp,
+) -> bool {
+    matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch)
+        && op.inputs.first().is_some_and(|target| {
+            same_block_forward_branch_target_op_idx(block, op_idx, block.ops.len(), op, target)
+                .is_some()
+        })
 }
 
 pub(super) fn const_offset(vn: &Varnode) -> Option<i64> {
@@ -808,6 +826,98 @@ mod same_block_forward_tests {
             idx,
             Some(block.ops.len()),
             "tail cmov should skip remaining ops through block end"
+        );
+    }
+
+    #[test]
+    fn same_block_forward_branch_does_not_create_cfg_self_edge() {
+        let target = Varnode {
+            space_id: 3,
+            offset: 0x4008,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let cond = Varnode {
+            space_id: 2,
+            offset: 1,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let pcode = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x4000,
+                    successors: vec![1],
+                    ops: vec![
+                        op(0, 0x4000, PcodeOpcode::Copy, vec![]),
+                        op(1, 0x4004, PcodeOpcode::CBranch, vec![target, cond]),
+                        // The guarded cmov body and its target are still in
+                        // this PcodeBasicBlock. The block's real successor is
+                        // the following block, not block 0 itself.
+                        op(2, 0x4004, PcodeOpcode::Copy, vec![]),
+                        op(3, 0x4008, PcodeOpcode::Copy, vec![]),
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x4010,
+                    successors: vec![],
+                    ops: vec![op(4, 0x4010, PcodeOpcode::Return, vec![])],
+                },
+            ],
+        };
+        let address_to_index = build_address_to_index_map(&pcode);
+        let layout_fallthrough = build_layout_fallthrough_map(&pcode);
+
+        assert_eq!(
+            build_successor_index_map(&pcode, &address_to_index, &layout_fallthrough),
+            vec![vec![1], vec![]],
+            "instruction-local forward branch must not become a function CFG self-edge"
+        );
+    }
+
+    #[test]
+    fn backward_branch_at_block_boundary_remains_a_cfg_edge() {
+        let target = Varnode {
+            space_id: 3,
+            offset: 0x5000,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let cond = Varnode {
+            space_id: 2,
+            offset: 1,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let pcode = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x5000,
+                    successors: vec![1],
+                    ops: vec![op(0, 0x5000, PcodeOpcode::CBranch, vec![target, cond])],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x5010,
+                    successors: vec![],
+                    ops: vec![op(1, 0x5010, PcodeOpcode::Return, vec![])],
+                },
+            ],
+        };
+        let address_to_index = build_address_to_index_map(&pcode);
+        let layout_fallthrough = build_layout_fallthrough_map(&pcode);
+
+        assert_eq!(
+            build_successor_index_map(&pcode, &address_to_index, &layout_fallthrough),
+            vec![vec![0, 1], vec![]],
+            "a backward branch to the block header is a real loop edge"
         );
     }
 }
