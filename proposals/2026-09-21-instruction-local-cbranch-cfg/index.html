@@ -1359,6 +1359,15 @@
 </span></code></pre></div>
 <p>The first wrong fact is the extra CFG edge, so changing a structuring reducer or
 the printer would only conceal a malformed control-flow substrate.</p>
+<p>During the first post-fix decompilation, removing the CFG self-edge exposed a
+second consumer of the same malformed classification: <code>PreviewBuilder</code>'s
+<code>block_terminator_index</code> still selected the instruction-local CBranch by raw
+reverse search. Structuring's infinite-loop-with-break reducer then consumed
+that CBranch and emitted <code>while (1) { ... if (condition) break; }</code> even though
+the successor map no longer contained a self-edge. This confirms that the
+classifier must be shared by both CFG successor construction and builder
+terminator lookup; changing only the downstream loop rule would leave the
+builder's control-flow contract inconsistent.</p>
 <h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
 <p>Generalized rule:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>A Branch/CBranch whose resolved target is a later operation in the same
@@ -1394,13 +1403,15 @@ mnemonic, address, function, or architecture guard.</p>
 <h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Existing pass/owner: <code>build_successor_index_map</code> and
-  <code>block_terminator_op</code> in <code>crates/fission-pcode/src/midend/cfg.rs</code>.</li>
+  <code>block_terminator_op</code> in <code>crates/fission-pcode/src/midend/cfg.rs</code>, plus
+  <code>PreviewBuilder::block_terminator_index</code> in
+  <code>crates/fission-pcode/src/midend/builder/materialize/terminators.rs</code>.</li>
 <li>Shared analysis/substrate candidate: [x] CFG / dominance / postdominance
   fact.</li>
-<li>Extending that owner is sufficient: all downstream loop and structuring
-  consumers already use the builder's successor map. Correcting the map keeps
-  the existing loop reducers unchanged and removes the malformed edge at its
-  source.</li>
+<li>Extending that owner is sufficient: both CFG construction and builder
+  terminator lowering can reuse the existing target-position classifier.
+  Correcting both consumers keeps the existing loop reducers unchanged and
+  removes the malformed edge/terminator at their source.</li>
 <li>Possible interaction with existing passes: same-block materialization must
   continue to lower cmov bodies as guarded statements; only inter-block CFG
   edges change. Real tail branches, returns, indirect targets, LSDA edges, and
@@ -1417,7 +1428,8 @@ mnemonic, address, function, or architecture guard.</p>
 <ul>
 <li>[ ] Targeted invariant test:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode -- same_block_forward</code></li>
-<li>Expected signal: the synthetic successor map has no fabricated self-edge;
+<li>Expected signal: the synthetic successor map has no fabricated self-edge,
+    the builder does not expose the local CBranch as a block terminator, and
     the existing target-resolution tests remain green.</li>
 <li>[ ] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode</code></li>
