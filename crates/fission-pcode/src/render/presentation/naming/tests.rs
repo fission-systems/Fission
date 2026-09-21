@@ -119,6 +119,53 @@ fn loop_counter_gets_short_letter_name() {
 }
 
 #[test]
+fn semantic_naming_does_not_duplicate_an_existing_binding_name() {
+    // The loop counter candidate wants `i`, but a distinct recovered local
+    // already owns that name.  Both bindings must remain addressable in the
+    // rendered function rather than collapsing into duplicate declarations.
+    let mut func = HirFunction {
+        name: "f".into(),
+        locals: vec![
+            local("uVar1", int_ty(32, true)),
+            local("i", int_ty(32, true)),
+        ],
+        return_type: NirType::Unknown,
+        body: vec![HirStmt::For {
+            init: Some(Box::new(HirStmt::Assign {
+                lhs: HirLValue::Var("uVar1".into()),
+                rhs: HirExpr::Const(0, int_ty(32, true)),
+            })),
+            cond: Some(HirExpr::Binary {
+                op: HirBinaryOp::Lt,
+                lhs: Box::new(HirExpr::Var("uVar1".into())),
+                rhs: Box::new(HirExpr::Const(2, int_ty(32, true))),
+                ty: NirType::Bool,
+            }),
+            update: Some(Box::new(HirStmt::Assign {
+                lhs: HirLValue::Var("uVar1".into()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("uVar1".into())),
+                    rhs: Box::new(HirExpr::Const(1, int_ty(32, true))),
+                    ty: int_ty(32, true),
+                },
+            })),
+            body: vec![HirStmt::Expr(HirExpr::Var("i".into()))],
+        }],
+        ..Default::default()
+    };
+
+    assert!(!apply_semantic_naming(&mut func));
+    assert_eq!(
+        func.locals
+            .iter()
+            .map(|binding| binding.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["uVar1", "i"]
+    );
+}
+
+#[test]
 fn size_naming_renames_memcpy_length_argument() {
     // memcpy(dst, src, param_3);
     let mut func = HirFunction {

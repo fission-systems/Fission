@@ -40,6 +40,18 @@ pub(super) struct Candidate {
 /// any variable was renamed.
 pub(crate) fn apply_semantic_naming(func: &mut HirFunction) -> bool {
     let mut already_named: HashSet<String> = HashSet::new();
+    // Candidates are collected from the pre-rename tree, while the function
+    // may already contain a meaningful binding with a suggested display name
+    // (`i` is common for a recovered local).  Renaming another binding to that
+    // name would create duplicate declarations and make the presentation
+    // surface ambiguous.  Reserve every existing binding name before any
+    // candidate is admitted, then update the set as names move.
+    let mut occupied_names: HashSet<String> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| binding.name.clone())
+        .collect();
     let mut changed = false;
 
     // (priority, candidates) so passes stay sorted without needing dynamic
@@ -71,10 +83,12 @@ pub(crate) fn apply_semantic_naming(func: &mut HirFunction) -> bool {
             if !binding_still_generic(func, &candidate.name) {
                 continue;
             }
-            if already_named.contains(&candidate.new_name) {
+            if occupied_names.contains(&candidate.new_name) {
                 continue;
             }
             rename_var_everywhere(func, &candidate.name, &candidate.new_name);
+            occupied_names.remove(&candidate.name);
+            occupied_names.insert(candidate.new_name.clone());
             already_named.insert(candidate.name);
             already_named.insert(candidate.new_name);
             changed = true;
