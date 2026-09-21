@@ -928,6 +928,101 @@ fn loop_phi_threads_narrow_update_through_widened_alias() {
     );
 }
 
+/// The entry arm can define a narrow register and immediately widen it before
+/// the inner loop head reads only the low byte. If the latch is inspected
+/// first, the phi's entry operand is the widening op, but its logical binding
+/// belongs to the narrow seed. The widening op and the seed must therefore
+/// reserve one name before either block is lowered normally.
+#[test]
+fn loop_phi_entry_widening_reuses_narrow_seed_binding() {
+    let r8b = reg(0x80, 1);
+    let r8d = reg(0x80, 4);
+    let r8 = reg(0x80, 8);
+    let condition = varnode(0x400);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(r8d.clone()),
+                    vec![Varnode::constant(7, 4)],
+                ),
+                op(1, PcodeOpcode::IntZExt, Some(r8.clone()), vec![r8d.clone()]),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    3,
+                    PcodeOpcode::IntEqual,
+                    Some(condition.clone()),
+                    vec![r8b.clone(), Varnode::constant(7, 1)],
+                ),
+                op(
+                    4,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1020), condition],
+                ),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(
+                    5,
+                    PcodeOpcode::Copy,
+                    Some(r8d.clone()),
+                    vec![Varnode::constant(8, 4)],
+                ),
+                op(6, PcodeOpcode::IntZExt, Some(r8.clone()), vec![r8d.clone()]),
+                op(7, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(0x1030, 3, vec![op(8, PcodeOpcode::Return, None, vec![])]),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![2, 3];
+    blocks[2].successors = vec![1];
+    blocks[3].successors = vec![];
+
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    // Force the same latch-first order that exposed the real materialization
+    // defect. The phi is attached to the wide latch output, while the
+    // logical entry seed is the earlier narrow definition.
+    let name = builder
+        .loop_head_phi_latch_binding_name(&pcode.blocks[2], 1, &r8)
+        .expect("widened latch output should have a loop-head phi binding");
+    assert!(
+        name.starts_with("uVar") || name.starts_with("xVar"),
+        "the unproven ABI slot must use a private scalar binding, got {name}"
+    );
+
+    let entry_narrow_key = MaterializedVarnodeKey::new(&r8d, &pcode.blocks[0].ops[0]);
+    let entry_wide_key = MaterializedVarnodeKey::new(&r8, &pcode.blocks[0].ops[1]);
+    assert_eq!(
+        builder.materialized_vns.get(&entry_narrow_key),
+        Some(&name),
+        "the phi entry reservation must also cover the narrow seed definition"
+    );
+    assert_eq!(
+        builder.materialized_vns.get(&entry_wide_key),
+        Some(&name),
+        "the widening entry definition must share the narrow seed binding"
+    );
+}
+
 #[test]
 fn loop_carried_proof_rejects_register_phase_killed_before_backedge() {
     let edx = reg(0x8, 4);

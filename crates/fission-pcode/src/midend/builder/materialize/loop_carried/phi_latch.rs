@@ -142,10 +142,6 @@ impl<'a> PreviewBuilder<'a> {
         if output.is_constant || output.size >= self.options.pointer_size {
             return None;
         }
-        let current_op = block.ops.get(op_idx)?;
-        if !Self::op_reads_varnode_key(current_op, &VarnodeKey::from(output)) {
-            return None;
-        }
         let candidates = block
             .ops
             .iter()
@@ -219,6 +215,56 @@ impl<'a> PreviewBuilder<'a> {
             .is_some_and(|index| index < self.entry_arity)
         {
             return self.register_param(definition_output);
+        }
+
+        // A widening p-code op writes the same logical scalar as its narrow
+        // input, even though scalar SSA represents the output as a fresh
+        // value. Reserve the input definition's binding first so an entry
+        // seed such as `r8d = value; r8 = zext(r8d)` cannot acquire a second
+        // name when a loop latch is materialized before the seed block.
+        if matches!(
+            definition_op.opcode,
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+        ) && let Some(input) = definition_op.inputs.first()
+            && !input.is_constant
+            && input.space_id == definition_output.space_id
+            && input.offset == definition_output.offset
+            && input.size < definition_output.size
+        {
+            let source_site = LoweringSite {
+                block_idx: definition.block as usize,
+                op_idx: definition.op as usize,
+            };
+            let (source_site, source_op) = self.with_lowering_site(source_site, |this| {
+                this.lookup_def_site(input)
+                    .map(|(site, op)| (site, op.clone()))
+            })?;
+            let source_output = source_op.output.as_ref()?.clone();
+            if VarnodeKey::from(&source_output) != VarnodeKey::from(input) {
+                return None;
+            }
+            let source_key = MaterializedVarnodeKey::new(&source_output, &source_op);
+            let name = if let Some(name) = self.materialized_vns.get(&source_key).cloned() {
+                name
+            } else if let Some(name) = self
+                .explicit_merge_bindings
+                .get(&(source_site.block_idx, VarnodeKey::from(&source_output)))
+                .cloned()
+            {
+                name
+            } else if self
+                .abi_state()
+                .param_slot_for_varnode(&source_output)
+                .is_some_and(|index| index < self.entry_arity)
+            {
+                self.register_param(&source_output)?
+            } else {
+                self.ensure_temp_binding_for_output(&source_op, &source_output, true)
+                    .name
+            };
+            self.materialized_vns.insert(materialized_key, name.clone());
+            self.invalidate_materialization_dependent_caches();
+            return Some(name);
         }
 
         let name = self
