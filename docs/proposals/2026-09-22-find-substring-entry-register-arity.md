@@ -159,3 +159,19 @@ pass when both the preheader seed and latch use the one phi-carried binding.
   - [x] Confirmed
 - Any new metric/pass/helper does not duplicate an existing owner:
   - [x] Confirmed; the existing ABI arity owner is extended.
+
+## 9. Post-Fix Measured Evidence
+
+- Production fix commit: `f68db0b48` (`fix(materialize): share widened loop phi seed bindings`).
+- Synthetic regression: `loop_phi_entry_widening_reuses_narrow_seed_binding` fails on the pre-fix implementation because the narrow entry definition has no binding reservation (`None`) while the widening phi entry receives a fresh temporary (`xVar0`). It passes after the fix, with both definitions sharing one private scalar binding.
+- Focused external rerun: `fission-benchmark` dev corpus, `find_substring`, all nine compiler variants, caches disabled, local endpoint provenance `local-f68db0b48`.
+- Result artifact: `results/issue105_after_f68db0b48_recreated.json` in the local benchmark checkout.
+- Semantic cases: `44/54` (`81.48%`), up from the baseline `27/54` (`50.0%`).
+  - `gcc -O1`: `3/6 → 6/6`
+  - `gcc -O2`: `0/6 → 6/6`
+  - `gcc -O3`: `0/6 → 6/6`
+  - `gcc -Os`: remains `3/6`
+  - `gcc-m32 -O2`: remains `3/6`
+  - `clang -O2`: remains `2/6`
+- The measured O1/O2/O3 improvement is caused by restoring the loop-carried `needle[j]` binding; the remaining variants are separate issues and are not claimed as fixed here.
+- Regression gates after the fix: `cargo nextest run -p fission-pcode --no-fail-fast` (`1069 passed, 3 pre-existing failures, 1 skipped`), `cargo nextest run -p fission-emulator --no-fail-fast` (`200 passed, 3 skipped`), workspace `cargo check`, `cargo fmt --all --check`, `git diff --check`, and `cargo build -p fission-cli --release` all passed.
