@@ -356,6 +356,21 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &PreHirExpr,
     ) -> Option<MissingMergeBindingProof> {
+        self.describe_missing_merge_binding_proof_with_rhs_kind(
+            block,
+            op_idx,
+            output,
+            Self::classify_disallowed_single_consumer_rhs_kind(rhs),
+        )
+    }
+
+    pub(super) fn describe_missing_merge_binding_proof_with_rhs_kind(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+    ) -> Option<MissingMergeBindingProof> {
         let def_block_idx = self.lowering_block_index(block);
         let first_use =
             self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output);
@@ -398,7 +413,7 @@ impl<'a> PreviewBuilder<'a> {
             incoming_value_count,
             has_existing_binding,
             consumer_kind,
-            rhs_kind: Self::classify_disallowed_single_consumer_rhs_kind(rhs),
+            rhs_kind,
             relation,
         })
     }
@@ -566,7 +581,23 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &PreHirExpr,
     ) -> Option<JoinMergeMissingProof> {
-        let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
+        self.describe_join_merge_missing_proof_with_rhs_kind(
+            block,
+            op_idx,
+            output,
+            Self::classify_disallowed_single_consumer_rhs_kind(rhs),
+        )
+    }
+
+    pub(super) fn describe_join_merge_missing_proof_with_rhs_kind(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+    ) -> Option<JoinMergeMissingProof> {
+        let proof = self
+            .describe_missing_merge_binding_proof_with_rhs_kind(block, op_idx, output, rhs_kind)?;
         if !matches!(
             proof.relation,
             MissingMergeBindingRelation::JoinMergeMissing
@@ -608,7 +639,7 @@ impl<'a> PreviewBuilder<'a> {
             has_missing_incoming,
             has_conflicting_incoming,
             consumer_kind: proof.consumer_kind,
-            rhs_kind: proof.rhs_kind,
+            rhs_kind,
             reason,
         })
     }
@@ -677,7 +708,23 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &PreHirExpr,
     ) -> Option<MergeBindingCandidateProof> {
-        let proof = self.describe_join_merge_missing_proof(block, op_idx, output, rhs)?;
+        self.describe_merge_binding_candidate_proof_with_rhs_kind(
+            block,
+            op_idx,
+            output,
+            Self::classify_disallowed_single_consumer_rhs_kind(rhs),
+        )
+    }
+
+    pub(super) fn describe_merge_binding_candidate_proof_with_rhs_kind(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+    ) -> Option<MergeBindingCandidateProof> {
+        let proof =
+            self.describe_join_merge_missing_proof_with_rhs_kind(block, op_idx, output, rhs_kind)?;
         let def_block_idx = self.lowering_block_index(block);
         let (merge_block_idx, merge_block_addr, _, _) =
             self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output)?;

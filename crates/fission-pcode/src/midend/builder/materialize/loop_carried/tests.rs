@@ -522,6 +522,118 @@ fn loop_carried_register_update_does_not_promote_prior_defined_abi_scratch() {
 }
 
 #[test]
+fn loop_carried_update_reuses_post_loop_join_binding() {
+    let rdx = reg(0x10, 8);
+    let rax = reg(0x00, 8);
+    let blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![op(
+                0,
+                PcodeOpcode::Copy,
+                Some(rdx.clone()),
+                vec![constant(0)],
+            )],
+        ),
+        block_at(0x1010, 1, vec![]),
+        block_at(
+            0x1020,
+            2,
+            vec![op(
+                1,
+                PcodeOpcode::IntAdd,
+                Some(rdx.clone()),
+                vec![rdx.clone(), constant(1)],
+            )],
+        ),
+        block_at(0x1030, 3, vec![]),
+        block_at(
+            0x1040,
+            4,
+            vec![op(2, PcodeOpcode::Copy, Some(rax), vec![rdx.clone()])],
+        ),
+        block_at(
+            0x1050,
+            5,
+            vec![op(
+                3,
+                PcodeOpcode::Copy,
+                Some(rdx.clone()),
+                vec![constant(7)],
+            )],
+        ),
+        block_at(
+            0x1060,
+            6,
+            vec![op(
+                4,
+                PcodeOpcode::Copy,
+                Some(rdx.clone()),
+                vec![constant(9)],
+            )],
+        ),
+    ];
+
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.successors = vec![
+        vec![1, 5], // entry -> loop head or the alternate incoming path
+        vec![2],    // loop head -> update
+        vec![4, 1], // exit first for the use scan, then the backedge
+        vec![],
+        vec![],
+        vec![4, 6],
+        vec![4],
+    ];
+    builder.predecessors = vec![
+        vec![],
+        vec![0, 2],
+        vec![1],
+        vec![],
+        vec![2, 5, 6],
+        vec![0],
+        vec![5],
+    ];
+    builder.loop_bodies = vec![crate::midend::structuring::loop_analysis::LoopBody {
+        head: 1,
+        tails: vec![2],
+        body: vec![1, 2],
+        exit_idx: Some(4),
+        all_exits: vec![4],
+    }];
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    });
+
+    let name = builder.loop_carried_output_binding_name(
+        &pcode.blocks[2],
+        0,
+        &pcode.blocks[2].ops[0],
+        &rdx,
+    );
+    assert!(
+        name.is_some(),
+        "a proven loop update reaching a complete join must receive a binding"
+    );
+    assert_ne!(
+        name.as_deref(),
+        Some("param_2"),
+        "the ABI-capable but entry-unowned RDX slot is not a formal parameter"
+    );
+    assert_eq!(
+        builder
+            .explicit_merge_bindings
+            .get(&(4, VarnodeKey::from(&rdx))),
+        name.as_ref(),
+        "the loop update and post-loop join must share one binding"
+    );
+}
+
+#[test]
 fn loop_carried_gpr32_update_with_prior_wide_def_does_not_rebind_param() {
     let r8 = reg(0x80, 8);
     let r8d = reg(0x80, 4);

@@ -82,10 +82,16 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(name);
             }
         }
+        if let Some(name) =
+            self.merge_binding_name_for_loop_carried_output(block, op_idx, op, output)
+        {
+            return Some(name);
+        }
         if self.abi_state().param_slot_for_varnode(output).is_some()
             && !self.loop_carried_output_has_prior_definition(output)
+            && let Some(name) = self.register_param(output)
         {
-            return self.register_param(output);
+            return Some(name);
         }
         // Resolve stack-param seed vs hardware name when both exist:
         // - Primary return *full* register (x86 EAX holding a scalar stack arg
@@ -555,7 +561,11 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         // Do not steal ABI register-parameter names; those are handled above.
-        if self.abi_state().param_slot_for_varnode(output).is_some() {
+        if self
+            .abi_state()
+            .param_slot_for_varnode(output)
+            .is_some_and(|index| index < self.entry_arity)
+        {
             return None;
         }
         let name = self.sla_hw_name(output.offset, output.size)?;
