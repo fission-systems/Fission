@@ -97,9 +97,11 @@ values.
   unsigned range comparisons for the subtracted operands.
 - [x] Actual emitted body execution: `-1`, `200`, and `399` return `0`, while
   `400` and `499` return `-1`; the remaining source cases also match.
-- [ ] Cache-disabled DecBench rerun on the same nine `process_code` rows;
-  record the final artifact path and whether the standard wrapper's aggregate
-  moved after the implementation commit.
+- [x] Cache-disabled DecBench rerun on the same nine `process_code` rows:
+  `fission-benchmark/results/issue101_after_bb907a58f.json`. The aggregate
+  remained 44/45 cases and 8/9 perfect rows, with the same `gcc-m32 -O2`
+  assertion failure; the standard wrapper does not exercise the negative and
+  200..399 cases.
 - [x] `cargo nextest run -p fission-pcode` and emulator regression (three
   pre-existing #103 pcode failures remain).
 - [x] Full normalize nextest, workspace check, format/diff check, and release
