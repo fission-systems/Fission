@@ -1,5 +1,6 @@
 //! Type inference and signature propagation passes.
 
+mod api_signature;
 mod callsite_type_prop;
 mod constraint;
 mod entry_param_promotion;
