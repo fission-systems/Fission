@@ -1141,7 +1141,6 @@ where
             fission_midend_prehir::action_pipeline::norm_trace_hash(func)
         );
     }
-
     fission_midend_core::wave_stats::add_pass_metric(
         pass_name,
         elapsed_ms,

@@ -214,6 +214,110 @@ fn scalar_ssa_piece_reassembly_zero_extends_signed_narrow_pieces() {
 }
 
 #[test]
+fn unsigned_compare_zero_extends_signed_arithmetic_operand() {
+    let code = register(0x08, 4);
+    let diff = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x900,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let comparison = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x910,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntSub,
+                Some(diff.clone()),
+                vec![code, constant_sized(1, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntLess,
+                Some(comparison.clone()),
+                vec![diff, constant_sized(98, 4)],
+            ),
+            op(2, PcodeOpcode::Return, None, vec![comparison]),
+        ],
+    )]);
+
+    let output = render_mlil_preview(&pcode, "unsigned_range_compare", 0x1000, &test_options())
+        .expect("render unsigned comparison");
+
+    assert!(
+        output.contains("(uint)(rcx - 1)") && !output.contains("(int)(rcx - 1)"),
+        "unsigned comparison must preserve the subtraction's bit pattern:\n{output}"
+    );
+}
+
+#[test]
+fn unsigned_branch_predicate_zero_extends_signed_arithmetic_operand() {
+    let code = register(0x08, 4);
+    let diff = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x920,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let carry = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x930,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let pcode = pcode_function(vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntSub,
+                    Some(diff.clone()),
+                    vec![code, constant_sized(1, 4)],
+                ),
+                op(
+                    1,
+                    PcodeOpcode::IntLess,
+                    Some(carry.clone()),
+                    vec![diff, constant_sized(98, 4)],
+                ),
+                op(2, PcodeOpcode::CBranch, None, vec![constant(0x1020), carry]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![op(3, PcodeOpcode::Return, None, vec![constant_sized(0, 4)])],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![op(4, PcodeOpcode::Return, None, vec![constant_sized(1, 4)])],
+        ),
+    ]);
+
+    let output = render_mlil_preview(&pcode, "unsigned_branch_compare", 0x1000, &test_options())
+        .expect("render unsigned branch comparison");
+
+    assert!(
+        output.contains("(uint)(rcx - 1)") && !output.contains("(int)(rcx - 1)"),
+        "unsigned branch predicate must preserve the subtraction's bit pattern:\n{output}"
+    );
+}
+
+#[test]
 fn diamond_join_lowers_branch_local_register_defs_as_select() {
     let cond = varnode(0x80);
     let rax = register(0, 8);
