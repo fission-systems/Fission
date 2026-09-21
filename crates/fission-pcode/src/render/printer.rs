@@ -250,6 +250,11 @@ impl<'a> PrintCtx<'a> {
                 ty: NirType::Ptr(_),
                 ..
             } => true,
+            HirExpr::PtrOffset { .. } => true,
+            HirExpr::Index {
+                elem_ty: NirType::Ptr(_),
+                ..
+            } => true,
             _ => false,
         }
     }
@@ -299,6 +304,7 @@ impl<'a> PrintCtx<'a> {
             HirExpr::Load { ty, .. } | HirExpr::Index { elem_ty: ty, .. } => {
                 matches!(ty, NirType::Ptr(_))
             }
+            HirExpr::PtrOffset { .. } => true,
             _ => self.expr_is_pointer(expr),
         }
     }
@@ -317,6 +323,11 @@ impl<'a> PrintCtx<'a> {
                 rhs,
                 ..
             } => self.expr_is_pointer(lhs) && !self.expr_is_pointer(rhs),
+            HirExpr::PtrOffset { .. } => true,
+            HirExpr::Index {
+                elem_ty: NirType::Ptr(_),
+                ..
+            } => true,
             other => self.expr_is_pointer(other),
         }
     }
@@ -399,6 +410,56 @@ impl<'a> PrintCtx<'a> {
             return false;
         };
         declared_size != access_size
+    }
+
+    /// Whether a pointer RHS carries a machine-side pointee width that differs
+    /// from the declaration selected for `name`. This keeps an internal cast
+    /// such as `(unsigned long long *)...` from becoming an incompatible
+    /// assignment to a recovered `int *` alias.
+    fn pointer_assignment_needs_decl_cast(&self, name: &str, rhs: &HirExpr) -> bool {
+        let Some(declared_size) = self
+            .decl_type_text
+            .get(name)
+            .and_then(|text| surface_pointee_byte_size(text))
+        else {
+            return false;
+        };
+        if let HirExpr::Var(source) = rhs
+            && self.decl_type_text.get(source.as_str()) == self.decl_type_text.get(name)
+        {
+            return false;
+        }
+        let rhs_size = self.pointer_expr_pointee_byte_size(rhs);
+        rhs_size.is_some_and(|rhs_size| rhs_size != declared_size)
+    }
+
+    fn pointer_expr_pointee_byte_size(&self, expr: &HirExpr) -> Option<u32> {
+        match expr {
+            HirExpr::Var(name) => self.var_types.get(name.as_str()).and_then(|ty| {
+                let NirType::Ptr(pointee) = ty else {
+                    return None;
+                };
+                type_byte_size(pointee)
+            }),
+            HirExpr::Cast {
+                ty: NirType::Ptr(pointee),
+                ..
+            }
+            | HirExpr::Binary {
+                ty: NirType::Ptr(pointee),
+                ..
+            }
+            | HirExpr::Load {
+                ty: NirType::Ptr(pointee),
+                ..
+            }
+            | HirExpr::Index {
+                elem_ty: NirType::Ptr(pointee),
+                ..
+            } => type_byte_size(pointee),
+            HirExpr::PtrOffset { base, .. } => self.pointer_expr_pointee_byte_size(base),
+            _ => None,
+        }
     }
 
     fn simple_deref_target_matches_access(&self, expr: &HirExpr, access_ty: &NirType) -> bool {
@@ -1954,8 +2015,18 @@ fn print_assignment_rhs(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -> S
         return rhs_str;
     };
     match lhs_ty {
-        NirType::Ptr(_) if !ctx.expr_has_pointer_like_result(rhs) => {
-            format!("({})({rhs_str})", print_type(lhs_ty))
+        NirType::Ptr(_) => {
+            if !ctx.expr_has_pointer_like_result(rhs) {
+                format!("({})({rhs_str})", print_type(lhs_ty))
+            } else if ctx.pointer_assignment_needs_decl_cast(var_name, rhs) {
+                if let Some(declaration) = ctx.decl_type_text.get(var_name.as_str()) {
+                    format!("({declaration})({rhs_str})")
+                } else {
+                    rhs_str
+                }
+            } else {
+                rhs_str
+            }
         }
         NirType::Int { .. } if ctx.expr_has_pointer_like_result(rhs) => {
             format!("({})(unsigned long long)({rhs_str})", print_type(lhs_ty))
@@ -2358,6 +2429,13 @@ mod tests {
                     origin: Some(NirBindingOrigin::TempPreserved),
                     initializer: None,
                 },
+                NirBinding {
+                    name: "q".to_string(),
+                    ty: NirType::Ptr(Box::new(u64_ty())),
+                    surface_type_name: Some("int *".to_string()),
+                    origin: Some(NirBindingOrigin::TempPreserved),
+                    initializer: None,
+                },
             ],
             body: vec![
                 HirStmt::Assign {
@@ -2374,6 +2452,13 @@ mod tests {
                     },
                     rhs: HirExpr::Const(7, u64_ty()),
                 },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("q".to_string()),
+                    rhs: HirExpr::Cast {
+                        ty: NirType::Ptr(Box::new(u64_ty())),
+                        expr: Box::new(HirExpr::Var("p".to_string())),
+                    },
+                },
             ],
             ..HirFunction::default()
         };
@@ -2386,6 +2471,10 @@ mod tests {
         );
         assert!(
             rendered.contains("*(unsigned long long *)(p) = 7;"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("q = (int *)((unsigned long long *)p);"),
             "{rendered}"
         );
     }
