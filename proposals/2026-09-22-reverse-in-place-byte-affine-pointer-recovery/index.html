@@ -1304,10 +1304,10 @@
 <li>Function: <code>reverse_in_place</code></li>
 <li>Address: <code>0x140001560</code></li>
 <li>Corpus row or benchmark command: external DecBench local evaluation, <code>dev</code> corpus, focused on <code>reverse_in_place</code>, Fission local endpoint, <code>FISSION_BENCHMARK_NO_CACHE=1</code>; baseline artifact <code>results/issue104_before_62fea7840_recreated.json</code> with server fingerprint <code>c0059ccc3ab6804cdc8a7c94dd095cc9357b0db6c5b745912fba63a0c3e373c6</code>.</li>
-<li>Current output summary: the reverse cursor is rendered as <code>addr = (int *)(items + len - 4)</code>. The machine address is <code>items + len * sizeof(int) - sizeof(int)</code>; the output therefore loses the byte scale on both the dynamic span and the final element offset.</li>
+<li>Current output summary: the reverse cursor is rendered as <code>addr = (int *)(items + len - 4)</code>. The machine address is <code>items + len * sizeof(int) - sizeof(int)</code>; the output therefore loses the byte scale on both the dynamic span and the final element offset. After the fix the same row renders the equivalent <code>(uint8_t *)(items + len) - 4</code> address and preserves the swap cursor.</li>
 <li>Semantic cases passed / total: focused <code>gcc -O2</code> row <code>1/5</code>; across the nine <code>reverse_in_place</code> variants, <code>18/45</code> cases (<code>0.40</code> mean pass rate) and <code>3/9</code> perfect rows.</li>
 <li>Failure category: <code>assertion_fail</code> for <code>gcc -O2</code>, <code>gcc -O1</code>, and <code>gcc-m32 -O2</code>; the remaining variants include separate compile/runtime failures and are retained in the same before/after matrix.</li>
-<li>Relevant benchmark/static/readability observations: baseline row metrics for <code>gcc -O2</code> are source similarity <code>0.237</code>, GED <code>9</code>, type match <code>0.75</code>, recompilation <code>0.3667</code>, and <code>1/5</code> semantic cases. The output loses the distinct last-element address and produces the wrong swap endpoint.</li>
+<li>Relevant benchmark/static/readability observations: baseline row metrics for <code>gcc -O2</code> are source similarity <code>0.237</code>, GED <code>9</code>, type match <code>0.75</code>, recompilation <code>0.3667</code>, and <code>1/5</code> semantic cases. The output loses the distinct last-element address and produces the wrong swap endpoint. After the fix, that row is <code>5/5</code> semantic cases with no failure; the nine-row matrix improves from <code>18/45</code> to <code>27/45</code> cases and from <code>3/9</code> to <code>5/9</code> perfect rows (<code>0.40</code> to <code>0.60</code> mean pass rate).</li>
 </ul>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1407,29 +1407,47 @@
 </ul>
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] Targeted invariant test:</li>
-<li>Command: <code>cargo nextest run -p fission-midend-normalize -E 'test(byte_affine_pointer_recovery)'</code></li>
+<li>[x] Targeted invariant test:</li>
+<li>Command: <code>cargo nextest run -p fission-midend-normalize -E 'test(preserves_scalar_add_const_as_byte_offset) or test(recovers_reversed_scalar_pointer_add_as_byte_offset) or test(recovers_byte_affine_last_element_offset)'</code></li>
 <li>Expected signal: the synthetic byte-affine expression retains the correct
     byte offset/element index and fails on the current implementation.</li>
-<li>[ ] Crate-level gate:</li>
+<li>Measured result: <code>3/3</code> focused tests passed; the complete normalize crate
+    passed <code>395/395</code>.</li>
+<li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-midend-normalize &amp;&amp; cargo nextest run -p fission-pcode</code></li>
 <li>Expected signal: no normalize regressions; known unrelated pcode failures,
     if still present, are reported separately.</li>
-<li>[ ] Focused benchmark row:</li>
+<li>Measured result: normalize <code>395/395</code>; pcode <code>1069/1072</code> passed, <code>1</code>
+    skipped, and the same three pre-existing builder failures remained:
+    <code>diamond_join_lowers_copy_through_join_read_as_select</code>,
+    <code>movzx_after_byte_add_zero_extends_unsigned</code>, and
+    <code>x64_byte_add_movzx_does_not_double_add_load</code>.</li>
+<li>[x] Focused benchmark row:</li>
 <li>Command: rebuild the local Linux CLI, recreate the local DecBench container,
     and rerun the exact nine-row <code>reverse_in_place</code> matrix with caches disabled.</li>
 <li>Expected row-level improvement: the last-element address and swap dataflow
     use the raw byte-affine expression; semantic cases improve without changing
     unrelated variants.</li>
-<li>[ ] Smoke or automation sample:</li>
-<li>Command: external cache-disabled DecBench validation sample after the fix.</li>
+<li>Measured result: local container health reported <code>git_sha=723aecd96</code> and
+    source fingerprint <code>7b3da503281d6010236691ff8c7de4bde4849f322fcc2f2996f6e297b61d83f2</code>.
+    The nine rows moved <code>18/45 -&gt; 27/45</code> semantic cases; <code>gcc -O2</code> and
+    <code>gcc-m32 -O2</code> each moved <code>1/5 -&gt; 5/5</code>, and <code>gcc -O1</code> moved <code>1/5 -&gt; 2/5</code>.
+    Existing <code>gcc -O3</code>/<code>clang -O2</code> compile failures and <code>gcc-m32 -O0</code> runtime
+    failure remained outside this address-unit fix.</li>
+<li>[x] Smoke or automation sample:</li>
+<li>Command: <code>FISSION_BENCHMARK_NO_CACHE=1 .venv/bin/python runner/runner.py --corpus dev --limit 20 --variant-limit 1 --decompilers fission --run-mode local --no-resume --output results/issue104_smoke_after_723aecd96.json</code></li>
 <li>Expected no-regression signal: no lost requested-function outputs or compile
     regressions outside the motivated affine-address shape.</li>
-<li>[ ] Optional related checks:</li>
+<li>Measured result: <code>20/20</code> requested outputs, zero adapter/boundary errors,
+    <code>16/20</code> perfect rows, and mean semantic pass rate <code>0.84</code>.</li>
+<li>[x] Optional related checks:</li>
 <li>Command: <code>cargo check -p fission-midend-normalize -p fission-pcode</code> and
     <code>cargo build -p fission-cli --release</code></li>
 <li>Expected signal: clean compilation.</li>
-<li>[ ] Boundary audit, if a new pass/helper/dependency was added: not required
+<li>Measured result: workspace <code>cargo check --workspace</code>,
+    <code>cargo fmt --all --check</code>, <code>git diff --check</code>, and release CLI build all
+    passed; emulator nextest passed <code>200/200</code> with <code>3</code> skipped.</li>
+<li>[x] Boundary audit, if a new pass/helper/dependency was added: not required
   unless the implementation introduces one.</li>
 </ul>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
@@ -1442,8 +1460,11 @@
 <li>Ghidra guidance confirmed: reference/correctness use only; no output-style
   mimicry request.</li>
 <li>Unseen or synthetic validation evidence:</li>
-<li>Patch validation pool command/result: pending implementation.</li>
-<li>Synthetic invariant test command/result: pending implementation.</li>
+<li>Patch validation pool command/result: external cache-disabled DecBench
+    smoke over 20 dev functions produced <code>20/20</code> clean requested outputs and
+    no adapter/boundary errors.</li>
+<li>Synthetic invariant test command/result: focused byte-unit tests <code>3/3</code>
+    passed; normalize crate <code>395/395</code> passed.</li>
 </ul>
 <h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
 <ul>
