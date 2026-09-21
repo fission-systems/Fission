@@ -7,3 +7,4 @@ mod call_target;
 mod lower_expr;
 mod op_lowering;
 mod register_alias;
+mod value_recovery;
