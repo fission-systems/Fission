@@ -60,6 +60,211 @@ pub(super) fn rederive_return_type(
     *return_type = candidates[0].clone();
 }
 
+/// Preserve a pointer return when the builder's scalar return seed only sees
+/// representation-preserving integer casts around a proven pointer binding.
+///
+/// The builder has to seed a return type from the expression tree before the
+/// binding/type fixed point runs, so `return (word)(ptr)` initially looks like
+/// an integer even when `ptr` is already known to be `Ptr(T)`.  Only a complete
+/// cast-only chain is eligible here: arithmetic, bitwise operations, loads,
+/// comparisons, and calls deliberately provide no pointer-return evidence.
+/// A zero constant is neutral when another return path supplies the pointer
+/// candidate, which covers the usual pointer-or-NULL shape.
+pub(super) fn promote_pointer_return_from_casts(
+    return_type: &mut NirType,
+    surface_return_type_name: &Option<String>,
+    body: &[PreHirStmt],
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+) -> bool {
+    if surface_return_type_name.is_some()
+        || matches!(
+            return_type,
+            NirType::Bool | NirType::Ptr(_) | NirType::Aggregate { .. } | NirType::Float { .. }
+        )
+    {
+        return false;
+    }
+
+    let mut candidate = None;
+    let mut saw_pointer = false;
+    let mut saw_non_pointer = false;
+    let mut saw_bare_return = false;
+    collect_pointer_return_evidence(
+        body,
+        defs,
+        known_binding_types,
+        &mut candidate,
+        &mut saw_pointer,
+        &mut saw_non_pointer,
+        &mut saw_bare_return,
+    );
+
+    let Some(candidate) = candidate else {
+        return false;
+    };
+    if !saw_pointer || saw_non_pointer || saw_bare_return {
+        return false;
+    }
+
+    let changed = *return_type != candidate;
+    if changed {
+        *return_type = candidate;
+    }
+    changed
+}
+
+fn collect_pointer_return_evidence(
+    stmts: &[PreHirStmt],
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+    candidate: &mut Option<NirType>,
+    saw_pointer: &mut bool,
+    saw_non_pointer: &mut bool,
+    saw_bare_return: &mut bool,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Return(Some(expr)) => {
+                if let Some(pointer_ty) = pointer_return_type_for_expr(
+                    expr,
+                    defs,
+                    known_binding_types,
+                    &mut HashSet::default(),
+                ) {
+                    *saw_pointer = true;
+                    if candidate.is_none() {
+                        *candidate = Some(pointer_ty);
+                    } else if candidate.as_ref() != Some(&pointer_ty) {
+                        *saw_non_pointer = true;
+                    }
+                } else if !is_zero_constant_return(expr) {
+                    *saw_non_pointer = true;
+                }
+            }
+            PreHirStmt::Return(None) => *saw_bare_return = true,
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_pointer_return_evidence(
+                body,
+                defs,
+                known_binding_types,
+                candidate,
+                saw_pointer,
+                saw_non_pointer,
+                saw_bare_return,
+            ),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_pointer_return_evidence(
+                    then_body,
+                    defs,
+                    known_binding_types,
+                    candidate,
+                    saw_pointer,
+                    saw_non_pointer,
+                    saw_bare_return,
+                );
+                collect_pointer_return_evidence(
+                    else_body,
+                    defs,
+                    known_binding_types,
+                    candidate,
+                    saw_pointer,
+                    saw_non_pointer,
+                    saw_bare_return,
+                );
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_pointer_return_evidence(
+                        &case.body,
+                        defs,
+                        known_binding_types,
+                        candidate,
+                        saw_pointer,
+                        saw_non_pointer,
+                        saw_bare_return,
+                    );
+                }
+                collect_pointer_return_evidence(
+                    default,
+                    defs,
+                    known_binding_types,
+                    candidate,
+                    saw_pointer,
+                    saw_non_pointer,
+                    saw_bare_return,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn pointer_return_type_for_expr(
+    expr: &PreHirExpr,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+    visited: &mut HashSet<String>,
+) -> Option<NirType> {
+    match expr {
+        PreHirExpr::Var(name) => {
+            pointer_return_type_for_binding(name, defs, known_binding_types, visited)
+        }
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => Some(expr_type(expr)),
+        PreHirExpr::Cast {
+            ty: NirType::Int { .. },
+            expr: inner,
+        } => pointer_return_type_for_expr(inner, defs, known_binding_types, visited),
+        _ => None,
+    }
+}
+
+fn pointer_return_type_for_binding(
+    name: &str,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+    visited: &mut HashSet<String>,
+) -> Option<NirType> {
+    if !visited.insert(name.to_owned()) {
+        return None;
+    }
+    if let Some(ty @ NirType::Ptr(_)) = known_binding_types.get(name) {
+        return Some(ty.clone());
+    }
+    match defs.get(name) {
+        Some(DefEntry::Alias(source)) => {
+            pointer_return_type_for_binding(source, defs, known_binding_types, visited)
+        }
+        Some(DefEntry::TypedAlias { source, ty }) => {
+            if matches!(ty, NirType::Ptr(_)) {
+                Some(ty.clone())
+            } else {
+                pointer_return_type_for_binding(source, defs, known_binding_types, visited)
+            }
+        }
+        Some(DefEntry::Known(ty) | DefEntry::Derived { ty, .. })
+            if matches!(ty, NirType::Ptr(_)) =>
+        {
+            Some(ty.clone())
+        }
+        _ => None,
+    }
+}
+
+fn is_zero_constant_return(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Const(value, _) => *value == 0,
+        PreHirExpr::Cast { expr, .. } => is_zero_constant_return(expr),
+        _ => false,
+    }
+}
+
 /// Collect all non-Unknown return expression types from a statement list.
 fn collect_return_types(
     stmts: &[PreHirStmt],

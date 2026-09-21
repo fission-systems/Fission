@@ -278,6 +278,13 @@ pub fn apply_type_inference_pass(func: &mut PreHirFunction) -> bool {
         &defs,
         &known_binding_types,
     );
+    changed |= return_type::promote_pointer_return_from_casts(
+        &mut func.return_type,
+        &func.surface_return_type_name,
+        &func.body,
+        &defs,
+        &known_binding_types,
+    );
     changed |= func.return_type != prev_return_type;
 
     changed |= return_type::narrow_zero_extended_return_width(func, &defs, &known_binding_types);
@@ -469,6 +476,84 @@ mod tests {
         // return_type was non-Unknown going in — should NOT be changed by the pass
         // (the pass only updates when return_type is Unknown)
         assert_eq!(func.return_type, existing_type);
+    }
+
+    #[test]
+    fn preserves_pointer_return_through_nested_integer_casts() {
+        let uint = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ulonglong = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let pointer = NirType::Ptr(Box::new(uint.clone()));
+        let mut addr = make_binding("addr");
+        addr.ty = pointer.clone();
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Cast {
+            ty: uint.clone(),
+            expr: Box::new(PreHirExpr::Cast {
+                ty: ulonglong,
+                expr: Box::new(PreHirExpr::Var("addr".to_owned())),
+            }),
+        }))];
+        let mut func = make_func(vec![addr], body, uint);
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.return_type, pointer);
+    }
+
+    #[test]
+    fn keeps_pointer_to_integer_arithmetic_scalar() {
+        let uint = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ulonglong = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let pointer = NirType::Ptr(Box::new(uint.clone()));
+        let mut addr = make_binding("addr");
+        addr.ty = pointer;
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: ulonglong.clone(),
+                expr: Box::new(PreHirExpr::Var("addr".to_owned())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(1, ulonglong.clone())),
+            ty: ulonglong.clone(),
+        }))];
+        let mut func = make_func(vec![addr], body, ulonglong.clone());
+
+        super::apply_type_inference_pass(&mut func);
+        assert_eq!(func.return_type, ulonglong);
+    }
+
+    #[test]
+    fn null_return_arm_is_neutral_to_pointer_return_evidence() {
+        let uint = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let pointer = NirType::Ptr(Box::new(uint.clone()));
+        let mut addr = make_binding("addr");
+        addr.ty = pointer.clone();
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Var("ok".to_owned()),
+            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Cast {
+                ty: uint.clone(),
+                expr: Box::new(PreHirExpr::Var("addr".to_owned())),
+            }))]
+            .into(),
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(0, uint.clone())))].into(),
+        }];
+        let mut func = make_func(vec![addr], body, uint);
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.return_type, pointer);
     }
 
     /// Cast expression: `x = (ulonglong)y` → x.ty inferred as `ulonglong`
