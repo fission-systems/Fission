@@ -1310,7 +1310,7 @@
 <li>Current output summary: the raw builder preserves <code>xVar2 = data + length</code>
   and the byte load, but renders the CRC update as <code>rax = (uint)rax ^ param_2</code>
   instead of XORing the loaded byte. After the builder fix, the input-byte
-  dataflow is correct in PreHIR, but structuring still folds the end-pointer
+  dataflow is correct in PreHIR, but HIR presentation still folds the end-pointer
   prefix into <code>data + length</code> even though <code>data</code> is incremented by the loop
   body. The two defects therefore have separate canonical owners.</li>
 <li>Semantic cases passed / total: the nine <code>crc32</code> variants pass <code>29/54</code> cases
@@ -1330,8 +1330,9 @@
 <li>[ ] SLEIGH/raw p-code:</li>
 <li>[x] Builder/materialize:</li>
 <li>[ ] Normalize:</li>
-<li>[x] Structuring:</li>
+<li>[ ] Structuring:</li>
 <li>[ ] Type/data recovery:</li>
+<li>[x] HIR presentation:</li>
 <li>[ ] Printer:</li>
 <li>[ ] Benchmark/automation:</li>
 </ul>
@@ -1365,15 +1366,16 @@
 </span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>not lost by raw lifting or normalize; the builder's loop-carried fallback
 </span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>overrides a closer local definition.
 </span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>
-</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>The remaining end-pointer error is introduced later by the generic loop
-</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>condition-prefix folder in
-</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>`crates/fission-midend-structuring/src/loops.rs`. It substitutes a prefix
-</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>binding such as `end = data + length` into the loop condition when `end` is
-</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>not itself read in the body. That proof does not account for variables read by
-</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>the prefix RHS: `data` is assigned in the body, so replacing the entry-owned
-</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>snapshot with the current `data` changes the loop predicate on every
-</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>iteration. The conservative result must retain the prefix assignment rather
-</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>than inline an expression whose dependencies are mutable in the loop body.
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>The remaining end-pointer error is introduced later by the HIR presentation
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>pass `inline_single_use_pure_assigns` in
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>`crates/fission-pcode/src/render/presentation/mod.rs`. Its
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>`pure_expr_free_var_redefined_before` proof only inspected direct top-level
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>assignments between the definition and use. It therefore missed that `data`
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>is assigned inside the loop body, and inlined `xVar2` as `data + length` into
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>the repeatedly evaluated condition. That changes the entry-owned snapshot on
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>every iteration. The conservative result must retain the prefix assignment
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>rather than inline an expression whose dependencies are mutable in the loop
+</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>body.
 </span></code></pre></div>
 <h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
 <p>Generalized rule:</p>
@@ -1414,8 +1416,11 @@
   <code>loop_body_carried_register_read_name</code> in
   <code>crates/fission-pcode/src/midend/builder/materialize/loop_carried/mod.rs</code>,
   called from <code>lower_varnode_inner</code> in <code>expr/lower_expr.rs</code>.
-  The end-pointer preservation owner is <code>try_fold_cond_prefix</code> in
-  <code>crates/fission-midend-structuring/src/loops.rs</code>.</li>
+  The end-pointer preservation owner is <code>inline_single_use_pure_assigns</code> and
+  its <code>pure_expr_free_var_redefined_before</code> proof in
+  <code>crates/fission-pcode/src/render/presentation/mod.rs</code>. The exact row's
+  structuring output already retains the snapshot; the later HIR presentation
+  clone was the layer that inlined it unsafely.</li>
 <li>Shared analysis/substrate candidate:</li>
 <li>[x] CFG / dominance / postdominance fact</li>
 <li>[x] Def-use / reaching-definition fact</li>
@@ -1426,10 +1431,11 @@
 <li>Why extending that owner is sufficient, or why a new pass/helper is needed:
   the existing <code>has_prior_local_def_for_varnode</code> already computes the required
   same-block reaching-definition fact with the builder's register alias rules.
-  The structuring proof can use the existing expression/body walkers to reject
-  condition-prefix substitution when a prefix RHS depends on a body-assigned
-  variable. Both fixes are narrow owner-local proof corrections; no new pass
-  or representation is needed.</li>
+  The presentation proof can use the existing expression/body walkers to
+  reject single-use substitution when a RHS depends on a variable assigned by
+  an intervening statement or by a repeated-condition loop body/update. Both
+  fixes are narrow owner-local proof corrections; no new pass or representation
+  is needed.</li>
 <li>If adding a new pass/helper/metric, why existing shared analysis cannot
   express the invariant: no new pass/helper/metric is planned.</li>
 <li>Possible interaction with existing normalize/structuring/materialize passes:
@@ -1445,18 +1451,25 @@
 </ul>
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] Targeted invariant test:</li>
+<li>[x] Targeted invariant test:</li>
 <li>Command: add a builder regression for a same-block byte load/width-alias
-    definition followed by a loop-carried register update, plus a structuring
-    regression for a loop-condition prefix whose RHS reads a body-mutated
-    cursor.</li>
+    definition followed by a loop-carried register update, plus a HIR
+    presentation regression for a loop-condition prefix whose RHS reads a
+    body-mutated cursor.</li>
 <li>Expected signal: the old builder returns the ABI parameter for the local
-    consumer and the old structurer folds the mutable cursor expression; the
+    consumer and the old presentation pass folds the mutable cursor expression; the
     fixed code lowers the load-derived value and preserves the snapshot.</li>
-<li>[ ] Crate-level gate:</li>
-<li>Command: <code>cargo nextest run -p fission-pcode</code></li>
-<li>Expected signal: the new regression and existing builder/materialize tests
-    pass; any pre-existing failures are reported separately.</li>
+<li>Result: <code>cargo nextest run -p fission-pcode -E 'test(local_register_write_precedes_loop_carried_read_fallback) | test(hir_presentation_keeps_snapshot_used_after_loop_cursor_update)'</code>
+    passed <code>2/2</code>. Before the presentation fix, the focused test failed because
+    the end-pointer assignment was inlined into the loop condition.</li>
+<li>[x] Crate-level gate:</li>
+<li>Command: <code>cargo nextest run -p fission-pcode --no-fail-fast</code></li>
+<li>Result: <code>1071 passed, 3 failed, 1 skipped</code> in <code>11.159s</code>. The three failures
+    are the pre-existing <code>diamond_join_lowers_copy_through_join_read_as_select</code>,
+    <code>movzx_after_byte_add_zero_extends_unsigned</code>, and
+    <code>x64_byte_add_movzx_does_not_double_add_load</code> regressions; the new focused
+    tests passed. Supporting runtime gate: <code>cargo nextest run -p
+    fission-emulator</code> passed <code>200/200</code> with <code>3 skipped</code>.</li>
 <li>[x] Focused benchmark row:</li>
 <li>Command: cache-disabled local DecBench <code>dev --function crc32 --decompilers
     fission</code> before/after matrix.</li>
@@ -1469,18 +1482,28 @@
     focused <code>gcc -O2</code> failure moved from timeout to runtime error, while its
     output changed from <code>^ length</code>/uninitialized <code>xVar2</code> to the load-derived
     byte and the still-invalid <code>data != data + length</code> predicate. This confirms
-    the builder fix mechanically and identifies the remaining structuring
+    the builder fix mechanically and identifies the remaining presentation
     defect; it is not a completed quality claim yet.</li>
-<li>[ ] Smoke or automation sample:</li>
-<li>Command: cache-disabled dev smoke after the fix.</li>
-<li>Expected no-regression signal: clean requested-function outputs and no
-    adapter/boundary regressions.</li>
-<li>[ ] Optional related checks:</li>
+<li>Measured after both fixes: <code>results/issue103_after_eb8b408ca_recreated.json</code>,
+    nine rows, still <code>29/54</code> cases and mean semantic score <code>0.4259</code>. The direct
+    <code>crypto_gcc_O2.exe:crc32@0x1400016e0</code> output now preserves
+    <code>xVar2 = data + length</code>, XORs <code>*data</code>, and compares <code>data != xVar2</code>.
+    Aggregate behavioral DecBench did not move, so this is recorded as a
+    measured anchored-row correctness repair, not a broad score improvement.</li>
+<li>[x] Smoke or automation sample:</li>
+<li>Command: cache-disabled dev smoke, <code>--limit 20 --variant-limit 1</code>, after
+    the final fix.</li>
+<li>Result: completed successfully in <code>98.4s</code> and saved
+    <code>results/issue103_smoke_after_eb8b408ca.json</code>. The requested sample
+    included the repaired <code>crc32</code> O0 row at <code>6/6</code>; existing unrelated
+    compile-error and timeout rows remain visible in the artifact.</li>
+<li>[x] Optional related checks:</li>
 <li>Command: <code>cargo check --workspace</code>, <code>cargo fmt --all --check</code>,
     <code>git diff --check</code>, and release CLI build.</li>
-<li>Expected signal: clean compilation and formatting.</li>
-<li>[ ] Boundary audit, if a new pass/helper/dependency was added: no new pass or
-  dependency is planned.</li>
+<li>Result: all listed checks passed; release CLI build passed after the final
+    fix.</li>
+<li>[x] Boundary audit, if a new pass/helper/dependency was added: no new pass or
+  dependency was added.</li>
 </ul>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1491,8 +1514,11 @@
 <li>Ghidra guidance confirmed: reference/correctness use only; no output-style
   mimicry request.</li>
 <li>Unseen or synthetic validation evidence:</li>
-<li>Patch validation pool command/result: pending after the fix.</li>
-<li>Synthetic invariant test command/result: pending after the fix.</li>
+<li>Patch validation pool command/result: the cache-disabled focused DecBench
+    matrix remains <code>29/54</code> with mean semantic score <code>0.4259</code>; no aggregate
+    quality claim is made.</li>
+<li>Synthetic invariant test command/result: the builder and HIR presentation
+    regressions pass <code>2/2</code>.</li>
 </ul>
 <h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
 <ul>
