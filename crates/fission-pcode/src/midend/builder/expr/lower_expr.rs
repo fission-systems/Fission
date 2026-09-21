@@ -2051,6 +2051,31 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let key = VarnodeKey::from(vn);
+        // A passthrough register definition can be read from a successor before
+        // the defining block has been materialized.  Seed the same binding that
+        // the later materializer will reuse; otherwise lowering the Copy RHS
+        // reuses the source register's ABI name even after that source has been
+        // overwritten on the path to this use.
+        if let Some(use_site) = self.current_lowering_site
+            && let Some((def_site, def_op)) = self.lookup_def_site(vn)
+            && def_site.block_idx != use_site.block_idx
+            && let Some(output) = def_op.output.as_ref()
+            && VarnodeKey::from(output) == key
+            && is_register_varnode(output)
+            && !self.register_namer().is_primary_return_register(output)
+            && !self
+                .materialized_vns
+                .contains_key(&MaterializedVarnodeKey::new(output, def_op))
+            && matches!(
+                def_op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            )
+            && def_op.inputs.first().is_some_and(is_register_varnode)
+        {
+            let def_op = def_op.clone();
+            let binding = self.ensure_temp_binding_for_output(&def_op, output, true);
+            return Ok(PreHirExpr::Var(binding.name));
+        }
         if let Some(expr) = self.try_lower_scalar_ssa_piece_reassembly(vn, &key, visiting)? {
             return Ok(expr);
         }

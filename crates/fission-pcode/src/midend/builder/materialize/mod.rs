@@ -1456,6 +1456,22 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
+        } else if let Some(name) = self
+            .full_width_primary_return_surface_name(block, op_idx, op, output)
+            .filter(|n| name_claim_is_safe(self, n))
+        {
+            // A full-width primary-return extension must establish the ABI
+            // surface when it overwrites an observed call carrier. Reusing the
+            // narrower lane's binding leaves later cross-block RAX reads able
+            // to select the pre-extension call result instead of this value.
+            self.ensure_live_register_binding(&name, self.options.pointer_size);
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
         } else if let Some((name, binding_size)) = self
             .live_register_lhs_name_for_partial_gpr_join_family(output)
             .filter(|(n, _)| name_claim_is_safe(self, n))
@@ -1483,22 +1499,6 @@ impl<'a> PreviewBuilder<'a> {
         {
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
-            name
-        } else if let Some(name) = self
-            .full_width_primary_return_surface_name(block, op_idx, op, output)
-            .filter(|n| name_claim_is_safe(self, n))
-        {
-            // x64 SLEIGH freeze before same-block cmov: IntZExt rax ← eax must
-            // use the HW surface so cmovl into EAX and epilogue `return rax`
-            // share one name. Freeze without a following cmov body keeps normal
-            // binding (RC4 index: freeze then movzx al for truncation).
-            self.ensure_live_register_binding(&name, self.options.pointer_size);
-            self.bind_materialized_output_to_existing_name(
-                op,
-                output,
-                &name,
-                preserve_materialization,
-            );
             name
         } else if let Some(name) =
             self.same_block_prior_register_binding_name(block, op_idx, output)
@@ -1643,8 +1643,9 @@ impl<'a> PreviewBuilder<'a> {
         self.sla_hw_name(output.offset, output.size)
     }
 
-    /// x64 SLEIGH freeze of the primary return low half into the full register,
-    /// only when a later same-block cmov body rewrites the return family.
+    /// Freeze a primary-return low half into the full register when the full
+    /// surface is required by a later same-block cmov body or by a
+    /// cross-block use after an observed call carrier was overwritten.
     ///
     /// Shape: `IntZExt`/`IntSExt` writing pointer-size primary return from a
     /// narrower same-offset input (`IntZExt rax ← eax`), and a later op inside
@@ -1652,8 +1653,9 @@ impl<'a> PreviewBuilder<'a> {
     /// (cmovl into EAX). That freeze must bind as `rax` so the cmov body
     /// family-joins onto the surface used by epilogue `return rax`.
     ///
-    /// Not applied when there is no following cmov body (RC4 index: freeze then
-    /// `movzx al` for truncation must keep temp/low-byte identity).
+    /// The latter case is deliberately limited to an observed call carrier and
+    /// a non-local use. A local extension such as the RC4 index's freeze then
+    /// `movzx al` keeps its temporary/low-byte identity.
     fn full_width_primary_return_surface_name(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -1690,11 +1692,53 @@ impl<'a> PreviewBuilder<'a> {
         {
             return None;
         }
-        if !self.later_same_block_cmov_writes_primary_return_family(block, op_idx, output) {
+        if !self.later_same_block_cmov_writes_primary_return_family(block, op_idx, output)
+            && !self.full_width_return_extension_overwrites_observed_call(block, op_idx, output)
+        {
             return None;
         }
         self.sla_hw_name(output.offset, self.options.pointer_size)
             .or_else(|| self.sla_hw_name(output.offset, output.size))
+    }
+
+    /// A call's result is represented by the primary-return surface until a
+    /// later definition proves otherwise. A narrower write followed by a
+    /// widening extension is such a definition, but reusing the narrow
+    /// materialization name does not update the full-width call carrier. If
+    /// that extended value crosses a block boundary, preserve the full-width
+    /// ABI surface so successor reads cannot recover the stale call result.
+    fn full_width_return_extension_overwrites_observed_call(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        if !self.output_has_nonlocal_use(block, op_idx, output) {
+            return false;
+        }
+        let block_idx = self.lowering_block_index(block);
+        let mut saw_partial_redefinition = false;
+        for prior_idx in (0..op_idx).rev() {
+            let prior_op = &block.ops[prior_idx];
+            if let Some(prior_output) = prior_op.output.as_ref()
+                && self.varnode_aliases_value(prior_output, output)
+            {
+                if prior_output.size >= output.size {
+                    return false;
+                }
+                saw_partial_redefinition = true;
+            }
+            if saw_partial_redefinition
+                && matches!(prior_op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                && self.call_result_bindings.contains_key(&LoweringSite {
+                    block_idx,
+                    op_idx: prior_idx,
+                })
+            {
+                return true;
+            }
+        }
+        false
     }
 
     /// True when some later op in this block is inside a same-block-forward

@@ -2534,6 +2534,24 @@ impl<'a> PreviewBuilder<'a> {
             )
             && op.inputs.len() == 1
         {
+            // A register copy is a value snapshot.  Lowering its source at the
+            // defining site is only sound while that source name remains live;
+            // x86 commonly overwrites the source register before the later
+            // `test`/`cmp` that consumes the destination.  Prefer the binding
+            // established for the destination definition so the predicate reads
+            // the copied value rather than a reused hardware-register name.
+            if let Some(output) = op.output.as_ref()
+                && VarnodeKey::from(output) == VarnodeKey::from(vn)
+            {
+                let key = MaterializedVarnodeKey::new(output, op);
+                if let Some(name) = self.materialized_vns.get(&key) {
+                    return Ok(PreHirExpr::Var(name.clone()));
+                }
+                if let Some(name) = self.sla_hw_name(output.offset, output.size) {
+                    let name = self.ensure_live_register_binding(&name, output.size);
+                    return Ok(PreHirExpr::Var(name));
+                }
+            }
             let src = op.inputs[0].clone();
             return self
                 .with_lowering_site(site, |this| this.lower_wrapped_varnode(&src, visiting));

@@ -115,6 +115,100 @@ fn call_result_observation_accepts_partial_return_register_reads() {
     assert!(builder.call_result_is_observed(&block, 0));
 }
 
+#[test]
+fn full_width_return_extension_does_not_reuse_partial_call_carrier() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8);
+    let mut block = block(vec![
+        op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+        // Preserve the call result in a different register before EAX is
+        // cleared, matching the ABI shape that exposed the stale RAX carrier.
+        op(2, PcodeOpcode::Copy, Some(rdx.clone()), vec![rax.clone()]),
+        op(
+            3,
+            PcodeOpcode::IntXor,
+            Some(eax.clone()),
+            vec![eax.clone(), eax.clone()],
+        ),
+        op(4, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax]),
+    ]);
+    block.successors = vec![1];
+    let use_block = block_at(
+        0x1010,
+        1,
+        vec![op(
+            5,
+            PcodeOpcode::IntAdd,
+            Some(register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x100, 8)),
+            vec![rax.clone(), rdx.clone()],
+        )],
+    );
+    let pcode = pcode_function(vec![block.clone(), use_block.clone()]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    apply_preview_cspec(&mut options);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prime_call_result_bindings();
+
+    // Lower the successor use first. This is the ordering that exposed the
+    // real row: successor materialization can precede the predecessor's own
+    // statement, so the copied return value must acquire a stable destination
+    // binding before its defining Copy is visited.
+    let rhs = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 1,
+                op_idx: 0,
+            },
+            |builder| {
+                builder
+                    .try_lower_materialized_output_rhs(use_block.start_address, &use_block.ops[0])
+            },
+        )
+        .expect("lower successor arithmetic use")
+        .expect("successor arithmetic should have a RHS");
+    let rdx_name = builder
+        .materialized_vns
+        .get(&MaterializedVarnodeKey::new(&rdx, &block.ops[1]))
+        .cloned()
+        .expect("cross-block register copy should seed a stable binding");
+    assert!(
+        matches!(
+            &rhs,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                rhs: add_rhs,
+                ..
+            } if add_rhs.as_ref() == &PreHirExpr::Var(rdx_name.clone())
+        ),
+        "successor read must use the copied destination, not the reused source register: {rhs:?}"
+    );
+
+    let statements = builder
+        .lower_block_stmts(&block)
+        .expect("lower partial return-register carrier");
+    let zext_name = builder
+        .materialized_vns
+        .get(&MaterializedVarnodeKey::new(&rax, &block.ops[3]))
+        .cloned();
+
+    assert_eq!(
+        zext_name.as_deref(),
+        Some("rax"),
+        "statements: {statements:?}"
+    );
+    assert_eq!(
+        builder
+            .materialized_vns
+            .get(&MaterializedVarnodeKey::new(&rdx, &block.ops[1]))
+            .map(String::as_str),
+        Some(rdx_name.as_str()),
+        "pre-seeded successor binding must survive predecessor materialization"
+    );
+}
+
 /// CALL as CFG terminator + successor `mov reg, eax` must count as observed
 /// (measured recursive dual-call pattern on PE x64 O0).
 #[test]
