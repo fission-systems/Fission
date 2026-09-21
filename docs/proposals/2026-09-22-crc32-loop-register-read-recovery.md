@@ -12,7 +12,7 @@
 - Current output summary: the raw builder preserves `xVar2 = data + length`
   and the byte load, but renders the CRC update as `rax = (uint)rax ^ param_2`
   instead of XORing the loaded byte. After the builder fix, the input-byte
-  dataflow is correct in PreHIR, but structuring still folds the end-pointer
+  dataflow is correct in PreHIR, but HIR presentation still folds the end-pointer
   prefix into `data + length` even though `data` is incremented by the loop
   body. The two defects therefore have separate canonical owners.
 - Semantic cases passed / total: the nine `crc32` variants pass `29/54` cases
@@ -32,8 +32,9 @@
 - [ ] SLEIGH/raw p-code:
 - [x] Builder/materialize:
 - [ ] Normalize:
-- [x] Structuring:
+- [ ] Structuring:
 - [ ] Type/data recovery:
+- [x] HIR presentation:
 - [ ] Printer:
 - [ ] Benchmark/automation:
 
@@ -69,15 +70,16 @@ definition for that register. The load and pointer end facts are therefore
 not lost by raw lifting or normalize; the builder's loop-carried fallback
 overrides a closer local definition.
 
-The remaining end-pointer error is introduced later by the generic loop
-condition-prefix folder in
-`crates/fission-midend-structuring/src/loops.rs`. It substitutes a prefix
-binding such as `end = data + length` into the loop condition when `end` is
-not itself read in the body. That proof does not account for variables read by
-the prefix RHS: `data` is assigned in the body, so replacing the entry-owned
-snapshot with the current `data` changes the loop predicate on every
-iteration. The conservative result must retain the prefix assignment rather
-than inline an expression whose dependencies are mutable in the loop body.
+The remaining end-pointer error is introduced later by the HIR presentation
+pass `inline_single_use_pure_assigns` in
+`crates/fission-pcode/src/render/presentation/mod.rs`. Its
+`pure_expr_free_var_redefined_before` proof only inspected direct top-level
+assignments between the definition and use. It therefore missed that `data`
+is assigned inside the loop body, and inlined `xVar2` as `data + length` into
+the repeatedly evaluated condition. That changes the entry-owned snapshot on
+every iteration. The conservative result must retain the prefix assignment
+rather than inline an expression whose dependencies are mutable in the loop
+body.
 ```
 
 ## 3. Generality / Invariant Proof
@@ -123,8 +125,11 @@ Comparable coverage:
   `loop_body_carried_register_read_name` in
   `crates/fission-pcode/src/midend/builder/materialize/loop_carried/mod.rs`,
   called from `lower_varnode_inner` in `expr/lower_expr.rs`.
-  The end-pointer preservation owner is `try_fold_cond_prefix` in
-  `crates/fission-midend-structuring/src/loops.rs`.
+  The end-pointer preservation owner is `inline_single_use_pure_assigns` and
+  its `pure_expr_free_var_redefined_before` proof in
+  `crates/fission-pcode/src/render/presentation/mod.rs`. The exact row's
+  structuring output already retains the snapshot; the later HIR presentation
+  clone was the layer that inlined it unsafely.
 - Shared analysis/substrate candidate:
   - [x] CFG / dominance / postdominance fact
   - [x] Def-use / reaching-definition fact
@@ -135,10 +140,11 @@ Comparable coverage:
 - Why extending that owner is sufficient, or why a new pass/helper is needed:
   the existing `has_prior_local_def_for_varnode` already computes the required
   same-block reaching-definition fact with the builder's register alias rules.
-  The structuring proof can use the existing expression/body walkers to reject
-  condition-prefix substitution when a prefix RHS depends on a body-assigned
-  variable. Both fixes are narrow owner-local proof corrections; no new pass
-  or representation is needed.
+  The presentation proof can use the existing expression/body walkers to
+  reject single-use substitution when a RHS depends on a variable assigned by
+  an intervening statement or by a repeated-condition loop body/update. Both
+  fixes are narrow owner-local proof corrections; no new pass or representation
+  is needed.
 - If adding a new pass/helper/metric, why existing shared analysis cannot
   express the invariant: no new pass/helper/metric is planned.
 - Possible interaction with existing normalize/structuring/materialize passes:
@@ -154,18 +160,25 @@ Comparable coverage:
 
 ## 5. Validation Matrix
 
-- [ ] Targeted invariant test:
+- [x] Targeted invariant test:
   - Command: add a builder regression for a same-block byte load/width-alias
-    definition followed by a loop-carried register update, plus a structuring
-    regression for a loop-condition prefix whose RHS reads a body-mutated
-    cursor.
+    definition followed by a loop-carried register update, plus a HIR
+    presentation regression for a loop-condition prefix whose RHS reads a
+    body-mutated cursor.
   - Expected signal: the old builder returns the ABI parameter for the local
-    consumer and the old structurer folds the mutable cursor expression; the
+    consumer and the old presentation pass folds the mutable cursor expression; the
     fixed code lowers the load-derived value and preserves the snapshot.
-- [ ] Crate-level gate:
-  - Command: `cargo nextest run -p fission-pcode`
-  - Expected signal: the new regression and existing builder/materialize tests
-    pass; any pre-existing failures are reported separately.
+  - Result: `cargo nextest run -p fission-pcode -E 'test(local_register_write_precedes_loop_carried_read_fallback) | test(hir_presentation_keeps_snapshot_used_after_loop_cursor_update)'`
+    passed `2/2`. Before the presentation fix, the focused test failed because
+    the end-pointer assignment was inlined into the loop condition.
+- [x] Crate-level gate:
+  - Command: `cargo nextest run -p fission-pcode --no-fail-fast`
+  - Result: `1071 passed, 3 failed, 1 skipped` in `11.159s`. The three failures
+    are the pre-existing `diamond_join_lowers_copy_through_join_read_as_select`,
+    `movzx_after_byte_add_zero_extends_unsigned`, and
+    `x64_byte_add_movzx_does_not_double_add_load` regressions; the new focused
+    tests passed. Supporting runtime gate: `cargo nextest run -p
+    fission-emulator` passed `200/200` with `3 skipped`.
 - [x] Focused benchmark row:
   - Command: cache-disabled local DecBench `dev --function crc32 --decompilers
     fission` before/after matrix.
@@ -178,18 +191,28 @@ Comparable coverage:
     focused `gcc -O2` failure moved from timeout to runtime error, while its
     output changed from `^ length`/uninitialized `xVar2` to the load-derived
     byte and the still-invalid `data != data + length` predicate. This confirms
-    the builder fix mechanically and identifies the remaining structuring
+    the builder fix mechanically and identifies the remaining presentation
     defect; it is not a completed quality claim yet.
-- [ ] Smoke or automation sample:
-  - Command: cache-disabled dev smoke after the fix.
-  - Expected no-regression signal: clean requested-function outputs and no
-    adapter/boundary regressions.
-- [ ] Optional related checks:
+  - Measured after both fixes: `results/issue103_after_eb8b408ca_recreated.json`,
+    nine rows, still `29/54` cases and mean semantic score `0.4259`. The direct
+    `crypto_gcc_O2.exe:crc32@0x1400016e0` output now preserves
+    `xVar2 = data + length`, XORs `*data`, and compares `data != xVar2`.
+    Aggregate behavioral DecBench did not move, so this is recorded as a
+    measured anchored-row correctness repair, not a broad score improvement.
+- [x] Smoke or automation sample:
+  - Command: cache-disabled dev smoke, `--limit 20 --variant-limit 1`, after
+    the final fix.
+  - Result: completed successfully in `98.4s` and saved
+    `results/issue103_smoke_after_eb8b408ca.json`. The requested sample
+    included the repaired `crc32` O0 row at `6/6`; existing unrelated
+    compile-error and timeout rows remain visible in the artifact.
+- [x] Optional related checks:
   - Command: `cargo check --workspace`, `cargo fmt --all --check`,
     `git diff --check`, and release CLI build.
-  - Expected signal: clean compilation and formatting.
-- [ ] Boundary audit, if a new pass/helper/dependency was added: no new pass or
-  dependency is planned.
+  - Result: all listed checks passed; release CLI build passed after the final
+    fix.
+- [x] Boundary audit, if a new pass/helper/dependency was added: no new pass or
+  dependency was added.
 
 ## 6. AI Review / Prompt Firewall
 
@@ -200,8 +223,11 @@ Comparable coverage:
 - Ghidra guidance confirmed: reference/correctness use only; no output-style
   mimicry request.
 - Unseen or synthetic validation evidence:
-  - Patch validation pool command/result: pending after the fix.
-  - Synthetic invariant test command/result: pending after the fix.
+  - Patch validation pool command/result: the cache-disabled focused DecBench
+    matrix remains `29/54` with mean semantic score `0.4259`; no aggregate
+    quality claim is made.
+  - Synthetic invariant test command/result: the builder and HIR presentation
+    regressions pass `2/2`.
 
 ## 7. Review Notes
 
