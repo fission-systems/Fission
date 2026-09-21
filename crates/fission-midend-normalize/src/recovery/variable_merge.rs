@@ -220,6 +220,199 @@ fn collect_cooccurring_var_pairs_in_expr(expr: &PreHirExpr, pairs: &mut HashSet<
     }
 }
 
+struct PendingCopyMerge {
+    destination: String,
+    source: String,
+    destination_changed: bool,
+    source_changed: bool,
+}
+
+struct CopyMergeConflictCollector<'a> {
+    direct_copies: &'a HashSet<(String, String)>,
+    pending: Vec<PendingCopyMerge>,
+    blocked_pairs: HashSet<(String, String)>,
+}
+
+impl<'a> CopyMergeConflictCollector<'a> {
+    fn new(direct_copies: &'a HashSet<(String, String)>) -> Self {
+        Self {
+            direct_copies,
+            pending: Vec::new(),
+            blocked_pairs: HashSet::default(),
+        }
+    }
+
+    fn visit_stmts(&mut self, stmts: &[PreHirStmt], under_control: bool) {
+        for stmt in stmts {
+            self.visit_stmt(stmt, under_control);
+        }
+    }
+
+    fn visit_stmt(&mut self, stmt: &PreHirStmt, under_control: bool) {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                self.visit_lvalue_reads(lhs);
+                self.visit_expr(rhs);
+                if let PreHirLValue::Var(destination) = lhs {
+                    if let PreHirExpr::Var(source) = rhs
+                        && !under_control
+                        && self
+                            .direct_copies
+                            .contains(&(destination.clone(), source.clone()))
+                    {
+                        // A direct copy starts a merge candidate. It is still
+                        // a write to the destination for older candidates.
+                        self.note_write(destination);
+                        self.pending.push(PendingCopyMerge {
+                            destination: destination.clone(),
+                            source: source.clone(),
+                            destination_changed: false,
+                            source_changed: false,
+                        });
+                    } else {
+                        self.note_write(destination);
+                    }
+                }
+            }
+            PreHirStmt::VaStart { va_list, .. }
+            | PreHirStmt::Expr(va_list)
+            | PreHirStmt::Return(Some(va_list)) => self.visit_expr(va_list),
+            PreHirStmt::Block(body) => self.visit_stmts(body, under_control),
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.visit_expr(cond);
+                self.visit_stmts(then_body, true);
+                self.visit_stmts(else_body, true);
+            }
+            PreHirStmt::While { cond, body } => {
+                self.visit_expr(cond);
+                self.visit_stmts(body, true);
+            }
+            PreHirStmt::DoWhile { body, cond } => {
+                self.visit_stmts(body, true);
+                self.visit_expr(cond);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    self.visit_stmt(init, under_control);
+                }
+                if let Some(cond) = cond {
+                    self.visit_expr(cond);
+                }
+                if let Some(update) = update {
+                    self.visit_stmt(update, true);
+                }
+                self.visit_stmts(body, true);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                self.visit_expr(expr);
+                for case in cases {
+                    self.visit_stmts(&case.body, true);
+                }
+                self.visit_stmts(default, true);
+            }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+
+    fn visit_lvalue_reads(&mut self, lvalue: &PreHirLValue) {
+        match lvalue {
+            PreHirLValue::Var(_) => {}
+            PreHirLValue::Deref { ptr, .. } => self.visit_expr(ptr),
+            PreHirLValue::Index { base, index, .. } => {
+                self.visit_expr(base);
+                self.visit_expr(index);
+            }
+            PreHirLValue::FieldAccess { base, .. } => self.visit_expr(base),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &PreHirExpr) {
+        match expr {
+            PreHirExpr::Var(name) | PreHirExpr::AddressOfLocal(name) => self.note_read(name),
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => self.visit_expr(expr),
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                self.visit_expr(lhs);
+                self.visit_expr(rhs);
+            }
+            PreHirExpr::Call { args, .. } => {
+                for arg in args {
+                    self.visit_expr(arg);
+                }
+            }
+            PreHirExpr::Index { base, index, .. } => {
+                self.visit_expr(base);
+                self.visit_expr(index);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.visit_expr(cond);
+                self.visit_expr(then_expr);
+                self.visit_expr(else_expr);
+            }
+            PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
+        }
+    }
+
+    fn note_read(&mut self, name: &str) {
+        let conflicts = self
+            .pending
+            .iter()
+            .filter(|copy| {
+                (copy.destination_changed && copy.source == name)
+                    || (copy.source_changed && copy.destination == name)
+            })
+            .map(|copy| sorted_var_pair(&copy.destination, &copy.source))
+            .collect::<Vec<_>>();
+        self.blocked_pairs.extend(conflicts);
+    }
+
+    fn note_write(&mut self, name: &str) {
+        for copy in &mut self.pending {
+            if copy.destination == name {
+                copy.destination_changed = true;
+            }
+            if copy.source == name {
+                copy.source_changed = true;
+            }
+        }
+    }
+}
+
+fn collect_copy_merge_conflicts(
+    stmts: &[PreHirStmt],
+    direct_copies: &HashSet<(String, String)>,
+) -> HashSet<(String, String)> {
+    let mut collector = CopyMergeConflictCollector::new(direct_copies);
+    collector.visit_stmts(stmts, false);
+    collector.blocked_pairs
+}
+
 fn collect_read_vars_in_stmts(stmts: &[PreHirStmt], vars: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
@@ -805,7 +998,11 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     let copy_merge_barriers = collect_copy_merge_barrier_vars(&func.body, stack_state_vars);
     // Pairs that appear together in one expression (e.g. `eax = ecx + edx`) must
     // never be unified — applies to both copy-alias and disjoint live-range merge.
-    let copy_merge_blocked_pairs = collect_cooccurring_var_pairs(&func.body);
+    let mut copy_merge_blocked_pairs = collect_cooccurring_var_pairs(&func.body);
+    // A direct copy proves equality only at the copy point. If either side is
+    // then changed and the other side is read, the names carry distinct live
+    // values and must not be globally renamed into one storage identity.
+    copy_merge_blocked_pairs.extend(collect_copy_merge_conflicts(&func.body, &direct_copies));
     let copy_aliases = transitive_copy_aliases(
         &direct_copies,
         &local_names,
@@ -2422,5 +2619,100 @@ mod tests {
             panic!("expected binary return");
         };
         assert_ne!(lhs, rhs, "co-occurring group members were merged");
+    }
+
+    #[test]
+    fn variable_merge_preserves_source_after_copy_is_mutated() {
+        let int_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let binding = |name: &str| PreHirBinding {
+            name: name.to_string(),
+            ty: int_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+        let mut func = PreHirFunction {
+            name: "copy_then_mutate_source".to_string(),
+            params: vec![],
+            locals: vec![
+                binding("r12"),
+                binding("uVar5"),
+                binding("rdi"),
+                binding("iVar36"),
+            ],
+            return_type: int_ty.clone(),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("uVar5".to_string()),
+                    rhs: PreHirExpr::Var("r12".to_string()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("uVar5".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("uVar5".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(0xffff_fffe, int_ty.clone())),
+                        ty: int_ty.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rdi".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Sub,
+                        lhs: Box::new(PreHirExpr::Var("rdi".to_string())),
+                        rhs: Box::new(PreHirExpr::Var("uVar5".to_string())),
+                        ty: int_ty.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("iVar36".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("r12".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(1, int_ty.clone())),
+                        ty: int_ty.clone(),
+                    },
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("iVar36".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        apply_variable_merge_pass(&mut func);
+
+        assert!(func.locals.iter().any(|binding| binding.name == "r12"));
+        assert!(func.locals.iter().any(|binding| binding.name == "uVar5"));
+        assert!(
+            matches!(
+                &func.body[1],
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(lhs),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: inner_lhs,
+                        ..
+                    },
+                } if lhs == "uVar5"
+                    && matches!(inner_lhs.as_ref(), PreHirExpr::Var(name) if name == "uVar5")
+            ),
+            "the copied value must keep its own masked definition: {func:?}"
+        );
+        assert!(
+            func.body.iter().any(|stmt| matches!(
+                stmt,
+                PreHirStmt::Assign {
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: inner_lhs,
+                        ..
+                    },
+                    ..
+                } if matches!(inner_lhs.as_ref(), PreHirExpr::Var(name) if name == "r12")
+            )),
+            "the source value must remain available for the later parity read: {func:?}"
+        );
     }
 }
