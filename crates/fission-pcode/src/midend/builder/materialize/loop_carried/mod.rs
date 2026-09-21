@@ -28,6 +28,26 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let block_idx = block_idx?;
+        // ABI slot membership alone is not formal-parameter evidence.  When
+        // entry-use inference proved that this slot is not an input, let the
+        // scalar-SSA phi/latch proof claim the shared loop binding before the
+        // fallback hardware name does.  This matters when the latch is
+        // lowered before its preheader definition has been materialized.
+        let is_unproven_entry_slot = self
+            .abi_state()
+            .param_slot_for_varnode(output)
+            .is_some_and(|index| index >= self.entry_arity);
+        if is_unproven_entry_slot
+            && let Some(name) = self.loop_head_phi_latch_binding_name(block, op_idx, output)
+        {
+            return Some(name);
+        }
+        if is_unproven_entry_slot
+            && let Some(name) =
+                self.loop_head_phi_latch_binding_name_for_widened_alias(block, op_idx, output)
+        {
+            return Some(name);
+        }
         let proof = self.prove_loop_carried_register_update(block_idx, op_idx, output)?;
         debug_assert_eq!(proof.definition_site(), (block_idx, op_idx));
         let loop_head = proof.loop_head();

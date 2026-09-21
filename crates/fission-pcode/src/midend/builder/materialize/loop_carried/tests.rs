@@ -735,6 +735,199 @@ fn loop_carried_register_update_reuses_wide_prior_for_gpr32_update() {
     );
 }
 
+/// A loop latch can be lowered before its preheader definition has been
+/// materialized.  The scalar-SSA phi still identifies the preheader value,
+/// so the latch must reserve the ordinary temporary binding for that
+/// definition instead of falling back to the ABI register name.  This is the
+/// shape behind a self-cleared Windows x64 argument register reused as a loop
+/// cursor: the slot is ABI-capable, but entry arity has already proved it is
+/// not a formal parameter.
+#[test]
+fn loop_phi_reserves_unmaterialized_entry_binding_for_unproven_abi_slot() {
+    let rcx = reg(0x08, 8);
+    let rdx = reg(0x10, 8);
+    let r9d = reg(0x88, 4);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                // Establish only the first two Windows x64 parameter slots.
+                op(
+                    0,
+                    PcodeOpcode::IntAnd,
+                    Some(varnode(0x200)),
+                    vec![rcx.clone(), rcx],
+                ),
+                op(
+                    1,
+                    PcodeOpcode::IntAnd,
+                    Some(varnode(0x208)),
+                    vec![rdx.clone(), rdx],
+                ),
+                // The R9D slot is initialized in the entry block, not read as
+                // an incoming parameter.
+                op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(r9d.clone()),
+                    vec![Varnode::constant(0, 4)],
+                ),
+                op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                // The loop head consumes the incoming phi value before any
+                // redefinition, making the latch value a genuine carrier.
+                op(
+                    4,
+                    PcodeOpcode::IntEqual,
+                    Some(varnode(0x210)),
+                    vec![r9d.clone(), Varnode::constant(0, 4)],
+                ),
+                op(5, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(
+                    6,
+                    PcodeOpcode::Copy,
+                    Some(r9d.clone()),
+                    vec![Varnode::constant(7, 4)],
+                ),
+                op(7, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(0x1030, 3, vec![op(8, PcodeOpcode::Return, None, vec![])]),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![2];
+    blocks[2].successors = vec![1, 3];
+    blocks[3].successors = vec![];
+
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let entry_key = MaterializedVarnodeKey::new(&r9d, &pcode.blocks[0].ops[2]);
+    assert!(
+        !builder.materialized_vns.contains_key(&entry_key),
+        "the regression must exercise latch-first lowering"
+    );
+
+    let name = builder
+        .loop_head_phi_latch_binding_name(&pcode.blocks[2], 0, &r9d)
+        .expect("latch phi should reserve the entry binding");
+    assert!(
+        name.starts_with("uVar") || name.starts_with("xVar"),
+        "an unproven ABI slot must use a private temporary, got {name}"
+    );
+    assert_eq!(
+        builder
+            .explicit_merge_bindings
+            .get(&(0, VarnodeKey::from(&r9d))),
+        Some(&name),
+        "the reserved entry binding must be visible to later preheader materialization"
+    );
+}
+
+/// A narrow read/modify/write can feed the loop-head phi through an adjacent
+/// wider alias (`R9D = R9D + 1; R9 = zext(R9D)`).  Binding the narrow output to
+/// the hardware lane loses the loop carrier when scalar SSA attaches the phi
+/// to the wider definition; the alias proof must thread both definitions onto
+/// the same reserved entry binding.
+#[test]
+fn loop_phi_threads_narrow_update_through_widened_alias() {
+    let rcx = reg(0x08, 8);
+    let rdx = reg(0x10, 8);
+    let r9d = reg(0x88, 4);
+    let r9 = reg(0x88, 8);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntAnd,
+                    Some(varnode(0x220)),
+                    vec![rcx.clone(), rcx],
+                ),
+                op(
+                    1,
+                    PcodeOpcode::IntAnd,
+                    Some(varnode(0x228)),
+                    vec![rdx.clone(), rdx],
+                ),
+                op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(r9d.clone()),
+                    vec![Varnode::constant(0, 4)],
+                ),
+                op(3, PcodeOpcode::IntZExt, Some(r9.clone()), vec![r9d.clone()]),
+                op(4, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    5,
+                    PcodeOpcode::IntEqual,
+                    Some(varnode(0x230)),
+                    vec![r9.clone(), Varnode::constant(0, 8)],
+                ),
+                op(6, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(
+                    7,
+                    PcodeOpcode::IntAdd,
+                    Some(r9d.clone()),
+                    vec![r9d.clone(), Varnode::constant(1, 4)],
+                ),
+                op(8, PcodeOpcode::IntZExt, Some(r9.clone()), vec![r9d.clone()]),
+                op(9, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(0x1030, 3, vec![op(10, PcodeOpcode::Return, None, vec![])]),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![2];
+    blocks[2].successors = vec![1, 3];
+    blocks[3].successors = vec![];
+
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    });
+
+    let name = builder
+        .loop_carried_output_binding_name(&pcode.blocks[2], 0, &pcode.blocks[2].ops[0], &r9d)
+        .expect("narrow loop update should inherit the widened phi carrier");
+    assert!(
+        name.starts_with("uVar") || name.starts_with("xVar"),
+        "unproven ABI slot must not fall back to the hardware lane, got {name}"
+    );
+}
+
 #[test]
 fn loop_carried_proof_rejects_register_phase_killed_before_backedge() {
     let edx = reg(0x8, 4);

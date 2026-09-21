@@ -39,12 +39,14 @@ impl<'a> PreviewBuilder<'a> {
         };
         let pieces = self.scalar_ssa.operation_outputs.get(&site)?.clone();
         let mut chosen: Option<String> = None;
-        for loop_body in self
+        let loop_bodies = self
             .loop_bodies
             .iter()
             .filter(|loop_body| loop_body.body.contains(&block_idx))
-        {
-            let Some(phis) = self.scalar_ssa.phis.get(&(loop_body.head as u32)) else {
+            .cloned()
+            .collect::<Vec<_>>();
+        for loop_body in loop_bodies {
+            let Some(phis) = self.scalar_ssa.phis.get(&(loop_body.head as u32)).cloned() else {
                 continue;
             };
             for phi in phis {
@@ -74,7 +76,7 @@ impl<'a> PreviewBuilder<'a> {
                     constant_val: 0,
                 };
                 let head_key = VarnodeKey::from(&storage_varnode);
-                if !self.loop_phi_output_read_before_redefinition(loop_body, &head_key) {
+                if !self.loop_phi_output_read_before_redefinition(&loop_body, &head_key) {
                     continue;
                 }
                 let mut names = BTreeSet::new();
@@ -90,12 +92,14 @@ impl<'a> PreviewBuilder<'a> {
                         .blocks
                         .get(definition.block as usize)?
                         .ops
-                        .get(definition.op as usize)?;
-                    let definition_output = definition_op.output.as_ref()?;
-                    let name = self.materialized_vns.get(&MaterializedVarnodeKey::new(
-                        definition_output,
-                        definition_op,
-                    ))?;
+                        .get(definition.op as usize)?
+                        .clone();
+                    let definition_output = definition_op.output.as_ref()?.clone();
+                    let name = self.loop_phi_entry_binding_name(
+                        definition,
+                        &definition_op,
+                        &definition_output,
+                    )?;
                     names.insert(name.clone());
                 }
                 let mut names = names.into_iter();
@@ -120,6 +124,111 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         chosen.filter(|name| self.temps.get(name.as_str()).is_some())
+    }
+
+    /// A partial-register update may be represented by a narrow definition
+    /// followed immediately by a wider zero/sign-extension of the same
+    /// storage. Scalar SSA can attach the loop-head phi to the wider
+    /// definition, while the narrow definition is the one that the return
+    /// path and the next arithmetic operation read. Reuse the wider
+    /// definition's phi-latch binding instead of falling back to a hardware
+    /// name for the narrow alias.
+    pub(super) fn loop_head_phi_latch_binding_name_for_widened_alias(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<String> {
+        if output.is_constant || output.size >= self.options.pointer_size {
+            return None;
+        }
+        let current_op = block.ops.get(op_idx)?;
+        if !Self::op_reads_varnode_key(current_op, &VarnodeKey::from(output)) {
+            return None;
+        }
+        let candidates = block
+            .ops
+            .iter()
+            .enumerate()
+            .skip(op_idx + 1)
+            .filter_map(|(candidate_idx, candidate)| {
+                if !matches!(
+                    candidate.opcode,
+                    PcodeOpcode::Copy
+                        | PcodeOpcode::Cast
+                        | PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                ) {
+                    return None;
+                }
+                let input = candidate.inputs.first()?;
+                let candidate_output = candidate.output.as_ref()?;
+                if input.is_constant
+                    || candidate_output.is_constant
+                    || input.space_id != output.space_id
+                    || input.offset != output.offset
+                    || input.size != output.size
+                    || candidate_output.space_id != output.space_id
+                    || candidate_output.offset != output.offset
+                    || candidate_output.size <= output.size
+                {
+                    return None;
+                }
+                Some((candidate_idx, candidate_output.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        candidates
+            .into_iter()
+            .find_map(|(candidate_idx, candidate_output)| {
+                self.loop_head_phi_latch_binding_name(block, candidate_idx, &candidate_output)
+            })
+    }
+
+    /// Resolve the name of a phi entry definition even when loop materialization
+    /// reaches the latch before the defining block.  Ordinary materialization
+    /// remains the source of truth: reserve its normal temporary binding and
+    /// place the reservation in the same merge-name table used by later join
+    /// recovery.  Proven entry parameters are deliberately not converted into
+    /// temporaries; the caller's existing threadable-name gate rejects those
+    /// formal names.
+    fn loop_phi_entry_binding_name(
+        &mut self,
+        definition: fission_midend_core::ir::SsaOpSite,
+        definition_op: &PcodeOp,
+        definition_output: &Varnode,
+    ) -> Option<String> {
+        let materialized_key = MaterializedVarnodeKey::new(definition_output, definition_op);
+        if let Some(name) = self.materialized_vns.get(&materialized_key).cloned() {
+            return Some(name);
+        }
+
+        let merge_key = (
+            definition.block as usize,
+            VarnodeKey::from(definition_output),
+        );
+        if let Some(name) = self.explicit_merge_bindings.get(&merge_key).cloned()
+            && self.temps.contains_key(&name)
+        {
+            return Some(name);
+        }
+
+        if self
+            .abi_state()
+            .param_slot_for_varnode(definition_output)
+            .is_some_and(|index| index < self.entry_arity)
+        {
+            return self.register_param(definition_output);
+        }
+
+        let name = self
+            .ensure_temp_binding_for_output(definition_op, definition_output, true)
+            .name;
+        self.explicit_merge_bindings
+            .entry(merge_key)
+            .or_insert_with(|| name.clone());
+        self.invalidate_materialization_dependent_caches();
+        Some(name)
     }
 
     /// Whether the value entering the loop head through the phi is genuinely
