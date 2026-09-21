@@ -355,7 +355,20 @@ fn optimize_expr(
             {
                 let val_ty = get_expr_type(val, type_map);
                 let val_bits = scalar_bit_width(&val_ty).unwrap_or(64);
-                if outer_bits <= inner_bits || val_bits <= inner_bits {
+                let signedness_preserved = match (&val_ty, &*inner_ty) {
+                    (
+                        NirType::Int {
+                            signed: value_signed,
+                            ..
+                        },
+                        NirType::Int {
+                            signed: inner_signed,
+                            ..
+                        },
+                    ) => value_signed == inner_signed,
+                    _ => true,
+                };
+                if outer_bits <= inner_bits || (val_bits <= inner_bits && signedness_preserved) {
                     *expr = PreHirExpr::Cast {
                         ty: outer_ty.clone(),
                         expr: Box::new((**val).clone()),
@@ -468,5 +481,46 @@ mod tests {
                 expr: Box::new(PreHirExpr::Var("x".to_string())),
             }
         );
+    }
+
+    #[test]
+    fn test_double_cast_preserves_signedness_changing_intermediate() {
+        let mut type_map = HashMap::default();
+        type_map.insert(
+            "x".to_string(),
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        );
+
+        // (u64)(u32)x is not equivalent to (u64)x when x is signed: a
+        // negative x must be zero-extended at 32 bits before widening.
+        let mut expr = PreHirExpr::Cast {
+            ty: u64_ty(),
+            expr: Box::new(PreHirExpr::Cast {
+                ty: u32_ty(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+        };
+
+        let nz_masks = HashMap::default();
+        assert!(!optimize_expr(&mut expr, &type_map, &nz_masks));
+        assert!(matches!(
+            expr,
+            PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false
+                },
+                expr
+            } if matches!(expr.as_ref(), PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false
+                },
+                ..
+            })
+        ));
     }
 }

@@ -340,5 +340,48 @@ fn should_drop_inner_scalar_cast(
         return true;
     }
 
-    outer_bits == inner_bits && outer_signed == inner_signed
+    if outer_bits == inner_bits {
+        return outer_signed == inner_signed;
+    }
+
+    // A widening cast cannot discard an intermediate cast that changes the
+    // source's signedness.  For example, `u64((u32)i32_value)` must clear the
+    // upper 32 bits before widening; rewriting it to `u64(i32_value)` changes
+    // a negative low lane into an all-ones 64-bit value.  Keep the inner cast
+    // whenever its signedness is known to differ from the source expression.
+    let Some((_, source_signed)) = scalar_cast_signature(source_ty) else {
+        return true;
+    };
+    if source_signed != inner_signed {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int_ty(bits: u32, signed: bool) -> NirType {
+        NirType::Int { bits, signed }
+    }
+
+    #[test]
+    fn widening_cast_keeps_signedness_changing_intermediate() {
+        let signed_source = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Const(1, int_ty(32, false))),
+            ty: int_ty(32, true),
+        };
+        let expr = PreHirExpr::Cast {
+            ty: int_ty(64, false),
+            expr: Box::new(PreHirExpr::Cast {
+                ty: int_ty(32, false),
+                expr: Box::new(signed_source),
+            }),
+        };
+
+        assert!(canonicalize_integer_expr(&expr).is_none());
+    }
 }

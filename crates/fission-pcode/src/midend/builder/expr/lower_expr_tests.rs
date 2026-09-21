@@ -183,6 +183,37 @@ fn scalar_ssa_piece_reassembly_preserves_adjacent_partial_register_definitions()
 }
 
 #[test]
+fn scalar_ssa_piece_reassembly_zero_extends_signed_narrow_pieces() {
+    let low = register(0x1200, 4);
+    let high = register(0x1204, 4);
+    let wide = register(0x1200, 8);
+    let low_input = register(0x20, 4);
+    let high_input = register(0x24, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntSub,
+                Some(low),
+                vec![low_input, constant_sized(1, 4)],
+            ),
+            op(1, PcodeOpcode::Copy, Some(high), vec![high_input]),
+            op(2, PcodeOpcode::Return, None, vec![wide]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "signed_piece_reassembly", 0x1000, &test_options())
+        .expect("render signed adjacent partial register definitions");
+
+    assert!(
+        code.contains("(uint)(rsp - 1)") && !code.contains("(unsigned long long)(rsp - 1)"),
+        "expected each signed 32-bit piece to be zero-extended before reassembly:\n{code}"
+    );
+}
+
+#[test]
 fn diamond_join_lowers_branch_local_register_defs_as_select() {
     let cond = varnode(0x80);
     let rax = register(0, 8);
