@@ -1299,10 +1299,11 @@
   8/9 perfect rows. The default wrapper does not exercise a negative status
   code, so it does not expose the motivating semantic defect in its aggregate
   score.</li>
-<li>Direct output defect: the gcc <code>-O2</code> NIR output renders the unsigned machine
-  comparisons as <code>(int)(code - 1)</code> and <code>code - 400 &lt; 100</code>. For <code>code &lt; 0</code>,
-  the source returns <code>0</code>, but the rendered body returns <code>2</code> because the first
-  range comparison is evaluated with signed C arithmetic.</li>
+<li>Direct output defect: the gcc <code>-O2</code> NIR output rendered unsigned machine
+  comparisons as signed C expressions. The first two range checks were fixed
+  by the preceding comparison-boundary change, but the third check remained
+  as <code>code - 400 &lt; 100</code> after copy cleanup. That residual expression returned
+  <code>-1</code> for <code>code</code> in <code>200..399</code>, although the source returns <code>0</code>.</li>
 </ul>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1330,7 +1331,7 @@ path already distinguishes unsigned CF/ZF predicates from signed predicates.
 The fix therefore makes the final <code>Lt</code>/<code>Le</code>/<code>Gt</code>/<code>Ge</code> operand boundary
 explicit, without changing the generic <code>IntSub</code> type or adding a function or
 address guard.</p>
-<p>The real row narrowed the failure to this sequence:</p>
+<p>The first fix narrowed the real row to this sequence:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>before final normalize:  (int)(code - 1) &lt; 98
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>unsigned-boundary pass:  (uint)(code - 1) &lt; 98
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>atomic variable inputs:  unchanged when their type is unknown/already unsigned
@@ -1338,6 +1339,13 @@ address guard.</p>
 <p>The cast is not a conversion of the arithmetic producer; it is a bit-pattern
 reinterpretation at the unsigned comparison boundary. Signed comparisons and
 already-unsigned or untyped atomic operands retain the old output shape.</p>
+<p>The remaining row-specific-looking expression exposed a second, more general
+ordering hole. The builder emitted an unsigned temporary for <code>uVar22 =
+code - 400</code>, followed by <code>IntLess uVar22, 100</code>. The final copy/alias cleanup
+replaced that temporary with the signed binding <code>iVar18</code> after the builder had
+already established the unsigned comparison. The final cleanup now restores
+the boundary from the binding type, so it covers the same alias shape wherever
+it occurs.</p>
 <h2 id="3-generalized-rule">3. Generalized Rule<a class="headerlink" href="#3-generalized-rule" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>An unsigned p-code comparison must compare scalar integer operands at the
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>comparison width as unsigned values, even when an operand is a signed-looking
@@ -1348,7 +1356,9 @@ already-unsigned or untyped atomic operands retain the old output shape.</p>
 <p>This covers direct <code>IntLess</code>/<code>IntLessEqual</code> expressions and x86 CF/ZF-derived
 branch predicates once they are represented as shared NIR comparisons. It is
 an ISA-agnostic comparison invariant; x86 only supplies one flag-shaped
-consumer.</p>
+consumer. The binding-aware final cleanup applies only to signed scalar
+integer operands, preserving unknown, pointer, aggregate, and already-unsigned
+values.</p>
 <h2 id="4-validation-matrix">4. Validation Matrix<a class="headerlink" href="#4-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
 <li>[x] Focused synthetic p-code regression: a signed-looking <code>IntSub</code> used by
@@ -1359,10 +1369,15 @@ consumer.</p>
   unchanged.</li>
 <li>[x] Real-binary direct output: <code>process_code@0x140001730</code> contains
   unsigned range comparisons for the subtracted operands.</li>
-<li>[ ] Cache-disabled DecBench rerun on the same nine <code>process_code</code> rows.</li>
+<li>[x] Actual emitted body execution: <code>-1</code>, <code>200</code>, and <code>399</code> return <code>0</code>, while
+  <code>400</code> and <code>499</code> return <code>-1</code>; the remaining source cases also match.</li>
+<li>[ ] Cache-disabled DecBench rerun on the same nine <code>process_code</code> rows;
+  record the final artifact path and whether the standard wrapper's aggregate
+  moved after the implementation commit.</li>
 <li>[x] <code>cargo nextest run -p fission-pcode</code> and emulator regression (three
   pre-existing #103 pcode failures remain).</li>
-<li>[ ] Workspace check, format/diff check, and release CLI build.</li>
+<li>[x] Full normalize nextest, workspace check, format/diff check, and release
+  CLI build.</li>
 </ul>
 <h2 id="5-measurement-interpretation">5. Measurement Interpretation<a class="headerlink" href="#5-measurement-interpretation" title="Permanent link">&para;</a></h2>
 <p>The official dev wrapper uses <code>process_code(100)</code> and its standard case set,
