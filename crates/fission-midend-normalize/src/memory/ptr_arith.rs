@@ -442,11 +442,17 @@ struct AddTreeState {
     non_multiples: Vec<(PreHirExpr, i64)>,
     non_mult_const: i64,
     other_terms: Vec<PreHirExpr>,
+    preserve_const_bytes: bool,
     valid: bool,
 }
 
 impl AddTreeState {
-    fn new(ptr_expr: PreHirExpr, ptr_ty: NirType, pointer_layout: PointerLayout) -> Self {
+    fn new(
+        ptr_expr: PreHirExpr,
+        ptr_ty: NirType,
+        pointer_layout: PointerLayout,
+        preserve_const_bytes: bool,
+    ) -> Self {
         let elem_ty = pointee_ty(&ptr_ty).cloned().unwrap_or(NirType::Unknown);
         let elem_size = type_byte_size(&elem_ty, pointer_layout).unwrap_or(1) as i64;
         let elem_size = if elem_size <= 0 { 1 } else { elem_size };
@@ -460,6 +466,7 @@ impl AddTreeState {
             non_multiples: Vec::new(),
             non_mult_const: 0,
             other_terms: Vec::new(),
+            preserve_const_bytes,
             valid: true,
         }
     }
@@ -513,6 +520,15 @@ impl AddTreeState {
             PreHirExpr::Const(k, _) => {
                 let val = k.wrapping_mul(coeff);
                 self.add_const_term(val);
+            }
+            PreHirExpr::Unary {
+                op: PreHirUnaryOp::Neg,
+                expr: inner,
+                ..
+            } if matches!(inner.as_ref(), PreHirExpr::Const(_, _)) => {
+                if let PreHirExpr::Const(k, _) = inner.as_ref() {
+                    self.add_const_term(k.wrapping_neg().wrapping_mul(coeff));
+                }
             }
             other => {
                 if other == &self.ptr_expr {
@@ -590,7 +606,7 @@ impl AddTreeState {
         }
 
         let mult_const_elements = self.mult_const / self.elem_size;
-        if mult_const_elements != 0 {
+        if !self.preserve_const_bytes && mult_const_elements != 0 {
             index_terms.push(PreHirExpr::Const(
                 mult_const_elements,
                 NirType::Int {
@@ -655,6 +671,13 @@ impl AddTreeState {
             };
         }
 
+        if self.preserve_const_bytes && self.mult_const != 0 {
+            base = PreHirExpr::PtrOffset {
+                base: Box::new(base),
+                offset: self.mult_const,
+            };
+        }
+
         if base == self.ptr_expr {
             None
         } else {
@@ -703,7 +726,8 @@ fn try_recover_ptr_arith_tree(
         return None;
     }
 
-    let mut state = AddTreeState::new(ptr_expr, ptr_ty, pointer_layout);
+    let preserve_const_bytes = !matches!(expr_type(expr), NirType::Ptr(_));
+    let mut state = AddTreeState::new(ptr_expr, ptr_ty, pointer_layout, preserve_const_bytes);
     for term in non_ptr_accum {
         state.span_add_tree(&term, 1);
     }
@@ -786,7 +810,12 @@ fn try_recover_ptr_arith(
     };
 
     let (ptr_expr, rhs_expr, neg) = match op {
-        PreHirBinaryOp::Add => (lhs.as_ref(), rhs.as_ref(), false),
+        PreHirBinaryOp::Add if typed_pointer_base(lhs, binding_types).is_some() => {
+            (lhs.as_ref(), rhs.as_ref(), false)
+        }
+        PreHirBinaryOp::Add if typed_pointer_base(rhs, binding_types).is_some() => {
+            (rhs.as_ref(), lhs.as_ref(), false)
+        }
         PreHirBinaryOp::Sub => (lhs.as_ref(), rhs.as_ref(), true),
         _ => return None,
     };
@@ -883,15 +912,17 @@ fn try_recover_ptr_arith(
     // +sizeof(int), breaking Pair/KV value loads (`accumulate_pairs`-class).
     if let PreHirExpr::Const(k, _) = rhs_expr {
         let offset = if neg { -k } else { *k };
-        if let Some(recovered) = recover_const_offset_as_typed_pointer_add(
-            &typed_ptr_expr,
-            &ptr_ty,
-            &elem_ty,
-            offset,
-            rhs_expr,
-            pointer_layout,
-        ) {
-            return Some(recovered);
+        if matches!(ty, NirType::Ptr(_)) || from_byte_cast {
+            if let Some(recovered) = recover_const_offset_as_typed_pointer_add(
+                &typed_ptr_expr,
+                &ptr_ty,
+                &elem_ty,
+                offset,
+                rhs_expr,
+                pointer_layout,
+            ) {
+                return Some(recovered);
+            }
         }
         if from_byte_cast && offset == 0 {
             return Some(typed_ptr_expr.clone());
@@ -2167,9 +2198,10 @@ mod tests {
         ));
     }
 
-    /// Add(Var("p"), Const(4)) where p: Ptr(uint32) → Add(Var("p"), Const(1)).
+    /// Scalar address arithmetic keeps its constant in bytes, even when the
+    /// base binding has a recovered pointee type.
     #[test]
-    fn rescales_scalar_add_const_to_typed_pointer_add() {
+    fn preserves_scalar_add_const_as_byte_offset() {
         let elem_ty = NirType::Int {
             bits: 32,
             signed: false,
@@ -2199,17 +2231,111 @@ mod tests {
         if let PreHirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(matches!(
                 rhs,
-                PreHirExpr::Binary {
-                    op: PreHirBinaryOp::Add,
-                    lhs,
-                    rhs,
-                    ty: NirType::Ptr(_),
-                } if matches!(lhs.as_ref(), PreHirExpr::Var(name) if name == "p")
-                    && matches!(rhs.as_ref(), PreHirExpr::Const(1, _))
+                PreHirExpr::PtrOffset {
+                    base,
+                    offset: 4,
+                } if matches!(base.as_ref(), PreHirExpr::Var(name) if name == "p")
             ));
         } else {
             panic!("expected assign");
         }
+    }
+
+    #[test]
+    fn recovers_reversed_scalar_pointer_add_as_byte_offset() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(elem_ty));
+        let scalar_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("cursor".to_owned()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Const(-4, scalar_ty.clone())),
+                rhs: Box::new(PreHirExpr::Var("base".to_owned())),
+                ty: scalar_ty,
+            },
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("base", ptr_ty)], body);
+
+        assert!(super::apply_ptr_arith_recovery_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::PtrOffset { base, offset: -4 },
+                ..
+            } if matches!(base.as_ref(), PreHirExpr::Var(name) if name == "base")
+        ));
+    }
+
+    #[test]
+    fn recovers_byte_affine_last_element_offset() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(elem_ty.clone()));
+        let index_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let scaled_index = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Var("index".to_owned())),
+            rhs: Box::new(PreHirExpr::Const(4, index_ty.clone())),
+            ty: index_ty.clone(),
+        };
+        let address = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("base".to_owned())),
+                rhs: Box::new(scaled_index),
+                ty: index_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(4, index_ty.clone())),
+            ty: index_ty.clone(),
+        };
+        let mut func = make_func(
+            vec![
+                make_binding_with_ty("base", ptr_ty),
+                make_binding_with_ty("index", index_ty),
+            ],
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("value".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(address),
+                    ty: elem_ty,
+                },
+            }],
+        );
+
+        super::apply_ptr_arith_recovery_pass(&mut func);
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs:
+                    PreHirExpr::Load {
+                        ptr,
+                        ty: NirType::Int { bits: 32, signed: true },
+                    },
+                ..
+            } if matches!(ptr.as_ref(), PreHirExpr::PtrOffset {
+                base,
+                offset: -4,
+            } if matches!(base.as_ref(), PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs,
+                rhs,
+                ..
+            } if matches!(lhs.as_ref(), PreHirExpr::Var(name) if name == "base")
+                && matches!(rhs.as_ref(), PreHirExpr::Var(name) if name == "index")))
+        ));
     }
 
     /// Pointer-valued Add(Var("p"), Mul(Var("i"), Const(4))) where p: Ptr(uint32)
