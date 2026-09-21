@@ -3452,6 +3452,48 @@ fn preview_recovers_cmp_jb_as_unsigned_lt() {
 }
 
 #[test]
+fn preview_recovers_cmp_jb_with_unsigned_compound_difference() {
+    let diff = uniq(0x340, 4);
+    let cf = reg(0x210, 1);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x406100,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x406100,
+                    output: Some(diff.clone()),
+                    inputs: vec![reg(0x00, 4), cst(400, 4)],
+                    asm_mnemonic: Some("SUB EAX,0x190".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntLess,
+                    address: 0x406100,
+                    output: Some(cf.clone()),
+                    inputs: vec![diff, cst(100, 4)],
+                    asm_mnemonic: Some("CMP EAX,0x64".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x406101,
+                    output: None,
+                    inputs: vec![cst(0x406200, 4), cf],
+                    asm_mnemonic: Some("JB 0x406200".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let cond = lower_x86_cond_expr(&func);
+    assert_eq!(print_prehir_expr(&cond), "(uint)(eax - 400) < 100");
+}
+
+#[test]
 fn preview_recovers_cmp_jl_as_signed_lt() {
     let diff = uniq(0x330, 4);
     let sf = reg(0x207, 1);

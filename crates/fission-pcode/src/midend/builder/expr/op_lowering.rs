@@ -557,6 +557,15 @@ impl<'a> PreviewBuilder<'a> {
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
         self.note_operand_metatypes(op.opcode, &[&lhs, &rhs]);
+        let (lhs, rhs) = if matches!(op.opcode, PcodeOpcode::IntLess | PcodeOpcode::IntLessEqual) {
+            let bits = op.inputs[0].size.saturating_mul(8);
+            (
+                self.coerce_unsigned_compare_operand(lhs, bits),
+                self.coerce_unsigned_compare_operand(rhs, bits),
+            )
+        } else {
+            (lhs, rhs)
+        };
         let output = op
             .output
             .as_ref()
@@ -580,6 +589,35 @@ impl<'a> PreviewBuilder<'a> {
             rhs: Box::new(rhs),
             ty,
         })
+    }
+
+    /// Preserve the bit-vector interpretation of a compound signed value when
+    /// an x86 flag recovery path reconstructs an unsigned comparison.  Leave
+    /// unknown/atomic operands untouched; their eventual ABI/type recovery is
+    /// the source of truth and blindly adding `(uint)` to every register pair
+    /// changes the established output shape.
+    pub(in crate::midend) fn coerce_unsigned_compare_operand(
+        &self,
+        expr: PreHirExpr,
+        bits: u32,
+    ) -> PreHirExpr {
+        let NirType::Int {
+            bits: source_bits,
+            signed: true,
+        } = expr_type(&expr)
+        else {
+            return expr;
+        };
+        if source_bits != bits {
+            return expr;
+        }
+        PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: bits.max(1),
+                signed: false,
+            },
+            expr: Box::new(expr),
+        }
     }
 
     /// CDQ-class dividend low half for signed rem/div.

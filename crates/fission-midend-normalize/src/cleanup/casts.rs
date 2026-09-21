@@ -105,30 +105,42 @@ fn strip_redundant_casts_in_expr(
     expr: &mut PreHirExpr,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
+    strip_redundant_casts_in_expr_with_context(expr, type_map, false)
+}
+
+fn strip_redundant_casts_in_expr_with_context(
+    expr: &mut PreHirExpr,
+    type_map: &HashMap<String, NirType>,
+    is_unsigned_compare_operand: bool,
+) -> bool {
     let mut changed = false;
     match expr {
         PreHirExpr::Cast { expr: inner, .. } => {
-            changed |= strip_redundant_casts_in_expr(inner, type_map);
+            changed |= strip_redundant_casts_in_expr_with_context(inner, type_map, false);
         }
         PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. }
         | PreHirExpr::FieldAccess { base: inner, .. } => {
-            changed |= strip_redundant_casts_in_expr(inner, type_map);
+            changed |= strip_redundant_casts_in_expr_with_context(inner, type_map, false);
         }
-        PreHirExpr::Binary { lhs, rhs, .. } => {
-            changed |= strip_redundant_casts_in_expr(lhs, type_map);
-            changed |= strip_redundant_casts_in_expr(rhs, type_map);
+        PreHirExpr::Binary { op, lhs, rhs, .. } => {
+            let preserve_operands = matches!(
+                op,
+                PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge
+            );
+            changed |= strip_redundant_casts_in_expr_with_context(lhs, type_map, preserve_operands);
+            changed |= strip_redundant_casts_in_expr_with_context(rhs, type_map, preserve_operands);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                changed |= strip_redundant_casts_in_expr(arg, type_map);
+                changed |= strip_redundant_casts_in_expr_with_context(arg, type_map, false);
             }
         }
         PreHirExpr::Index { base, index, .. } => {
-            changed |= strip_redundant_casts_in_expr(base, type_map);
-            changed |= strip_redundant_casts_in_expr(index, type_map);
+            changed |= strip_redundant_casts_in_expr_with_context(base, type_map, false);
+            changed |= strip_redundant_casts_in_expr_with_context(index, type_map, false);
         }
         PreHirExpr::Select {
             cond,
@@ -136,9 +148,9 @@ fn strip_redundant_casts_in_expr(
             else_expr,
             ..
         } => {
-            changed |= strip_redundant_casts_in_expr(cond, type_map);
-            changed |= strip_redundant_casts_in_expr(then_expr, type_map);
-            changed |= strip_redundant_casts_in_expr(else_expr, type_map);
+            changed |= strip_redundant_casts_in_expr_with_context(cond, type_map, false);
+            changed |= strip_redundant_casts_in_expr_with_context(then_expr, type_map, false);
+            changed |= strip_redundant_casts_in_expr_with_context(else_expr, type_map, false);
         }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -148,7 +160,9 @@ fn strip_redundant_casts_in_expr(
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         if let PreHirExpr::Var(name) = inner.as_ref() {
             if let Some(var_ty) = type_map.get(name) {
-                if var_ty == ty {
+                let is_unsigned_compare_boundary =
+                    is_unsigned_compare_operand && matches!(ty, NirType::Int { signed: false, .. });
+                if var_ty == ty && !is_unsigned_compare_boundary {
                     *expr = (**inner).clone();
                     changed = true;
                 }
@@ -518,6 +532,278 @@ fn elide_casts_in_stmt(
     }
 }
 
+/// Restore the C-level unsigned interpretation at the final comparison
+/// boundary after alias/copy cleanup.
+///
+/// P-code `IntLess`/`IntLessEqual` are unsigned comparisons, while generic
+/// arithmetic such as `IntSub` has no signedness in its opcode.  Earlier
+/// lowering can therefore preserve the distinction as an explicit cast or as
+/// an unsigned temporary.  A later pure-copy cleanup may replace that
+/// temporary with a signed binding and remove the only visible cast.  The
+/// binding table is the canonical type fact available at this stage, so add
+/// the cast back only when a comparison operand is known to be signed.  An
+/// untyped atomic value is deliberately left alone.
+pub fn canonicalize_unsigned_compare_binding_casts(func: &mut PreHirFunction) -> bool {
+    let binding_types: HashMap<String, NirType> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| (binding.name.clone(), binding.ty.clone()))
+        .collect();
+    if binding_types.is_empty() {
+        return false;
+    }
+    canonicalize_unsigned_compare_binding_casts_in_stmts(&mut func.body, &binding_types)
+}
+
+fn canonicalize_unsigned_compare_binding_casts_in_stmts(
+    stmts: &mut [PreHirStmt],
+    binding_types: &HashMap<String, NirType>,
+) -> bool {
+    stmts
+        .iter_mut()
+        .map(|stmt| canonicalize_unsigned_compare_binding_casts_in_stmt(stmt, binding_types))
+        .any(|changed| changed)
+}
+
+fn canonicalize_unsigned_compare_binding_casts_in_stmt(
+    stmt: &mut PreHirStmt,
+    binding_types: &HashMap<String, NirType>,
+) -> bool {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_lvalue(lhs, binding_types);
+            changed |= canonicalize_unsigned_compare_binding_casts_in_expr(rhs, binding_types);
+            changed
+        }
+        PreHirStmt::Expr(expr)
+        | PreHirStmt::VaStart { va_list: expr, .. }
+        | PreHirStmt::Return(Some(expr)) => {
+            canonicalize_unsigned_compare_binding_casts_in_expr(expr, binding_types)
+        }
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => canonicalize_unsigned_compare_binding_casts_in_stmts(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            binding_types,
+        ),
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_expr(cond, binding_types);
+            changed |= canonicalize_unsigned_compare_binding_casts_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                binding_types,
+            );
+            changed |= canonicalize_unsigned_compare_binding_casts_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                binding_types,
+            );
+            changed
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            let mut changed = false;
+            if let Some(init) = init {
+                changed |= canonicalize_unsigned_compare_binding_casts_in_stmt(init, binding_types);
+            }
+            if let Some(cond) = cond {
+                changed |= canonicalize_unsigned_compare_binding_casts_in_expr(cond, binding_types);
+            }
+            if let Some(update) = update {
+                changed |=
+                    canonicalize_unsigned_compare_binding_casts_in_stmt(update, binding_types);
+            }
+            changed |= canonicalize_unsigned_compare_binding_casts_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                binding_types,
+            );
+            changed
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_expr(expr, binding_types);
+            for case in cases {
+                changed |= canonicalize_unsigned_compare_binding_casts_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    binding_types,
+                );
+            }
+            changed |= canonicalize_unsigned_compare_binding_casts_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                binding_types,
+            );
+            changed
+        }
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
+    }
+}
+
+fn canonicalize_unsigned_compare_binding_casts_in_lvalue(
+    lhs: &mut PreHirLValue,
+    binding_types: &HashMap<String, NirType>,
+) -> bool {
+    match lhs {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } | PreHirLValue::FieldAccess { base: ptr, .. } => {
+            canonicalize_unsigned_compare_binding_casts_in_expr(ptr, binding_types)
+        }
+        PreHirLValue::Index { base, index, .. } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_expr(base, binding_types);
+            changed |= canonicalize_unsigned_compare_binding_casts_in_expr(index, binding_types);
+            changed
+        }
+    }
+}
+
+fn canonicalize_unsigned_compare_binding_casts_in_expr(
+    expr: &mut PreHirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> bool {
+    let mut changed = match expr {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
+            canonicalize_unsigned_compare_binding_casts_in_expr(expr, binding_types)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_expr(lhs, binding_types);
+            changed |= canonicalize_unsigned_compare_binding_casts_in_expr(rhs, binding_types);
+            changed
+        }
+        PreHirExpr::Call { args, .. } => args
+            .iter_mut()
+            .map(|arg| canonicalize_unsigned_compare_binding_casts_in_expr(arg, binding_types))
+            .any(|changed| changed),
+        PreHirExpr::Index { base, index, .. } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_expr(base, binding_types);
+            changed |= canonicalize_unsigned_compare_binding_casts_in_expr(index, binding_types);
+            changed
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_expr(cond, binding_types);
+            changed |=
+                canonicalize_unsigned_compare_binding_casts_in_expr(then_expr, binding_types);
+            changed |=
+                canonicalize_unsigned_compare_binding_casts_in_expr(else_expr, binding_types);
+            changed
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
+    };
+
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return changed;
+    };
+    let Some(bits) = unsigned_compare_binding_width(lhs, rhs, binding_types) else {
+        return changed;
+    };
+    let new_lhs = unsigned_compare_binding_operand(lhs, bits, binding_types);
+    let new_rhs = unsigned_compare_binding_operand(rhs, bits, binding_types);
+    if new_lhs != **lhs {
+        **lhs = new_lhs;
+        changed = true;
+    }
+    if new_rhs != **rhs {
+        **rhs = new_rhs;
+        changed = true;
+    }
+    changed
+}
+
+fn unsigned_compare_binding_type(
+    expr: &PreHirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> NirType {
+    match expr {
+        PreHirExpr::Var(name) => binding_types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| expr_type(expr)),
+        _ => expr_type(expr),
+    }
+}
+
+fn unsigned_compare_binding_width(
+    lhs: &PreHirExpr,
+    rhs: &PreHirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<u32> {
+    let mut width = 0;
+    for expr in [lhs, rhs] {
+        match unsigned_compare_binding_type(expr, binding_types) {
+            NirType::Bool => width = width.max(1),
+            NirType::Int { bits, .. } => width = width.max(bits),
+            NirType::Unknown => {}
+            _ => return None,
+        }
+    }
+    (width > 0).then_some(width)
+}
+
+fn unsigned_compare_binding_operand(
+    expr: &PreHirExpr,
+    bits: u32,
+    binding_types: &HashMap<String, NirType>,
+) -> PreHirExpr {
+    let NirType::Int {
+        bits: source_bits,
+        signed: true,
+    } = unsigned_compare_binding_type(expr, binding_types)
+    else {
+        return expr.clone();
+    };
+    if source_bits != bits {
+        return expr.clone();
+    }
+    if matches!(expr, PreHirExpr::Const(value, _) if *value >= 0) {
+        return expr.clone();
+    }
+    PreHirExpr::Cast {
+        ty: NirType::Int {
+            bits: bits.max(1),
+            signed: false,
+        },
+        expr: Box::new(expr.clone()),
+    }
+}
+
 fn try_strip_outer_cast(expr: &PreHirExpr, binding_ty: &NirType) -> Option<PreHirExpr> {
     let PreHirExpr::Cast {
         ty: cast_ty,
@@ -589,5 +875,84 @@ pub fn normalize_pointer_and_struct_casts(expr: &PreHirExpr) -> Option<PreHirExp
         } => Some((**base).clone()),
         PreHirExpr::PtrOffset { base, offset: 0 } => Some((**base).clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(bits: u32, signed: bool) -> NirType {
+        NirType::Int { bits, signed }
+    }
+
+    #[test]
+    fn keeps_unsigned_cast_at_unsigned_compare_boundary() {
+        let mut type_map = HashMap::default();
+        type_map.insert("value".to_string(), int(32, false));
+        let mut expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: int(32, false),
+                expr: Box::new(PreHirExpr::Var("value".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(98, int(32, false))),
+            ty: NirType::Bool,
+        };
+
+        assert!(!strip_redundant_casts_in_expr(&mut expr, &type_map));
+        assert!(matches!(
+            expr,
+            PreHirExpr::Binary { lhs, .. }
+                if matches!(lhs.as_ref(), PreHirExpr::Cast { ty, .. } if *ty == int(32, false))
+        ));
+    }
+
+    #[test]
+    fn strips_same_type_cast_outside_unsigned_compare() {
+        let mut type_map = HashMap::default();
+        type_map.insert("value".to_string(), int(32, false));
+        let mut expr = PreHirExpr::Cast {
+            ty: int(32, false),
+            expr: Box::new(PreHirExpr::Var("value".to_string())),
+        };
+
+        assert!(strip_redundant_casts_in_expr(&mut expr, &type_map));
+        assert!(matches!(expr, PreHirExpr::Var(name) if name == "value"));
+    }
+
+    #[test]
+    fn restores_unsigned_cast_for_signed_binding_after_alias_cleanup() {
+        let mut func = PreHirFunction {
+            name: "unsigned_compare_binding".to_string(),
+            locals: vec![PreHirBinding {
+                name: "iVar18".to_string(),
+                ty: int(32, true),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cf".to_string()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Lt,
+                    lhs: Box::new(PreHirExpr::Var("iVar18".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(100, int(32, false))),
+                    ty: NirType::Bool,
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert!(canonicalize_unsigned_compare_binding_casts(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary { lhs, .. },
+                ..
+            } if matches!(lhs.as_ref(), PreHirExpr::Cast { ty, expr }
+                if *ty == int(32, false)
+                    && matches!(expr.as_ref(), PreHirExpr::Var(name) if name == "iVar18"))
+        ));
     }
 }

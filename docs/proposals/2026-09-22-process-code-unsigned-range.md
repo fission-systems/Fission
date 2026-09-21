@@ -12,10 +12,11 @@
   8/9 perfect rows. The default wrapper does not exercise a negative status
   code, so it does not expose the motivating semantic defect in its aggregate
   score.
-- Direct output defect: the gcc `-O2` NIR output renders the unsigned machine
-  comparisons as `(int)(code - 1)` and `code - 400 < 100`. For `code < 0`,
-  the source returns `0`, but the rendered body returns `2` because the first
-  range comparison is evaluated with signed C arithmetic.
+- Direct output defect: the gcc `-O2` NIR output rendered unsigned machine
+  comparisons as signed C expressions. The first two range checks were fixed
+  by the preceding comparison-boundary change, but the third check remained
+  as `code - 400 < 100` after copy cleanup. That residual expression returned
+  `-1` for `code` in `200..399`, although the source returns `0`.
 
 ## 2. Owner Proof
 
@@ -47,7 +48,7 @@ The fix therefore makes the final `Lt`/`Le`/`Gt`/`Ge` operand boundary
 explicit, without changing the generic `IntSub` type or adding a function or
 address guard.
 
-The real row narrowed the failure to this sequence:
+The first fix narrowed the real row to this sequence:
 
 ```text
 before final normalize:  (int)(code - 1) < 98
@@ -58,6 +59,14 @@ atomic variable inputs:  unchanged when their type is unknown/already unsigned
 The cast is not a conversion of the arithmetic producer; it is a bit-pattern
 reinterpretation at the unsigned comparison boundary. Signed comparisons and
 already-unsigned or untyped atomic operands retain the old output shape.
+
+The remaining row-specific-looking expression exposed a second, more general
+ordering hole. The builder emitted an unsigned temporary for `uVar22 =
+code - 400`, followed by `IntLess uVar22, 100`. The final copy/alias cleanup
+replaced that temporary with the signed binding `iVar18` after the builder had
+already established the unsigned comparison. The final cleanup now restores
+the boundary from the binding type, so it covers the same alias shape wherever
+it occurs.
 
 ## 3. Generalized Rule
 
@@ -72,7 +81,9 @@ change unrelated arithmetic result types.
 This covers direct `IntLess`/`IntLessEqual` expressions and x86 CF/ZF-derived
 branch predicates once they are represented as shared NIR comparisons. It is
 an ISA-agnostic comparison invariant; x86 only supplies one flag-shaped
-consumer.
+consumer. The binding-aware final cleanup applies only to signed scalar
+integer operands, preserving unknown, pointer, aggregate, and already-unsigned
+values.
 
 ## 4. Validation Matrix
 
@@ -84,10 +95,15 @@ consumer.
   unchanged.
 - [x] Real-binary direct output: `process_code@0x140001730` contains
   unsigned range comparisons for the subtracted operands.
-- [ ] Cache-disabled DecBench rerun on the same nine `process_code` rows.
+- [x] Actual emitted body execution: `-1`, `200`, and `399` return `0`, while
+  `400` and `499` return `-1`; the remaining source cases also match.
+- [ ] Cache-disabled DecBench rerun on the same nine `process_code` rows;
+  record the final artifact path and whether the standard wrapper's aggregate
+  moved after the implementation commit.
 - [x] `cargo nextest run -p fission-pcode` and emulator regression (three
   pre-existing #103 pcode failures remain).
-- [ ] Workspace check, format/diff check, and release CLI build.
+- [x] Full normalize nextest, workspace check, format/diff check, and release
+  CLI build.
 
 ## 5. Measurement Interpretation
 

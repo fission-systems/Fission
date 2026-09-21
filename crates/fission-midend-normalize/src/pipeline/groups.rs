@@ -6,8 +6,9 @@ use super::super::analysis::defuse::{
 use super::super::arith::apply_conditional_move_pass;
 use super::super::cleanup::{
     apply_deindirect_pass, apply_expand_load_pass, apply_subvar_trim_pass, apply_switch_norm_pass,
-    cast_elision_pass, elide_unused_popcount_assigns, inline_loop_condition_trailing_temps,
-    normalize_dowhile_decrement_condition, single_pred_label_inline,
+    canonicalize_unsigned_compare_binding_casts, cast_elision_pass, elide_unused_popcount_assigns,
+    inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
+    single_pred_label_inline,
 };
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_conditional_const_pass, apply_cse_pass,
@@ -593,6 +594,15 @@ pub fn build_normalize_pipeline() -> Pipeline {
                         block,
                         cleanup_after_loop_condition_temps,
                     )],
+                ))
+                // Copy cleanup can replace an unsigned temporary with its
+                // signed source. Restore the p-code comparison's bit-pattern
+                // interpretation after the final alias pass, using binding
+                // types rather than variable-name or binary-specific rules.
+                .pass(fn_pass(
+                    "canonicalize_unsigned_compare_binding_casts",
+                    concept,
+                    canonicalize_unsigned_compare_binding_casts,
                 )),
         )
 }
