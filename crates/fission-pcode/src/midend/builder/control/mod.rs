@@ -2,4 +2,5 @@
 
 pub(super) use super::*;
 
+mod jump_table;
 mod terminator;
