@@ -6,10 +6,10 @@
 - Function: `reverse_in_place`
 - Address: `0x140001560`
 - Corpus row or benchmark command: external DecBench local evaluation, `dev` corpus, focused on `reverse_in_place`, Fission local endpoint, `FISSION_BENCHMARK_NO_CACHE=1`; baseline artifact `results/issue104_before_62fea7840_recreated.json` with server fingerprint `c0059ccc3ab6804cdc8a7c94dd095cc9357b0db6c5b745912fba63a0c3e373c6`.
-- Current output summary: the reverse cursor is rendered as `addr = (int *)(items + len - 4)`. The machine address is `items + len * sizeof(int) - sizeof(int)`; the output therefore loses the byte scale on both the dynamic span and the final element offset.
+- Current output summary: the reverse cursor is rendered as `addr = (int *)(items + len - 4)`. The machine address is `items + len * sizeof(int) - sizeof(int)`; the output therefore loses the byte scale on both the dynamic span and the final element offset. After the fix the same row renders the equivalent `(uint8_t *)(items + len) - 4` address and preserves the swap cursor.
 - Semantic cases passed / total: focused `gcc -O2` row `1/5`; across the nine `reverse_in_place` variants, `18/45` cases (`0.40` mean pass rate) and `3/9` perfect rows.
 - Failure category: `assertion_fail` for `gcc -O2`, `gcc -O1`, and `gcc-m32 -O2`; the remaining variants include separate compile/runtime failures and are retained in the same before/after matrix.
-- Relevant benchmark/static/readability observations: baseline row metrics for `gcc -O2` are source similarity `0.237`, GED `9`, type match `0.75`, recompilation `0.3667`, and `1/5` semantic cases. The output loses the distinct last-element address and produces the wrong swap endpoint.
+- Relevant benchmark/static/readability observations: baseline row metrics for `gcc -O2` are source similarity `0.237`, GED `9`, type match `0.75`, recompilation `0.3667`, and `1/5` semantic cases. The output loses the distinct last-element address and produces the wrong swap endpoint. After the fix, that row is `5/5` semantic cases with no failure; the nine-row matrix improves from `18/45` to `27/45` cases and from `3/9` to `5/9` perfect rows (`0.40` to `0.60` mean pass rate).
 
 ## 2. Owner Proof
 
@@ -116,29 +116,47 @@ Comparable coverage:
 
 ## 5. Validation Matrix
 
-- [ ] Targeted invariant test:
-  - Command: `cargo nextest run -p fission-midend-normalize -E 'test(byte_affine_pointer_recovery)'`
+- [x] Targeted invariant test:
+  - Command: `cargo nextest run -p fission-midend-normalize -E 'test(preserves_scalar_add_const_as_byte_offset) or test(recovers_reversed_scalar_pointer_add_as_byte_offset) or test(recovers_byte_affine_last_element_offset)'`
   - Expected signal: the synthetic byte-affine expression retains the correct
     byte offset/element index and fails on the current implementation.
-- [ ] Crate-level gate:
+  - Measured result: `3/3` focused tests passed; the complete normalize crate
+    passed `395/395`.
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-midend-normalize && cargo nextest run -p fission-pcode`
   - Expected signal: no normalize regressions; known unrelated pcode failures,
     if still present, are reported separately.
-- [ ] Focused benchmark row:
+  - Measured result: normalize `395/395`; pcode `1069/1072` passed, `1`
+    skipped, and the same three pre-existing builder failures remained:
+    `diamond_join_lowers_copy_through_join_read_as_select`,
+    `movzx_after_byte_add_zero_extends_unsigned`, and
+    `x64_byte_add_movzx_does_not_double_add_load`.
+- [x] Focused benchmark row:
   - Command: rebuild the local Linux CLI, recreate the local DecBench container,
     and rerun the exact nine-row `reverse_in_place` matrix with caches disabled.
   - Expected row-level improvement: the last-element address and swap dataflow
     use the raw byte-affine expression; semantic cases improve without changing
     unrelated variants.
-- [ ] Smoke or automation sample:
-  - Command: external cache-disabled DecBench validation sample after the fix.
+  - Measured result: local container health reported `git_sha=723aecd96` and
+    source fingerprint `7b3da503281d6010236691ff8c7de4bde4849f322fcc2f2996f6e297b61d83f2`.
+    The nine rows moved `18/45 -> 27/45` semantic cases; `gcc -O2` and
+    `gcc-m32 -O2` each moved `1/5 -> 5/5`, and `gcc -O1` moved `1/5 -> 2/5`.
+    Existing `gcc -O3`/`clang -O2` compile failures and `gcc-m32 -O0` runtime
+    failure remained outside this address-unit fix.
+- [x] Smoke or automation sample:
+  - Command: `FISSION_BENCHMARK_NO_CACHE=1 .venv/bin/python runner/runner.py --corpus dev --limit 20 --variant-limit 1 --decompilers fission --run-mode local --no-resume --output results/issue104_smoke_after_723aecd96.json`
   - Expected no-regression signal: no lost requested-function outputs or compile
     regressions outside the motivated affine-address shape.
-- [ ] Optional related checks:
+  - Measured result: `20/20` requested outputs, zero adapter/boundary errors,
+    `16/20` perfect rows, and mean semantic pass rate `0.84`.
+- [x] Optional related checks:
   - Command: `cargo check -p fission-midend-normalize -p fission-pcode` and
     `cargo build -p fission-cli --release`
   - Expected signal: clean compilation.
-- [ ] Boundary audit, if a new pass/helper/dependency was added: not required
+  - Measured result: workspace `cargo check --workspace`,
+    `cargo fmt --all --check`, `git diff --check`, and release CLI build all
+    passed; emulator nextest passed `200/200` with `3` skipped.
+- [x] Boundary audit, if a new pass/helper/dependency was added: not required
   unless the implementation introduces one.
 
 ## 6. AI Review / Prompt Firewall
@@ -151,8 +169,11 @@ Comparable coverage:
 - Ghidra guidance confirmed: reference/correctness use only; no output-style
   mimicry request.
 - Unseen or synthetic validation evidence:
-  - Patch validation pool command/result: pending implementation.
-  - Synthetic invariant test command/result: pending implementation.
+  - Patch validation pool command/result: external cache-disabled DecBench
+    smoke over 20 dev functions produced `20/20` clean requested outputs and
+    no adapter/boundary errors.
+  - Synthetic invariant test command/result: focused byte-unit tests `3/3`
+    passed; normalize crate `395/395` passed.
 
 ## 7. Review Notes
 
