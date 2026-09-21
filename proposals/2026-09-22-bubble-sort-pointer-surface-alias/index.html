@@ -1209,6 +1209,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="1. Baseline Row Anchor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#measured-follow-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured follow-up
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1277,6 +1294,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#8-final-owner-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Final Owner Evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1310,14 +1338,26 @@
 <li>Failure category: runtime/semantic failure; the focused aggregate had 5 runtime-error rows, 2 assertion-failure rows, and 2 passing rows.</li>
 <li>Relevant benchmark/static/readability observations: raw p-code is correct and contains the 4-byte cursor increment, 8-byte packed load, lane extraction, swap store, and end-pointer comparison. The first wrong surface fact is the local declaration/type overlay, not the lift or lane semantics.</li>
 </ul>
+<h3 id="measured-follow-up">Measured follow-up<a class="headerlink" href="#measured-follow-up" title="Permanent link">&para;</a></h3>
+<p>The same cache-disabled nine-row DecBench matrix was rerun after each owner
+change. The alias/byte-stride work raised the aggregate from 16/45 to 24/45;
+the signed lane and dual-layer fixes then raised it to 27/45 (0.6000), with
+perfect rows changing from 2/9 to 5/9. The motivating <code>gcc -O2</code> row changed
+from 0/5 runtime-error to 5/5, and <code>gcc -O3</code> changed from 0/5 runtime-error
+to 5/5. The final row taxonomy is 5 <code>ok</code>, 1 <code>assertion_fail</code>, 1
+<code>compile_error</code>, and 2 <code>runtime_error</code>.</p>
+<p>The remaining failures are compiler/ABI-specific recovery gaps outside the
+motivating x86-64 packed-SSE row: both x86-32 rows still need separate pointer
+address recovery, and the Clang rows expose unrelated scalar/pointer recovery
+problems. They are not used to claim that every matrix variant is solved.</p>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
 <li>[ ] SLEIGH/raw p-code:</li>
 <li>[ ] Builder/materialize:</li>
-<li>[ ] Normalize:</li>
+<li>[x] Normalize:</li>
 <li>[ ] Structuring:</li>
 <li>[x] Type/data recovery:</li>
-<li>[ ] Printer:</li>
+<li>[x] Printer:</li>
 <li>[ ] Benchmark/automation:</li>
 </ul>
 <p>Evidence:</p>
@@ -1399,22 +1439,24 @@
 <li>Command: focused <code>fission-pcode</code> nextest filter for pointer surface alias propagation.</li>
 <li>Expected signal: direct-copy and pointer-offset aliases inherit the source
     pointer surface type; unsafe aliases remain unchanged.</li>
-<li>[ ] Crate-level gate:</li>
+<li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode</code></li>
 <li>Expected signal: no new failures beyond the known unrelated baseline failures.</li>
-<li>[ ] Focused benchmark row:</li>
+<li>[x] Focused benchmark row:</li>
 <li>Command: cache-disabled DecBench rerun for <code>bubble_sort</code> across the same nine
     dev rows.</li>
-<li>Expected row-level improvement: the motivating packed-SSE row emits compatible
-    pointer declarations and compiles/executes; report aggregate movement only if
-    the measured cases change.</li>
+<li>Result: <code>results/issue102_after_4cc254460.json</code>; the motivating <code>gcc -O2</code>
+    row is 5/5 and the emitted HIR keeps an <code>int *</code> cursor with byte-stride
+    arithmetic while retaining the packed 64-bit load/store.</li>
 <li>[ ] Smoke or automation sample:</li>
 <li>Command: bounded dev smoke through the local benchmark runner.</li>
 <li>Expected no-regression signal: no new failure in the smoke sample.</li>
-<li>[ ] Optional related checks:</li>
+<li>[x] Optional related checks:</li>
 <li>Command: <code>cargo check --workspace</code>, <code>cargo fmt --all --check</code>, <code>git diff --check</code>,
     and release CLI build.</li>
-<li>Expected signal: all pass.</li>
+<li>Result: formatting, diff check, workspace check, and <code>cargo build -p
+    fission-cli --release</code> pass; the full pcode nextest retains only the
+    three pre-existing #103 failures.</li>
 <li>[ ] Boundary audit, if a new pass/helper/dependency was added:</li>
 <li>Command: <code>python3 scripts/audit/nir_boundary_scan.py --root .</code></li>
 <li>Expected signal: no boundary violations.</li>
@@ -1438,8 +1480,11 @@
 <li>Ghidra guidance confirmed:</li>
 <li>[x] No Ghidra output-style request was made.</li>
 <li>Unseen or synthetic validation evidence:</li>
-<li>Patch validation pool command/result: pending implementation.</li>
-<li>Synthetic invariant test command/result: pending implementation.</li>
+<li>Patch validation pool command/result: not run; the focused DecBench matrix
+    is the measured motivating-row gate for this change.</li>
+<li>Synthetic invariant test command/result: targeted <code>fission-pcode</code> nextest
+    filters passed, including the signed lane, HIR preservation, and dual-layer
+    stitch regressions.</li>
 </ul>
 <h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1450,6 +1495,27 @@
 <li>[x] Confirmed</li>
 <li>Any new metric/pass/helper does not duplicate an existing owner:</li>
 <li>[x] Confirmed</li>
+</ul>
+<h2 id="8-final-owner-evidence">8. Final Owner Evidence<a class="headerlink" href="#8-final-owner-evidence" title="Permanent link">&para;</a></h2>
+<p>The raw p-code still contains the explicit 32-bit <code>IntZExt</code> operations for
+each packed lane. The first semantic loss was in generic normalize cast
+canonicalization: <code>u64(u32(signed_lane))</code> was collapsed to
+<code>u64(signed_lane)</code>. The follow-up fix keeps a signedness-changing intermediate
+cast through both normalize cast-elimination paths. A second, independent
+surface bug was in dual-layer orchestration: <code>code_nir</code> was populated from the
+scored tree's HIR string, so HIR cast sugar could reintroduce the same loss
+after the NIR AST was correct. The stitch now keeps the scored NIR string, and
+HIR cast cleanup only removes a widening cast when the underlying source is
+known unsigned.</p>
+<p>The fixes are generic signedness and layer-contract rules. They contain no
+function, address, binary, architecture, or compiler-tuple guards.</p>
+<p>Regression coverage includes:</p>
+<ul>
+<li>normalize idiom and wide-cast tests for preserving signedness-changing
+  intermediate casts;</li>
+<li>scalar SSA packed-piece reassembly coverage;</li>
+<li>dual-layer NIR stitching coverage;</li>
+<li>HIR presentation coverage for signed-lane zero-extension.</li>
 </ul>
 
 
