@@ -841,7 +841,13 @@ fn inline_single_use_in_stmts(
     changed
 }
 
-/// True if any free variable of a pure expression is assigned on `[start, end)`.
+/// True if a free variable of an expression is assigned before its use.
+///
+/// A condition on a loop is evaluated again after the loop body, so a write in
+/// the target loop body also counts as "before" later uses.  Treating only
+/// top-level assignments as redefinitions would incorrectly move an entry
+/// snapshot such as `end = data + length` into `data != end` after `data` is
+/// advanced by the body.
 fn pure_expr_free_var_redefined_before(
     stmts: &[HirStmt],
     start: usize,
@@ -854,17 +860,33 @@ fn pure_expr_free_var_redefined_before(
         return false;
     }
     for stmt in stmts.iter().take(end).skip(start) {
-        if let HirStmt::Assign {
-            lhs: HirLValue::Var(n),
-            ..
-        } = stmt
+        if free
+            .iter()
+            .any(|name| assigns_var_name(stmt, name.as_str()))
         {
-            if free.contains(n.as_str()) {
-                return true;
-            }
+            return true;
         }
     }
-    false
+    stmts.get(end).is_some_and(|stmt| {
+        let body = match stmt {
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => Some(body),
+            HirStmt::For { body, update, .. } => {
+                if free.iter().any(|name| {
+                    update
+                        .as_ref()
+                        .is_some_and(|s| assigns_var_name(s, name.as_str()))
+                }) {
+                    return true;
+                }
+                Some(body)
+            }
+            _ => None,
+        };
+        body.is_some_and(|body| {
+            free.iter()
+                .any(|name| body.iter().any(|s| assigns_var_name(s, name.as_str())))
+        })
+    })
 }
 
 fn collect_free_vars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
@@ -1772,6 +1794,76 @@ mod tests {
         assert!(
             func.locals.iter().any(|b| b.name == "guard"),
             "local used only in a do-while condition must keep its declaration"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_keeps_snapshot_used_after_loop_cursor_update() {
+        // `end = data + length` is evaluated once before the loop.  The
+        // cursor changes in the loop body, so replacing the condition's
+        // `end` use with its RHS would turn an entry-owned bound into a
+        // per-iteration `data + length` expression.
+        let mut func = HirFunction {
+            name: "bounded_scan".into(),
+            params: vec![param("data"), param("length")],
+            locals: vec![local("end")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("end".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("data".into())),
+                        rhs: Box::new(HirExpr::Var("length".into())),
+                        ty: int_ty(32, false),
+                    },
+                },
+                HirStmt::DoWhile {
+                    body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("data".into()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("data".into())),
+                            rhs: Box::new(HirExpr::Const(1, int_ty(32, false))),
+                            ty: int_ty(32, false),
+                        },
+                    }],
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::Ne,
+                        lhs: Box::new(HirExpr::Var("data".into())),
+                        rhs: Box::new(HirExpr::Var("end".into())),
+                        ty: NirType::Bool,
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("data".into()))),
+            ],
+            ..Default::default()
+        };
+
+        apply_hir_presentation(&mut func);
+
+        assert!(
+            matches!(
+                func.body.first(),
+                Some(HirStmt::Assign {
+                    lhs: HirLValue::Var(name),
+                    ..
+                }) if name == "end"
+            ),
+            "the loop-invariant snapshot assignment must remain: {:?}",
+            func.body
+        );
+        let condition = match func.body.get(1) {
+            Some(HirStmt::DoWhile { cond, .. }) => cond,
+            other => panic!("expected do-while after presentation, got {other:?}"),
+        };
+        assert!(
+            matches!(
+                condition,
+                HirExpr::Binary { rhs, .. }
+                    if matches!(rhs.as_ref(), HirExpr::Var(name) if name == "end")
+            ),
+            "the condition must keep the entry-owned snapshot, got {condition:?}"
         );
     }
 
