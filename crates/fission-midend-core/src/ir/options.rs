@@ -1,4 +1,5 @@
 use super::*;
+use fission_loader::loader::types::LoaderSymbolKind;
 
 /// What a structuring is being selected *for*.
 ///
@@ -534,6 +535,18 @@ impl NirRenderOptions {
                 .entry(*addr)
                 .or_insert_with(|| sanitize_c_identifier(name));
         }
+        // COFF/PE symbol tables also carry non-function data labels outside
+        // the loader's ordinary global-symbol map.  Keep those typed facts in
+        // the render options as well: a direct address use of a named DW2
+        // object must become a declared global, not an unbound identifier in
+        // the generated C.
+        for symbol in &inner.loader_symbols {
+            if symbol.kind == LoaderSymbolKind::Data {
+                global_names
+                    .entry(symbol.address)
+                    .or_insert_with(|| sanitize_c_identifier(&symbol.name));
+            }
+        }
         // A constant that lands exactly on a function entry is a function
         // reference, not a magic number: coreutils `ls` passes `strcmp` to a
         // comparator and we printed `46050`. The compiler then emits
@@ -974,5 +987,41 @@ mod selection_axis_tests {
     #[test]
     fn dual_layer_structuring_is_off_by_default() {
         assert!(!NirRenderOptions::default().dual_layer_structuring);
+    }
+}
+
+#[cfg(test)]
+mod loader_symbol_option_tests {
+    use super::{LoaderSymbolKind, NirRenderOptions};
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, types::LoaderSymbolInfo};
+
+    #[test]
+    fn data_loader_symbols_become_global_name_facts() {
+        let binary = LoadedBinaryBuilder::new("symbols.exe".into(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(false)
+            .add_loader_symbols([
+                LoaderSymbolInfo {
+                    address: 0x405104,
+                    name: "___EH_FRAME_BEGIN__".into(),
+                    kind: LoaderSymbolKind::Data,
+                    origin: "pe-coff-symbol-table".into(),
+                },
+                LoaderSymbolInfo {
+                    address: 0x401000,
+                    name: "code_label".into(),
+                    kind: LoaderSymbolKind::CodeLabel,
+                    origin: "pe-coff-symbol-table".into(),
+                },
+            ])
+            .build()
+            .expect("fixture should build");
+
+        let options = NirRenderOptions::from_loaded_binary(&binary);
+        assert_eq!(
+            options.global_names.get(&0x405104).map(String::as_str),
+            Some("___EH_FRAME_BEGIN__")
+        );
+        assert!(!options.global_names.contains_key(&0x401000));
     }
 }
