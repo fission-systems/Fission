@@ -7,9 +7,21 @@
 - Address: `0x1400016d0`
 - Corpus row or benchmark command: `fission-benchmark` dev corpus, focused `tm_year_of` run; direct probe with `fission_cli decomp --addr 0x1400016d0 --layer both --prehir --debug-decomp --json --no-db --no-warnings`
 - Current output summary: direct output uses `int * param_1` and `param_1[5]`; no debug parameter or struct-field hint is applied.
-- Semantic cases passed / total: DecBench focused run: `17/35` cases overall (`gcc -O1/-O2/-O3/-Os`: `5/5` each; `gcc -O0` and `gcc-m32 -O0/-O2`: compile errors in the benchmark harness).
+- Semantic cases passed / total: DecBench focused baseline: `17/35` cases overall (`gcc -O1/-O2/-O3/-Os`: `5/5` each; `gcc -O0` and `gcc-m32 -O0/-O2`: compile errors).
 - Failure category: direct type/data recovery gap; benchmark compile failures additionally expose the generated translation unit's missing `tm` declaration.
 - Relevant benchmark/static/readability observations: the three passing rows produce the expected scalar result but retain `int * param_1`; the direct probe reports `debug_struct_field_hits=0`, `debug_struct_promotions=0`, and no explicit parameter type hit.
+
+After the loader and rendering fixes, the same cache-disabled focused run on
+commit `149df3a71` passes `35/35` cases: all seven compiler/optimization
+rows are semantic `1.00`, type-match `1.00`, bare-compile `ok`, and have no
+runner errors. The final NIR surface is:
+
+```c
+typedef struct fission_agg36 { /* recovered tm fields */ } fission_agg36;
+typedef fission_agg36 tm;
+
+int tm_year_of(const tm* t) { return t->tm_year + 1900; }
+```
 
 ## 2. Owner Proof
 
@@ -18,7 +30,7 @@
 - [ ] Normalize:
 - [ ] Structuring:
 - [x] Type/data recovery:
-- [ ] Printer:
+- [x] Printer:
 - [ ] Benchmark/automation:
 
 Evidence:
@@ -42,6 +54,14 @@ The same DWARF unit also contains quotient_of's malformed local location:
 The current location-list parser propagates that one expression error from
 extract_local_var_info through analyze_functions_inner, so no later DWARF
 function facts reach the type/data recovery owner.
+
+The first parser fix exposed two independent declaration-contract defects in
+the renderer: qualified aliases such as `const tm *` were not emitted, and a
+same-name scalar spill could overwrite the aggregate alias recovered for the
+formal. Unknown aggregate fields were also laid out as one-byte values even
+though emitted `undefined` is a four-byte C typedef. These were fixed at the
+renderer owner, with the scalar-spill merge selecting the most informative
+definition and field widths inferred from recovered offsets.
 ```
 
 ## 3. Generality / Invariant Proof
@@ -54,6 +74,15 @@ expression cannot be decoded, that variable's location is Unknown; it must not
 discard unrelated function and parameter facts from the compilation unit.
 Valid single-register descriptions in later DIEs remain eligible for debug
 parameter and aggregate-type recovery.
+
+Surface declaration rule:
+
+```text
+For one recovered surface alias, merge duplicate binding definitions by
+information content. A recovered aggregate layout must not be replaced by a
+scalar compiler spill, and emitted unknown fields must preserve their proven
+offsets in the target C layout.
+```
 ```
 
 ISA-agnostic check ([ADR 0009](../adr/0009-isa-agnostic-semantic-rules.md)):
@@ -95,7 +124,7 @@ Comparable coverage:
   - Expected signal: loader tests pass.
 - [x] Focused benchmark row:
   - Command: focused `tm_year_of` run with `FISSION_BENCHMARK_NO_CACHE=1` before and after the local release build.
-  - Expected row-level improvement: valid `const tm *` and `tm_year` recovery appears on rows whose DWARF facts were previously discarded; unrelated compile-harness failures are reported separately.
+  - Result: `17/35` baseline → `35/35` after `149df3a71`; all seven rows are semantic-perfect, type-perfect, compile-clean, and error-free.
 - [x] Smoke or automation sample:
   - Command: direct `fission_cli decomp` for `tm_year_of`, plus `cargo nextest run -p fission-emulator`.
   - Expected no-regression signal: direct raw p-code and emulator tests remain unchanged.
@@ -118,8 +147,8 @@ Comparable coverage:
 - Ghidra guidance confirmed:
   - [x] No Ghidra output-style guidance used
 - Unseen or synthetic validation evidence:
-  - Patch validation pool command/result: pending production fix.
-  - Synthetic invariant test command/result: pending production fix.
+  - Patch validation pool command/result: focused DecBench corpus rows, cache disabled, `35/35` after the fix.
+  - Synthetic invariant test command/result: malformed DWARF location, qualified alias, duplicate aggregate/scalar alias, and unknown-field layout tests pass.
 
 ## 7. Review Notes
 
