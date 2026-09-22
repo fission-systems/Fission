@@ -52,7 +52,7 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Vec::new();
         }
-        self.register_namer().primary_return_registers()
+        self.register_namer().return_registers()
     }
 
     pub(super) fn callother_is_same_instruction_call_marker(
@@ -207,6 +207,119 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
+    fn call_result_register_used_by_op(
+        &self,
+        op: &PcodeOp,
+        ret_regs: &[Varnode],
+    ) -> Option<Varnode> {
+        let matches: Vec<Varnode> = ret_regs
+            .iter()
+            .filter(|ret_reg| {
+                op.inputs
+                    .iter()
+                    .any(|input| self.varnode_aliases_value(ret_reg, input))
+            })
+            .cloned()
+            .collect();
+        if matches.is_empty() {
+            return None;
+        }
+        // A floating operation is the strongest available local evidence that
+        // the call consumed the floating ABI carrier rather than the integer
+        // one. Copy/Cast and untyped stores intentionally fall back to the
+        // stable integer-first order, preserving the existing integer-call
+        // behavior when both caller-saved carrier families are present.
+        if matches!(
+            op.opcode,
+            PcodeOpcode::FloatAdd
+                | PcodeOpcode::FloatSub
+                | PcodeOpcode::FloatMult
+                | PcodeOpcode::FloatDiv
+                | PcodeOpcode::FloatNeg
+                | PcodeOpcode::FloatAbs
+                | PcodeOpcode::FloatSqrt
+                | PcodeOpcode::FloatCeil
+                | PcodeOpcode::FloatFloor
+                | PcodeOpcode::FloatRound
+                | PcodeOpcode::FloatFloat2Float
+                | PcodeOpcode::FloatTrunc
+                | PcodeOpcode::FloatEqual
+                | PcodeOpcode::FloatNotEqual
+                | PcodeOpcode::FloatLess
+                | PcodeOpcode::FloatLessEqual
+                | PcodeOpcode::FloatNan
+        ) {
+            return matches
+                .into_iter()
+                .find(|ret_reg| self.register_namer().is_float_return_register(ret_reg));
+        }
+        matches
+            .into_iter()
+            .find(|ret_reg| !self.register_namer().is_float_return_register(ret_reg))
+            .or_else(|| {
+                ret_regs.iter().find_map(|ret_reg| {
+                    op.inputs
+                        .iter()
+                        .any(|input| self.varnode_aliases_value(ret_reg, input))
+                        .then(|| ret_reg.clone())
+                })
+            })
+    }
+
+    fn observed_call_result_register(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        ret_regs: &[Varnode],
+    ) -> Option<Varnode> {
+        for candidate in block.ops.iter().skip(op_idx + 1) {
+            if let Some(ret_reg) = self.call_result_register_used_by_op(candidate, ret_regs) {
+                return Some(ret_reg);
+            }
+            if candidate.output.as_ref().is_some_and(|output| {
+                ret_regs
+                    .iter()
+                    .any(|ret_reg| self.varnode_aliases_value(ret_reg, output))
+            }) {
+                break;
+            }
+        }
+        for &succ_idx in &block.successors {
+            let Some(successor) = self.pcode.blocks.get(succ_idx as usize) else {
+                continue;
+            };
+            for candidate in &successor.ops {
+                if let Some(ret_reg) = self.call_result_register_used_by_op(candidate, ret_regs) {
+                    return Some(ret_reg);
+                }
+                if candidate.output.as_ref().is_some_and(|output| {
+                    ret_regs
+                        .iter()
+                        .any(|ret_reg| self.varnode_aliases_value(ret_reg, output))
+                }) {
+                    break;
+                }
+            }
+        }
+        None
+    }
+
+    fn set_call_result_binding_type(&mut self, name: &str, ty: &NirType) {
+        if let Some(binding) = self.temps.get_mut(name) {
+            binding.ty = ty.clone();
+        }
+        for binding in self.params.values_mut() {
+            if binding.name == name {
+                binding.ty = ty.clone();
+            }
+        }
+        for slot in self.locals.values_mut() {
+            if slot.name == name {
+                slot.ty = ty.clone();
+            }
+        }
+    }
+
     pub(super) fn ensure_call_result_binding(
         &mut self,
         site: LoweringSite,
@@ -216,7 +329,10 @@ impl<'a> PreviewBuilder<'a> {
             return name.clone();
         }
         let ret_regs = self.call_result_registers();
-        let Some(ret_reg) = ret_regs.first() else {
+        let Some(ret_reg) = self
+            .observed_call_result_register(self.pcode_block(site.block_idx), site.op_idx, &ret_regs)
+            .or_else(|| ret_regs.first().cloned())
+        else {
             return self
                 .ensure_temp_binding_for_output(
                     op,
@@ -231,20 +347,27 @@ impl<'a> PreviewBuilder<'a> {
                 )
                 .name;
         };
+        let result_ty = if self.register_namer().is_float_return_register(&ret_reg) {
+            float_type_from_size(ret_reg.size)
+        } else {
+            type_from_size(ret_reg.size, false)
+        };
+        self.call_result_types.insert(site, result_ty.clone());
         // Prefer the ABI return surface (rax / r3 / …) so epilogue recovery and
         // CallInd result share one name. Temps (`xVarN`) break `return` join and
         // force undeclared-symbol noise when the call is a function pointer.
         if let Some(name) = self.sla_hw_name(ret_reg.offset, ret_reg.size) {
             self.ensure_live_register_binding(&name, ret_reg.size);
+            self.set_call_result_binding_type(&name, &result_ty);
             self.call_result_bindings.insert(site, name.clone());
             return name;
         }
-        let name = self.next_unused_temp_binding_name(&type_from_size(ret_reg.size, false));
+        let name = self.next_unused_temp_binding_name(&result_ty);
         self.temps.insert(
             name.clone(),
             PreHirBinding {
                 name: name.clone(),
-                ty: type_from_size(ret_reg.size, false),
+                ty: result_ty,
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::Temp),
                 initializer: None,

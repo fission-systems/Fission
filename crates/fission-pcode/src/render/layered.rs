@@ -61,6 +61,14 @@ mod layered_tests {
     use crate::midend::{HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirType, StructField};
 
     #[test]
+    fn unknown_arity_called_extern_uses_c11_unspecified_parameter_list() {
+        assert_eq!(
+            render_called_extern("callee", &NirType::Float { bits: 64 }, None,),
+            "extern double callee();\n"
+        );
+    }
+
+    #[test]
     fn layered_pseudocode_hir_drops_unused_home_local() {
         let func = HirFunction {
             name: "f".into(),
@@ -757,11 +765,11 @@ fn merge_opaque_pcodeop_return_type(existing: &NirType, next: &NirType) -> NirTy
 /// compiling. The parameter list is left open because the call sites are the
 /// only evidence of arity, and they disagree often enough not to be trusted.
 ///
-/// "Open" has to be written `(...)`, not `()`. An empty list once meant
-/// "unspecified"; since C23 it means `(void)`, so `extern T f();` now asserts
-/// the arity is zero and every call with arguments is an error rather than a
-/// warning. On a mingw-built PE that single spelling produced 68 of the unit's
-/// 170 errors -- 28 from `__fission_branchind` alone.
+/// In the C11 output contract, an empty parameter list means that the arity is
+/// unspecified, so `extern T f();` accepts the argument shapes seen at its
+/// call sites. A bare `...` is not a valid C declaration: C requires a named
+/// parameter before an ellipsis. The output target is C11 because the
+/// recompilation harness and generated corpus wrappers use that dialect.
 ///
 /// `declared` is the exception, and the only one: a signature somebody wrote
 /// down. The reason the list is left open is that call sites are the only
@@ -773,7 +781,7 @@ fn render_called_extern(target: &str, return_ty: &NirType, declared: Option<&Str
         return format!("extern {declaration};\n");
     }
     let return_type = opaque_pcodeop_return_type_name(return_ty);
-    format!("extern {return_type} {target}(...);\n")
+    format!("extern {return_type} {target}();\n")
 }
 
 fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {

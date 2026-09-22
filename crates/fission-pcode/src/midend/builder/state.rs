@@ -125,6 +125,10 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) load_value_bindings: HashSet<String>,
     pub(crate) explicit_merge_bindings: HashMap<(usize, VarnodeKey), String>,
     pub(crate) call_result_bindings: HashMap<LoweringSite, String>,
+    /// ABI type selected for each output-less call. Raw p-code models calls as
+    /// control transfers, so the result type is carried beside the binding
+    /// name when a cspec return carrier is observed.
+    pub(crate) call_result_types: HashMap<LoweringSite, NirType>,
     pub(crate) selector_representatives: BuilderCacheMap<(usize, u64, u64), PreHirExpr>,
     pub(crate) current_lowering_site: Option<LoweringSite>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,

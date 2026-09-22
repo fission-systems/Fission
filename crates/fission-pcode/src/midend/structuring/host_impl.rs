@@ -44,6 +44,9 @@ fn commit_isolated_semantic_identities<'a>(
     for (site, name) in isolated.call_result_bindings {
         target.call_result_bindings.entry(site).or_insert(name);
     }
+    for (site, ty) in isolated.call_result_types {
+        target.call_result_types.entry(site).or_insert(ty);
+    }
     for (offset, index) in isolated.register_param_aliases {
         target.register_param_aliases.entry(offset).or_insert(index);
     }

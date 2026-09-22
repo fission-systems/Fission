@@ -594,6 +594,118 @@ impl RegisterNamer {
         }
     }
 
+    fn has_exact_register_variant(&self, offset: u64, size: u32) -> bool {
+        self.sla_map
+            .as_ref()
+            .is_some_and(|map| map.contains_key(&(offset, size)))
+            || self
+                .model
+                .as_ref()
+                .is_some_and(|model| model.exact_name_for(offset, size).is_some())
+    }
+
+    fn float_return_register_size(&self, offset: u64) -> u32 {
+        // The cspec gives us the storage offset, while the SLA gives us the
+        // scalar view that p-code will actually use. Prefer the exact scalar
+        // variants over a covering vector register: XMM0 is 16 bytes, but its
+        // ABI float/double carrier is XMM0_Qa (8 bytes), and ST0 is 10 bytes.
+        [10, 8, 4]
+            .into_iter()
+            .find(|&size| self.has_exact_register_variant(offset, size))
+            .unwrap_or_else(|| self.pointer_size.clamp(4, 8))
+    }
+
+    /// Candidate varnodes for a scalar floating-point ABI return carrier.
+    ///
+    /// The integer and floating return slots are independent cspec facts. Keep
+    /// the existing space ordering used by `primary_return_registers`, but do
+    /// not add the x86 UNIQUE GPR view: floating carriers are represented by
+    /// the REGISTER-space XMM/ST views, with the builder adding its runtime
+    /// register-space spelling when needed.
+    pub fn float_return_registers(&self) -> Vec<Varnode> {
+        let Some(offset) = self.float_return_offset else {
+            return Vec::new();
+        };
+        let size = self.float_return_register_size(offset);
+        let mut out = Vec::with_capacity(3);
+        if matches!(
+            self.abi,
+            CallingConvention::WindowsX64
+                | CallingConvention::SystemVAmd64
+                | CallingConvention::X86_32
+        ) {
+            out.push(Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset,
+                size,
+                is_constant: false,
+                constant_val: 0,
+            });
+        } else {
+            out.push(Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset,
+                size,
+                is_constant: false,
+                constant_val: 0,
+            });
+            out.push(Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset,
+                size,
+                is_constant: false,
+                constant_val: 0,
+            });
+        }
+        if matches!(
+            self.abi,
+            CallingConvention::LoongArch32 | CallingConvention::LoongArch64
+        ) {
+            out.push(Varnode {
+                space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
+                offset,
+                size,
+                is_constant: false,
+                constant_val: 0,
+            });
+        }
+        out
+    }
+
+    /// All ABI return carriers that a call may define, in stable integer-first
+    /// order. Keeping `primary_return_registers` separate is important for
+    /// control-flow/return recovery, which reasons specifically about the
+    /// integer/pointer return slot.
+    pub fn return_registers(&self) -> Vec<Varnode> {
+        let mut out = self.primary_return_registers();
+        for candidate in self.float_return_registers() {
+            if !out.iter().any(|existing| {
+                existing.space_id == candidate.space_id
+                    && existing.offset == candidate.offset
+                    && existing.size == candidate.size
+            }) {
+                out.push(candidate);
+            }
+        }
+        out
+    }
+
+    pub fn is_float_return_register(&self, vn: &Varnode) -> bool {
+        let Some(offset) = self.float_return_offset else {
+            return false;
+        };
+        if !is_register_space_id(vn.space_id) || vn.offset != offset {
+            return false;
+        }
+        let expected_size = self.float_return_register_size(offset);
+        if expected_size > 8 {
+            vn.size == expected_size
+        } else {
+            // The same ABI slot carries both float (4) and double (8).
+            vn.size <= 8
+        }
+    }
+
     pub fn is_primary_return_register(&self, vn: &Varnode) -> bool {
         if vn.space_id == UNIQUE_SPACE_ID {
             return unique_x86_register_name(vn.offset, vn.size)
@@ -603,23 +715,12 @@ impl RegisterNamer {
             return false;
         }
         // Float/double-returning functions return through a *different*
-        // register than int/pointer-returning ones (e.g. x86's ST0 vs.
-        // EAX) -- checked independently of `return_offset` below, since a
-        // prototype can declare both and only one is actually live for any
-        // given function.
-        if let Some(float_ret_off) = self.float_return_offset {
-            // A real scalar float/double return through XMM0 is at most 8
-            // bytes (float=4, double=8) under every ABI this models -- a
-            // full 16-byte write is a whole-vector-register op, not a
-            // scalar return value. Without this, compiler-inserted
-            // register-zeroing epilogues (`-fzero-call-used-regs`-style
-            // `pxor xmm0,xmm0`) that fall through into a function's own
-            // decoded range get misdetected as that function's real return
-            // value, corrupting its inferred return type to a 16-byte
-            // aggregate.
-            if vn.offset == float_ret_off && vn.size <= 8 {
-                return true;
-            }
+        // register than int/pointer-returning ones (e.g. x86's ST0 vs. EAX).
+        // Check it independently of `return_offset`, since a prototype can
+        // declare both and only one is live for a given function. Full vector
+        // writes remain excluded by `is_float_return_register`.
+        if self.is_float_return_register(vn) {
+            return true;
         }
         if let Some(ret_off) = self.return_offset {
             if vn.offset == ret_off {

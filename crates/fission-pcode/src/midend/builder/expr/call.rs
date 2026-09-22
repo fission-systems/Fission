@@ -225,15 +225,16 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
-        Ok(PreHirExpr::Call {
-            target,
-            args,
-            ty: op
-                .output
-                .as_ref()
-                .map(|out| type_from_size(out.size, false))
-                .unwrap_or(NirType::Unknown),
-        })
+        let ty = self
+            .current_lowering_site
+            .and_then(|site| self.call_result_types.get(&site).cloned())
+            .or_else(|| {
+                op.output
+                    .as_ref()
+                    .map(|out| type_from_size(out.size, false))
+            })
+            .unwrap_or(NirType::Unknown);
+        Ok(PreHirExpr::Call { target, args, ty })
     }
 
     /// True when a recovered call argument expression is the same surface as

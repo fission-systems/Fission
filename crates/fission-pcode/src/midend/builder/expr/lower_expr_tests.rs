@@ -1517,6 +1517,53 @@ fn x64_register_callind_emits_function_pointer_call() {
     assert!(code.contains("return"), "expected a return:\n{code}");
 }
 
+#[test]
+fn x64_call_float_return_uses_xmm0_carrier_and_type() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let xmm0 = register(0x1200, 8);
+    let xmm1 = register(0x1210, 8);
+    let eax = register(0, 4);
+    let rax = register(0, 8);
+    let ret_addr = register(0x288, 8);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // Raw p-code calls have no output; the following FLOAT_DIV is the
+            // first semantic use of the ABI floating return carrier.
+            op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                1,
+                PcodeOpcode::FloatDiv,
+                Some(xmm0.clone()),
+                vec![xmm0.clone(), xmm1],
+            ),
+            op(2, PcodeOpcode::FloatTrunc, Some(eax.clone()), vec![xmm0]),
+            op(3, PcodeOpcode::IntZExt, Some(rax), vec![eax]),
+            op(4, PcodeOpcode::Return, None, vec![ret_addr]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "float_call", 0x1000, &options).expect("render");
+    eprintln!("float_call:\n{code}");
+    assert!(
+        code.contains("double xmm0_qa;"),
+        "the floating ABI carrier must retain its scalar type:\n{code}"
+    );
+    assert!(
+        code.contains("xmm0_qa = "),
+        "the call result must be assigned through XMM0 rather than discarded:\n{code}"
+    );
+    assert!(
+        code.contains("extern double sub_2000();") || code.contains("extern double callee();"),
+        "the selected call carrier must type the external declaration:\n{code}"
+    );
+}
+
 /// Diamond: null → eax=0; non-null → CallInd result in rax. Join return must
 /// prefer the call-result binding over the pre-call arg write to EAX.
 #[test]

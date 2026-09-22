@@ -4,11 +4,12 @@ use fission_loader::loader::LoadedBinary;
 
 /// The register spellings a `Call` should count as defining.
 ///
-/// `primary_return_registers` names the x86 return slot in `REGISTER_SPACE_ID`
-/// and `UNIQUE_SPACE_ID`, but this pipeline's own p-code for x86 emits it in
-/// `RUST_SLEIGH_REGISTER_SPACE_ID` -- the same split the register model's own
-/// doc comment records for the AArch64 side. Rather than guess which one this
-/// function's p-code uses, keep only the spellings that actually appear in it.
+/// `return_registers` names the integer and floating ABI return slots in
+/// `REGISTER_SPACE_ID` and `UNIQUE_SPACE_ID`, but this pipeline's own p-code
+/// for x86 emits them in `RUST_SLEIGH_REGISTER_SPACE_ID` -- the same split the
+/// register model's own doc comment records for the AArch64 side. Rather than
+/// guess which spelling this function's p-code uses, keep only the spelling
+/// that actually appears in it.
 /// Whether the `Call` at `op_idx` is really this function's *return*.
 ///
 /// ARM's `bx lr` lifts to `Call(target)` immediately followed by
@@ -30,7 +31,7 @@ fn call_result_definition_varnodes(
 ) -> Vec<Varnode> {
     let namer = crate::midend::cspec::RegisterNamer::from_options(options);
     let mut candidates = Vec::new();
-    for vn in namer.primary_return_registers() {
+    for vn in namer.return_registers() {
         candidates.push(Varnode {
             space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
             ..vn.clone()
@@ -269,6 +270,7 @@ impl<'a> PreviewBuilder<'a> {
             load_value_bindings: HashSet::default(),
             explicit_merge_bindings: HashMap::default(),
             call_result_bindings: HashMap::default(),
+            call_result_types: HashMap::default(),
             selector_representatives: BuilderCacheMap::default(),
             current_lowering_site: None,
             register_param_aliases,
