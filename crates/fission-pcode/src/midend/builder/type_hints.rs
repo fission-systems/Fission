@@ -10,6 +10,308 @@ pub(super) struct StackAliasCollector {
     alias_boundaries: Vec<(AbstractStackSlot, u64)>,
 }
 
+#[derive(Debug, Clone)]
+struct SurfaceArrayType {
+    element: NirType,
+    element_size: u32,
+    count: u32,
+}
+
+#[derive(Debug, Clone)]
+struct DebugArrayRegion {
+    base_name: String,
+    stack_offset: i64,
+    size: u32,
+    element: NirType,
+    element_size: u32,
+}
+
+/// Apply trusted debug-info array shapes before normalize can discard the
+/// physical stack extent.  A byte store at the end of a source array is a
+/// separate stack view in raw PreHIR; once the normalizer has treated it as a
+/// short-lived scalar temporary, the relation to the array is no longer
+/// recoverable from the final HIR alone.
+pub(super) fn apply_pre_hir_debug_array_hints(
+    func: &mut PreHirFunction,
+    context: &PreviewTypeContext,
+    debug_cfa_stack_offset_bias: Option<i64>,
+) -> usize {
+    let Some(hints) = &context.function_hints else {
+        return 0;
+    };
+
+    let mut reserved_names = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| binding.name.clone())
+        .collect::<HashSet<_>>();
+    let mut renames = Vec::new();
+    let mut arrays = HashMap::default();
+    let mut array_regions = Vec::new();
+    let mut applied = 0;
+
+    for binding in &mut func.locals {
+        let Some((offset, is_derived)) = stack_origin_offset(binding.origin) else {
+            continue;
+        };
+        if is_derived {
+            continue;
+        }
+        let debug_offset = match hints.debug_stack_offset_base {
+            NirStackOffsetBase::BuilderFrame => Some(offset),
+            NirStackOffsetBase::CallFrameCfa => {
+                debug_cfa_stack_offset_bias.and_then(|bias| offset.checked_sub(bias))
+            }
+        };
+        let type_name = debug_offset
+            .and_then(|offset| hints.debug_stack_local_type_names.get(&offset))
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| {
+                hints
+                    .stack_local_type_names
+                    .get(&offset)
+                    .filter(|name| !name.trim().is_empty())
+            });
+        let Some(type_name) = type_name else {
+            continue;
+        };
+        let Some(array) = parse_surface_array_type(type_name) else {
+            continue;
+        };
+        let Some(size) = array.element_size.checked_mul(array.count) else {
+            continue;
+        };
+        let fields = (0..array.count)
+            .map(|index| StructField {
+                offset: index.saturating_mul(array.element_size),
+                ty: array.element.clone(),
+                name: format!("element_{index}"),
+            })
+            .collect();
+        binding.ty = NirType::Aggregate { size, fields };
+        binding.surface_type_name = Some(type_name.trim().to_string());
+        let base_name = binding.name.clone();
+        arrays.insert(base_name.clone(), array.element.clone());
+        array_regions.push(DebugArrayRegion {
+            base_name,
+            stack_offset: offset,
+            size,
+            element: array.element.clone(),
+            element_size: array.element_size,
+        });
+        applied += 1;
+
+        let new_name = debug_offset
+            .and_then(|offset| hints.debug_stack_local_names.get(&offset))
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| {
+                hints
+                    .stack_local_names
+                    .get(&offset)
+                    .filter(|name| !name.trim().is_empty())
+            })
+            .map(|name| name.trim().to_string());
+        let Some(new_name) = new_name else {
+            continue;
+        };
+        if new_name == binding.name || reserved_names.contains(&new_name) {
+            continue;
+        }
+        reserved_names.remove(&binding.name);
+        reserved_names.insert(new_name.clone());
+        renames.push((binding.name.clone(), new_name.clone()));
+        binding.name = new_name;
+    }
+
+    if applied == 0 {
+        return 0;
+    }
+
+    // The machine store is still a scalar operation even though its stack
+    // owner is now known to be an array.  Keep that operation explicit as a
+    // typed memory write.
+    rewrite_pre_hir_array_base_scalar_stores(&mut func.body, &arrays);
+
+    // A compiler may materialize the last byte (or another element) through
+    // a separate scalar stack view.  The normalizer normally converts such a
+    // write-only view to a Temp before its stack merge pass runs.  Do this
+    // rewrite while the builder still has the original stack provenance, and
+    // use the normalize owner's traversal so the same rule handles calls,
+    // loads, pointer escapes, and nested statements consistently.
+    let array_base_names = array_regions
+        .iter()
+        .map(|region| region.base_name.as_str())
+        .collect::<HashSet<_>>();
+    let mut scalar_views = Vec::new();
+    for binding in &func.locals {
+        if array_base_names.contains(binding.name.as_str()) || binding.initializer.is_some() {
+            continue;
+        }
+        let Some((scalar_offset, is_derived)) = stack_origin_offset(binding.origin) else {
+            continue;
+        };
+        if is_derived {
+            continue;
+        }
+        let Some(scalar_size) = binding_byte_size(&binding.ty) else {
+            continue;
+        };
+        for region in &array_regions {
+            if scalar_size != region.element_size {
+                continue;
+            }
+            let Some(relative) = scalar_offset.checked_sub(region.stack_offset) else {
+                continue;
+            };
+            if relative < 0
+                || relative % i64::from(region.element_size) != 0
+                || relative + i64::from(scalar_size) > i64::from(region.size)
+            {
+                continue;
+            }
+            scalar_views.push((
+                binding.name.clone(),
+                region.base_name.clone(),
+                relative,
+                region.element.clone(),
+            ));
+            break;
+        }
+    }
+
+    let mut recovered_scalar_names = HashSet::default();
+    for (scalar_name, base_name, offset, element_ty) in scalar_views {
+        fission_midend_normalize::recovery::rewrite_stack_view_as_array_element(
+            &mut func.body,
+            &scalar_name,
+            &base_name,
+            offset,
+            element_ty,
+        );
+        recovered_scalar_names.insert(scalar_name);
+    }
+    if !recovered_scalar_names.is_empty() {
+        func.locals
+            .retain(|binding| !recovered_scalar_names.contains(&binding.name));
+    }
+
+    if !renames.is_empty() {
+        fission_midend_prehir::rename_vars_in_stmts(&mut func.body, &renames);
+        for binding in &mut func.locals {
+            if let Some(initializer) = binding.initializer.as_mut() {
+                fission_midend_prehir::util::rename_vars_in_expr(initializer, &renames);
+            }
+        }
+    }
+    applied
+}
+
+fn parse_surface_array_type(surface: &str) -> Option<SurfaceArrayType> {
+    let surface = surface.trim();
+    let open = surface.rfind('[')?;
+    let count = surface[open + 1..].strip_suffix(']')?.trim().parse().ok()?;
+    if count == 0 || surface[..open].contains('[') || surface[..open].contains('*') {
+        return None;
+    }
+    let base = surface_scalar_type(surface[..open].trim())?;
+    let element_size = binding_byte_size(&base)?;
+    Some(SurfaceArrayType {
+        element: base,
+        element_size,
+        count,
+    })
+}
+
+fn surface_scalar_type(surface: &str) -> Option<NirType> {
+    let words = surface
+        .split_whitespace()
+        .filter(|word| !matches!(*word, "const" | "volatile" | "restrict"))
+        .collect::<Vec<_>>();
+    let name = words.join(" ");
+    let (bits, signed) = match name.as_str() {
+        "char" | "signed char" | "int8_t" => (8, true),
+        "unsigned char" | "uint8_t" | "uchar" => (8, false),
+        "short" | "signed short" | "signed short int" | "int16_t" => (16, true),
+        "unsigned short" | "unsigned short int" | "uint16_t" | "ushort" => (16, false),
+        "int" | "signed" | "signed int" | "int32_t" => (32, true),
+        "unsigned" | "unsigned int" | "uint32_t" | "uint" => (32, false),
+        "long long" | "signed long long" | "signed long long int" | "int64_t" => (64, true),
+        "unsigned long long" | "unsigned long long int" | "uint64_t" | "ulong" => (64, false),
+        "float" => return Some(NirType::Float { bits: 32 }),
+        "double" => return Some(NirType::Float { bits: 64 }),
+        _ => return None,
+    };
+    Some(NirType::Int { bits, signed })
+}
+
+fn rewrite_pre_hir_array_base_scalar_stores(
+    body: &mut [PreHirStmt],
+    arrays: &HashMap<String, NirType>,
+) {
+    for stmt in body {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs,
+            } if arrays.contains_key(name)
+                && !matches!(
+                    fission_midend_prehir::expr_type(rhs),
+                    NirType::Aggregate { .. }
+                ) =>
+            {
+                let ty = fission_midend_prehir::expr_type(rhs);
+                if matches!(
+                    ty,
+                    NirType::Int { .. } | NirType::Bool | NirType::Float { .. }
+                ) {
+                    let array_name = name.clone();
+                    *stmt = PreHirStmt::Assign {
+                        lhs: PreHirLValue::Deref {
+                            ptr: Box::new(PreHirExpr::AddressOfLocal(array_name)),
+                            ty,
+                        },
+                        rhs: rhs.clone(),
+                    };
+                }
+            }
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+            PreHirStmt::Block(stmts)
+            | PreHirStmt::While { body: stmts, .. }
+            | PreHirStmt::DoWhile { body: stmts, .. }
+            | PreHirStmt::For { body: stmts, .. } => {
+                let nested = std::rc::Rc::make_mut(stmts);
+                rewrite_pre_hir_array_base_scalar_stores(nested.as_mut_slice(), arrays)
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    let nested = std::rc::Rc::make_mut(&mut case.body);
+                    rewrite_pre_hir_array_base_scalar_stores(nested.as_mut_slice(), arrays);
+                }
+                let nested = std::rc::Rc::make_mut(default);
+                rewrite_pre_hir_array_base_scalar_stores(nested.as_mut_slice(), arrays);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                let nested_then = std::rc::Rc::make_mut(then_body);
+                rewrite_pre_hir_array_base_scalar_stores(nested_then.as_mut_slice(), arrays);
+                let nested_else = std::rc::Rc::make_mut(else_body);
+                rewrite_pre_hir_array_base_scalar_stores(nested_else.as_mut_slice(), arrays);
+            }
+        }
+    }
+}
+
 impl StackAliasCollector {
     pub(super) fn new(func: &HirFunction) -> Self {
         let mut boundaries = Vec::new();
@@ -91,7 +393,179 @@ pub(super) fn apply_preview_type_hints(
         }
     }
 
+    decay_array_addresses_at_typed_calls(func, context);
+
     stats
+}
+
+fn decay_array_addresses_at_typed_calls(func: &mut HirFunction, context: &PreviewTypeContext) {
+    let arrays = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .filter_map(|binding| {
+            parse_surface_array_type(binding.surface_type_name.as_deref()?)
+                .map(|array| (binding.name.clone(), array.element_size))
+        })
+        .collect::<HashMap<_, _>>();
+    if arrays.is_empty() {
+        return;
+    }
+    decay_array_addresses_in_stmts(&mut func.body, context, &arrays);
+}
+
+fn decay_array_addresses_in_stmts(
+    body: &mut [HirStmt],
+    context: &PreviewTypeContext,
+    arrays: &HashMap<String, u32>,
+) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                decay_array_addresses_in_lvalue(lhs, context, arrays);
+                decay_array_addresses_in_expr(rhs, context, arrays);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                decay_array_addresses_in_expr(expr, context, arrays)
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                decay_array_addresses_in_expr(va_list, context, arrays)
+            }
+            HirStmt::Block(stmts)
+            | HirStmt::While { body: stmts, .. }
+            | HirStmt::DoWhile { body: stmts, .. }
+            | HirStmt::For { body: stmts, .. } => {
+                decay_array_addresses_in_stmts(stmts, context, arrays)
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                decay_array_addresses_in_expr(expr, context, arrays);
+                for case in cases {
+                    decay_array_addresses_in_stmts(&mut case.body, context, arrays);
+                }
+                decay_array_addresses_in_stmts(default, context, arrays);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                decay_array_addresses_in_expr(cond, context, arrays);
+                decay_array_addresses_in_stmts(then_body, context, arrays);
+                decay_array_addresses_in_stmts(else_body, context, arrays);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn decay_array_addresses_in_lvalue(
+    lvalue: &mut HirLValue,
+    context: &PreviewTypeContext,
+    arrays: &HashMap<String, u32>,
+) {
+    match lvalue {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => decay_array_addresses_in_expr(ptr, context, arrays),
+        HirLValue::Index { base, index, .. } => {
+            decay_array_addresses_in_expr(base, context, arrays);
+            decay_array_addresses_in_expr(index, context, arrays);
+        }
+        HirLValue::FieldAccess { base, .. } => decay_array_addresses_in_expr(base, context, arrays),
+    }
+}
+
+fn decay_array_addresses_in_expr(
+    expr: &mut HirExpr,
+    context: &PreviewTypeContext,
+    arrays: &HashMap<String, u32>,
+) {
+    match expr {
+        HirExpr::Call { target, args, .. } => {
+            for (index, arg) in args.iter_mut().enumerate() {
+                decay_array_addresses_in_expr(arg, context, arrays);
+                let Some(name) = (match arg {
+                    HirExpr::AddressOfLocal(name) => Some(name.clone()),
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                let Some(array_size) = arrays.get(&name).copied() else {
+                    continue;
+                };
+                if call_expects_pointer_to_element(context, target, index, array_size) {
+                    *arg = HirExpr::Var(name);
+                }
+            }
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            decay_array_addresses_in_expr(expr, context, arrays)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            decay_array_addresses_in_expr(lhs, context, arrays);
+            decay_array_addresses_in_expr(rhs, context, arrays);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            decay_array_addresses_in_expr(cond, context, arrays);
+            decay_array_addresses_in_expr(then_expr, context, arrays);
+            decay_array_addresses_in_expr(else_expr, context, arrays);
+        }
+        HirExpr::Index { base, index, .. } => {
+            decay_array_addresses_in_expr(base, context, arrays);
+            decay_array_addresses_in_expr(index, context, arrays);
+        }
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn call_expects_pointer_to_element(
+    context: &PreviewTypeContext,
+    target: &str,
+    arg_index: usize,
+    array_size: u32,
+) -> bool {
+    if let Some(summary) = context.call_prototype_summaries.get(target) {
+        if let Some(surface) = summary
+            .param_surface_type_names
+            .get(arg_index)
+            .and_then(Option::as_deref)
+            && surface.contains('*')
+            && surface_pointee_byte_size(surface) == Some(array_size)
+        {
+            return true;
+        }
+        if let Some(Some(NirCallPointerPointee::Int { bits, .. })) =
+            summary.param_pointer_pointees.get(arg_index)
+            && bits / 8 == array_size
+        {
+            return true;
+        }
+    }
+    context.call_param_rules.iter().any(|rule| {
+        rule.callee_name == target
+            && rule.arg_index == arg_index
+            && rule.pointee_sizes.contains(&array_size)
+    })
 }
 
 fn apply_function_name_hints(

@@ -12,7 +12,7 @@
 use super::{
     DecompFacts, GhidraActionConcept, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
     NirRenderOptions, NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewHintStats,
-    PreviewTypeContext, apply_preview_type_hints_with_stack_bias,
+    PreviewTypeContext, apply_pre_hir_debug_array_hints, apply_preview_type_hints_with_stack_bias,
     discover_guarded_tail_candidates_for_stats, record_ghidra_action_stage,
     record_ghidra_clean_room_pipeline_complete, recover_global_symbol_accesses,
     render_layered_pseudocode, structuring,
@@ -345,6 +345,13 @@ fn render_mlil_preview_with_binary_and_context_output(
         debug_log("build_hir_error");
         err
     })?;
+    if let Some(context) = type_context {
+        let _ = apply_pre_hir_debug_array_hints(
+            &mut hir,
+            context,
+            builder.debug_cfa_stack_offset_bias(),
+        );
+    }
     // Returned raw observation, captured for the typed output for the same
     // reason the legacy compatibility snapshot exists below
     // below, but captured *before* `normalize_hir_function` runs rather than

@@ -465,7 +465,11 @@ impl<'a> PrintCtx<'a> {
     fn simple_deref_target_matches_access(&self, expr: &HirExpr, access_ty: &NirType) -> bool {
         self.simple_deref_target_is_declared_pointer(expr)
             && peel_simple_deref_target(expr).is_some_and(|name| {
-                !self.direct_var_has_aggregate_access_mismatch(name, access_ty)
+                !self
+                    .decl_type_text
+                    .get(name)
+                    .is_some_and(|text| surface_array_declarator(Some(text)).is_some())
+                    && !self.direct_var_has_aggregate_access_mismatch(name, access_ty)
                     && !self.direct_var_has_scalar_access_width_mismatch(name, access_ty)
             })
     }
@@ -533,24 +537,19 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
             if idx > 0 {
                 out.push_str(", ");
             }
-            out.push_str(&format!("{} {}", print_binding_type(param), param.name));
+            out.push_str(&print_binding_declaration(param));
         }
     }
     out.push_str(")\n{\n");
     for local in &func.locals {
         if let Some(initializer) = &local.initializer {
             out.push_str(&format!(
-                "    {} {} = {};\n",
-                print_binding_type(local),
-                local.name,
+                "    {} = {};\n",
+                print_binding_declaration(local),
                 print_expr_with_ctx(initializer, &ctx)
             ));
         } else {
-            out.push_str(&format!(
-                "    {} {};\n",
-                print_binding_type(local),
-                local.name
-            ));
+            out.push_str(&format!("    {};\n", print_binding_declaration(local)));
         }
     }
     if !func.locals.is_empty() {
@@ -569,6 +568,24 @@ fn print_binding_type(binding: &NirBinding) -> String {
         .clone()
         .filter(|surface| surface_type_is_definable(surface, &binding.ty))
         .unwrap_or_else(|| print_type(&binding.ty))
+}
+
+fn print_binding_declaration(binding: &NirBinding) -> String {
+    if let Some((base, suffix)) = surface_array_declarator(binding.surface_type_name.as_deref()) {
+        return format!("{base} {}{suffix}", binding.name);
+    }
+    format!("{} {}", print_binding_type(binding), binding.name)
+}
+
+fn surface_array_declarator(surface: Option<&str>) -> Option<(&str, &str)> {
+    let surface = surface?.trim();
+    let open = surface.rfind('[')?;
+    let suffix = surface[open..].strip_suffix(']')?;
+    if suffix[1..].trim().is_empty() || surface[..open].contains('[') {
+        return None;
+    }
+    let base = surface[..open].trim_end();
+    (!base.is_empty()).then_some((base, &surface[open..]))
 }
 
 fn type_byte_size(ty: &NirType) -> Option<u32> {
@@ -2405,6 +2422,7 @@ pub fn render_contracted_wrapper_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::midend::StructField;
 
     fn u8_ptr() -> NirType {
         NirType::Ptr(Box::new(NirType::Int {
@@ -2418,6 +2436,82 @@ mod tests {
             bits: 64,
             signed: false,
         }
+    }
+
+    #[test]
+    fn array_surface_declaration_and_overlapping_store_are_c_valid() {
+        let byte = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let hir = HirFunction {
+            name: "array_store".to_string(),
+            locals: vec![NirBinding {
+                name: "data".to_string(),
+                ty: NirType::Aggregate {
+                    size: 5,
+                    fields: (0..5)
+                        .map(|index| StructField {
+                            offset: index,
+                            ty: byte.clone(),
+                            name: format!("element_{index}"),
+                        })
+                        .collect(),
+                },
+                surface_type_name: Some("unsigned char[5]".to_string()),
+                origin: Some(NirBindingOrigin::StackOffset(-5)),
+                initializer: None,
+            }],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::AddressOfLocal("data".to_string())),
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    },
+                    rhs: HirExpr::Const(
+                        0x0403_0201,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Index {
+                        base: Box::new(HirExpr::Var("data".to_string())),
+                        index: Box::new(HirExpr::Const(
+                            4,
+                            NirType::Int {
+                                bits: 64,
+                                signed: true,
+                            },
+                        )),
+                        elem_ty: byte,
+                    },
+                    rhs: HirExpr::Const(
+                        5,
+                        NirType::Int {
+                            bits: 8,
+                            signed: false,
+                        },
+                    ),
+                },
+            ],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(rendered.contains("unsigned char data[5];"), "{rendered}");
+        assert!(
+            rendered.contains("*(uint *)(&data) = 67305985;"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("data[4] = 5;"), "{rendered}");
+        assert!(!rendered.contains("unsigned char[5] data;"), "{rendered}");
     }
 
     #[test]

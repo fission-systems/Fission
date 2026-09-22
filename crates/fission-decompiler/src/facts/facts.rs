@@ -348,25 +348,48 @@ fn build_nir_call_prototype_summaries(
             continue;
         }
         // Debug info spells "returns nothing" as an absent `DW_AT_type`, which
-        // the loader resolves to `void` for subprograms specifically.
+        // the loader resolves to `void` for subprograms specifically.  A
+        // non-void function's formal parameters are also declaration-level
+        // evidence: callers need the same source pointer surface that the
+        // project renderer emits for the definition (for example, an array
+        // argument must decay at a typed call site).
         let returns_void = debug
             .return_type
             .as_deref()
             .is_some_and(|name| name.trim().eq_ignore_ascii_case("void"));
-        if !returns_void {
+        if !returns_void && debug.params.is_empty() {
             continue;
         }
         let arity = debug.params.len();
-        summaries
-            .entry(debug.name.clone())
-            .or_insert_with(|| NirCallPrototypeSummary {
-                min_arity: arity,
-                max_arity: arity,
-                locked_exact_arity: Some(arity),
-                param_pointer_pointees: vec![None; arity],
-                param_surface_type_names: vec![None; arity],
-                returns_void: true,
-            });
+        let summary =
+            summaries
+                .entry(debug.name.clone())
+                .or_insert_with(|| NirCallPrototypeSummary {
+                    min_arity: arity,
+                    max_arity: arity,
+                    locked_exact_arity: Some(arity),
+                    param_pointer_pointees: vec![None; arity],
+                    param_surface_type_names: debug
+                        .params
+                        .iter()
+                        .map(|param| {
+                            let type_name = param.type_name.trim();
+                            (!type_name.is_empty()).then(|| type_name.to_string())
+                        })
+                        .collect(),
+                    returns_void,
+                });
+        for (index, param) in debug.params.iter().enumerate() {
+            let type_name = param.type_name.trim();
+            if type_name.is_empty() {
+                continue;
+            }
+            if let Some(slot) = summary.param_surface_type_names.get_mut(index)
+                && slot.is_none()
+            {
+                *slot = Some(type_name.to_string());
+            }
+        }
     }
     summaries
 }
@@ -967,9 +990,23 @@ pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
                 prototype_summary.min_arity = 0;
                 prototype_summary.locked_exact_arity = None;
             }
-            type_context
+            if let Some(existing) = type_context
                 .call_prototype_summaries
-                .insert(target_ref.symbol.clone(), prototype_summary);
+                .get_mut(&target_ref.symbol)
+            {
+                // The binary-wide context may already carry declaration-level
+                // evidence from DWARF or a user signature.  The bounded callee
+                // preview is useful supplemental ABI-slot evidence, but its
+                // raw-HIR path intentionally does not run the full function
+                // type overlay and can therefore be less specific.  Preserve
+                // the stronger surface facts and fill only missing pointer
+                // evidence from the preview.
+                merge_preview_pointer_evidence(existing, prototype_summary);
+            } else {
+                type_context
+                    .call_prototype_summaries
+                    .insert(target_ref.symbol.clone(), prototype_summary);
+            }
         }
     }
 }

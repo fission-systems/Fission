@@ -176,6 +176,138 @@ fn preview_type_hints_translate_cfa_relative_debug_stack_locals() {
 }
 
 #[test]
+fn pre_hir_debug_array_hints_recover_overlapping_scalar_stack_view() {
+    let u8_ty = NirType::Int {
+        bits: 8,
+        signed: false,
+    };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+    let mut func = PreHirFunction {
+        name: "array_stack_view".to_string(),
+        locals: vec![
+            PreHirBinding {
+                name: "local_5".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(-5)),
+                initializer: None,
+            },
+            PreHirBinding {
+                name: "local_1".to_string(),
+                ty: u8_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(-1)),
+                initializer: None,
+            },
+        ],
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("local_5".to_string()),
+                rhs: PreHirExpr::Const(0x0403_0201, u32_ty.clone()),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("local_1".to_string()),
+                rhs: PreHirExpr::Const(5, u8_ty.clone()),
+            },
+        ],
+        ..PreHirFunction::default()
+    };
+    let mut context = PreviewTypeContext::default();
+    context.function_hints = Some(PreviewFunctionHints {
+        debug_stack_local_names: HashMap::from([(-5, "data".to_string())]),
+        debug_stack_local_type_names: HashMap::from([(-5, "unsigned char[5]".to_string())]),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        apply_pre_hir_debug_array_hints(&mut func, &context, None),
+        1
+    );
+    assert_eq!(func.locals.len(), 1);
+    assert_eq!(func.locals[0].name, "data");
+    assert_eq!(
+        func.locals[0].surface_type_name.as_deref(),
+        Some("unsigned char[5]")
+    );
+    assert!(matches!(
+        func.locals[0].ty,
+        NirType::Aggregate { size: 5, .. }
+    ));
+    assert!(matches!(
+        &func.body[0],
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref { .. },
+            ..
+        }
+    ));
+    assert!(matches!(
+        &func.body[1],
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Index { base, index, .. },
+            ..
+        } if matches!(base.as_ref(), PreHirExpr::Var(name) if name == "data")
+            && matches!(index.as_ref(), PreHirExpr::Const(4, _))
+    ));
+}
+
+#[test]
+fn typed_pointer_call_decays_recovered_array_address() {
+    let array_ty = NirType::Aggregate {
+        size: 5,
+        fields: (0..5)
+            .map(|index| StructField {
+                offset: index,
+                ty: NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
+                name: format!("element_{index}"),
+            })
+            .collect(),
+    };
+    let mut func = HirFunction {
+        name: "typed_array_call".to_string(),
+        locals: vec![NirBinding {
+            name: "data".to_string(),
+            ty: array_ty,
+            surface_type_name: Some("unsigned char[5]".to_string()),
+            origin: Some(NirBindingOrigin::StackOffset(-5)),
+            initializer: None,
+        }],
+        body: vec![HirStmt::Expr(HirExpr::Call {
+            target: "checksum".to_string(),
+            args: vec![HirExpr::AddressOfLocal("data".to_string())],
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        })],
+        ..HirFunction::default()
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_prototype_summaries.insert(
+        "checksum".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 1,
+            max_arity: 1,
+            param_pointer_pointees: vec![None],
+            param_surface_type_names: vec![Some("const unsigned char *".to_string())],
+            ..Default::default()
+        },
+    );
+
+    apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
+
+    let HirStmt::Expr(HirExpr::Call { args, .. }) = &func.body[0] else {
+        panic!("expected checksum call")
+    };
+    assert!(matches!(&args[0], HirExpr::Var(name) if name == "data"));
+}
+
+#[test]
 fn preview_type_hints_surface_param_types_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),

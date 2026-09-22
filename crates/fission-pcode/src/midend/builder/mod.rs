@@ -148,6 +148,14 @@ pub(super) fn apply_preview_type_hints_with_stack_bias(
     )
 }
 
+pub(super) fn apply_pre_hir_debug_array_hints(
+    func: &mut PreHirFunction,
+    context: &PreviewTypeContext,
+    debug_cfa_stack_offset_bias: Option<i64>,
+) -> usize {
+    type_hints::apply_pre_hir_debug_array_hints(func, context, debug_cfa_stack_offset_bias)
+}
+
 fn seed_callee_summaries_from_type_context(
     context: &PreviewTypeContext,
 ) -> IndexMap<String, CallSummary> {
