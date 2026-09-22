@@ -94,16 +94,16 @@ Comparable coverage:
 ## 5. Validation Matrix
 
 - [x] Targeted invariant test:
-  - Command: `cargo nextest run -p fission-pcode --filter-expr 'test(loop_carried_update_reserves_internal_abi_seed_before_formal_fallback) | test(loop_carried_narrow_simd_update_reuses_wide_seed_carrier)'`
-  - Result: `2 tests run: 2 passed, 1110 skipped`.
-  - The new internal-seed and wide-seed/lane tests fail before the fix and pass after it; existing carrier tests remain green in the focused run.
-- [ ] Crate-level gate:
+  - Command: `cargo nextest run -p fission-pcode --filter-expr 'test(loop_carried_update_reuses_post_loop_join_binding) | test(win64_ecx_zext_then_shr_self_loop_uses_param_1) | test(loop_carried_update_reserves_internal_abi_seed_before_formal_fallback) | test(loop_carried_narrow_simd_update_reuses_wide_seed_carrier)'`
+  - Result: `4 tests run: 4 passed, 1108 skipped`.
+  - The new internal-seed and wide-seed/lane tests fail before the fix and pass after it; the existing post-loop-join and formal-parameter carrier tests remain green.
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
-  - Expected signal: no new failures beyond the three existing failures recorded in the issue worklog; run after the documentation update.
+  - Result: `1111 tests run: 1108 passed, 3 failed, 1 skipped`; the three failures are the pre-existing `diamond_join_lowers_copy_through_join_read_as_select`, `movzx_after_byte_add_zero_extends_unsigned`, and `x64_byte_add_movzx_does_not_double_add_load` tests. No loop-carried regression remains.
 - [x] Focused benchmark row:
-  - Command: `FISSION_ENDPOINT=http://localhost:8007 .venv/bin/python runner/runner.py --corpus dev --function matrix_multiply --decompilers fission,ghidra --run-mode local --no-resume --output results/issue77_after_739d6768a_matrix_multiply.json`.
-  - After provenance: local Fission `739d6768a`, source fingerprint `658d0df0eb221c9a3c3b7df899d6824c0b613ceda0b8769ee156b9273240f6b8`.
-  - Result: the nine focused rows increased from `6/45` to `16/45`. GCC O1 improved `0/5 → 5/5`, and GCC O2 improved `0/5 → 5/5`; GCC O0, GCC O3, GCC Os, GCC-m32 O0/O2, Clang O0, and Clang O2 were unchanged. The after run took 167.6 seconds versus 168.6 seconds for baseline.
+  - Command: `FISSION_ENDPOINT=http://localhost:8007 .venv/bin/python runner/runner.py --corpus dev --function matrix_multiply --decompilers fission,ghidra --run-mode local --no-resume --output results/issue77_after_4f1316eea_matrix_multiply.json`.
+  - After provenance: local Fission `4f1316eea`, source fingerprint `ab1af7bca0d7e22a114b57d1891b854ded53050cdf466cbf287fd858eaa225f6`.
+  - Result: the nine focused rows increased from `6/45` to `16/45`. GCC O1 improved `0/5 → 5/5`, and GCC O2 improved `0/5 → 5/5`; GCC O0, GCC O3, GCC Os, GCC-m32 O0/O2, Clang O0, and Clang O2 were unchanged. The after run took 160.5 seconds versus 168.6 seconds for baseline.
   - The GCC O2 output now contains `rbx[iVar8] = xmm1_qa;` instead of `*rbx = xmm1_da;`, preserving both the reaching accumulator and the indexed destination. This is a measured semantic improvement on the anchored corpus rows, not a synthetic-only claim.
 - [ ] Smoke or automation sample:
   - Command: existing benchmark smoke manifest after the focused fix.
@@ -121,7 +121,7 @@ Comparable coverage:
   - [ ] Yes, using `docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md`
 - Unseen or synthetic validation evidence:
   - Patch validation pool command/result: not run; this fix was validated against the anchored nine-row real-binary slice and the focused Rust regressions.
-  - Synthetic invariant test command/result: the two focused tests passed after the fix (`2 passed, 1110 skipped`).
+  - Synthetic invariant test command/result: the two new carrier tests and two existing carrier regressions passed after the fix (`4 passed, 1108 skipped`).
 
 ## 7. Review Notes
 
