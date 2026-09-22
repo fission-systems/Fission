@@ -103,7 +103,10 @@ impl<'a> PreviewBuilder<'a> {
             .find(|(_, candidate)| Self::op_kills_varnode_definition(candidate, &key))
     }
 
-    pub(super) fn op_kills_varnode_definition(op: &PcodeOp, key: &VarnodeKey) -> bool {
+    pub(in crate::midend::builder) fn op_kills_varnode_definition(
+        op: &PcodeOp,
+        key: &VarnodeKey,
+    ) -> bool {
         let Some(output) = op.output.as_ref() else {
             return false;
         };

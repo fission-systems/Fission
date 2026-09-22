@@ -16,10 +16,20 @@ pub(super) fn propagate_pure_var_aliases(func: &mut HirFunction) -> bool {
     let formal: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
     let mut def_counts = HashMap::new();
     count_defs_in_stmts(&func.body, &mut def_counts);
+    // A formal is only a stable alias source when the body never assigns to
+    // it.  A loop-carried register can initially be represented as
+    // `carrier = param_2` and later write the remainder back to `param_2`.
+    // Replacing every carrier use with the formal would then move the use
+    // across that write and change the loop's value flow.
+    let stable_formal: HashSet<&str> = formal
+        .iter()
+        .copied()
+        .filter(|name| def_counts.get(*name).copied().unwrap_or(0) == 0)
+        .collect();
 
     // Collect x → y for single-def pure var copies. Resolve short chains.
     let mut copy_map: HashMap<String, String> = HashMap::new();
-    collect_pure_var_copies(&func.body, &formal, &def_counts, &mut copy_map);
+    collect_pure_var_copies(&func.body, &stable_formal, &def_counts, &mut copy_map);
     if copy_map.is_empty() {
         return false;
     }
@@ -52,6 +62,86 @@ pub(super) fn propagate_pure_var_aliases(func: &mut HirFunction) -> bool {
     }
     changed |= remove_copy_assigns(&mut func.body, &copy_map);
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int32() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn binding(name: &str) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: int32(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    #[test]
+    fn does_not_fold_alias_from_formal_reassigned_in_loop() {
+        let mut func = HirFunction {
+            params: vec![binding("param_2")],
+            locals: vec![binding("carrier")],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("carrier".to_string()),
+                    rhs: HirExpr::Var("param_2".to_string()),
+                },
+                HirStmt::DoWhile {
+                    body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("param_2".to_string()),
+                        rhs: HirExpr::Const(0, int32()),
+                    }],
+                    cond: HirExpr::Var("param_2".to_string()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("carrier".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!propagate_pure_var_aliases(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs: HirExpr::Var(source),
+            } if name == "carrier" && source == "param_2"
+        ));
+        assert!(matches!(
+            &func.body[2],
+            HirStmt::Return(Some(HirExpr::Var(name))) if name == "carrier"
+        ));
+    }
+
+    #[test]
+    fn folds_alias_from_unchanged_formal() {
+        let mut func = HirFunction {
+            params: vec![binding("param_1")],
+            locals: vec![binding("carrier")],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("carrier".to_string()),
+                    rhs: HirExpr::Var("param_1".to_string()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("carrier".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(propagate_pure_var_aliases(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Return(Some(HirExpr::Var(name))) if name == "param_1"
+        ));
+    }
 }
 
 fn collect_pure_var_copies(

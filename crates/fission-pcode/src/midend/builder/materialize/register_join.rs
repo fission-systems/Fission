@@ -420,6 +420,28 @@ impl<'a> PreviewBuilder<'a> {
             return self.sla_hw_name(output.offset, 4).map(|name| (name, 4));
         }
         if live_register_loop_carried {
+            // A missing loop-header incoming value can be the ABI-owned entry
+            // state rather than an unowned scratch register. When entry-use
+            // inference has already proved this slot is a formal parameter,
+            // keep the carrier on that formal so the first loop iteration is
+            // initialized from the caller's value. Unproven slots continue to
+            // use their hardware identity below; prior-definition cases are
+            // likewise handled by the existing loop-carrier proof before this
+            // missing-merge fallback.
+            if let Some(param_index) = self.abi_state().param_slot_for_varnode(output)
+                && param_index < self.entry_arity
+            {
+                let name = self.abi_state().param_name(param_index);
+                self.trace_path_sensitive_register_merge(
+                    block.start_address,
+                    op.seq_num,
+                    output,
+                    proof.relation,
+                    proof.consumer_kind,
+                    name.as_str(),
+                );
+                return Some((name, output.size));
+            }
             let name = self.sla_hw_name(output.offset, output.size)?;
             if crate::arch::x86::x86_gpr_family_index(name.as_str()).is_none()
                 && self.gpr_family_index_for_key(&output_key).is_none()

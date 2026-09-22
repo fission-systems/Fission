@@ -1152,7 +1152,13 @@ impl<'a> PreviewBuilder<'a> {
         // in the loop body from being given an opaque temp name (e.g. xVar1) that
         // then propagates back into EAX bindings via loop_header_explicit_merge_binding_name.
         // We use SLA-first hardware naming for the narrow canonical name (EAX→"rax").
-        let hw_name: Option<String> = if !output.is_constant
+        let param_name = self
+            .abi_state()
+            .param_slot_for_varnode(output)
+            .filter(|&index| index < self.entry_arity)
+            .and_then(|_| self.register_param(output));
+        let hw_name: Option<String> = if param_name.is_none()
+            && !output.is_constant
             && is_register_space_id(output.space_id)
             && matches!(
                 self.options.calling_convention,
@@ -1173,7 +1179,9 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             None
         };
-        let name = if let Some(hw) = hw_name {
+        let name = if let Some(param) = param_name {
+            param
+        } else if let Some(hw) = hw_name {
             // Reuse an existing binding with the same hardware name if present.
             if self.temps.contains_key(&hw) || self.used_param_local_names.contains(&hw) {
                 hw

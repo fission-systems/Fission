@@ -425,7 +425,11 @@ impl<'a> PreviewBuilder<'a> {
         candidates
     }
 
-    pub(super) fn has_prior_local_def_for_varnode(&self, vn: &Varnode, site: LoweringSite) -> bool {
+    pub(in crate::midend::builder) fn has_prior_local_def_for_varnode(
+        &self,
+        vn: &Varnode,
+        site: LoweringSite,
+    ) -> bool {
         let key = VarnodeKey::from(vn);
         let candidate_keys = self.lookup_candidate_def_keys(&key);
         let Some(defs_in_block) = self.block_defs.get(site.block_idx) else {

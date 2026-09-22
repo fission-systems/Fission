@@ -102,14 +102,18 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(name);
             }
         }
-        if let Some(name) =
-            self.merge_binding_name_for_loop_carried_output(block, op_idx, op, output)
-        {
-            return Some(name);
-        }
+        // An entry-owned ABI register is also the seed of the loop carrier.
+        // Choose the formal before merge-binding fallback can mint or reuse a
+        // hardware name; otherwise a latch-first read observes an uninitialized
+        // `rdx`/equivalent even though the entry path proved the slot live.
         if self.abi_state().param_slot_for_varnode(output).is_some()
             && !self.loop_carried_output_has_prior_definition(output)
             && let Some(name) = self.register_param(output)
+        {
+            return Some(name);
+        }
+        if let Some(name) =
+            self.merge_binding_name_for_loop_carried_output(block, op_idx, op, output)
         {
             return Some(name);
         }
@@ -244,6 +248,37 @@ impl<'a> PreviewBuilder<'a> {
         }
         let site = self.current_lowering_site?;
         let site_block = self.pcode.blocks.get(site.block_idx)?;
+
+        // A direct loop-body passthrough can read the incoming value of an ABI
+        // register before the loop's later write establishes the carried
+        // state. Keep that read on the formal parameter; otherwise the
+        // materializer sees the future backedge definition and falls back to
+        // a bare hardware name (for example `rdx`) for the first iteration.
+        if self
+            .loop_bodies
+            .iter()
+            .any(|loop_body| loop_body.body.contains(&site.block_idx))
+            && !self.has_prior_local_def_for_varnode(vn, site)
+            && let Some(op) = site_block.ops.get(site.op_idx)
+            && matches!(
+                op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            )
+            && op.inputs.len() == 1
+            && op
+                .inputs
+                .first()
+                .is_some_and(|input| self.varnode_aliases_value(input, vn))
+            // An entry alias (for example RAX seeded from the first argument's
+            // RCX slot) already has a materialized carrier binding. Reusing
+            // `register_param` here would replace that carrier with the
+            // formal on every loop read and make the backedge write appear
+            // dead. Only native ABI register slots use this direct seed path.
+            && !self.register_param_aliases.contains_key(&vn.offset)
+            && let Some(name) = self.register_param(vn)
+        {
+            return Some(name);
+        }
 
         // Prefer the name of a loop-carried self-update when we are reading that
         // register as an input of the update op itself (eax = eax + 4).

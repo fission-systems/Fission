@@ -2349,6 +2349,227 @@ fn loop_header_missing_merge_uses_x64_live_register_binding() {
 }
 
 #[test]
+fn loop_header_missing_merge_uses_entry_owned_parameter_binding() {
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 4);
+    let r14d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb0, 4);
+    let store_ptr = register(UNIQUE_SPACE_ID, 0x100, 8);
+    let cond = register(UNIQUE_SPACE_ID, 0x108, 1);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            // An entry read proves that the ABI-owned RDX slot is param_2.
+            op(
+                0,
+                PcodeOpcode::IntEqual,
+                Some(cond.clone()),
+                vec![rdx.clone(), Varnode::constant(0, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x1010), cond.clone()],
+            ),
+        ],
+    );
+    entry.successors = vec![1];
+    let mut header = block_at(
+        0x1010,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::Store,
+                None,
+                vec![constant(0), store_ptr, rdx.clone()],
+            ),
+            op(3, PcodeOpcode::CBranch, None, vec![constant(0x1030), cond]),
+        ],
+    );
+    header.successors = vec![3, 2];
+    let mut body = block_at(
+        0x1020,
+        2,
+        vec![
+            // The backedge update is the same physical ABI register, but its
+            // first loop-head value is the incoming param_2.
+            op(4, PcodeOpcode::Copy, Some(rdx.clone()), vec![r14d]),
+            op(5, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+        ],
+    );
+    body.successors = vec![1];
+    let exit = block_at(
+        0x1030,
+        3,
+        vec![op(
+            6,
+            PcodeOpcode::Return,
+            None,
+            vec![constant(0), rdx.clone()],
+        )],
+    );
+    let pcode = pcode_function(vec![entry, header, body.clone(), exit]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    let rhs = PreHirExpr::Var("r14".to_string());
+
+    assert_eq!(builder.entry_arity, 2, "RDX entry read must prove param_2");
+    assert_eq!(
+        builder.live_register_lhs_name_for_safe_missing_merge(
+            &body,
+            0,
+            &body.ops[0],
+            &rdx,
+            &rhs,
+            ReplacementValuePlan::incomplete(
+                ReplacementReadClass::Merge,
+                MaterializationRejectionReason::MissingMergeBinding,
+            ),
+        ),
+        Some(("param_2".to_string(), 4)),
+        "an entry-owned loop carrier must retain the formal parameter seed"
+    );
+}
+
+#[test]
+fn loop_body_parameter_passthrough_uses_source_formal_before_carrier_write() {
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 4);
+    let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 4);
+    let r14d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb0, 4);
+    let cond = register(UNIQUE_SPACE_ID, 0x108, 1);
+    let mut entry = block_at(
+        0x2000,
+        0,
+        vec![
+            // The entry read proves RDX is the second Windows x64 parameter.
+            op(
+                0,
+                PcodeOpcode::IntEqual,
+                Some(cond.clone()),
+                vec![rdx.clone(), Varnode::constant(0, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x2030), cond.clone()],
+            ),
+        ],
+    );
+    entry.successors = vec![1, 3];
+    let mut preheader = block_at(0x2010, 1, vec![]);
+    preheader.successors = vec![2];
+    let mut body = block_at(
+        0x2020,
+        2,
+        vec![
+            // The loop carrier is RCX, but its first value comes from RDX.
+            op(2, PcodeOpcode::Copy, Some(rcx.clone()), vec![rdx.clone()]),
+            op(3, PcodeOpcode::Copy, Some(rdx.clone()), vec![r14d]),
+            op(4, PcodeOpcode::CBranch, None, vec![constant(0x2020), cond]),
+        ],
+    );
+    body.successors = vec![2, 3];
+    let exit = block_at(
+        0x2030,
+        3,
+        vec![op(
+            5,
+            PcodeOpcode::Return,
+            None,
+            vec![constant(0), rcx.clone()],
+        )],
+    );
+    let pcode = pcode_function(vec![entry, preheader, body, exit]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    assert_eq!(builder.entry_arity, 2, "RDX entry read must prove param_2");
+    assert!(
+        {
+            builder.current_lowering_site = Some(LoweringSite {
+                block_idx: 2,
+                op_idx: 0,
+            });
+            builder.loop_body_carried_register_read_name(&rdx)
+        } == Some("param_2".to_string()),
+        "the first loop-body read must use the entry formal, not bare RDX"
+    );
+}
+
+#[test]
+fn shared_loop_exit_uses_entry_alias_carrier_binding() {
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 4);
+    let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 4);
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 4);
+    let seed = op(0, PcodeOpcode::Copy, Some(rax.clone()), vec![rcx.clone()]);
+    let mut entry = block_at(
+        0x3000,
+        0,
+        vec![
+            seed.clone(),
+            op(1, PcodeOpcode::Branch, None, vec![constant(0x3010)]),
+        ],
+    );
+    entry.successors = vec![1, 2];
+    let mut body = block_at(
+        0x3010,
+        1,
+        vec![
+            // The loop tail transfers the value read at the shared exit into
+            // the entry-owned RAX alias carrier.
+            op(2, PcodeOpcode::Copy, Some(rax.clone()), vec![rcx.clone()]),
+            op(3, PcodeOpcode::Branch, None, vec![constant(0x3010)]),
+        ],
+    );
+    body.successors = vec![1, 2];
+    let exit = block_at(0x3030, 2, vec![op(4, PcodeOpcode::Return, None, vec![rdx])]);
+    let pcode = pcode_function(vec![entry, body, exit]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.predecessors[2] = vec![0, 1];
+    // These are the entry-analysis facts supplied by the real x64 prologue:
+    // RAX is an alias carrier for the first ABI register, and the loop tail's
+    // RAX copy is therefore the stable binding for the shared exit.
+    builder.register_param_aliases.insert(rax.offset, 0);
+    builder.entry_arity = 1;
+    builder.loop_bodies = vec![crate::midend::structuring::loop_analysis::LoopBody {
+        head: 1,
+        tails: vec![1],
+        body: vec![1],
+        exit_idx: Some(2),
+        all_exits: vec![2],
+    }];
+    builder
+        .materialized_vns
+        .insert(MaterializedVarnodeKey::new(&rax, &seed), "rax".to_string());
+    builder.temps.insert(
+        "rax".to_string(),
+        PreHirBinding {
+            name: "rax".to_string(),
+            ty: type_from_size(4, false),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        },
+    );
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    });
+
+    let binding = builder.loop_exit_materialized_register_binding(&rcx);
+    assert!(
+        matches!(binding, Some(PreHirExpr::Var(ref name)) if name == "rax"),
+        "shared exit must use the loop-tail's entry-alias carrier, got {binding:?}"
+    );
+}
+
+#[test]
 fn loop_header_missing_merge_rejects_side_effect_rhs() {
     let r14d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb0, 4);
     let r15d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb8, 4);

@@ -346,7 +346,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn loop_exit_materialized_register_binding(
+    pub(in crate::midend::builder) fn loop_exit_materialized_register_binding(
         &mut self,
         vn: &Varnode,
     ) -> Option<PreHirExpr> {
@@ -375,6 +375,16 @@ impl<'a> PreviewBuilder<'a> {
                     }
                 }
             }
+        }
+
+        // A loop tail may join an entry bypass at a shared return block.  If
+        // the tail copies this register into an entry-owned register alias,
+        // that alias is the same logical value on both incoming paths: the
+        // bypass still has the entry seed, while the loop path has the
+        // carried update.  Prefer the alias carrier instead of selecting the
+        // entry formal for every path (which drops the final loop value).
+        if let Some(name) = self.loop_exit_entry_alias_binding(vn, &predecessor_idxs) {
+            return Some(PreHirExpr::Var(name));
         }
 
         if predecessor_idxs.len() < 2 || predecessor_idxs.contains(&site.block_idx) {
@@ -446,6 +456,78 @@ impl<'a> PreviewBuilder<'a> {
             binding.initializer = Some(PreHirExpr::Const(0, type_from_size(vn.size, false)));
         }
         materialized_expr
+    }
+
+    fn loop_exit_entry_alias_binding(
+        &mut self,
+        vn: &Varnode,
+        predecessor_idxs: &[usize],
+    ) -> Option<String> {
+        let loop_tail_blocks: Vec<usize> = self
+            .loop_bodies
+            .iter()
+            .filter(|loop_body| {
+                predecessor_idxs
+                    .iter()
+                    .any(|pred_idx| loop_body.body.contains(pred_idx))
+            })
+            .flat_map(|loop_body| loop_body.body.iter().copied())
+            .filter(|block_idx| predecessor_idxs.contains(block_idx))
+            .collect();
+        let mut candidate_sites = Vec::new();
+        for block_idx in loop_tail_blocks {
+            let Some(block) = self.pcode.blocks.get(block_idx) else {
+                continue;
+            };
+            for (op_idx, op) in block.ops.iter().enumerate() {
+                if !matches!(
+                    op.opcode,
+                    PcodeOpcode::Copy
+                        | PcodeOpcode::Cast
+                        | PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                ) || op.inputs.len() != 1
+                {
+                    continue;
+                }
+                let Some(output) = op.output.as_ref() else {
+                    continue;
+                };
+                let Some(input) = op.inputs.first() else {
+                    continue;
+                };
+                if is_register_space_id(output.space_id)
+                    && self.register_param_aliases.contains_key(&output.offset)
+                    && self.varnode_aliases_value(input, vn)
+                {
+                    candidate_sites.push((block_idx, op_idx));
+                }
+            }
+        }
+
+        for (block_idx, op_idx) in candidate_sites {
+            let Some(name) = self.with_lowering_site(LoweringSite { block_idx, op_idx }, |this| {
+                let block = this.pcode.blocks.get(block_idx)?;
+                let op = block.ops.get(op_idx)?;
+                let output = op.output.as_ref()?;
+                let output_key = VarnodeKey::from(output);
+                if block
+                    .ops
+                    .iter()
+                    .skip(op_idx + 1)
+                    .any(|candidate| Self::op_kills_varnode_definition(candidate, &output_key))
+                {
+                    return None;
+                }
+                let name = this.prior_materialized_same_register_output_name(output)?;
+                this.temps.contains_key(&name).then_some(name)
+            }) else {
+                continue;
+            };
+
+            return Some(name);
+        }
+        None
     }
 
     fn predecessor_path_has_zero_register_seed(
