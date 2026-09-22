@@ -98,6 +98,12 @@ pub struct NirRenderOptions {
     /// reasoning does not apply, so it is carried here and used verbatim.
     #[serde(default)]
     pub declared_signatures: HashMap<String, String>,
+    /// Source-level callable signatures for named function-pointer aliases
+    /// recovered from debug information. The renderer uses these to emit
+    /// `typedef int (*alias)(int, int);` instead of reducing the alias to its
+    /// machine-width pointer representation.
+    #[serde(default)]
+    pub function_type_aliases: HashMap<String, NirFunctionType>,
     /// Calling convention used to identify parameter registers.
     /// Auto-detected from binary format in `from_loaded_binary`; can be overridden.
     #[serde(default)]
@@ -363,6 +369,19 @@ pub struct NirTypeContext {
     /// aggregate fields; see `NirStructTypeHint`.
     #[serde(default)]
     pub struct_types: HashMap<String, NirStructTypeHint>,
+    /// Named source-level callable typedefs recovered from the binary's
+    /// debug metadata, keyed by typedef alias.
+    #[serde(default)]
+    pub function_type_aliases: HashMap<String, NirFunctionType>,
+}
+
+/// The source-level signature behind a named function-pointer typedef.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NirFunctionType {
+    pub return_type: String,
+    pub param_types: Vec<String>,
+    #[serde(default)]
+    pub variadic: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -642,6 +661,7 @@ impl NirRenderOptions {
             global_sizes: inner.global_symbol_sizes.clone(),
             relocation_names: inner.relocation_symbols.clone(),
             declared_signatures,
+            function_type_aliases: HashMap::new(),
             calling_convention,
             userops: HashMap::new(),
             cspec_param_offsets: None,

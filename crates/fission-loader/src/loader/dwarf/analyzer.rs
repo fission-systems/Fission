@@ -4,7 +4,7 @@
 //! information from DWARF debug sections.
 
 use super::sections::SectionData;
-use super::types::DwarfTypeInfo;
+use super::types::{DwarfFunctionTypeInfo, DwarfTypeInfo};
 use crate::loader::LoadedBinary;
 use crate::loader::types::DwarfFunctionInfo;
 use gimli::{AttributeValue, DebuggingInformationEntry, DwAt, EndianSlice, RunTimeEndian};
@@ -111,6 +111,31 @@ impl<'a> DwarfAnalyzer<'a> {
             }
             Err(e) => {
                 tracing::warn!("[DwarfAnalyzer] Error parsing DWARF types: {}", e);
+                Vec::new()
+            }
+        }
+    }
+
+    /// Analyze DWARF function-pointer typedefs and retain their callable
+    /// signatures for project-level declaration rendering.
+    pub fn analyze_function_types(&self) -> Vec<DwarfFunctionTypeInfo> {
+        if !self.has_debug {
+            return Vec::new();
+        }
+
+        match self.analyze_function_types_inner() {
+            Ok(function_types) => {
+                tracing::info!(
+                    "[DwarfAnalyzer] Extracted {} function typedefs from DWARF debug info",
+                    function_types.len()
+                );
+                function_types
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "[DwarfAnalyzer] Error parsing DWARF function typedefs: {}",
+                    error
+                );
                 Vec::new()
             }
         }

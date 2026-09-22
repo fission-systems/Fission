@@ -9,7 +9,7 @@ use super::presentation::apply_hir_presentation_with_globals;
 use super::printer::surface_type_definition_source;
 use super::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
-    NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
+    NirFunctionType, NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -58,7 +58,9 @@ pub(crate) fn render_layered_pseudocode(
 #[cfg(test)]
 mod layered_tests {
     use super::*;
-    use crate::midend::{HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirType, StructField};
+    use crate::midend::{
+        HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirFunctionType, NirType, StructField,
+    };
 
     #[test]
     fn unknown_arity_called_extern_uses_c11_unspecified_parameter_list() {
@@ -270,6 +272,48 @@ mod layered_tests {
         assert!(rendered.contains("typedef fission_agg8 tm;"), "{rendered}");
         assert!(!rendered.contains("typedef int tm;"), "{rendered}");
     }
+
+    #[test]
+    fn function_pointer_surface_alias_uses_callable_signature() {
+        let func = HirFunction {
+            name: "apply_binop".into(),
+            params: vec![NirBinding {
+                name: "op".into(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: Some("binop_fn".into()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            body: vec![HirStmt::Return(Some(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )))],
+            ..Default::default()
+        };
+        let mut options = MlilPreviewOptions::default();
+        options.function_type_aliases.insert(
+            "binop_fn".into(),
+            NirFunctionType {
+                return_type: "int".into(),
+                param_types: vec!["int".into(), "int".into()],
+                variadic: false,
+            },
+        );
+
+        let rendered = render_hir_function_with_global_decls(&func, &options);
+        assert!(
+            rendered.contains("typedef int (*binop_fn)(int, int);"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("typedef void * binop_fn;"), "{rendered}");
+    }
 }
 
 fn render_hir_function_with_profile(
@@ -290,7 +334,7 @@ fn render_hir_function_with_profile(
     let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(&printable);
     // A call to a name this unit does not define needs a declaration for the
     // result to compile as a project rather than as one loose function.
-    let undefined_types = collect_undefined_surface_types(&printable);
+    let undefined_types = collect_undefined_surface_types(&printable, options);
     let mut called_externs = collect_called_externs(&printable, &printable.name);
     called_externs
         .retain(|name, _| !decls.contains_key(name) && !opaque_pcodeop_stubs.contains_key(name));
@@ -318,7 +362,14 @@ fn render_hir_function_with_profile(
         ));
     }
     for (name, definition) in &undefined_types {
-        rendered.push_str(&format!("typedef {definition} {name};\n"));
+        if let Some(function_type) = options.function_type_aliases.get(name) {
+            rendered.push_str(&format!(
+                "typedef {};\n",
+                render_function_type_definition(function_type, name)
+            ));
+        } else {
+            rendered.push_str(&format!("typedef {definition} {name};\n"));
+        }
     }
     for (target, return_ty) in &called_externs {
         rendered.push_str(&render_called_extern(
@@ -345,7 +396,10 @@ fn render_hir_function_with_profile(
 /// without the name meaning anything the recovered type did not already say --
 /// same width, same stride, same arithmetic. Names the aggregate typedefs or C
 /// itself already provide are left alone.
-fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String> {
+fn collect_undefined_surface_types(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+) -> BTreeMap<String, String> {
     // A parameter and its O0 spill can carry the same debug spelling while
     // only the parameter has been promoted to an aggregate. Keep the most
     // informative definition instead of letting the later scalar spill
@@ -375,6 +429,10 @@ fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String
         if base.starts_with("fission_agg") || KNOWN_C_TYPE_NAMES.contains(&base) {
             continue;
         }
+        if options.function_type_aliases.contains_key(base) {
+            names.insert(base.to_string(), (5, String::new()));
+            continue;
+        }
         let Some(source) = surface_type_definition_source(surface, &ty) else {
             continue;
         };
@@ -391,6 +449,30 @@ fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String
         .into_iter()
         .map(|(name, (_, definition))| (name, definition))
         .collect()
+}
+
+fn render_function_type_definition(function_type: &NirFunctionType, alias: &str) -> String {
+    let return_type = if function_type.return_type.trim().is_empty() {
+        "void"
+    } else {
+        function_type.return_type.trim()
+    };
+    let mut params = function_type
+        .param_types
+        .iter()
+        .map(|param| param.trim())
+        .filter(|param| !param.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if function_type.variadic {
+        params.push("...".to_string());
+    }
+    let params = if params.is_empty() {
+        "void".to_string()
+    } else {
+        params.join(", ")
+    };
+    format!("{return_type} (*{alias})({params})")
 }
 
 /// Rank competing definitions for one recovered C surface alias.

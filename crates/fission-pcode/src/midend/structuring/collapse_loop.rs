@@ -142,6 +142,7 @@ mod tests {
             global_sizes: Default::default(),
             relocation_names: Default::default(),
             declared_signatures: Default::default(),
+            function_type_aliases: Default::default(),
             calling_convention: Default::default(),
             userops: Default::default(),
             cspec_param_offsets: None,

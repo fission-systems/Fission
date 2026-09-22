@@ -1,6 +1,8 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use std::sync::Arc;
 
+use super::dwarf::DwarfFunctionTypeInfo;
+
 // Re-export common types from fission-core to maintain API compatibility
 pub use fission_core::architecture::{
     ArchitectureDescriptor, BinaryLoadSpec, LanguageCompilerSpecPair,
@@ -428,6 +430,10 @@ pub struct LoadedBinary {
     /// entire lifetime, so an independent copy here is pure standing
     /// duplication, not a one-off cost.
     pub dwarf_functions: Arc<std::collections::HashMap<u64, DwarfFunctionInfo>>,
+    /// Named DWARF function-pointer typedefs, keyed by source alias.
+    /// Not serialized: these are rebuilt from debug sections on each load and
+    /// are consumed by project-level declaration rendering.
+    pub dwarf_function_types: Arc<std::collections::HashMap<String, DwarfFunctionTypeInfo>>,
     /// Focused PDB function-level facts (name, return type, params/locals).
     /// Keyed by function address for O(1) lookup during post-processing.
     /// Not serialized — rebuilt on each load from the PDB sidecar when
@@ -469,6 +475,7 @@ impl LoadedBinary {
         Self {
             inner: Arc::new(inner),
             dwarf_functions: Arc::new(std::collections::HashMap::new()),
+            dwarf_function_types: Arc::new(std::collections::HashMap::new()),
             pdb_functions: Arc::new(std::collections::HashMap::new()),
             identity_report: None,
             go_version: None,

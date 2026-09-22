@@ -3,8 +3,8 @@ use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPointerPointee, NirCallPrototypeSummary,
-    NirFunctionHints, NirRenderOptions, NirStackOffsetBase, NirStructFieldHint, NirStructTypeHint,
-    NirType, NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
+    NirFunctionHints, NirFunctionType, NirRenderOptions, NirStackOffsetBase, NirStructFieldHint,
+    NirStructTypeHint, NirType, NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
     infer_entry_register_param_arity,
 };
 use fission_analysis_db::SymbolKind;
@@ -245,6 +245,20 @@ pub(crate) fn build_nir_type_context(
             .clone(),
         function_hints,
         struct_types: build_nir_struct_type_hints(binary),
+        function_type_aliases: binary
+            .dwarf_function_types
+            .iter()
+            .map(|(name, function_type)| {
+                (
+                    name.clone(),
+                    NirFunctionType {
+                        return_type: function_type.return_type.clone(),
+                        param_types: function_type.param_types.clone(),
+                        variadic: function_type.variadic,
+                    },
+                )
+            })
+            .collect(),
     }
 }
 

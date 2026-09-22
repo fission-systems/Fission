@@ -121,7 +121,7 @@ impl LoadedBinary {
             (
                 (apple_funcs_res, swift_types_res, objc_classes_res, objc_selectors_res),
                 (
-                    (dwarf_types_res, dwarf_funcs_res, dwarf_lines_res),
+                    (dwarf_types_res, dwarf_function_types_res, dwarf_funcs_res, dwarf_lines_res),
                     (rust_vtables_res, (cpp_types_res, cpp_vtable_funcs_res)),
                 ),
             ),
@@ -163,11 +163,12 @@ impl LoadedBinary {
                                 let dwarf_analyzer = dwarf::DwarfAnalyzer::new(binary_ref);
                                 if dwarf_analyzer.has_debug_info() {
                                     let types = dwarf_analyzer.analyze_types();
+                                    let function_types = dwarf_analyzer.analyze_function_types();
                                     let funcs = dwarf_analyzer.analyze_functions();
                                     let lines = dwarf_analyzer.analyze_lines();
-                                    (types, funcs, lines)
+                                    (types, function_types, funcs, lines)
                                 } else {
-                                    (Vec::new(), Vec::new(), Vec::new())
+                                    (Vec::new(), Vec::new(), Vec::new(), Vec::new())
                                 }
                             },
                             || {
@@ -328,6 +329,17 @@ impl LoadedBinary {
                 .inner_mut()
                 .inferred_types
                 .push(ty.to_inferred_type());
+        }
+
+        if !dwarf_function_types_res.is_empty() {
+            tracing::info!(
+                "[Loader] DWARF: {} function-pointer typedefs extracted",
+                dwarf_function_types_res.len()
+            );
+            let function_types = Arc::make_mut(&mut binary.dwarf_function_types);
+            for function_type in dwarf_function_types_res {
+                function_types.insert(function_type.name.clone(), function_type);
+            }
         }
 
         if !dwarf_funcs_res.is_empty() {

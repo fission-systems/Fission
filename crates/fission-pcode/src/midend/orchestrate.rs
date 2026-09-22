@@ -264,6 +264,16 @@ fn render_mlil_preview_with_binary_and_context_output(
     type_context: Option<&PreviewTypeContext>,
     decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<NirDecompileOutput, MlilPreviewError> {
+    // Type-context facts are computed alongside the builder input, while the
+    // renderer receives the stable render-options contract. Copy the
+    // structured callable aliases into that contract once so both NIR and HIR
+    // project rendering see the same DWARF evidence without making the printer
+    // depend on the loader.
+    let mut effective_options = options.clone();
+    if let Some(type_context) = type_context {
+        effective_options.function_type_aliases = type_context.function_type_aliases.clone();
+    }
+    let options = &effective_options;
     // Two output modes, two structurings. Handled here rather than in a
     // wrapper because the pipeline calls this entry point directly. Legacy
     // string-returning wrappers install their observation compatibility state

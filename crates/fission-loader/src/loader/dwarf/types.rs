@@ -26,6 +26,21 @@ pub struct DwarfMemberInfo {
     pub size: u32,
 }
 
+/// A named C function-pointer typedef recovered from DWARF.
+///
+/// DWARF represents `typedef int (*binop_fn)(int, int)` as a typedef whose
+/// target is a pointer whose target is a `DW_TAG_subroutine_type`.  Keeping
+/// that shape separate from scalar/aggregate type facts lets the renderer
+/// emit a callable declaration without pretending that the alias is merely a
+/// machine-width integer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DwarfFunctionTypeInfo {
+    pub name: String,
+    pub return_type: String,
+    pub param_types: Vec<String>,
+    pub variadic: bool,
+}
+
 impl DwarfTypeInfo {
     /// Convert to InferredTypeInfo for decompiler integration
     pub fn to_inferred_type(&self) -> InferredTypeInfo {
@@ -51,6 +66,121 @@ impl DwarfTypeInfo {
 
 /// Type extraction methods for DwarfAnalyzer
 impl<'a> super::analyzer::DwarfAnalyzer<'a> {
+    /// Extract named function-pointer typedefs from DWARF.
+    pub(super) fn analyze_function_types_inner(
+        &self,
+    ) -> Result<Vec<DwarfFunctionTypeInfo>, gimli::Error> {
+        let dwarf = self.build_dwarf()?;
+        let mut function_types = Vec::new();
+
+        let mut units = dwarf.units();
+        while let Some(unit_header) = units.next()? {
+            let unit = dwarf.unit(unit_header)?;
+            let mut type_cache: HashMap<UnitOffset<usize>, String> = HashMap::new();
+            self.collect_type_names(&unit, &dwarf, &mut type_cache)?;
+
+            let mut pointer_targets = HashMap::new();
+            let mut subroutine_types = HashMap::new();
+            let mut typedefs = Vec::new();
+            let mut entries = unit.entries();
+            while let Some((_, entry)) = entries.next_dfs()? {
+                match entry.tag() {
+                    DwTag(0x16) => {
+                        // DW_TAG_typedef
+                        let Some(name) = self
+                            .get_attr_string(entry, DwAt(0x03), &unit, &dwarf)?
+                            .filter(|name| !name.is_empty())
+                        else {
+                            continue;
+                        };
+                        let Some(AttributeValue::UnitRef(type_ref)) =
+                            entry.attr_value(DwAt(0x49))?
+                        else {
+                            continue;
+                        };
+                        typedefs.push((name, type_ref));
+                    }
+                    DwTag(0x0f) => {
+                        // DW_TAG_pointer_type
+                        if let Some(AttributeValue::UnitRef(type_ref)) =
+                            entry.attr_value(DwAt(0x49))?
+                        {
+                            pointer_targets.insert(entry.offset(), type_ref);
+                        }
+                    }
+                    DwTag(0x15) => {
+                        // DW_TAG_subroutine_type
+                        let return_type = match entry.attr_value(DwAt(0x49))? {
+                            Some(AttributeValue::UnitRef(type_ref)) => Some(type_ref),
+                            _ => None,
+                        };
+                        let mut param_types = Vec::new();
+                        let mut variadic = false;
+                        let mut tree = unit.entries_tree(Some(entry.offset()))?;
+                        let root = tree.root()?;
+                        let mut children = root.children();
+                        while let Some(child) = children.next()? {
+                            match child.entry().tag() {
+                                DwTag(0x05) => {
+                                    // DW_TAG_formal_parameter
+                                    if let Some(AttributeValue::UnitRef(type_ref)) =
+                                        child.entry().attr_value(DwAt(0x49))?
+                                    {
+                                        param_types.push(type_ref);
+                                    }
+                                }
+                                DwTag(0x18) => {
+                                    // DW_TAG_unspecified_parameters
+                                    variadic = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                        subroutine_types
+                            .insert(entry.offset(), (return_type, param_types, variadic));
+                    }
+                    _ => {}
+                }
+            }
+
+            for (name, typedef_target) in typedefs {
+                let Some(subroutine_target) = pointer_targets
+                    .get(&typedef_target)
+                    .copied()
+                    .filter(|target| subroutine_types.contains_key(target))
+                else {
+                    continue;
+                };
+                let (return_type_ref, param_type_refs, variadic) = subroutine_types
+                    .get(&subroutine_target)
+                    .expect("checked above");
+                let return_type = return_type_ref
+                    .and_then(|type_ref| type_cache.get(&type_ref).cloned())
+                    .unwrap_or_else(|| "void".to_string());
+                let Some(param_types) = param_type_refs
+                    .iter()
+                    .map(|type_ref| type_cache.get(type_ref).cloned())
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    // An unresolved parameter type is not safe to render as a
+                    // source declaration. Keep the alias on its existing
+                    // conservative path until the producer supplies it.
+                    continue;
+                };
+                function_types.push(DwarfFunctionTypeInfo {
+                    name,
+                    return_type,
+                    param_types,
+                    variadic: *variadic,
+                });
+            }
+        }
+
+        function_types.sort_by(|left, right| left.name.cmp(&right.name));
+        function_types.dedup_by(|left, right| left.name == right.name);
+        Ok(function_types)
+    }
+
     /// Extract all type information from DWARF
     pub(super) fn analyze_types_inner(&self) -> Result<Vec<DwarfTypeInfo>, gimli::Error> {
         let dwarf = self.build_dwarf()?;

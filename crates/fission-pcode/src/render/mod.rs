@@ -18,7 +18,7 @@
 // Keep this bridge explicit so render does not depend on normalize/structuring.
 pub(crate) use crate::midend::{
     HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, MlilPreviewOptions,
-    NirBinding, NirBindingOrigin, NirType, SWITCH_FALLTHROUGH_SENTINEL,
+    NirBinding, NirBindingOrigin, NirFunctionType, NirType, SWITCH_FALLTHROUGH_SENTINEL,
 };
 
 /// HIR-side counterpart to `crate::midend::support::expr_util::expr_type`

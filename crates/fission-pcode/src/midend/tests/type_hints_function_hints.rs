@@ -45,6 +45,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
         call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
+        function_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["hwnd".to_string(), "lpRect".to_string()],
             param_type_names: HashMap::default(),
@@ -111,6 +112,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
         call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
+        function_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -217,6 +219,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
         call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
+        function_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::from([(0, "HWND".to_string()), (1, "LPRECT".to_string())]),
@@ -275,6 +278,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
         call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
+        function_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -318,6 +322,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
         call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
+        function_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -395,6 +400,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
         call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
+        function_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["a".to_string(), "b".to_string()],
             param_type_names: HashMap::from([(0, "int".to_string()), (1, "int".to_string())]),
@@ -437,6 +443,7 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
         call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
+        function_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["param_1".to_string()],
             param_type_names: HashMap::from([(0, "_func_5014 *".to_string())]),

@@ -170,6 +170,7 @@ mod tests {
                 }],
                 function_hints: None,
                 struct_types: std::collections::HashMap::new(),
+                function_type_aliases: std::collections::HashMap::new(),
             },
         };
 
@@ -545,6 +546,7 @@ mod tests {
             }],
             function_hints: None,
             struct_types: std::collections::HashMap::new(),
+            function_type_aliases: std::collections::HashMap::new(),
         };
 
         let request = make_nir_request(
