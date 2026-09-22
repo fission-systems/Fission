@@ -23,4 +23,4 @@ mod types;
 
 // Re-export public API
 pub use analyzer::DwarfAnalyzer;
-pub use types::{DwarfFunctionTypeInfo, DwarfMemberInfo, DwarfTypeInfo};
+pub use types::{DwarfFunctionTypeInfo, DwarfMemberInfo, DwarfPointerTypeInfo, DwarfTypeInfo};

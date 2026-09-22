@@ -46,6 +46,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_type_aliases: std::collections::HashMap::default(),
+        pointer_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["hwnd".to_string(), "lpRect".to_string()],
             param_type_names: HashMap::default(),
@@ -113,6 +114,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_type_aliases: std::collections::HashMap::default(),
+        pointer_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -352,6 +354,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_type_aliases: std::collections::HashMap::default(),
+        pointer_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::from([(0, "HWND".to_string()), (1, "LPRECT".to_string())]),
@@ -411,6 +414,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_type_aliases: std::collections::HashMap::default(),
+        pointer_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -455,6 +459,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_type_aliases: std::collections::HashMap::default(),
+        pointer_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -476,6 +481,66 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
         "rendered:\n{}",
         rendered
     );
+}
+
+#[test]
+fn preview_type_hints_restore_debug_pointer_typedef_shape() {
+    let section_alias = "PIMAGE_SECTION_HEADER";
+    let mut func = HirFunction {
+        name: "section_for_address".to_string(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "section".to_string(),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+            surface_type_name: Some(section_alias.to_string()),
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }],
+        return_type: NirType::Int {
+            bits: 64,
+            signed: false,
+        },
+        surface_return_type_name: Some(section_alias.to_string()),
+        body: vec![HirStmt::Return(Some(HirExpr::Var("section".to_string())))],
+        ..Default::default()
+    };
+    let mut context = PreviewTypeContext::default();
+    context.pointer_type_aliases.insert(
+        section_alias.to_string(),
+        NirPointerTypeAlias {
+            pointee_name: "_IMAGE_SECTION_HEADER".to_string(),
+            pointer_depth: 1,
+        },
+    );
+    context.struct_types.insert(
+        "_IMAGE_SECTION_HEADER".to_string(),
+        NirStructTypeHint {
+            name: "_IMAGE_SECTION_HEADER".to_string(),
+            size: 40,
+            fields: vec![NirStructFieldHint {
+                name: "VirtualAddress".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 12,
+                size: 4,
+            }],
+        },
+    );
+
+    apply_preview_type_hints(&mut func, &context, &HashMap::default());
+
+    assert!(matches!(
+        &func.return_type,
+        NirType::Ptr(inner)
+            if matches!(inner.as_ref(), NirType::Aggregate { size: 40, .. })
+    ));
+    assert!(matches!(
+        &func.locals[0].ty,
+        NirType::Ptr(inner)
+            if matches!(inner.as_ref(), NirType::Aggregate { size: 40, .. })
+    ));
 }
 
 #[test]
@@ -533,6 +598,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_type_aliases: std::collections::HashMap::default(),
+        pointer_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["a".to_string(), "b".to_string()],
             param_type_names: HashMap::from([(0, "int".to_string()), (1, "int".to_string())]),
@@ -576,6 +642,7 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_type_aliases: std::collections::HashMap::default(),
+        pointer_type_aliases: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["param_1".to_string()],
             param_type_names: HashMap::from([(0, "_func_5014 *".to_string())]),

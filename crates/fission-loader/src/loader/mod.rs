@@ -121,7 +121,13 @@ impl LoadedBinary {
             (
                 (apple_funcs_res, swift_types_res, objc_classes_res, objc_selectors_res),
                 (
-                    (dwarf_types_res, dwarf_function_types_res, dwarf_funcs_res, dwarf_lines_res),
+                    (
+                        dwarf_types_res,
+                        dwarf_function_types_res,
+                        dwarf_pointer_types_res,
+                        dwarf_funcs_res,
+                        dwarf_lines_res,
+                    ),
                     (rust_vtables_res, (cpp_types_res, cpp_vtable_funcs_res)),
                 ),
             ),
@@ -164,11 +170,12 @@ impl LoadedBinary {
                                 if dwarf_analyzer.has_debug_info() {
                                     let types = dwarf_analyzer.analyze_types();
                                     let function_types = dwarf_analyzer.analyze_function_types();
+                                    let pointer_types = dwarf_analyzer.analyze_pointer_types();
                                     let funcs = dwarf_analyzer.analyze_functions();
                                     let lines = dwarf_analyzer.analyze_lines();
-                                    (types, function_types, funcs, lines)
+                                    (types, function_types, pointer_types, funcs, lines)
                                 } else {
-                                    (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                                    (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
                                 }
                             },
                             || {
@@ -339,6 +346,17 @@ impl LoadedBinary {
             let function_types = Arc::make_mut(&mut binary.dwarf_function_types);
             for function_type in dwarf_function_types_res {
                 function_types.insert(function_type.name.clone(), function_type);
+            }
+        }
+
+        if !dwarf_pointer_types_res.is_empty() {
+            tracing::info!(
+                "[Loader] DWARF: {} pointer typedefs extracted",
+                dwarf_pointer_types_res.len()
+            );
+            let pointer_types = Arc::make_mut(&mut binary.dwarf_pointer_types);
+            for pointer_type in dwarf_pointer_types_res {
+                pointer_types.insert(pointer_type.name.clone(), pointer_type);
             }
         }
 

@@ -374,6 +374,10 @@ pub struct NirTypeContext {
     /// debug metadata, keyed by typedef alias.
     #[serde(default)]
     pub function_type_aliases: HashMap<String, NirFunctionType>,
+    /// Named pointer typedefs recovered from the binary's debug metadata,
+    /// keyed by typedef alias.
+    #[serde(default)]
+    pub pointer_type_aliases: HashMap<String, NirPointerTypeAlias>,
 }
 
 /// The source-level signature behind a named function-pointer typedef.
@@ -383,6 +387,18 @@ pub struct NirFunctionType {
     pub param_types: Vec<String>,
     #[serde(default)]
     pub variadic: bool,
+}
+
+/// A named source-level typedef whose target is one or more pointer layers.
+///
+/// The machine-level builder can only see the pointer-width carrier. Keeping
+/// the debug type's pointee name and pointer depth alongside the surface alias
+/// lets type recovery restore the pointer role without guessing from an alias
+/// spelling such as `PIMAGE_SECTION_HEADER`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NirPointerTypeAlias {
+    pub pointee_name: String,
+    pub pointer_depth: u8,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

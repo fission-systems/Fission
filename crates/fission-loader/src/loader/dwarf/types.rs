@@ -41,6 +41,19 @@ pub struct DwarfFunctionTypeInfo {
     pub variadic: bool,
 }
 
+/// A named typedef whose target is one or more ordinary pointer layers.
+///
+/// DWARF keeps the pointer shape in the typedef's target DIE rather than in
+/// the spelling (`PIMAGE_SECTION_HEADER` is a pointer typedef, not an integer
+/// alias). The loader retains that fact separately from struct layouts so the
+/// decompiler can restore pointer semantics at the type-context boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DwarfPointerTypeInfo {
+    pub name: String,
+    pub pointee_name: String,
+    pub pointer_depth: u8,
+}
+
 impl DwarfTypeInfo {
     /// Convert to InferredTypeInfo for decompiler integration
     pub fn to_inferred_type(&self) -> InferredTypeInfo {
@@ -66,6 +79,80 @@ impl DwarfTypeInfo {
 
 /// Type extraction methods for DwarfAnalyzer
 impl<'a> super::analyzer::DwarfAnalyzer<'a> {
+    /// Extract named ordinary pointer typedefs from DWARF.
+    pub(super) fn analyze_pointer_types_inner(
+        &self,
+    ) -> Result<Vec<DwarfPointerTypeInfo>, gimli::Error> {
+        let dwarf = self.build_dwarf()?;
+        let mut pointer_types = Vec::new();
+
+        let mut units = dwarf.units();
+        while let Some(unit_header) = units.next()? {
+            let unit = dwarf.unit(unit_header)?;
+            let mut type_cache: HashMap<UnitOffset<usize>, String> = HashMap::new();
+            self.collect_type_names(&unit, &dwarf, &mut type_cache)?;
+
+            let mut pointer_targets = HashMap::new();
+            let mut typedefs = Vec::new();
+            let mut entries = unit.entries();
+            while let Some((_, entry)) = entries.next_dfs()? {
+                match entry.tag() {
+                    DwTag(0x16) => {
+                        // DW_TAG_typedef
+                        let Some(name) = self
+                            .get_attr_string(entry, DwAt(0x03), &unit, &dwarf)?
+                            .filter(|name| !name.is_empty())
+                        else {
+                            continue;
+                        };
+                        let Some(AttributeValue::UnitRef(type_ref)) =
+                            entry.attr_value(DwAt(0x49))?
+                        else {
+                            continue;
+                        };
+                        typedefs.push((name, type_ref));
+                    }
+                    DwTag(0x0f) => {
+                        // DW_TAG_pointer_type
+                        if let Some(AttributeValue::UnitRef(type_ref)) =
+                            entry.attr_value(DwAt(0x49))?
+                        {
+                            pointer_targets.insert(entry.offset(), type_ref);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            for (name, typedef_target) in typedefs {
+                let mut target = typedef_target;
+                let mut pointer_depth = 0u8;
+                while let Some(next) = pointer_targets.get(&target).copied() {
+                    pointer_depth = pointer_depth.saturating_add(1);
+                    target = next;
+                }
+                if pointer_depth == 0 {
+                    continue;
+                }
+                let Some(pointee_name) = type_cache.get(&target).cloned() else {
+                    // Function-pointer typedefs are handled by
+                    // `analyze_function_types_inner`; unresolved targets are
+                    // not safe to use as ordinary data pointers here.
+                    continue;
+                };
+                pointer_types.push(DwarfPointerTypeInfo {
+                    name,
+                    pointee_name,
+                    pointer_depth,
+                });
+            }
+        }
+
+        pointer_types.sort_by(|left, right| left.name.cmp(&right.name));
+        pointer_types.dedup_by(|left, right| left.name == right.name);
+        Ok(pointer_types)
+    }
+
     /// Extract named function-pointer typedefs from DWARF.
     pub(super) fn analyze_function_types_inner(
         &self,

@@ -345,6 +345,7 @@ pub(super) fn apply_preview_type_hints(
     let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
     let mut stats =
         apply_function_name_hints(func, context, register_origins, debug_cfa_stack_offset_bias);
+    apply_debug_pointer_type_aliases(func, context);
     stats.local_surface_hits += propagate_pointer_surface_aliases(func);
     preserve_surface_pointer_byte_offsets(func);
     apply_debug_struct_promotions(func, context, &mut stats);
@@ -396,6 +397,107 @@ pub(super) fn apply_preview_type_hints(
     decay_array_addresses_at_typed_calls(func, context);
 
     stats
+}
+
+/// Restore pointer semantics that are carried by a named debug typedef.
+///
+/// A machine-level return or binding can be represented as an integer with
+/// pointer width even when DWARF says its source type is a typedef whose target
+/// is a pointer. The alias spelling alone is not evidence (`DWORD_PTR` and
+/// `PIMAGE_SECTION_HEADER` are both opaque names), so the loader transports the
+/// typedef target and depth in `pointer_type_aliases`. Apply that fact to the
+/// internal type before rendering; this keeps the source alias in the emitted
+/// declaration while preventing the project prelude from defining it as an
+/// integer.
+fn apply_debug_pointer_type_aliases(func: &mut HirFunction, context: &PreviewTypeContext) {
+    if context.pointer_type_aliases.is_empty() {
+        return;
+    }
+
+    let return_type = func
+        .surface_return_type_name
+        .as_deref()
+        .and_then(|surface| pointer_alias_for_surface(surface, context))
+        .and_then(|alias| nir_type_for_pointer_alias(alias, context));
+    if let Some(return_type) = return_type
+        && pointer_alias_type_should_replace(&func.return_type, &return_type)
+    {
+        func.return_type = return_type;
+    }
+
+    for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
+        let Some(surface) = binding.surface_type_name.as_deref() else {
+            continue;
+        };
+        let Some(alias) = pointer_alias_for_surface(surface, context) else {
+            continue;
+        };
+        let Some(recovered) = nir_type_for_pointer_alias(alias, context) else {
+            continue;
+        };
+        if pointer_alias_type_should_replace(&binding.ty, &recovered) {
+            binding.ty = recovered;
+        }
+    }
+}
+
+fn pointer_alias_for_surface<'a>(
+    surface: &str,
+    context: &'a PreviewTypeContext,
+) -> Option<&'a NirPointerTypeAlias> {
+    let mut alias_name = None;
+    for word in surface.split_whitespace() {
+        if matches!(word, "const" | "volatile" | "restrict") {
+            continue;
+        }
+        if word.contains('*') || alias_name.is_some() {
+            return None;
+        }
+        alias_name = Some(word);
+    }
+    context.pointer_type_aliases.get(alias_name?)
+}
+
+fn nir_type_for_pointer_alias(
+    alias: &NirPointerTypeAlias,
+    context: &PreviewTypeContext,
+) -> Option<NirType> {
+    if alias.pointer_depth == 0 {
+        return None;
+    }
+    let pointee = context
+        .struct_types
+        .get(&alias.pointee_name)
+        .map(|hint| NirType::Aggregate {
+            size: hint.size,
+            fields: hint
+                .fields
+                .iter()
+                .map(|field| StructField {
+                    offset: field.offset,
+                    ty: NirType::Unknown,
+                    name: field.name.clone(),
+                })
+                .collect(),
+        })
+        .unwrap_or(NirType::Unknown);
+    let mut recovered = pointee;
+    for _ in 0..alias.pointer_depth {
+        recovered = NirType::Ptr(Box::new(recovered));
+    }
+    Some(recovered)
+}
+
+fn pointer_alias_type_should_replace(existing: &NirType, recovered: &NirType) -> bool {
+    match (existing, recovered) {
+        (NirType::Ptr(existing_inner), NirType::Ptr(recovered_inner))
+            if matches!(recovered_inner.as_ref(), NirType::Aggregate { .. }) =>
+        {
+            !matches!(existing_inner.as_ref(), NirType::Aggregate { .. })
+        }
+        (NirType::Ptr(_), NirType::Ptr(_)) => false,
+        _ => true,
+    }
 }
 
 fn decay_array_addresses_at_typed_calls(func: &mut HirFunction, context: &PreviewTypeContext) {
