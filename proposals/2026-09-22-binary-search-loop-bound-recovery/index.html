@@ -1309,6 +1309,15 @@
 <li>Semantic cases passed / total: <code>0/6</code> for the measured GCC O2 row.</li>
 <li>Failure category: <code>compile_error</code> (the emitted loop-bound expression does not match the source behavior).</li>
 <li>Relevant benchmark/static/readability observations: the issue-focused baseline measured 6 locally available variants; 5 passed and the motivating GCC O2 row failed. Three additional manifest variants were unavailable in the local fixture checkout and are not included in the denominator.</li>
+<li>After-change observation: the GCC O2 PreHIR/HIR now mutates the carried bound
+  (<code>n--</code>, then <code>n = mid - 1</code>) and uses that value for both midpoint and lower
+  bound calculations; the old output retained a separate <code>hi</code> but read the
+  immutable <code>n</code> in those expressions.</li>
+<li>Focused after-run result: the same six-row measurement remained <code>5/6</code>
+  semantic-perfect (<code>0.8333</code> mean) because both before and after still hit the
+  independent NIR compile blocker <code>extern bool __sborrow(...)</code>. The row-level
+  loop-bound defect itself is removed in the emitted HIR/PreHIR, but no
+  DecBench score improvement is claimed from this run.</li>
 </ul>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1399,16 +1408,18 @@ then shares the wrong formal binding with the later arithmetic.</p>
     and the new transformed-seed/wider-alias case.</li>
 <li>Negative proof: removing the direct formal guard or the wider-alias proof
     makes the new test return <code>Some("param_2")</code> and fail.</li>
-<li>[ ] Crate-level gate:</li>
+<li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode</code></li>
-<li>Expected signal: no new failures; known pre-existing failures will be
-    recorded separately if still present.</li>
-<li>[ ] Focused benchmark row:</li>
-<li>Command: rerun the exact issue-focused DecBench command with caches disabled
-    after rebuilding the local Fission service.</li>
-<li>Expected row-level improvement: the GCC O2 <code>binary_search</code> row should no
-    longer emit a midpoint based on the immutable incoming <code>n</code> after <code>hi</code> has
-    been updated, and its compile/semantic result should be remeasured.</li>
+<li>Actual signal: <code>1087 passed, 3 failed, 1 skipped</code>; the three failures are
+    pre-existing <code>diamond_join</code>/<code>movzx byte-add</code> assertions and are unrelated to
+    loop-carried register naming.</li>
+<li>[x] Focused benchmark row:</li>
+<li>Command: <code>runner/runner.py --corpus holdout --function binary_search --decompilers fission --run-mode local --no-resume</code> with <code>FISSION_BENCHMARK_NO_CACHE=1</code>, before and after the local Docker rebuild.</li>
+<li>Actual signal: 6 local variants measured in both runs; GCC O2 changed from
+    <code>hi = n - 1</code> plus midpoint/lower-bound reads from <code>n</code> to a single carried
+    bound (<code>n--</code> / subsequent <code>n</code> reads). The row remains <code>0/6</code> with
+    <code>compile_error</code> in both runs because of the independent <code>__sborrow</code>
+    declaration; no aggregate quality gain is claimed.</li>
 <li>[ ] Smoke or automation sample:</li>
 <li>Command: existing pcode/decompiler smoke lane after the focused rerun.</li>
 <li>Expected no-regression signal: existing loop-carried parameter rows retain
@@ -1418,7 +1429,7 @@ then shares the wrong formal binding with the later arithmetic.</p>
     on the anchored binary/function.</li>
 <li>Expected signal: release build succeeds and the emitted loop uses the
     transformed bound (<code>param_2--</code> in PreHIR) for subsequent midpoint and bound
-    updates.</li>
+    updates. Observed on <code>561f4397b</code>.</li>
 <li>[ ] Boundary audit, if a new pass/helper/dependency was added: not applicable.</li>
 </ul>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
