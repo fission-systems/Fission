@@ -188,6 +188,27 @@ impl<'a> PreviewBuilder<'a> {
     /// recovery.  Proven entry parameters are deliberately not converted into
     /// temporaries; the caller's existing threadable-name gate rejects those
     /// formal names.
+    pub(super) fn loop_carried_seed_binding_name(&mut self, output: &Varnode) -> Option<String> {
+        let (definition, definition_op) = self.lookup_def_site(output)?;
+        if self.current_lowering_site == Some(definition) {
+            return None;
+        }
+        let definition_output = definition_op.output.as_ref()?;
+        if !self.varnode_aliases_value(definition_output, output)
+            && !self.varnode_aliases_value(output, definition_output)
+        {
+            return None;
+        }
+        self.loop_phi_entry_binding_name(
+            fission_midend_core::ir::SsaOpSite {
+                block: definition.block_idx as u32,
+                op: definition.op_idx as u32,
+            },
+            &definition_op,
+            definition_output,
+        )
+    }
+
     fn loop_phi_entry_binding_name(
         &mut self,
         definition: fission_midend_core::ir::SsaOpSite,
@@ -207,14 +228,6 @@ impl<'a> PreviewBuilder<'a> {
             && self.temps.contains_key(&name)
         {
             return Some(name);
-        }
-
-        if self
-            .abi_state()
-            .param_slot_for_varnode(definition_output)
-            .is_some_and(|index| index < self.entry_arity)
-        {
-            return self.register_param(definition_output);
         }
 
         // A widening p-code op writes the same logical scalar as its narrow
@@ -256,6 +269,7 @@ impl<'a> PreviewBuilder<'a> {
                 .abi_state()
                 .param_slot_for_varnode(&source_output)
                 .is_some_and(|index| index < self.entry_arity)
+                && !self.definition_has_internal_seed_input(&source_op, &source_output)
             {
                 self.register_param(&source_output)?
             } else {
@@ -267,6 +281,15 @@ impl<'a> PreviewBuilder<'a> {
             return Some(name);
         }
 
+        if self
+            .abi_state()
+            .param_slot_for_varnode(definition_output)
+            .is_some_and(|index| index < self.entry_arity)
+            && !self.definition_has_internal_seed_input(definition_op, definition_output)
+        {
+            return self.register_param(definition_output);
+        }
+
         let name = self
             .ensure_temp_binding_for_output(definition_op, definition_output, true)
             .name;
@@ -275,6 +298,12 @@ impl<'a> PreviewBuilder<'a> {
             .or_insert_with(|| name.clone());
         self.invalidate_materialization_dependent_caches();
         Some(name)
+    }
+
+    fn definition_has_internal_seed_input(&self, op: &PcodeOp, output: &Varnode) -> bool {
+        op.inputs
+            .iter()
+            .any(|input| input.is_constant || self.varnode_aliases_value(input, output))
     }
 
     /// Whether the value entering the loop head through the phi is genuinely

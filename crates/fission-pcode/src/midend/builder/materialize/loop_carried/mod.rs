@@ -52,6 +52,16 @@ impl<'a> PreviewBuilder<'a> {
         debug_assert_eq!(proof.definition_site(), (block_idx, op_idx));
         let loop_head = proof.loop_head();
 
+        // A reaching definition outside the current update is the first
+        // iteration's seed, even when it occupies an ABI-capable register
+        // slot. Reserve its normal carrier before the latch is materialized so
+        // a later formal-parameter fallback cannot split the loop state. The
+        // seed helper also projects a narrow update onto a wider same-storage
+        // definition (for example a SIMD zero followed by a scalar lane add).
+        if let Some(name) = self.loop_carried_seed_binding_name(output) {
+            return Some(name);
+        }
+
         // Non-anonymous merge / prior bindings keep their stable names first
         // (e.g. cursor register `edx` seeded from a pointer param must stay `edx`,
         // not be rewritten to `param_1++` while `*edx` still reads `edx`).

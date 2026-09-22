@@ -735,6 +735,156 @@ fn loop_carried_register_update_reuses_wide_prior_for_gpr32_update() {
     );
 }
 
+#[test]
+fn loop_carried_update_reserves_internal_abi_seed_before_formal_fallback() {
+    let r9d = reg(0x88, 4);
+    let r9 = reg(0x88, 8);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                // Establish R9D as an incoming ABI slot, then overwrite it in
+                // the entry path before the loop begins.
+                op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x200)),
+                    vec![r9d.clone()],
+                ),
+                op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::IntXor,
+                    Some(r9d.clone()),
+                    vec![r9d.clone(), r9d.clone()],
+                ),
+                op(3, PcodeOpcode::IntZExt, Some(r9.clone()), vec![r9d.clone()]),
+                op(4, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(
+                    5,
+                    PcodeOpcode::IntAdd,
+                    Some(r9.clone()),
+                    vec![r9.clone(), Varnode::constant(1, 8)],
+                ),
+                op(6, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(0x1030, 3, vec![op(7, PcodeOpcode::Return, None, vec![])]),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![2];
+    blocks[2].successors = vec![2, 3];
+    blocks[3].successors = vec![];
+
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    });
+
+    let name = builder
+        .loop_carried_output_binding_name(&pcode.blocks[2], 0, &pcode.blocks[2].ops[0], &r9)
+        .expect("the proven R9 update should receive a carrier");
+    assert_ne!(
+        name, "param_4",
+        "an entry-overwritten ABI slot must use its internal seed, not the formal"
+    );
+    assert!(
+        name.starts_with("uVar") || name.starts_with("iVar") || name.starts_with("xVar"),
+        "the internal zero seed should receive a private carrier, got {name}"
+    );
+    assert_eq!(
+        builder
+            .materialized_vns
+            .get(&MaterializedVarnodeKey::new(&r9d, &pcode.blocks[1].ops[0])),
+        Some(&name),
+        "the narrow internal seed must share the reserved carrier"
+    );
+    assert_eq!(
+        builder
+            .materialized_vns
+            .get(&MaterializedVarnodeKey::new(&r9, &pcode.blocks[1].ops[1])),
+        Some(&name),
+        "the widened seed must share the reserved carrier"
+    );
+}
+
+#[test]
+fn loop_carried_narrow_simd_update_reuses_wide_seed_carrier() {
+    let xmm1 = reg(0x1240, 16);
+    let xmm1_lane = reg(0x1240, 4);
+    let addend = reg(0x1200, 4);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntXor,
+                    Some(xmm1.clone()),
+                    vec![xmm1.clone(), xmm1.clone()],
+                ),
+                op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::FloatAdd,
+                    Some(xmm1_lane.clone()),
+                    vec![xmm1_lane.clone(), addend],
+                ),
+                op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![1];
+
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 1,
+        op_idx: 0,
+    });
+
+    let name = builder
+        .loop_carried_output_binding_name(&pcode.blocks[1], 0, &pcode.blocks[1].ops[0], &xmm1_lane)
+        .expect("the proven SIMD lane update should receive a carrier");
+    assert_ne!(
+        name, "xmm1_da",
+        "a narrow lane update must not fall back to a fresh hardware lane"
+    );
+    assert_eq!(
+        builder
+            .materialized_vns
+            .get(&MaterializedVarnodeKey::new(&xmm1, &pcode.blocks[0].ops[0])),
+        Some(&name),
+        "the lane update must reuse the wider seed definition's carrier"
+    );
+}
+
 /// A loop latch can be lowered before its preheader definition has been
 /// materialized.  The scalar-SSA phi still identifies the preheader value,
 /// so the latch must reserve the ordinary temporary binding for that
