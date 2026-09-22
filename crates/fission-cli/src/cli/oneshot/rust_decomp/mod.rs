@@ -332,7 +332,7 @@ fn run_with_functions(
         debug_decomp: cli.debug_decomp,
         debug_decomp_bundle: cli.debug_decomp_bundle.is_some(),
         requested_address: cli.address,
-        timeout_ms: cli.timeout_ms,
+        timeout_ms: workers::resolve_render_timeout_ms(cli.timeout_ms),
         layer,
         prehir: cli.prehir,
     };

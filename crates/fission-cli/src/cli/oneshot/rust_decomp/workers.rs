@@ -47,6 +47,16 @@ fn render_timeout_message(timeout_ms: u64) -> String {
     format!("preview_timeout: Rust-Sleigh render timed out after {timeout_ms}ms")
 }
 
+/// Resolve the timeout used by the one-shot Rust-Sleigh renderer.
+///
+/// The CLI option remains authoritative, including `Some(0)` which explicitly
+/// disables the watchdog.  Omitting the option must still use the same
+/// configured default as the rest of the decompiler runtime; passing `None`
+/// through here would make the worker join unbounded.
+pub(crate) fn resolve_render_timeout_ms(requested: Option<u64>) -> Option<u64> {
+    requested.or(Some(fission_core::CONFIG.decompiler.timeout_ms))
+}
+
 pub(crate) fn render_one_function_on_large_stack(
     binary: Arc<fission_loader::loader::LoadedBinary>,
     facts: Arc<FactStore>,
@@ -252,7 +262,21 @@ pub(crate) fn run_worker_fanout_fanin(
 
 #[cfg(test)]
 mod tests {
-    use super::render_timeout_message;
+    use super::{render_timeout_message, resolve_render_timeout_ms};
+
+    #[test]
+    fn configured_timeout_is_used_when_cli_does_not_override_it() {
+        assert_eq!(
+            resolve_render_timeout_ms(None),
+            Some(fission_core::CONFIG.decompiler.timeout_ms)
+        );
+    }
+
+    #[test]
+    fn explicit_timeout_values_are_preserved() {
+        assert_eq!(resolve_render_timeout_ms(Some(37)), Some(37));
+        assert_eq!(resolve_render_timeout_ms(Some(0)), Some(0));
+    }
 
     #[test]
     fn render_timeout_message_includes_exact_budget() {
