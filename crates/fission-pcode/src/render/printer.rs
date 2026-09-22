@@ -1387,6 +1387,7 @@ pub(crate) fn print_type(ty: &NirType) -> String {
         NirType::Float { bits } => match *bits {
             32 => "float".to_string(),
             64 => "double".to_string(),
+            80 => "long double".to_string(),
             _ => format!("float{}", bits),
         },
     }
@@ -2512,6 +2513,35 @@ mod tests {
         );
         assert!(rendered.contains("data[4] = 5;"), "{rendered}");
         assert!(!rendered.contains("unsigned char[5] data;"), "{rendered}");
+    }
+
+    #[test]
+    fn x87_extended_float_uses_a_valid_c_surface_type() {
+        let extended = NirType::Float { bits: 80 };
+        let hir = HirFunction {
+            name: "x87_extended_value".to_string(),
+            locals: vec![NirBinding {
+                name: "st0".to_string(),
+                ty: extended.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("st0".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: extended.clone(),
+                    expr: Box::new(HirExpr::Const(1, extended)),
+                },
+            }],
+            ..HirFunction::default()
+        };
+
+        assert_eq!(print_type(&NirType::Float { bits: 80 }), "long double");
+        let rendered = print_hir_function(&hir);
+        assert!(rendered.contains("long double st0;"), "{rendered}");
+        assert!(rendered.contains("(long double)1"), "{rendered}");
+        assert!(!rendered.contains("float80"), "{rendered}");
     }
 
     #[test]
