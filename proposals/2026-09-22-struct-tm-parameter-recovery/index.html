@@ -1305,10 +1305,19 @@
 <li>Address: <code>0x1400016d0</code></li>
 <li>Corpus row or benchmark command: <code>fission-benchmark</code> dev corpus, focused <code>tm_year_of</code> run; direct probe with <code>fission_cli decomp --addr 0x1400016d0 --layer both --prehir --debug-decomp --json --no-db --no-warnings</code></li>
 <li>Current output summary: direct output uses <code>int * param_1</code> and <code>param_1[5]</code>; no debug parameter or struct-field hint is applied.</li>
-<li>Semantic cases passed / total: DecBench focused run: <code>17/35</code> cases overall (<code>gcc -O1/-O2/-O3/-Os</code>: <code>5/5</code> each; <code>gcc -O0</code> and <code>gcc-m32 -O0/-O2</code>: compile errors in the benchmark harness).</li>
+<li>Semantic cases passed / total: DecBench focused baseline: <code>17/35</code> cases overall (<code>gcc -O1/-O2/-O3/-Os</code>: <code>5/5</code> each; <code>gcc -O0</code> and <code>gcc-m32 -O0/-O2</code>: compile errors).</li>
 <li>Failure category: direct type/data recovery gap; benchmark compile failures additionally expose the generated translation unit's missing <code>tm</code> declaration.</li>
 <li>Relevant benchmark/static/readability observations: the three passing rows produce the expected scalar result but retain <code>int * param_1</code>; the direct probe reports <code>debug_struct_field_hits=0</code>, <code>debug_struct_promotions=0</code>, and no explicit parameter type hit.</li>
 </ul>
+<p>After the loader and rendering fixes, the same cache-disabled focused run on
+commit <code>149df3a71</code> passes <code>35/35</code> cases: all seven compiler/optimization
+rows are semantic <code>1.00</code>, type-match <code>1.00</code>, bare-compile <code>ok</code>, and have no
+runner errors. The final NIR surface is:</p>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">fission_agg36</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* recovered tm fields */</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">fission_agg36</span><span class="p">;</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">typedef</span><span class="w"> </span><span class="n">fission_agg36</span><span class="w"> </span><span class="n">tm</span><span class="p">;</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kt">int</span><span class="w"> </span><span class="nf">tm_year_of</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">tm</span><span class="o">*</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">t</span><span class="o">-&gt;</span><span class="n">tm_year</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1900</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
 <li>[ ] SLEIGH/raw p-code:</li>
@@ -1316,37 +1325,54 @@
 <li>[ ] Normalize:</li>
 <li>[ ] Structuring:</li>
 <li>[x] Type/data recovery:</li>
-<li>[ ] Printer:</li>
+<li>[x] Printer:</li>
 <li>[ ] Benchmark/automation:</li>
 </ul>
 <p>Evidence:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>raw p-code for tm_year_of:
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  IntAdd unique &lt;- RCX, const(0x14:8)
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  Load temp:u32 &lt;- space3, unique
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  Copy RAX:u32 &lt;- temp
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  IntZExt RAX:u64 &lt;- RAX:u32
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  IntAdd RAX:u32 &lt;- RAX:u32, const(0x76c:4)
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>DWARF contains a valid function-scoped parameter:
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  tm_year_of @ 0x1400016d0
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  t: const tm *
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  location: DW_OP_reg2 RCX
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>The same DWARF unit also contains quotient_of's malformed local location:
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>  DW_OP_reg0 RAX, &lt;decoding error&gt; f0
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>The current location-list parser propagates that one expression error from
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>extract_local_var_info through analyze_functions_inner, so no later DWARF
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>function facts reach the type/data recovery owner.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>raw p-code for tm_year_of:
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  IntAdd unique &lt;- RCX, const(0x14:8)
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  Load temp:u32 &lt;- space3, unique
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  Copy RAX:u32 &lt;- temp
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  IntZExt RAX:u64 &lt;- RAX:u32
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  IntAdd RAX:u32 &lt;- RAX:u32, const(0x76c:4)
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>DWARF contains a valid function-scoped parameter:
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  tm_year_of @ 0x1400016d0
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  t: const tm *
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>  location: DW_OP_reg2 RCX
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>The same DWARF unit also contains quotient_of's malformed local location:
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>  DW_OP_reg0 RAX, &lt;decoding error&gt; f0
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>The current location-list parser propagates that one expression error from
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>extract_local_var_info through analyze_functions_inner, so no later DWARF
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>function facts reach the type/data recovery owner.
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>The first parser fix exposed two independent declaration-contract defects in
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>the renderer: qualified aliases such as `const tm *` were not emitted, and a
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>same-name scalar spill could overwrite the aggregate alias recovered for the
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>formal. Unknown aggregate fields were also laid out as one-byte values even
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>though emitted `undefined` is a four-byte C typedef. These were fixed at the
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>renderer owner, with the scalar-spill merge selecting the most informative
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>definition and field widths inferred from recovered offsets.
 </span></code></pre></div>
 <h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
 <p>Generalized rule:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>DWARF location descriptions are per-variable facts. If one location-list
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>expression cannot be decoded, that variable's location is Unknown; it must not
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>discard unrelated function and parameter facts from the compilation unit.
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>Valid single-register descriptions in later DIEs remain eligible for debug
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>parameter and aggregate-type recovery.
+<p><div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>DWARF location descriptions are per-variable facts. If one location-list
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>expression cannot be decoded, that variable's location is Unknown; it must not
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>discard unrelated function and parameter facts from the compilation unit.
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>Valid single-register descriptions in later DIEs remain eligible for debug
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>parameter and aggregate-type recovery.
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>Surface declaration rule:
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>```text
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>For one recovered surface alias, merge duplicate binding definitions by
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>information content. A recovered aggregate layout must not be replaced by a
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>scalar compiler spill, and emitted unknown fields must preserve their proven
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>offsets in the target C layout.
 </span></code></pre></div>
+```</p>
 <p>ISA-agnostic check (<a href="../../adr/0009-isa-agnostic-semantic-rules/">ADR 0009</a>):</p>
 <ul>
 <li>[x] Production condition is independent of function name, address, binary, and ISA.</li>
@@ -1386,7 +1412,7 @@
 <li>Expected signal: loader tests pass.</li>
 <li>[x] Focused benchmark row:</li>
 <li>Command: focused <code>tm_year_of</code> run with <code>FISSION_BENCHMARK_NO_CACHE=1</code> before and after the local release build.</li>
-<li>Expected row-level improvement: valid <code>const tm *</code> and <code>tm_year</code> recovery appears on rows whose DWARF facts were previously discarded; unrelated compile-harness failures are reported separately.</li>
+<li>Result: <code>17/35</code> baseline → <code>35/35</code> after <code>149df3a71</code>; all seven rows are semantic-perfect, type-perfect, compile-clean, and error-free.</li>
 <li>[x] Smoke or automation sample:</li>
 <li>Command: direct <code>fission_cli decomp</code> for <code>tm_year_of</code>, plus <code>cargo nextest run -p fission-emulator</code>.</li>
 <li>Expected no-regression signal: direct raw p-code and emulator tests remain unchanged.</li>
@@ -1409,8 +1435,8 @@
 <li>Ghidra guidance confirmed:</li>
 <li>[x] No Ghidra output-style guidance used</li>
 <li>Unseen or synthetic validation evidence:</li>
-<li>Patch validation pool command/result: pending production fix.</li>
-<li>Synthetic invariant test command/result: pending production fix.</li>
+<li>Patch validation pool command/result: focused DecBench corpus rows, cache disabled, <code>35/35</code> after the fix.</li>
+<li>Synthetic invariant test command/result: malformed DWARF location, qualified alias, duplicate aggregate/scalar alias, and unknown-field layout tests pass.</li>
 </ul>
 <h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
 <ul>
