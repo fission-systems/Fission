@@ -1409,9 +1409,12 @@ observable consumers retain only the written low lane.</p>
 <li>Expected signal: the low-lane-only case recovers the flag expression and
     the wide-condition case remains conservative. Both passed after the fix;
     the positive test failed before the fix at the direct wide-read assertion.</li>
-<li>[ ] Crate-level gate:</li>
+<li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode</code></li>
-<li>Expected signal: no new failures beyond the three existing baseline tests.</li>
+<li>Result: <code>1104 passed / 3 failed / 1 skipped</code>; the three failures are the
+    pre-existing <code>diamond_join_lowers_copy_through_join_read_as_select</code>,
+    <code>movzx_after_byte_add_zero_extends_unsigned</code>, and
+    <code>x64_byte_add_movzx_does_not_double_add_load</code> tests.</li>
 <li>[x] Focused real-binary observation:</li>
 <li>Command: fresh release <code>fission_cli decomp --addr 0x140001530 --layer hir</code>
     followed by an equivalent five-case C wrapper compiled at <code>-O0</code> and <code>-O2</code>.</li>
@@ -1423,12 +1426,13 @@ observable consumers retain only the written low lane.</p>
     semantic rows remain <code>compile_error</code> because the existing aggregate typedef
     prelude conflict from issue #80 occurs before these wrapper cases; that is
     recorded as a harness blocker, not as evidence against this fix.</li>
-<li>[ ] Crate-level and smoke gates:</li>
+<li>[x] Crate-level and smoke gates:</li>
 <li>Commands: <code>cargo nextest run -p fission-pcode</code>,
     <code>cargo nextest run -p fission-decompiler</code>, <code>cargo check</code>, and a release CLI
     build.</li>
-<li>Expected no-regression signal: no new failures beyond the three existing
-    pcode baseline tests.</li>
+<li>Result: decompiler <code>72/72</code>, workspace <code>cargo check</code>, release build,
+    <code>cargo fmt --all --check</code>, and <code>git diff --check</code> passed; pcode retained
+    only the three baseline failures listed above.</li>
 <li>[x] Optional related checks:</li>
 <li>Command: <code>cargo fmt --all --check</code> and <code>git diff --check</code>.</li>
 <li>Expected signal: clean formatting and patch.</li>
