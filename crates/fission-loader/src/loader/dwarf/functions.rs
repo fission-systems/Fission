@@ -375,7 +375,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             Some(
                 attr @ (gimli::AttributeValue::LocationListsRef(_)
                 | gimli::AttributeValue::DebugLocListsIndex(_)),
-            ) => self.parse_location_list(attr, unit, dwarf),
+            ) => Ok(self.parse_location_list(attr, unit, dwarf)),
             _ => Ok(DwarfLocation::Unknown),
         }
     }
@@ -387,34 +387,68 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         attr: gimli::AttributeValue<EndianSlice<'a, RunTimeEndian>>,
         unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
         dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
-    ) -> Result<DwarfLocation, gimli::Error> {
-        let Some(mut iter) = dwarf.attr_locations(unit, attr)? else {
-            return Ok(DwarfLocation::Unknown);
+    ) -> DwarfLocation {
+        let Some(mut iter) = (match dwarf.attr_locations(unit, attr) {
+            Ok(iter) => iter,
+            Err(error) => {
+                tracing::debug!(?error, "ignoring malformed DWARF location list");
+                return DwarfLocation::Unknown;
+            }
+        }) else {
+            return DwarfLocation::Unknown;
         };
 
         let mut entries = Vec::new();
-        while let Some(list_entry) = iter.next()? {
-            entries.push(self.classify_location_list_expr(list_entry.data, unit)?);
+        loop {
+            let next = match iter.next() {
+                Ok(next) => next,
+                Err(error) => {
+                    tracing::debug!(?error, "ignoring malformed DWARF location-list entry");
+                    return DwarfLocation::Unknown;
+                }
+            };
+            let Some(list_entry) = next else {
+                break;
+            };
+            entries.push(self.classify_location_list_expr(list_entry.data, unit.encoding()));
         }
 
-        Ok(register_after_leading_constants(&entries)
+        register_after_leading_constants(&entries)
             .map(|register| DwarfLocation::Register(format!("reg{register}")))
-            .unwrap_or(DwarfLocation::Unknown))
+            .unwrap_or(DwarfLocation::Unknown)
     }
 
     fn classify_location_list_expr(
         &self,
         expr: gimli::Expression<EndianSlice<'a, RunTimeEndian>>,
-        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
-    ) -> Result<LocationListEntryKind, gimli::Error> {
-        let mut ops = expr.operations(unit.encoding());
-        let first = ops.next()?;
-        let second = ops.next()?;
-        let third = ops.next()?;
+        encoding: gimli::Encoding,
+    ) -> LocationListEntryKind {
+        let mut ops = expr.operations(encoding);
+        let first = match ops.next() {
+            Ok(operation) => operation,
+            Err(error) => {
+                tracing::debug!(?error, "ignoring malformed DWARF location expression");
+                return LocationListEntryKind::Other;
+            }
+        };
+        let second = match ops.next() {
+            Ok(operation) => operation,
+            Err(error) => {
+                tracing::debug!(?error, "ignoring malformed DWARF location expression");
+                return LocationListEntryKind::Other;
+            }
+        };
+        let third = match ops.next() {
+            Ok(operation) => operation,
+            Err(error) => {
+                tracing::debug!(?error, "ignoring malformed DWARF location expression");
+                return LocationListEntryKind::Other;
+            }
+        };
 
         match (first, second, third) {
             (Some(gimli::Operation::Register { register }), None, None) => {
-                Ok(LocationListEntryKind::Register(u64::from(register.0)))
+                LocationListEntryKind::Register(u64::from(register.0))
             }
             (
                 Some(gimli::Operation::RegisterOffset { register, .. }),
@@ -424,7 +458,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                 .dwarf_stack_base_registers()
                 .contains(&u64::from(register.0)) =>
             {
-                Ok(LocationListEntryKind::Register(u64::from(register.0)))
+                LocationListEntryKind::Register(u64::from(register.0))
             }
             (
                 Some(
@@ -433,8 +467,8 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                 ),
                 Some(gimli::Operation::StackValue),
                 None,
-            ) => Ok(LocationListEntryKind::ConstantValue),
-            _ => Ok(LocationListEntryKind::Other),
+            ) => LocationListEntryKind::ConstantValue,
+            _ => LocationListEntryKind::Other,
         }
     }
 
@@ -477,6 +511,9 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 #[cfg(test)]
 mod location_list_tests {
     use super::{LocationListEntryKind as Entry, register_after_leading_constants};
+    use crate::loader::dwarf::DwarfAnalyzer;
+    use crate::loader::types::{DataBuffer, LoadedBinaryBuilder};
+    use gimli::{Encoding, EndianSlice, Expression, Format, RunTimeEndian};
 
     #[test]
     fn accepts_constant_prefix_followed_by_one_register() {
@@ -503,6 +540,34 @@ mod location_list_tests {
         assert_eq!(
             register_after_leading_constants(&[Entry::ConstantValue, Entry::Other]),
             None
+        );
+    }
+
+    #[test]
+    fn malformed_location_expression_is_an_unknown_entry() {
+        let binary = LoadedBinaryBuilder::new(
+            "malformed-location.elf".to_string(),
+            DataBuffer::Heap(Vec::new()),
+        )
+        .format("test")
+        .arch_spec("x86:LE:64:default")
+        .entry_point(0)
+        .image_base(0)
+        .is_64bit(true)
+        .build()
+        .expect("build malformed-location fixture");
+        let analyzer = DwarfAnalyzer::new(&binary);
+        let bytes = [0x50, 0xf0]; // DW_OP_reg0 followed by an invalid opcode.
+        let expression = Expression(EndianSlice::new(&bytes, RunTimeEndian::Little));
+        let encoding = Encoding {
+            address_size: 8,
+            format: Format::Dwarf32,
+            version: 5,
+        };
+
+        assert_eq!(
+            analyzer.classify_location_list_expr(expression, encoding),
+            Entry::Other
         );
     }
 }
