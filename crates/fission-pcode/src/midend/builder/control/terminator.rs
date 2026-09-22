@@ -698,32 +698,46 @@ impl<'a> PreviewBuilder<'a> {
         }
         let (mut cursor_idx, mut cursor_vn) =
             self.last_primary_return_def_after_barrier(block, term_idx)?;
-        for (op_idx, op) in block.ops.iter().enumerate().take(cursor_idx).rev() {
-            let Some(output) = op.output.as_ref() else {
-                continue;
-            };
-            if !self.varnode_aliases_value(output, &cursor_vn) {
-                continue;
-            }
-            let Some(input) = op.inputs.first() else {
-                return None;
-            };
-            if op.inputs.len() != 1
+        loop {
+            let op = block.ops.get(cursor_idx)?;
+            let output = op.output.as_ref()?;
+            if !self.varnode_aliases_value(output, &cursor_vn)
+                || op.inputs.len() != 1
                 || !matches!(
                     op.opcode,
                     PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
                 )
-                || !is_register_space_id(input.space_id)
             {
+                return None;
+            }
+            let input = op.inputs.first()?;
+            if !is_register_space_id(input.space_id) {
                 return None;
             }
             if !self.register_namer().is_primary_return_register(input) {
                 return Some(input.clone());
             }
-            cursor_idx = op_idx;
+
+            // Continue through a primary-return-register alias chain (for
+            // example RAX <- ZExt(EAX)) by finding the preceding definition of
+            // the narrower register. The current primary-return definition must
+            // be examined too: a direct `RAX <- RDX` copy is the common return
+            // join shape and was previously skipped by starting at `cursor_idx`.
+            let (prior_idx, _) =
+                block
+                    .ops
+                    .iter()
+                    .enumerate()
+                    .take(cursor_idx)
+                    .rev()
+                    .find(|(_, candidate)| {
+                        candidate.output.as_ref().is_some_and(|candidate_output| {
+                            self.varnode_aliases_value(candidate_output, input)
+                        })
+                    })?;
+            cursor_idx = prior_idx;
             cursor_vn = input.clone();
         }
-        None
     }
 
     pub(in crate::midend::builder) fn return_join_has_primary_return_evidence(

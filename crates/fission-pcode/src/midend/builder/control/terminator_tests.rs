@@ -1480,6 +1480,127 @@ fn arm32_big_endian_pair_return_composes_r0_high_r1_low() {
     assert!(code.contains("return 1234605616436508552;"), "{code}");
 }
 
+/// A shared x64 return block can copy a non-primary register into RAX. The
+/// edge-specific return recovery must inspect that copy itself; skipping the
+/// current primary-return definition makes the recovery fall back to a
+/// dominance lookup and lose the predecessor's value.
+#[test]
+fn x64_return_join_copy_uses_edge_source_register() {
+    let rdx = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x10,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x00,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let constant = |value, size| Varnode::constant(value, size);
+    let pcode = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1000,
+                        output: Some(rdx.clone()),
+                        inputs: vec![constant(1, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1004,
+                        output: None,
+                        inputs: vec![constant(0x3000, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x2000,
+                successors: vec![2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x2000,
+                        output: Some(rdx.clone()),
+                        inputs: vec![constant(2, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x2004,
+                        output: None,
+                        inputs: vec![constant(0x3000, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x3000,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x3000,
+                        output: Some(rax),
+                        inputs: vec![rdx],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x3004,
+                        output: None,
+                        inputs: vec![constant(0, 8), constant(0, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let options = preview_options_with_cspec(MlilPreviewOptions {
+        pe_x64_only: true,
+        is_64bit: true,
+        is_big_endian: false,
+        pointer_size: 8,
+        format: "PE64".to_string(),
+        image_base: 0x1000,
+        sections: vec![(0x1000, 0x4000)],
+        calling_convention: CallingConvention::WindowsX64,
+        ..Default::default()
+    });
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let expr = builder
+        .lower_return_join_expr_for_predecessor(1, 2)
+        .expect("return join recovery");
+    assert_eq!(
+        expr,
+        Some(PreHirExpr::Const(
+            2,
+            NirType::Int {
+                bits: 64,
+                signed: false
+            }
+        ))
+    );
+}
+
 /// Match-path early RET after a loop-carried primary return register update:
 /// RET p-code input is the return *address* (stack), not EAX. The index lives
 /// in EAX from a predecessor block. Must not emit bare `return;`.

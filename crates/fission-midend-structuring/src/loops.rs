@@ -848,7 +848,29 @@ fn try_lower_while_impl(
             stats.continue_rewrites,
             stats.skipped_nested_scope_count,
         );
+        // A loop head may exit directly to a shared return block. In that
+        // shape the return block's value is edge-sensitive: the loop edge
+        // carries the updated accumulator while a bypass edge may carry the
+        // entry seed. Preserve the loop edge as an actual return instead of
+        // rewriting it to `break` and letting the shared return block resolve
+        // the source through dominance.
+        let loop_exit_return = host.lower_return_join_expr_for_predecessor(idx, exit_idx)?;
         if cond_prefix.is_empty() {
+            if let Some(return_expr) = loop_exit_return {
+                let mut guarded_body = vec![PreHirStmt::If {
+                    cond: negate_expr(cond),
+                    then_body: std::rc::Rc::new(vec![PreHirStmt::Return(Some(return_expr))]),
+                    else_body: std::rc::Rc::new(Vec::new()),
+                }];
+                guarded_body.extend(body);
+                return Ok(Some((
+                    PreHirStmt::While {
+                        cond: PreHirExpr::Const(1, NirType::Bool),
+                        body: std::rc::Rc::new(guarded_body),
+                    },
+                    exit_idx,
+                )));
+            }
             return Ok(Some((
                 PreHirStmt::While {
                     cond,
@@ -857,7 +879,9 @@ fn try_lower_while_impl(
                 exit_idx,
             )));
         }
-        if let Some(folded_cond) = try_fold_cond_prefix(&cond_prefix, &cond, &body) {
+        if loop_exit_return.is_none()
+            && let Some(folded_cond) = try_fold_cond_prefix(&cond_prefix, &cond, &body)
+        {
             if diag {
                 eprintln!(
                     "[DIAG] try_lower_while cond_prefix_folded: idx={} block=0x{:x} prefix_stmts={}",
@@ -876,9 +900,12 @@ fn try_lower_while_impl(
         }
 
         let mut guarded_body = cond_prefix;
+        let exit_stmt = loop_exit_return
+            .map(|expr| PreHirStmt::Return(Some(expr)))
+            .unwrap_or(PreHirStmt::Break);
         guarded_body.push(PreHirStmt::If {
             cond: negate_expr(cond),
-            then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+            then_body: std::rc::Rc::new(vec![exit_stmt]),
             else_body: std::rc::Rc::new(Vec::new()),
         });
         guarded_body.extend(body);
@@ -970,13 +997,33 @@ fn try_lower_while_impl(
 
         host.bump_loop_while_subgraph_lowered();
 
+        let loop_exit_return = host.lower_return_join_expr_for_predecessor(idx, exit_idx)?;
+
         let body = if cond_prefix.is_empty() {
+            if let Some(return_expr) = loop_exit_return {
+                let mut guarded_body = vec![PreHirStmt::If {
+                    cond: negate_expr(cond),
+                    then_body: std::rc::Rc::new(vec![PreHirStmt::Return(Some(return_expr))]),
+                    else_body: std::rc::Rc::new(Vec::new()),
+                }];
+                guarded_body.extend(lowered_body);
+                return Ok(Some((
+                    PreHirStmt::While {
+                        cond: PreHirExpr::Const(1, NirType::Bool),
+                        body: std::rc::Rc::new(guarded_body),
+                    },
+                    exit_idx,
+                )));
+            }
             lowered_body
         } else {
             let mut guarded = cond_prefix;
+            let exit_stmt = loop_exit_return
+                .map(|expr| PreHirStmt::Return(Some(expr)))
+                .unwrap_or(PreHirStmt::Break);
             guarded.push(PreHirStmt::If {
                 cond: negate_expr(cond.clone()),
-                then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+                then_body: std::rc::Rc::new(vec![exit_stmt]),
                 else_body: std::rc::Rc::new(Vec::new()),
             });
             guarded.extend(lowered_body);
