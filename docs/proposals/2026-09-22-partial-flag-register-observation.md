@@ -119,9 +119,12 @@ Comparable coverage:
   - Expected signal: the low-lane-only case recovers the flag expression and
     the wide-condition case remains conservative. Both passed after the fix;
     the positive test failed before the fix at the direct wide-read assertion.
-- [ ] Crate-level gate:
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
-  - Expected signal: no new failures beyond the three existing baseline tests.
+  - Result: `1104 passed / 3 failed / 1 skipped`; the three failures are the
+    pre-existing `diamond_join_lowers_copy_through_join_read_as_select`,
+    `movzx_after_byte_add_zero_extends_unsigned`, and
+    `x64_byte_add_movzx_does_not_double_add_load` tests.
 - [x] Focused real-binary observation:
   - Command: fresh release `fission_cli decomp --addr 0x140001530 --layer hir`
     followed by an equivalent five-case C wrapper compiled at `-O0` and `-O2`.
@@ -133,12 +136,13 @@ Comparable coverage:
     semantic rows remain `compile_error` because the existing aggregate typedef
     prelude conflict from issue #80 occurs before these wrapper cases; that is
     recorded as a harness blocker, not as evidence against this fix.
-- [ ] Crate-level and smoke gates:
+- [x] Crate-level and smoke gates:
   - Commands: `cargo nextest run -p fission-pcode`,
     `cargo nextest run -p fission-decompiler`, `cargo check`, and a release CLI
     build.
-  - Expected no-regression signal: no new failures beyond the three existing
-    pcode baseline tests.
+  - Result: decompiler `72/72`, workspace `cargo check`, release build,
+    `cargo fmt --all --check`, and `git diff --check` passed; pcode retained
+    only the three baseline failures listed above.
 - [x] Optional related checks:
   - Command: `cargo fmt --all --check` and `git diff --check`.
   - Expected signal: clean formatting and patch.
