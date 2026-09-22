@@ -58,7 +58,7 @@ pub(crate) fn render_layered_pseudocode(
 #[cfg(test)]
 mod layered_tests {
     use super::*;
-    use crate::midend::{HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirType};
+    use crate::midend::{HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirType, StructField};
 
     #[test]
     fn layered_pseudocode_hir_drops_unused_home_local() {
@@ -168,8 +168,19 @@ mod layered_tests {
     #[test]
     fn qualified_surface_type_gets_a_compilable_alias() {
         let aggregate = NirType::Aggregate {
-            size: 4,
-            fields: vec![],
+            size: 8,
+            fields: vec![
+                StructField {
+                    offset: 0,
+                    ty: NirType::Unknown,
+                    name: "first".into(),
+                },
+                StructField {
+                    offset: 4,
+                    ty: NirType::Unknown,
+                    name: "second".into(),
+                },
+            ],
         };
         let func = HirFunction {
             name: "tm_year_of".into(),
@@ -195,7 +206,12 @@ mod layered_tests {
         };
 
         let rendered = render_hir_function_with_global_decls(&func, &MlilPreviewOptions::default());
-        assert!(rendered.contains("typedef fission_agg4 tm;"), "{rendered}");
+        assert!(rendered.contains("typedef fission_agg8 tm;"), "{rendered}");
+        assert!(
+            rendered.contains("undefined first;\n    undefined second;"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("_pad_1[3]"), "{rendered}");
         assert!(rendered.contains("const tm * t"), "{rendered}");
     }
 }
@@ -990,7 +1006,8 @@ fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>
     }
     let mut members = String::new();
     let mut cursor = 0u32;
-    for (offset, (name, ty)) in fields {
+    let mut field_iter = fields.iter().peekable();
+    while let Some((offset, (name, ty))) = field_iter.next() {
         if *offset > cursor {
             members.push_str(&format!(
                 "    unsigned char _pad_{cursor}[{}];\n",
@@ -1001,7 +1018,6 @@ fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>
             // Overlapping/out-of-order residual — still emit the named field.
         }
         let fty = print_type(ty);
-        let fsize = nir_type_byte_size(ty).unwrap_or(1);
         // Sanitize field names that might not be valid C identifiers.
         let fname = if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             && name
@@ -1014,6 +1030,14 @@ fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>
             format!("field_{offset:x}")
         };
         members.push_str(&format!("    {fty} {fname};\n"));
+        // `undefined` is emitted as a 32-bit C typedef, but its NirType is
+        // Unknown and therefore has no intrinsic width. Use the next known
+        // field offset (or the aggregate end) so the declaration's C layout
+        // agrees with the recovered offsets instead of packing every unknown
+        // field as one byte.
+        let next_offset = field_iter.peek().map(|(offset, _)| **offset);
+        let inferred_size = next_offset.unwrap_or(size).saturating_sub(*offset).max(1);
+        let fsize = nir_type_byte_size(ty).unwrap_or(inferred_size);
         cursor = cursor.max(*offset + fsize);
     }
     if cursor < size {
