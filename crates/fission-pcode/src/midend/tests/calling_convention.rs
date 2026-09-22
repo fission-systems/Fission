@@ -411,6 +411,156 @@ fn x86_64_argument_registers_do_not_survive_an_intervening_call() {
     );
 }
 
+#[test]
+fn x86_64_call_keeps_an_unchanged_register_argument_after_an_intervening_call() {
+    // The third argument is staged before an unrelated call and is unchanged
+    // at the current call boundary. The first two arguments are staged after
+    // that call, so the earlier definition is a hole in the current ABI
+    // snapshot, not a replay of the earlier call's arguments.
+    let mut options = preview_options_for(CallingConvention::WindowsX64);
+    options.format = "PE".to_string();
+    options.pointer_size = 8;
+    options.is_64bit = true;
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x401000,
+                    output: Some(reg(0x80, 8)),
+                    inputs: vec![cst(5, 8)],
+                    asm_mnemonic: Some("mov r8d, 5".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x401005,
+                    output: None,
+                    inputs: vec![cst(0x401100, 8)],
+                    asm_mnemonic: Some("call 0x401100".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x40100a,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![cst(8, 8)],
+                    asm_mnemonic: Some("mov ecx, 8".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntXor,
+                    address: 0x40100f,
+                    output: Some(reg(0x10, 8)),
+                    inputs: vec![reg(0x10, 8), reg(0x10, 8)],
+                    asm_mnemonic: Some("xor edx, edx".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x401011,
+                    output: None,
+                    inputs: vec![cst(0x401200, 8)],
+                    asm_mnemonic: Some("call 0x401200".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401016,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("ret".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "caller", 0x401000, &options).expect("preview render");
+    assert!(
+        code.contains("sub_401200(8, 0, "),
+        "unchanged R8 must remain the third call argument: {code}"
+    );
+}
+
+#[test]
+fn x86_64_call_without_new_carriers_does_not_replay_same_block_arguments() {
+    let mut options = preview_options_for(CallingConvention::WindowsX64);
+    options.format = "PE".to_string();
+    options.pointer_size = 8;
+    options.is_64bit = true;
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x402000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x402000,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![cst(14, 8)],
+                    asm_mnemonic: Some("mov ecx, 14".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x402005,
+                    output: Some(reg(0x10, 8)),
+                    inputs: vec![cst(22, 8)],
+                    asm_mnemonic: Some("mov edx, 22".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x40200a,
+                    output: None,
+                    inputs: vec![cst(0x402100, 8)],
+                    asm_mnemonic: Some("call 0x402100".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x40200f,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![cst(8, 8)],
+                    asm_mnemonic: Some("mov ecx, 8".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x402014,
+                    output: None,
+                    inputs: vec![cst(0x402200, 8)],
+                    asm_mnemonic: Some("call 0x402200".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x402019,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("ret".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "caller", 0x402000, &options).expect("preview render");
+    assert!(code.contains("sub_402100(14, 22)"), "{code}");
+    assert!(
+        code.contains("sub_402200(8)"),
+        "second call inherited a stale slot: {code}"
+    );
+    assert!(!code.contains("sub_402200(8, 22)"), "{code}");
+}
+
 /// Regression for a loop-latch arm carrying a mapped-global write.
 ///
 /// Three blocks -- a header that branches out or falls through, an arm whose

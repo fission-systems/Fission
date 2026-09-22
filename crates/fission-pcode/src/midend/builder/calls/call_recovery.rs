@@ -1068,6 +1068,14 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
+        // A call has no register operands in raw p-code, so an unchanged ABI
+        // carrier can sit before an earlier call while the current call
+        // stages the rest of its prefix afterwards. Keep the current call's
+        // snapshot bounded: cross at most that immediately preceding call,
+        // and only after at least two contiguous current-call slots already
+        // provide evidence that this is a new argument tuple. Without that
+        // evidence, continuing would replay a prior call's staged arguments.
+        let mut crossed_intervening_call = false;
         for (scan_block, scan_limit) in scan_blocks {
             for prev_idx in (0..scan_limit).rev() {
                 let prev = &scan_block.ops[prev_idx];
@@ -1080,6 +1088,14 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     if self.call_is_terminal_branchind_artifact(scan_block, prev_idx) {
                         continue;
+                    }
+                    if prev.opcode.is_call() && std::ptr::eq(scan_block, block) {
+                        let current_prefix =
+                            recovered.iter().take_while(|expr| expr.is_some()).count();
+                        if !crossed_intervening_call && current_prefix >= 2 {
+                            crossed_intervening_call = true;
+                            continue;
+                        }
                     }
                     // Only hard-stop control-flow inside the *call* block.
                     if std::ptr::eq(scan_block, block) {
