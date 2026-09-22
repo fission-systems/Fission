@@ -236,6 +236,45 @@ fn call_result_observation_follows_successor_copy_of_return_register() {
     );
 }
 
+/// A shared epilogue can observe a call result without naming the ABI return
+/// register in its `Return` p-code.  Another predecessor may write a distinct
+/// value (the failure arm), so the call's carrier must remain bound on the
+/// successor path that falls through to the join.
+#[test]
+fn call_result_observation_follows_epilogue_return_path() {
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let mut call_block = block_at(
+        0x1000,
+        0,
+        vec![op(1, PcodeOpcode::Call, None, vec![constant(0x2000)])],
+    );
+    call_block.successors = vec![1, 2];
+
+    let epilogue = block_at(
+        0x1010,
+        1,
+        vec![op(2, PcodeOpcode::Return, None, vec![constant(0)])],
+    );
+    let mut failure = block_at(
+        0x1020,
+        2,
+        vec![
+            op(3, PcodeOpcode::Copy, Some(rax), vec![constant(-1)]),
+            op(4, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+        ],
+    );
+    failure.successors = vec![1];
+
+    let pcode = pcode_function(vec![call_block.clone(), epilogue, failure]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+
+    assert!(
+        builder.call_result_is_observed(&call_block, 0),
+        "a call whose fallthrough reaches a value-bearing shared epilogue must bind its result"
+    );
+}
+
 /// End-to-end: terminator CALL + successor save of return reg must bind the
 /// call result into the save (`reg = f()` / `saved = ret`), not the pre-call
 /// argument temp that still occupied the return register storage.

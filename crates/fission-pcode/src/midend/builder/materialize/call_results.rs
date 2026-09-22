@@ -154,6 +154,16 @@ impl<'a> PreviewBuilder<'a> {
         if self.call_result_observed_in_successors(block, &ret_regs) {
             return true;
         }
+        // Some ABIs expose the return carrier only through the function's
+        // epilogue: the shared successor contains `Return` with a control
+        // input, while another predecessor writes an alternate return value.
+        // A call feeding that join is still observed when one successor path
+        // reaches `Return` without redefining the carrier.  Require
+        // function-wide primary-return evidence so a genuinely void call is
+        // not turned into a value merely because it happens to precede RET.
+        if self.call_result_reaches_return_in_successors(block, &ret_regs) {
+            return true;
+        }
         // CallInd often has no p-code use of RAX before an epilogue Return
         // (return address on the stack). The ABI still leaves the primary
         // return register live-out — materialize `ret = (*(fp))(…)` so return
@@ -178,6 +188,56 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         false
+    }
+
+    fn call_result_reaches_return_in_successors(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        ret_regs: &[Varnode],
+    ) -> bool {
+        if !self.function_has_primary_return_def() {
+            return false;
+        }
+        let mut visited = std::collections::BTreeSet::new();
+        block.successors.iter().any(|successor| {
+            self.call_result_reaches_return(*successor as usize, ret_regs, &mut visited)
+        })
+    }
+
+    fn call_result_reaches_return(
+        &self,
+        block_idx: usize,
+        ret_regs: &[Varnode],
+        visited: &mut std::collections::BTreeSet<usize>,
+    ) -> bool {
+        if !visited.insert(block_idx) {
+            return false;
+        }
+        let Some(block) = self.pcode.blocks.get(block_idx) else {
+            return false;
+        };
+        for candidate in &block.ops {
+            if candidate.inputs.iter().any(|input| {
+                ret_regs
+                    .iter()
+                    .any(|ret_reg| self.varnode_aliases_value(ret_reg, input))
+            }) {
+                return true;
+            }
+            if let Some(output) = candidate.output.as_ref()
+                && ret_regs
+                    .iter()
+                    .any(|ret_reg| self.varnode_aliases_value(ret_reg, output))
+            {
+                return false;
+            }
+            if candidate.opcode == PcodeOpcode::Return {
+                return true;
+            }
+        }
+        block.successors.iter().any(|successor| {
+            self.call_result_reaches_return(*successor as usize, ret_regs, visited)
+        })
     }
 
     fn return_reg_used_before_redefinition_in_block(

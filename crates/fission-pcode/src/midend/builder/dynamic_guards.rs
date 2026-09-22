@@ -533,7 +533,15 @@ pub(super) fn resolve_pointer_value(
                 .ops
                 .get(site.op as usize)?;
             let outputs = ssa.operation_outputs.get(&site)?;
-            if outputs.len() != 1 || outputs[0].value != value_id {
+            // A wide register write can be partitioned into several scalar
+            // SSA pieces when an earlier narrow write established a lane
+            // boundary (for example RDXD followed by a full-width RDX copy).
+            // The pointer provenance belongs to the p-code operation's whole
+            // output, not only to the one lane currently being inspected.
+            // Requiring a single output piece loses stack addresses exactly
+            // at this ABI boundary and prevents escaping-slot invalidation at
+            // the following call.
+            if !outputs.iter().any(|output| output.value == value_id) {
                 None
             } else {
                 match op.opcode {

@@ -22,7 +22,14 @@ pub fn apply_sccp_pass(func: &mut PreHirFunction) -> bool {
     let mut any = false;
     for _ in 0..max_rounds {
         let mut env = ConstEnv::default();
-        if !sccp_transform_stmts(&mut func.body, &mut env, &goto_targets, &all_xvars) {
+        let address_aliases = collect_address_aliases(&func.body);
+        if !sccp_transform_stmts(
+            &mut func.body,
+            &mut env,
+            &goto_targets,
+            &all_xvars,
+            &address_aliases,
+        ) {
             break;
         }
         any = true;
@@ -283,16 +290,148 @@ fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
 /// `AddressOfLocal` cannot itself have been folded into a `Const` (that is
 /// exactly what `sccp_subst_expr` now refuses to do), so this always finds
 /// the real argument shape, not a folded stand-in.
-fn kill_locals_with_address_taken_in_calls(expr: &PreHirExpr, env: &mut ConstEnv) {
+type AddressAliases = HashMap<String, HashSet<String>>;
+
+/// Collect pointer-like variable assignments so an address passed through a
+/// temporary is still recognized as an escaping local.  The builder commonly
+/// materializes `p = &local; call(p)` rather than keeping the address
+/// expression directly in the call argument.  SCCP must treat those two
+/// forms identically: the callee can write through `p`, so the pre-call value
+/// of `local` is not a valid constant afterwards.
+///
+/// This is deliberately a may-alias summary for the whole function.  Keeping
+/// an old possible address after a later reassignment can only discard a
+/// constant that would otherwise be propagated; dropping a possible address
+/// could substitute a stale value after a call and change semantics.
+fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
+    let mut definitions = HashMap::<String, Vec<PreHirExpr>>::default();
+
+    fn visit(stmts: &[PreHirStmt], definitions: &mut HashMap<String, Vec<PreHirExpr>>) {
+        for stmt in stmts {
+            match stmt {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs,
+                } => definitions
+                    .entry(name.clone())
+                    .or_default()
+                    .push(rhs.clone()),
+                PreHirStmt::Block(body)
+                | PreHirStmt::While { body, .. }
+                | PreHirStmt::DoWhile { body, .. } => visit(body, definitions),
+                PreHirStmt::For {
+                    init, update, body, ..
+                } => {
+                    if let Some(init) = init {
+                        visit(std::slice::from_ref(init.as_ref()), definitions);
+                    }
+                    visit(body, definitions);
+                    if let Some(update) = update {
+                        visit(std::slice::from_ref(update.as_ref()), definitions);
+                    }
+                }
+                PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    visit(then_body, definitions);
+                    visit(else_body, definitions);
+                }
+                PreHirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        visit(&case.body, definitions);
+                    }
+                    visit(default, definitions);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn resolve_expr(
+        expr: &PreHirExpr,
+        definitions: &HashMap<String, Vec<PreHirExpr>>,
+        visiting: &mut HashSet<String>,
+        out: &mut HashSet<String>,
+    ) {
+        match expr {
+            PreHirExpr::AddressOfLocal(name) => {
+                out.insert(name.clone());
+            }
+            PreHirExpr::Var(name) => {
+                if visiting.insert(name.clone()) {
+                    if let Some(defs) = definitions.get(name) {
+                        for def in defs {
+                            resolve_expr(def, definitions, visiting, out);
+                        }
+                    }
+                    visiting.remove(name);
+                }
+            }
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => {
+                resolve_expr(expr, definitions, visiting, out);
+            }
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                resolve_expr(lhs, definitions, visiting, out);
+                resolve_expr(rhs, definitions, visiting, out);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                resolve_expr(cond, definitions, visiting, out);
+                resolve_expr(then_expr, definitions, visiting, out);
+                resolve_expr(else_expr, definitions, visiting, out);
+            }
+            PreHirExpr::Index { base, index, .. } => {
+                resolve_expr(base, definitions, visiting, out);
+                resolve_expr(index, definitions, visiting, out);
+            }
+            PreHirExpr::Load { .. }
+            | PreHirExpr::Call { .. }
+            | PreHirExpr::AggregateCopy { .. }
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::Const(_, _) => {}
+        }
+    }
+
+    visit(stmts, &mut definitions);
+    let mut aliases = AddressAliases::default();
+    for name in definitions.keys() {
+        let mut targets = HashSet::default();
+        resolve_expr(
+            &PreHirExpr::Var(name.clone()),
+            &definitions,
+            &mut HashSet::default(),
+            &mut targets,
+        );
+        if !targets.is_empty() {
+            aliases.insert(name.clone(), targets);
+        }
+    }
+    aliases
+}
+
+fn kill_locals_with_address_taken_in_calls(
+    expr: &PreHirExpr,
+    env: &mut ConstEnv,
+    address_aliases: &AddressAliases,
+) {
     if let PreHirExpr::Call { args, .. } = expr {
         for arg in args {
-            collect_address_taken_locals(arg, env);
+            collect_address_taken_locals(arg, env, address_aliases);
         }
     }
     match expr {
         PreHirExpr::Call { args, .. } => {
             for a in args {
-                kill_locals_with_address_taken_in_calls(a, env);
+                kill_locals_with_address_taken_in_calls(a, env, address_aliases);
             }
         }
         PreHirExpr::Unary { expr: inner, .. }
@@ -301,15 +440,15 @@ fn kill_locals_with_address_taken_in_calls(expr: &PreHirExpr, env: &mut ConstEnv
         | PreHirExpr::PtrOffset { base: inner, .. }
         | PreHirExpr::FieldAccess { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. } => {
-            kill_locals_with_address_taken_in_calls(inner, env);
+            kill_locals_with_address_taken_in_calls(inner, env, address_aliases);
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            kill_locals_with_address_taken_in_calls(lhs, env);
-            kill_locals_with_address_taken_in_calls(rhs, env);
+            kill_locals_with_address_taken_in_calls(lhs, env, address_aliases);
+            kill_locals_with_address_taken_in_calls(rhs, env, address_aliases);
         }
         PreHirExpr::Index { base, index, .. } => {
-            kill_locals_with_address_taken_in_calls(base, env);
-            kill_locals_with_address_taken_in_calls(index, env);
+            kill_locals_with_address_taken_in_calls(base, env, address_aliases);
+            kill_locals_with_address_taken_in_calls(index, env, address_aliases);
         }
         PreHirExpr::Select {
             cond,
@@ -317,9 +456,9 @@ fn kill_locals_with_address_taken_in_calls(expr: &PreHirExpr, env: &mut ConstEnv
             else_expr,
             ..
         } => {
-            kill_locals_with_address_taken_in_calls(cond, env);
-            kill_locals_with_address_taken_in_calls(then_expr, env);
-            kill_locals_with_address_taken_in_calls(else_expr, env);
+            kill_locals_with_address_taken_in_calls(cond, env, address_aliases);
+            kill_locals_with_address_taken_in_calls(then_expr, env, address_aliases);
+            kill_locals_with_address_taken_in_calls(else_expr, env, address_aliases);
         }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -331,29 +470,41 @@ fn kill_locals_with_address_taken_in_calls(expr: &PreHirExpr, env: &mut ConstEnv
 /// Names of every local whose address appears anywhere in `expr` (a call
 /// argument, or a sub-address like `&local + k` / `(char *)&local` nested
 /// inside one) -- the removal side of [`kill_locals_with_address_taken_in_calls`].
-fn collect_address_taken_locals(expr: &PreHirExpr, env: &mut ConstEnv) {
+fn collect_address_taken_locals(
+    expr: &PreHirExpr,
+    env: &mut ConstEnv,
+    address_aliases: &AddressAliases,
+) {
     match expr {
         PreHirExpr::AddressOfLocal(name) => {
             env.remove(name);
         }
+        PreHirExpr::Var(name) => {
+            if let Some(aliases) = address_aliases.get(name) {
+                for alias in aliases {
+                    env.remove(alias);
+                }
+            }
+        }
         PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
-        | PreHirExpr::FieldAccess { base: inner, .. } => collect_address_taken_locals(inner, env),
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
+            collect_address_taken_locals(inner, env, address_aliases)
+        }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            collect_address_taken_locals(lhs, env);
-            collect_address_taken_locals(rhs, env);
+            collect_address_taken_locals(lhs, env, address_aliases);
+            collect_address_taken_locals(rhs, env, address_aliases);
         }
         PreHirExpr::Select {
             then_expr,
             else_expr,
             ..
         } => {
-            collect_address_taken_locals(then_expr, env);
-            collect_address_taken_locals(else_expr, env);
+            collect_address_taken_locals(then_expr, env, address_aliases);
+            collect_address_taken_locals(else_expr, env, address_aliases);
         }
-        PreHirExpr::Var(_)
-        | PreHirExpr::AddressOfGlobal(_)
+        PreHirExpr::AddressOfGlobal(_)
         | PreHirExpr::Const(_, _)
         | PreHirExpr::Load { .. }
         | PreHirExpr::Index { .. }
@@ -502,6 +653,51 @@ mod tests {
     }
 
     #[test]
+    fn sccp_kills_a_local_when_its_address_reaches_a_call_through_a_pointer_alias() {
+        // The p-code materializer commonly separates the address computation
+        // from the call argument (`p = &buf; call(p)`).  Treating only a
+        // direct `call(&buf)` as an escape lets SCCP reuse the pre-call
+        // constant even though the callee receives the same address.
+        let mut func = PreHirFunction {
+            name: "test_sccp_pointer_alias_escape".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("buf".to_string()),
+                    rhs: PreHirExpr::Const(0, int(64)),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("p".to_string()),
+                    rhs: PreHirExpr::AddressOfLocal("buf".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "write_through_pointer".to_string(),
+                    args: vec![var("p")],
+                    ty: int(64),
+                }),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: var("buf"),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Assign { rhs, .. } = &func.body[3] else {
+            panic!("expected the trailing read to remain an assignment");
+        };
+        assert_eq!(
+            rhs,
+            &var("buf"),
+            "an address passed through a pointer alias must invalidate the \
+             pointee's pre-call constant"
+        );
+    }
+
+    #[test]
     fn sccp_does_not_prune_if_when_discarded_branch_has_side_effects() {
         let mut func = PreHirFunction {
             name: "test".to_string(),
@@ -619,11 +815,12 @@ fn sccp_transform_stmts(
     env: &mut ConstEnv,
     goto_targets: &HashSet<String>,
     all_xvars: &HashSet<String>,
+    address_aliases: &AddressAliases,
 ) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
-        changed |= sccp_stmt(&mut stmts[i], env, goto_targets, all_xvars);
+        changed |= sccp_stmt(&mut stmts[i], env, goto_targets, all_xvars, address_aliases);
         i += 1;
     }
     changed
@@ -634,6 +831,7 @@ fn sccp_stmt(
     env: &mut ConstEnv,
     goto_targets: &HashSet<String>,
     all_xvars: &HashSet<String>,
+    address_aliases: &AddressAliases,
 ) -> bool {
     let mut changed = false;
     loop {
@@ -651,11 +849,11 @@ fn sccp_stmt(
                     } else {
                         env.remove(name);
                     }
-                    kill_locals_with_address_taken_in_calls(rhs, env);
+                    kill_locals_with_address_taken_in_calls(rhs, env, address_aliases);
                 } else {
                     changed |= sccp_subst_expr(rhs, env);
                     changed |= fold_expr_hir(rhs);
-                    kill_locals_with_address_taken_in_calls(rhs, env);
+                    kill_locals_with_address_taken_in_calls(rhs, env, address_aliases);
                 }
                 break;
             }
@@ -667,7 +865,7 @@ fn sccp_stmt(
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 changed |= sccp_subst_expr(expr, env);
                 changed |= fold_expr_hir(expr);
-                kill_locals_with_address_taken_in_calls(expr, env);
+                kill_locals_with_address_taken_in_calls(expr, env, address_aliases);
                 break;
             }
             PreHirStmt::Block(stmts) => {
@@ -676,6 +874,7 @@ fn sccp_stmt(
                     env,
                     goto_targets,
                     all_xvars,
+                    address_aliases,
                 );
                 break;
             }
@@ -722,12 +921,14 @@ fn sccp_stmt(
                             &mut e1,
                             goto_targets,
                             all_xvars,
+                            address_aliases,
                         );
                         changed |= sccp_transform_stmts(
                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                             &mut e2,
                             goto_targets,
                             all_xvars,
+                            address_aliases,
                         );
                         *env = merge_env(&e1, &e2);
                     }
@@ -746,6 +947,7 @@ fn sccp_stmt(
                     &mut inner,
                     goto_targets,
                     all_xvars,
+                    address_aliases,
                 );
                 *env = env_without_vars(&pre, &modified);
                 break;
@@ -759,6 +961,7 @@ fn sccp_stmt(
                     &mut inner,
                     goto_targets,
                     all_xvars,
+                    address_aliases,
                 );
                 let cond_env = env_without_vars(&inner, &modified);
                 changed |= sccp_subst_expr(cond, &cond_env);
@@ -773,7 +976,7 @@ fn sccp_stmt(
                 body,
             } => {
                 if let Some(i) = init.as_mut() {
-                    changed |= sccp_stmt(i, env, goto_targets, all_xvars);
+                    changed |= sccp_stmt(i, env, goto_targets, all_xvars, address_aliases);
                 }
                 let loop_entry = env.clone();
                 let mut modified = loop_variant_vars(body, all_xvars);
@@ -797,11 +1000,13 @@ fn sccp_stmt(
                     &mut inner,
                     goto_targets,
                     all_xvars,
+                    address_aliases,
                 );
                 *env = env_without_vars(&loop_entry, &modified);
                 if let Some(u) = update.as_mut() {
                     let mut update_env = env_without_vars(&inner, &modified);
-                    changed |= sccp_stmt(u, &mut update_env, goto_targets, all_xvars);
+                    changed |=
+                        sccp_stmt(u, &mut update_env, goto_targets, all_xvars, address_aliases);
                 }
                 break;
             }
@@ -845,6 +1050,7 @@ fn sccp_stmt(
                         &mut e,
                         goto_targets,
                         all_xvars,
+                        address_aliases,
                     );
                     acc = Some(match acc {
                         None => e,
@@ -857,6 +1063,7 @@ fn sccp_stmt(
                     &mut ed,
                     goto_targets,
                     all_xvars,
+                    address_aliases,
                 );
                 *env = merge_env(acc.as_ref().unwrap_or(&pre), &ed);
                 break;

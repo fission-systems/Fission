@@ -755,7 +755,7 @@ impl<'a> PreviewBuilder<'a> {
     /// before its terminator (including loop-carried index updates). Used to
     /// distinguish void-like functions from value-returning ones when RET's
     /// p-code input is only the return address on the stack.
-    fn function_has_primary_return_def(&self) -> bool {
+    pub(in crate::midend::builder) fn function_has_primary_return_def(&self) -> bool {
         (0..self.pcode.blocks.len())
             .any(|block_idx| self.block_has_primary_return_def_before_terminator(block_idx))
     }
