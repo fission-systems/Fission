@@ -114,25 +114,30 @@ Comparable coverage:
 
 ## 5. Validation Matrix
 
-- [ ] Targeted invariant test:
+- [x] Targeted invariant test:
   - Command: `cargo nextest run -p fission-pcode -E 'test(type_hints_function_hints)'`
-  - Expected signal: scalar constant index becomes the declared field access;
-    variable index remains an index.
-- [ ] Crate-level gate:
+  - Result: 56 passed. The new regression renders `p->y` and rejects `p[1]`.
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
-  - Expected signal: no new failures.
-- [ ] Focused benchmark row:
-  - Command: local DecBench runs for `find_pair_value` and `kv_lookup`, with
-    caches disabled, before and after the change.
-  - Expected row-level improvement: optimized output uses `->value` rather
-    than `[...]`; compile-error denominators are reported separately if the
-    existing missing-declaration harness issue remains.
-- [ ] Smoke or automation sample:
+  - Result: 1088 passed, 1 skipped, 3 pre-existing failures in unrelated
+    `lower_expr` tests (`diamond_join...`, `movzx_after_byte_add...`, and
+    `x64_byte_add_movzx...`).
+- [x] Focused benchmark row:
+  - Command: local DecBench `dev` runs for `find_pair_value` and `kv_lookup`
+    with `FISSION_BENCHMARK_NO_CACHE=1`, a commit-specific
+    `BENCHMARK_IMAGE_ID_FISSION`, and a force-recreated local Docker service.
+  - Result: `find_pair_value` semantic perfect variants 2/9 -> 7/9 and
+    `kv_lookup` 2/9 -> 7/9. The optimized rows changed from `pairs[1]` /
+    `items[1]` to `pairs->value` / `items->value`. Remaining compile errors
+    are the separate missing `Pair`/`Kv` declaration issue in the benchmark
+    translation-unit harness.
+- [x] Smoke or automation sample:
   - Command: `cargo nextest run -p fission-emulator` and release CLI build.
-  - Expected no-regression signal: existing runtime and CLI paths remain green.
-- [ ] Optional related checks:
+  - Result: emulator 200 passed, 3 skipped; `cargo build -p fission-cli --release`
+    passed.
+- [x] Optional related checks:
   - Command: `cargo fmt --all --check && git diff --check`
-  - Expected signal: clean formatting and patch.
+  - Result: passed.
 
 ## 6. AI Review / Prompt Firewall
 
