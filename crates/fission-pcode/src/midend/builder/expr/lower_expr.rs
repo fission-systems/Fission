@@ -652,6 +652,9 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(expr) = self.try_lower_zero_extended_partial_register(vn, visiting)? {
             return Ok(expr);
         }
+        if let Some(expr) = self.try_lower_observed_low_lane_partial_register(vn, visiting)? {
+            return Ok(expr);
+        }
         // The diamond path reconstructs a merge from the CFG shape, and it
         // runs even when a definite reaching definition was already found
         // above. Probed on `TIM_OC4Init`: every input at the sites it fires

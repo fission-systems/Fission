@@ -40,7 +40,10 @@ impl DefinitionReachesReturnProof {
 }
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn varnode_matches_key(varnode: &Varnode, key: &VarnodeKey) -> bool {
+    pub(in crate::midend::builder) fn varnode_matches_key(
+        varnode: &Varnode,
+        key: &VarnodeKey,
+    ) -> bool {
         let candidate = VarnodeKey::from(varnode);
         if candidate == *key {
             return true;
@@ -130,7 +133,7 @@ impl<'a> PreviewBuilder<'a> {
     /// definition are intentionally ignored here; callers analyze those with
     /// `collect_output_use_sites_in_block`. Re-entering the block over a
     /// backedge is a non-local use and is therefore included.
-    pub(super) fn first_reaching_output_use_after_block_exit(
+    pub(in crate::midend::builder) fn first_reaching_output_use_after_block_exit(
         &self,
         definition_block_idx: usize,
         definition_op_idx: usize,

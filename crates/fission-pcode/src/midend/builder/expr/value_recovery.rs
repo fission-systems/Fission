@@ -1,5 +1,10 @@
 use super::*;
 
+enum LowLaneUse<'a> {
+    Transform { value: &'a Varnode, known_size: u32 },
+    Terminal,
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn try_lower_scalar_ssa_piece_reassembly(
         &mut self,
@@ -548,6 +553,354 @@ impl<'a> PreviewBuilder<'a> {
             ty: type_from_size(vn.size, false),
             expr: Box::new(expr),
         }))
+    }
+
+    /// Recover a wider read from a narrow register definition when the
+    /// dependency cone proves that no consumer can observe the unknown upper
+    /// bytes.
+    ///
+    /// A partial write such as `setcc r8b` must not be treated as a complete
+    /// definition of `r8`: a later comparison or address calculation really
+    /// can observe the stale upper bytes.  It is nevertheless sound to use
+    /// the low lane when every same-block consumer is a low-lane-preserving
+    /// operation and the value is ultimately observed through that lane.  The
+    /// proof is deliberately bounded to the current block; a live-out use is
+    /// rejected unless the existing reaching-use scan proves that no such use
+    /// exists.
+    pub(super) fn try_lower_observed_low_lane_partial_register(
+        &mut self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
+        if vn.is_constant || !is_register_space_id(vn.space_id) || vn.size <= 1 {
+            return Ok(None);
+        }
+        let Some(site) = self.current_lowering_site else {
+            return Ok(None);
+        };
+        let block_idx = self.pcode_block_idx(site.block_idx);
+        let Some(block) = self.pcode.blocks.get(block_idx) else {
+            return Ok(None);
+        };
+        let scan_end = site.op_idx.min(block.ops.len());
+
+        // Find the latest low-lane definition that can reach this wide read.
+        // Any intervening overlapping definition invalidates the proof unless
+        // it is itself the candidate we are trying to recover.
+        let mut candidate = None;
+        for idx in (0..scan_end).rev() {
+            let Some(output) = block.ops[idx].output.as_ref() else {
+                continue;
+            };
+            if output.is_constant
+                || output.space_id != vn.space_id
+                || !Self::varnode_ranges_overlap(output.offset, output.size, vn.offset, vn.size)
+            {
+                continue;
+            }
+            if output.offset == vn.offset && output.size < vn.size {
+                candidate = Some((idx, output.clone()));
+            }
+            // An overlapping full-width or higher-lane write is the nearest
+            // reaching definition, so the older partial write is not the
+            // value read here.
+            break;
+        }
+        let Some((candidate_idx, candidate)) = candidate else {
+            return Ok(None);
+        };
+        if candidate.size == 0 {
+            return Ok(None);
+        }
+
+        let mut active = HashSet::default();
+        if !self.prove_low_lane_observation_paths(
+            block_idx,
+            candidate_idx,
+            &candidate,
+            candidate.size,
+            &mut active,
+        ) {
+            return Ok(None);
+        }
+
+        let op = &block.ops[candidate_idx];
+        let expr = self.with_lowering_site(
+            LoweringSite {
+                block_idx: site.block_idx,
+                op_idx: candidate_idx,
+            },
+            |this| this.lower_def_op(op, visiting),
+        )?;
+        Ok(Some(PreHirExpr::Cast {
+            ty: type_from_size(vn.size, false),
+            expr: Box::new(expr),
+        }))
+    }
+
+    fn prove_low_lane_observation_paths(
+        &self,
+        block_idx: usize,
+        definition_idx: usize,
+        value: &Varnode,
+        known_size: u32,
+        active: &mut HashSet<(usize, usize, VarnodeKey, u32)>,
+    ) -> bool {
+        if known_size == 0 {
+            return false;
+        }
+        let state = (
+            block_idx,
+            definition_idx,
+            VarnodeKey::from(value),
+            known_size,
+        );
+        if !active.insert(state.clone()) {
+            return false;
+        }
+
+        let result = self.pcode.blocks.get(block_idx).is_some_and(|block| {
+            let key = &state.2;
+            let mut valid = true;
+            for (op_idx, op) in block.ops.iter().enumerate().skip(definition_idx + 1) {
+                let input_idx = op
+                    .inputs
+                    .iter()
+                    .position(|input| Self::varnode_matches_key(input, key));
+                let output_overlaps = op
+                    .output
+                    .as_ref()
+                    .is_some_and(|output| Self::varnode_matches_key(output, key));
+
+                if let Some(input_idx) = input_idx {
+                    let Some(use_kind) = Self::classify_low_lane_use(op, input_idx, known_size)
+                    else {
+                        let Some(output) = op.output.as_ref() else {
+                            valid = false;
+                            break;
+                        };
+                        let mut dead_active = HashSet::default();
+                        if !Self::is_dead_propagating_opcode(op.opcode)
+                            || !self.prove_value_is_dead(
+                                block_idx,
+                                op_idx,
+                                output,
+                                &mut dead_active,
+                            )
+                        {
+                            valid = false;
+                            break;
+                        }
+                        if output_overlaps {
+                            break;
+                        }
+                        continue;
+                    };
+                    if let LowLaneUse::Transform {
+                        value: next,
+                        known_size: next_known_size,
+                    } = use_kind
+                    {
+                        if !self.prove_low_lane_observation_paths(
+                            block_idx,
+                            op_idx,
+                            next,
+                            next_known_size,
+                            active,
+                        ) {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    // A register-space output overlapping the current
+                    // state replaces it. The transformed output proof (if
+                    // any) now covers all later observations.
+                    if output_overlaps {
+                        break;
+                    }
+                } else if output_overlaps {
+                    // A write that does not read the tracked value kills
+                    // this dependency path without observing it.
+                    break;
+                }
+            }
+
+            valid
+                && self
+                    .first_reaching_output_use_after_block_exit(block_idx, definition_idx, value)
+                    .is_none()
+        });
+        active.remove(&state);
+        result
+    }
+
+    fn prove_value_is_dead(
+        &self,
+        block_idx: usize,
+        definition_idx: usize,
+        value: &Varnode,
+        active: &mut HashSet<(usize, usize, VarnodeKey)>,
+    ) -> bool {
+        let state = (block_idx, definition_idx, VarnodeKey::from(value));
+        if !active.insert(state.clone()) {
+            return false;
+        }
+        let result = self.pcode.blocks.get(block_idx).is_some_and(|block| {
+            let key = &state.2;
+            let mut valid = true;
+            for (op_idx, op) in block.ops.iter().enumerate().skip(definition_idx + 1) {
+                let input_matches = op
+                    .inputs
+                    .iter()
+                    .any(|input| Self::varnode_matches_key(input, key));
+                let output_overlaps = op
+                    .output
+                    .as_ref()
+                    .is_some_and(|output| Self::varnode_matches_key(output, key));
+                if input_matches {
+                    let Some(output) = op.output.as_ref() else {
+                        valid = false;
+                        break;
+                    };
+                    if !Self::is_dead_propagating_opcode(op.opcode)
+                        || !self.prove_value_is_dead(block_idx, op_idx, output, active)
+                    {
+                        valid = false;
+                        break;
+                    }
+                    if output_overlaps {
+                        break;
+                    }
+                } else if output_overlaps {
+                    break;
+                }
+            }
+            valid
+                && self
+                    .first_reaching_output_use_after_block_exit(block_idx, definition_idx, value)
+                    .is_none()
+        });
+        active.remove(&state);
+        result
+    }
+
+    fn is_dead_propagating_opcode(opcode: PcodeOpcode) -> bool {
+        !matches!(
+            opcode,
+            PcodeOpcode::Store
+                | PcodeOpcode::Branch
+                | PcodeOpcode::CBranch
+                | PcodeOpcode::BranchInd
+                | PcodeOpcode::Call
+                | PcodeOpcode::CallInd
+                | PcodeOpcode::CallOther
+                | PcodeOpcode::Return
+                | PcodeOpcode::Unknown
+        )
+    }
+
+    fn classify_low_lane_use(
+        op: &PcodeOp,
+        input_idx: usize,
+        known_size: u32,
+    ) -> Option<LowLaneUse<'_>> {
+        let input = op.inputs.get(input_idx)?;
+        let output = op.output.as_ref();
+        match op.opcode {
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::IntNegate => {
+                output.map(|output| Self::low_lane_transform(op, input_idx, output, known_size))
+            }
+            PcodeOpcode::SubPiece
+                if input_idx == 0
+                    && op
+                        .inputs
+                        .get(1)
+                        .and_then(const_offset)
+                        .is_some_and(|offset| offset == 0) =>
+            {
+                output.map(|output| Self::low_lane_transform(op, input_idx, output, known_size))
+            }
+            PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr
+            | PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+                if input.size <= known_size =>
+            {
+                output.map(|output| Self::low_lane_transform(op, input_idx, output, known_size))
+            }
+            PcodeOpcode::Store if input_idx == 2 && input.size <= known_size => {
+                Some(LowLaneUse::Terminal)
+            }
+            PcodeOpcode::CBranch
+                if input_idx + 1 == op.inputs.len() && input.size <= known_size =>
+            {
+                Some(LowLaneUse::Terminal)
+            }
+            _ => None,
+        }
+    }
+
+    fn known_low_lane_width(
+        op: &PcodeOp,
+        input_idx: usize,
+        output: &Varnode,
+        known_size: u32,
+    ) -> u32 {
+        let input = &op.inputs[input_idx];
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast if input.size <= known_size => {
+                known_size.min(output.size)
+            }
+            PcodeOpcode::IntZExt | PcodeOpcode::IntSExt if input.size <= known_size => output.size,
+            PcodeOpcode::IntAnd
+                if op.inputs.iter().enumerate().any(|(idx, candidate)| {
+                    idx != input_idx
+                        && candidate.is_constant
+                        && Self::constant_has_no_bits_above(candidate, known_size)
+                }) =>
+            {
+                output.size
+            }
+            _ => known_size.min(output.size),
+        }
+    }
+
+    fn low_lane_transform<'value>(
+        op: &PcodeOp,
+        input_idx: usize,
+        output: &'value Varnode,
+        known_size: u32,
+    ) -> LowLaneUse<'value> {
+        LowLaneUse::Transform {
+            value: output,
+            known_size: Self::known_low_lane_width(op, input_idx, output, known_size),
+        }
+    }
+
+    fn constant_has_no_bits_above(value: &Varnode, known_size: u32) -> bool {
+        if !value.is_constant {
+            return false;
+        }
+        let bits = known_size.saturating_mul(8);
+        bits >= 64 || ((value.constant_val as u64) >> bits) == 0
     }
 
     fn is_zero_copy(op: &PcodeOp) -> bool {

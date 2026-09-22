@@ -469,6 +469,163 @@ fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def()
     );
 }
 
+#[test]
+fn partial_flag_register_is_recovered_when_only_low_lane_is_observed() {
+    let options = test_options();
+    let r8b = register(0x80, 1);
+    let r8 = register(0x80, 8);
+    let r8d = register(0x80, 4);
+    let edx = register(0x10, 4);
+    let rcx = register(0x08, 8);
+    let flag = Varnode {
+        size: 1,
+        ..varnode(0x8f00)
+    };
+    let first = varnode(0x9000);
+    let second = varnode(0x9010);
+    let combined = varnode(0x9020);
+    let low = Varnode {
+        size: 1,
+        ..varnode(0x9030)
+    };
+    let ret_addr = register(0x288, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // setcc's boolean result is copied into R8B; the upper bytes of R8
+            // remain unspecified.
+            op(
+                0,
+                PcodeOpcode::IntSLess,
+                Some(flag.clone()),
+                vec![edx, constant_sized(100, 4)],
+            ),
+            op(1, PcodeOpcode::Copy, Some(r8b), vec![flag]),
+            // The wide arithmetic is eventually observed only through its low
+            // byte, so the flag's low lane is the complete relevant value.
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(first.clone()),
+                vec![constant_sized(1, 8), r8.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(second.clone()),
+                vec![first, r8.clone()],
+            ),
+            op(
+                4,
+                PcodeOpcode::IntMult,
+                Some(combined.clone()),
+                vec![second, constant_sized(1, 8)],
+            ),
+            op(
+                5,
+                PcodeOpcode::SubPiece,
+                Some(r8d.clone()),
+                vec![combined, constant_sized(0, 4)],
+            ),
+            op(6, PcodeOpcode::IntZExt, Some(r8.clone()), vec![r8d.clone()]),
+            op(
+                7,
+                PcodeOpcode::IntOr,
+                Some(r8d.clone()),
+                vec![r8d.clone(), constant_sized(0, 4)],
+            ),
+            op(8, PcodeOpcode::IntZExt, Some(r8.clone()), vec![r8d]),
+            op(
+                9,
+                PcodeOpcode::Copy,
+                Some(low.clone()),
+                vec![register(0x80, 1)],
+            ),
+            op(
+                10,
+                PcodeOpcode::Store,
+                None,
+                vec![constant_sized(3, 4), rcx, low],
+            ),
+            op(11, PcodeOpcode::Return, None, vec![ret_addr]),
+        ],
+    )]);
+
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 2,
+    });
+    let lowered = builder
+        .lower_varnode(&r8, &mut HashSet::default())
+        .expect("lower wide partial-register read");
+    assert!(
+        !matches!(&lowered, PreHirExpr::Var(name) if name == "r8"),
+        "a wide read whose only observable path is low-lane must not fall back to bare r8: {lowered:?}"
+    );
+
+    let code = render_mlil_preview(&pcode, "partial_flag_low_lane", 0x1000, &options)
+        .expect("render partial flag low lane");
+
+    assert!(
+        !code.contains("long long r8;"),
+        "must not declare an uninitialized wide flag carrier:\n{code}"
+    );
+    assert!(
+        code.contains("param_2") || code.contains("rdx"),
+        "the low-lane expression should retain the comparison input:\n{code}"
+    );
+}
+
+#[test]
+fn partial_flag_register_is_not_recovered_for_wide_condition_use() {
+    let options = test_options();
+    let r8b = register(0x80, 1);
+    let r8 = register(0x80, 8);
+    let edx = register(0x10, 4);
+    let flag = Varnode {
+        size: 1,
+        ..varnode(0x8f00)
+    };
+    let ret_addr = register(0x288, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntSLess,
+                Some(flag.clone()),
+                vec![edx, constant_sized(100, 4)],
+            ),
+            op(1, PcodeOpcode::Copy, Some(r8b), vec![flag]),
+            // A wide branch condition observes the unknown upper bytes and
+            // must keep the original register read conservative.
+            op(
+                2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant_sized(0x1010, 8), r8],
+            ),
+            op(3, PcodeOpcode::Return, None, vec![ret_addr]),
+        ],
+    )]);
+
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 2,
+    });
+    let lowered = builder
+        .lower_varnode(&register(0x80, 8), &mut HashSet::default())
+        .expect("lower wide branch condition");
+    assert!(
+        matches!(&lowered, PreHirExpr::Var(name) if name == "r8"),
+        "a wide condition must not be reconstructed from a partial write: {lowered:?}"
+    );
+}
+
 /// classify_range / setcc high path: `xor eax,eax; setnz al; add eax,2; ret`
 /// must compose to `return (!zf) + 2`, not constant-fold through the pre-setcc zero.
 #[test]
