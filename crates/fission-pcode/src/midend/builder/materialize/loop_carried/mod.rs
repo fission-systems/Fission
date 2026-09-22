@@ -58,8 +58,18 @@ impl<'a> PreviewBuilder<'a> {
         // a later formal-parameter fallback cannot split the loop state. The
         // seed helper also projects a narrow update onto a wider same-storage
         // definition (for example a SIMD zero followed by a scalar lane add).
-        if let Some(name) = self.loop_carried_seed_binding_name(output) {
-            return Some(name);
+        let seed_name = self.loop_carried_seed_binding_name(output, loop_head);
+        if let Some(seed_name) = seed_name {
+            // A post-loop join has its own definition-scoped carrier. Let the
+            // merge owner publish that binding after the seed is reserved;
+            // otherwise an order-independent seed reservation can return early
+            // and leave the join without the mapping its reader requires.
+            if let Some(name) =
+                self.merge_binding_name_for_loop_carried_output(block, op_idx, op, output)
+            {
+                return Some(name);
+            }
+            return Some(seed_name);
         }
 
         // Non-anonymous merge / prior bindings keep their stable names first

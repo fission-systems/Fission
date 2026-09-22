@@ -188,9 +188,25 @@ impl<'a> PreviewBuilder<'a> {
     /// recovery.  Proven entry parameters are deliberately not converted into
     /// temporaries; the caller's existing threadable-name gate rejects those
     /// formal names.
-    pub(super) fn loop_carried_seed_binding_name(&mut self, output: &Varnode) -> Option<String> {
+    pub(super) fn loop_carried_seed_binding_name(
+        &mut self,
+        output: &Varnode,
+        loop_head: usize,
+    ) -> Option<String> {
         let (definition, definition_op) = self.lookup_def_site(output)?;
         if self.current_lowering_site == Some(definition) {
+            return None;
+        }
+        // A definition in the proven loop body is not the first-iteration
+        // seed.  It is an in-loop passthrough/redefinition and may represent
+        // an incoming formal value (for example a widening of ECX before its
+        // shift update).  Reserving it as a private seed would incorrectly
+        // outrank the ABI parameter binding.
+        if self
+            .loop_bodies
+            .iter()
+            .any(|body| body.head == loop_head && body.body.contains(&definition.block_idx))
+        {
             return None;
         }
         let definition_output = definition_op.output.as_ref()?;
@@ -199,14 +215,15 @@ impl<'a> PreviewBuilder<'a> {
         {
             return None;
         }
-        self.loop_phi_entry_binding_name(
+        let name = self.loop_phi_entry_binding_name(
             fission_midend_core::ir::SsaOpSite {
                 block: definition.block_idx as u32,
                 op: definition.op_idx as u32,
             },
             &definition_op,
             definition_output,
-        )
+        );
+        name
     }
 
     fn loop_phi_entry_binding_name(
@@ -301,9 +318,14 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn definition_has_internal_seed_input(&self, op: &PcodeOp, output: &Varnode) -> bool {
-        op.inputs
-            .iter()
-            .any(|input| input.is_constant || self.varnode_aliases_value(input, output))
+        op.inputs.iter().any(|input| input.is_constant)
+            || (!matches!(
+                op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            ) && op
+                .inputs
+                .iter()
+                .any(|input| self.varnode_aliases_value(input, output)))
     }
 
     /// Whether the value entering the loop head through the phi is genuinely
