@@ -104,18 +104,18 @@ Comparable coverage:
 - [x] Targeted invariant test:
   - Command: `cargo nextest run -p fission-pcode shared_loop_exit_uses_entry_alias_carrier_binding loop_body_parameter_passthrough_uses_source_formal_before_carrier_write loop_header_missing_merge_uses_entry_owned_parameter_binding does_not_fold_alias_from_formal_reassigned_in_loop folds_alias_from_unchanged_formal`
   - Expected signal: the old binding is not selected; the formal seed and loop update share one `param_2` carrier, and HIR does not substitute a mutable formal across its write.
-- [ ] Crate-level gate:
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
-  - Expected signal: no new failures beyond the three existing tracked lower-expression failures.
-- [ ] Focused benchmark row:
+  - Result: `1085 passed, 3 failed, 1 skipped`; the three failures are the pre-existing `diamond_join_lowers_copy_through_join_read_as_select`, `movzx_after_byte_add_zero_extends_unsigned`, and `x64_byte_add_movzx_does_not_double_add_load` tests.
+- [x] Focused benchmark row:
   - Command: `fission-benchmark` holdout `core_c_pe_holdout --function gcd --decompilers fission --run-mode local --no-resume`, caches disabled
-  - Expected row-level improvement: the x64 optimized gcd rows execute the Euclidean remainder path and pass more wrapper cases.
-- [ ] Smoke or automation sample:
+  - Result: same six variants and 36 semantic cases improved from `18/36` to `25/36`; perfect variants improved from `2/6` to `3/6`. `clang -O2` improved `2/6 → 5/6`, and `gcc -O2` improved `2/6 → 6/6`. HIR semantic guards agreed with NIR on every row.
+- [x] Smoke or automation sample:
   - Command: broader holdout/core C smoke after the focused rerun
-  - Expected no-regression signal: existing behavior statuses and case counts do not regress.
-- [ ] Optional related checks:
+  - Result: `results/issue100_smoke_after_8e660d6d9.json` completed all 30 Fission rows (5 functions × 6 variants), with no adapter/output failures; the expected semantic/compile/timeout cases remain recorded per row.
+- [x] Optional related checks:
   - Command: `cargo nextest run -p fission-emulator`, `cargo check`, `cargo fmt --all --check`, `git diff --check`, `cargo build -p fission-cli --release`
-  - Expected signal: all pass, with known unrelated pcode failures recorded if still present.
+  - Result: emulator `200 passed, 3 skipped`; workspace check, format, diff check, and release CLI build pass.
 - [x] Boundary audit, if a new pass/helper/dependency was added:
   - Command: not applicable; no new pass or dependency is planned.
   - Expected signal: no boundary change.
@@ -137,6 +137,8 @@ Comparable coverage:
 - Production code contains no hardcoded binary/function/address/corpus guards:
   - [x] Confirmed
 - The change does not claim semantic improvement from dashboard or benchmark-only edits:
+  - [x] Confirmed
+- The focused external measurement was run against local Fission SHA `8e660d6d9` with caches disabled:
   - [x] Confirmed
 - Any new metric/pass/helper does not duplicate an existing owner:
   - [x] Confirmed; the existing register-join/materialization owner is extended.
