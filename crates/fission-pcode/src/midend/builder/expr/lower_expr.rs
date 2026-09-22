@@ -555,6 +555,18 @@ impl<'a> PreviewBuilder<'a> {
                         | PcodeOpcode::IntSExt
                 )
                 && def_op.inputs.first().is_some_and(is_register_varnode)
+                // A width-changing view of the same register storage is an
+                // alias derivation, not an independently materialized value.
+                // Seeding it here reserves a name before its narrow source is
+                // lowered; the later identity/cast cleanup can then discard
+                // the assignment and leave cross-block reads bound to an
+                // uninitialized temporary. Let the normal alias recovery path
+                // derive this value from the narrow definition instead.
+                && !def_op.inputs.first().is_some_and(|input| {
+                    input.space_id == output.space_id
+                        && input.offset == output.offset
+                        && input.size != output.size
+                })
             {
                 let def_op = def_op.clone();
                 let binding = self.ensure_temp_binding_for_output(&def_op, output, true);

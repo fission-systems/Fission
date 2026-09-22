@@ -1396,6 +1396,106 @@ fn local_register_write_precedes_loop_carried_read_fallback() {
 }
 
 #[test]
+fn cross_block_wide_alias_derives_from_narrow_definition() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let r8d = register(0x80, 4);
+    let r8 = register(0x80, 8);
+    let rcx = register(0x08, 8);
+    let loaded = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x9000,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let condition = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x9100,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    apply_preview_cspec(&mut options);
+
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(rcx.clone()),
+                vec![constant_sized(0x1400_1000, 8)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Branch,
+                None,
+                vec![constant_sized(0x1010, 8)],
+            ),
+        ],
+    );
+    entry.successors = vec![1];
+    let mut header = block_at(
+        0x1010,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::Load,
+                Some(loaded.clone()),
+                vec![constant_sized(3, 4), rcx],
+            ),
+            op(3, PcodeOpcode::IntZExt, Some(r8d.clone()), vec![loaded]),
+            // x86-64 SLEIGH emits this wide alias after the 32-bit write.
+            op(4, PcodeOpcode::IntZExt, Some(r8.clone()), vec![r8d]),
+            op(
+                5,
+                PcodeOpcode::Branch,
+                None,
+                vec![constant_sized(0x1020, 8)],
+            ),
+        ],
+    );
+    header.successors = vec![2];
+    let consumer = block_at(
+        0x1020,
+        2,
+        vec![
+            op(
+                6,
+                PcodeOpcode::IntEqual,
+                Some(condition.clone()),
+                vec![r8.clone(), constant_sized(0, 8)],
+            ),
+            op(7, PcodeOpcode::Return, None, vec![r8.clone()]),
+        ],
+    );
+    let pcode = pcode_function(vec![entry, header, consumer]);
+
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    });
+    let lowered = builder
+        .lower_varnode(&r8, &mut HashSet::default())
+        .expect("lower wide alias read");
+    let wide_def_key = MaterializedVarnodeKey::new(&r8, &pcode.blocks[1].ops[2]);
+    assert!(
+        !builder.materialized_vns.contains_key(&wide_def_key),
+        "a cross-block wide alias must be derived from its narrow definition, not reserve an unassigned temp"
+    );
+    assert!(
+        format!("{lowered:?}").contains("Load"),
+        "wide alias should retain its narrow load provenance: {lowered:?}"
+    );
+}
+
+#[test]
 fn join_register_update_read_stays_live_register_instead_of_abi_param() {
     let mut options = test_options();
     options.calling_convention = CallingConvention::AArch64;
