@@ -2026,6 +2026,111 @@ fn x86_32_callind_esp_staged_args_and_eax_result() {
     );
 }
 
+/// PE base-relocation use-sites can be recorded without a symbol name.  Such
+/// an empty marker must not turn a dynamic constructor-table load into the
+/// invalid `&` expression; the loaded pointer stays an opaque indirect-call
+/// target with its table lookup intact.
+#[test]
+fn x86_32_callind_constructor_table_ignores_unnamed_relocation_marker() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+    use crate::midend::support::CallingConvention;
+
+    let ebx = register(0x0c, 4);
+    let scaled = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x3000,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let table_ptr = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x3100,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let loaded_target = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x3200,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let call_target = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x3300,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::X86_32;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "PE32".to_string();
+    options.pe_x64_only = false;
+    options
+        .global_names
+        .insert(0x2000, "ctor_table".to_string());
+    options.global_sizes.insert(0x2000, 0x20);
+    // The PE loader retains unnamed base-relocation use-sites as empty
+    // strings so they remain available as relocation markers.
+    options.relocation_names.insert(0x1005, String::new());
+    apply_preview_cspec(&mut options);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntMult,
+                Some(scaled.clone()),
+                vec![ebx, constant_sized(4, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntAdd,
+                Some(table_ptr.clone()),
+                vec![constant_sized(0x2000, 4), scaled],
+            ),
+            PcodeOp {
+                seq_num: 5,
+                opcode: PcodeOpcode::Load,
+                address: 0x1005,
+                output: Some(loaded_target.clone()),
+                inputs: vec![constant_sized(3, 4), table_ptr],
+                asm_mnemonic: None,
+            },
+            op(
+                6,
+                PcodeOpcode::Copy,
+                Some(call_target.clone()),
+                vec![loaded_target],
+            ),
+            op(7, PcodeOpcode::CallInd, None, vec![call_target]),
+            op(8, PcodeOpcode::Return, None, vec![register(0x288, 4)]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "callind_ctor_table", 0x1000, &options)
+        .expect("render constructor-table callind");
+    eprintln!("callind_ctor_table:\n{code}");
+    assert!(
+        code.contains("ctor_table"),
+        "the indirect target must retain the table expression:\n{code}"
+    );
+    assert!(
+        !code.contains("= &;") && !code.contains("((uint (*)(...))(&))()"),
+        "an unnamed relocation marker must not become an empty address:\n{code}"
+    );
+    assert!(
+        code.contains("(*") || code.contains("__fission_callind_opaque"),
+        "the loaded target must remain an indirect call surface:\n{code}"
+    );
+}
+
 /// m32-O0 residual: stage via EAX from [ebp+c]/[ebp+10], then reload EAX with
 /// the fp from [ebp+8] before CallInd. Args must stay param_2/param_3, not
 /// rewrite through live EAX to param_1.

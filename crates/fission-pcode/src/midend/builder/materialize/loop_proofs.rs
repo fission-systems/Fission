@@ -229,7 +229,12 @@ impl<'a> PreviewBuilder<'a> {
             if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd) {
                 let mut target_name = None;
                 if op.opcode == PcodeOpcode::Call {
-                    if let Some(name) = self.options.relocation_names.get(&op.address) {
+                    if let Some(name) = self
+                        .options
+                        .relocation_names
+                        .get(&op.address)
+                        .filter(|name| !name.is_empty())
+                    {
                         target_name = Some(name.as_str());
                     }
                 }

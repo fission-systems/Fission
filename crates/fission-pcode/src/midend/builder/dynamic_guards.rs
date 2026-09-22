@@ -165,7 +165,11 @@ fn resolve_direct_call_target(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Option<String> {
-    if let Some(symbol) = options.relocation_names.get(&op.address) {
+    if let Some(symbol) = options
+        .relocation_names
+        .get(&op.address)
+        .filter(|symbol| !symbol.is_empty())
+    {
         return Some(symbol.clone());
     }
     let address = op
@@ -181,7 +185,11 @@ pub(in crate::midend) fn resolve_lifted_direct_call_target(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Option<String> {
-    if let Some(symbol) = options.relocation_names.get(&op.address) {
+    if let Some(symbol) = options
+        .relocation_names
+        .get(&op.address)
+        .filter(|symbol| !symbol.is_empty())
+    {
         return Some(symbol.clone());
     }
     let target = op.inputs.first()?;

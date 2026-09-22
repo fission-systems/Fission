@@ -105,7 +105,11 @@ impl<'a> PreviewBuilder<'a> {
         if !matches!(op.opcode, PcodeOpcode::Call) {
             return None;
         }
-        self.options.relocation_names.get(&op.address).cloned()
+        self.options
+            .relocation_names
+            .get(&op.address)
+            .filter(|name| !name.is_empty())
+            .cloned()
     }
 
     pub(super) fn resolve_constant_call_target_name(

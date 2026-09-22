@@ -294,14 +294,22 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         address: u64,
     ) -> Option<String> {
+        // PE base-relocation and MinGW pseudo-relocation use-sites may be
+        // retained with an empty value when no symbol identity is available.
+        // They remain useful through `contains_key` for relocation presence,
+        // but an empty marker is not a valid C identifier or global pointer
+        // name and must never become `AddressOfGlobal("")`.
         if let Some(name) = self.options.relocation_names.get(&address) {
-            return Some(name.clone());
+            return (!name.is_empty()).then(|| name.clone());
         }
         let max_inline_reloc_delta = u64::from(self.options.pointer_size.min(4));
         self.options
             .relocation_names
             .iter()
             .filter_map(|(&reloc_addr, name)| {
+                if name.is_empty() {
+                    return None;
+                }
                 let delta = reloc_addr.checked_sub(address)?;
                 (delta > 0 && delta <= max_inline_reloc_delta).then_some((delta, reloc_addr, name))
             })
@@ -318,7 +326,11 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         if ptr.is_constant
-            && let Some(name) = self.options.relocation_names.get(&ptr.offset)
+            && let Some(name) = self
+                .options
+                .relocation_names
+                .get(&ptr.offset)
+                .filter(|name| !name.is_empty())
         {
             return Some(ResolvedGlobalPointer {
                 name: name.clone(),
@@ -393,7 +405,12 @@ impl<'a> PreviewBuilder<'a> {
             });
         }
         let literal_addr = self.resolve_global_address(op.inputs.get(1)?, budget)?;
-        if let Some(name) = self.options.relocation_names.get(&literal_addr) {
+        if let Some(name) = self
+            .options
+            .relocation_names
+            .get(&literal_addr)
+            .filter(|name| !name.is_empty())
+        {
             return Some(ResolvedGlobalPointer {
                 name: name.clone(),
                 byte_offset: 0,

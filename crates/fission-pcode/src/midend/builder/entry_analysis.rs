@@ -128,7 +128,11 @@ pub(super) fn infer_entry_stack_layout(
     // other rule in this file. Gated to 32-bit only, matching that this
     // callfixup exists solely in `x86win.cspec`, not `x86-64-win.cspec`.
     let resolve_call_target_name = |op: &PcodeOp| -> Option<String> {
-        if let Some(name) = options.relocation_names.get(&op.address) {
+        if let Some(name) = options
+            .relocation_names
+            .get(&op.address)
+            .filter(|name| !name.is_empty())
+        {
             return Some(name.clone());
         }
         let target = op.inputs.first()?;
