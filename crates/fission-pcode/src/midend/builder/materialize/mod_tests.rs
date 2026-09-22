@@ -2501,6 +2501,66 @@ fn loop_body_parameter_passthrough_uses_source_formal_before_carrier_write() {
 }
 
 #[test]
+fn loop_body_parameter_passthrough_keeps_dominating_seed_definition() {
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 4);
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 4);
+    let rdx_wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8);
+    let cond = register(UNIQUE_SPACE_ID, 0x120, 1);
+    let mut entry = block_at(
+        0x2100,
+        0,
+        vec![
+            // RDX is an ABI-capable parameter, but the loop consumes the
+            // derived upper bound, not the caller's original `n`.
+            op(
+                0,
+                PcodeOpcode::IntSub,
+                Some(rdx.clone()),
+                vec![rdx.clone(), Varnode::constant(1, 4)],
+            ),
+            // Register lookup may see this wider alias as the dominating
+            // definition for the narrow loop-carried view.
+            op(1, PcodeOpcode::IntZExt, Some(rdx_wide), vec![rdx.clone()]),
+            op(2, PcodeOpcode::Branch, None, vec![constant(0x2120)]),
+        ],
+    );
+    entry.successors = vec![1];
+    let mut body = block_at(
+        0x2120,
+        1,
+        vec![
+            // This passthrough is the loop-head read that used to be
+            // incorrectly named `param_2`.
+            op(3, PcodeOpcode::Copy, Some(rax), vec![rdx.clone()]),
+            op(
+                4,
+                PcodeOpcode::IntAdd,
+                Some(rdx.clone()),
+                vec![rdx.clone(), Varnode::constant(1, 4)],
+            ),
+            op(5, PcodeOpcode::CBranch, None, vec![constant(0x2120), cond]),
+        ],
+    );
+    body.successors = vec![1, 2];
+    let exit = block_at(0x2130, 2, vec![op(6, PcodeOpcode::Return, None, vec![])]);
+    let pcode = pcode_function(vec![entry, body, exit]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 1,
+        op_idx: 0,
+    });
+
+    assert_eq!(builder.entry_arity, 2, "RDX must remain ABI-visible input");
+    assert_ne!(
+        builder.loop_body_carried_register_read_name(&rdx),
+        Some("param_2".to_string()),
+        "a dominating RDX seed must not be replaced by the original parameter"
+    );
+}
+
+#[test]
 fn shared_loop_exit_uses_entry_alias_carrier_binding() {
     let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 4);
     let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 4);

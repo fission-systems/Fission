@@ -269,6 +269,14 @@ impl<'a> PreviewBuilder<'a> {
                 .inputs
                 .first()
                 .is_some_and(|input| self.varnode_aliases_value(input, vn))
+            // An ABI slot only identifies the register's entry ownership.  A
+            // dominating definition in the external path means the value at
+            // this loop-body read is already a transformed loop seed (for
+            // example `hi = n - 1`), not the caller's original parameter.
+            // Reusing `register_param` in that case drops the seed and makes
+            // the loop recompute from the immutable argument on every
+            // iteration.
+            && self.lookup_def_site(vn).is_none()
             // An entry alias (for example RAX seeded from the first argument's
             // RCX slot) already has a materialized carrier binding. Reusing
             // `register_param` here would replace that carrier with the
@@ -461,7 +469,13 @@ impl<'a> PreviewBuilder<'a> {
         let Some(prior_output) = op.output.as_ref() else {
             return false;
         };
+        // `lookup_def_site` may select a wider register view (for example the
+        // entry `IntZExt RDX:u32 -> RDX:u64`) when the carried definition is
+        // the narrow view.  That is still a dominating seed definition: ABI
+        // slot identity must not make the later loop update look like the
+        // original parameter.
         VarnodeKey::from(prior_output) == VarnodeKey::from(output)
+            || self.varnode_aliases_value(prior_output, output)
     }
 
     /// Prefer the formal parameter name when a loop-carried register is seeded by
