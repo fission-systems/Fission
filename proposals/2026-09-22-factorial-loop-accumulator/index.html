@@ -1306,16 +1306,23 @@
 <li>Corpus row or benchmark command:
   <code>FISSION_BENCHMARK_NO_CACHE=1 FISSION_ENDPOINT=http://localhost:8007 .venv/bin/python runner/runner.py --corpus dev --function factorial --decompilers fission --run-mode local --no-resume --output results/issue99_before_8e660d6d9.json</code></li>
 <li>Current output summary: the accumulator is initialized to <code>1</code>, the loop body is empty, and the function returns the seed instead of the loop-carried product.</li>
-<li>Semantic cases passed / total: <code>31/45</code> across the nine <code>factorial</code> variants; the motivating gcc <code>-O2</code> row passes <code>2/5</code> cases.</li>
+<li>Semantic cases passed / total before the fix: <code>31/45</code> across the nine <code>factorial</code> variants; the motivating gcc <code>-O2</code> row passes <code>2/5</code> cases.</li>
 <li>Failure category: semantic assertion failure after successful decompilation; the output also has an empty loop body and returns the initial accumulator.</li>
-<li>Relevant benchmark/static/readability observations: <code>5/9</code> variants are perfect on the current local run; the motivating gcc <code>-O2</code> variant is not. The one-shot PreHIR output already omits the multiply, so this is not a printer-only defect.</li>
+<li>After <code>afe75f519</code>, the same cache-disabled run is <code>37/45</code> cases and <code>7/9</code>
+  perfect variants; the motivating gcc <code>-O2</code> row is <code>5/5</code>. The x86-64 gcc <code>-O3</code>
+  row also moves from <code>2/5</code> to <code>5/5</code>; the x86-32 failures are unchanged.</li>
+<li>Type match remains <code>9/9</code>; GED perfect rows remain <code>4/9</code>, while mean GED moves
+  from <code>4.6667</code> to <code>6.0</code>. This is recorded as a semantic-correctness repair,
+  not a structural/readability improvement. The scored DecBench surface is
+  NIR (<code>pseudocode_layer: nir</code>); the separate HIR presentation still needs a
+  follow-up audit.</li>
 </ul>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
 <li>[ ] SLEIGH/raw p-code:</li>
-<li>[x] Builder/materialize:</li>
+<li>[x] Builder/control:</li>
 <li>[ ] Normalize:</li>
-<li>[ ] Structuring:</li>
+<li>[x] Structuring:</li>
 <li>[ ] Type/data recovery:</li>
 <li>[ ] Printer:</li>
 <li>[ ] Benchmark/automation:</li>
@@ -1326,22 +1333,28 @@
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  IntMult register[0x10]:8 &lt;- register[0x10]:8, register[0x80]:8
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>The first register is RDX, which is seeded with 1 before the loop and copied
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>to RAX at the exit. The materialization trace lowers the operation to
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>`xVar8 = xVar8 * xVar0`, but classifies the output as `MissingMergeBinding`.
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>The final PreHIR contains the seed assignment and an empty loop, followed by
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>`return xVar12`; therefore the first wrong fact is created while the
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>loop-carried materialized binding is selected/retained, before normalization
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>or printing.
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>to RAX at the exit. The materializer already lowers the operation to
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>`xVar8 = xVar8 * xVar0`, so SLEIGH and arithmetic materialization are correct.
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>The shared exit contains `RAX &lt;- RDX; Return`. The old
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>`return_join_source_register` scan started before the current primary-return
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>definition, so it skipped that direct copy and returned no edge source. The
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>structurer consequently rewrote the loop edge to `break`; its fallback
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>condition-prefix fold then treated the pure multiply as unobservable, and the
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>shared return block's dominance lookup selected the entry seed `xVar12`.
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>The earliest emitted semantic loss is therefore structuring's discard of the
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>loop-head multiply, with builder return-join recovery being the missing proof
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>that allowed the loss.
 </span></code></pre></div>
 <h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
 <p>Generalized rule:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>When a register definition reads its own prior value, reaches a natural-loop
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>backedge without an intervening kill, and has an entry/preheader definition
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>that reaches the loop, the definition is a loop-carried scalar update. The
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>materializer must retain the update under the carried binding even when the
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>register is also ABI-capable; an ABI register slot alone does not prove that
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>the value is an incoming formal when a prior local definition dominates the
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>loop update.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Dominance is insufficient for a value selected at a shared return join:
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>different incoming edges may carry different definitions. For a proven simple
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>primary-return copy/extension, inspect the current definition and follow its
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>primary-return alias chain. When a natural-loop condition head exits directly
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>to that join, retain the edge-specific return expression and do not fold away
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>the condition-head prefix that computes it. If the source cannot be proven,
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>keep the existing conservative break/fold path.
 </span></code></pre></div>
 <p>ISA-agnostic check (ADR 0009):</p>
 <ul>
@@ -1349,36 +1362,37 @@
   facts, not a function name, address, or corpus row.</li>
 <li>[x] Calling-convention information remains evidence about formal parameters;
   it does not replace the shared loop-carried proof.</li>
-<li>[x] The synthetic test will express the preheader seed, self-read update,
-  backedge, and post-loop use without a compiler tuple or function name.</li>
+<li>[x] The synthetic test expresses a shared return join with two incoming
+  register definitions and checks the recovered edge value without a compiler
+  tuple, function name, or address guard.</li>
 </ul>
 <p>Comparable coverage:</p>
 <ul>
-<li>Similar shape 1: <code>loop_carried_register_update_does_not_promote_prior_defined_abi_scratch</code>
-  protects the parameter/non-parameter distinction but does not cover the
-  multiply surviving through the complete materialization/structuring path.</li>
-<li>Similar shape 2: <code>loop_carried_update_reuses_post_loop_join_binding</code> protects
-  reuse of a carried name at the exit join.</li>
-<li>Synthetic invariant test: add a minimal preheader-seeded multiply loop and
-  assert that the materialized loop body contains the update and the exit
-  reads the carried value.</li>
+<li>Direct regression: <code>x64_return_join_copy_uses_edge_source_register</code> fails
+  on the old scan (<code>None</code>) and passes after the fix (<code>Const(2, u64)</code>).</li>
+<li>Related coverage: <code>x64_loop_direct_epilogue_return_exit_keeps_predecessor_value</code>
+  protects a loop edge from inheriting a sibling sentinel return.</li>
+<li>Real-binary anchor: the cache-disabled factorial matrix verifies that the
+  repaired edge returns the carried product on the motivating row.</li>
 </ul>
 <h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Existing pass/owner that might already own this behavior:
-  <code>materialize::loop_carried::loop_carried_output_binding_name</code> and its
-  reaching-definition proof.</li>
+  <code>PreviewBuilder::return_join_source_register</code> in
+  <code>builder/control/terminator.rs</code>, and
+  <code>fission-midend-structuring::loops::try_lower_while_impl</code> for preserving the
+  proven edge return.</li>
 <li>Shared analysis/substrate candidate:</li>
-<li>[ ] CFG / dominance / postdominance fact</li>
+<li>[x] CFG / dominance / postdominance fact</li>
 <li>[x] Def-use / reaching-definition fact</li>
 <li>[x] Type constraint / calling-convention fact</li>
 <li>[ ] Memory alias / stack-slot fact</li>
 <li>[ ] P-code semantic contract</li>
 <li>[ ] None; owner-local rule is justified</li>
 <li>Why extending that owner is sufficient: the raw p-code and arithmetic
-  lowering are already correct. The existing loop-carried proof has the needed
-  natural-loop and self-read facts; the fix should make its binding selection
-  honor a prior local seed rather than adding a new pass or output workaround.</li>
+  lowering are already correct. The existing return-join and loop-structuring
+  owners already expose the required CFG/ABI/def-use facts; the change adds no
+  new pass and no output workaround.</li>
 <li>If adding a new pass/helper/metric, why existing shared analysis cannot express
   the invariant: no new pass/helper is planned.</li>
 <li>Possible interaction with existing normalize/structuring/materialize passes:
@@ -1394,27 +1408,33 @@
 </ul>
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] Targeted invariant test:</li>
-<li>Command: <code>cargo nextest run -p fission-pcode &lt;focused filter&gt;</code></li>
-<li>Expected signal: the old implementation fails because the update is absent;
-    the fixed implementation retains the multiply and exit value.</li>
-<li>[ ] Crate-level gate:</li>
+<li>[x] Targeted invariant test:</li>
+<li>Command: <code>cargo nextest run -p fission-pcode -E 'test(x64_return_join_copy_uses_edge_source_register)' --no-fail-fast</code></li>
+<li>Result: fixed implementation passes. Temporarily restoring the old scan
+    fails with <code>left: None</code>, <code>right: Some(Const(2, Int { bits: 64, signed: false }))</code>.</li>
+<li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode</code></li>
-<li>Expected signal: no new failures beyond the already-known unrelated failures.</li>
-<li>[ ] Focused benchmark row:</li>
+<li>Result: <code>1086 passed, 3 failed, 1 skipped</code> (the three existing failures are
+    <code>diamond_join_lowers_copy_through_join_read_as_select</code>,
+    <code>movzx_after_byte_add_zero_extends_unsigned</code>, and
+    <code>x64_byte_add_movzx_does_not_double_add_load</code>). The new return-join test
+    and the structuring-loop suite pass.</li>
+<li>[x] Focused benchmark row:</li>
 <li>Command: rerun the nine <code>factorial</code> dev variants with
     <code>FISSION_BENCHMARK_NO_CACHE=1</code> against the local container.</li>
-<li>Expected row-level improvement: the motivating gcc <code>-O2</code> row must improve
-    from <code>2/5</code>; report exact before/after cases and do not generalize from the
-    synthetic test alone.</li>
-<li>[ ] Smoke or automation sample:</li>
-<li>Command: focused factorial smoke plus the existing local smoke manifest.</li>
-<li>Expected no-regression signal: all selected functions return without adapter
-    or output errors and previously passing factorial variants do not regress.</li>
-<li>[ ] Optional related checks:</li>
+<li>Result: <code>results/issue99_before_8e660d6d9.json</code> →
+    <code>results/issue99_after_afe75f519.json</code>; <code>31/45 → 37/45</code> semantic cases,
+    <code>5/9 → 7/9</code> perfect variants, and gcc <code>-O2</code> <code>2/5 → 5/5</code>.</li>
+<li>[x] Smoke or automation sample:</li>
+<li>Command: dev smoke with <code>--limit 20 --variant-limit 1</code>, caches disabled.</li>
+<li>Result: <code>results/issue99_smoke_after_afe75f519.json</code>; all 20 requested
+    rows returned without adapter/output errors. Existing compile/assertion
+    failures remain explicit in the artifact.</li>
+<li>[x] Optional related checks:</li>
 <li>Command: <code>cargo nextest run -p fission-emulator</code>, <code>cargo check</code>,
     <code>cargo fmt --all --check</code>, <code>git diff --check</code>, and release CLI build.</li>
-<li>Expected signal: all pass.</li>
+<li>Result: emulator <code>200 passed, 3 skipped</code>; workspace <code>cargo check</code>, format,
+    diff check, and <code>cargo build -p fission-cli --release</code> all pass.</li>
 <li>[ ] Boundary audit, if a new pass/helper/dependency was added:</li>
 <li>Command: not applicable; no new pass/helper/dependency is planned.</li>
 <li>Expected signal: not applicable.</li>
@@ -1432,8 +1452,9 @@
 <li>Redaction confirmed: not applicable.</li>
 <li>Ghidra guidance confirmed: not applicable.</li>
 <li>Unseen or synthetic validation evidence:</li>
-<li>Patch validation pool command/result: pending implementation.</li>
-<li>Synthetic invariant test command/result: pending implementation.</li>
+<li>Patch validation pool command/result: not run in this focused issue pass.</li>
+<li>Synthetic invariant test: completed by the direct return-join regression
+    above.</li>
 </ul>
 <h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1441,7 +1462,8 @@
 <li>[x] Confirmed for the planned rule.</li>
 <li>The change does not claim semantic improvement from dashboard or benchmark-only
   edits:</li>
-<li>[x] Confirmed; benchmark evidence will be remeasured after the semantic fix.</li>
+<li>[x] Confirmed; the semantic claim is backed by the same cache-disabled
+    DecBench factorial matrix before and after the code change.</li>
 <li>Any new metric/pass/helper does not duplicate an existing owner:</li>
 <li>[x] Confirmed; no new metric/pass/helper is planned.</li>
 </ul>
