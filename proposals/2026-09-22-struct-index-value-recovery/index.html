@@ -1404,25 +1404,30 @@ surface aggregate type changes the meaning of the surviving index.</p>
 </ul>
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] Targeted invariant test:</li>
+<li>[x] Targeted invariant test:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode -E 'test(type_hints_function_hints)'</code></li>
-<li>Expected signal: scalar constant index becomes the declared field access;
-    variable index remains an index.</li>
-<li>[ ] Crate-level gate:</li>
+<li>Result: 56 passed. The new regression renders <code>p-&gt;y</code> and rejects <code>p[1]</code>.</li>
+<li>[x] Crate-level gate:</li>
 <li>Command: <code>cargo nextest run -p fission-pcode</code></li>
-<li>Expected signal: no new failures.</li>
-<li>[ ] Focused benchmark row:</li>
-<li>Command: local DecBench runs for <code>find_pair_value</code> and <code>kv_lookup</code>, with
-    caches disabled, before and after the change.</li>
-<li>Expected row-level improvement: optimized output uses <code>-&gt;value</code> rather
-    than <code>[...]</code>; compile-error denominators are reported separately if the
-    existing missing-declaration harness issue remains.</li>
-<li>[ ] Smoke or automation sample:</li>
+<li>Result: 1088 passed, 1 skipped, 3 pre-existing failures in unrelated
+    <code>lower_expr</code> tests (<code>diamond_join...</code>, <code>movzx_after_byte_add...</code>, and
+    <code>x64_byte_add_movzx...</code>).</li>
+<li>[x] Focused benchmark row:</li>
+<li>Command: local DecBench <code>dev</code> runs for <code>find_pair_value</code> and <code>kv_lookup</code>
+    with <code>FISSION_BENCHMARK_NO_CACHE=1</code>, a commit-specific
+    <code>BENCHMARK_IMAGE_ID_FISSION</code>, and a force-recreated local Docker service.</li>
+<li>Result: <code>find_pair_value</code> semantic perfect variants 2/9 -&gt; 7/9 and
+    <code>kv_lookup</code> 2/9 -&gt; 7/9. The optimized rows changed from <code>pairs[1]</code> /
+    <code>items[1]</code> to <code>pairs-&gt;value</code> / <code>items-&gt;value</code>. Remaining compile errors
+    are the separate missing <code>Pair</code>/<code>Kv</code> declaration issue in the benchmark
+    translation-unit harness.</li>
+<li>[x] Smoke or automation sample:</li>
 <li>Command: <code>cargo nextest run -p fission-emulator</code> and release CLI build.</li>
-<li>Expected no-regression signal: existing runtime and CLI paths remain green.</li>
-<li>[ ] Optional related checks:</li>
+<li>Result: emulator 200 passed, 3 skipped; <code>cargo build -p fission-cli --release</code>
+    passed.</li>
+<li>[x] Optional related checks:</li>
 <li>Command: <code>cargo fmt --all --check &amp;&amp; git diff --check</code></li>
-<li>Expected signal: clean formatting and patch.</li>
+<li>Result: passed.</li>
 </ul>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
 <ul>
