@@ -164,6 +164,40 @@ mod layered_tests {
              declared at file scope, not left as a local nothing assigns:\n{code}"
         );
     }
+
+    #[test]
+    fn qualified_surface_type_gets_a_compilable_alias() {
+        let aggregate = NirType::Aggregate {
+            size: 4,
+            fields: vec![],
+        };
+        let func = HirFunction {
+            name: "tm_year_of".into(),
+            params: vec![NirBinding {
+                name: "t".into(),
+                ty: NirType::Ptr(Box::new(aggregate)),
+                surface_type_name: Some("const tm *".into()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            body: vec![HirStmt::Return(Some(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )))],
+            ..Default::default()
+        };
+
+        let rendered = render_hir_function_with_global_decls(&func, &MlilPreviewOptions::default());
+        assert!(rendered.contains("typedef fission_agg4 tm;"), "{rendered}");
+        assert!(rendered.contains("const tm * t"), "{rendered}");
+    }
 }
 
 fn render_hir_function_with_profile(
@@ -258,12 +292,9 @@ fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String
         let Some(surface) = surface.as_deref() else {
             continue;
         };
-        let base = surface
-            .trim_end_matches(|c: char| c == '*' || c.is_whitespace())
-            .trim();
-        if base.is_empty() || !is_c_identifier(base) {
+        let Some(base) = surface_type_alias_name(surface) else {
             continue;
-        }
+        };
         // Anything the prelude or an aggregate typedef already provides.
         if base.starts_with("fission_agg") || KNOWN_C_TYPE_NAMES.contains(&base) {
             continue;
@@ -274,6 +305,28 @@ fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String
         names.insert(base.to_string(), print_type(source));
     }
     names
+}
+
+/// Extract the identifier of a user-defined surface type after its C
+/// qualifiers. `surface_type_name` is a declaration spelling, so a debug
+/// parameter may legitimately arrive as `const tm *`; the old declaration
+/// collector treated `const tm` as one non-identifier token and omitted the
+/// typedef that makes the recovered name compile.
+fn surface_type_alias_name(surface: &str) -> Option<&str> {
+    let base = surface
+        .trim_end_matches(|c: char| c == '*' || c.is_whitespace())
+        .trim();
+    let mut alias = None;
+    for word in base.split_whitespace() {
+        if matches!(word, "const" | "volatile" | "restrict") {
+            continue;
+        }
+        if alias.is_some() {
+            return None;
+        }
+        alias = Some(word);
+    }
+    alias.filter(|name| is_c_identifier(name))
 }
 
 /// Spelled out rather than derived: these are the names the emitted prelude
