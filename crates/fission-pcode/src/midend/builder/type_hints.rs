@@ -1187,7 +1187,32 @@ fn promote_field_access_in_lvalue(
             }
             promote_field_access_in_expr(ptr, eligible, promoted);
         }
-        HirLValue::Index { base, index, .. } => {
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            let index_expr = HirExpr::Index {
+                base: base.clone(),
+                index: index.clone(),
+                elem_ty: elem_ty.clone(),
+            };
+            if let Some((field_base, field_name, offset)) =
+                base_field_at_offset(&index_expr, elem_ty, eligible)
+            {
+                *lvalue = HirLValue::FieldAccess {
+                    base: Box::new(field_base),
+                    field_name: field_name.clone(),
+                    offset,
+                    ty: elem_ty.clone(),
+                };
+                if let HirLValue::FieldAccess { base, .. } = lvalue
+                    && let HirExpr::Var(name) = base.as_ref()
+                {
+                    promoted.insert(name.clone());
+                }
+                return;
+            }
             promote_field_access_in_expr(base, eligible, promoted);
             promote_field_access_in_expr(index, eligible, promoted);
         }
@@ -1247,7 +1272,30 @@ fn promote_field_access_in_expr(
             }
         }
         HirExpr::PtrOffset { base, .. } => promote_field_access_in_expr(base, eligible, promoted),
-        HirExpr::Index { base, index, .. } => {
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            let index_expr = HirExpr::Index {
+                base: base.clone(),
+                index: index.clone(),
+                elem_ty: elem_ty.clone(),
+            };
+            if let Some((field_base, field_name, offset)) =
+                base_field_at_offset(&index_expr, elem_ty, eligible)
+            {
+                if let HirExpr::Var(name) = &field_base {
+                    promoted.insert(name.clone());
+                }
+                *expr = HirExpr::FieldAccess {
+                    base: Box::new(field_base),
+                    field_name: field_name.clone(),
+                    offset,
+                    ty: elem_ty.clone(),
+                };
+                return;
+            }
             promote_field_access_in_expr(base, eligible, promoted);
             promote_field_access_in_expr(index, eligible, promoted);
         }
@@ -1273,6 +1321,29 @@ fn base_field_at_offset<'a>(
     let (base, offset) = match ptr {
         HirExpr::Var(_) => (ptr.clone(), 0i64),
         HirExpr::PtrOffset { base, offset } => (base.as_ref().clone(), *offset),
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            // Normalization can represent a scalar load at byte offset 4 as
+            // `Index(p, 1)` while `p` is still typed as `uint *`.  Once a
+            // debug hint proves that `p` is a record, keep the old scalar
+            // element width for this one constant index; using the newly
+            // promoted record stride would incorrectly mean `p[1]`.
+            if matches!(elem_ty, NirType::Aggregate { .. }) {
+                return None;
+            }
+            let HirExpr::Const(index, _) = index.as_ref() else {
+                return None;
+            };
+            let elem_size = i64::from(binding_byte_size(elem_ty)?);
+            if *index < 0 {
+                return None;
+            }
+            let offset = index.checked_mul(elem_size)?;
+            (base.as_ref().clone(), offset)
+        }
         _ => return None,
     };
     let HirExpr::Var(name) = &base else {

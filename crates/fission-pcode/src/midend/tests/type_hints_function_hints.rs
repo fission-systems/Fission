@@ -841,6 +841,77 @@ fn preview_type_hints_overlay_debug_struct_field_names_rewrites_body_field_acces
     assert!(!rendered.contains("field_4"), "rendered: {rendered}");
 }
 
+#[test]
+fn preview_type_hints_promotes_scalar_constant_index_to_debug_struct_field() {
+    // Normalize may encode the second 32-bit field load as `Index(p, 1)`
+    // while p is still inferred as `uint *`. Once the debug type proves that
+    // p is a Point*, the index is still a four-byte offset, not a Point-sized
+    // array step. It must therefore become p->y.
+    let int_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let mut func = HirFunction {
+        name: "read_second_field".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![NirBinding {
+            name: "p".to_string(),
+            ty: NirType::Ptr(Box::new(int_ty.clone())),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        locals: vec![],
+        return_type: int_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Index {
+            base: Box::new(HirExpr::Var("p".to_string())),
+            index: Box::new(HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            elem_ty: int_ty,
+        }))],
+        ..Default::default()
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .struct_types
+        .insert("Point".to_string(), point_struct_type_hint());
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec!["p".to_string()],
+        param_type_names: HashMap::from([(0, "Point*".to_string())]),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
+        return_type_name: None,
+        register_local_names: HashMap::default(),
+        register_local_type_names: HashMap::default(),
+        ..Default::default()
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
+    assert_eq!(stats.debug_struct_promotions, 1);
+
+    let HirStmt::Return(Some(HirExpr::FieldAccess {
+        field_name, offset, ..
+    })) = &func.body[0]
+    else {
+        panic!(
+            "expected constant scalar index to become FieldAccess: {:?}",
+            func.body
+        );
+    };
+    assert_eq!(field_name, "y");
+    assert_eq!(*offset, 4);
+    let rendered = print_hir_function(&func);
+    assert!(rendered.contains("p->y"), "rendered: {rendered}");
+    assert!(!rendered.contains("p[1]"), "rendered: {rendered}");
+}
+
 fn int_ty() -> NirType {
     NirType::Int {
         bits: 32,
