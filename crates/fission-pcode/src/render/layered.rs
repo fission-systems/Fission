@@ -214,6 +214,54 @@ mod layered_tests {
         assert!(!rendered.contains("_pad_1[3]"), "{rendered}");
         assert!(rendered.contains("const tm * t"), "{rendered}");
     }
+
+    #[test]
+    fn aggregate_surface_alias_wins_over_scalar_spill_definition() {
+        let aggregate = NirType::Aggregate {
+            size: 8,
+            fields: vec![StructField {
+                offset: 4,
+                ty: NirType::Unknown,
+                name: "tm_year".into(),
+            }],
+        };
+        let func = HirFunction {
+            name: "tm_year_of".into(),
+            params: vec![NirBinding {
+                name: "t".into(),
+                ty: NirType::Ptr(Box::new(aggregate)),
+                surface_type_name: Some("const tm *".into()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![NirBinding {
+                name: "spill_t".into(),
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 32,
+                    signed: true,
+                })),
+                surface_type_name: Some("const tm *".into()),
+                origin: Some(NirBindingOrigin::StackOffset(16)),
+                initializer: None,
+            }],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            body: vec![HirStmt::Return(Some(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )))],
+            ..Default::default()
+        };
+
+        let rendered = render_hir_function_with_global_decls(&func, &MlilPreviewOptions::default());
+        assert!(rendered.contains("typedef fission_agg8 tm;"), "{rendered}");
+        assert!(!rendered.contains("typedef int tm;"), "{rendered}");
+    }
 }
 
 fn render_hir_function_with_profile(
@@ -290,7 +338,11 @@ fn render_hir_function_with_profile(
 /// same width, same stride, same arithmetic. Names the aggregate typedefs or C
 /// itself already provide are left alone.
 fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String> {
-    let mut names = BTreeMap::new();
+    // A parameter and its O0 spill can carry the same debug spelling while
+    // only the parameter has been promoted to an aggregate. Keep the most
+    // informative definition instead of letting the later scalar spill
+    // overwrite the aggregate alias.
+    let mut names: BTreeMap<String, (u8, String)> = BTreeMap::new();
     // The return type is not a binding, and leaving it out left every name
     // that only ever appears there undefined: `BOOL __dyn_tls_dtor(...)` with
     // no `BOOL`. Debug info supplies plenty of those.
@@ -318,9 +370,41 @@ fn collect_undefined_surface_types(hir: &HirFunction) -> BTreeMap<String, String
         let Some(source) = surface_type_definition_source(surface, &ty) else {
             continue;
         };
-        names.insert(base.to_string(), print_type(source));
+        let candidate = print_type(source);
+        let candidate_rank = surface_type_definition_rank(source);
+        let replace = names
+            .get(base)
+            .is_none_or(|(current_rank, _)| candidate_rank > *current_rank);
+        if replace {
+            names.insert(base.to_string(), (candidate_rank, candidate));
+        }
     }
     names
+        .into_iter()
+        .map(|(name, (_, definition))| (name, definition))
+        .collect()
+}
+
+/// Rank competing definitions for one recovered C surface alias.
+///
+/// Debug information can describe a formal and its compiler-generated spill
+/// with the same source-level name. The formal may have a recovered aggregate
+/// layout while the spill is still represented as a scalar pointer. Aggregate
+/// structure is the stronger declaration contract for both field accesses and
+/// the emitted typedef, so it must win the merge.
+fn surface_type_definition_rank(ty: &NirType) -> u8 {
+    match ty {
+        NirType::Aggregate { fields, .. } => {
+            if fields.is_empty() {
+                3
+            } else {
+                4
+            }
+        }
+        NirType::Ptr(inner) => 1 + surface_type_definition_rank(inner),
+        NirType::Int { .. } | NirType::Float { .. } | NirType::Bool => 1,
+        NirType::Unknown => 0,
+    }
 }
 
 /// Extract the identifier of a user-defined surface type after its C
