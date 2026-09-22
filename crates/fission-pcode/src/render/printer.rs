@@ -1038,10 +1038,28 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 if rejects_pointer_operands(*op) && expr_prints_as_pointer_ctx_free(lhs) {
                     lhs_str = format!("(unsigned long long){lhs_str}");
                 }
-                (
-                    format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
-                    prec,
-                )
+                if *op == HirBinaryOp::Shr {
+                    if let Some(count) = width_minus_shift_count(rhs) {
+                        let count_str = print_expr_prec(count, 0, depth + 1);
+                        (
+                            format!(
+                                "{count_str} == 0 ? 0 : {lhs_str} {} {rhs_str}",
+                                print_binary_op(*op)
+                            ),
+                            20,
+                        )
+                    } else {
+                        (
+                            format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
+                            prec,
+                        )
+                    }
+                } else {
+                    (
+                        format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
+                        prec,
+                    )
+                }
             }
         }
         HirExpr::Select {
@@ -1193,6 +1211,28 @@ fn binary_precedence(op: HirBinaryOp) -> u8 {
         HirBinaryOp::Add | HirBinaryOp::Sub => 90,
         HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod => 100,
     }
+}
+
+/// Return the shift count when an integer right shift uses the machine word
+/// width minus that count. This is the canonical rotate lowering emitted by
+/// x86 and several other targets: `value >> (width - count)`. At count zero
+/// the machine operation shifts by exactly the word width and produces zero,
+/// while C makes that shift undefined. The caller renders a short-circuiting
+/// conditional so the undefined shift is never evaluated.
+fn width_minus_shift_count(rhs: &HirExpr) -> Option<&HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs,
+        rhs: count,
+        ..
+    } = rhs
+    else {
+        return None;
+    };
+    let HirExpr::Const(width, _) = lhs.as_ref() else {
+        return None;
+    };
+    matches!(*width, 8 | 16 | 32 | 64).then_some(count.as_ref())
 }
 
 fn binary_rhs_parent_precedence(parent_op: HirBinaryOp, rhs: &HirExpr, fallback: u8) -> u8 {
@@ -1672,10 +1712,28 @@ fn print_expr_prec_ctx(
                 }
             }
 
-            (
-                format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
-                prec,
-            )
+            if *op == HirBinaryOp::Shr {
+                if let Some(count) = width_minus_shift_count(rhs) {
+                    let count_str = print_expr_prec_ctx(count, 0, depth + 1, ctx);
+                    (
+                        format!(
+                            "{count_str} == 0 ? 0 : {lhs_str} {} {rhs_str}",
+                            print_binary_op(*op)
+                        ),
+                        20,
+                    )
+                } else {
+                    (
+                        format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
+                        prec,
+                    )
+                }
+            } else {
+                (
+                    format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
+                    prec,
+                )
+            }
         }
         HirExpr::Select {
             cond,
@@ -2394,6 +2452,55 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("local_d *= 2;"), "{rendered}");
+    }
+
+    #[test]
+    fn rotate_style_word_width_shift_is_guarded_at_zero_count() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let expression = HirExpr::Binary {
+            op: HirBinaryOp::Shr,
+            lhs: Box::new(HirExpr::Var("value".into())),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs: Box::new(HirExpr::Const(32, u32_ty.clone())),
+                rhs: Box::new(HirExpr::Var("count".into())),
+                ty: u32_ty.clone(),
+            }),
+            ty: u32_ty.clone(),
+        };
+
+        let standalone = print_expr(&expression);
+        assert_eq!(standalone, "count == 0 ? 0 : value >> 32 - count");
+
+        let rendered = print_hir_function(&HirFunction {
+            name: "rotate_part".into(),
+            locals: vec![
+                NirBinding {
+                    name: "value".into(),
+                    ty: u32_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "count".into(),
+                    ty: u32_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: u32_ty,
+            body: vec![HirStmt::Return(Some(expression))],
+            ..HirFunction::default()
+        });
+        assert!(
+            rendered.contains("return count == 0 ? 0 : value >> 32 - count;"),
+            "{rendered}"
+        );
     }
 
     #[test]
