@@ -11,6 +11,15 @@
 - Semantic cases passed / total: `0/6` for the measured GCC O2 row.
 - Failure category: `compile_error` (the emitted loop-bound expression does not match the source behavior).
 - Relevant benchmark/static/readability observations: the issue-focused baseline measured 6 locally available variants; 5 passed and the motivating GCC O2 row failed. Three additional manifest variants were unavailable in the local fixture checkout and are not included in the denominator.
+- After-change observation: the GCC O2 PreHIR/HIR now mutates the carried bound
+  (`n--`, then `n = mid - 1`) and uses that value for both midpoint and lower
+  bound calculations; the old output retained a separate `hi` but read the
+  immutable `n` in those expressions.
+- Focused after-run result: the same six-row measurement remained `5/6`
+  semantic-perfect (`0.8333` mean) because both before and after still hit the
+  independent NIR compile blocker `extern bool __sborrow(...)`. The row-level
+  loop-bound defect itself is removed in the emitted HIR/PreHIR, but no
+  DecBench score improvement is claimed from this run.
 
 ## 2. Owner Proof
 
@@ -109,16 +118,18 @@ Comparable coverage:
     and the new transformed-seed/wider-alias case.
   - Negative proof: removing the direct formal guard or the wider-alias proof
     makes the new test return `Some("param_2")` and fail.
-- [ ] Crate-level gate:
+- [x] Crate-level gate:
   - Command: `cargo nextest run -p fission-pcode`
-  - Expected signal: no new failures; known pre-existing failures will be
-    recorded separately if still present.
-- [ ] Focused benchmark row:
-  - Command: rerun the exact issue-focused DecBench command with caches disabled
-    after rebuilding the local Fission service.
-  - Expected row-level improvement: the GCC O2 `binary_search` row should no
-    longer emit a midpoint based on the immutable incoming `n` after `hi` has
-    been updated, and its compile/semantic result should be remeasured.
+  - Actual signal: `1087 passed, 3 failed, 1 skipped`; the three failures are
+    pre-existing `diamond_join`/`movzx byte-add` assertions and are unrelated to
+    loop-carried register naming.
+- [x] Focused benchmark row:
+  - Command: `runner/runner.py --corpus holdout --function binary_search --decompilers fission --run-mode local --no-resume` with `FISSION_BENCHMARK_NO_CACHE=1`, before and after the local Docker rebuild.
+  - Actual signal: 6 local variants measured in both runs; GCC O2 changed from
+    `hi = n - 1` plus midpoint/lower-bound reads from `n` to a single carried
+    bound (`n--` / subsequent `n` reads). The row remains `0/6` with
+    `compile_error` in both runs because of the independent `__sborrow`
+    declaration; no aggregate quality gain is claimed.
 - [ ] Smoke or automation sample:
   - Command: existing pcode/decompiler smoke lane after the focused rerun.
   - Expected no-regression signal: existing loop-carried parameter rows retain
@@ -128,7 +139,7 @@ Comparable coverage:
     on the anchored binary/function.
   - Expected signal: release build succeeds and the emitted loop uses the
     transformed bound (`param_2--` in PreHIR) for subsequent midpoint and bound
-    updates.
+    updates. Observed on `561f4397b`.
 - [ ] Boundary audit, if a new pass/helper/dependency was added: not applicable.
 
 ## 6. AI Review / Prompt Firewall
