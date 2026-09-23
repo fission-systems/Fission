@@ -2390,6 +2390,7 @@ fn collapse_trivial_assign_returns_folds_rax_param_add() {
     }
 }
 
+#[test]
 fn rescue_undeclared_bindings_declares_stack_local_names() {
     let mut func = PreHirFunction {
         name: "f".to_string(),
@@ -2410,6 +2411,60 @@ fn rescue_undeclared_bindings_declares_stack_local_names() {
         "local_0 must be declared: {:?}",
         func.locals
     );
+}
+
+#[test]
+fn rescue_undeclared_bindings_declares_simd_lane_names() {
+    let mut func = PreHirFunction {
+        name: "f".to_string(),
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("xmm1_wh".to_string()),
+                rhs: PreHirExpr::Const(0x1234, int(16)),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("ymm2_db".to_string()),
+                rhs: PreHirExpr::Const(0x1234_5678, int(32)),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("zmm3_qword_1".to_string()),
+                rhs: PreHirExpr::Const(0x1234_5678, int(64)),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("xmm_register".to_string()),
+                rhs: PreHirExpr::Const(0, int(32)),
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert!(rescue_undeclared_bindings(&mut func));
+    for (name, bits) in [("xmm1_wh", 16), ("ymm2_db", 32), ("zmm3_qword_1", 64)] {
+        assert_eq!(
+            func.locals
+                .iter()
+                .find(|binding| binding.name == name)
+                .map(|binding| &binding.ty),
+            Some(&int(bits)),
+            "{name} should be declared with its first assigned type: {:?}",
+            func.locals
+        );
+    }
+    assert!(
+        !func
+            .locals
+            .iter()
+            .any(|binding| binding.name == "xmm_register"),
+        "the SIMD-family spelling without a numeric register index is not a register name"
+    );
+    assert!(
+        func.locals
+            .windows(2)
+            .all(|pair| pair[0].name <= pair[1].name),
+        "rescued declarations must have deterministic name order: {:?}",
+        func.locals
+    );
+    assert!(!rescue_undeclared_bindings(&mut func));
 }
 
 #[test]

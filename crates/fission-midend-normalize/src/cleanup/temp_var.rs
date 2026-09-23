@@ -1696,11 +1696,43 @@ fn is_rescue_candidate_name(name: &str) -> bool {
         // Named EFLAGS bits (SLA 0x200 layout). Prefer dead-flag cleanup; if a
         // live use remains, declare as Bool so the C harness compiles.
         true
+    } else if is_simd_register_name(name) {
+        // RegisterNamer spells vector registers and their scalar lanes as
+        // `xmmN`, `xmmN_<lane>`, etc. Builder paths can leave one of these
+        // names in the body without a binding; keep declaration closure
+        // aligned with the same stable hardware-name grammar.
+        true
     } else if name.starts_with('r') || name.starts_with('e') {
         name != "reg" && name != "rsp" && name != "rbp" && name != "esp" && name != "ebp"
     } else {
         false
     }
+}
+
+fn is_simd_register_name(name: &str) -> bool {
+    let Some(suffix) = ["xmm", "ymm", "zmm"]
+        .iter()
+        .find_map(|family| name.strip_prefix(family))
+    else {
+        return false;
+    };
+    let index_end = suffix
+        .bytes()
+        .position(|byte| !byte.is_ascii_digit())
+        .unwrap_or(suffix.len());
+    if index_end == 0 {
+        return false;
+    }
+    let lane_suffix = &suffix[index_end..];
+    if lane_suffix.is_empty() {
+        return true;
+    }
+    lane_suffix.strip_prefix('_').is_some_and(|lane| {
+        !lane.is_empty()
+            && lane.split('_').all(|segment| {
+                !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            })
+    })
 }
 
 pub fn rescue_undeclared_bindings(func: &mut PreHirFunction) -> bool {
@@ -1718,22 +1750,25 @@ pub fn rescue_undeclared_bindings(func: &mut PreHirFunction) -> bool {
     collect_all_body_names_stmts(&func.body, &mut body_names);
 
     // Find undeclared names and try to infer their type from the first
-    // assignment RHS in the body.
+    // assignment RHS in the body. Sort before appending so rescuing multiple
+    // lane aliases cannot make rendered declaration order depend on HashSet
+    // iteration order.
+    let mut undeclared_candidates = body_names
+        .into_iter()
+        .filter(|name| !declared.contains(name.as_str()))
+        .filter(|name| is_rescue_candidate_name(name))
+        .collect::<Vec<_>>();
+    undeclared_candidates.sort_unstable();
+
     let mut changed = false;
-    for name in &body_names {
-        if declared.contains(name.as_str()) {
-            continue;
-        }
-        if !is_rescue_candidate_name(name.as_str()) {
-            continue;
-        }
+    for name in undeclared_candidates {
         let inferred_ty = if matches!(
             name.as_str(),
             "cf" | "pf" | "af" | "zf" | "sf" | "of" | "df" | "if_"
         ) {
             NirType::Bool
         } else {
-            infer_type_from_first_assign(&func.body, name)
+            infer_type_from_first_assign(&func.body, &name)
         };
         func.locals.push(PreHirBinding {
             name: name.clone(),
@@ -1742,7 +1777,7 @@ pub fn rescue_undeclared_bindings(func: &mut PreHirFunction) -> bool {
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
         });
-        declared.insert(name.clone());
+        declared.insert(name);
         changed = true;
     }
     changed
