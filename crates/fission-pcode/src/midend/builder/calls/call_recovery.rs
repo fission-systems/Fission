@@ -111,6 +111,31 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    fn call_preserves_argument_register(&self, vn: &Varnode, call: &PcodeOp) -> bool {
+        let Some(param_slot) = self.param_index_for_varnode(vn, true) else {
+            return false;
+        };
+        let Some(symbol) =
+            super::super::resolve_lifted_direct_call_target(call, self.options, self.type_context)
+        else {
+            return false;
+        };
+        let Some(written_slots) = self
+            .type_context
+            .and_then(|context| context.call_effect_summaries.get(&symbol))
+            .and_then(|summary| summary.modified_argument_register_slots.as_ref())
+        else {
+            return false;
+        };
+        !written_slots.contains(&param_slot)
+    }
+
+    fn call_clobbers_register_varnode(&self, vn: &Varnode, op: &PcodeOp) -> bool {
+        op.opcode.is_call()
+            && !self.is_callee_saved_register_varnode(vn)
+            && !self.call_preserves_argument_register(vn, op)
+    }
+
     fn check_ancestor_realistic(
         &self,
         vn: &Varnode,
@@ -130,33 +155,30 @@ impl<'a> PreviewBuilder<'a> {
         let clobbered_in = |block_idx: usize, range: std::ops::Range<usize>| {
             self.pcode.blocks[block_idx].ops[range]
                 .iter()
-                .any(|op| op.opcode.is_call())
+                .any(|op| self.call_clobbers_register_varnode(vn, op))
         };
         if def_site.block_idx == call_block_idx {
             return def_site.op_idx < call_op_idx
-                && (self.is_callee_saved_register_varnode(vn)
-                    || !clobbered_in(
-                        call_block_idx,
-                        def_site.op_idx + 1
-                            ..call_op_idx.min(self.pcode.blocks[call_block_idx].ops.len()),
-                    ));
+                && !clobbered_in(
+                    call_block_idx,
+                    def_site.op_idx + 1
+                        ..call_op_idx.min(self.pcode.blocks[call_block_idx].ops.len()),
+                );
         }
 
         if !self.dom_tree.dominates(def_site.block_idx, call_block_idx) {
             return false;
         }
 
-        if !self.is_callee_saved_register_varnode(vn) {
-            let def_block_len = self.pcode.blocks[def_site.block_idx].ops.len();
-            if clobbered_in(
-                def_site.block_idx,
-                (def_site.op_idx + 1).min(def_block_len)..def_block_len,
-            ) || clobbered_in(
-                call_block_idx,
-                0..call_op_idx.min(self.pcode.blocks[call_block_idx].ops.len()),
-            ) {
-                return false;
-            }
+        let def_block_len = self.pcode.blocks[def_site.block_idx].ops.len();
+        if clobbered_in(
+            def_site.block_idx,
+            (def_site.op_idx + 1).min(def_block_len)..def_block_len,
+        ) || clobbered_in(
+            call_block_idx,
+            0..call_op_idx.min(self.pcode.blocks[call_block_idx].ops.len()),
+        ) {
+            return false;
         }
 
         // According to Ghidra 11.4.2 AncestorRealistic:
@@ -172,7 +194,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             let inter_block = &self.pcode.blocks[intermediate_idx];
             for op in &inter_block.ops {
-                if op.opcode.is_call() && !self.is_callee_saved_register_varnode(vn) {
+                if self.call_clobbers_register_varnode(vn, op) {
                     return false;
                 }
             }

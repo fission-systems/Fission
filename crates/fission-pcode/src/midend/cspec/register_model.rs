@@ -412,6 +412,13 @@ impl RegisterNamer {
         self.hw_name_at(vn.offset, vn.size)
     }
 
+    /// True when the varnode is in an architectural register space, or is a
+    /// recognized legacy x86 unique-space register alias.
+    pub fn is_architectural_register_varnode(&self, vn: &Varnode) -> bool {
+        is_register_space_id(vn.space_id)
+            || (vn.space_id == UNIQUE_SPACE_ID && self.hw_name(vn).is_some())
+    }
+
     pub fn hw_name_at(&self, offset: u64, size: u32) -> Option<String> {
         if self.abi == CallingConvention::AArch64 && offset == 0x00 {
             return Some(if size == 4 {
@@ -577,6 +584,31 @@ impl RegisterNamer {
             Some(idx) => Some((format!("param_{}", idx + 1), Some(idx))),
             None => Some((hw_name, None)),
         }
+    }
+
+    /// Return the integer ABI parameter slot written by a register varnode.
+    ///
+    /// Unlike `register_name_with_param_owned`, this method validates the
+    /// varnode's address space. It also recognizes the legacy x86 unique-space
+    /// aliases that encode physical registers, while leaving ordinary unique
+    /// temporaries and non-register spaces unclassified.
+    pub fn integer_param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
+        let hw_name = self.hw_name(vn)?;
+        if is_register_space_id(vn.space_id) {
+            return self.register_name_with_param_owned(vn.offset, vn.size)?.1;
+        }
+        if vn.space_id != UNIQUE_SPACE_ID {
+            return None;
+        }
+
+        let model = self.model.as_ref()?;
+        let family = model.family_index(&hw_name)?;
+        self.int_param_offsets.iter().position(|&offset| {
+            model
+                .name_for(offset, self.param_slot_size())
+                .and_then(|name| model.family_index(name))
+                == Some(family)
+        })
     }
 
     pub(crate) fn param_slot_size(&self) -> u32 {

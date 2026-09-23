@@ -60,6 +60,144 @@ fn win64_r9_is_param_4() {
 }
 
 #[test]
+fn x64_live_argument_slots_cross_only_proven_nonwriting_calls() {
+    fn render_with_leaf_effect(leaf_writes: Option<Vec<usize>>) -> String {
+        let base = 0x401000;
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: base,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: base,
+                        output: Some(reg(0x08, 8)),
+                        inputs: vec![cst(0x5000, 8)],
+                        asm_mnemonic: Some("lea rcx, values".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: base + 1,
+                        output: Some(reg(0x80, 4)),
+                        inputs: vec![cst(7, 4)],
+                        asm_mnemonic: Some("mov r8d, 7".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Call,
+                        address: base + 2,
+                        output: None,
+                        inputs: vec![cst(0x401100, 8)],
+                        asm_mnemonic: Some("call leaf".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Copy,
+                        address: base + 3,
+                        output: Some(reg(0x10, 4)),
+                        inputs: vec![cst(5, 4)],
+                        asm_mnemonic: Some("mov edx, 5".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Call,
+                        address: base + 4,
+                        output: None,
+                        inputs: vec![cst(0x401200, 8)],
+                        asm_mnemonic: Some("call target_fn".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Return,
+                        address: base + 5,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: Some("ret".to_string()),
+                    },
+                ],
+            }],
+        };
+        let mut context = PreviewTypeContext::default();
+        for (address, symbol) in [(0x401100, "leaf"), (0x401200, "target_fn")] {
+            context.call_target_refs.insert(
+                address,
+                CallTargetRef {
+                    address: Some(address),
+                    symbol: symbol.to_string(),
+                    provenance: CallTargetProvenance::Direct,
+                    edge_kind: CallEdgeKind::Direct,
+                    confidence: 100,
+                },
+            );
+        }
+        context.call_prototype_summaries.insert(
+            "target_fn".to_string(),
+            NirCallPrototypeSummary {
+                min_arity: 3,
+                max_arity: 3,
+                locked_exact_arity: Some(3),
+                ..Default::default()
+            },
+        );
+        if let Some(modified_argument_register_slots) = leaf_writes {
+            context.call_effect_summaries.insert(
+                "leaf".to_string(),
+                NirCallEffectSummary {
+                    modified_argument_register_slots: Some(modified_argument_register_slots),
+                    source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+                    ..Default::default()
+                },
+            );
+        }
+
+        render_mlil_preview_with_context(
+            &func,
+            "caller",
+            base,
+            &preview_options_for(CallingConvention::WindowsX64),
+            Some(&context),
+        )
+        .expect("preview render")
+    }
+
+    let untouched_slots = render_with_leaf_effect(Some(vec![1]));
+    assert!(
+        untouched_slots.contains("target_fn(xVar0, 5, 7)"),
+        "complete leaf proof should preserve untouched slots 0 and 2: {untouched_slots}"
+    );
+
+    let overwritten_slot = render_with_leaf_effect(Some(vec![0]));
+    assert!(
+        overwritten_slot.contains("target_fn()"),
+        "a callee write to slot 0 must keep the argument tuple conservative: {overwritten_slot}"
+    );
+
+    let unknown_effect = render_with_leaf_effect(None);
+    assert!(
+        unknown_effect.contains("target_fn()"),
+        "an unknown effect must not preserve caller-saved slots: {unknown_effect}"
+    );
+}
+
+#[test]
+fn register_namer_maps_only_register_varnodes_to_integer_parameter_slots() {
+    let mut namer = register_namer_for_abi(CallingConvention::WindowsX64);
+    namer.int_param_offsets = int_params_for(CallingConvention::WindowsX64);
+
+    assert_eq!(namer.integer_param_slot_for_varnode(&reg(0x08, 8)), Some(0));
+    assert_eq!(namer.integer_param_slot_for_varnode(&reg(0x10, 4)), Some(1));
+    assert_eq!(namer.integer_param_slot_for_varnode(&reg(0x80, 4)), Some(2));
+    assert_eq!(namer.integer_param_slot_for_varnode(&reg(0x00, 8)), None);
+    assert_eq!(
+        namer.integer_param_slot_for_varnode(&Varnode::constant(0x08, 8)),
+        None
+    );
+}
+
+#[test]
 fn win64_self_clearing_register_input_does_not_infer_tail_params() {
     let r9d = reg(0x88, 4);
     let func = PcodeFunction {

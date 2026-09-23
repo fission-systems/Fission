@@ -74,3 +74,45 @@ pub(crate) fn decode_rust_sleigh_pcode(
     .map(|(p, _, _)| p)
     .map_err(|f| f.message)
 }
+
+/// Decode a direct callee and report whether the bounded decode covered a
+/// trustworthy whole-function byte/instruction window. Callers still need to
+/// validate the p-code control-flow shape before treating derived effects as
+/// exact.
+pub(crate) fn decode_rust_sleigh_pcode_with_completion(
+    binary: &LoadedBinary,
+    name: &str,
+    entry_address: u64,
+    max_bytes: usize,
+    instruction_limit: usize,
+    function_size: u64,
+    continue_past_indirect_branch: bool,
+    retry_on_decode_error: bool,
+) -> Result<(crate::PcodeFunction, bool), String> {
+    let (pcode, diag, _) = decode::decode_rust_sleigh_pcode(
+        binary,
+        name,
+        entry_address,
+        max_bytes,
+        instruction_limit,
+        continue_past_indirect_branch,
+        retry_on_decode_error,
+        None,
+    )
+    .map_err(|failure| failure.message)?;
+
+    let exact_byte_window = usize::try_from(function_size)
+        .ok()
+        .is_some_and(|size| size > 0 && size == max_bytes && size <= instruction_limit);
+    let completed_without_recovery = matches!(
+        diag.stop_reason.as_str(),
+        "success_first_lift"
+            | "success_thumb_preferred_entry_hint"
+            | "success_after_forced_low_bit_code_mode_retry"
+            | "success_cached_fid_decode"
+    ) || diag
+        .stop_reason
+        .starts_with("success_after_sibling_language_retry:");
+
+    Ok((pcode, exact_byte_window && completed_without_recovery))
+}

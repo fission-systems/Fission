@@ -1,5 +1,6 @@
 use crate::decode_rust_sleigh_pcode;
 use crate::pipeline::rust_sleigh::apply_spec_overrides;
+use crate::pipeline::rust_sleigh::decode_rust_sleigh_pcode_with_completion;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPointerPointee, NirCallPrototypeSummary,
@@ -649,6 +650,7 @@ fn build_nir_call_effect_summaries(
                 escapes_args: None,
                 may_call_unknown: None,
                 may_exit,
+                modified_argument_register_slots: None,
                 source,
             });
         // Upgrade to may_exit=true if a later address for the same symbol name provides evidence.
@@ -989,6 +991,16 @@ pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
             continue;
         };
         if has_resolved_target_identity {
+            let effect_summary = type_context
+                .call_effect_summaries
+                .get(&target_ref.symbol)
+                .filter(|existing| {
+                    existing.source == Some(CallEffectSummarySource::PreviewCalleeAnalysis)
+                })
+                .map(|existing| {
+                    merge_preview_argument_register_writes(existing, effect_summary.clone())
+                })
+                .unwrap_or(effect_summary);
             type_context
                 .call_effect_summaries
                 .insert(target_ref.symbol.clone(), effect_summary);
@@ -1042,6 +1054,12 @@ fn collect_direct_internal_callee_targets(pcode: &PcodeFunction) -> BTreeSet<u64
 
 type CalleeSummary = Option<(NirCallEffectSummary, Option<NirCallPrototypeSummary>)>;
 
+#[derive(Clone)]
+struct CachedCalleePcode {
+    pcode: Arc<PcodeFunction>,
+    complete_decode: bool,
+}
+
 /// Callee summaries already computed, keyed by what they can actually depend
 /// on.
 ///
@@ -1080,7 +1098,7 @@ static CALLEE_SUMMARY_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64, u64), Ca
 /// unlike the summary above it needs no context in its key. It is cached
 /// separately because the summary key cannot be built without it: the key
 /// names the callee's own callees, which only the decoded body knows.
-static CALLEE_PCODE_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64), Arc<PcodeFunction>>>> =
+static CALLEE_PCODE_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64), CachedCalleePcode>>> =
     LazyLock::new(|| {
         Mutex::new(lru::LruCache::new(
             std::num::NonZeroUsize::new(CALLEE_PCODE_CACHE_CAPACITY).expect("non-zero capacity"),
@@ -1126,24 +1144,27 @@ fn build_preview_callee_summaries(
         .expect("callee pcode cache poisoned")
         .get(&pcode_key)
         .cloned();
-    let pcode = match cached_pcode {
+    let decoded = match cached_pcode {
         Some(hit) => hit,
         None => {
             // Decoded outside the lock: two callers racing on the same callee
             // each decode it and one copy is dropped, which is cheaper than
             // serialising every callee decode in the binary behind one mutex.
-            let decoded = Arc::new(
-                decode_rust_sleigh_pcode(
-                    binary,
-                    target_name,
-                    target_addr,
-                    max_bytes,
-                    instruction_limit,
-                    true,
-                    true,
-                )
-                .ok()?,
-            );
+            let (pcode, complete_decode) = decode_rust_sleigh_pcode_with_completion(
+                binary,
+                target_name,
+                target_addr,
+                max_bytes,
+                instruction_limit,
+                function.size,
+                true,
+                true,
+            )
+            .ok()?;
+            let decoded = CachedCalleePcode {
+                pcode: Arc::new(pcode),
+                complete_decode,
+            };
             CALLEE_PCODE_CACHE
                 .lock()
                 .expect("callee pcode cache poisoned")
@@ -1157,7 +1178,7 @@ fn build_preview_callee_summaries(
     let cache_key = (
         binary.hash.clone(),
         target_addr,
-        callee_context_key(&pcode, type_context),
+        callee_context_key(&decoded.pcode, type_context),
     );
     if let Some(hit) = CALLEE_SUMMARY_CACHE
         .lock()
@@ -1176,7 +1197,8 @@ fn build_preview_callee_summaries(
         max_bytes,
         instruction_limit,
         next_function,
-        &pcode,
+        &decoded.pcode,
+        decoded.complete_decode,
     );
     CALLEE_SUMMARY_CACHE
         .lock()
@@ -1196,8 +1218,14 @@ fn build_preview_callee_summaries_uncached(
     instruction_limit: usize,
     next_function: Option<u64>,
     pcode: &PcodeFunction,
+    complete_decode: bool,
 ) -> Option<(NirCallEffectSummary, Option<NirCallPrototypeSummary>)> {
-    let (summary, detail) = summarize_preview_callee_effects(pcode);
+    let mut options = crate::seed_nir_render_options(binary);
+    apply_spec_overrides(binary, &mut options);
+    let register_namer = RegisterNamer::from_options(&options);
+    let (mut summary, detail) = summarize_preview_callee_effects(pcode);
+    summary.modified_argument_register_slots =
+        summarize_modified_argument_register_slots(pcode, &register_namer, complete_decode);
     trace_preview_callee_effect_detail(
         target_name,
         target_addr,
@@ -1208,9 +1236,6 @@ fn build_preview_callee_summaries_uncached(
         &pcode,
         &detail,
     );
-    let mut options = crate::seed_nir_render_options(binary);
-    apply_spec_overrides(binary, &mut options);
-    let register_namer = RegisterNamer::from_options(&options);
     // Full raw-HIR construction and normalization is deliberately bounded by
     // the callee's decoded semantic size. Effect summarization above remains
     // linear and useful for larger callees, while typed previews beyond this
@@ -1540,10 +1565,141 @@ fn summarize_preview_callee_effects(
             escapes_args: None,
             may_call_unknown,
             may_exit,
+            modified_argument_register_slots: None,
             source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
         },
         detail,
     )
+}
+
+fn summarize_modified_argument_register_slots(
+    pcode: &PcodeFunction,
+    register_namer: &RegisterNamer,
+    complete_decode: bool,
+) -> Option<Vec<usize>> {
+    if !complete_decode || pcode.blocks.is_empty() {
+        return None;
+    }
+
+    let block_indices = pcode
+        .blocks
+        .iter()
+        .map(|block| block.start_address)
+        .enumerate()
+        .map(|(index, address)| (address, index as u32))
+        .collect::<HashMap<_, _>>();
+    let instruction_addresses = pcode
+        .blocks
+        .iter()
+        .flat_map(|block| block.ops.iter().map(|op| op.address))
+        .collect::<HashSet<_>>();
+    let mut written_slots = BTreeSet::new();
+    let mut saw_return = false;
+
+    for (block_position, block) in pcode.blocks.iter().enumerate() {
+        if block.index as usize != block_position || block.ops.is_empty() {
+            return None;
+        }
+        if block
+            .successors
+            .iter()
+            .any(|successor| *successor as usize >= pcode.blocks.len())
+        {
+            return None;
+        }
+
+        let last_op_index = block.ops.len() - 1;
+        match block.ops[last_op_index].opcode {
+            PcodeOpcode::Return => {
+                if !block.successors.is_empty() {
+                    return None;
+                }
+                saw_return = true;
+            }
+            PcodeOpcode::Branch | PcodeOpcode::CBranch => {}
+            _ if has_linear_fallthrough_successor(pcode, block_position, block) => {}
+            _ => {
+                return None;
+            }
+        }
+
+        for (op_index, op) in block.ops.iter().enumerate() {
+            if op.opcode.is_call()
+                || op.opcode == PcodeOpcode::BranchInd
+                || (op.opcode == PcodeOpcode::Return && op_index != last_op_index)
+            {
+                return None;
+            }
+            if op.opcode.is_branch() {
+                let target = op.inputs.first()?.offset;
+                if !instruction_addresses.contains(&target) {
+                    return None;
+                }
+                if op_index == last_op_index
+                    && let Some(&target_index) = block_indices.get(&target)
+                    && !block.successors.contains(&target_index)
+                {
+                    return None;
+                }
+            }
+            let Some(output) = op.output.as_ref() else {
+                continue;
+            };
+            if register_namer.is_architectural_register_varnode(output)
+                && register_namer.hw_name(output).is_none()
+            {
+                // An unrecognized write in a register space could alias an
+                // ABI argument register, so it cannot support an exact set.
+                return None;
+            }
+            if let Some(slot) = register_namer.integer_param_slot_for_varnode(output) {
+                written_slots.insert(slot);
+            }
+        }
+    }
+
+    saw_return.then(|| written_slots.into_iter().collect())
+}
+
+/// A non-control p-code block with one edge to the next address-ordered block
+/// is an ordinary instruction fallthrough. Rust-Sleigh intentionally creates
+/// leaders at nops and other instruction boundaries, so such a block need not
+/// end with an explicit p-code Branch even though the decoded CFG has its
+/// successor. Requiring that exact single forward edge keeps effect proofs
+/// conservative for ambiguous or terminal blocks.
+fn has_linear_fallthrough_successor(
+    pcode: &PcodeFunction,
+    block_position: usize,
+    block: &crate::PcodeBasicBlock,
+) -> bool {
+    let Some(next_block) = pcode.blocks.get(block_position + 1) else {
+        return false;
+    };
+    block.successors.as_slice() == [next_block.index]
+        && next_block.index as usize == block_position + 1
+        && next_block.start_address > block.start_address
+}
+
+fn merge_preview_argument_register_writes(
+    existing: &NirCallEffectSummary,
+    mut incoming: NirCallEffectSummary,
+) -> NirCallEffectSummary {
+    incoming.modified_argument_register_slots = match (
+        existing.modified_argument_register_slots.as_ref(),
+        incoming.modified_argument_register_slots.as_ref(),
+    ) {
+        (Some(existing), Some(incoming)) => Some(
+            existing
+                .iter()
+                .chain(incoming)
+                .copied()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+        ),
+        _ => None,
+    };
+    incoming
 }
 
 fn trace_preview_callee_effect_detail(
@@ -2169,19 +2325,22 @@ mod tests {
         build_nir_import_call_prototype_summaries, direct_callee_instruction_limit,
         direct_callee_preview_options, direct_callee_stable_prefix_instruction_limit,
         expose_preview_callsite_copy_sources, merge_nir_function_hints,
-        merge_preview_pointer_evidence, record_interprocedural_arity_facts,
-        record_unambiguous_register_type_hint, resolve_nir_struct_name,
+        merge_preview_argument_register_writes, merge_preview_pointer_evidence,
+        record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
+        resolve_nir_struct_name, summarize_modified_argument_register_slots,
         summarize_preview_callee_effects,
     };
     use crate::{
-        CallEdgeKind, CallTargetProvenance, CallTargetRef, NirCallPointerPointee,
-        NirCallPrototypeSummary, NirTypeContext, PcodeBasicBlock, PcodeFunction, PcodeOp,
-        PcodeOpcode, Varnode,
+        CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
+        NirCallEffectSummary, NirCallPointerPointee, NirCallPrototypeSummary, NirTypeContext,
+        PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode,
     };
+    use fission_core::CallingConvention;
     use fission_midend_normalize::prelude::{
         NirBindingOrigin, NirType, PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue,
         PreHirStmt, pre_hir_function_expr_nodes_fit_budget,
     };
+    use fission_pcode::midend::cspec::register_namer_for_abi;
     use fission_signatures::win_types::WindowsStructures;
     use fission_static::analysis::decomp::facts::FactStore;
     use std::collections::{HashMap, HashSet};
@@ -2713,5 +2872,178 @@ mod tests {
             detail.first_call,
             Some((0x401002, Some(0x500000), PcodeOpcode::Call))
         );
+    }
+
+    #[test]
+    fn preview_callee_register_effect_requires_complete_leaf_control_flow() {
+        let mut register_namer = register_namer_for_abi(CallingConvention::WindowsX64);
+        register_namer.int_param_offsets = vec![0x08, 0x10, 0x80, 0x88];
+        let mut rcx_write = op(0, PcodeOpcode::Copy);
+        rcx_write.output = Some(Varnode {
+            space_id: 1,
+            offset: 0x08,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        });
+        let mut r8_write = op(1, PcodeOpcode::IntAdd);
+        r8_write.output = Some(Varnode {
+            space_id: 1,
+            offset: 0x80,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        });
+        let leaf = test_pcode(vec![rcx_write, r8_write, op(2, PcodeOpcode::Return)]);
+
+        assert_eq!(
+            summarize_modified_argument_register_slots(&leaf, &register_namer, true),
+            Some(vec![0, 2])
+        );
+        assert_eq!(
+            summarize_modified_argument_register_slots(&leaf, &register_namer, false),
+            None,
+            "a truncated or recovery decode cannot claim an exact write set"
+        );
+
+        let mut conditional_branch = op(0, PcodeOpcode::CBranch);
+        conditional_branch.inputs = vec![
+            Varnode {
+                space_id: 3,
+                offset: 0x401001,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: 2,
+                offset: 0x100,
+                size: 1,
+                is_constant: false,
+                constant_val: 0,
+            },
+        ];
+        conditional_branch.address = 0x401000;
+        let mut conditional_rcx_write = op(1, PcodeOpcode::Copy);
+        conditional_rcx_write.address = 0x401001;
+        conditional_rcx_write.output = Some(Varnode {
+            space_id: 1,
+            offset: 0x08,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        });
+        let mut conditional_return = op(2, PcodeOpcode::Return);
+        conditional_return.address = 0x401002;
+        let intra_instruction_branch = test_pcode(vec![
+            conditional_branch,
+            conditional_rcx_write,
+            conditional_return,
+        ]);
+        assert_eq!(
+            summarize_modified_argument_register_slots(
+                &intra_instruction_branch,
+                &register_namer,
+                true,
+            ),
+            Some(vec![0]),
+            "a direct p-code branch to a decoded instruction inside the same block is complete"
+        );
+
+        let mut fallthrough_write = op(0, PcodeOpcode::Copy);
+        fallthrough_write.output = Some(Varnode {
+            space_id: 1,
+            offset: 0x08,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        });
+        let fallthrough = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x401000,
+                    successors: vec![1],
+                    ops: vec![fallthrough_write.clone(), op(1, PcodeOpcode::IntAdd)],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x401002,
+                    successors: Vec::new(),
+                    ops: vec![op(2, PcodeOpcode::Return)],
+                },
+            ],
+        };
+        assert_eq!(
+            summarize_modified_argument_register_slots(&fallthrough, &register_namer, true),
+            Some(vec![0]),
+            "a non-control block with one forward edge to the next block is a complete fallthrough"
+        );
+
+        let ambiguous_fallthrough = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x401000,
+                    successors: vec![1, 2],
+                    ops: vec![fallthrough_write, op(1, PcodeOpcode::IntAdd)],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x401002,
+                    successors: Vec::new(),
+                    ops: vec![op(2, PcodeOpcode::Return)],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x401004,
+                    successors: Vec::new(),
+                    ops: vec![op(3, PcodeOpcode::Return)],
+                },
+            ],
+        };
+        assert_eq!(
+            summarize_modified_argument_register_slots(
+                &ambiguous_fallthrough,
+                &register_namer,
+                true,
+            ),
+            None,
+            "an unterminated block with multiple successors cannot prove a write set"
+        );
+
+        let nested_call = test_pcode(vec![
+            constant_call_op(0, 0x500000),
+            op(1, PcodeOpcode::Return),
+        ]);
+        assert_eq!(
+            summarize_modified_argument_register_slots(&nested_call, &register_namer, true),
+            None,
+            "nested calls can modify any caller-saved argument slot"
+        );
+    }
+
+    #[test]
+    fn same_symbol_preview_register_effects_merge_conservatively() {
+        let existing = NirCallEffectSummary {
+            modified_argument_register_slots: Some(vec![1]),
+            source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+            ..Default::default()
+        };
+        let incoming = NirCallEffectSummary {
+            modified_argument_register_slots: Some(vec![0, 2]),
+            source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+            ..Default::default()
+        };
+        let merged = merge_preview_argument_register_writes(&existing, incoming);
+        assert_eq!(merged.modified_argument_register_slots, Some(vec![0, 1, 2]));
+
+        let unknown = NirCallEffectSummary {
+            modified_argument_register_slots: None,
+            source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+            ..Default::default()
+        };
+        let merged = merge_preview_argument_register_writes(&merged, unknown);
+        assert_eq!(merged.modified_argument_register_slots, None);
     }
 }

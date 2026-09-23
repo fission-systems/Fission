@@ -364,6 +364,10 @@ pub struct NirCallEffectSummary {
     pub escapes_args: Option<bool>,
     pub may_call_unknown: Option<bool>,
     pub may_exit: Option<bool>,
+    /// Exact integer ABI argument-register slots written by a complete leaf
+    /// callee preview. `None` means the write set is unknown or incomplete.
+    #[serde(default)]
+    pub modified_argument_register_slots: Option<Vec<usize>>,
     pub source: Option<CallEffectSummarySource>,
 }
 
