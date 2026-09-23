@@ -1864,7 +1864,8 @@ fn print_expr_prec_ctx(
             } else {
                 match base.as_ref() {
                     HirExpr::Var(name)
-                        if !ctx.direct_var_has_aggregate_access_mismatch(name, elem_ty) =>
+                        if !ctx.direct_var_has_aggregate_access_mismatch(name, elem_ty)
+                            && !ctx.direct_var_has_scalar_access_width_mismatch(name, elem_ty) =>
                     {
                         format!("{name}[{index}]")
                     }
@@ -1957,7 +1958,8 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
             } else {
                 match base.as_ref() {
                     HirExpr::Var(name)
-                        if !ctx.direct_var_has_aggregate_access_mismatch(name, elem_ty) =>
+                        if !ctx.direct_var_has_aggregate_access_mismatch(name, elem_ty)
+                            && !ctx.direct_var_has_scalar_access_width_mismatch(name, elem_ty) =>
                     {
                         format!("{name}[{index}]")
                     }
@@ -2795,6 +2797,69 @@ mod tests {
         );
         assert!(
             rendered.contains("q = (int *)((unsigned long long *)p);"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn byte_pointer_subscripts_preserve_wide_access_width() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let hir = HirFunction {
+            name: "read_and_write_pe_header_word".to_string(),
+            params: vec![NirBinding {
+                name: "pImageBase".to_string(),
+                ty: NirType::Ptr(Box::new(u32_ty.clone())),
+                surface_type_name: Some("unsigned char*".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![NirBinding {
+                name: "loaded".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: u32_ty.clone(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("loaded".to_string()),
+                    rhs: HirExpr::Index {
+                        base: Box::new(HirExpr::Var("pImageBase".to_string())),
+                        index: Box::new(HirExpr::Const(15, u64_ty())),
+                        elem_ty: u32_ty.clone(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Index {
+                        base: Box::new(HirExpr::Var("pImageBase".to_string())),
+                        index: Box::new(HirExpr::Const(15, u64_ty())),
+                        elem_ty: u32_ty,
+                    },
+                    rhs: HirExpr::Const(
+                        7,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
+                },
+                HirStmt::Return(Some(HirExpr::Var("loaded".to_string()))),
+            ],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains("loaded = ((uint *)(pImageBase))[15];"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("((uint *)(pImageBase))[15] = 7;"),
             "{rendered}"
         );
     }

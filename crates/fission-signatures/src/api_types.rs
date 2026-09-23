@@ -562,6 +562,27 @@ mod tests {
     }
 
     #[test]
+    fn msvc_pe_image_helpers_keep_their_pointer_contracts() {
+        let db = ApiTypeDatabase::from_utils_signatures().expect("load utils api signatures");
+
+        let validate = db
+            .get("_ValidateImageBase")
+            .expect("_ValidateImageBase signature");
+        assert_eq!(validate.return_type, "int");
+        assert_eq!(validate.params.len(), 1);
+        assert_eq!(validate.params[0].name, "pImageBase");
+        assert_eq!(validate.params[0].type_name, "unsigned char*");
+
+        let find_section = db.get("_FindPESection").expect("_FindPESection signature");
+        assert_eq!(find_section.return_type, "PIMAGE_SECTION_HEADER");
+        assert_eq!(find_section.params.len(), 2);
+        assert_eq!(find_section.params[0].name, "pImageBase");
+        assert_eq!(find_section.params[0].type_name, "unsigned char*");
+        assert_eq!(find_section.params[1].name, "rva");
+        assert_eq!(find_section.params[1].type_name, "DWORD_PTR");
+    }
+
+    #[test]
     fn loads_ntoskrnl_signatures_with_correct_arity() {
         let db = ApiTypeDatabase::from_utils_signatures().expect("load utils api signatures");
         let ps_lookup = db

@@ -26,7 +26,7 @@ pub fn win_type_name_to_nir(name: &str) -> Option<NirType> {
                 bits: 16,
                 signed: false,
             },
-            "BYTE" | "UCHAR" => NirType::Int {
+            "BYTE" | "UCHAR" | "unsigned char" => NirType::Int {
                 bits: 8,
                 signed: false,
             },
@@ -162,4 +162,21 @@ pub(super) fn api_signature_via_import_aliases(name: &str) -> Option<&'static Ap
 /// Returns `None` when the return type is void or not mappable.
 pub(super) fn resolve_return_ty(ret_type_str: &str) -> Option<NirType> {
     win_type_name_to_nir(ret_type_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::win_type_name_to_nir;
+    use crate::prelude::NirType;
+
+    #[test]
+    fn unsigned_char_pointer_type_is_an_unsigned_byte_pointer() {
+        assert_eq!(
+            win_type_name_to_nir("unsigned char*"),
+            Some(NirType::Ptr(Box::new(NirType::Int {
+                bits: 8,
+                signed: false,
+            })))
+        );
+    }
 }
