@@ -1212,6 +1212,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#11-re-measured-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Re-measured Result
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#2-owner-proof" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1304,15 +1315,23 @@
 <li>Function: MinGW runtime helper <code>__report_error</code> (the benchmark source <code>advanced_patterns.c</code> does not contain this linked helper).</li>
 <li>Address: <code>0x140001a70</code></li>
 <li>Reproduction: <code>target/release/fission_cli decomp &lt;binary&gt; --project --no-header --no-warnings -o /tmp/fission-issue56-baseline-project.c</code></li>
-<li>Current direct output: fixed prototype <code>void __report_error(const char *msg, unsigned long long param_2, unsigned long long param_3, unsigned long long param_4)</code>; body forwards <code>msg</code> and a <code>va_list</code>-typed local to <code>vfprintf</code>.</li>
-<li>Current project output: calls to this definition render with only the format-string argument. The corresponding machine code also places values in argument registers at call sites; for example <code>0x140001c07</code> sets <code>RCX=format</code>, <code>RDX=GetLastError()</code>, and calls the helper.</li>
+<li>Baseline direct output: fixed prototype <code>void __report_error(const char *msg, unsigned long long param_2, unsigned long long param_3, unsigned long long param_4)</code>; body forwards <code>msg</code> and a <code>va_list</code>-typed local to <code>vfprintf</code>.</li>
+<li>Baseline project output: calls to this definition render with only the format-string argument. The corresponding machine code also places values in argument registers at call sites; for example <code>0x140001c07</code> sets <code>RCX=format</code>, <code>RDX=GetLastError()</code>, and calls the helper.</li>
 <li>Compile baseline: Clang GNU C17 reports 66 errors for the complete project output, including 9 <code>__report_error</code> diagnostics of <code>too few arguments, expected 4, have 1</code>. The remaining diagnostics are outside this issue.</li>
 <li>Semantic cases / semantic scores: N/A for this declaration/call-contract defect; the measured gate is the generated project compile contract and targeted call-site preservation.</li>
 </ul>
+<h2 id="11-re-measured-result">1.1 Re-measured Result<a class="headerlink" href="#11-re-measured-result" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The direct release-CLI definition is now <code>void __report_error(const char* msg, ...)</code>; project callsites retain their recovered extra operands.</li>
+<li>The focused builder regression confirms that only the fixed register prefix becomes named formals; unnamed variadic register state uses a declared live-register binding. The fixed-arity control still names all consumed parameters.</li>
+<li>Clang GNU C17 on the baseline project output reports 66 diagnostics, including 9 <code>__report_error</code> arity errors. A repeated final release run reports 57 diagnostics and 0 <code>__report_error</code> arity errors.</li>
+<li>Whole-project totals varied from 54 to 57 diagnostics across release reruns because unrelated import-thunk prototypes (notably <code>__iob_func</code>) vary between inferred forms. One rerun briefly emitted an unrelated one-parameter declaration for that zero-argument import. The target helper result remained fixed across runs; this variance is not counted as a <code>__report_error</code> result or a quality score.</li>
+</ul>
 <h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[x] Normalize / type-data recovery</li>
+<li>[x] Loader debug-type extraction and normalize / type-data recovery</li>
 <li>[x] Decompiler facts / prototype propagation</li>
+<li>[x] Builder entry-register formal binding</li>
 <li>[ ] SLEIGH/raw p-code</li>
 <li>[ ] Builder/materialize</li>
 <li>[ ] Structuring</li>
@@ -1325,26 +1344,34 @@
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>to vfprintf. Its current normalized definition nevertheless exposes four
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>fixed parameters. The project's real calls use different argument counts.
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>`seed_whole_program_call_arity_facts` and
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>`record_interprocedural_arity_facts` currently reduce calls to a maximum count
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>and turn that count into ordinary parameter-name hints for any resolved
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>defined callee. The direct-callee prototype path then stores an inferred
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>register arity as `locked_exact_arity`. Neither the ordinary function model
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>nor `NirCallPrototypeSummary` carries a defined-function variadic contract;
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>`NirFunctionType.variadic` covers function-pointer aliases, while the printer's
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>ellipsis exception is limited to known runtime symbol names.
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>`llvm-dwarfdump` provides declaration-level confirmation: the helper DIE has
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>one `DW_TAG_formal_parameter` (`msg`) followed by
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>`DW_TAG_unspecified_parameters`, and its `argp` local has type `va_list`. The
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>loader already recognizes the equivalent DWARF marker for function-pointer
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>types, but `DwarfFunctionInfo` drops it for ordinary functions.
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>`seed_whole_program_call_arity_facts` and
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>`record_interprocedural_arity_facts` currently reduce calls to a maximum count
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>and turn that count into ordinary parameter-name hints for any resolved
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>defined callee. The direct-callee prototype path then stores an inferred
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>register arity as `locked_exact_arity`. Neither the ordinary function model
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>nor `NirCallPrototypeSummary` carries a defined-function variadic contract;
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>`NirFunctionType.variadic` covers function-pointer aliases, while the printer's
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>ellipsis exception is limited to known runtime symbol names.
 </span></code></pre></div>
 <p>The first wrong fact is the conflation of observed caller maximum arity with a
-callee's fixed named-parameter count. The callee's ABI/home-slot and va_list
-evidence must be represented before prototype propagation and rendering.</p>
+callee's fixed named-parameter count. The fixed prefix and variadic marker
+already exist in DWARF; the loader and prototype contracts must preserve them
+before caller arity facts can lock a fixed signature. The ABI home-slot cursor
+is corroborating evidence, not the source of this target's classification.</p>
 <h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
 <p>Generalized rule:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>For a defined callee, do not treat the maximum observed call-site argument
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>count as an exact fixed prototype when the callee body proves a variadic
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>entry contract. On Windows x64, derive the fixed prefix from the ABI home-slot
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>cursor used as a va_list: the slot at which that cursor begins is the first
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>unnamed argument. Preserve the fixed prefix and mark the remaining call
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>contract variadic. Caller-count disagreement alone is not sufficient proof.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>For a defined callee, preserve declaration-level variadic evidence
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>(`DW_TAG_unspecified_parameters`, or an equivalent explicit signature source)
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>and its fixed named-parameter count. Do not treat caller-observed arity as an
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>exact fixed prototype when that evidence marks a variadic tail. Call-site
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>observations may widen lower bounds, but cannot erase the variadic contract.
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>Caller-count disagreement alone is not sufficient proof.
 </span></code></pre></div>
 <p>ISA/ABI check: the rule is grounded in Windows x64 home-slot/parameter-slot
 facts; it must not test a function name, address, binary identity, or corpus
@@ -1353,27 +1380,27 @@ representation and propagation are shared.</p>
 <p>Comparable coverage:</p>
 <ul>
 <li>Known imported variadic prototypes (<code>fprintf</code>/<code>printf</code>) already preserve a fixed prefix and do not lock total arity.</li>
-<li>A synthetic defined helper with a one-parameter fixed prefix and one, two, or three trailing arguments.</li>
+<li>A synthetic defined helper with a one-parameter fixed prefix and one, two, or three trailing arguments, plus a fixed-arity control.</li>
 <li>A fixed-arity Windows x64 control whose four register parameters are semantically consumed and must remain fixed.</li>
 </ul>
 <h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Existing owner: <code>types/entry_param_promotion.rs</code> owns entry-register and existing variadic-register-save promotion; <code>facts.rs</code> owns caller-observed arity facts and direct-callee prototype summaries.</li>
-<li>Shared substrate candidate: typed prototype contract. Extend the existing summary/function contract rather than infer a second private flag in the printer.</li>
+<li>Existing owners: DWARF extraction in <code>fission-loader</code>; function/call prototype facts in <code>fission-decompiler::facts</code>; entry-register formal binding in <code>fission-pcode::builder</code>; entry-register promotion and call-site pruning in <code>fission-midend-normalize</code>; signature emission in the existing HIR printer.</li>
+<li>Shared substrate candidate: typed function/call prototype contract. Extend the existing models rather than infer a second private flag in the printer.</li>
 <li>Interaction: variadic evidence must be available before entry-param promotion, call-site argument pruning, and interprocedural arity-hint seeding can make the false fixed-arity fact irreversible.</li>
 <li>Known cases that must not change: imported exact-arity APIs, known imported variadic runtime APIs, ordinary fixed-arity internal functions, and Windows x64 functions with genuinely used register parameters.</li>
-<li>Risk: false-positive variadic classification could weaken a real fixed prototype or preserve spurious arguments; require a positive va_list/home-slot proof and a fixed-arity negative control. Project output currently also has unrelated compile diagnostics; compare only the nine target diagnostics for this acceptance gate.</li>
+<li>Risk: dropping or misapplying the DWARF variadic marker could weaken a real fixed prototype or preserve spurious arguments; test both the unspecified-parameters marker and ordinary fixed-arity signatures. Project output currently also has unrelated compile diagnostics; compare only the nine target diagnostics for this acceptance gate.</li>
 <li>Telemetry: no new metric planned.</li>
 </ul>
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] Targeted invariant tests: normalize entry-prototype classification and defined-callee summary/pruning; synthetic one-fixed-plus-1/2/3-tail cases and fixed-arity control.</li>
-<li>[ ] Normalize tests: <code>cargo nextest run -p fission-midend-normalize</code>.</li>
-<li>[ ] P-code tests: <code>cargo nextest run -p fission-pcode</code> and <code>cargo check -p fission-pcode</code>.</li>
-<li>[ ] Decompiler/CLI checks: <code>cargo check -p fission-decompiler</code> and <code>cargo build -p fission-cli --release</code>.</li>
-<li>[ ] Focused row: rerun the helper and full project with caches disabled; verify fixed prefix plus ellipsis, preserved recovered caller arguments, and zero <code>__report_error</code> C17 arity diagnostics.</li>
-<li>[ ] Regression sample: rerun other known imported variadic calls and a fixed-arity Windows x64 internal function; compare their signatures and call arguments.</li>
-<li>[ ] Formatting: <code>cargo fmt --all --check</code>; <code>git diff --check</code>.</li>
+<li>[x] Targeted invariant tests: DWARF variadic-marker extraction; normalize defined-callee summary/pruning; fixed-prefix builder binding and fixed-arity control.</li>
+<li>[x] Normalize tests: <code>cargo nextest run -p fission-midend-normalize</code> (432 passed).</li>
+<li>[x] P-code tests and check: 1,132 passed with three failures excluded after each was reproduced at unchanged <code>a727d1abd</code>; four skipped; <code>cargo check -p fission-pcode</code> passed. <code>cargo nextest run -p fission-pcode</code> without exclusions still reports those three baseline failures.</li>
+<li>[x] Decompiler/CLI checks: <code>cargo nextest run -p fission-decompiler</code> (77 passed), both crate checks passed, and <code>CARGO_BUILD_JOBS=1 cargo build -p fission-cli --release</code> passed.</li>
+<li>[x] Focused row: debug and release runs show fixed prefix plus ellipsis, preserve recovered caller operands, and reduce <code>__report_error</code> C17 arity diagnostics from 9 to 0.</li>
+<li>[x] Regression sample: existing imported-variadic and exact fixed-arity IAT tests pass; the synthetic fixed-arity control also passes.</li>
+<li>[x] Formatting: <code>cargo fmt --all --check</code>; <code>git diff --check</code>.</li>
 </ul>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
 <ul>
