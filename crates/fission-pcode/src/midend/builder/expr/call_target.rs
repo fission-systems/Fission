@@ -1,4 +1,5 @@
 use super::*;
+use fission_midend_core::ir::sanitize_c_identifier;
 
 const CALL_TARGET_CONST_FOLD_BUDGET: usize = 16;
 const CALL_TARGET_DESCRIPTOR_RECOVERY_BUDGET: usize = 16;
@@ -43,7 +44,7 @@ impl<'a> PreviewBuilder<'a> {
                         .call_target_direct_symbol_resolved_count += 1;
                 }
             }
-            return Some(target_ref.symbol.clone());
+            return Some(sanitize_c_identifier(&target_ref.symbol));
         }
         // Fallback: the address may be an IAT slot VA reached via a constant
         // (e.g. Windows x64 `COPY rcx <- const(0x1400082b8)` followed by
@@ -55,7 +56,7 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry
                 .call_targets
                 .call_target_import_resolved_count += 1;
-            return Some(target_ref.symbol.clone());
+            return Some(sanitize_c_identifier(&target_ref.symbol));
         }
         if ctx.ambiguous_call_targets.contains(&addr) {
             self.telemetry
@@ -91,14 +92,14 @@ impl<'a> PreviewBuilder<'a> {
         self.telemetry
             .call_targets
             .call_target_import_resolved_count += 1;
-        Some(target_ref.symbol.clone())
+        Some(sanitize_c_identifier(&target_ref.symbol))
     }
 
     fn resolve_call_target_by_iat_slot_without_telemetry(&self, addr: u64) -> Option<String> {
         self.type_context?
             .iat_target_refs
             .get(&addr)
-            .map(|target_ref| target_ref.symbol.clone())
+            .map(|target_ref| sanitize_c_identifier(&target_ref.symbol))
     }
 
     pub(super) fn resolve_relocation_call_target_name(&mut self, op: &PcodeOp) -> Option<String> {
@@ -109,7 +110,7 @@ impl<'a> PreviewBuilder<'a> {
             .relocation_names
             .get(&op.address)
             .filter(|name| !name.is_empty())
-            .cloned()
+            .map(|name| sanitize_c_identifier(name))
     }
 
     pub(super) fn resolve_constant_call_target_name(
@@ -179,12 +180,12 @@ impl<'a> PreviewBuilder<'a> {
             return Some(name);
         }
         if self.pcode_has_instruction_address(addr)
-            && let Some(name) = self.current_function_name.clone()
+            && let Some(name) = self.current_function_name.as_deref()
         {
             self.telemetry
                 .call_targets
                 .call_target_indirect_const_resolved_count += 1;
-            return Some(name);
+            return Some(sanitize_c_identifier(name));
         }
         self.telemetry
             .call_targets

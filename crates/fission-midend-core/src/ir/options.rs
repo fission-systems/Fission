@@ -909,40 +909,146 @@ impl MlilPreviewError {
     }
 }
 
-/// Rewrite a linker symbol so C can spell it.
+/// Rewrite a linker symbol to a valid C identifier without collapsing distinct
+/// linker spellings into the same output name.
 ///
-/// ELF names are not identifiers: a versioned symbol carries dots
-/// (`ZLIB_1.2.2`), an imported one carries `@` (`memcpy@GLIBC_2.14`), and a
-/// compiler-local one can carry `.` or `$`. Every character C forbids becomes
-/// `_`, and a leading digit gains one, so the name still reads as itself.
-///
-/// Two symbols can collide after this. That is the same trade every
-/// disassembler makes here, and a name that collides is still better than one
-/// that does not compile.
+/// Ordinary non-keyword C identifiers outside the reserved `fission_symbol_`
+/// namespace are kept unchanged. Every other spelling is placed in that
+/// namespace and encoded byte-for-byte: ASCII letters and digits remain
+/// readable, while every other UTF-8 byte (including `_`) becomes `_xHH_`.
+/// Escaping the reserved namespace as well makes the mapping injective over
+/// arbitrary linker names. Apply it once when constructing C-facing HIR; a
+/// later renderer must preserve that mapped spelling rather than map it again.
 pub fn sanitize_c_identifier(name: &str) -> String {
-    if !name.is_empty()
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        && !name.starts_with(|c: char| c.is_ascii_digit())
-    {
+    const ENCODED_PREFIX: &str = "fission_symbol_";
+
+    if is_plain_c_identifier(name) && !is_c_keyword(name) && !name.starts_with(ENCODED_PREFIX) {
         return name.to_string();
     }
-    let mut out = String::with_capacity(name.len() + 1);
-    if name.starts_with(|c: char| c.is_ascii_digit()) {
-        out.push('_');
-    }
-    for c in name.chars() {
-        out.push(if c.is_ascii_alphanumeric() || c == '_' {
-            c
+
+    let mut out = String::with_capacity(ENCODED_PREFIX.len() + name.len() * 2);
+    out.push_str(ENCODED_PREFIX);
+    for byte in name.as_bytes() {
+        if byte.is_ascii_alphanumeric() {
+            out.push(char::from(*byte));
         } else {
-            '_'
-        });
+            use std::fmt::Write as _;
+            write!(&mut out, "_x{byte:02X}_").expect("writing to a String cannot fail");
+        }
     }
-    if out.is_empty() { "_".to_string() } else { out }
+    out
+}
+
+fn is_plain_c_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+fn is_c_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "auto"
+            | "break"
+            | "case"
+            | "char"
+            | "const"
+            | "continue"
+            | "default"
+            | "do"
+            | "double"
+            | "else"
+            | "enum"
+            | "extern"
+            | "float"
+            | "for"
+            | "goto"
+            | "if"
+            | "inline"
+            | "int"
+            | "long"
+            | "register"
+            | "restrict"
+            | "return"
+            | "short"
+            | "signed"
+            | "sizeof"
+            | "static"
+            | "struct"
+            | "switch"
+            | "typedef"
+            | "union"
+            | "unsigned"
+            | "void"
+            | "volatile"
+            | "while"
+            | "_Alignas"
+            | "_Alignof"
+            | "_Atomic"
+            | "_BitInt"
+            | "_Bool"
+            | "_Complex"
+            | "_Generic"
+            | "_Imaginary"
+            | "_Noreturn"
+            | "_Static_assert"
+            | "_Thread_local"
+            | "alignas"
+            | "alignof"
+            | "asm"
+            | "bool"
+            | "constexpr"
+            | "false"
+            | "__asm"
+            | "__asm__"
+            | "__attribute"
+            | "__attribute__"
+            | "__auto_type"
+            | "__const"
+            | "__const__"
+            | "__complex"
+            | "__complex__"
+            | "__extension__"
+            | "__imag__"
+            | "__inline__"
+            | "__int128"
+            | "__label__"
+            | "__inline"
+            | "__real__"
+            | "__restrict"
+            | "__restrict__"
+            | "__signed"
+            | "__signed__"
+            | "__thread"
+            | "__typeof"
+            | "__typeof__"
+            | "__volatile"
+            | "__volatile__"
+            | "_Decimal32"
+            | "_Decimal64"
+            | "_Decimal128"
+            | "_Float16"
+            | "_Float32"
+            | "_Float32x"
+            | "_Float64"
+            | "_Float64x"
+            | "_Float128"
+            | "_Float128x"
+            | "nullptr"
+            | "static_assert"
+            | "thread_local"
+            | "true"
+            | "typeof"
+            | "typeof_unqual"
+    )
 }
 
 #[cfg(test)]
 mod sanitize_identifier_tests {
-    use super::sanitize_c_identifier;
+    use super::{is_c_keyword, is_plain_c_identifier, sanitize_c_identifier};
 
     #[test]
     fn an_ordinary_name_is_returned_unchanged() {
@@ -952,26 +1058,77 @@ mod sanitize_identifier_tests {
 
     #[test]
     fn a_versioned_symbol_loses_its_dots() {
-        assert_eq!(sanitize_c_identifier("ZLIB_1.2.2"), "ZLIB_1_2_2");
-        assert_eq!(sanitize_c_identifier("LIBBSD_0.11.0"), "LIBBSD_0_11_0");
+        assert_eq!(
+            sanitize_c_identifier("ZLIB_1.2.2"),
+            "fission_symbol_ZLIB_x5F_1_x2E_2_x2E_2"
+        );
+        assert_eq!(
+            sanitize_c_identifier("LIBBSD_0.11.0"),
+            "fission_symbol_LIBBSD_x5F_0_x2E_11_x2E_0"
+        );
     }
 
     #[test]
     fn an_imported_symbol_loses_its_at_sign() {
         assert_eq!(
             sanitize_c_identifier("memcpy@GLIBC_2.14"),
-            "memcpy_GLIBC_2_14"
+            "fission_symbol_memcpy_x40_GLIBC_x5F_2_x2E_14"
         );
     }
 
     #[test]
     fn a_leading_digit_gains_an_underscore() {
-        assert_eq!(sanitize_c_identifier("3com"), "_3com");
+        assert_eq!(sanitize_c_identifier("3com"), "fission_symbol_3com");
     }
 
     #[test]
     fn an_empty_name_still_yields_an_identifier() {
-        assert_eq!(sanitize_c_identifier(""), "_");
+        assert_eq!(sanitize_c_identifier(""), "fission_symbol_");
+    }
+
+    #[test]
+    fn punctuation_encoding_does_not_collapse_to_underscore_replacement() {
+        let dotted = sanitize_c_identifier("foo.bar");
+        let underscored = sanitize_c_identifier("foo_bar");
+        let marker_like = sanitize_c_identifier("foo_x2E_bar");
+        assert_ne!(dotted, underscored);
+        assert_ne!(dotted, marker_like);
+        assert_ne!(underscored, marker_like);
+    }
+
+    #[test]
+    fn reserved_namespace_is_escaped_to_keep_the_mapping_injective() {
+        let dotted = sanitize_c_identifier("foo.bar");
+        let raw_symbol_with_that_spelling = sanitize_c_identifier(&dotted);
+        assert_ne!(dotted, raw_symbol_with_that_spelling);
+        assert_ne!(dotted, sanitize_c_identifier("foo_bar"));
+        assert_ne!(dotted, sanitize_c_identifier("foo_x2E_bar"));
+        assert_ne!(
+            sanitize_c_identifier("fission_symbol_foo"),
+            "fission_symbol_foo"
+        );
+        assert_ne!(sanitize_c_identifier("int"), "int");
+    }
+
+    #[test]
+    fn linker_symbol_mapping_is_a_valid_c_identifier() {
+        for input in [
+            "foo.bar",
+            "3com",
+            "int",
+            "typeof",
+            "_BitInt",
+            "__int128",
+            "__auto_type",
+            "__typeof__",
+            "memcpy@GLIBC_2.14",
+            "λ",
+            "",
+        ] {
+            let mapped = sanitize_c_identifier(input);
+            assert!(is_plain_c_identifier(&mapped), "{input:?} -> {mapped:?}");
+            assert!(!is_c_keyword(&mapped), "{input:?} -> C keyword {mapped:?}");
+        }
     }
 }
 

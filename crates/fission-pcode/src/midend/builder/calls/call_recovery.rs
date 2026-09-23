@@ -1,4 +1,5 @@
 use super::*;
+use fission_midend_core::ir::sanitize_c_identifier;
 
 fn resolve_add_op_stack_address(
     builder: &PreviewBuilder<'_>,
@@ -90,7 +91,7 @@ impl<'a> PreviewBuilder<'a> {
         };
         ctx.call_target_refs
             .get(&(value as u64))
-            .map(|target_ref| PreHirExpr::Var(target_ref.symbol.clone()))
+            .map(|target_ref| PreHirExpr::Var(sanitize_c_identifier(&target_ref.symbol)))
             .unwrap_or(fallback)
     }
 

@@ -12,6 +12,7 @@ use super::{
     NirFunctionType, NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_type,
 };
+use fission_midend_core::ir::sanitize_c_identifier;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub(crate) fn render_hir_function_with_global_decls(
@@ -61,6 +62,30 @@ mod layered_tests {
     use crate::midend::{
         HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirFunctionType, NirType, StructField,
     };
+
+    #[test]
+    fn c_external_declaration_and_pre_mapped_call_share_the_symbol() {
+        let symbol = sanitize_c_identifier("external.part.0");
+        let hir = HirFunction {
+            name: "caller".to_string(),
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                // Call-target recovery can reuse the C-safe address map.
+                target: symbol.clone(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            })],
+            ..HirFunction::default()
+        };
+
+        let rendered = render_hir_function_with_global_decls(&hir, &MlilPreviewOptions::default());
+
+        assert!(
+            rendered.contains(&format!("extern unsigned long long {symbol}();")),
+            "{rendered}"
+        );
+        assert!(rendered.contains(&format!("{symbol}();")), "{rendered}");
+        assert!(!rendered.contains("external.part.0"), "{rendered}");
+    }
 
     #[test]
     fn unknown_arity_called_extern_uses_c11_unspecified_parameter_list() {
@@ -446,8 +471,7 @@ fn render_hir_function_with_profile(
     called_externs.retain(|name, _| {
         !decls.contains_key(name)
             && !opaque_pcodeop_stubs.contains_key(name)
-            && (!is_stdio_declared_symbol(name)
-                || options.declared_signatures.contains_key(name.as_str()))
+            && (!is_stdio_declared_symbol(name) || options.declared_signatures.contains_key(name))
     });
     let include_stdio = function_uses_file_surface(&printable) || calls_stdio;
     if decls.is_empty()
@@ -491,7 +515,7 @@ fn render_hir_function_with_profile(
         rendered.push_str(&render_called_extern(
             target,
             return_ty,
-            options.declared_signatures.get(target.as_str()),
+            options.declared_signatures.get(target),
         ));
     }
     rendered.push('\n');
@@ -1006,7 +1030,10 @@ fn render_called_extern(target: &str, return_ty: &NirType, declared: Option<&Str
 fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
     let return_type = opaque_pcodeop_return_type_name(return_ty);
     let return_stmt = opaque_pcodeop_default_return(return_ty);
-    format!("static inline {return_type} {target}(...) {{ {return_stmt} }}\n")
+    format!(
+        "static inline {return_type} {}(...) {{ {return_stmt} }}\n",
+        sanitize_c_identifier(target)
+    )
 }
 
 fn opaque_pcodeop_return_type_name(return_ty: &NirType) -> String {

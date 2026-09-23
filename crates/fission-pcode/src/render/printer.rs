@@ -7,6 +7,7 @@ use super::{
     HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding,
     NirBindingOrigin, NirType, PrintProfile, expr_type,
 };
+use fission_midend_core::ir::sanitize_c_identifier;
 use std::collections::{HashMap, HashSet};
 
 const MAX_PRINT_STMT_DEPTH: usize = 512;
@@ -25,6 +26,10 @@ struct PrintCtx<'a> {
     return_type: &'a NirType,
     inline_guard_goto: bool,
     global_names: Option<&'a HashMap<u64, String>>,
+    /// Standalone print helpers accept raw HIR symbols. The decompiler's
+    /// layered path maps symbols when building HIR and must not encode them a
+    /// second time.
+    sanitize_symbols: bool,
     profile: PrintProfile,
     /// Variable -> Win32 enum group its value came from, for variables that
     /// hold a known API's return value. Lets a later comparison against a
@@ -234,6 +239,7 @@ impl<'a> PrintCtx<'a> {
             return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
             global_names: None,
+            sanitize_symbols: false,
             profile,
             goto_targets,
         }
@@ -476,7 +482,9 @@ impl<'a> PrintCtx<'a> {
 }
 
 pub(crate) fn print_hir_function(func: &HirFunction) -> String {
-    print_hir_function_with_profile(func, None, PrintProfile::Nir)
+    let mut ctx = PrintCtx::build_with_profile(func, PrintProfile::Nir);
+    ctx.sanitize_symbols = true;
+    print_hir_function_impl(func, ctx)
 }
 
 pub(crate) fn print_hir_function_with_global_names(
@@ -518,7 +526,14 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
         .surface_return_type_name
         .clone()
         .unwrap_or_else(|| print_return_type(&func.return_type));
-    out.push_str(&format!("{return_type} {}(", func.name));
+    out.push_str(&format!(
+        "{return_type} {}(",
+        if ctx.sanitize_symbols {
+            sanitize_c_identifier(&func.name)
+        } else {
+            func.name.clone()
+        }
+    ));
     if func.params.is_empty() {
         // `(void)` asserts the function takes nothing. For an import thunk
         // that is false and provably so: its whole body is one indirect jump
@@ -1454,7 +1469,11 @@ fn print_callable_target(
         .strip_prefix("((code *)")
         .and_then(|rest| rest.strip_suffix(')'))
     else {
-        return target.to_string();
+        return if ctx.is_none_or(|ctx| ctx.sanitize_symbols) || target.starts_with("__pcodeop_") {
+            sanitize_c_identifier(target)
+        } else {
+            target.to_string()
+        };
     };
     let ret_ty = if matches!(return_ty, NirType::Unknown) {
         ctx.map(|ctx| ctx.return_type).unwrap_or(return_ty)
@@ -2460,6 +2479,52 @@ mod tests {
             bits: 64,
             signed: false,
         }
+    }
+
+    #[test]
+    fn standalone_c_function_definition_and_self_call_map_raw_symbols_once() {
+        let symbol = sanitize_c_identifier("helper.part.0");
+        let hir = HirFunction {
+            name: "helper.part.0".to_string(),
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "helper.part.0".to_string(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            })],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains(&format!("unsigned long long {symbol}(void)")),
+            "{rendered}"
+        );
+        assert!(rendered.contains(&format!("{symbol}();")), "{rendered}");
+        assert!(!rendered.contains("helper.part.0"), "{rendered}");
+    }
+
+    #[test]
+    fn pipeline_printer_preserves_symbols_mapped_when_hir_was_built() {
+        let symbol = sanitize_c_identifier("helper.part.0");
+        let hir = HirFunction {
+            name: symbol.clone(),
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: symbol.clone(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            })],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function_with_profile(&hir, None, PrintProfile::Nir);
+
+        assert!(
+            rendered.contains(&format!("unsigned long long {symbol}(void)")),
+            "{rendered}"
+        );
+        assert!(rendered.contains(&format!("{symbol}();")), "{rendered}");
+        assert!(!rendered.contains("fission_symbol_fission"), "{rendered}");
     }
 
     #[test]

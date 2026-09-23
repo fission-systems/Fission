@@ -30,6 +30,7 @@ mod type_hints;
 use self::debug::{
     preview_builder_diag_enabled, preview_debug_enabled, preview_debug_regdump_enabled,
 };
+use fission_midend_core::ir::sanitize_c_identifier;
 pub(in crate::midend::builder) use memory::aggregate_recovery;
 use tracing::trace_span;
 
@@ -227,6 +228,22 @@ fn seed_callee_summaries_from_type_context(
         );
     }
     summaries
+}
+
+/// Use the address-resolved symbol identity for a function definition when
+/// the same program context uses that identity at call sites. The original
+/// loader name remains in builder state for name-based analysis; this only
+/// selects the HIR symbol that the C renderer presents.
+fn resolved_hir_function_name(
+    name: &str,
+    address: u64,
+    type_context: Option<&PreviewTypeContext>,
+) -> String {
+    let raw_name = type_context
+        .and_then(|context| context.call_target_refs.get(&address))
+        .map(|target| target.symbol.as_str())
+        .unwrap_or(name);
+    sanitize_c_identifier(raw_name)
 }
 
 #[cfg(test)]
@@ -796,7 +813,7 @@ impl<'a> PreviewBuilder<'a> {
             .unwrap_or_default();
 
         Ok(PreHirFunction {
-            name: name.to_string(),
+            name: resolved_hir_function_name(name, address, self.type_context),
             params: self.params.values().cloned().collect(),
             locals: self
                 .locals
@@ -1323,5 +1340,41 @@ mod entry_param_suppression_tests {
         let builder = PreviewBuilder::new(&pcode, &options, None);
 
         assert!(builder.should_suppress_entry_register_params("chkstk_ms", 0x1000));
+    }
+}
+
+#[cfg(test)]
+mod function_symbol_tests {
+    use super::resolved_hir_function_name;
+    use crate::midend::{CallEdgeKind, CallTargetProvenance, CallTargetRef, PreviewTypeContext};
+    use fission_midend_core::ir::sanitize_c_identifier;
+
+    #[test]
+    fn function_definition_uses_the_address_resolved_call_symbol() {
+        let address = 0x1100;
+        let mut context = PreviewTypeContext::default();
+        context.call_target_refs.insert(
+            address,
+            CallTargetRef {
+                address: Some(address),
+                symbol: "helper.part.0".to_string(),
+                provenance: CallTargetProvenance::Fact,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 240,
+            },
+        );
+
+        assert_eq!(
+            resolved_hir_function_name("helper.part.0", address, Some(&context)),
+            sanitize_c_identifier("helper.part.0")
+        );
+    }
+
+    #[test]
+    fn missing_address_identity_keeps_the_loader_name_for_rendering() {
+        assert_eq!(
+            resolved_hir_function_name("helper.part.0", 0x1000, None),
+            sanitize_c_identifier("helper.part.0")
+        );
     }
 }

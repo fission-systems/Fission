@@ -1,4 +1,5 @@
 use super::*;
+use fission_midend_core::ir::sanitize_c_identifier;
 
 mod predicate_matching;
 mod switch_recovery;
@@ -282,7 +283,7 @@ impl<'a> PreviewBuilder<'a> {
         let resolved_target = self
             .type_context
             .and_then(|ctx| ctx.call_target_refs.get(&target_addr))
-            .map(|target_ref| target_ref.symbol.clone())?;
+            .map(|target_ref| sanitize_c_identifier(&target_ref.symbol))?;
         // The tail call's arguments are set up before the epilogue, in this
         // block or in the single predecessor that falls into it, and
         // `recover_tail_call_args` checks for exactly that. It used to run
@@ -510,7 +511,7 @@ impl<'a> PreviewBuilder<'a> {
                         .options
                         .relocation_names
                         .values()
-                        .any(|global| global == name)
+                        .any(|global| sanitize_c_identifier(global) == *name)
             }
             PreHirExpr::Const(_, _) => false,
         }

@@ -1,5 +1,5 @@
 use super::*;
-use fission_midend_core::ir::SelectionAxis;
+use fission_midend_core::ir::{SelectionAxis, sanitize_c_identifier};
 use fission_midend_core::ir::{
     SsaGuardRangePrecision, SsaMemoryRegion, SsaMemoryValueId, SsaOpSite, SsaValueDefinition,
 };
@@ -300,7 +300,7 @@ impl<'a> PreviewBuilder<'a> {
         // but an empty marker is not a valid C identifier or global pointer
         // name and must never become `AddressOfGlobal("")`.
         if let Some(name) = self.options.relocation_names.get(&address) {
-            return (!name.is_empty()).then(|| name.clone());
+            return (!name.is_empty()).then(|| sanitize_c_identifier(name));
         }
         let max_inline_reloc_delta = u64::from(self.options.pointer_size.min(4));
         self.options
@@ -314,7 +314,7 @@ impl<'a> PreviewBuilder<'a> {
                 (delta > 0 && delta <= max_inline_reloc_delta).then_some((delta, reloc_addr, name))
             })
             .min_by_key(|(delta, reloc_addr, _)| (*delta, *reloc_addr))
-            .map(|(_, _, name)| name.clone())
+            .map(|(_, _, name)| sanitize_c_identifier(name))
     }
 
     fn resolve_relocated_pointer(
@@ -333,7 +333,7 @@ impl<'a> PreviewBuilder<'a> {
                 .filter(|name| !name.is_empty())
         {
             return Some(ResolvedGlobalPointer {
-                name: name.clone(),
+                name: sanitize_c_identifier(name),
                 byte_offset: 0,
             });
         }
@@ -412,7 +412,7 @@ impl<'a> PreviewBuilder<'a> {
             .filter(|name| !name.is_empty())
         {
             return Some(ResolvedGlobalPointer {
-                name: name.clone(),
+                name: sanitize_c_identifier(name),
                 byte_offset: 0,
             });
         }
