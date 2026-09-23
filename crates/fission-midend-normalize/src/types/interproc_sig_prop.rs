@@ -79,6 +79,10 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                     .prototype
                     .param_surface_type_names
                     .resize(arity, None);
+                summary
+                    .prototype
+                    .param_pointer_contracts
+                    .resize(arity, false);
             }
             if arity == 0 && summary.effect_summary.escapes_args != Some(false) {
                 summary.effect_summary.escapes_args = Some(false);
@@ -95,6 +99,7 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown; arity],
                 param_surface_type_names: vec![None; arity],
+                param_pointer_contracts: vec![false; arity],
                 soundness: SummarySoundness::Pessimistic,
             },
             effect_summary: CallEffectSummary {
@@ -302,7 +307,8 @@ pub fn apply_interproc_callsite_arity_pass(func: &mut PreHirFunction) -> bool {
                     .prototype
                     .param_lattices
                     .len()
-                    .max(summary.prototype.param_surface_type_names.len());
+                    .max(summary.prototype.param_surface_type_names.len())
+                    .max(summary.prototype.param_pointer_contracts.len());
                 if existing.prototype.param_lattices.len() < incoming_param_count {
                     existing
                         .prototype
@@ -314,6 +320,20 @@ pub fn apply_interproc_callsite_arity_pass(func: &mut PreHirFunction) -> bool {
                         .prototype
                         .param_surface_type_names
                         .resize(incoming_param_count, None);
+                }
+                if existing.prototype.param_pointer_contracts.len() < incoming_param_count {
+                    existing
+                        .prototype
+                        .param_pointer_contracts
+                        .resize(incoming_param_count, false);
+                }
+                for (index, has_contract) in
+                    summary.prototype.param_pointer_contracts.iter().enumerate()
+                {
+                    if *has_contract && !existing.prototype.param_pointer_contracts[index] {
+                        existing.prototype.param_pointer_contracts[index] = true;
+                        prototype_refinements += 1;
+                    }
                 }
                 for (index, surface) in summary
                     .prototype

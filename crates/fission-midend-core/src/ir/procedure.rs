@@ -323,6 +323,11 @@ pub struct PrototypeSummary {
     pub return_lattice: NirType,
     pub param_lattices: Vec<NirType>,
     pub param_surface_type_names: Vec<Option<String>>,
+    /// Slots with explicit pointer-pointee evidence in the shared NIR call
+    /// prototype. This distinguishes a typed ABI contract from a generic
+    /// direct-callee pointer inference when deciding whether a call-local
+    /// integer-to-pointer conversion is safe.
+    pub param_pointer_contracts: Vec<bool>,
     pub soundness: SummarySoundness,
 }
 

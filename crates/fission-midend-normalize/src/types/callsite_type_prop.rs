@@ -56,7 +56,9 @@ use call_target_surface::{
     is_generic_binding_name, register_name_candidate, resolve_call_target_symbol,
     resolve_call_target_symbol_with_wrapper, rewrite_call_targets_stmts,
 };
-use direct_callee_pointer::apply_direct_callee_pointer_transitively;
+use direct_callee_pointer::{
+    apply_direct_callee_pointer_transitively, cast_direct_callee_pointer_arguments,
+};
 use format_inference::{
     apply_site_sensitive_translated_format_types, apply_variadic_printf_format_string_arg_types,
     collect_copy_sources, parse_printf_format_specifier_types,
@@ -384,6 +386,7 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     {
         changed = true;
     }
+    changed |= cast_direct_callee_pointer_arguments(func);
     changed |= strip_pointer_width_integer_copy_casts_in_stmts(
         &mut func.body,
         &func.locals,
@@ -1028,6 +1031,7 @@ mod tests {
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![param_ty],
                 param_surface_type_names: vec![surface.map(str::to_string)],
+                param_pointer_contracts: vec![false],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {
@@ -1059,6 +1063,7 @@ mod tests {
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown; fixed_arity],
                 param_surface_type_names: vec![None; fixed_arity],
+                param_pointer_contracts: vec![false; fixed_arity],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {
@@ -1181,6 +1186,63 @@ mod tests {
         assert!(apply_callsite_type_prop_pass(&mut func));
         assert_eq!(func.locals[0].ty, char_ptr);
         assert_eq!(func.params[0].ty, func.locals[0].ty);
+    }
+
+    #[test]
+    fn typed_object_pointer_call_contract_casts_scalar_actual_at_the_call() {
+        let mut scalar = unsigned_binding("scalar", 64, Some(NirBindingOrigin::Temp));
+        scalar.ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        scalar.surface_type_name = Some("long long".to_string());
+        let mut typed_target_summary = direct_pointer_summary(
+            "typed_target",
+            NirType::Ptr(Box::new(NirType::Unknown)),
+            Some("char **"),
+        );
+        typed_target_summary.prototype.param_pointer_contracts[0] = true;
+        let mut func = PreHirFunction {
+            name: "caller".to_string(),
+            locals: vec![scalar],
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "typed_target".to_string(),
+                    args: vec![PreHirExpr::Var("scalar".to_string())],
+                    ty: NirType::Unknown,
+                }),
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "typed_target".to_string(),
+                    args: vec![PreHirExpr::AddressOfGlobal("buffer".to_string())],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            callee_summaries: indexmap::IndexMap::from([(
+                "typed_target".to_string(),
+                typed_target_summary,
+            )]),
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &func.body[0] else {
+            panic!("first statement remains the typed call");
+        };
+        assert_eq!(
+            args[0],
+            PreHirExpr::Cast {
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                expr: Box::new(PreHirExpr::Var("scalar".to_string())),
+            }
+        );
+        let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &func.body[1] else {
+            panic!("second statement remains the typed call");
+        };
+        assert_eq!(args[0], PreHirExpr::AddressOfGlobal("buffer".to_string()));
+        assert!(
+            !apply_callsite_type_prop_pass(&mut func),
+            "call-boundary casts are idempotent"
+        );
     }
 
     #[test]
@@ -1879,6 +1941,7 @@ mod tests {
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
                         param_surface_type_names: vec![],
+                        param_pointer_contracts: vec![],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -2013,6 +2076,7 @@ mod tests {
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![NirType::Unknown; 4],
                         param_surface_type_names: vec![None; 4],
+                        param_pointer_contracts: vec![false; 4],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -2307,6 +2371,7 @@ mod tests {
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
                         param_surface_type_names: vec![],
+                        param_pointer_contracts: vec![],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -2386,6 +2451,7 @@ mod tests {
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![NirType::Unknown],
                         param_surface_type_names: vec![None],
+                        param_pointer_contracts: vec![false],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -2452,6 +2518,7 @@ mod tests {
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
                         param_surface_type_names: vec![],
+                        param_pointer_contracts: vec![],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {

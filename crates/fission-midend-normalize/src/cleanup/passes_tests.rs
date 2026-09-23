@@ -1945,6 +1945,7 @@ fn deindirect_resolves_const_address_to_symbol() {
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown],
                 param_surface_type_names: vec![None],
+                param_pointer_contracts: vec![false],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {
@@ -2010,6 +2011,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![],
                 param_surface_type_names: vec![],
+                param_pointer_contracts: vec![],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {
@@ -2086,6 +2088,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown],
                 param_surface_type_names: vec![None],
+                param_pointer_contracts: vec![false],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {

@@ -179,6 +179,12 @@ fn seed_callee_summaries_from_type_context(
         }
         let mut param_surface_type_names = prototype.param_surface_type_names.clone();
         param_surface_type_names.resize(prototype.max_arity, None);
+        let mut param_pointer_contracts = prototype
+            .param_pointer_pointees
+            .iter()
+            .map(Option::is_some)
+            .collect::<Vec<_>>();
+        param_pointer_contracts.resize(prototype.max_arity, false);
         let target = context
             .call_target_refs
             .values()
@@ -205,6 +211,7 @@ fn seed_callee_summaries_from_type_context(
                     return_lattice: NirType::Unknown,
                     param_lattices,
                     param_surface_type_names,
+                    param_pointer_contracts,
                     soundness: SummarySoundness::Optimistic,
                 },
                 effect_summary: CallEffectSummary {

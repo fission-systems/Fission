@@ -1005,8 +1005,15 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
         HirExpr::Var(name) => (name.clone(), 120),
         HirExpr::Const(value, ty) => (print_integer_const(*value, ty), 120),
         HirExpr::Cast { ty, expr } => {
-            let inner = print_expr_prec(expr, 110, depth + 1);
-            (format!("({}){}", print_type(ty), inner), 110)
+            if matches!(ty, NirType::Ptr(_))
+                && let HirExpr::Const(value, source_ty) = expr.as_ref()
+                && source_ty == ty
+            {
+                (format!("({})0x{:x}", print_type(ty), *value as u64), 110)
+            } else {
+                let inner = print_expr_prec(expr, 110, depth + 1);
+                (format!("({}){}", print_type(ty), inner), 110)
+            }
         }
         HirExpr::Unary { op, expr, .. } => {
             let symbol = match op {
@@ -1316,7 +1323,7 @@ fn print_integer_const(value: i64, ty: &NirType) -> String {
             // agent reading a lone unresolved pointer constant as plain
             // decimal (`5368878324`) has no way to tell it apart from an
             // ordinary integer value it should treat as data, not a location.
-            return format!("0x{:x}", value as u64);
+            return format!("({})0x{:x}", print_type(ty), value as u64);
         }
         return value.to_string();
     };
@@ -1657,22 +1664,33 @@ fn print_expr_prec_ctx(
                     return elided;
                 }
             }
-            // If casting from a pointer type to a non-pointer integer type (e.g. (uint)ptr),
-            // insert an intermediate (ulonglong) cast to avoid invalid C (pointer-to-int truncation
-            // without going through a pointer-sized integer is UB/error in strict C11).
-            let expr_is_ptr = ctx.expr_is_pointer(expr);
-            let target_is_int = !matches!(ty, NirType::Ptr(_));
-            let mut inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
-            if matches!(ty, NirType::Ptr(_)) {
-                inner = cast_pointer_vars_in_bitop_text(inner, ctx);
-            }
-            if expr_is_ptr && target_is_int {
-                (
-                    format!("({})(unsigned long long){}", print_type(ty), inner),
-                    110,
-                )
+            if matches!(ty, NirType::Ptr(_))
+                && let HirExpr::Const(value, source_ty) = expr.as_ref()
+                && source_ty == ty
+            {
+                let inner = ctx
+                    .global_names
+                    .and_then(|names| names.get(&(*value as u64)).cloned())
+                    .unwrap_or_else(|| format!("0x{:x}", *value as u64));
+                (format!("({}){inner}", print_type(ty)), 110)
             } else {
-                (format!("({}){}", print_type(ty), inner), 110)
+                // If casting from a pointer type to a non-pointer integer type (e.g. (uint)ptr),
+                // insert an intermediate (ulonglong) cast to avoid invalid C (pointer-to-int truncation
+                // without going through a pointer-sized integer is UB/error in strict C11).
+                let expr_is_ptr = ctx.expr_is_pointer(expr);
+                let target_is_int = !matches!(ty, NirType::Ptr(_));
+                let mut inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
+                if matches!(ty, NirType::Ptr(_)) {
+                    inner = cast_pointer_vars_in_bitop_text(inner, ctx);
+                }
+                if expr_is_ptr && target_is_int {
+                    (
+                        format!("({})(unsigned long long){}", print_type(ty), inner),
+                        110,
+                    )
+                } else {
+                    (format!("({}){}", print_type(ty), inner), 110)
+                }
             }
         }
         HirExpr::Unary { op, expr, .. } => {
@@ -2871,6 +2889,10 @@ mod tests {
             print_hir_function_with_global_names(&hir, &std::collections::HashMap::new());
 
         assert!(rendered.contains("0x140001040"), "{rendered}");
+        assert!(
+            rendered.contains("(uchar *)0x140001040"),
+            "pointer-typed integer constants need a C pointer cast: {rendered}"
+        );
         assert!(!rendered.contains("5368713280"), "{rendered}");
     }
 
@@ -2890,6 +2912,10 @@ mod tests {
         let rendered = print_hir_function(&hir);
 
         assert!(rendered.contains("0x140001040"), "{rendered}");
+        assert!(
+            rendered.contains("(uchar *)0x140001040"),
+            "pointer-typed integer constants need a C pointer cast: {rendered}"
+        );
         assert!(!rendered.contains("5368713280"), "{rendered}");
     }
 

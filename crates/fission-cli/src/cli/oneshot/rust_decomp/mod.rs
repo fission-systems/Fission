@@ -113,6 +113,26 @@ fn apply_output_filters(code: &str, config: RenderConfig) -> String {
     filtered
 }
 
+fn shared_fact_store(
+    binary: &LoadedBinary,
+    scan_signature_matches: bool,
+    seed_project_call_arities: bool,
+) -> fission_static::analysis::decomp::facts::FactStore {
+    let mut facts = if scan_signature_matches {
+        fission_static::analysis::decomp::facts::FactStore::from_binary(binary)
+    } else {
+        fission_static::analysis::decomp::facts::FactStore::from_binary_without_signature_matches(
+            binary,
+        )
+    };
+
+    if seed_project_call_arities {
+        fission_decompiler::facts::seed_whole_program_call_arity_facts(binary, &mut facts);
+    }
+
+    facts
+}
+
 fn filter_optional(code: Option<String>, config: RenderConfig) -> Option<String> {
     code.map(|c| apply_output_filters(&c, config))
 }
@@ -353,13 +373,16 @@ fn run_with_functions(
     // the binary, so rebuilding it per function (as `decompile_with_rust_
     // sleigh`'s convenience wrapper does) turned a `--all` batch of N
     // functions into N redundant whole-binary analyses.
-    let facts = Arc::new(if cli.decomp_all || functions.len() > 1 {
-        fission_static::analysis::decomp::facts::FactStore::from_binary(binary)
-    } else {
-        fission_static::analysis::decomp::facts::FactStore::from_binary_without_signature_matches(
-            binary,
-        )
-    });
+    // A project unit renders functions independently (and may do so in
+    // parallel), so call-site arity must be known before workers start. The
+    // existing whole-program analysis is intentionally limited to project
+    // assembly; ordinary one-function and batch renders keep their current
+    // cost profile.
+    let facts = Arc::new(shared_fact_store(
+        binary,
+        cli.decomp_all || functions.len() > 1,
+        cli.project && functions.len() > 1,
+    ));
     let mut results = if use_worker_fanout {
         if cli.verbose {
             eprintln!(
@@ -484,4 +507,161 @@ fn run_with_functions(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod project_call_arity_tests {
+    use super::shared_fact_store;
+    use fission_loader::loader::{
+        BinaryLoadSpec, DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo,
+    };
+
+    fn function(name: &str, address: u64, size: u64) -> FunctionInfo {
+        FunctionInfo {
+            name: name.to_string(),
+            address,
+            size,
+            is_export: false,
+            is_import: false,
+            ..Default::default()
+        }
+    }
+
+    fn binary_with_three_argument_internal_call(
+        callee_name: &str,
+    ) -> fission_loader::loader::LoadedBinary {
+        let mut code = vec![0x90; 0x21];
+        code[..21].copy_from_slice(&[
+            0xbf, 1, 0, 0, 0, // mov edi, 1
+            0xbe, 2, 0, 0, 0, // mov esi, 2
+            0xba, 3, 0, 0, 0, // mov edx, 3
+            0xe8, 0x0c, 0, 0, 0,    // call 0x1020
+            0xc3, // ret
+        ]);
+        code[0x20] = 0xc3;
+
+        LoadedBinaryBuilder::new(
+            "synthetic-call-arity.elf".to_string(),
+            DataBuffer::Heap(code),
+        )
+        .format("ELF")
+        .load_spec(BinaryLoadSpec::new(
+            "ELF",
+            0x1000,
+            "x86:LE:64:default",
+            "gcc",
+            "synthetic-test",
+        ))
+        .entry_point(0x1000)
+        .image_base(0x1000)
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 0x21,
+            file_offset: 0,
+            file_size: 0x21,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_functions([
+            function("caller", 0x1000, 0x15),
+            function(callee_name, 0x1020, 1),
+        ])
+        .build()
+        .expect("synthetic x86-64 binary builds")
+    }
+
+    #[test]
+    fn project_fact_store_seeds_arity_before_parallel_function_renders() {
+        let binary = binary_with_three_argument_internal_call("target_fn");
+        let facts = shared_fact_store(&binary, false, true);
+
+        let hints = facts
+            .structuring_hints(0x1020)
+            .expect("resolved internal call seeds a callee hint");
+        assert_eq!(hints.param_names, ["param_1", "param_2", "param_3"]);
+
+        let target = binary
+            .function_at_exact(0x1020)
+            .expect("synthetic callee exists");
+        let rendered = super::render_with_rust_sleigh(&binary, &facts, target, None, false)
+            .expect("synthetic callee decompiles with the seeded facts");
+        let signature = rendered
+            .code
+            .lines()
+            .find(|line| line.contains("target_fn(") && !line.starts_with("extern "))
+            .expect("rendered callee signature exists");
+        assert!(
+            (1..=3).all(|index| signature.contains(&format!("param_{index}"))),
+            "the project render should include all three call-site parameters: {signature}"
+        );
+    }
+
+    #[test]
+    fn non_project_fact_store_does_not_run_whole_program_arity_scan() {
+        let binary = binary_with_three_argument_internal_call("target_fn");
+        let facts = shared_fact_store(&binary, false, false);
+
+        assert!(facts.structuring_hints(0x1020).is_none());
+    }
+
+    #[test]
+    fn project_main_call_keeps_runtime_prototype() {
+        let binary = binary_with_three_argument_internal_call("main");
+        let facts = shared_fact_store(&binary, false, true);
+
+        let hints = facts
+            .structuring_hints(0x1020)
+            .expect("observed runtime call seeds the C entry prototype");
+        assert_eq!(hints.param_names, ["argc", "argv", "envp"]);
+        assert_eq!(hints.param_type_names[&0], "int");
+        assert_eq!(hints.param_type_names[&1], "char **");
+        assert_eq!(hints.param_type_names[&2], "char **");
+        assert_eq!(hints.return_type_name.as_deref(), Some("int"));
+
+        let entry = binary
+            .function_at_exact(0x1020)
+            .expect("synthetic C entry exists");
+        let rendered_entry = super::render_with_rust_sleigh(&binary, &facts, entry, None, false)
+            .expect("entry decompiles with the recovered runtime prototype");
+        let signature = rendered_entry
+            .code
+            .lines()
+            .find(|line| line.contains("main(") && !line.starts_with("extern "))
+            .expect("rendered entry signature exists");
+        assert!(signature.contains("int argc"), "{signature}");
+        assert!(signature.contains("char **"), "{signature}");
+        assert!(signature.contains("envp"), "{signature}");
+
+        let caller = binary
+            .function_at_exact(0x1000)
+            .expect("synthetic caller exists");
+        let rendered_caller = super::render_with_rust_sleigh(&binary, &facts, caller, None, false)
+            .expect("startup call site decompiles");
+        assert!(
+            rendered_caller.code.contains("main("),
+            "{}",
+            rendered_caller.code
+        );
+        assert!(
+            rendered_caller.code.contains("(void *)"),
+            "typed pointer parameters should convert scalar-shaped ABI actuals at the call only. code:\n{}\nNIR:\n{}\nHIR:\n{}",
+            rendered_caller.code,
+            rendered_caller.code_nir.as_deref().unwrap_or("<none>"),
+            rendered_caller.code_hir.as_deref().unwrap_or("<none>")
+        );
+
+        let project =
+            super::unit::assemble(&[rendered_caller.code.clone(), rendered_entry.code.clone()]);
+        assert!(
+            project.contains("int main(int argc, char ** argv, char ** envp);"),
+            "the project prototype should come from the typed definition:\n{project}"
+        );
+        assert!(
+            !project.contains("extern unsigned long long main();"),
+            "the stale inferred declaration must not shadow the project definition:\n{project}"
+        );
+    }
 }

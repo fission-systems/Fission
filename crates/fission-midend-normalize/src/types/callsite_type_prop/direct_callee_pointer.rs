@@ -6,6 +6,430 @@
 
 use super::*;
 
+/// Keep a typed direct-call pointer contract at the call boundary when the
+/// recovered actual is scalar-shaped. This leaves the caller binding and its
+/// other uses untouched, avoiding pointer-scale changes to local arithmetic.
+pub(super) fn cast_direct_callee_pointer_arguments(func: &mut PreHirFunction) -> bool {
+    let binding_types = func
+        .params
+        .iter()
+        .chain(&func.locals)
+        .map(|binding| (binding.name.clone(), binding.ty.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut binding_surface_types = func
+        .params
+        .iter()
+        .chain(&func.locals)
+        .filter_map(|binding| {
+            binding
+                .surface_type_name
+                .as_ref()
+                .map(|surface| (binding.name.clone(), surface.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut copy_sources = HashMap::default();
+    collect_copy_sources(&func.body, &mut copy_sources);
+    for alias in copy_sources.keys() {
+        let mut current = alias.as_str();
+        let mut visited = HashSet::default();
+        while visited.insert(current) {
+            if let Some(surface) = binding_surface_types.get(current).cloned() {
+                binding_surface_types.insert(alias.clone(), surface);
+                break;
+            }
+            let Some(source) = copy_sources.get(current) else {
+                break;
+            };
+            current = source;
+        }
+    }
+    let summaries = &func.callee_summaries;
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
+    cast_pointer_arguments_in_stmts(
+        &mut func.body,
+        &binding_types,
+        &binding_surface_types,
+        summaries,
+        pointer_bits,
+    )
+}
+
+fn cast_pointer_arguments_in_stmts(
+    stmts: &mut [PreHirStmt],
+    binding_types: &HashMap<String, NirType>,
+    binding_surface_types: &HashMap<String, String>,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                changed |= cast_pointer_arguments_in_lvalue(
+                    lhs,
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+                changed |= cast_pointer_arguments_in_expr(
+                    rhs,
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+                changed |= cast_pointer_arguments_in_expr(
+                    expr,
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::VaStart { va_list, .. } => {
+                changed |= cast_pointer_arguments_in_expr(
+                    va_list,
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= cast_pointer_arguments_in_stmts(
+                    std::rc::Rc::make_mut(body).as_mut_slice(),
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                changed |= cast_pointer_arguments_in_expr(
+                    cond,
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+                changed |= cast_pointer_arguments_in_stmts(
+                    std::rc::Rc::make_mut(then_body).as_mut_slice(),
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+                changed |= cast_pointer_arguments_in_stmts(
+                    std::rc::Rc::make_mut(else_body).as_mut_slice(),
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    changed |= cast_pointer_arguments_in_stmts(
+                        std::slice::from_mut(init.as_mut()),
+                        binding_types,
+                        binding_surface_types,
+                        summaries,
+                        pointer_bits,
+                    );
+                }
+                if let Some(cond) = cond {
+                    changed |= cast_pointer_arguments_in_expr(
+                        cond,
+                        binding_types,
+                        binding_surface_types,
+                        summaries,
+                        pointer_bits,
+                    );
+                }
+                if let Some(update) = update {
+                    changed |= cast_pointer_arguments_in_stmts(
+                        std::slice::from_mut(update.as_mut()),
+                        binding_types,
+                        binding_surface_types,
+                        summaries,
+                        pointer_bits,
+                    );
+                }
+                changed |= cast_pointer_arguments_in_stmts(
+                    std::rc::Rc::make_mut(body).as_mut_slice(),
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                changed |= cast_pointer_arguments_in_expr(
+                    expr,
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+                for case in cases {
+                    changed |= cast_pointer_arguments_in_stmts(
+                        std::rc::Rc::make_mut(&mut case.body).as_mut_slice(),
+                        binding_types,
+                        binding_surface_types,
+                        summaries,
+                        pointer_bits,
+                    );
+                }
+                changed |= cast_pointer_arguments_in_stmts(
+                    std::rc::Rc::make_mut(default).as_mut_slice(),
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::Return(None)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+    changed
+}
+
+fn cast_pointer_arguments_in_lvalue(
+    lvalue: &mut PreHirLValue,
+    binding_types: &HashMap<String, NirType>,
+    binding_surface_types: &HashMap<String, String>,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    match lvalue {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => cast_pointer_arguments_in_expr(
+            ptr,
+            binding_types,
+            binding_surface_types,
+            summaries,
+            pointer_bits,
+        ),
+        PreHirLValue::Index { base, index, .. } => {
+            cast_pointer_arguments_in_expr(
+                base,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            ) | cast_pointer_arguments_in_expr(
+                index,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            )
+        }
+        PreHirLValue::FieldAccess { base, .. } => cast_pointer_arguments_in_expr(
+            base,
+            binding_types,
+            binding_surface_types,
+            summaries,
+            pointer_bits,
+        ),
+    }
+}
+
+fn cast_pointer_arguments_in_expr(
+    expr: &mut PreHirExpr,
+    binding_types: &HashMap<String, NirType>,
+    binding_surface_types: &HashMap<String, String>,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    match expr {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => cast_pointer_arguments_in_expr(
+            expr,
+            binding_types,
+            binding_surface_types,
+            summaries,
+            pointer_bits,
+        ),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            cast_pointer_arguments_in_expr(
+                lhs,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            ) | cast_pointer_arguments_in_expr(
+                rhs,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            )
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            cast_pointer_arguments_in_expr(
+                cond,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            ) | cast_pointer_arguments_in_expr(
+                then_expr,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            ) | cast_pointer_arguments_in_expr(
+                else_expr,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            )
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            cast_pointer_arguments_in_expr(
+                base,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            ) | cast_pointer_arguments_in_expr(
+                index,
+                binding_types,
+                binding_surface_types,
+                summaries,
+                pointer_bits,
+            )
+        }
+        PreHirExpr::Call { target, args, .. } => {
+            let mut changed = false;
+            for arg in args.iter_mut() {
+                changed |= cast_pointer_arguments_in_expr(
+                    arg,
+                    binding_types,
+                    binding_surface_types,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+
+            let resolved = resolve_call_target_symbol_with_wrapper(target, summaries).0;
+            let Some(summary) = summaries.get(target).or_else(|| summaries.get(resolved)) else {
+                return changed;
+            };
+            if matches!(
+                summary.target.provenance,
+                CallTargetProvenance::Import | CallTargetProvenance::Intrinsic
+            ) {
+                return changed;
+            }
+
+            for (index, arg) in args.iter_mut().enumerate() {
+                if !matches!(
+                    summary.prototype.param_lattices.get(index),
+                    Some(NirType::Ptr(_))
+                ) {
+                    continue;
+                }
+                let Some(surface) = summary
+                    .prototype
+                    .param_surface_type_names
+                    .get(index)
+                    .and_then(Option::as_deref)
+                    .map(str::trim)
+                else {
+                    continue;
+                };
+                if !surface.contains('*')
+                    || surface.contains("(*")
+                    || !fission_signatures::pointer_surface_type_name_is_specific(surface)
+                {
+                    continue;
+                }
+
+                let actual_ty = prehir_expr_type(arg, binding_types);
+                let explicit_pointer_contract = summary
+                    .prototype
+                    .param_pointer_contracts
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false);
+                if matches!(actual_ty, NirType::Ptr(_))
+                    || !explicit_pointer_contract
+                        && matches!(arg, PreHirExpr::Var(name) if binding_surface_types.contains_key(name))
+                    || !matches!(actual_ty, NirType::Unknown)
+                        && !matches!(actual_ty, NirType::Int { bits, .. } if bits == pointer_bits)
+                {
+                    continue;
+                }
+
+                *arg = PreHirExpr::Cast {
+                    ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                    expr: Box::new(arg.clone()),
+                };
+                changed = true;
+            }
+            changed
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
+    }
+}
+
+fn prehir_expr_type(expr: &PreHirExpr, binding_types: &HashMap<String, NirType>) -> NirType {
+    match expr {
+        PreHirExpr::Var(name) => binding_types.get(name).cloned().unwrap_or(NirType::Unknown),
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
+            NirType::Ptr(Box::new(NirType::Unknown))
+        }
+        PreHirExpr::Const(_, ty)
+        | PreHirExpr::Unary { ty, .. }
+        | PreHirExpr::Binary { ty, .. }
+        | PreHirExpr::Select { ty, .. }
+        | PreHirExpr::Call { ty, .. }
+        | PreHirExpr::Load { ty, .. }
+        | PreHirExpr::FieldAccess { ty, .. }
+        | PreHirExpr::Cast { ty, .. } => ty.clone(),
+        PreHirExpr::PtrOffset { base, .. } => prehir_expr_type(base, binding_types),
+        PreHirExpr::Index { elem_ty, .. } => elem_ty.clone(),
+        PreHirExpr::AggregateCopy { .. } => NirType::Unknown,
+    }
+}
+
 fn binding_accepts_direct_callee_pointer(
     binding: &PreHirBinding,
     candidate: &NirType,

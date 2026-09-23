@@ -233,13 +233,20 @@ pub(crate) fn build_nir_type_context(
         }
     }
 
+    let mut call_prototype_summaries = build_nir_call_prototype_summaries(&all_target_refs, binary);
+    merge_fact_store_call_prototype_hints(
+        &mut call_prototype_summaries,
+        &all_target_refs,
+        binary,
+        fact_store,
+    );
     NirTypeContext {
         call_targets,
         call_target_refs: call_target_refs.clone(),
         iat_target_refs: iat_target_refs.clone(),
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
-        call_prototype_summaries: build_nir_call_prototype_summaries(&all_target_refs, binary),
+        call_prototype_summaries,
         call_result_is_source_value: build_nir_call_result_facts(&all_target_refs),
         call_param_rules: call_param_rules_for_binary(binary, &all_target_refs)
             .as_ref()
@@ -406,6 +413,75 @@ fn build_nir_call_prototype_summaries(
         }
     }
     summaries
+}
+
+/// Transport typed function facts to direct internal call sites. Function
+/// definitions already consume these `FactStore` hints; without the matching
+/// prototype summary, their callers still lower against a guessed register
+/// width and can emit an incompatible C argument expression.
+fn merge_fact_store_call_prototype_hints(
+    summaries: &mut HashMap<String, NirCallPrototypeSummary>,
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+) {
+    let mut targets =
+        call_target_refs
+            .iter()
+            .filter_map(|(&address, target_ref)| {
+                let function = binary.function_at_exact(address)?;
+                if function.is_import {
+                    return None;
+                }
+                let hints = fact_store.structuring_hints(address)?;
+                (!hints.param_type_names.is_empty() || hints.return_type_name.is_some())
+                    .then_some((address, target_ref.symbol.clone(), hints.clone()))
+            })
+            .collect::<Vec<_>>();
+    targets.sort_by_key(|(address, _, _)| *address);
+
+    for (_, symbol, hints) in targets {
+        let hinted_arity = hints
+            .param_type_names
+            .keys()
+            .map(|index| index.saturating_add(1))
+            .max()
+            .unwrap_or(0)
+            .max(hints.param_names.len());
+        let summary = summaries.entry(symbol).or_default();
+        summary.max_arity = summary.max_arity.max(hinted_arity);
+        summary
+            .param_pointer_pointees
+            .resize(summary.max_arity, None);
+        summary
+            .param_surface_type_names
+            .resize(summary.max_arity, None);
+
+        for (&index, type_name) in &hints.param_type_names {
+            let Some(surface) = summary.param_surface_type_names.get_mut(index) else {
+                continue;
+            };
+            if surface.is_none() && !type_name.trim().is_empty() {
+                *surface = Some(type_name.trim().to_string());
+            }
+            if type_name.trim().ends_with('*')
+                && let Some(pointee) = summary.param_pointer_pointees.get_mut(index)
+                && pointee.is_none()
+            {
+                // The surface declaration carries the exact pointer depth;
+                // this lattice slot only needs to mark the ABI value as a
+                // pointer for call-site lowering.
+                *pointee = Some(NirCallPointerPointee::Unknown);
+            }
+        }
+        if hints
+            .return_type_name
+            .as_deref()
+            .is_some_and(|name| name.trim().eq_ignore_ascii_case("void"))
+        {
+            summary.returns_void = true;
+        }
+    }
 }
 
 fn build_nir_import_call_prototype_summaries(
@@ -852,6 +928,30 @@ pub(crate) fn record_interprocedural_arity_facts(
     }
 }
 
+/// The standard narrow-character C program-entry prototypes supported by the
+/// runtime call-arity evidence. A two-argument call uses the hosted C form;
+/// the third `envp` argument is the documented implementation-defined
+/// environment extension used by common CRTs.
+fn c_main_runtime_hints(arity: usize) -> Option<NirFunctionHints> {
+    let (param_names, param_types) = match arity {
+        2 => (vec!["argc", "argv"], vec![(0, "int"), (1, "char **")]),
+        3 => (
+            vec!["argc", "argv", "envp"],
+            vec![(0, "int"), (1, "char **"), (2, "char **")],
+        ),
+        _ => return None,
+    };
+    Some(NirFunctionHints {
+        param_names: param_names.into_iter().map(str::to_string).collect(),
+        param_type_names: param_types
+            .into_iter()
+            .map(|(index, name)| (index, name.to_string()))
+            .collect(),
+        return_type_name: Some("int".to_string()),
+        ..Default::default()
+    })
+}
+
 /// Whole-program call-arity pre-analysis: decode every non-import function in
 /// the binary once, harvest each one's own real (pre-normalize) call-site
 /// argument counts via [`collect_raw_call_arities`], and record every
@@ -932,12 +1032,16 @@ pub fn seed_whole_program_call_arity_facts(binary: &LoadedBinary, fact_store: &m
     }
 
     for (callee_addr, arity) in merged {
-        // See `record_interprocedural_arity_facts` above for why `param_{i}`
-        // placeholders (not empty names) are required here.
-        let hints = NirFunctionHints {
-            param_names: (1..=arity).map(|i| format!("param_{i}")).collect(),
-            ..Default::default()
-        };
+        let hints = binary
+            .function_at_exact(callee_addr)
+            .filter(|function| !function.is_import && function.name.eq_ignore_ascii_case("main"))
+            .and_then(|_| c_main_runtime_hints(arity))
+            .unwrap_or_else(|| NirFunctionHints {
+                // See `record_interprocedural_arity_facts` above for why
+                // `param_{i}` placeholders must remain non-empty.
+                param_names: (1..=arity).map(|i| format!("param_{i}")).collect(),
+                ..Default::default()
+            });
         fact_store.record_structuring_hints(callee_addr, hints);
     }
 }
