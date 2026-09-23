@@ -36,10 +36,9 @@ that it writes the RDX argument slot but leaves the RCX and R8 slots untouched.
 The issue's `__mingw_setusermatherr` subcase is not a call-argument case: its
 actual bytes store RCX to `stUserMathErr`, then jump to an import thunk for
 `__setusermatherr` without staging an argument. NIR and pre-structuring output
-retain the global write, but default HIR currently omits it. That is a separate
-HIR effect-preservation defect and remains unresolved; do not manufacture a
-call argument or claim issue #69 is fully closed until that symptom is
-separately triaged.
+retain the global write, but default HIR omitted it. This separate HIR
+effect-preservation defect is addressed in the follow-up below; it must not be
+misrepresented as a recovered call argument.
 
 ## 3. Generality / Invariant Proof
 
@@ -115,4 +114,58 @@ Comparable coverage:
   - [x] Confirmed.
 - Issue status:
   - The live ABI-slot loss reproduced in multiple caller rows is fixed by this change.
-  - The issue's MinGW wrapper also has a measured HIR omission of its global callback store; it is not addressed by this call-recovery change and requires a separate owner-native investigation before closing the issue.
+  - The issue's MinGW wrapper also had a measured HIR omission of its global callback store; the separately measured presentation fix is documented below.
+
+## HIR Global-Write Follow-Up (2026-09-23)
+
+### Baseline and owner proof
+
+- Real binary observations before the follow-up: NIR retained
+  `stUserMathErr = f` / `handler = new_handler`, while default HIR dropped the
+  global store. The same shape appeared in `advanced_patterns` GCC O1 and O2,
+  `libc_types` GCC O2, and `math` GCC O2; the invalid-parameter-handler store
+  also disappeared in `advanced_patterns` O1 and `math` O2.
+- At `render/presentation/alias_propagation.rs`,
+  `collect_pure_var_copies` accepted any single-definition non-formal
+  destination copied from an unchanged formal. It therefore classified
+  `stUserMathErr = f` as a removable alias. `remove_copy_assigns` then deleted
+  the store before the global-aware dead-assignment pass could protect it.
+- The pass already receives global names at the layered-render boundary, but
+  alias propagation previously did not. This is a HIR presentation ownership
+  bug, not a builder, printer, or ABI-call-recovery defect.
+
+### Generalized fix and regression
+
+- Pass the existing global-name set into alias propagation and exclude global
+  destinations from the temporary-copy map. Copies into ordinary temporaries
+  remain eligible; global writes remain observable effects even if unread.
+- Strengthen `hir_presentation_keeps_a_write_to_a_global_nothing_reads` so the
+  global receives an unchanged formal. Before the fix it failed with an empty
+  assignment list; after the fix it passes through the full HIR presentation
+  pipeline.
+- No ISA, symbol, function, address, or corpus guard was added.
+
+### After evidence and validation
+
+- Release CLI direct-render checks now retain `stUserMathErr = f` in the
+  advanced-patterns GCC O1/O2, libc-types GCC O2, and math GCC O2 binaries;
+  `handler = new_handler` is also retained in math GCC O2. These are direct
+  real-binary observations, not a claim that an aggregate benchmark score
+  improved.
+- The external runner has no source row for `__mingw_setusermatherr` (it is a
+  CRT-generated helper), and rejects it as an unknown function. A no-cache
+  `kv_lookup` run in the same advanced-patterns corpus completed for nine
+  compiler variants, but all nine had a `[compile_error]` outcome. There is no
+  before-run for that adjacent row, and it does not measure this global store;
+  no score delta is claimed from it.
+- Validation: the strengthened global-store test and both alias-propagation
+  tests pass; `cargo check -p fission-pcode -p fission-decompiler`, native
+  release CLI build, Linux release bundle build, `cargo fmt --all --check`, and
+  `git diff --check` pass. The full `fission-pcode` run reports 1,117 passed,
+  1 skipped, and the same three known failures from the preceding validation:
+  `diamond_join_lowers_copy_through_join_read_as_select`,
+  `movzx_after_byte_add_zero_extends_unsigned`, and
+  `x64_byte_add_movzx_does_not_double_add_load`.
+- No new memory callback, cache flush, or per-operation runtime path was added;
+  the fix adds a global-name membership check only while considering a
+  candidate alias. No broad performance claim is made.

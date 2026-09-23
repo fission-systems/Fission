@@ -73,7 +73,7 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
     for _ in 0..16 {
         let mut changed = false;
         changed |= flatten_redundant_blocks(&mut func.body);
-        changed |= propagate_pure_var_aliases(func);
+        changed |= propagate_pure_var_aliases(func, globals);
         changed |= fold_self_update_after_seed(&mut func.body);
         changed |= fold_seed_transform(&mut func.body);
         // Shared `goto L; ... L: return e` → direct returns (enables if-else recovery).
@@ -1699,8 +1699,8 @@ mod tests {
         // values and would otherwise delete it from the emitted C.
         let mut func = HirFunction {
             name: "f".into(),
-            params: vec![],
-            locals: vec![local("x")],
+            params: vec![param("x")],
+            locals: vec![],
             return_type: int_ty(32, true),
             body: vec![
                 HirStmt::Assign {

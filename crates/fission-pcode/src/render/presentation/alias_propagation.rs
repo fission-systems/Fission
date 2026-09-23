@@ -12,7 +12,10 @@ use super::*;
 /// Copying a mutable register surface (`rbx = rax` after a call) must not
 /// rewrite later uses of `rbx` after `rax` is reassigned — that turns
 /// `rax = f(); rbx = rax; rax = g(); rax += rbx` into `rax += rax`.
-pub(super) fn propagate_pure_var_aliases(func: &mut HirFunction) -> bool {
+pub(super) fn propagate_pure_var_aliases(
+    func: &mut HirFunction,
+    globals: &HashSet<String>,
+) -> bool {
     let formal: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
     let mut def_counts = HashMap::new();
     count_defs_in_stmts(&func.body, &mut def_counts);
@@ -29,7 +32,13 @@ pub(super) fn propagate_pure_var_aliases(func: &mut HirFunction) -> bool {
 
     // Collect x → y for single-def pure var copies. Resolve short chains.
     let mut copy_map: HashMap<String, String> = HashMap::new();
-    collect_pure_var_copies(&func.body, &stable_formal, &def_counts, &mut copy_map);
+    collect_pure_var_copies(
+        &func.body,
+        &stable_formal,
+        &def_counts,
+        globals,
+        &mut copy_map,
+    );
     if copy_map.is_empty() {
         return false;
     }
@@ -107,7 +116,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!propagate_pure_var_aliases(&mut func));
+        assert!(!propagate_pure_var_aliases(&mut func, &HashSet::new()));
         assert!(matches!(
             &func.body[0],
             HirStmt::Assign {
@@ -136,7 +145,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(propagate_pure_var_aliases(&mut func));
+        assert!(propagate_pure_var_aliases(&mut func, &HashSet::new()));
         assert!(matches!(
             &func.body[0],
             HirStmt::Return(Some(HirExpr::Var(name))) if name == "param_1"
@@ -148,6 +157,7 @@ fn collect_pure_var_copies(
     stmts: &[HirStmt],
     formal: &HashSet<&str>,
     def_counts: &HashMap<String, usize>,
+    globals: &HashSet<String>,
     out: &mut HashMap<String, String>,
 ) {
     for stmt in stmts {
@@ -157,6 +167,9 @@ fn collect_pure_var_copies(
                 rhs: HirExpr::Var(source),
             } if name != source
                 && !formal.contains(name.as_str())
+                // A global store is an observable effect, not a temporary
+                // copy that presentation may erase after substituting uses.
+                && !globals.contains(name.as_str())
                 && formal.contains(source.as_str())
                 && def_counts.get(name.as_str()).copied().unwrap_or(0) == 1 =>
             {
@@ -165,15 +178,15 @@ fn collect_pure_var_copies(
                 out.insert(name.clone(), source.clone());
             }
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                collect_pure_var_copies(body, formal, def_counts, out)
+                collect_pure_var_copies(body, formal, def_counts, globals, out)
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_pure_var_copies(then_body, formal, def_counts, out);
-                collect_pure_var_copies(else_body, formal, def_counts, out);
+                collect_pure_var_copies(then_body, formal, def_counts, globals, out);
+                collect_pure_var_copies(else_body, formal, def_counts, globals, out);
             }
             HirStmt::For {
                 init, update, body, ..
@@ -183,6 +196,7 @@ fn collect_pure_var_copies(
                         std::slice::from_ref(i.as_ref()),
                         formal,
                         def_counts,
+                        globals,
                         out,
                     );
                 }
@@ -191,16 +205,17 @@ fn collect_pure_var_copies(
                         std::slice::from_ref(u.as_ref()),
                         formal,
                         def_counts,
+                        globals,
                         out,
                     );
                 }
-                collect_pure_var_copies(body, formal, def_counts, out);
+                collect_pure_var_copies(body, formal, def_counts, globals, out);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_pure_var_copies(&case.body, formal, def_counts, out);
+                    collect_pure_var_copies(&case.body, formal, def_counts, globals, out);
                 }
-                collect_pure_var_copies(default, formal, def_counts, out);
+                collect_pure_var_copies(default, formal, def_counts, globals, out);
             }
             _ => {}
         }
