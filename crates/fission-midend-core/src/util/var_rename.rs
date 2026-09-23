@@ -1,6 +1,6 @@
 //! Variable renaming helpers shared by normalize passes and preview type hints.
 
-use crate::ir::{HirExpr, HirLValue, HirStmt};
+use crate::ir::{HirExpr, HirLValue, HirStmt, NirType};
 
 pub fn rename_vars_in_stmts(body: &mut [HirStmt], renames: &[(String, String)]) {
     for stmt in body {
@@ -134,10 +134,11 @@ fn rename_var_name(name: &mut String, renames: &[(String, String)]) {
 /// `field_8`) must rewrite these already-built AST nodes directly, not just
 /// the type-level `StructField` annotation.
 ///
-/// `renames` is keyed by `(base_var_name, offset)`; only `FieldAccess` nodes
-/// whose `base` is exactly `HirExpr::Var(base_var_name)` are matched --
-/// deliberately narrow, matching the same single-level-of-indirection scope
-/// as the `StructField` overlay that motivates this rewrite.
+/// `renames` is keyed by `(base_var_name, offset)`. A base matches when it is
+/// a variable or a chain of pointer casts rooted directly at that variable.
+/// Other expressions (including pointer arithmetic and indexing) remain
+/// deliberately unmatched, preserving the same single-level-of-indirection
+/// scope as the `StructField` overlay that motivates this rewrite.
 pub fn rewrite_field_access_names_in_stmts(
     body: &mut [HirStmt],
     renames: &std::collections::HashMap<(String, u32), String>,
@@ -298,8 +299,16 @@ fn apply_field_rename(
     field_name: &mut String,
     renames: &std::collections::HashMap<(String, u32), String>,
 ) {
-    let HirExpr::Var(base_name) = base else {
-        return;
+    let mut base = base;
+    let base_name = loop {
+        match base {
+            HirExpr::Var(base_name) => break base_name,
+            HirExpr::Cast {
+                expr,
+                ty: NirType::Ptr(_),
+            } => base = expr,
+            _ => return,
+        }
     };
     if let Some(new_name) = renames.get(&(base_name.clone(), offset)) {
         *field_name = new_name.clone();

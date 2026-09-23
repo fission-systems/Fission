@@ -6,15 +6,13 @@ use super::typed_facts::{
 };
 /// Aggregate field layout recovery pass.
 ///
-/// After pointer-arithmetic recovery (`ptr_arith.rs`) has converted raw
-/// `IntAdd(ptr, k)` expressions into `PtrOffset { base: Var(x), offset: k }`
-/// nodes, this pass examines every `PtrOffset` whose base variable has type
-/// `Ptr(Aggregate { .. })` and accumulates the complete set of byte offsets
-/// that are actually accessed.  It then:
+/// This pass examines typed pointer accesses after pointer-arithmetic recovery,
+/// including constant-index accesses whose element index is converted to a
+/// byte offset, and accumulates the observed offsets for each pointer object.
+/// It then:
 ///
 /// 1. **Builds an offset → field-type map** for each aggregate variable by
-///    scanning `Load { ptr: PtrOffset }` and store-lvalue `Deref { ptr:
-///    PtrOffset }` sites.
+///    scanning pointer loads/stores and already-recovered field/index accesses.
 /// 2. **Annotates** the `NirType::Aggregate` with a sorted `Vec<StructField>`,
 ///    giving each field the name `field_{offset:x}` (e.g. `field_8`).
 /// 3. **Updates the printer** indirectly: `printer.rs` checks for a non-empty
@@ -24,13 +22,14 @@ use super::typed_facts::{
 ///
 /// The algorithm is purely data-flow / use-site driven:
 ///
-/// - Only constant-offset `PtrOffset` nodes are considered (variable offsets
-///   produce `Index` nodes, handled separately).
+/// - Only constant byte offsets feed a fixed aggregate shape. A runtime
+///   `Index` retains its stride for other analyses but is not treated as a
+///   fixed field.
 /// - When two accesses at the same offset have different type widths, the
 ///   wider type wins (conservative union-field model; no Rust-level union is
 ///   emitted, the smaller access simply becomes a nested cast at the use-site).
-/// - The pass is monotone: it only *adds* fields to a previously-empty
-///   `fields` vec.  Re-running is safe.
+/// - Existing field names, offsets, and known types are preserved; discovered
+///   access types fill only matching `Unknown` fields. Re-running is safe.
 ///
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use crate::prelude::*;
@@ -47,11 +46,14 @@ fn can_upgrade_binding_to_aggregate(
     let NirType::Ptr(inner) = &binding.ty else {
         return false;
     };
-    if matches!(
-        inner.as_ref(),
-        NirType::Unknown | NirType::Aggregate { .. } | NirType::Int { bits: 8 | 16, .. }
-    ) {
-        return true;
+    match inner.as_ref() {
+        NirType::Unknown | NirType::Int { bits: 8 | 16, .. } => return true,
+        // Keep a populated aggregate's field identities and trusted types.
+        // `update_binding` below can still refine its Unknown fields from the
+        // observed access widths at matching byte offsets.
+        NirType::Aggregate { fields, .. } if fields.is_empty() => return true,
+        NirType::Aggregate { .. } => return false,
+        _ => {}
     }
     // A homogeneous scalar array can expose several constant offsets and
     // must remain `T *`. Distinct access widths at those offsets cannot be
@@ -157,23 +159,45 @@ pub fn apply_aggregate_fields_pass(func: &mut PreHirFunction) -> bool {
         if object_facts.shape.fields.is_empty() {
             return false;
         }
-        {
+        let shape_changed = {
             let NirType::Ptr(inner) = &mut binding.ty else {
                 return false;
             };
             let NirType::Aggregate { fields, .. } = inner.as_mut() else {
                 return false;
             };
-            if !fields.is_empty() {
-                return false; // already populated
+            if fields.is_empty() {
+                *fields = object_facts.shape.fields.clone();
+                true
+            } else {
+                let mut changed = false;
+                for observed in &object_facts.shape.fields {
+                    let Some(existing) = fields
+                        .iter_mut()
+                        .find(|field| field.offset == observed.offset)
+                    else {
+                        continue;
+                    };
+                    if existing.ty == NirType::Unknown && observed.ty != NirType::Unknown {
+                        existing.ty = observed.ty.clone();
+                        changed = true;
+                    }
+                }
+                changed
             }
-            *fields = object_facts.shape.fields.clone();
+        };
+        if !shape_changed {
+            return false;
         }
-        let named_fields = object_facts
-            .shape
-            .fields
-            .iter()
-            .any(|field| !field.name.starts_with("field_"));
+        let named_fields = match &binding.ty {
+            NirType::Ptr(inner) => match inner.as_ref() {
+                NirType::Aggregate { fields, .. } => {
+                    fields.iter().any(|field| !field.name.starts_with("field_"))
+                }
+                _ => false,
+            },
+            _ => false,
+        };
         if named_fields {
             add_typed_object_shape_refinements(1);
         }
@@ -736,6 +760,232 @@ mod tests {
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].offset, 4);
         assert_eq!(fields[1].offset, 8);
+    }
+
+    #[test]
+    fn aggregate_fields_refines_unknown_named_fields_from_access_widths() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "typed_fields".to_string(),
+            int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
+            params: vec![PreHirBinding {
+                name: "node".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 8,
+                    fields: vec![
+                        StructField {
+                            offset: 0,
+                            ty: NirType::Unknown,
+                            name: "flags".to_string(),
+                        },
+                        StructField {
+                            offset: 4,
+                            ty: NirType::Unknown,
+                            name: "value".to_string(),
+                        },
+                    ],
+                })),
+                surface_type_name: Some("ConfigNode *".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("node".to_string())),
+                    ty: u8_ty.clone(),
+                }),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Index {
+                        base: Box::new(PreHirExpr::Var("node".to_string())),
+                        index: Box::new(PreHirExpr::Const(
+                            1,
+                            NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
+                        )),
+                        elem_ty: u32_ty.clone(),
+                    },
+                    rhs: PreHirExpr::Const(0x1234_5678, u32_ty.clone()),
+                },
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer parameter");
+        };
+        let NirType::Aggregate { size, fields } = inner.as_ref() else {
+            panic!("expected aggregate parameter");
+        };
+        assert_eq!(*size, 8);
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].offset, 0);
+        assert_eq!(fields[0].name, "flags");
+        assert_eq!(fields[0].ty, u8_ty);
+        assert_eq!(fields[1].offset, 4);
+        assert_eq!(fields[1].name, "value");
+        assert_eq!(fields[1].ty, u32_ty);
+    }
+
+    #[test]
+    fn aggregate_fields_do_not_treat_dynamic_indices_as_fixed_fields() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "dynamic_index_is_not_a_field".to_string(),
+            params: vec![PreHirBinding {
+                name: "node".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 8,
+                    fields: vec![
+                        StructField {
+                            offset: 0,
+                            ty: NirType::Unknown,
+                            name: "flags".to_string(),
+                        },
+                        StructField {
+                            offset: 4,
+                            ty: NirType::Unknown,
+                            name: "value".to_string(),
+                        },
+                    ],
+                })),
+                surface_type_name: Some("ConfigNode *".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("node".to_string())),
+                    ty: u8_ty.clone(),
+                }),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Index {
+                        base: Box::new(PreHirExpr::Var("node".to_string())),
+                        index: Box::new(PreHirExpr::Var("i".to_string())),
+                        elem_ty: u32_ty,
+                    },
+                    rhs: PreHirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer parameter");
+        };
+        let NirType::Aggregate { fields, .. } = inner.as_ref() else {
+            panic!("expected aggregate parameter");
+        };
+        assert_eq!(fields[0].ty, u8_ty);
+        assert_eq!(fields[1].ty, NirType::Unknown);
+    }
+
+    #[test]
+    fn aggregate_fields_preserves_known_member_type_for_narrower_access() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "preserve_known_field".to_string(),
+            int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
+            params: vec![PreHirBinding {
+                name: "node".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 8,
+                    fields: vec![
+                        StructField {
+                            offset: 0,
+                            ty: u32_ty.clone(),
+                            name: "flags".to_string(),
+                        },
+                        StructField {
+                            offset: 4,
+                            ty: NirType::Unknown,
+                            name: "value".to_string(),
+                        },
+                    ],
+                })),
+                surface_type_name: Some("ConfigNode *".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::FieldAccess {
+                    base: Box::new(PreHirExpr::Var("node".to_string())),
+                    field_name: "flags".to_string(),
+                    offset: 0,
+                    ty: u8_ty,
+                }),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::FieldAccess {
+                        base: Box::new(PreHirExpr::Var("node".to_string())),
+                        field_name: "value".to_string(),
+                        offset: 4,
+                        ty: u32_ty.clone(),
+                    },
+                    rhs: PreHirExpr::Const(0x1234_5678, u32_ty.clone()),
+                },
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer parameter");
+        };
+        let NirType::Aggregate { fields, .. } = inner.as_ref() else {
+            panic!("expected aggregate parameter");
+        };
+        assert_eq!(fields[0].name, "flags");
+        assert_eq!(fields[0].ty, u32_ty);
+        assert_eq!(fields[1].name, "value");
+        assert_eq!(fields[1].ty, u32_ty);
     }
 
     #[test]

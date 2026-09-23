@@ -1048,6 +1048,56 @@ fn preview_type_hints_overlay_debug_struct_field_names_rewrites_body_field_acces
 }
 
 #[test]
+fn preview_type_hints_rewrites_field_access_through_pointer_cast() {
+    let int_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let pointer_ty = point_aggregate_binding().ty;
+    let mut func = HirFunction {
+        name: "read_point_y".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![point_aggregate_binding()],
+        locals: vec![],
+        return_type: int_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::FieldAccess {
+            base: Box::new(HirExpr::Cast {
+                expr: Box::new(HirExpr::Var("param_1".to_string())),
+                ty: pointer_ty,
+            }),
+            field_name: "field_4".to_string(),
+            offset: 4,
+            ty: int_ty,
+        }))],
+        ..Default::default()
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .struct_types
+        .insert("Point".to_string(), point_struct_type_hint());
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec!["p".to_string()],
+        param_type_names: HashMap::from([(0, "Point*".to_string())]),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
+        return_type_name: None,
+        register_local_names: HashMap::default(),
+        register_local_type_names: HashMap::default(),
+        ..Default::default()
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
+    assert_eq!(stats.debug_struct_field_hits, 2);
+
+    let HirStmt::Return(Some(HirExpr::FieldAccess { field_name, .. })) = &func.body[0] else {
+        panic!("expected Return(FieldAccess)");
+    };
+    assert_eq!(field_name, "y");
+}
+
+#[test]
 fn preview_type_hints_promotes_scalar_constant_index_to_debug_struct_field() {
     // Normalize may encode the second 32-bit field load as `Index(p, 1)`
     // while p is still inferred as `uint *`. Once the debug type proves that
