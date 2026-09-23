@@ -714,6 +714,7 @@ fn is_self_describing_c_type(base: &str) -> bool {
                     | "uint16_t"
                     | "uint32_t"
                     | "uint64_t"
+                    | "__int128"
                     | "int128"
                     | "undefined"
                     | "undefined1"
@@ -1379,6 +1380,8 @@ pub(crate) fn print_type(ty: &NirType) -> String {
             (32, true) => "int".to_string(),
             (64, false) => "unsigned long long".to_string(),
             (64, true) => "long long".to_string(),
+            (128, false) => "unsigned __int128".to_string(),
+            (128, true) => "__int128".to_string(),
             _ => format!("int{}", bits),
         },
         NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Unknown) => "void *".to_string(),
@@ -2542,6 +2545,47 @@ mod tests {
         assert!(rendered.contains("long double st0;"), "{rendered}");
         assert!(rendered.contains("(long double)1"), "{rendered}");
         assert!(!rendered.contains("float80"), "{rendered}");
+    }
+
+    #[test]
+    fn wide_128_bit_integer_uses_a_compilable_gnu_c_type() {
+        let wide = NirType::Int {
+            bits: 128,
+            signed: false,
+        };
+        let hir = HirFunction {
+            name: "wide_scalar".to_string(),
+            locals: vec![NirBinding {
+                name: "wide_value".to_string(),
+                ty: wide.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: wide,
+            body: vec![HirStmt::Return(Some(HirExpr::Var(
+                "wide_value".to_string(),
+            )))],
+            ..HirFunction::default()
+        };
+
+        assert_eq!(
+            print_type(&NirType::Int {
+                bits: 128,
+                signed: true,
+            }),
+            "__int128"
+        );
+        let rendered = print_hir_function(&hir);
+        assert!(
+            rendered.contains("unsigned __int128 wide_scalar(void)"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("unsigned __int128 wide_value;"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("\n    int128 wide_scalar"), "{rendered}");
     }
 
     #[test]

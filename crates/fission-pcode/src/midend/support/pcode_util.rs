@@ -98,21 +98,43 @@ pub(crate) fn pcode_output_type_from_size(opcode: PcodeOpcode, size: u32) -> Nir
             type_from_size(size, false)
         };
     }
-    type_from_size(
-        size,
-        matches!(
-            opcode,
-            PcodeOpcode::IntAdd
-                | PcodeOpcode::IntSub
-                | PcodeOpcode::IntMult
-                | PcodeOpcode::IntSDiv
-                | PcodeOpcode::IntSRem
-                | PcodeOpcode::IntSLess
-                | PcodeOpcode::IntSLessEqual
-                | PcodeOpcode::IntSExt
-                | PcodeOpcode::IntSRight
-        ),
-    )
+    let signed = matches!(
+        opcode,
+        PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::IntSRight
+    );
+    let integer_result = matches!(
+        opcode,
+        PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+    );
+    if size == 16 && integer_result {
+        NirType::Int { bits: 128, signed }
+    } else {
+        type_from_size(size, signed)
+    }
 }
 
 /// The C metatype an op-code's *operands* must have (Ghidra `TypeOp::metain`).

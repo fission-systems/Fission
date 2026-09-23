@@ -153,6 +153,198 @@ fn wide_register_subpiece_projects_exact_partial_lane_definition() {
 }
 
 #[test]
+fn wide_integer_op_uses_scalar_surface_type() {
+    let lhs = register(0x1200, 16);
+    let rhs = register(0x1300, 16);
+    let result = register(0x1400, 16);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::IntAnd, Some(result.clone()), vec![lhs, rhs]),
+            op(1, PcodeOpcode::Return, None, vec![result]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "wide_integer_op", 0x1000, &test_options())
+        .expect("render wide integer op");
+
+    assert!(
+        code.contains("typedef unsigned __int128 fission_agg16") && code.contains(" & "),
+        "opaque 128-bit operands must have a scalar bit-vector representation:\n{code}"
+    );
+    assert!(
+        !code.contains("typedef struct fission_agg16"),
+        "opaque 128-bit storage was still declared as a struct:\n{code}"
+    );
+    assert!(
+        !code
+            .lines()
+            .any(|line| line.contains("fission_agg16") && line.contains(" & ")),
+        "aggregate value used as an integer operand:\n{code}"
+    );
+}
+
+#[test]
+fn wide_register_lane_add_does_not_use_aggregate_rhs() {
+    let wide = register(0x1200, 16);
+    let lane = register(0x1200, 4);
+    let source = register(0x1300, 16);
+    let result = register(0x1500, 4);
+    let ram = |offset| Varnode {
+        space_id: 3,
+        offset,
+        size: 16,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut options = test_options();
+    options
+        .global_names
+        .insert(0x1400_1000, "wide_source_a".to_string());
+    options.global_sizes.insert(0x1400_1000, 16);
+    options
+        .global_names
+        .insert(0x1400_1010, "wide_source_b".to_string());
+    options.global_sizes.insert(0x1400_1010, 16);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(wide), vec![ram(0x1400_1000)]),
+            op(1, PcodeOpcode::Copy, Some(source), vec![ram(0x1400_1010)]),
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(result.clone()),
+                vec![lane, register(0x1300, 4)],
+            ),
+            op(3, PcodeOpcode::Return, None, vec![result]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "wide_lane_add", 0x1000, &options)
+        .expect("render wide lane add");
+
+    assert!(
+        code.lines().any(|line| {
+            line.contains(" + ")
+                && line.contains("(int)")
+                && line.contains("wide_source_a")
+                && line.contains("wide_source_b")
+        }),
+        "narrow integer aliases must be cast from the opaque 128-bit value at their use width:\n{code}"
+    );
+    assert!(
+        !code.contains("typedef struct fission_agg16"),
+        "opaque 128-bit storage was still declared as a struct:\n{code}"
+    );
+}
+
+#[test]
+fn wide_register_lane_projection_respects_target_endianness() {
+    for (is_big_endian, lane_offset, expected_shift) in [(false, 4, 32), (true, 0, 96)] {
+        let wide_a = register(0x1200, 16);
+        let wide_b = register(0x1300, 16);
+        let result = register(0x1500, 4);
+        let ram = |offset| Varnode {
+            space_id: 3,
+            offset,
+            size: 16,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut options = test_options();
+        options.is_big_endian = is_big_endian;
+        options
+            .global_names
+            .insert(0x1400_1000, "wide_source_a".to_string());
+        options.global_sizes.insert(0x1400_1000, 16);
+        options
+            .global_names
+            .insert(0x1400_1010, "wide_source_b".to_string());
+        options.global_sizes.insert(0x1400_1010, 16);
+        let pcode = pcode_function(vec![block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(wide_a), vec![ram(0x1400_1000)]),
+                op(1, PcodeOpcode::Copy, Some(wide_b), vec![ram(0x1400_1010)]),
+                op(
+                    2,
+                    PcodeOpcode::IntAdd,
+                    Some(result.clone()),
+                    vec![
+                        register(0x1200 + lane_offset, 4),
+                        register(0x1300 + lane_offset, 4),
+                    ],
+                ),
+                op(3, PcodeOpcode::Return, None, vec![result]),
+            ],
+        )]);
+
+        let code = render_mlil_preview(&pcode, "wide_lane_endian", 0x1000, &options)
+            .expect("render endian-aware wide lane add");
+
+        assert!(
+            code.contains(&format!(">> {expected_shift}")),
+            "expected {expected_shift}-bit projection for big_endian={is_big_endian}:\n{code}"
+        );
+        assert!(
+            code.contains("wide_source_a") && code.contains("wide_source_b"),
+            "lane projection must preserve each source object:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn opaque_wide_store_does_not_create_integer_lane_projection() {
+    let source = Varnode {
+        space_id: 3,
+        offset: 0x1400_1000,
+        size: 16,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let value = register(0x1200, 16);
+    let mut options = test_options();
+    options
+        .global_names
+        .insert(0x1400_1000, "wide_source".to_string());
+    options.global_sizes.insert(0x1400_1000, 16);
+    options
+        .global_names
+        .insert(0x1400_1020, "wide_destination".to_string());
+    options.global_sizes.insert(0x1400_1020, 16);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(value.clone()), vec![source]),
+            op(
+                1,
+                PcodeOpcode::Store,
+                None,
+                vec![constant_sized(3, 4), constant_sized(0x1400_1020, 8), value],
+            ),
+            op(2, PcodeOpcode::Return, None, vec![]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "opaque_wide_store", 0x1000, &options)
+        .expect("render aggregate-only store");
+
+    assert!(
+        code.contains("wide_destination = wide_source"),
+        "opaque wide copy/store should remain a whole-value transfer:\n{code}"
+    );
+    assert!(
+        !code.contains(">>") && !code.contains("(int)"),
+        "a whole-value store must not gain an integer lane projection:\n{code}"
+    );
+}
+
+#[test]
 fn scalar_ssa_piece_reassembly_preserves_adjacent_partial_register_definitions() {
     let low = register(0x1200, 4);
     let high = register(0x1204, 4);

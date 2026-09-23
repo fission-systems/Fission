@@ -549,6 +549,7 @@ const KNOWN_C_TYPE_NAMES: &[&str] = &[
     "uint16_t",
     "uint32_t",
     "uint64_t",
+    "__int128",
     "int128",
     "undefined",
     "undefined1",
@@ -1174,6 +1175,14 @@ fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>
         .collect();
     let fields = &fields;
     if fields.is_empty() {
+        if size == 16 {
+            // The empty aggregate is only an opaque 16-byte storage fallback,
+            // not a recovered C struct. A scalar bit-vector keeps integer
+            // p-code operators well-typed while the attributes preserve the
+            // byte alignment and aliasing expected of opaque memory storage.
+            return "typedef unsigned __int128 fission_agg16 __attribute__((aligned(1), may_alias));\n"
+                .to_string();
+        }
         return format!(
             "typedef struct fission_agg{size} {{ unsigned char bytes[{size}]; }} fission_agg{size};\n"
         );
@@ -2053,7 +2062,7 @@ mod global_decl_tests {
 
         assert!(
             rendered.starts_with(
-                "typedef struct fission_agg16 { unsigned char bytes[16]; } fission_agg16;\n\n"
+                "typedef unsigned __int128 fission_agg16 __attribute__((aligned(1), may_alias));\n\n"
             ),
             "{rendered}"
         );
@@ -2158,7 +2167,7 @@ mod global_decl_tests {
 
         assert!(
             rendered.starts_with(
-                "typedef struct fission_agg16 { unsigned char bytes[16]; } fission_agg16;\n"
+                "typedef unsigned __int128 fission_agg16 __attribute__((aligned(1), may_alias));\n"
             ),
             "{rendered}"
         );

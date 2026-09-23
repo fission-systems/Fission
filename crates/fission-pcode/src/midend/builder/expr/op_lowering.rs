@@ -111,6 +111,7 @@ impl<'a> PreviewBuilder<'a> {
                     .first()
                     .ok_or(MlilPreviewError::UnsupportedExprAddressMaterialization)?;
                 let expr = self.lower_varnode(input, visiting)?;
+                let expr = self.opaque_integer_operand_view(expr, input, op.opcode);
                 // Partial-register ZExt (`movzx r32, al` / `movzx r32, ax`) must keep a
                 // source-width truncation before widening. Prefer an explicit narrow cast
                 // plus AND mask so normalize cannot drop the low-byte lane when the parent
@@ -118,7 +119,7 @@ impl<'a> PreviewBuilder<'a> {
                 // Do not apply this to full-width 4→8 ZExt (ordinary zero-extend).
                 if input.size > 0 && input.size <= 2 && input.size < output.size {
                     let narrow_ty = type_from_size(input.size, false);
-                    let out_ty = type_from_size(output.size, false);
+                    let out_ty = pcode_output_type_from_size(op.opcode, output.size);
                     let bits = (input.size as u32).saturating_mul(8);
                     let mask = (1i64 << bits) - 1;
                     let truncated = PreHirExpr::Cast {
@@ -133,7 +134,7 @@ impl<'a> PreviewBuilder<'a> {
                     });
                 }
                 Ok(PreHirExpr::Cast {
-                    ty: type_from_size(output.size, false),
+                    ty: pcode_output_type_from_size(op.opcode, output.size),
                     expr: Box::new(expr),
                 })
             }
@@ -143,8 +144,17 @@ impl<'a> PreviewBuilder<'a> {
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprAddressMaterialization)?;
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
+                let expr = if op.opcode == PcodeOpcode::IntSExt {
+                    self.opaque_integer_operand_view(expr, &op.inputs[0], op.opcode)
+                } else {
+                    expr
+                };
                 Ok(PreHirExpr::Cast {
-                    ty: type_from_size(output.size, matches!(op.opcode, PcodeOpcode::IntSExt)),
+                    ty: if op.opcode == PcodeOpcode::IntSExt {
+                        pcode_output_type_from_size(op.opcode, output.size)
+                    } else {
+                        type_from_size(output.size, false)
+                    },
                     expr: Box::new(expr),
                 })
             }
@@ -290,12 +300,21 @@ impl<'a> PreviewBuilder<'a> {
             }
             PcodeOpcode::IntNegate | PcodeOpcode::BoolNegate | PcodeOpcode::Int2Comp => {
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
+                let expr = if matches!(op.opcode, PcodeOpcode::IntNegate | PcodeOpcode::Int2Comp) {
+                    self.opaque_integer_operand_view(expr, &op.inputs[0], op.opcode)
+                } else {
+                    expr
+                };
                 self.note_operand_metatypes(op.opcode, &[&expr]);
                 let output = op
                     .output
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
-                let ty = type_from_size(output.size, false);
+                let ty = if op.opcode == PcodeOpcode::BoolNegate {
+                    type_from_size(output.size, false)
+                } else {
+                    pcode_output_type_from_size(op.opcode, output.size)
+                };
                 let op = match op.opcode {
                     PcodeOpcode::IntNegate => PreHirUnaryOp::BitNot,
                     PcodeOpcode::BoolNegate => PreHirUnaryOp::Not,
@@ -499,6 +518,251 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Give an opaque wide value the scalar view required by an
+    /// integer p-code operand. `NirType::Aggregate { fields: [] }` is the
+    /// builder's byte-storage fallback; using its variable directly in C
+    /// arithmetic would apply an operator to a struct rather than to
+    /// the represented bits.
+    fn opaque_integer_operand_view(
+        &self,
+        expr: PreHirExpr,
+        input: &Varnode,
+        opcode: PcodeOpcode,
+    ) -> PreHirExpr {
+        let Some(meta) = pcode_input_metatype(opcode) else {
+            return expr;
+        };
+        if matches!(meta, InputMetatype::Float) || input.is_constant {
+            return expr;
+        }
+        let PreHirExpr::Var(expr_name) = &expr else {
+            return expr;
+        };
+
+        let global_input = if is_register_space_id(input.space_id) {
+            self.opaque_global_source_lane(input)
+        } else if self.opaque_global_containing(input).is_some()
+            || !is_unique_space_id(input.space_id)
+        {
+            Some(input.clone())
+        } else {
+            None
+        };
+        if let Some(global_input) = global_input
+            && let Some((name, base, size)) = self.opaque_global_containing(&global_input)
+            && (*expr_name == name
+                || self
+                    .options
+                    .global_names
+                    .get(&global_input.offset)
+                    .is_some_and(|name| name == expr_name)
+                || *expr_name == format!("DAT_{:x}", global_input.offset)
+                || *expr_name == format!("tmp_{:x}", global_input.offset))
+        {
+            return Self::opaque_integer_scalar_view(
+                PreHirExpr::Var(name),
+                global_input.offset.saturating_sub(base),
+                size,
+                input.size,
+                meta,
+                self.options.is_big_endian,
+            )
+            .unwrap_or(expr);
+        }
+
+        let name = expr_name.clone();
+        let Some(size) = self.opaque_aggregate_binding_size(&name) else {
+            return expr;
+        };
+        let Some(base) = self.opaque_aggregate_binding_base(&name, input, size) else {
+            return expr;
+        };
+        Self::opaque_integer_scalar_view(
+            expr,
+            input.offset.saturating_sub(base),
+            size,
+            input.size,
+            meta,
+            self.options.is_big_endian,
+        )
+        .unwrap_or_else(|| {
+            // Retain the original expression when the use cannot be
+            // represented as one aligned scalar lane.
+            PreHirExpr::Var(name)
+        })
+    }
+
+    fn opaque_global_containing(&self, input: &Varnode) -> Option<(String, u64, u32)> {
+        let input_end = input.offset.checked_add(u64::from(input.size))?;
+        let mut candidates = self
+            .options
+            .global_names
+            .iter()
+            .filter_map(|(base, name)| {
+                let size = u32::try_from(*self.options.global_sizes.get(base)?).ok()?;
+                if size != 16 {
+                    return None;
+                }
+                let end = base.checked_add(u64::from(size))?;
+                (input.offset >= *base && input_end <= end).then(|| (name.clone(), *base, size))
+            })
+            .collect::<Vec<_>>();
+        // Prefer the narrowest containing object; ties are deterministic by
+        // address/name so duplicate-symbol maps cannot change the rendering.
+        candidates.sort_by(|lhs, rhs| {
+            lhs.2
+                .cmp(&rhs.2)
+                .then_with(|| lhs.1.cmp(&rhs.1))
+                .then_with(|| lhs.0.cmp(&rhs.0))
+        });
+        candidates.into_iter().next()
+    }
+
+    fn opaque_global_source_lane(&self, input: &Varnode) -> Option<Varnode> {
+        let (_site, def) = self.lookup_def_site(input)?;
+        let output = def.output.as_ref()?;
+        if !matches!(
+            def.opcode,
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+        ) || output.size < input.size
+            || !Self::register_key_covers(&VarnodeKey::from(output), &VarnodeKey::from(input))
+        {
+            return None;
+        }
+        let source = def.inputs.first()?;
+        if source.is_constant
+            || is_register_space_id(source.space_id)
+            || (is_unique_space_id(source.space_id)
+                && self.opaque_global_containing(source).is_none())
+        {
+            return None;
+        }
+
+        let output_end = output.offset.checked_add(u64::from(output.size))?;
+        let input_end = input.offset.checked_add(u64::from(input.size))?;
+        let byte_offset = if self.options.is_big_endian {
+            output_end.checked_sub(input_end)?
+        } else {
+            input.offset.checked_sub(output.offset)?
+        };
+        let input_size = u64::from(input.size);
+        let source_size = u64::from(source.size);
+        if byte_offset.checked_add(input_size)? > source_size {
+            return None;
+        }
+        let source_offset = if self.options.is_big_endian {
+            source_size.checked_sub(byte_offset.checked_add(input_size)?)?
+        } else {
+            byte_offset
+        };
+        let address = source.offset.checked_add(source_offset)?;
+        Some(Varnode {
+            space_id: source.space_id,
+            offset: address,
+            size: input.size,
+            is_constant: false,
+            constant_val: 0,
+        })
+    }
+
+    fn opaque_aggregate_binding_size(&self, name: &str) -> Option<u32> {
+        let opaque_size = |ty: &NirType| match ty {
+            NirType::Aggregate { size: 16, fields } if fields.is_empty() => Some(16),
+            _ => None,
+        };
+        self.params
+            .values()
+            .find(|binding| binding.name == name)
+            .and_then(|binding| opaque_size(&binding.ty))
+            .or_else(|| {
+                self.locals
+                    .values()
+                    .find(|slot| slot.name == name)
+                    .and_then(|slot| opaque_size(&slot.ty))
+            })
+            .or_else(|| {
+                self.temps
+                    .values()
+                    .find(|binding| binding.name == name)
+                    .and_then(|binding| opaque_size(&binding.ty))
+            })
+    }
+
+    fn opaque_aggregate_binding_base(&self, name: &str, input: &Varnode, size: u32) -> Option<u64> {
+        if input.size == size {
+            return Some(input.offset);
+        }
+        let input_end = input.offset.checked_add(u64::from(input.size))?;
+        let mut candidates = self
+            .materialized_vns
+            .iter()
+            .filter_map(|(key, binding_name)| {
+                let varnode = &key.varnode;
+                if binding_name != name
+                    || varnode.space_id != input.space_id
+                    || varnode.is_constant
+                    || varnode.size != size
+                {
+                    return None;
+                }
+                let end = varnode.offset.checked_add(u64::from(varnode.size))?;
+                (varnode.offset <= input.offset && input_end <= end).then_some(varnode.offset)
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates.dedup();
+        // The nearest enclosing materialized value is the narrowest known
+        // storage owner for this alias.
+        candidates.into_iter().max()
+    }
+
+    fn opaque_integer_scalar_view(
+        base: PreHirExpr,
+        byte_offset: u64,
+        aggregate_size: u32,
+        lane_size: u32,
+        meta: InputMetatype,
+        is_big_endian: bool,
+    ) -> Option<PreHirExpr> {
+        let bits = lane_size.checked_mul(8)?;
+        if aggregate_size != 16
+            || !matches!(lane_size, 1 | 2 | 4 | 8 | 16)
+            || byte_offset % u64::from(lane_size) != 0
+            || byte_offset.checked_add(u64::from(lane_size))? > u64::from(aggregate_size)
+        {
+            return None;
+        }
+        let bit_offset = if is_big_endian {
+            u64::from(aggregate_size).checked_sub(byte_offset.checked_add(u64::from(lane_size))?)?
+        } else {
+            byte_offset
+        };
+        if lane_size == aggregate_size && bit_offset == 0 {
+            return Some(base);
+        }
+        let scalar = if bit_offset == 0 {
+            base
+        } else {
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(base),
+                rhs: Box::new(PreHirExpr::Const(
+                    i64::try_from(bit_offset.checked_mul(8)?).ok()?,
+                    type_from_size(4, false),
+                )),
+                ty: NirType::Int {
+                    bits: 128,
+                    signed: false,
+                },
+            }
+        };
+        let signed = matches!(meta, InputMetatype::Signed);
+        Some(PreHirExpr::Cast {
+            ty: NirType::Int { bits, signed },
+            expr: Box::new(scalar),
+        })
+    }
+
     pub(in crate::midend) fn lower_binary_op(
         &mut self,
         op: &PcodeOp,
@@ -520,7 +784,10 @@ impl<'a> PreviewBuilder<'a> {
                 .output
                 .as_ref()
                 .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
-            return Ok(PreHirExpr::Const(0, type_from_size(output.size, false)));
+            return Ok(PreHirExpr::Const(
+                0,
+                pcode_output_type_from_size(op.opcode, output.size),
+            ));
         }
         // x86 CDQ + IDIV: dividend is Piece(sign_fill(L), L). Use signed L alone.
         if matches!(op.opcode, PcodeOpcode::IntSRem | PcodeOpcode::IntSDiv)
@@ -556,6 +823,8 @@ impl<'a> PreviewBuilder<'a> {
         }
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
+        let lhs = self.opaque_integer_operand_view(lhs, &op.inputs[0], op.opcode);
+        let rhs = self.opaque_integer_operand_view(rhs, &op.inputs[1], op.opcode);
         self.note_operand_metatypes(op.opcode, &[&lhs, &rhs]);
         let (lhs, rhs) = if matches!(op.opcode, PcodeOpcode::IntLess | PcodeOpcode::IntLessEqual) {
             let bits = op.inputs[0].size.saturating_mul(8);
