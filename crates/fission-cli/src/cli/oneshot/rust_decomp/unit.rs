@@ -196,17 +196,14 @@ fn definition_line(body: &str) -> Option<&str> {
         .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with("//"))
 }
 
-/// The name a `extern <type> <name>(...);` declaration declares.
-///
-/// The parameter list is `(...)` -- "arity unknown" -- and used to be `()`,
-/// which said the same thing until C23 made it mean `(void)`. Matching only
-/// the old spelling silently stopped recognising these as externs, so the
-/// "the unit defines it, skip the extern" rule below never fired and the unit
-/// declared 60 of its own definitions a second time.
+/// The name a function-style `extern` declaration declares, whether its
+/// parameter list is typed or has unspecified arity. Function-pointer
+/// declarations are excluded because their first parenthesis opens the
+/// pointer declarator rather than the function's parameter list.
 fn extern_function_name(decl: &str) -> Option<&str> {
     let rest = decl.trim().strip_prefix("extern ")?;
     let open = rest.find('(')?;
-    if !(rest[open..].starts_with("()") || rest[open..].starts_with("(...)")) {
+    if rest[open..].starts_with("(*") {
         return None;
     }
     identifier_before(&rest[..open])
@@ -289,6 +286,28 @@ mod tests {
         );
         // It still needs a declaration before the call -- the definition's own.
         assert!(unit.contains("void helper(void);"), "{unit}");
+    }
+
+    #[test]
+    fn unit_drops_a_typed_variadic_extern_when_the_function_is_defined() {
+        let unit = assemble(&[
+            "extern int fprintf(FILE* __stream, const char* __format, ...);\n\nvoid caller(void)\n{\n    fprintf(stderr, \"%d\", 1);\n}\n".to_string(),
+            "int fprintf(FILE* __stream, const char* __format, ...)\n{\n    return 0;\n}\n"
+                .to_string(),
+        ]);
+        assert!(
+            !unit.contains("extern int fprintf(FILE* __stream, const char* __format, ...);"),
+            "{unit}"
+        );
+        assert!(
+            unit.contains("int fprintf(FILE* __stream, const char* __format, ...);"),
+            "{unit}"
+        );
+    }
+
+    #[test]
+    fn typed_extern_function_pointer_is_not_mistaken_for_a_function_prototype() {
+        assert_eq!(extern_function_name("extern int (*callback)(int);"), None);
     }
 
     /// Two renders can disagree about an undefined callee's return type, and

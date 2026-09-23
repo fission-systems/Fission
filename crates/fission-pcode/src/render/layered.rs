@@ -13,6 +13,10 @@ use super::{
     print_hir_function_with_profile, print_type,
 };
 use fission_midend_core::ir::sanitize_c_identifier;
+use fission_signatures::{
+    ApiSignature, SIGNATURE_RESOURCES, canonical_variadic_runtime_symbol,
+    is_known_variadic_runtime_symbol, runtime_api_parameter_surface_type,
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub(crate) fn render_hir_function_with_global_decls(
@@ -93,6 +97,104 @@ mod layered_tests {
             render_called_extern("callee", &NirType::Float { bits: 64 }, None,),
             "extern double callee();\n"
         );
+    }
+
+    #[test]
+    fn known_variadic_api_extern_uses_its_fixed_prefix_and_file_surface() {
+        let declaration = render_called_extern(
+            "fprintf",
+            &NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            None,
+        );
+        assert_eq!(
+            declaration,
+            "extern int fprintf(FILE* __stream, const char* __format, ...);\n"
+        );
+        assert!(called_api_uses_file_surface("fprintf"));
+    }
+
+    #[test]
+    fn fprintf_keeps_each_argument_for_a_multi_conversion_format() {
+        // HIR stores the format pointer as a parameter rather than a literal;
+        // keep the conversion/variadic-operand count tied to the fixture.
+        let format = "%s %s %g %g %g";
+        let args = [
+            "stream",
+            "format",
+            "first_text",
+            "second_text",
+            "first_value",
+            "second_value",
+            "third_value",
+        ]
+        .into_iter()
+        .map(|name| HirExpr::Var(name.to_string()))
+        .collect::<Vec<_>>();
+        assert_eq!(format.matches('%').count(), args.len() - 2);
+        let params = [
+            ("stream", "FILE*"),
+            ("format", "const char*"),
+            ("first_text", "const char*"),
+            ("second_text", "const char*"),
+            ("first_value", "double"),
+            ("second_value", "double"),
+            ("third_value", "double"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, surface_type_name))| NirBinding {
+            name: name.to_string(),
+            ty: NirType::Unknown,
+            surface_type_name: Some(surface_type_name.to_string()),
+            origin: Some(NirBindingOrigin::ParamIndex(index)),
+            initializer: None,
+        })
+        .collect();
+        let hir = HirFunction {
+            name: "report_values".to_string(),
+            params,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "fprintf".to_string(),
+                args,
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            })],
+            ..HirFunction::default()
+        };
+
+        let rendered = render_hir_function_with_global_decls(&hir, &MlilPreviewOptions::default());
+        assert!(
+            rendered.contains("extern int fprintf(FILE* __stream, const char* __format, ...);"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "fprintf(stream, format, first_text, second_text, first_value, second_value, third_value);"
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn known_variadic_api_without_stream_keeps_its_typed_prefix() {
+        let declaration = render_called_extern(
+            "snprintf",
+            &NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            None,
+        );
+        assert_eq!(
+            declaration,
+            "extern int snprintf(char* __s, size_t __maxlen, const char* __format, ...);\n"
+        );
+        assert!(!called_api_uses_file_surface("snprintf"));
     }
 
     #[test]
@@ -467,7 +569,7 @@ fn render_hir_function_with_profile(
     let mut called_externs = collect_called_externs(&printable, &printable.name);
     let calls_stdio = called_externs
         .keys()
-        .any(|name| is_stdio_declared_symbol(name));
+        .any(|name| is_stdio_declared_symbol(name) || called_api_uses_file_surface(name));
     called_externs.retain(|name, _| {
         !decls.contains_key(name)
             && !opaque_pcodeop_stubs.contains_key(name)
@@ -716,6 +818,26 @@ fn is_stdio_declared_symbol(name: &str) -> bool {
     let canonical = canonical.strip_prefix("__imp_").unwrap_or(canonical);
     let canonical = canonical.trim_start_matches('_');
     matches!(canonical, "fopen" | "setvbuf")
+}
+
+fn known_variadic_api_signature(name: &str) -> Option<ApiSignature> {
+    if !is_known_variadic_runtime_symbol(name) {
+        return None;
+    }
+    let canonical = canonical_variadic_runtime_symbol(name);
+    SIGNATURE_RESOURCES
+        .api_signature(name)
+        .or_else(|| SIGNATURE_RESOURCES.api_signature(&canonical))
+        .cloned()
+}
+
+fn called_api_uses_file_surface(name: &str) -> bool {
+    known_variadic_api_signature(name).is_some_and(|signature| {
+        signature
+            .params
+            .iter()
+            .any(|param| surface_type_alias_name(&param.type_name) == Some("FILE"))
+    })
 }
 
 /// Names this function calls but does not define.
@@ -1014,14 +1136,42 @@ fn merge_opaque_pcodeop_return_type(existing: &NirType, next: &NirType) -> NirTy
 /// parameter before an ellipsis. The output target is C11 because the
 /// recompilation harness and generated corpus wrappers use that dialect.
 ///
-/// `declared` is the exception, and the only one: a signature somebody wrote
-/// down. The reason the list is left open is that call sites are the only
-/// evidence of arity and they disagree -- which stops being true the moment
-/// a person says what the arity is. Without this, a typed callee was typed
-/// only inside itself and its caller still declared it `(...)`.
+/// `declared` is authoritative when somebody wrote a signature down. Known
+/// variadic runtime APIs are the other exception: their bundled signature
+/// supplies a fixed prefix and the runtime-symbol metadata supplies `...`.
+/// Other callees keep the open list because call sites alone are not reliable
+/// declaration evidence.
 fn render_called_extern(target: &str, return_ty: &NirType, declared: Option<&String>) -> String {
     if let Some(declaration) = declared {
         return format!("extern {declaration};\n");
+    }
+    if let Some(signature) = known_variadic_api_signature(target) {
+        let mut params = signature
+            .params
+            .iter()
+            .enumerate()
+            .filter(|param| {
+                !param.1.type_name.trim().eq_ignore_ascii_case("void")
+                    || !param.1.name.trim().is_empty()
+            })
+            .map(|(index, param)| {
+                let ty = runtime_api_parameter_surface_type(target, index, &param.type_name);
+                let name = param.name.trim();
+                if name.is_empty() {
+                    ty
+                } else {
+                    format!("{ty} {name}")
+                }
+            })
+            .collect::<Vec<_>>();
+        if !params.is_empty() {
+            params.push("...".to_string());
+            return format!(
+                "extern {} {target}({});\n",
+                signature.return_type.trim(),
+                params.join(", ")
+            );
+        }
     }
     let return_type = opaque_pcodeop_return_type_name(return_ty);
     format!("extern {return_type} {target}();\n")

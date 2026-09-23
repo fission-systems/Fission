@@ -600,6 +600,14 @@ mod project_call_arity_tests {
     }
 
     #[test]
+    fn project_fact_store_does_not_learn_fixed_arity_for_variadic_api_names() {
+        let binary = binary_with_three_argument_internal_call("fprintf");
+        let facts = shared_fact_store(&binary, false, true);
+
+        assert!(facts.structuring_hints(0x1020).is_none());
+    }
+
+    #[test]
     fn non_project_fact_store_does_not_run_whole_program_arity_scan() {
         let binary = binary_with_three_argument_internal_call("target_fn");
         let facts = shared_fact_store(&binary, false, false);

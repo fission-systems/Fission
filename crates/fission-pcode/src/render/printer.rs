@@ -8,6 +8,7 @@ use super::{
     NirBindingOrigin, NirType, PrintProfile, expr_type,
 };
 use fission_midend_core::ir::sanitize_c_identifier;
+use fission_signatures::is_known_variadic_runtime_symbol;
 use std::collections::{HashMap, HashSet};
 
 const MAX_PRINT_STMT_DEPTH: usize = 512;
@@ -553,6 +554,9 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
                 out.push_str(", ");
             }
             out.push_str(&print_binding_declaration(param));
+        }
+        if is_known_variadic_runtime_symbol(&func.name) {
+            out.push_str(", ...");
         }
     }
     out.push_str(")\n{\n");
@@ -2479,6 +2483,57 @@ mod tests {
             bits: 64,
             signed: false,
         }
+    }
+
+    #[test]
+    fn known_variadic_runtime_definitions_print_fixed_prefix_and_ellipsis() {
+        let file_ptr = NirType::Ptr(Box::new(NirType::Unknown));
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: true,
+        }));
+        let hir = HirFunction {
+            name: "fprintf".to_string(),
+            params: vec![
+                NirBinding {
+                    name: "__stream".to_string(),
+                    ty: file_ptr.clone(),
+                    surface_type_name: Some("FILE*".to_string()),
+                    origin: Some(NirBindingOrigin::ParamIndex(0)),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "__format".to_string(),
+                    ty: char_ptr.clone(),
+                    surface_type_name: Some("const char*".to_string()),
+                    origin: Some(NirBindingOrigin::ParamIndex(1)),
+                    initializer: None,
+                },
+            ],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+        assert!(
+            rendered.starts_with("int fprintf(FILE* __stream, const char* __format, ...)\n"),
+            "{rendered}"
+        );
+
+        let ordinary = HirFunction {
+            name: "ordinary".to_string(),
+            params: hir.params.clone(),
+            return_type: hir.return_type.clone(),
+            ..HirFunction::default()
+        };
+        let ordinary_rendered = print_hir_function(&ordinary);
+        assert!(
+            ordinary_rendered.starts_with("int ordinary(FILE* __stream, const char* __format)\n"),
+            "{ordinary_rendered}"
+        );
     }
 
     #[test]

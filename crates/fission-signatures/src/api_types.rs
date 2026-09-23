@@ -178,6 +178,24 @@ pub fn printf_style_format_string_arg_index(name: &str) -> Option<usize> {
     }
 }
 
+/// Apply source-level qualifiers implied by a known runtime API contract to
+/// one stored parameter type. The packed GDT signature tables sometimes lose
+/// `const` from formatted-I/O declarations; C requires their format argument
+/// to be read-only, and definitions must agree with standard-library
+/// prototypes when emitted alongside the corresponding headers.
+pub fn runtime_api_parameter_surface_type(name: &str, index: usize, type_name: &str) -> String {
+    let type_name = type_name.trim();
+    let compact = type_name
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
+    if printf_style_format_string_arg_index(name) == Some(index) && compact == "char*" {
+        "const char*".to_string()
+    } else {
+        type_name.to_string()
+    }
+}
+
 pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
     printf_style_format_string_arg_index(name).is_some()
         || matches!(
@@ -547,6 +565,26 @@ mod tests {
         assert!(is_known_variadic_runtime_symbol("__imp___printf_chk"));
         assert!(is_known_variadic_runtime_symbol("error"));
         assert_eq!(printf_style_format_string_arg_index("fputs"), None);
+    }
+
+    #[test]
+    fn formatted_runtime_parameter_surface_is_const_without_changing_other_slots() {
+        assert_eq!(
+            runtime_api_parameter_surface_type("fprintf", 1, "char *"),
+            "const char*"
+        );
+        assert_eq!(
+            runtime_api_parameter_surface_type("printf", 0, "const char *"),
+            "const char *"
+        );
+        assert_eq!(
+            runtime_api_parameter_surface_type("fprintf", 0, "FILE*"),
+            "FILE*"
+        );
+        assert_eq!(
+            runtime_api_parameter_surface_type("fputs", 0, "char*"),
+            "char*"
+        );
     }
 
     #[test]

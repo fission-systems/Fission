@@ -21,7 +21,7 @@ use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
 use fission_signatures::win_types::WindowsStructures;
 use fission_signatures::{
     SIGNATURE_RESOURCES, is_known_variadic_runtime_symbol, pointer_surface_type_name_is_specific,
-    symbol_for_win_api_database_lookup,
+    runtime_api_parameter_surface_type, symbol_for_win_api_database_lookup,
 };
 use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
@@ -41,7 +41,10 @@ fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
     let mut param_type_names = HashMap::new();
     for (index, param) in matched_sig.params.iter().enumerate() {
         param_names.push(param.name.clone());
-        param_type_names.insert(index, param.type_name.clone());
+        param_type_names.insert(
+            index,
+            runtime_api_parameter_surface_type(name, index, &param.type_name),
+        );
     }
 
     Some(NirFunctionHints {
@@ -904,6 +907,9 @@ pub(crate) fn record_interprocedural_arity_facts(
         if arity == 0 {
             continue; // uninformative / can't distinguish from "not a real call"
         }
+        if is_known_variadic_runtime_symbol(&callee_name) {
+            continue; // an observed suffix is not a fixed-arity contract
+        }
         let Some(&callee_addr) = name_to_addr.get(callee_name.as_str()) else {
             continue; // unresolved symbol (external import, indirect, etc.)
         };
@@ -1017,6 +1023,9 @@ pub fn seed_whole_program_call_arity_facts(binary: &LoadedBinary, fact_store: &m
         for (callee_name, &arity) in arities {
             if arity == 0 {
                 continue; // uninformative / can't distinguish from "not a real call"
+            }
+            if is_known_variadic_runtime_symbol(callee_name) {
+                continue; // preserve the API's declared prefix and variadic tail
             }
             let Some(&callee_addr) = name_to_addr.get(callee_name.as_str()) else {
                 continue; // unresolved symbol (external import, indirect, etc.)
@@ -2679,6 +2688,37 @@ mod tests {
             })],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn observed_variadic_call_arity_does_not_seed_a_fixed_signature() {
+        let mut facts = FactStore::default();
+        let mut ctx = type_context_with_call_target(0x401000, "fprintf");
+        ctx.call_target_refs.insert(
+            0x401000,
+            CallTargetRef {
+                address: Some(0x401000),
+                symbol: "fprintf".to_string(),
+                provenance: CallTargetProvenance::Import,
+                edge_kind: CallEdgeKind::Import,
+                confidence: 255,
+            },
+        );
+        let raw_hir = raw_hir_calling("fprintf", 7);
+
+        record_interprocedural_arity_facts(&mut facts, &ctx, &raw_hir, 0x400000);
+
+        assert!(facts.structuring_hints(0x401000).is_none());
+
+        let mut unannotated_facts = FactStore::default();
+        let unannotated_ctx = type_context_with_call_target(0x401000, "fprintf");
+        record_interprocedural_arity_facts(
+            &mut unannotated_facts,
+            &unannotated_ctx,
+            &raw_hir,
+            0x400000,
+        );
+        assert!(unannotated_facts.structuring_hints(0x401000).is_none());
     }
 
     #[test]
