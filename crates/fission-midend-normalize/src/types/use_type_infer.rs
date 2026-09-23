@@ -1836,10 +1836,16 @@ fn restore_scalar_only_pointer_locals(
     constraints: &HashMap<String, Vec<UseConstraint>>,
     roles: &HashMap<String, BindingUseRole>,
     dependencies: &DefinitionDependencyMap,
+    scalar_induction: &super::type_infer::ScalarInductionEvidence,
 ) -> bool {
-    let pointer_compare_peers = super::type_infer::pointer_compare_peer_promotions(func);
+    let pointer_compare_peers =
+        super::type_infer::pointer_compare_peer_promotions_with_evidence(func, scalar_induction);
     let transitive_address_locals =
-        super::type_infer::transitive_address_pointer_locals_with_dependencies(func, dependencies);
+        super::type_infer::transitive_address_pointer_locals_with_evidence(
+            func,
+            dependencies,
+            scalar_induction,
+        );
     let scalar_ty = NirType::Int {
         bits: if func.is_64bit { 64 } else { 32 },
         signed: false,
@@ -1918,6 +1924,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
     // copy) turns up to 8 full-body walks per call into 1.
     let mut roles = HashMap::<String, BindingUseRole>::default();
     collect_binding_use_roles(&func.body, &mut roles);
+    let scalar_induction = super::type_infer::scalar_induction_evidence(func);
     let mut flow_changed = false;
     // Iterate to convergence (alias chains may require multiple rounds).
     for _ in 0..4 {
@@ -1962,8 +1969,13 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
         round_changed |= promote_store_value_only_aggregate_bindings(func, &constraints, &roles);
-        round_changed |=
-            restore_scalar_only_pointer_locals(func, &constraints, &roles, &dependencies);
+        round_changed |= restore_scalar_only_pointer_locals(
+            func,
+            &constraints,
+            &roles,
+            &dependencies,
+            &scalar_induction,
+        );
         round_changed |= narrow_byte_index_accumulators(func);
         if !round_changed {
             break;

@@ -26,15 +26,17 @@ use crate::{HashMap, HashSet};
 mod return_type;
 
 mod pointer_roles;
+pub(super) use pointer_roles::{
+    ScalarInductionEvidence, pointer_compare_peer_promotions,
+    pointer_compare_peer_promotions_with_evidence, scalar_induction_evidence,
+    transitive_address_pointer_locals, transitive_address_pointer_locals_with_dependencies,
+    transitive_address_pointer_locals_with_evidence,
+};
 use pointer_roles::{
     apply_address_contributor_param_pointer_types, apply_address_role_pointer_override_for_locals,
     apply_pointer_compare_peer_override_for_locals, apply_scalar_role_override_for_pointer_locals,
     apply_transitive_address_pointer_override_for_locals,
     promote_signed_neutral_word_load_pointees, rewrite_scalar_zero_alias_assignments,
-};
-pub(super) use pointer_roles::{
-    pointer_compare_peer_promotions, transitive_address_pointer_locals,
-    transitive_address_pointer_locals_with_dependencies,
 };
 /// Collect the first assignment expression type for each named variable in the
 /// body.  We store `(NirType, Option<String>)` where the Option carries the
@@ -235,6 +237,7 @@ pub fn apply_type_inference_pass(func: &mut PreHirFunction) -> bool {
     let mut defs: HashMap<String, DefEntry> = HashMap::default();
     scan_def_types(&func.body, &mut defs);
     let dependencies = DefinitionDependencyMap::build(&func.body);
+    let scalar_induction = scalar_induction_evidence(func);
     let mut known_binding_types = collect_known_binding_types(func);
     let mut changed = false;
 
@@ -291,9 +294,9 @@ pub fn apply_type_inference_pass(func: &mut PreHirFunction) -> bool {
     changed |= return_type::promote_sub32_abi_return_width(func, &defs, &known_binding_types);
     changed |= return_type::promote_narrow_returned_temps_for_abi_return(func);
     changed |= return_type::strip_zero_extended_casts_to_declared_return_width(func);
-    changed |= apply_scalar_role_override_for_pointer_locals(func);
+    changed |= apply_scalar_role_override_for_pointer_locals(func, &scalar_induction);
     changed |= apply_address_role_pointer_override_for_locals(func);
-    changed |= apply_pointer_compare_peer_override_for_locals(func);
+    changed |= apply_pointer_compare_peer_override_for_locals(func, &scalar_induction);
     changed |= rewrite_scalar_zero_alias_assignments(func);
     let address_binding_types = collect_known_binding_types(func);
     changed |= apply_address_contributor_param_pointer_types(
@@ -302,7 +305,11 @@ pub fn apply_type_inference_pass(func: &mut PreHirFunction) -> bool {
         &dependencies,
         &address_binding_types,
     );
-    changed |= apply_transitive_address_pointer_override_for_locals(func, &dependencies);
+    changed |= apply_transitive_address_pointer_override_for_locals(
+        func,
+        &dependencies,
+        &scalar_induction,
+    );
     changed |= promote_signed_neutral_word_load_pointees(func, &dependencies);
 
     changed
@@ -2120,5 +2127,111 @@ mod tests {
         assert!(super::apply_type_inference_pass(&mut func));
         assert!(matches!(func.params[0].ty, NirType::Ptr(_)));
         assert_eq!(func.params[1].ty, u64_ty);
+    }
+
+    #[test]
+    fn copied_negated_induction_offset_is_not_promoted_by_pointer_context() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let negated_address = PreHirExpr::Unary {
+            op: PreHirUnaryOp::Neg,
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sub,
+                lhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("buffer".into())),
+                    rhs: Box::new(PreHirExpr::Var("count".into())),
+                    ty: u64_ty.clone(),
+                }),
+                rhs: Box::new(PreHirExpr::Const(1, u64_ty.clone())),
+                ty: u64_ty.clone(),
+            }),
+            ty: u64_ty.clone(),
+        };
+        let body = vec![
+            make_assign("cursor", negated_address),
+            make_assign("cursor_alias", PreHirExpr::Var("cursor".into())),
+            make_assign(
+                "address",
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("buffer".into())),
+                    rhs: Box::new(PreHirExpr::Var("cursor_alias".into())),
+                    ty: u64_ty.clone(),
+                },
+            ),
+            make_assign(
+                "loaded",
+                PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("address".into())),
+                    ty: u32_ty,
+                },
+            ),
+            PreHirStmt::While {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Ne,
+                    lhs: Box::new(PreHirExpr::Var("cursor".into())),
+                    rhs: Box::new(PreHirExpr::Var("end".into())),
+                    ty: NirType::Bool,
+                },
+                body: vec![make_assign(
+                    "cursor",
+                    PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("cursor".into())),
+                        offset: -4,
+                    },
+                )]
+                .into(),
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_binding("cursor"),
+                make_binding("cursor_alias"),
+                make_binding("address"),
+                make_binding("loaded"),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.is_64bit = true;
+        func.params = vec![
+            make_param("buffer", ptr_ty.clone()),
+            make_param("count", u64_ty.clone()),
+            make_param("end", ptr_ty),
+        ];
+
+        super::apply_type_inference_pass(&mut func);
+
+        for name in ["cursor", "cursor_alias"] {
+            assert_eq!(
+                func.locals
+                    .iter()
+                    .find(|binding| binding.name == name)
+                    .unwrap()
+                    .ty,
+                u64_ty,
+                "{name} is the integer induction displacement, not an address"
+            );
+        }
+        assert!(matches!(
+            func.locals
+                .iter()
+                .find(|binding| binding.name == "address")
+                .unwrap()
+                .ty,
+            NirType::Ptr(_)
+        ));
     }
 }

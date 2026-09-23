@@ -9,6 +9,18 @@ struct BindingUseRole {
     address_pointee_type: Option<NirType>,
 }
 
+#[derive(Default)]
+pub(crate) struct ScalarInductionEvidence {
+    bindings: HashSet<String>,
+    address_uses: HashSet<String>,
+}
+
+impl ScalarInductionEvidence {
+    fn preserves_scalar_role(&self, name: &str) -> bool {
+        self.bindings.contains(name) && !self.address_uses.contains(name)
+    }
+}
+
 fn scalar_role_type_for_function(func: &PreHirFunction) -> NirType {
     NirType::Int {
         bits: if func.is_64bit { 64 } else { 32 },
@@ -16,7 +28,165 @@ fn scalar_role_type_for_function(func: &PreHirFunction) -> NirType {
     }
 }
 
-pub(super) fn apply_scalar_role_override_for_pointer_locals(func: &mut PreHirFunction) -> bool {
+/// Bindings defined by integer negation and then advanced as a scalar loop
+/// value can share a machine register with pointer-valued paths. Keep those
+/// bindings out of the pointer promotions that are based only on address
+/// provenance or pointer-comparison peers. Simple copies preserve the role.
+pub(crate) fn scalar_induction_evidence(func: &PreHirFunction) -> ScalarInductionEvidence {
+    fn negated_integer(expr: &PreHirExpr) -> bool {
+        match expr {
+            PreHirExpr::Cast { expr, .. } => negated_integer(expr),
+            PreHirExpr::Unary {
+                op: PreHirUnaryOp::Neg,
+                ty: NirType::Int { .. },
+                ..
+            } => true,
+            _ => false,
+        }
+    }
+
+    fn copied_variable(expr: &PreHirExpr) -> Option<&str> {
+        match expr {
+            PreHirExpr::Var(name) => Some(name),
+            PreHirExpr::Cast { expr, .. } => copied_variable(expr),
+            _ => None,
+        }
+    }
+
+    fn negative_step_update(name: &str, expr: &PreHirExpr) -> bool {
+        match expr {
+            PreHirExpr::PtrOffset { base, offset } => {
+                matches!(base.as_ref(), PreHirExpr::Var(base_name) if base_name == name)
+                    && *offset < 0
+            }
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sub,
+                lhs,
+                rhs,
+                ..
+            } => {
+                matches!(lhs.as_ref(), PreHirExpr::Var(lhs_name) if lhs_name == name)
+                    && matches!(rhs.as_ref(), PreHirExpr::Const(value, NirType::Int { .. }) if *value > 0)
+            }
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs,
+                rhs,
+                ..
+            } => {
+                matches!(lhs.as_ref(), PreHirExpr::Var(lhs_name) if lhs_name == name)
+                    && matches!(rhs.as_ref(), PreHirExpr::Const(value, NirType::Int { .. }) if *value < 0)
+            }
+            _ => false,
+        }
+    }
+
+    fn collect(
+        stmts: &[PreHirStmt],
+        negated: &mut HashSet<String>,
+        stepped: &mut HashSet<String>,
+        copies: &mut Vec<(String, String)>,
+    ) {
+        for stmt in stmts {
+            match stmt {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs,
+                } => {
+                    if negated_integer(rhs) {
+                        negated.insert(name.clone());
+                    }
+                    if negative_step_update(name, rhs) {
+                        stepped.insert(name.clone());
+                    }
+                    if let Some(source) = copied_variable(rhs) {
+                        copies.push((name.clone(), source.to_owned()));
+                    }
+                }
+                PreHirStmt::Block(body)
+                | PreHirStmt::While { body, .. }
+                | PreHirStmt::DoWhile { body, .. } => collect(body, negated, stepped, copies),
+                PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    collect(then_body, negated, stepped, copies);
+                    collect(else_body, negated, stepped, copies);
+                }
+                PreHirStmt::For {
+                    init, update, body, ..
+                } => {
+                    if let Some(init) = init {
+                        collect(
+                            std::slice::from_ref(init.as_ref()),
+                            negated,
+                            stepped,
+                            copies,
+                        );
+                    }
+                    if let Some(update) = update {
+                        collect(
+                            std::slice::from_ref(update.as_ref()),
+                            negated,
+                            stepped,
+                            copies,
+                        );
+                    }
+                    collect(body, negated, stepped, copies);
+                }
+                PreHirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        collect(&case.body, negated, stepped, copies);
+                    }
+                    collect(default, negated, stepped, copies);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut negated = HashSet::default();
+    let mut stepped = HashSet::default();
+    let mut copies = Vec::new();
+    collect(&func.body, &mut negated, &mut stepped, &mut copies);
+    let mut candidates: HashSet<String> = negated.intersection(&stepped).cloned().collect();
+    let mut copied_targets: HashMap<&str, Vec<&str>> = HashMap::default();
+    for (target, source) in &copies {
+        copied_targets
+            .entry(source.as_str())
+            .or_default()
+            .push(target.as_str());
+    }
+    let mut pending: Vec<String> = candidates.iter().cloned().collect();
+    let mut next = 0;
+    while next < pending.len() {
+        let source = pending[next].clone();
+        next += 1;
+        if let Some(targets) = copied_targets.get(source.as_str()) {
+            for target in targets {
+                if candidates.insert((*target).to_owned()) {
+                    pending.push((*target).to_owned());
+                }
+            }
+        }
+    }
+    let mut roles = HashMap::default();
+    collect_binding_use_roles_stmts(&func.body, &mut roles);
+    let address_uses = roles
+        .into_iter()
+        .filter_map(|(name, role)| role.address_use.then_some(name))
+        .collect();
+    ScalarInductionEvidence {
+        bindings: candidates,
+        address_uses,
+    }
+}
+
+pub(super) fn apply_scalar_role_override_for_pointer_locals(
+    func: &mut PreHirFunction,
+    scalar_induction: &ScalarInductionEvidence,
+) -> bool {
     let mut roles: HashMap<String, BindingUseRole> = HashMap::default();
     collect_binding_use_roles_stmts(&func.body, &mut roles);
     let scalar_ty = scalar_role_type_for_function(func);
@@ -29,7 +199,9 @@ pub(super) fn apply_scalar_role_override_for_pointer_locals(func: &mut PreHirFun
         let Some(role) = roles.get(&binding.name) else {
             continue;
         };
-        if role.strong_scalar_use && !role.address_use {
+        if (role.strong_scalar_use || scalar_induction.preserves_scalar_role(&binding.name))
+            && !role.address_use
+        {
             binding.ty = scalar_ty.clone();
             changed = true;
         }
@@ -85,6 +257,15 @@ pub(crate) fn transitive_address_pointer_locals_with_dependencies(
     func: &PreHirFunction,
     dependencies: &DefinitionDependencyMap,
 ) -> HashMap<String, NirType> {
+    let scalar_induction = scalar_induction_evidence(func);
+    transitive_address_pointer_locals_with_evidence(func, dependencies, &scalar_induction)
+}
+
+pub(crate) fn transitive_address_pointer_locals_with_evidence(
+    func: &PreHirFunction,
+    dependencies: &DefinitionDependencyMap,
+    scalar_induction: &ScalarInductionEvidence,
+) -> HashMap<String, NirType> {
     let pointer_roots: HashSet<String> = func
         .params
         .iter()
@@ -102,7 +283,9 @@ pub(crate) fn transitive_address_pointer_locals_with_dependencies(
     dependencies
         .address_contributors(&func.body, &pointer_roots)
         .into_iter()
-        .filter(|(name, _)| local_names.contains(name.as_str()))
+        .filter(|(name, _)| {
+            local_names.contains(name.as_str()) && !scalar_induction.preserves_scalar_role(name)
+        })
         .map(|(name, pointee)| (name, NirType::Ptr(Box::new(pointee))))
         .collect()
 }
@@ -110,8 +293,10 @@ pub(crate) fn transitive_address_pointer_locals_with_dependencies(
 pub(super) fn apply_transitive_address_pointer_override_for_locals(
     func: &mut PreHirFunction,
     dependencies: &DefinitionDependencyMap,
+    scalar_induction: &ScalarInductionEvidence,
 ) -> bool {
-    let contributors = transitive_address_pointer_locals_with_dependencies(func, dependencies);
+    let contributors =
+        transitive_address_pointer_locals_with_evidence(func, dependencies, scalar_induction);
     if contributors.is_empty() {
         return false;
     }
@@ -136,8 +321,11 @@ pub(super) fn apply_transitive_address_pointer_override_for_locals(
 /// A register can be reused for a computed end pointer and later compared with
 /// a cursor. Comparing with a known pointer is strong evidence that the peer is
 /// also a pointer of the same machine-word width.
-pub(super) fn apply_pointer_compare_peer_override_for_locals(func: &mut PreHirFunction) -> bool {
-    let promote = pointer_compare_peer_promotions(func);
+pub(super) fn apply_pointer_compare_peer_override_for_locals(
+    func: &mut PreHirFunction,
+    scalar_induction: &ScalarInductionEvidence,
+) -> bool {
+    let promote = pointer_compare_peer_promotions_with_evidence(func, scalar_induction);
     if promote.is_empty() {
         return false;
     }
@@ -155,9 +343,18 @@ pub(super) fn apply_pointer_compare_peer_override_for_locals(func: &mut PreHirFu
 }
 
 pub(crate) fn pointer_compare_peer_promotions(func: &PreHirFunction) -> HashMap<String, NirType> {
+    let scalar_induction = scalar_induction_evidence(func);
+    pointer_compare_peer_promotions_with_evidence(func, &scalar_induction)
+}
+
+pub(crate) fn pointer_compare_peer_promotions_with_evidence(
+    func: &PreHirFunction,
+    scalar_induction: &ScalarInductionEvidence,
+) -> HashMap<String, NirType> {
     let types = collect_known_binding_types(func);
     let mut promote: HashMap<String, NirType> = HashMap::default();
     collect_pointer_compare_peer_promotions(&func.body, &types, &mut promote);
+    promote.retain(|name, _| !scalar_induction.preserves_scalar_role(name));
     promote
 }
 
@@ -1740,6 +1937,16 @@ fn collect_binding_use_roles_stmts(
 
 fn collect_binding_use_roles_stmt(stmt: &PreHirStmt, roles: &mut HashMap<String, BindingUseRole>) {
     match stmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs),
+            rhs: PreHirExpr::PtrOffset { base, offset },
+        } if *offset < 0
+            && matches!(base.as_ref(), PreHirExpr::Var(base_name) if base_name == lhs) =>
+        {
+            // A negative self-offset update does not by itself prove that the
+            // register is a pointer base. Its other uses establish whether it
+            // is an address or a scalar induction value.
+        }
         PreHirStmt::Assign { lhs, rhs } => {
             collect_binding_use_roles_lvalue(lhs, roles);
             collect_binding_use_roles_expr(rhs, roles);
