@@ -4,16 +4,28 @@ use crate::HashSet;
 use crate::analysis::defuse::collect_expr_vars;
 use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
 
-/// Transfer summary for `live_in = uses_before_definition U (live_out - must_definitions)`.
+/// Transfer summary for structured backward liveness.
 ///
 /// The fields remain private so callers cannot manufacture a proof by combining
 /// unrelated name sets. Summaries are built from HIR structure and composed in
 /// execution order.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LivenessTransfer {
     uses_before_definition: HashSet<String>,
     must_definitions: HashSet<String>,
     may_diverge: bool,
+    may_fall_through: bool,
+}
+
+impl Default for LivenessTransfer {
+    fn default() -> Self {
+        Self {
+            uses_before_definition: HashSet::default(),
+            must_definitions: HashSet::default(),
+            may_diverge: false,
+            may_fall_through: true,
+        }
+    }
 }
 
 impl LivenessTransfer {
@@ -30,15 +42,24 @@ impl LivenessTransfer {
                 Self {
                     uses_before_definition: uses,
                     must_definitions,
-                    may_diverge: false,
+                    ..Self::default()
                 }
             }
-            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) => {
                 let mut uses = HashSet::default();
                 collect_expr_vars(expr, &mut uses);
                 Self {
                     uses_before_definition: uses,
-                    may_diverge: matches!(stmt, PreHirStmt::Return(_)),
+                    ..Self::default()
+                }
+            }
+            PreHirStmt::Return(Some(expr)) => {
+                let mut uses = HashSet::default();
+                collect_expr_vars(expr, &mut uses);
+                Self {
+                    uses_before_definition: uses,
+                    may_diverge: true,
+                    may_fall_through: false,
                     ..Self::default()
                 }
             }
@@ -50,10 +71,12 @@ impl LivenessTransfer {
                     ..Self::default()
                 }
             }
-            PreHirStmt::Return(None)
-            | PreHirStmt::Goto(_)
-            | PreHirStmt::Break
-            | PreHirStmt::Continue => Self {
+            PreHirStmt::Return(None) => Self {
+                may_diverge: true,
+                may_fall_through: false,
+                ..Self::default()
+            },
+            PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => Self {
                 may_diverge: true,
                 ..Self::default()
             },
@@ -70,15 +93,25 @@ impl LivenessTransfer {
                 let else_transfer = Self::for_stmts(else_body);
                 uses.extend(then_transfer.uses_before_definition.iter().cloned());
                 uses.extend(else_transfer.uses_before_definition.iter().cloned());
-                let must_definitions = then_transfer
-                    .must_definitions
-                    .intersection(&else_transfer.must_definitions)
-                    .cloned()
-                    .collect();
+                let must_definitions = match (
+                    then_transfer.may_fall_through,
+                    else_transfer.may_fall_through,
+                ) {
+                    (true, true) => then_transfer
+                        .must_definitions
+                        .intersection(&else_transfer.must_definitions)
+                        .cloned()
+                        .collect(),
+                    (true, false) => then_transfer.must_definitions.clone(),
+                    (false, true) => else_transfer.must_definitions.clone(),
+                    (false, false) => HashSet::default(),
+                };
                 Self {
                     uses_before_definition: uses,
                     must_definitions,
                     may_diverge: then_transfer.may_diverge || else_transfer.may_diverge,
+                    may_fall_through: then_transfer.may_fall_through
+                        || else_transfer.may_fall_through,
                 }
             }
             PreHirStmt::While { cond, body } => {
@@ -90,6 +123,7 @@ impl LivenessTransfer {
                     uses_before_definition: uses,
                     must_definitions: HashSet::default(),
                     may_diverge: body_transfer.may_diverge,
+                    may_fall_through: true,
                 }
             }
             PreHirStmt::DoWhile { body, cond } => {
@@ -100,6 +134,7 @@ impl LivenessTransfer {
                     uses_before_definition: cond_uses,
                     must_definitions: HashSet::default(),
                     may_diverge: false,
+                    may_fall_through: true,
                 })
             }
             PreHirStmt::For {
@@ -122,6 +157,7 @@ impl LivenessTransfer {
                     uses_before_definition: loop_uses,
                     must_definitions: HashSet::default(),
                     may_diverge: body_transfer.may_diverge,
+                    may_fall_through: true,
                 })
             }
             PreHirStmt::Switch {
@@ -141,13 +177,16 @@ impl LivenessTransfer {
                 }
                 let must_definitions = arms
                     .iter()
+                    .filter(|arm| arm.may_fall_through)
                     .map(|arm| arm.must_definitions.clone())
                     .reduce(|left, right| left.intersection(&right).cloned().collect())
                     .unwrap_or_default();
+                let may_fall_through = arms.iter().any(|arm| arm.may_fall_through);
                 Self {
                     uses_before_definition: uses,
                     must_definitions,
                     may_diverge: arms.iter().any(|arm| arm.may_diverge),
+                    may_fall_through,
                 }
             }
         }
@@ -164,7 +203,28 @@ impl LivenessTransfer {
         self.uses_before_definition.iter().map(String::as_str)
     }
 
+    pub(crate) fn may_fall_through(&self) -> bool {
+        self.may_fall_through
+    }
+
+    /// Apply this transfer to a known live-out set.
+    pub(crate) fn live_in_from(&self, live_out: &HashSet<String>) -> HashSet<String> {
+        let mut live_in = self.uses_before_definition.clone();
+        if !self.may_fall_through {
+            return live_in;
+        }
+        if self.may_diverge {
+            live_in.extend(live_out.iter().cloned());
+        } else {
+            live_in.extend(live_out.difference(&self.must_definitions).cloned());
+        }
+        live_in
+    }
+
     fn then(self, next: Self) -> Self {
+        if !self.may_fall_through {
+            return self;
+        }
         let mut uses = self.uses_before_definition;
         if self.may_diverge {
             uses.extend(next.uses_before_definition.iter().cloned());
@@ -187,6 +247,7 @@ impl LivenessTransfer {
             uses_before_definition: uses,
             must_definitions,
             may_diverge: self.may_diverge || next.may_diverge,
+            may_fall_through: self.may_fall_through && next.may_fall_through,
         }
     }
 }
@@ -266,5 +327,54 @@ mod tests {
 
         let transfer = LivenessTransfer::for_stmt(&stmt);
         assert!(transfer.uses_before_definition().any(|name| name == "cf"));
+    }
+
+    #[test]
+    fn returning_if_arms_stop_liveness_before_unreachable_tail() {
+        let stmt = PreHirStmt::If {
+            cond: var("condition"),
+            then_body: vec![PreHirStmt::Return(Some(var("then_value")))].into(),
+            else_body: vec![PreHirStmt::Return(Some(var("else_value")))].into(),
+        };
+        let transfer = LivenessTransfer::for_stmts(&[
+            stmt,
+            PreHirStmt::Return(Some(var("unreachable_value"))),
+        ]);
+        let live_out = ["after".to_string()].into_iter().collect();
+        let live_in = transfer.live_in_from(&live_out);
+
+        assert!(!transfer.may_fall_through());
+        assert!(
+            transfer
+                .uses_before_definition()
+                .any(|name| name == "then_value")
+        );
+        assert!(
+            transfer
+                .uses_before_definition()
+                .any(|name| name == "else_value")
+        );
+        assert!(
+            !transfer
+                .uses_before_definition()
+                .any(|name| name == "unreachable_value")
+        );
+        assert!(!live_in.contains("after"));
+    }
+
+    #[test]
+    fn returning_branch_keeps_live_out_for_fallthrough_sibling() {
+        let stmt = PreHirStmt::If {
+            cond: var("condition"),
+            then_body: vec![PreHirStmt::Return(Some(var("return_value")))].into(),
+            else_body: Vec::new().into(),
+        };
+        let transfer = LivenessTransfer::for_stmt(&stmt);
+        let live_out = ["after".to_string()].into_iter().collect();
+        let live_in = transfer.live_in_from(&live_out);
+
+        assert!(transfer.may_fall_through());
+        assert!(live_in.contains("after"));
+        assert!(live_in.contains("return_value"));
     }
 }

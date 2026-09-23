@@ -6,26 +6,6 @@
 
 use super::*;
 
-fn tighten_binding_from_direct_callee_pointer(
-    binding: &mut PreHirBinding,
-    candidate: &NirType,
-    pointer_bits: u32,
-) -> bool {
-    if tighten_binding_ty(binding, candidate) {
-        return true;
-    }
-    if binding.surface_type_name.is_some() || !matches!(candidate, NirType::Ptr(_)) {
-        return false;
-    }
-    match binding.ty {
-        NirType::Int { bits, .. } if bits == pointer_bits => {
-            binding.ty = candidate.clone();
-            true
-        }
-        _ => false,
-    }
-}
-
 fn binding_accepts_direct_callee_pointer(
     binding: &PreHirBinding,
     candidate: &NirType,
@@ -263,7 +243,7 @@ pub(super) fn apply_direct_callee_pointer_transitively(
         if let Some(binding) = binding_by_name_mut(&mut func.locals, name)
             .or_else(|| binding_by_name_mut(&mut func.params, name))
         {
-            changed |= tighten_binding_from_direct_callee_pointer(binding, param_ty, pointer_bits);
+            changed |= tighten_binding_ty_from_pointer_contract(binding, param_ty, pointer_bits);
             if binding.surface_type_name.is_none()
                 && let Some(surface) = surface_type_name
             {

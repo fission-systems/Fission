@@ -48,7 +48,8 @@ mod format_inference;
 pub use super::api_signature::{api_signature, is_known_api_signature, win_type_name_to_nir};
 use super::api_signature::{api_signature_via_import_aliases, resolve_return_ty};
 use call_arity::{
-    drop_void_call_receivers, prune_known_api_call_args_stmts, prune_self_call_args_stmts,
+    drop_unused_call_receivers, drop_void_call_receivers, prune_known_api_call_args_stmts,
+    prune_self_call_args_stmts,
 };
 use call_target_surface::{
     apply_api_surface_type_transitively, apply_binding_surface_renames, build_call_target_rewrites,
@@ -71,7 +72,8 @@ use fission_midend_core::wave_stats::{
 use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_signatures::{
     canonical_variadic_runtime_symbol, is_known_variadic_runtime_symbol,
-    printf_style_format_string_arg_index, type_name_is_informative,
+    pointer_surface_type_name_is_specific, printf_style_format_string_arg_index,
+    type_name_is_informative,
 };
 
 /// Attempt to tighten a binding's type using a new candidate.
@@ -97,6 +99,28 @@ fn tighten_binding_ty(binding: &mut PreHirBinding, candidate: &NirType) -> bool 
     }
 }
 
+/// Apply a vetted pointer contract to a binding whose current integer type is
+/// only the machine-width representation of a pointer value.
+pub(super) fn tighten_binding_ty_from_pointer_contract(
+    binding: &mut PreHirBinding,
+    candidate: &NirType,
+    pointer_bits: u32,
+) -> bool {
+    if tighten_binding_ty(binding, candidate) {
+        return true;
+    }
+    if binding.surface_type_name.is_some() || !matches!(candidate, NirType::Ptr(_)) {
+        return false;
+    }
+    match binding.ty {
+        NirType::Int { bits, .. } if bits == pointer_bits => {
+            binding.ty = candidate.clone();
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Apply call-site type propagation to a function.
 ///
 /// Collects all `Call` expressions, looks up each target in the API type provider, and
@@ -106,6 +130,15 @@ fn tighten_binding_ty(binding: &mut PreHirBinding, candidate: &NirType) -> bool 
 pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     // Build a lookup map from binding name to index in func.locals / func.params.
     let mut changed = false;
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
+    let callee_summaries = func.callee_summaries.clone();
+    let void_receivers = drop_void_call_receivers(&mut func.body, &callee_summaries);
+    let unused_receivers = drop_unused_call_receivers(func);
+    let dropped_receivers = void_receivers + unused_receivers;
+    if dropped_receivers > 0 {
+        add_call_signature_refinements(dropped_receivers);
+        changed = true;
+    }
     let mut rename_candidates = HashMap::<String, String>::default();
     let mut rename_conflicts = HashSet::<String>::default();
     let mut wrapper_resolved_count = 0usize;
@@ -117,6 +150,13 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     super::type_flow::collect_self_referential_bindings(&func.body, &mut self_referential);
     let mut copy_sources = HashMap::default();
     collect_copy_sources(&func.body, &mut copy_sources);
+    let mut pointer_copy_sources = HashMap::default();
+    collect_pointer_copy_sources(&func.body, pointer_bits, &mut pointer_copy_sources);
+    changed |= apply_api_pointer_return_types_in_stmts(
+        &mut func.body,
+        &func.callee_summaries,
+        pointer_bits,
+    );
 
     // Collect call sites: (receiver_name_opt, callee_name, arg_var_names)
     let mut callsites: Vec<(Option<String>, String, Vec<Option<String>>)> = Vec::new();
@@ -205,10 +245,52 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
             .filter(|_| type_name_is_informative(&sig.return_type))
         {
             if let Some(recv_name) = receiver {
-                if let Some(b) = binding_by_name_mut(&mut func.locals, recv_name)
+                if matches!(ret_ty, NirType::Ptr(_)) {
+                    let stable_local_result = definition_counts.get(recv_name).copied() == Some(1)
+                        && !self_referential.contains(recv_name)
+                        && !func.params.iter().any(|param| param.name == *recv_name);
+                    if stable_local_result {
+                        let (tightened, can_apply_surface) = if let Some(binding) =
+                            binding_by_name_mut(&mut func.locals, recv_name)
+                        {
+                            let tightened = if binding.surface_type_name.is_none() {
+                                tighten_binding_ty_from_pointer_contract(
+                                    binding,
+                                    &ret_ty,
+                                    pointer_bits,
+                                )
+                            } else {
+                                false
+                            };
+                            (
+                                tightened,
+                                binding.surface_type_name.is_none()
+                                    && matches!(binding.ty, NirType::Ptr(_)),
+                            )
+                        } else {
+                            (false, false)
+                        };
+                        changed |= tightened;
+                        refined_here |= tightened;
+                        if can_apply_surface
+                            && pointer_surface_type_name_is_specific(&sig.return_type)
+                        {
+                            let surfaced = apply_api_surface_type_transitively(
+                                func,
+                                &copy_sources,
+                                &definition_counts,
+                                &self_referential,
+                                recv_name,
+                                sig.return_type.trim(),
+                            );
+                            changed |= surfaced;
+                            refined_here |= surfaced;
+                        }
+                    }
+                } else if let Some(binding) = binding_by_name_mut(&mut func.locals, recv_name)
                     .or_else(|| binding_by_name_mut(&mut func.params, recv_name))
                 {
-                    let tightened = tighten_binding_ty(b, &ret_ty);
+                    let tightened = tighten_binding_ty(binding, &ret_ty);
                     changed |= tightened;
                     refined_here |= tightened;
                 }
@@ -224,13 +306,25 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
                 break;
             };
             let informative = type_name_is_informative(&param.type_name);
+            let param_ty = informative
+                .then(|| win_type_name_to_nir(&param.type_name))
+                .flatten();
+            if matches!(param_ty.as_ref(), Some(NirType::Ptr(_))) {
+                changed |= promote_pointer_copy_carrier_from_typed_source(
+                    func,
+                    &pointer_copy_sources,
+                    &definition_counts,
+                    &self_referential,
+                    arg_var,
+                    pointer_bits,
+                );
+            }
             if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
                 .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
             {
-                let tightened = informative
-                    && win_type_name_to_nir(&param.type_name)
-                        .map(|param_ty| tighten_binding_ty(b, &param_ty))
-                        .unwrap_or(false);
+                let tightened = param_ty
+                    .as_ref()
+                    .is_some_and(|param_ty| tighten_binding_ty(b, param_ty));
                 changed |= tightened;
                 refined_here |= tightened;
                 if !matches!(b.origin, Some(NirBindingOrigin::ParamIndex(_)))
@@ -270,12 +364,6 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     if !rename_conflicts.is_empty() {
         add_typed_fact_conflicts(rename_conflicts.len());
     }
-    let callee_summaries = func.callee_summaries.clone();
-    let void_receivers = drop_void_call_receivers(&mut func.body, &callee_summaries);
-    if void_receivers > 0 {
-        add_call_signature_refinements(void_receivers);
-        changed = true;
-    }
     let pruned_count = prune_known_api_call_args_stmts(&mut func.body, &func.callee_summaries);
     if pruned_count > 0 {
         add_call_signature_refinements(pruned_count);
@@ -296,6 +384,12 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     {
         changed = true;
     }
+    changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+        &mut func.body,
+        &func.locals,
+        &func.params,
+        pointer_bits,
+    );
 
     changed
 }
@@ -316,6 +410,462 @@ fn arg_var_name(expr: &PreHirExpr) -> Option<String> {
         | PreHirExpr::AddressOfLocal(name) => Some(name.clone()),
         PreHirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
         _ => None,
+    }
+}
+
+fn strip_pointer_width_integer_copy_casts_in_stmts(
+    stmts: &mut [PreHirStmt],
+    locals: &[PreHirBinding],
+    params: &[PreHirBinding],
+    pointer_bits: u32,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(destination),
+                rhs,
+            } => {
+                let destination_is_pointer = binding_type(locals, params, destination)
+                    .is_some_and(|ty| matches!(ty, NirType::Ptr(_)));
+                if destination_is_pointer
+                    && let Some(source) = pointer_width_integer_copy_source(rhs, pointer_bits)
+                    && binding_type(locals, params, source)
+                        .is_some_and(|ty| matches!(ty, NirType::Ptr(_)))
+                {
+                    *rhs = PreHirExpr::Var(source.to_string());
+                    changed = true;
+                }
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    locals,
+                    params,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    locals,
+                    params,
+                    pointer_bits,
+                );
+                changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    locals,
+                    params,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                        std::slice::from_mut(init.as_mut()),
+                        locals,
+                        params,
+                        pointer_bits,
+                    );
+                }
+                if let Some(update) = update {
+                    changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                        std::slice::from_mut(update.as_mut()),
+                        locals,
+                        params,
+                        pointer_bits,
+                    );
+                }
+                changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    locals,
+                    params,
+                    pointer_bits,
+                );
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        locals,
+                        params,
+                        pointer_bits,
+                    );
+                }
+                changed |= strip_pointer_width_integer_copy_casts_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    locals,
+                    params,
+                    pointer_bits,
+                );
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn binding_type<'a>(
+    locals: &'a [PreHirBinding],
+    params: &'a [PreHirBinding],
+    name: &str,
+) -> Option<&'a NirType> {
+    locals
+        .iter()
+        .chain(params.iter())
+        .find(|binding| binding.name == name)
+        .map(|binding| &binding.ty)
+}
+
+fn pointer_width_integer_copy_source(expr: &PreHirExpr, pointer_bits: u32) -> Option<&str> {
+    let mut current = expr;
+    let mut saw_integer_cast = false;
+    while let PreHirExpr::Cast { ty, expr } = current {
+        if !matches!(ty, NirType::Int { bits, .. } if *bits == pointer_bits) {
+            return None;
+        }
+        saw_integer_cast = true;
+        current = expr;
+    }
+    match current {
+        PreHirExpr::Var(name) if saw_integer_cast => Some(name),
+        _ => None,
+    }
+}
+
+fn pointer_copy_source(expr: &PreHirExpr, pointer_bits: u32) -> Option<&str> {
+    match expr {
+        PreHirExpr::Var(name) => Some(name),
+        _ => pointer_width_integer_copy_source(expr, pointer_bits),
+    }
+}
+
+fn collect_pointer_copy_sources(
+    stmts: &[PreHirStmt],
+    pointer_bits: u32,
+    out: &mut HashMap<String, String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(destination),
+                rhs,
+            } => {
+                if let Some(source) = pointer_copy_source(rhs, pointer_bits) {
+                    out.insert(destination.clone(), source.to_string());
+                }
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                collect_pointer_copy_sources(body, pointer_bits, out);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_pointer_copy_sources(then_body, pointer_bits, out);
+                collect_pointer_copy_sources(else_body, pointer_bits, out);
+            }
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_pointer_copy_sources(
+                        std::slice::from_ref(init.as_ref()),
+                        pointer_bits,
+                        out,
+                    );
+                }
+                if let Some(update) = update {
+                    collect_pointer_copy_sources(
+                        std::slice::from_ref(update.as_ref()),
+                        pointer_bits,
+                        out,
+                    );
+                }
+                collect_pointer_copy_sources(body, pointer_bits, out);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_pointer_copy_sources(&case.body, pointer_bits, out);
+                }
+                collect_pointer_copy_sources(default, pointer_bits, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Refine a scalar copy carrier only when its unique-definition chain ends at
+/// an already typed pointer. The API parameter alone is not enough: integer
+/// stack locals passed to pointer-taking APIs remain integer-typed unless a
+/// bit-preserving copy from pointer evidence proves their value role.
+fn promote_pointer_copy_carrier_from_typed_source(
+    func: &mut PreHirFunction,
+    copy_sources: &HashMap<String, String>,
+    definition_counts: &HashMap<String, usize>,
+    self_referential: &HashSet<String>,
+    arg_var: &str,
+    pointer_bits: u32,
+) -> bool {
+    let mut current = arg_var.to_string();
+    let mut visited = HashSet::default();
+    let mut carriers = Vec::new();
+    let pointer_type = loop {
+        if !visited.insert(current.clone()) {
+            return false;
+        }
+        let Some(binding) = func
+            .locals
+            .iter()
+            .chain(func.params.iter())
+            .find(|binding| binding.name == current)
+        else {
+            return false;
+        };
+        if let NirType::Ptr(_) = &binding.ty {
+            break binding.ty.clone();
+        }
+        if func.params.iter().any(|param| param.name == current)
+            || binding.surface_type_name.is_some()
+            || !matches!(binding.ty, NirType::Int { bits, .. } if bits == pointer_bits)
+            || !super::type_flow::binding_is_safe_for_backward_refine(
+                &current,
+                definition_counts,
+                self_referential,
+            )
+        {
+            return false;
+        }
+        carriers.push(current.clone());
+        let Some(source) = copy_sources.get(&current) else {
+            return false;
+        };
+        current = source.clone();
+    };
+
+    if carriers.is_empty() {
+        return false;
+    }
+    for name in carriers {
+        let Some(binding) = binding_by_name_mut(&mut func.locals, &name) else {
+            return false;
+        };
+        binding.ty = pointer_type.clone();
+    }
+    true
+}
+
+fn apply_api_pointer_return_types_in_stmts(
+    stmts: &mut [PreHirStmt],
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        changed |= apply_api_pointer_return_types_in_stmt(stmt, summaries, pointer_bits);
+    }
+    changed
+}
+
+fn apply_api_pointer_return_types_in_rc_stmts(
+    stmts: &mut std::rc::Rc<Vec<PreHirStmt>>,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    apply_api_pointer_return_types_in_stmts(
+        std::rc::Rc::make_mut(stmts).as_mut_slice(),
+        summaries,
+        pointer_bits,
+    )
+}
+
+fn apply_api_pointer_return_types_in_stmt(
+    stmt: &mut PreHirStmt,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            apply_api_pointer_return_types_in_lvalue(lhs, summaries, pointer_bits)
+                | apply_api_pointer_return_types_in_expr(rhs, summaries, pointer_bits)
+        }
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+            apply_api_pointer_return_types_in_expr(expr, summaries, pointer_bits)
+        }
+        PreHirStmt::VaStart { va_list, .. } => {
+            apply_api_pointer_return_types_in_expr(va_list, summaries, pointer_bits)
+        }
+        PreHirStmt::Block(body) => {
+            apply_api_pointer_return_types_in_rc_stmts(body, summaries, pointer_bits)
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            let mut changed = apply_api_pointer_return_types_in_expr(expr, summaries, pointer_bits);
+            for case in cases {
+                changed |= apply_api_pointer_return_types_in_rc_stmts(
+                    &mut case.body,
+                    summaries,
+                    pointer_bits,
+                );
+            }
+            changed | apply_api_pointer_return_types_in_rc_stmts(default, summaries, pointer_bits)
+        }
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let cond_changed =
+                apply_api_pointer_return_types_in_expr(cond, summaries, pointer_bits);
+            let then_changed =
+                apply_api_pointer_return_types_in_rc_stmts(then_body, summaries, pointer_bits);
+            let else_changed =
+                apply_api_pointer_return_types_in_rc_stmts(else_body, summaries, pointer_bits);
+            cond_changed | then_changed | else_changed
+        }
+        PreHirStmt::While { cond, body } => {
+            let cond_changed =
+                apply_api_pointer_return_types_in_expr(cond, summaries, pointer_bits);
+            let body_changed =
+                apply_api_pointer_return_types_in_rc_stmts(body, summaries, pointer_bits);
+            cond_changed | body_changed
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            let body_changed =
+                apply_api_pointer_return_types_in_rc_stmts(body, summaries, pointer_bits);
+            let cond_changed =
+                apply_api_pointer_return_types_in_expr(cond, summaries, pointer_bits);
+            body_changed | cond_changed
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            let init_changed = init.as_deref_mut().is_some_and(|init| {
+                apply_api_pointer_return_types_in_stmt(init, summaries, pointer_bits)
+            });
+            let cond_changed = cond.as_mut().is_some_and(|cond| {
+                apply_api_pointer_return_types_in_expr(cond, summaries, pointer_bits)
+            });
+            let update_changed = update.as_deref_mut().is_some_and(|update| {
+                apply_api_pointer_return_types_in_stmt(update, summaries, pointer_bits)
+            });
+            let body_changed =
+                apply_api_pointer_return_types_in_rc_stmts(body, summaries, pointer_bits);
+            init_changed | cond_changed | update_changed | body_changed
+        }
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
+    }
+}
+
+fn apply_api_pointer_return_types_in_lvalue(
+    lvalue: &mut PreHirLValue,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    match lvalue {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => {
+            apply_api_pointer_return_types_in_expr(ptr, summaries, pointer_bits)
+        }
+        PreHirLValue::Index { base, index, .. } => {
+            apply_api_pointer_return_types_in_expr(base, summaries, pointer_bits)
+                | apply_api_pointer_return_types_in_expr(index, summaries, pointer_bits)
+        }
+        PreHirLValue::FieldAccess { base, .. } => {
+            apply_api_pointer_return_types_in_expr(base, summaries, pointer_bits)
+        }
+    }
+}
+
+fn apply_api_pointer_return_types_in_expr(
+    expr: &mut PreHirExpr,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+    pointer_bits: u32,
+) -> bool {
+    match expr {
+        PreHirExpr::Call { target, args, ty } => {
+            let resolved = resolve_call_target_symbol_with_wrapper(target, summaries).0;
+            let signature = api_signature_via_import_aliases(resolved)
+                .or_else(|| api_signature_via_import_aliases(target));
+            let mut changed = false;
+            if let Some(signature) = signature
+                && type_name_is_informative(&signature.return_type)
+                && let Some(candidate @ NirType::Ptr(_)) = resolve_return_ty(&signature.return_type)
+            {
+                let replaces_machine_word =
+                    matches!(ty, NirType::Int { bits, .. } if *bits == pointer_bits);
+                let replaces_unknown = *ty == NirType::Unknown;
+                let refines_unknown_pointee = matches!(
+                    (&*ty, &candidate),
+                    (NirType::Ptr(existing), NirType::Ptr(next))
+                        if **existing == NirType::Unknown && **next != NirType::Unknown
+                );
+                if replaces_machine_word || replaces_unknown || refines_unknown_pointee {
+                    *ty = candidate;
+                    changed = true;
+                }
+            }
+            for arg in args {
+                changed |= apply_api_pointer_return_types_in_expr(arg, summaries, pointer_bits);
+            }
+            changed
+        }
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
+            apply_api_pointer_return_types_in_expr(expr, summaries, pointer_bits)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            apply_api_pointer_return_types_in_expr(lhs, summaries, pointer_bits)
+                | apply_api_pointer_return_types_in_expr(rhs, summaries, pointer_bits)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let cond_changed =
+                apply_api_pointer_return_types_in_expr(cond, summaries, pointer_bits);
+            let then_changed =
+                apply_api_pointer_return_types_in_expr(then_expr, summaries, pointer_bits);
+            let else_changed =
+                apply_api_pointer_return_types_in_expr(else_expr, summaries, pointer_bits);
+            cond_changed | then_changed | else_changed
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
@@ -727,6 +1277,298 @@ mod tests {
         assert!(matches!(
             wrong_width.params[0].ty,
             NirType::Int { bits: 64, .. }
+        ));
+    }
+
+    #[test]
+    fn api_pointer_return_types_stable_call_and_copy_carriers() {
+        let uint64 = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "reader_wrapper".to_string(),
+            params: vec![unknown_binding(
+                "path",
+                Some(NirBindingOrigin::ParamIndex(0)),
+            )],
+            locals: vec![
+                unsigned_binding("rax", 64, Some(NirBindingOrigin::Temp)),
+                unsigned_binding("saved", 64, Some(NirBindingOrigin::Temp)),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rax".to_string()),
+                    rhs: PreHirExpr::Call {
+                        target: "fopen".to_string(),
+                        args: vec![
+                            PreHirExpr::Var("path".to_string()),
+                            PreHirExpr::Const(
+                                0,
+                                NirType::Ptr(Box::new(NirType::Int {
+                                    bits: 8,
+                                    signed: true,
+                                })),
+                            ),
+                        ],
+                        ty: uint64.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".to_string()),
+                    rhs: PreHirExpr::Var("rax".to_string()),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("saved".to_string()))),
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        let file_ptr = NirType::Ptr(Box::new(NirType::Unknown));
+        assert_eq!(func.locals[0].ty, file_ptr);
+        assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("FILE*"));
+        let PreHirStmt::Assign {
+            rhs: PreHirExpr::Call { ty, .. },
+            ..
+        } = &func.body[0]
+        else {
+            panic!("expected the fopen call assignment");
+        };
+        assert_eq!(ty, &func.locals[0].ty);
+
+        assert!(super::super::type_flow::apply_type_flow_pass(&mut func));
+        assert_eq!(func.locals[1].ty, func.locals[0].ty);
+    }
+
+    #[test]
+    fn api_pointer_return_survives_a_dead_reused_register_result() {
+        let uint32 = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: true,
+        }));
+        let mut func = PreHirFunction {
+            name: "reader_wrapper".to_string(),
+            params: vec![PreHirBinding {
+                name: "path".to_string(),
+                ty: char_ptr.clone(),
+                surface_type_name: Some("const char*".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                unsigned_binding("eax", 32, Some(NirBindingOrigin::Temp)),
+                unsigned_binding("saved", 32, Some(NirBindingOrigin::Temp)),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("eax".to_string()),
+                    rhs: PreHirExpr::Call {
+                        target: "fopen".to_string(),
+                        args: vec![
+                            PreHirExpr::Var("path".to_string()),
+                            PreHirExpr::Const(0, char_ptr),
+                        ],
+                        ty: uint32.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".to_string()),
+                    rhs: PreHirExpr::Var("eax".to_string()),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("eax".to_string()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("eax".to_string()),
+                        rhs: PreHirExpr::Call {
+                            target: "setvbuf".to_string(),
+                            args: Vec::new(),
+                            ty: NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
+                        },
+                    }]
+                    .into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("saved".to_string()))),
+            ],
+            is_64bit: false,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        let PreHirStmt::If { then_body, .. } = &func.body[2] else {
+            panic!("expected conditional setvbuf call");
+        };
+        assert!(
+            matches!(then_body.as_slice(), [PreHirStmt::Expr(PreHirExpr::Call { target, .. })] if target == "setvbuf")
+        );
+
+        let file_ptr = NirType::Ptr(Box::new(NirType::Unknown));
+        assert_eq!(func.locals[0].ty, file_ptr);
+        assert!(super::super::type_flow::apply_type_flow_pass(&mut func));
+        assert_eq!(func.locals[1].ty, func.locals[0].ty);
+    }
+
+    #[test]
+    fn pointer_width_round_trip_casts_are_removed_only_for_pointer_copies() {
+        let file_ptr = NirType::Ptr(Box::new(NirType::Unknown));
+        let mut func = PreHirFunction {
+            locals: vec![
+                PreHirBinding {
+                    name: "source".to_string(),
+                    ty: file_ptr.clone(),
+                    surface_type_name: Some("FILE*".to_string()),
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "round_trip".to_string(),
+                    ty: file_ptr.clone(),
+                    surface_type_name: Some("FILE*".to_string()),
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "narrowed".to_string(),
+                    ty: file_ptr,
+                    surface_type_name: Some("FILE*".to_string()),
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("round_trip".to_string()),
+                    rhs: PreHirExpr::Cast {
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: true,
+                        },
+                        expr: Box::new(PreHirExpr::Cast {
+                            ty: NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                            expr: Box::new(PreHirExpr::Var("source".to_string())),
+                        }),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("narrowed".to_string()),
+                    rhs: PreHirExpr::Cast {
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                        expr: Box::new(PreHirExpr::Cast {
+                            ty: NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                            expr: Box::new(PreHirExpr::Var("source".to_string())),
+                        }),
+                    },
+                },
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert!(matches!(
+            func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Var(ref source),
+                ..
+            } if source == "source"
+        ));
+        assert!(matches!(
+            func.body[1],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Cast { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn api_pointer_parameter_promotes_carrier_and_elides_pointer_round_trip() {
+        let file_ptr = NirType::Ptr(Box::new(NirType::Unknown));
+        let mut source = unknown_binding("source", Some(NirBindingOrigin::Temp));
+        source.ty = file_ptr.clone();
+        let mut destination =
+            unsigned_binding("file_slot", 64, Some(NirBindingOrigin::StackOffset(-8)));
+        destination.surface_type_name = None;
+        let mut func = PreHirFunction {
+            locals: vec![source, destination],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("file_slot".to_string()),
+                    rhs: PreHirExpr::Cast {
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: true,
+                        },
+                        expr: Box::new(PreHirExpr::Cast {
+                            ty: NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                            expr: Box::new(PreHirExpr::Var("source".to_string())),
+                        }),
+                    },
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "setvbuf".to_string(),
+                    args: vec![
+                        PreHirExpr::Var("file_slot".to_string()),
+                        PreHirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        ),
+                        PreHirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
+                        ),
+                        PreHirExpr::Const(
+                            4096,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        ),
+                    ],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                }),
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert!(matches!(func.locals[1].ty, NirType::Ptr(_)));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Var(source),
+                ..
+            } if source == "source"
         ));
     }
 

@@ -71,6 +71,110 @@ mod layered_tests {
     }
 
     #[test]
+    fn file_surface_uses_stdio_header_instead_of_synthesized_aliases() {
+        let file_ptr = NirType::Ptr(Box::new(NirType::Unknown));
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: true,
+        }));
+        let func = HirFunction {
+            name: "open_reader".into(),
+            params: vec![NirBinding {
+                name: "path".into(),
+                ty: char_ptr.clone(),
+                surface_type_name: Some("const char*".into()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                NirBinding {
+                    name: "rax".into(),
+                    ty: file_ptr.clone(),
+                    surface_type_name: Some("FILE*".into()),
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "saved".into(),
+                    ty: file_ptr.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: file_ptr.clone(),
+            surface_return_type_name: Some("FILE*".into()),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rax".into()),
+                    rhs: HirExpr::Call {
+                        target: "fopen".into(),
+                        args: vec![HirExpr::Var("path".into()), HirExpr::Const(0, char_ptr)],
+                        ty: file_ptr.clone(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("saved".into()),
+                    rhs: HirExpr::Var("rax".into()),
+                },
+                HirStmt::Expr(HirExpr::Call {
+                    target: "setvbuf".into(),
+                    args: vec![
+                        HirExpr::Var("rax".into()),
+                        HirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
+                        ),
+                        HirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
+                        ),
+                        HirExpr::Const(
+                            4096,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        ),
+                    ],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                }),
+                HirStmt::Return(Some(HirExpr::Var("saved".into()))),
+            ],
+            ..Default::default()
+        };
+
+        let rendered = render_hir_function_with_global_decls(&func, &MlilPreviewOptions::default());
+
+        assert!(rendered.starts_with("#include <stdio.h>\n"), "{rendered}");
+        assert!(rendered.contains("FILE* open_reader("), "{rendered}");
+        assert!(rendered.contains("FILE* rax;"), "{rendered}");
+        assert!(rendered.contains("fopen(path"), "{rendered}");
+        assert!(
+            !rendered.contains("typedef unsigned long long FILE;"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("typedef undefined FILE;"), "{rendered}");
+        assert!(
+            !rendered.contains("extern unsigned long long fopen"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("extern unsigned long long setvbuf"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
     fn layered_pseudocode_hir_drops_unused_home_local() {
         let func = HirFunction {
             name: "f".into(),
@@ -336,18 +440,30 @@ fn render_hir_function_with_profile(
     // result to compile as a project rather than as one loose function.
     let undefined_types = collect_undefined_surface_types(&printable, options);
     let mut called_externs = collect_called_externs(&printable, &printable.name);
-    called_externs
-        .retain(|name, _| !decls.contains_key(name) && !opaque_pcodeop_stubs.contains_key(name));
+    let calls_stdio = called_externs
+        .keys()
+        .any(|name| is_stdio_declared_symbol(name));
+    called_externs.retain(|name, _| {
+        !decls.contains_key(name)
+            && !opaque_pcodeop_stubs.contains_key(name)
+            && (!is_stdio_declared_symbol(name)
+                || options.declared_signatures.contains_key(name.as_str()))
+    });
+    let include_stdio = function_uses_file_surface(&printable) || calls_stdio;
     if decls.is_empty()
         && aggregate_typedefs.is_empty()
         && opaque_pcodeop_stubs.is_empty()
         && called_externs.is_empty()
         && undefined_types.is_empty()
+        && !include_stdio
     {
         return print_hir_function_with_profile(&printable, Some(&options.global_names), profile);
     }
 
     let mut rendered = String::new();
+    if include_stdio {
+        rendered.push_str("#include <stdio.h>\n");
+    }
     for (size, fields) in aggregate_typedefs {
         rendered.push_str(&render_aggregate_typedef(size, &fields));
     }
@@ -549,6 +665,7 @@ const KNOWN_C_TYPE_NAMES: &[&str] = &[
     "uint16_t",
     "uint32_t",
     "uint64_t",
+    "FILE",
     "__int128",
     "int128",
     "undefined",
@@ -557,6 +674,25 @@ const KNOWN_C_TYPE_NAMES: &[&str] = &[
     "undefined4",
     "undefined8",
 ];
+
+fn function_uses_file_surface(hir: &HirFunction) -> bool {
+    hir.params
+        .iter()
+        .chain(hir.locals.iter())
+        .filter_map(|binding| binding.surface_type_name.as_deref())
+        .chain(hir.surface_return_type_name.as_deref())
+        .any(|surface| surface_type_alias_name(surface) == Some("FILE"))
+}
+
+fn is_stdio_declared_symbol(name: &str) -> bool {
+    let canonical = name
+        .rsplit_once('!')
+        .map(|(_, symbol)| symbol)
+        .unwrap_or(name);
+    let canonical = canonical.strip_prefix("__imp_").unwrap_or(canonical);
+    let canonical = canonical.trim_start_matches('_');
+    matches!(canonical, "fopen" | "setvbuf")
+}
 
 /// Names this function calls but does not define.
 ///

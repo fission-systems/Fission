@@ -5,6 +5,358 @@
 
 use super::*;
 
+/// Remove only a dead call-result store, not the call itself.
+///
+/// API calls may share a machine-register binding even when consecutive
+/// results have unrelated C types. If a later call overwrites that carrier
+/// before its value is read, keeping the first call's receiver unnecessarily
+/// merges the two result types into one local declaration. `TempPreserved`
+/// protects materializations needed while building the function; by this
+/// normalization pass those consumers have run, so explicit liveness is the
+/// authority for whether a temporary call result remains observable.
+pub(super) fn drop_unused_call_receivers(func: &mut PreHirFunction) -> usize {
+    let address_taken = crate::analysis::defuse::collect_address_taken_locals(&func.body);
+    let mut protected = HashSet::default();
+    protected.extend(func.params.iter().map(|binding| binding.name.clone()));
+    protected.extend(
+        func.locals
+            .iter()
+            .filter(|binding| {
+                let non_addressable_local =
+                    binding.origin.is_some_and(NirBindingOrigin::is_temp_like)
+                        || (binding.origin.is_none() && !address_taken.contains(&binding.name));
+                !non_addressable_local || matches!(binding.ty, NirType::Aggregate { .. })
+            })
+            .map(|binding| binding.name.clone()),
+    );
+    drop_unused_call_receivers_in_stmts(&mut func.body, &HashSet::default(), &protected)
+}
+
+fn drop_unused_call_receivers_in_stmts(
+    stmts: &mut Vec<PreHirStmt>,
+    live_after: &HashSet<String>,
+    protected: &HashSet<String>,
+) -> usize {
+    let mut live = live_after.clone();
+    let mut dropped = 0;
+    for index in (0..stmts.len()).rev() {
+        match &mut stmts[index] {
+            PreHirStmt::Block(body) => {
+                let body_live_after = live_out_for_stmt_list(body, &live);
+                dropped += drop_unused_call_receivers_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    &body_live_after,
+                    protected,
+                );
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                let then_live_after = live_out_for_stmt_list(then_body, &live);
+                let else_live_after = live_out_for_stmt_list(else_body, &live);
+                dropped += drop_unused_call_receivers_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    &then_live_after,
+                    protected,
+                );
+                dropped += drop_unused_call_receivers_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    &else_live_after,
+                    protected,
+                );
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    let case_live_after = live_out_for_stmt_list(&case.body, &live);
+                    dropped += drop_unused_call_receivers_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        &case_live_after,
+                        protected,
+                    );
+                }
+                let default_live_after = live_out_for_stmt_list(default, &live);
+                dropped += drop_unused_call_receivers_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    &default_live_after,
+                    protected,
+                );
+            }
+            // A loop body can feed a later iteration. Its local live-out needs
+            // a loop fixed point, so this deliberately leaves loop receivers
+            // alone until that proof is available.
+            PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => {}
+            _ => {}
+        }
+
+        let receiver = match &stmts[index] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs,
+            } if !protected.contains(name)
+                && !live.contains(name)
+                && expr_is_known_api_call_result(rhs) =>
+            {
+                Some(rhs.clone())
+            }
+            _ => None,
+        };
+        if let Some(call) = receiver {
+            stmts[index] = PreHirStmt::Expr(call);
+            dropped += 1;
+        }
+        live = crate::analysis::liveness::LivenessTransfer::for_stmt(&stmts[index])
+            .live_in_from(&live);
+    }
+    dropped
+}
+
+fn live_out_for_stmt_list(stmts: &[PreHirStmt], live_after: &HashSet<String>) -> HashSet<String> {
+    if crate::analysis::liveness::LivenessTransfer::for_stmts(stmts).may_fall_through() {
+        live_after.clone()
+    } else {
+        HashSet::default()
+    }
+}
+
+fn expr_is_known_api_call_result(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Call { target, .. } => api_signature_via_import_aliases(target).is_some(),
+        PreHirExpr::Cast { expr, .. } => expr_is_known_api_call_result(expr),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod unused_receiver_tests {
+    use super::*;
+
+    fn temp(name: &str) -> PreHirBinding {
+        PreHirBinding {
+            name: name.to_string(),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    fn side_effecting_call() -> PreHirExpr {
+        PreHirExpr::Call {
+            target: "setvbuf".to_string(),
+            args: Vec::new(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        }
+    }
+
+    fn assign_call(name: &str) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs: side_effecting_call(),
+        }
+    }
+
+    #[test]
+    fn dead_temporary_call_receiver_becomes_a_call_statement() {
+        let mut func = PreHirFunction {
+            locals: vec![temp("eax")],
+            body: vec![assign_call("eax")],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 1);
+        assert!(matches!(
+            func.body.as_slice(),
+            [PreHirStmt::Expr(PreHirExpr::Call { target, .. })] if target == "setvbuf"
+        ));
+    }
+
+    #[test]
+    fn call_receiver_stays_when_its_value_is_read_afterward() {
+        let mut func = PreHirFunction {
+            locals: vec![temp("eax")],
+            body: vec![
+                assign_call("eax"),
+                PreHirStmt::Return(Some(PreHirExpr::Var("eax".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 0);
+        assert!(matches!(func.body[0], PreHirStmt::Assign { .. }));
+    }
+
+    #[test]
+    fn branch_receiver_observed_after_join_stays_assigned() {
+        let mut func = PreHirFunction {
+            locals: vec![temp("eax")],
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Const(1, NirType::Bool),
+                    then_body: vec![assign_call("eax")].into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("eax".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 0);
+        let PreHirStmt::If { then_body, .. } = &func.body[0] else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(then_body.as_slice(), [PreHirStmt::Assign { .. }]));
+    }
+
+    #[test]
+    fn stack_backed_call_receiver_is_not_removed_as_dead() {
+        let mut slot = temp("slot");
+        slot.origin = Some(NirBindingOrigin::StackOffset(-8));
+        let mut func = PreHirFunction {
+            locals: vec![slot],
+            body: vec![assign_call("slot")],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 0);
+        assert!(matches!(func.body[0], PreHirStmt::Assign { .. }));
+    }
+
+    #[test]
+    fn dead_preserved_temporary_call_receiver_becomes_a_call_statement() {
+        let mut receiver = temp("uVar4");
+        receiver.origin = Some(NirBindingOrigin::TempPreserved);
+        let mut func = PreHirFunction {
+            locals: vec![receiver],
+            body: vec![assign_call("uVar4")],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 1);
+        assert!(matches!(
+            func.body.as_slice(),
+            [PreHirStmt::Expr(PreHirExpr::Call { target, .. })] if target == "setvbuf"
+        ));
+    }
+
+    #[test]
+    fn dead_unclassified_local_call_receiver_becomes_a_call_statement() {
+        let mut local = temp("eax");
+        local.origin = None;
+        let mut func = PreHirFunction {
+            locals: vec![local],
+            body: vec![assign_call("eax")],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 1);
+        assert!(matches!(
+            func.body.as_slice(),
+            [PreHirStmt::Expr(PreHirExpr::Call { target, .. })] if target == "setvbuf"
+        ));
+    }
+
+    #[test]
+    fn address_taken_unclassified_local_call_receiver_is_preserved() {
+        let mut local = temp("local");
+        local.origin = None;
+        let mut func = PreHirFunction {
+            locals: vec![local],
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "escape".to_string(),
+                    args: vec![PreHirExpr::AddressOfLocal("local".to_string())],
+                    ty: NirType::Unknown,
+                }),
+                assign_call("local"),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 0);
+        assert!(matches!(func.body[1], PreHirStmt::Assign { .. }));
+    }
+
+    #[test]
+    fn unknown_indirect_call_receiver_is_not_removed_from_machine_state() {
+        let mut receiver = temp("eax");
+        receiver.origin = Some(NirBindingOrigin::TempPreserved);
+        let mut func = PreHirFunction {
+            locals: vec![receiver],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("eax".to_string()),
+                rhs: PreHirExpr::Call {
+                    target: "__fission_callind_opaque".to_string(),
+                    args: vec![PreHirExpr::Const(
+                        3,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    )],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 0);
+        assert!(matches!(func.body[0], PreHirStmt::Assign { .. }));
+    }
+
+    #[test]
+    fn returning_branches_do_not_keep_dead_call_result_live_from_unreachable_tail() {
+        let mut eax = temp("eax");
+        eax.origin = None;
+        let mut func = PreHirFunction {
+            locals: vec![eax, temp("fp")],
+            body: vec![PreHirStmt::Block(
+                vec![
+                    PreHirStmt::If {
+                        cond: PreHirExpr::Var("fp".to_string()),
+                        then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
+                            0,
+                            NirType::Ptr(Box::new(NirType::Unknown)),
+                        )))]
+                        .into(),
+                        else_body: vec![
+                            assign_call("eax"),
+                            PreHirStmt::Return(Some(PreHirExpr::Var("fp".to_string()))),
+                        ]
+                        .into(),
+                    },
+                    PreHirStmt::Return(Some(PreHirExpr::Var("eax".to_string()))),
+                ]
+                .into(),
+            )],
+            ..Default::default()
+        };
+
+        assert_eq!(drop_unused_call_receivers(&mut func), 1);
+        let PreHirStmt::Block(body) = &func.body[0] else {
+            panic!("expected outer block");
+        };
+        let PreHirStmt::If { else_body, .. } = &body[0] else {
+            panic!("expected branch");
+        };
+        assert!(matches!(
+            else_body.as_slice(),
+            [PreHirStmt::Expr(PreHirExpr::Call { target, .. }), PreHirStmt::Return(Some(_))]
+                if target == "setvbuf"
+        ));
+    }
+}
+
 fn exact_arity_for_target(
     target: &str,
     summaries: &indexmap::IndexMap<String, CallSummary>,
