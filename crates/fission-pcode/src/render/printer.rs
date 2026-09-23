@@ -535,6 +535,9 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
             func.name.clone()
         }
     ));
+    let variadic_fixed_arity = func
+        .variadic_fixed_arity
+        .or_else(|| is_known_variadic_runtime_symbol(&func.name).then_some(func.params.len()));
     if func.params.is_empty() {
         // `(void)` asserts the function takes nothing. For an import thunk
         // that is false and provably so: its whole body is one indirect jump
@@ -543,20 +546,27 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
         // in a mingw-built PE are called with arguments and every one of them
         // was an error. `(...)` is the C23 spelling for "arity unknown", and
         // is legal on a definition as well as a declaration.
-        out.push_str(if is_import_thunk_body(&func.body) {
-            "..."
-        } else {
-            "void"
-        });
+        out.push_str(
+            if is_import_thunk_body(&func.body) || variadic_fixed_arity == Some(0) {
+                "..."
+            } else {
+                "void"
+            },
+        );
     } else {
-        for (idx, param) in func.params.iter().enumerate() {
+        let fixed_arity = variadic_fixed_arity.unwrap_or(func.params.len());
+        for (idx, param) in func.params.iter().take(fixed_arity).enumerate() {
             if idx > 0 {
                 out.push_str(", ");
             }
             out.push_str(&print_binding_declaration(param));
         }
-        if is_known_variadic_runtime_symbol(&func.name) {
-            out.push_str(", ...");
+        if variadic_fixed_arity.is_some() {
+            out.push_str(if fixed_arity.min(func.params.len()) > 0 {
+                ", ..."
+            } else {
+                "..."
+            });
         }
     }
     out.push_str(")\n{\n");
@@ -2494,6 +2504,7 @@ mod tests {
         }));
         let hir = HirFunction {
             name: "fprintf".to_string(),
+            variadic_fixed_arity: Some(2),
             params: vec![
                 NirBinding {
                     name: "__stream".to_string(),
@@ -2533,6 +2544,28 @@ mod tests {
         assert!(
             ordinary_rendered.starts_with("int ordinary(FILE* __stream, const char* __format)\n"),
             "{ordinary_rendered}"
+        );
+    }
+
+    #[test]
+    fn explicit_defined_variadic_prototype_uses_fixed_prefix_metadata() {
+        let hir = HirFunction {
+            name: "defined_helper".to_string(),
+            variadic_fixed_arity: Some(1),
+            params: vec![NirBinding {
+                name: "format".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: Some("const char*".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+        assert!(
+            rendered.starts_with("unsigned long long defined_helper(const char* format, ...)\n"),
+            "{rendered}"
         );
     }
 

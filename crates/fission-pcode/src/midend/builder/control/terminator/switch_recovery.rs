@@ -980,7 +980,7 @@ impl<'a> PreviewBuilder<'a> {
 
             if is_register_space_id(current_vn.space_id) {
                 if let Some(&param_idx) = self.register_param_aliases.get(&current_vn.offset) {
-                    if param_idx < self.entry_arity {
+                    if param_idx < self.named_entry_param_arity() {
                         let param_name = self.abi_state().param_name(param_idx);
                         selector_names.insert(param_name);
                     }

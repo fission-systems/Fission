@@ -398,6 +398,7 @@ mod tests {
 
     fn base_func(body: Vec<PreHirStmt>, locals: Vec<PreHirBinding>) -> PreHirFunction {
         PreHirFunction {
+            variadic_fixed_arity: None,
             name: "f".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),

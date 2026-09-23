@@ -924,7 +924,10 @@ impl<'a> PreviewBuilder<'a> {
         vn: &Varnode,
         param_index: usize,
     ) -> Option<PreHirExpr> {
-        if self.lookup_def_site(vn).is_some()
+        if self
+            .declared_variadic_fixed_arity
+            .is_some_and(|fixed| param_index >= fixed)
+            || self.lookup_def_site(vn).is_some()
             || !self.entry_register_slot_is_live_at_call(block, call_idx)
         {
             return None;

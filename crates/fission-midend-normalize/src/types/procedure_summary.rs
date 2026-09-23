@@ -122,6 +122,7 @@ mod tests {
     #[test]
     fn summarize_wrapper_hir_function_detects_tail_forwarder() {
         let func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "wrapper".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),

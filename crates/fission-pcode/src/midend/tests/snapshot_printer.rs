@@ -7,6 +7,7 @@ use insta::assert_snapshot;
 #[test]
 fn snapshot_print_hir_function_minimal() {
     let func = HirFunction {
+        variadic_fixed_arity: None,
         name: "f_snapshot".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),

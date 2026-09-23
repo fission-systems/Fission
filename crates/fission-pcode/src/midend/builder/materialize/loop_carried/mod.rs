@@ -126,7 +126,10 @@ impl<'a> PreviewBuilder<'a> {
         // Choose the formal before merge-binding fallback can mint or reuse a
         // hardware name; otherwise a latch-first read observes an uninitialized
         // `rdx`/equivalent even though the entry path proved the slot live.
-        if self.abi_state().param_slot_for_varnode(output).is_some()
+        if self
+            .abi_state()
+            .param_slot_for_varnode(output)
+            .is_some_and(|index| index < self.named_entry_param_arity())
             && !self.loop_carried_output_has_prior_definition(output)
             && let Some(name) = self.register_param(output)
         {
@@ -653,7 +656,7 @@ impl<'a> PreviewBuilder<'a> {
         if self
             .abi_state()
             .param_slot_for_varnode(output)
-            .is_some_and(|index| index < self.entry_arity)
+            .is_some_and(|index| index < self.named_entry_param_arity())
         {
             return None;
         }

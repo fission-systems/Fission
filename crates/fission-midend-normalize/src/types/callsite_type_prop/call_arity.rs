@@ -362,6 +362,13 @@ fn exact_arity_for_target(
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> Option<usize> {
     let resolved_target = resolve_call_target_symbol(target, summaries);
+    if [target, resolved_target].into_iter().any(|symbol| {
+        summaries
+            .get(symbol)
+            .is_some_and(|summary| summary.prototype.variadic_fixed_arity.is_some())
+    }) {
+        return None;
+    }
     if is_known_variadic_runtime_symbol(target) || is_known_variadic_runtime_symbol(resolved_target)
     {
         return None;
@@ -719,4 +726,70 @@ fn prune_self_call_args_expr(expr: &mut PreHirExpr, func_name: &str, arity: usiz
         | PreHirExpr::Const(_, _) => {}
     }
     pruned
+}
+
+#[cfg(test)]
+mod variadic_arity_tests {
+    use super::*;
+
+    fn summary(variadic_fixed_arity: Option<usize>) -> CallSummary {
+        CallSummary {
+            target: CallTargetRef {
+                address: Some(0x401000),
+                symbol: "defined_helper".to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 160,
+            },
+            prototype: PrototypeSummary {
+                min_arity: 1,
+                max_arity: 4,
+                locked_exact_arity: variadic_fixed_arity.is_none().then_some(4),
+                variadic_fixed_arity,
+                returns_void: false,
+                return_lattice: NirType::Unknown,
+                param_lattices: vec![NirType::Unknown; 4],
+                param_surface_type_names: vec![None; 4],
+                param_pointer_contracts: vec![false; 4],
+                soundness: SummarySoundness::Optimistic,
+            },
+            effect_summary: CallEffectSummary {
+                reads_memory: None,
+                writes_memory: None,
+                escapes_args: None,
+                regions: Vec::new(),
+                wrapper_class: WrapperClass::None,
+                wrapper_of: None,
+                confidence: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn explicit_defined_variadic_contract_keeps_observed_call_tail() {
+        let mut summaries = indexmap::IndexMap::new();
+        summaries.insert("defined_helper".to_string(), summary(Some(1)));
+        let mut stmts = vec![PreHirStmt::Expr(PreHirExpr::Call {
+            target: "defined_helper".to_string(),
+            args: (0..4)
+                .map(|value| PreHirExpr::Const(value, NirType::Unknown))
+                .collect(),
+            ty: NirType::Unknown,
+        })];
+
+        assert_eq!(prune_known_api_call_args_stmts(&mut stmts, &summaries), 0);
+        let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &stmts[0] else {
+            panic!("expected call expression");
+        };
+        assert_eq!(args.len(), 4);
+
+        let mut fixed = summary(None);
+        fixed.prototype.locked_exact_arity = Some(1);
+        summaries.insert("defined_helper".to_string(), fixed);
+        assert_eq!(prune_known_api_call_args_stmts(&mut stmts, &summaries), 3);
+        let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &stmts[0] else {
+            panic!("expected call expression");
+        };
+        assert_eq!(args.len(), 1);
+    }
 }

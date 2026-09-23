@@ -1736,6 +1736,7 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
     let float64 = NirType::Float { bits: 64 };
 
     let mut func = PreHirFunction {
+        variadic_fixed_arity: None,
         name: "test_subfloat".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),
@@ -1824,6 +1825,7 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     let bool_ty = NirType::Bool;
 
     let mut func = PreHirFunction {
+        variadic_fixed_arity: None,
         name: "test_or_compare".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),

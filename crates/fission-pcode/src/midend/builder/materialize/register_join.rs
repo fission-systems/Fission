@@ -429,7 +429,7 @@ impl<'a> PreviewBuilder<'a> {
             // likewise handled by the existing loop-carrier proof before this
             // missing-merge fallback.
             if let Some(param_index) = self.abi_state().param_slot_for_varnode(output)
-                && param_index < self.entry_arity
+                && param_index < self.named_entry_param_arity()
             {
                 let name = self.abi_state().param_name(param_index);
                 self.trace_path_sensitive_register_merge(

@@ -317,6 +317,9 @@ pub struct PrototypeSummary {
     pub min_arity: usize,
     pub max_arity: usize,
     pub locked_exact_arity: Option<usize>,
+    /// Fixed named prefix for an explicitly variadic callee. `None` means no
+    /// declaration-level variadic evidence is available.
+    pub variadic_fixed_arity: Option<usize>,
     /// Debug info says this callee returns nothing -- see
     /// [`NirCallPrototypeSummary::returns_void`].
     pub returns_void: bool,
@@ -387,6 +390,9 @@ pub struct NirCallPrototypeSummary {
     pub min_arity: usize,
     pub max_arity: usize,
     pub locked_exact_arity: Option<usize>,
+    /// Fixed named prefix for an explicitly variadic callee.
+    #[serde(default)]
+    pub variadic_fixed_arity: Option<usize>,
     #[serde(default)]
     pub param_pointer_pointees: Vec<Option<NirCallPointerPointee>>,
     #[serde(default)]
@@ -683,6 +689,8 @@ pub enum NirTerminator {
 pub struct HirFunction {
     pub name: String,
     pub params: Vec<NirBinding>,
+    /// Number of named parameters before a declaration-level variadic tail.
+    pub variadic_fixed_arity: Option<usize>,
     pub locals: Vec<NirBinding>,
     pub return_type: NirType,
     pub surface_return_type_name: Option<String>,
@@ -713,6 +721,7 @@ impl Default for HirFunction {
         Self {
             name: String::new(),
             params: Vec::new(),
+            variadic_fixed_arity: None,
             locals: Vec::new(),
             return_type: NirType::Unknown,
             surface_return_type_name: None,

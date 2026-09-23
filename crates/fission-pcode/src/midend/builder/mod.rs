@@ -208,6 +208,7 @@ fn seed_callee_summaries_from_type_context(
                     min_arity: prototype.min_arity,
                     max_arity: prototype.max_arity,
                     locked_exact_arity: prototype.locked_exact_arity,
+                    variadic_fixed_arity: prototype.variadic_fixed_arity,
                     returns_void: prototype.returns_void,
                     return_lattice: NirType::Unknown,
                     param_lattices,
@@ -536,6 +537,10 @@ impl<'a> PreviewBuilder<'a> {
         PreHirFunction {
             name: self.current_function_name.clone().unwrap_or_default(),
             params: self.params.values().cloned().collect(),
+            variadic_fixed_arity: self
+                .type_context
+                .and_then(|context| context.function_hints.as_ref())
+                .and_then(|hints| hints.variadic_fixed_arity),
             locals: self
                 .locals
                 .iter()
@@ -815,6 +820,10 @@ impl<'a> PreviewBuilder<'a> {
         Ok(PreHirFunction {
             name: resolved_hir_function_name(name, address, self.type_context),
             params: self.params.values().cloned().collect(),
+            variadic_fixed_arity: self
+                .type_context
+                .and_then(|context| context.function_hints.as_ref())
+                .and_then(|hints| hints.variadic_fixed_arity),
             locals: self
                 .locals
                 .iter()
@@ -1197,7 +1206,7 @@ impl<'a> PreviewBuilder<'a> {
         let param_name = self
             .abi_state()
             .param_slot_for_varnode(output)
-            .filter(|&index| index < self.entry_arity)
+            .filter(|&index| index < self.named_entry_param_arity())
             .and_then(|_| self.register_param(output));
         let hw_name: Option<String> = if param_name.is_none()
             && !output.is_constant

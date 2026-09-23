@@ -201,6 +201,9 @@ impl<'a> PreviewBuilder<'a> {
 
         let register_namer = RegisterNamer::from_options(options);
         let entry_arity = infer_entry_register_param_arity(pcode, &register_namer).unwrap_or(0);
+        let declared_variadic_fixed_arity = type_context
+            .and_then(|context| context.function_hints.as_ref())
+            .and_then(|hints| hints.variadic_fixed_arity);
         let mut register_param_aliases =
             entry_analysis::collect_entry_register_param_aliases(pcode, &register_namer);
         register_param_aliases.retain(|_, idx| *idx < entry_arity);
@@ -275,6 +278,7 @@ impl<'a> PreviewBuilder<'a> {
             current_lowering_site: None,
             register_param_aliases,
             entry_arity,
+            declared_variadic_fixed_arity,
             suppress_entry_register_params: false,
             stack_frame_size,
             entry_frame_pointer_established,

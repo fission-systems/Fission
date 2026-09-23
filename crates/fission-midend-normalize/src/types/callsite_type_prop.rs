@@ -372,8 +372,11 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
         add_call_prototype_exact_api_arity_pruned(pruned_count);
         changed = true;
     }
-    let self_pruned_count =
-        prune_self_call_args_stmts(&mut func.body, &func.name, func.params.len());
+    let self_pruned_count = if func.variadic_fixed_arity.is_none() {
+        prune_self_call_args_stmts(&mut func.body, &func.name, func.params.len())
+    } else {
+        0
+    };
     if self_pruned_count > 0 {
         add_call_signature_refinements(self_pruned_count);
         changed = true;
@@ -1024,6 +1027,7 @@ mod tests {
                 confidence: 160,
             },
             prototype: PrototypeSummary {
+                variadic_fixed_arity: None,
                 min_arity: 1,
                 max_arity: 1,
                 locked_exact_arity: Some(1),
@@ -1056,6 +1060,7 @@ mod tests {
                 confidence: 255,
             },
             prototype: PrototypeSummary {
+                variadic_fixed_arity: None,
                 min_arity: fixed_arity,
                 max_arity: fixed_arity,
                 locked_exact_arity: None,
@@ -1080,6 +1085,7 @@ mod tests {
 
     fn translated_error_fixture() -> PreHirFunction {
         PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -1637,6 +1643,7 @@ mod tests {
     #[test]
     fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -1688,6 +1695,7 @@ mod tests {
         );
         locked.surface_type_name = Some("uintptr_t".to_string());
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -1906,6 +1914,7 @@ mod tests {
     #[test]
     fn callsite_type_prop_rewrites_target_through_wrapper_summary() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -1934,6 +1943,7 @@ mod tests {
                         confidence: 128,
                     },
                     prototype: PrototypeSummary {
+                        variadic_fixed_arity: None,
                         min_arity: 0,
                         max_arity: 0,
                         locked_exact_arity: Some(0),
@@ -1976,6 +1986,7 @@ mod tests {
     fn callsite_type_prop_prunes_extra_args_only_for_exact_api_signature() {
         reset_normalize_wave_stats();
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -2034,6 +2045,7 @@ mod tests {
     fn callsite_type_prop_keeps_extra_args_for_known_variadic_runtime_symbol() {
         reset_normalize_wave_stats();
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -2069,6 +2081,7 @@ mod tests {
                         confidence: 160,
                     },
                     prototype: PrototypeSummary {
+                        variadic_fixed_arity: None,
                         min_arity: 4,
                         max_arity: 4,
                         locked_exact_arity: Some(4),
@@ -2127,6 +2140,7 @@ mod tests {
         }
 
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -2282,6 +2296,7 @@ mod tests {
     fn callsite_type_prop_prunes_self_recursive_args_to_function_arity() {
         reset_normalize_wave_stats();
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "fib".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -2330,6 +2345,7 @@ mod tests {
     fn callsite_type_prop_prunes_wrapper_args_after_resolving_import_summary() {
         reset_normalize_wave_stats();
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -2364,6 +2380,7 @@ mod tests {
                         confidence: 128,
                     },
                     prototype: PrototypeSummary {
+                        variadic_fixed_arity: None,
                         min_arity: 0,
                         max_arity: 0,
                         locked_exact_arity: Some(0),
@@ -2412,6 +2429,7 @@ mod tests {
     fn callsite_type_prop_prunes_locked_internal_callee_arity() {
         reset_normalize_wave_stats();
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -2444,6 +2462,7 @@ mod tests {
                         confidence: 224,
                     },
                     prototype: PrototypeSummary {
+                        variadic_fixed_arity: None,
                         min_arity: 1,
                         max_arity: 1,
                         locked_exact_arity: Some(1),
@@ -2480,6 +2499,7 @@ mod tests {
     fn callsite_type_prop_keeps_args_when_summary_signature_missing() {
         reset_normalize_wave_stats();
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -2511,6 +2531,7 @@ mod tests {
                         confidence: 128,
                     },
                     prototype: PrototypeSummary {
+                        variadic_fixed_arity: None,
                         min_arity: 0,
                         max_arity: 2,
                         locked_exact_arity: None,

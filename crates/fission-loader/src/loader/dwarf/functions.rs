@@ -15,6 +15,7 @@ struct FuncBuilder {
     name: String,
     return_type: Option<String>,
     params: Vec<DwarfParamInfo>,
+    variadic: bool,
     local_vars: Vec<DwarfLocalVar>,
     frame_base: DwarfFrameBase,
     size: u64,
@@ -27,6 +28,7 @@ impl FuncBuilder {
             name: self.name,
             return_type: self.return_type,
             params: self.params,
+            variadic: self.variadic,
             local_vars: self.local_vars,
             frame_base: self.frame_base,
             size: self.size,
@@ -137,6 +139,11 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                                     func.params.push(param);
                                 }
                             }
+                            DwTag(0x18) => {
+                                // DW_TAG_unspecified_parameters marks the
+                                // ellipsis in a variadic function prototype.
+                                func.variadic = true;
+                            }
                             DwTag(0x34) => {
                                 // DW_TAG_variable (top-level or in lexical block)
                                 if let Some(mut var) =
@@ -183,6 +190,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                         name,
                         return_type,
                         params: Vec::new(),
+                        variadic: false,
                         local_vars: Vec::new(),
                         frame_base,
                         size,
@@ -568,6 +576,31 @@ mod location_list_tests {
         assert_eq!(
             analyzer.classify_location_list_expr(expression, encoding),
             Entry::Other
+        );
+    }
+
+    #[test]
+    fn analyze_functions_preserves_unspecified_parameter_marker() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/variadic_subprogram_test.elf");
+        let binary =
+            crate::loader::LoadedBinary::from_file(&path).expect("load variadic DWARF fixture");
+        let analyzer = DwarfAnalyzer::new(&binary);
+        assert!(analyzer.has_debug_info(), "{:?}", binary.sections);
+        let functions = analyzer.analyze_functions();
+        let function = functions
+            .iter()
+            .find(|function| function.name == "fission_variadic_fixture")
+            .unwrap_or_else(|| panic!("find variadic function in DWARF fixture: {functions:?}"));
+
+        assert!(function.variadic);
+        assert_eq!(
+            function
+                .params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            ["fixed", "format"]
         );
     }
 }

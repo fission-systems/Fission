@@ -699,6 +699,7 @@ mod tests {
                     type_name: "HWND".to_string(),
                     location: DwarfLocation::Register("RCX".to_string()),
                 }],
+                variadic: false,
                 local_vars: vec![DwarfLocalVar {
                     name: "rect".to_string(),
                     type_name: "RECT".to_string(),

@@ -50,6 +50,7 @@ fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
     Some(NirFunctionHints {
         param_names,
         param_type_names,
+        variadic_fixed_arity: None,
         stack_local_names: HashMap::new(),
         stack_local_type_names: HashMap::new(),
         debug_stack_local_names: HashMap::new(),
@@ -80,6 +81,7 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
     Some(NirFunctionHints {
         param_names,
         param_type_names,
+        variadic_fixed_arity: None,
         stack_local_names: HashMap::new(),
         stack_local_type_names: HashMap::new(),
         debug_stack_local_names: HashMap::new(),
@@ -353,6 +355,7 @@ fn build_nir_call_prototype_summaries(
                 // Exact, because a person wrote it down. Inference locks an
                 // arity only when it can prove one.
                 locked_exact_arity: Some(arity),
+                variadic_fixed_arity: None,
                 param_pointer_pointees: vec![None; arity],
                 param_surface_type_names: signature
                     .param_types
@@ -367,7 +370,7 @@ fn build_nir_call_prototype_summaries(
         );
     }
 
-    for debug in binary.dwarf_functions.values() {
+    for (&address, debug) in binary.dwarf_functions.iter() {
         if debug.name.is_empty() {
             continue;
         }
@@ -381,17 +384,23 @@ fn build_nir_call_prototype_summaries(
             .return_type
             .as_deref()
             .is_some_and(|name| name.trim().eq_ignore_ascii_case("void"));
-        if !returns_void && debug.params.is_empty() {
+        if !returns_void && debug.params.is_empty() && !debug.variadic {
             continue;
         }
         let arity = debug.params.len();
+        // An explicitly supplied user signature remains the strongest local
+        // contract. Otherwise the declaration-level DWARF ellipsis wins over
+        // call-site arity observations and inferred register slots.
+        let variadic_fixed_arity =
+            (debug.variadic && !binary.user_signatures.contains_key(&address)).then_some(arity);
         let summary =
             summaries
                 .entry(debug.name.clone())
                 .or_insert_with(|| NirCallPrototypeSummary {
                     min_arity: arity,
                     max_arity: arity,
-                    locked_exact_arity: Some(arity),
+                    locked_exact_arity: variadic_fixed_arity.is_none().then_some(arity),
+                    variadic_fixed_arity,
                     param_pointer_pointees: vec![None; arity],
                     param_surface_type_names: debug
                         .params
@@ -403,6 +412,12 @@ fn build_nir_call_prototype_summaries(
                         .collect(),
                     returns_void,
                 });
+        if let Some(fixed_arity) = variadic_fixed_arity {
+            summary.min_arity = fixed_arity;
+            summary.max_arity = summary.max_arity.max(fixed_arity);
+            summary.locked_exact_arity = None;
+            summary.variadic_fixed_arity = Some(fixed_arity);
+        }
         for (index, param) in debug.params.iter().enumerate() {
             let type_name = param.type_name.trim();
             if type_name.is_empty() {
@@ -428,19 +443,20 @@ fn merge_fact_store_call_prototype_hints(
     binary: &LoadedBinary,
     fact_store: &FactStore,
 ) {
-    let mut targets =
-        call_target_refs
-            .iter()
-            .filter_map(|(&address, target_ref)| {
-                let function = binary.function_at_exact(address)?;
-                if function.is_import {
-                    return None;
-                }
-                let hints = fact_store.structuring_hints(address)?;
-                (!hints.param_type_names.is_empty() || hints.return_type_name.is_some())
-                    .then_some((address, target_ref.symbol.clone(), hints.clone()))
-            })
-            .collect::<Vec<_>>();
+    let mut targets = call_target_refs
+        .iter()
+        .filter_map(|(&address, target_ref)| {
+            let function = binary.function_at_exact(address)?;
+            if function.is_import {
+                return None;
+            }
+            let hints = fact_store.structuring_hints(address)?;
+            (!hints.param_type_names.is_empty()
+                || hints.return_type_name.is_some()
+                || hints.variadic_fixed_arity.is_some())
+            .then_some((address, target_ref.symbol.clone(), hints.clone()))
+        })
+        .collect::<Vec<_>>();
     targets.sort_by_key(|(address, _, _)| *address);
 
     for (_, symbol, hints) in targets {
@@ -484,6 +500,12 @@ fn merge_fact_store_call_prototype_hints(
         {
             summary.returns_void = true;
         }
+        if let Some(fixed_arity) = hints.variadic_fixed_arity {
+            summary.min_arity = fixed_arity;
+            summary.max_arity = summary.max_arity.max(fixed_arity);
+            summary.locked_exact_arity = None;
+            summary.variadic_fixed_arity = Some(fixed_arity);
+        }
     }
 }
 
@@ -512,6 +534,7 @@ fn build_nir_import_call_prototype_summaries(
                 max_arity: arity,
                 locked_exact_arity: (!is_known_variadic_runtime_symbol(&target_ref.symbol))
                     .then_some(arity),
+                variadic_fixed_arity: None,
                 returns_void: signature.return_type.trim().eq_ignore_ascii_case("void"),
                 param_pointer_pointees: vec![None; arity],
                 param_surface_type_names: vec![None; arity],
@@ -1369,9 +1392,19 @@ fn build_preview_callee_summaries_uncached(
             .then(|| infer_entry_register_param_arity(candidate_pcode, &register_namer))
             .flatten()
             .map(|arity| {
+            let variadic_fixed_arity = binary
+                .dwarf_functions
+                .get(&target_addr)
+                .filter(|debug| debug.variadic)
+                .filter(|_| !binary.user_signatures.contains_key(&target_addr))
+                .map(|debug| debug.params.len());
+            let typed_arity = variadic_fixed_arity.unwrap_or(arity);
             let mut callee_context = type_context.clone();
             callee_context.function_hints = Some(NirFunctionHints {
-                param_names: (1..=arity).map(|index| format!("param_{index}")).collect(),
+                param_names: (1..=typed_arity)
+                    .map(|index| format!("param_{index}"))
+                    .collect(),
+                variadic_fixed_arity,
                 ..Default::default()
             });
             callee_context.call_prototype_summaries.remove(target_name);
@@ -1410,9 +1443,9 @@ fn build_preview_callee_summaries_uncached(
             })
             .unwrap_or_default();
 
-            let mut param_pointer_pointees = vec![None; arity];
-            let mut param_surface_type_names = vec![None; arity];
-            for (index, param) in typed_params.into_iter().take(arity).enumerate() {
+            let mut param_pointer_pointees = vec![None; typed_arity];
+            let mut param_surface_type_names = vec![None; typed_arity];
+            for (index, param) in typed_params.into_iter().take(typed_arity).enumerate() {
                 let surface = param
                     .surface_type_name
                     .filter(|name| pointer_surface_type_name_is_specific(name));
@@ -1445,9 +1478,10 @@ fn build_preview_callee_summaries_uncached(
             }
 
             NirCallPrototypeSummary {
-                min_arity: arity,
-                max_arity: arity,
-                locked_exact_arity: Some(arity),
+                min_arity: variadic_fixed_arity.unwrap_or(arity),
+                max_arity: arity.max(variadic_fixed_arity.unwrap_or(0)),
+                locked_exact_arity: variadic_fixed_arity.is_none().then_some(arity),
+                variadic_fixed_arity,
                 returns_void: false,
                 param_pointer_pointees,
                 param_surface_type_names,
@@ -2128,8 +2162,10 @@ fn nir_hints_from_debug_function(
     let (register_local_names, register_local_type_names) =
         register_local_hints_from_debug_function(debug, binary);
 
+    let variadic_fixed_arity = debug.variadic.then_some(debug.params.len());
     if param_names.is_empty()
         && param_type_names.is_empty()
+        && variadic_fixed_arity.is_none()
         && debug_stack_local_names.is_empty()
         && debug_stack_local_type_names.is_empty()
         && return_type_name.is_none()
@@ -2141,6 +2177,7 @@ fn nir_hints_from_debug_function(
         Some(NirFunctionHints {
             param_names,
             param_type_names,
+            variadic_fixed_arity,
             stack_local_names: HashMap::new(),
             stack_local_type_names: HashMap::new(),
             debug_stack_local_names,
@@ -2166,20 +2203,33 @@ fn merge_nir_function_hints(
     let Some(structural) = structural else {
         return (!nir_function_hints_are_empty(&merged)).then_some(merged);
     };
+    let variadic_fixed_arity = merged
+        .variadic_fixed_arity
+        .or(structural.variadic_fixed_arity);
     let had_debug_stack_hints = !merged.debug_stack_local_names.is_empty()
         || !merged.debug_stack_local_type_names.is_empty();
 
-    if merged.param_names.len() < structural.param_names.len() {
-        merged
-            .param_names
-            .resize(structural.param_names.len(), String::new());
+    let structural_param_limit = variadic_fixed_arity.unwrap_or(structural.param_names.len());
+    if merged.param_names.len() < structural.param_names.len().min(structural_param_limit) {
+        merged.param_names.resize(
+            structural.param_names.len().min(structural_param_limit),
+            String::new(),
+        );
     }
-    for (index, name) in structural.param_names.iter().enumerate() {
+    for (index, name) in structural
+        .param_names
+        .iter()
+        .take(structural_param_limit)
+        .enumerate()
+    {
         if merged.param_names[index].is_empty() && !name.is_empty() {
             merged.param_names[index] = name.clone();
         }
     }
     for (index, type_name) in &structural.param_type_names {
+        if variadic_fixed_arity.is_some_and(|fixed| *index >= fixed) {
+            continue;
+        }
         merged
             .param_type_names
             .entry(*index)
@@ -2220,6 +2270,7 @@ fn merge_nir_function_hints(
             .return_type_name
             .clone_from(&structural.return_type_name);
     }
+    merged.variadic_fixed_arity = variadic_fixed_arity;
     for (reg_name, var_name) in &structural.register_local_names {
         merged
             .register_local_names
@@ -2239,6 +2290,7 @@ fn merge_nir_function_hints(
 fn nir_function_hints_are_empty(hints: &NirFunctionHints) -> bool {
     hints.param_names.iter().all(String::is_empty)
         && hints.param_type_names.is_empty()
+        && hints.variadic_fixed_arity.is_none()
         && hints.stack_local_names.is_empty()
         && hints.stack_local_type_names.is_empty()
         && hints.debug_stack_local_names.is_empty()
@@ -2445,10 +2497,14 @@ mod tests {
     };
     use crate::{
         CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
-        NirCallEffectSummary, NirCallPointerPointee, NirCallPrototypeSummary, NirTypeContext,
-        PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode,
+        NirCallEffectSummary, NirCallPointerPointee, NirCallPrototypeSummary, NirFunctionHints,
+        NirTypeContext, PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode,
     };
     use fission_core::CallingConvention;
+    use fission_loader::loader::types::{
+        DataBuffer, DwarfFrameBase, DwarfFunctionInfo, DwarfLocation, DwarfParamInfo,
+        LoadedBinaryBuilder,
+    };
     use fission_midend_normalize::prelude::{
         NirBindingOrigin, NirType, PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue,
         PreHirStmt, pre_hir_function_expr_nodes_fit_budget,
@@ -2462,6 +2518,61 @@ mod tests {
         let mut ctx = NirTypeContext::default();
         ctx.call_targets.insert(addr, name.to_string());
         ctx
+    }
+
+    #[test]
+    fn explicit_dwarf_variadic_marker_survives_prototype_and_hint_merging() {
+        let address = 0x401000;
+        let mut binary = LoadedBinaryBuilder::new(
+            "variadic-helper.exe".to_string(),
+            DataBuffer::Heap(Vec::new()),
+        )
+        .format("PE")
+        .arch_spec("x86:LE:64:default")
+        .entry_point(address)
+        .image_base(0x400000)
+        .is_64bit(true)
+        .build()
+        .expect("build variadic helper fixture");
+        let debug = DwarfFunctionInfo {
+            address,
+            name: "defined_helper".to_string(),
+            return_type: Some("void".to_string()),
+            params: vec![DwarfParamInfo {
+                name: "format".to_string(),
+                type_name: "const char *".to_string(),
+                location: DwarfLocation::Unknown,
+            }],
+            variadic: true,
+            local_vars: Vec::new(),
+            frame_base: DwarfFrameBase::Unknown,
+            size: 0,
+        };
+        binary.dwarf_functions = std::sync::Arc::new(HashMap::from([(address, debug.clone())]));
+
+        let summaries = super::build_nir_call_prototype_summaries(&HashMap::new(), &binary);
+        let summary = &summaries["defined_helper"];
+        assert_eq!(summary.min_arity, 1);
+        assert_eq!(summary.variadic_fixed_arity, Some(1));
+        assert_eq!(summary.locked_exact_arity, None);
+
+        let structural = NirFunctionHints {
+            param_names: (1..=4).map(|index| format!("param_{index}")).collect(),
+            param_type_names: HashMap::from([
+                (1, "unsigned long long".to_string()),
+                (2, "unsigned long long".to_string()),
+                (3, "unsigned long long".to_string()),
+            ]),
+            ..Default::default()
+        };
+        let hints = super::merge_nir_function_hints(
+            super::nir_hints_from_debug_function(&debug, &binary),
+            Some(&structural),
+        )
+        .expect("declaration metadata should produce function hints");
+        assert_eq!(hints.variadic_fixed_arity, Some(1));
+        assert_eq!(hints.param_names, ["format"]);
+        assert!(hints.param_type_names.keys().all(|index| *index == 0));
     }
 
     #[test]
@@ -2577,6 +2688,7 @@ mod tests {
             min_arity: 2,
             max_arity: 2,
             locked_exact_arity: Some(2),
+            variadic_fixed_arity: None,
             returns_void: false,
             param_pointer_pointees: vec![None, Some(concrete.clone())],
             param_surface_type_names: vec![None, Some("long*".to_string())],
@@ -2585,6 +2697,7 @@ mod tests {
             min_arity: 3,
             max_arity: 3,
             locked_exact_arity: Some(3),
+            variadic_fixed_arity: None,
             returns_void: false,
             param_pointer_pointees: vec![
                 Some(NirCallPointerPointee::Unknown),

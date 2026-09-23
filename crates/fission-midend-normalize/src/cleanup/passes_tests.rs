@@ -1634,6 +1634,7 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
 #[test]
 fn switch_norm_folds_range_check_guard() {
     let mut func = PreHirFunction {
+        variadic_fixed_arity: None,
         name: "test_switch_norm".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),
@@ -1706,6 +1707,7 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
     });
 
     let mut func = PreHirFunction {
+        variadic_fixed_arity: None,
         name: "test_constant_ptr".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),
@@ -1772,6 +1774,7 @@ fn condexe_folding_merges_sequential_siblings() {
     use crate::cleanup::apply_condexe_folding_pass;
 
     let mut func = PreHirFunction {
+        variadic_fixed_arity: None,
         name: "test_condexe_siblings".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),
@@ -1827,6 +1830,7 @@ fn condexe_folding_merges_nested_ifs() {
     use crate::cleanup::apply_condexe_folding_pass;
 
     let mut func = PreHirFunction {
+        variadic_fixed_arity: None,
         name: "test_condexe_nested".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),
@@ -1881,6 +1885,7 @@ fn condexe_folding_preserves_safety_on_assignment() {
     use crate::cleanup::apply_condexe_folding_pass;
 
     let mut func = PreHirFunction {
+        variadic_fixed_arity: None,
         name: "test_condexe_safety".to_string(),
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),
@@ -1938,6 +1943,7 @@ fn deindirect_resolves_const_address_to_symbol() {
                 confidence: 128,
             },
             prototype: PrototypeSummary {
+                variadic_fixed_arity: None,
                 min_arity: 1,
                 max_arity: 1,
                 locked_exact_arity: None,
@@ -2004,6 +2010,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
                 confidence: 128,
             },
             prototype: PrototypeSummary {
+                variadic_fixed_arity: None,
                 min_arity: 0,
                 max_arity: 0,
                 locked_exact_arity: None,
@@ -2081,6 +2088,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
                 confidence: 255,
             },
             prototype: PrototypeSummary {
+                variadic_fixed_arity: None,
                 min_arity: 1,
                 max_arity: 1,
                 locked_exact_arity: None,

@@ -1581,6 +1581,7 @@ mod tests {
             .map(|idx| temp_binding(&format!("xVar{idx}")))
             .collect();
         PreHirFunction {
+            variadic_fixed_arity: None,
             name: "wide_dead_assignment_test".to_string(),
             params: Vec::new(),
             locals,

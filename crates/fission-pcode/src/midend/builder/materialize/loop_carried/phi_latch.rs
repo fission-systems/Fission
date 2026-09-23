@@ -285,7 +285,7 @@ impl<'a> PreviewBuilder<'a> {
             } else if self
                 .abi_state()
                 .param_slot_for_varnode(&source_output)
-                .is_some_and(|index| index < self.entry_arity)
+                .is_some_and(|index| index < self.named_entry_param_arity())
                 && !self.definition_has_internal_seed_input(&source_op, &source_output)
             {
                 self.register_param(&source_output)?
@@ -301,7 +301,7 @@ impl<'a> PreviewBuilder<'a> {
         if self
             .abi_state()
             .param_slot_for_varnode(definition_output)
-            .is_some_and(|index| index < self.entry_arity)
+            .is_some_and(|index| index < self.named_entry_param_arity())
             && !self.definition_has_internal_seed_input(definition_op, definition_output)
         {
             return self.register_param(definition_output);

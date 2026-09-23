@@ -451,6 +451,10 @@ pub enum NirStackOffsetBase {
 pub struct NirFunctionHints {
     pub param_names: Vec<String>,
     pub param_type_names: HashMap<usize, String>,
+    /// Number of named parameters before a defined variadic tail, when an
+    /// explicit declaration source supplies that contract.
+    #[serde(default)]
+    pub variadic_fixed_arity: Option<usize>,
     /// Stack names supplied by structural analysis. These offsets are already
     /// in the builder's canonical coordinate system.
     pub stack_local_names: HashMap<i64, String>,

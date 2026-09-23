@@ -133,6 +133,9 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) current_lowering_site: Option<LoweringSite>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,
     pub(crate) entry_arity: usize,
+    /// Declaration-level fixed prefix for a variadic function, cached from
+    /// the type context so register lowering does not repeatedly walk hints.
+    pub(crate) declared_variadic_fixed_arity: Option<usize>,
     pub(crate) suppress_entry_register_params: bool,
     /// Varnodes some op reads for their value rather than to reach memory.
     ///

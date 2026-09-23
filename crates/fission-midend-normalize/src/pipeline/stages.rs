@@ -807,6 +807,7 @@ mod tests {
     #[test]
     fn memory_recovery_admits_aggregate_facts_inside_structured_loop() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "loop_object_shape".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),

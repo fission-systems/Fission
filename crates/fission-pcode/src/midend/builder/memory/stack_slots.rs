@@ -43,6 +43,16 @@ fn signed_const_displacement(vn: &Varnode) -> Option<i64> {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    /// Number of entry-register slots that may be named as source parameters.
+    ///
+    /// Entry-use inference still tracks every ABI input register, including
+    /// unnamed variadic values saved by a prologue. Only the declared fixed
+    /// prefix may become a formal binding in the rendered function.
+    pub(in crate::midend::builder) fn named_entry_param_arity(&self) -> usize {
+        self.declared_variadic_fixed_arity
+            .map_or(self.entry_arity, |fixed| self.entry_arity.min(fixed))
+    }
+
     /// Entry-SP-relative offset for a load whose reaching memory value is
     /// proven to come from function entry rather than a store in this
     /// function. This is the ownership proof required before an ABI stack
@@ -169,7 +179,7 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let abi = self.abi_state();
-        let entry_arity = self.entry_arity;
+        let entry_arity = self.named_entry_param_arity();
         if is_register_varnode(vn)
             && let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied()
         {

@@ -701,6 +701,7 @@ mod tests {
 
     fn empty_func() -> PreHirFunction {
         PreHirFunction {
+            variadic_fixed_arity: None,
             name: "admission".to_string(),
             params: Vec::new(),
             locals: Vec::new(),

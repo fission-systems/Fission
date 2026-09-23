@@ -652,6 +652,7 @@ mod tests {
     #[test]
     fn aggregate_fields_upgrades_unknown_pointer_to_aggregate() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "test".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -698,6 +699,7 @@ mod tests {
     #[test]
     fn aggregate_fields_upgrades_byte_pointer_when_shape_is_structured() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "shape".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -773,6 +775,7 @@ mod tests {
             signed: false,
         };
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "typed_fields".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -923,6 +926,7 @@ mod tests {
             signed: false,
         };
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "preserve_known_field".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -995,6 +999,7 @@ mod tests {
             signed: false,
         };
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "homogeneous_scalar_offsets".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -1036,6 +1041,7 @@ mod tests {
     #[test]
     fn aggregate_fields_uses_windows_struct_field_names_when_surface_type_known() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "rect_shape".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -1118,6 +1124,7 @@ mod tests {
         // Verify the aggregate field pass fires and infers correct field offsets
         // from multiple memory accesses on a pointer parameter.
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "process_info_infer".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -1209,6 +1216,7 @@ mod tests {
         // Win32 struct (via LP prefix stripping), the aggregate pass must resolve
         // that name and propagate the surface type correctly.
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "process_info_hint".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),

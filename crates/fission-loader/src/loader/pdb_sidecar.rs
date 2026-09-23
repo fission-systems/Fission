@@ -401,6 +401,7 @@ impl PendingFunction {
                 name,
                 return_type,
                 params,
+                variadic: false,
                 local_vars: Vec::new(),
                 frame_base: DwarfFrameBase::Unknown,
                 size: u64::from(proc.len),

@@ -90,7 +90,7 @@ impl<'a> PreviewBuilder<'a> {
                     .register_name_with_param_owned(vn.offset, vn.size)
                     .and_then(|(name, idx)| {
                         if let Some(idx) = idx {
-                            (idx < self.entry_arity).then_some(name)
+                            (idx < self.named_entry_param_arity()).then_some(name)
                         } else {
                             Some(name)
                         }
@@ -730,7 +730,7 @@ impl<'a> PreviewBuilder<'a> {
                         .register_name_with_param_owned(vn.offset, vn.size)
                         .and_then(|(name, idx)| {
                             if let Some(idx) = idx {
-                                (idx < self.entry_arity).then_some(name)
+                                (idx < self.named_entry_param_arity()).then_some(name)
                             } else {
                                 Some(name)
                             }

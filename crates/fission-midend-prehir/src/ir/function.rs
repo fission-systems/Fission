@@ -41,6 +41,8 @@ impl PreHirBinding {
 pub struct PreHirFunction {
     pub name: String,
     pub params: Vec<PreHirBinding>,
+    /// Number of named parameters before a declaration-level variadic tail.
+    pub variadic_fixed_arity: Option<usize>,
     pub locals: Vec<PreHirBinding>,
     pub return_type: NirType,
     pub surface_return_type_name: Option<String>,
@@ -60,6 +62,7 @@ impl Default for PreHirFunction {
         Self {
             name: String::new(),
             params: Vec::new(),
+            variadic_fixed_arity: None,
             locals: Vec::new(),
             return_type: NirType::Unknown,
             surface_return_type_name: None,
@@ -90,6 +93,7 @@ impl PreHirFunction {
                 .into_iter()
                 .map(dir_binding_to_nir_binding)
                 .collect(),
+            variadic_fixed_arity: self.variadic_fixed_arity,
             locals: self
                 .locals
                 .into_iter()

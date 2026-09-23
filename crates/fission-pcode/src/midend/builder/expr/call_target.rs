@@ -403,7 +403,7 @@ impl<'a> PreviewBuilder<'a> {
                     .register_name_with_param_owned(target.offset, target.size)
                     .and_then(|(name, param_index)| {
                         param_index
-                            .filter(|&idx| idx < self.entry_arity)
+                            .filter(|&idx| idx < self.named_entry_param_arity())
                             .map(|_| name.to_string())
                     });
             }
@@ -441,7 +441,7 @@ impl<'a> PreviewBuilder<'a> {
                 .register_name_with_param_owned(ptr.offset, ptr.size)
                 .and_then(|(name, param_index)| {
                     param_index
-                        .filter(|&idx| idx < self.entry_arity)
+                        .filter(|&idx| idx < self.named_entry_param_arity())
                         .map(|_| name.to_string())
                 });
         }

@@ -248,6 +248,12 @@ pub struct DwarfFunctionInfo {
     pub return_type: Option<String>,
     /// Parameters in declaration order
     pub params: Vec<DwarfParamInfo>,
+    /// Whether the declaration has `...` after its fixed parameters.
+    ///
+    /// For DWARF this is `DW_TAG_unspecified_parameters`; formats that do not
+    /// expose that declaration fact leave it false rather than inferring it
+    /// from observed call sites.
+    pub variadic: bool,
     /// Local variables
     pub local_vars: Vec<DwarfLocalVar>,
     /// Frame-base expression used by `DW_OP_fbreg` locations in this

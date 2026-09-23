@@ -63,9 +63,15 @@ fn summary_seed(target: &str) -> CallTargetRef {
 fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: usize) {
     map.entry(callee.to_string())
         .and_modify(|summary| {
-            summary.prototype.min_arity = summary.prototype.min_arity.min(arity);
+            if let Some(fixed_arity) = summary.prototype.variadic_fixed_arity {
+                summary.prototype.min_arity = fixed_arity;
+                summary.prototype.locked_exact_arity = None;
+            } else {
+                summary.prototype.min_arity = summary.prototype.min_arity.min(arity);
+            }
             summary.prototype.max_arity = summary.prototype.max_arity.max(arity);
-            if let Some(locked) = summary.prototype.locked_exact_arity
+            if summary.prototype.variadic_fixed_arity.is_none()
+                && let Some(locked) = summary.prototype.locked_exact_arity
                 && locked != arity
             {
                 summary.prototype.locked_exact_arity = None;
@@ -95,6 +101,7 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                 min_arity: arity,
                 max_arity: arity,
                 locked_exact_arity: None,
+                variadic_fixed_arity: None,
                 returns_void: false,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown; arity],
@@ -115,6 +122,9 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
 }
 
 fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize {
+    if summary.prototype.variadic_fixed_arity.is_some() {
+        return 0;
+    }
     let Some(sig) = api_signature(callee) else {
         return 0;
     };
@@ -439,6 +449,7 @@ mod tests {
     #[test]
     fn interproc_summary_marks_zero_arity_as_non_escaping() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),
@@ -466,6 +477,7 @@ mod tests {
     #[test]
     fn interproc_summary_detects_simple_wrapper_shape() {
         let mut func = PreHirFunction {
+            variadic_fixed_arity: None,
             name: "wrapper".to_string(),
             int_param_offsets: Vec::new(),
             float_param_offsets: Vec::new(),

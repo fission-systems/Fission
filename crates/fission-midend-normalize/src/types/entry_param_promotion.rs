@@ -451,7 +451,11 @@ fn param_ty_for_abi(func: &PreHirFunction) -> NirType {
 
 fn promote_existing_param_name_reads(func: &mut PreHirFunction) -> usize {
     let mut promotions = 0usize;
-    for slot in 0..func.int_param_offsets.len() {
+    let named_param_limit = func
+        .variadic_fixed_arity
+        .unwrap_or(func.int_param_offsets.len())
+        .min(func.int_param_offsets.len());
+    for slot in 0..named_param_limit {
         let param_name = format!("param_{}", slot + 1);
         if !func
             .body
@@ -475,7 +479,9 @@ fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
     let abi = func.calling_convention;
     let variadic_evidence =
         abi == CallingConvention::WindowsX64 && detect_variadic_register_save(func);
-    let max_fixed_slot = if variadic_evidence {
+    let max_fixed_slot = if let Some(fixed_arity) = func.variadic_fixed_arity {
+        fixed_arity.min(func.int_param_offsets.len())
+    } else if variadic_evidence {
         2
     } else {
         func.int_param_offsets.len()
@@ -791,6 +797,14 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
         let Some(slot) = param_slot_for_hw_register(rhs_name, abi, func.is_64bit) else {
             continue;
         };
+        if func
+            .variadic_fixed_arity
+            .is_some_and(|fixed_arity| slot >= fixed_arity)
+        {
+            // Register-save spills beyond the declared fixed prefix are
+            // locals backing the variadic area, not named formals.
+            continue;
+        }
         if !seen_lhs.insert(lhs_name.clone()) {
             continue;
         }
@@ -842,4 +856,81 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
     let _ = trim_unused_variadic_tail_params(func);
     add_entry_param_promotions(promotions);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spill(name: &str, register: &str) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs: PreHirExpr::Var(register.to_string()),
+        }
+    }
+
+    fn register_save_function(variadic_fixed_arity: Option<usize>) -> PreHirFunction {
+        let slots = [
+            ("home_28", "RCX", 0x28),
+            ("home_30", "RDX", 0x30),
+            ("home_38", "R8", 0x38),
+            ("home_40", "R9", 0x40),
+        ];
+        PreHirFunction {
+            name: "defined_variadic".to_string(),
+            locals: slots
+                .iter()
+                .map(|(name, _, offset)| PreHirBinding {
+                    name: (*name).to_string(),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::HomeSlot(*offset)),
+                    initializer: None,
+                })
+                .collect(),
+            body: slots
+                .iter()
+                .map(|(name, register, _)| spill(name, register))
+                .collect(),
+            calling_convention: CallingConvention::WindowsX64,
+            is_64bit: true,
+            int_param_offsets: vec![0x08, 0x10, 0x80, 0x88],
+            variadic_fixed_arity,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn declared_variadic_prefix_does_not_promote_register_save_slots() {
+        let mut func = register_save_function(Some(1));
+
+        assert!(apply_entry_param_promotion_pass(&mut func));
+        assert_eq!(
+            func.params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            ["param_1"]
+        );
+        for name in ["home_30", "home_38", "home_40"] {
+            assert!(func.locals.iter().any(|local| local.name == name), "{name}");
+        }
+    }
+
+    #[test]
+    fn fixed_arity_register_save_function_still_promotes_all_used_slots() {
+        let mut func = register_save_function(None);
+
+        assert!(apply_entry_param_promotion_pass(&mut func));
+        assert_eq!(
+            func.params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            ["param_1", "param_2", "param_3", "param_4"]
+        );
+    }
 }

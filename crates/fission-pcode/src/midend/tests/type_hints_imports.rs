@@ -31,6 +31,7 @@ fn exact_import_context(target: u64, symbol: &str, arity: usize) -> PreviewTypeC
     context.call_prototype_summaries.insert(
         symbol.to_string(),
         NirCallPrototypeSummary {
+            variadic_fixed_arity: None,
             min_arity: arity,
             max_arity: arity,
             locked_exact_arity: Some(arity),
@@ -1465,6 +1466,7 @@ fn exact_iat_call_arity_recovers_entry_owned_windows_registers() {
     context.call_prototype_summaries.insert(
         "WaitForSingleObject".to_string(),
         NirCallPrototypeSummary {
+            variadic_fixed_arity: None,
             min_arity: 2,
             max_arity: 2,
             locked_exact_arity: Some(2),

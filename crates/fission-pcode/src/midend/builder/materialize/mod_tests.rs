@@ -16,6 +16,39 @@ fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
 }
 
 #[test]
+fn defined_variadic_function_names_only_its_fixed_register_parameters() {
+    let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8);
+    let pcode = pcode_function(vec![block(Vec::new())]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+
+    let mut type_context = crate::midend::PreviewTypeContext::default();
+    type_context.function_hints = Some(crate::midend::NirFunctionHints {
+        variadic_fixed_arity: Some(1),
+        ..Default::default()
+    });
+    let mut variadic = PreviewBuilder::new(&pcode, &options, Some(&type_context));
+    variadic.entry_arity = 4;
+
+    assert_eq!(variadic.named_entry_param_arity(), 1);
+    assert_eq!(variadic.register_param(&rcx).as_deref(), Some("param_1"));
+    assert_eq!(variadic.register_param(&rdx), None);
+    let mut visiting = HashSet::default();
+    let unnamed_input = variadic
+        .lower_varnode(&rdx, &mut visiting)
+        .expect("unnamed entry register should lower as a live register binding");
+    assert!(matches!(unnamed_input, PreHirExpr::Var(ref name) if name == "rdx"));
+    assert!(variadic.temps.contains_key("rdx"));
+    assert!(!variadic.params.contains_key(&1));
+
+    let mut fixed = PreviewBuilder::new(&pcode, &options, None);
+    fixed.entry_arity = 4;
+    assert_eq!(fixed.named_entry_param_arity(), 4);
+    assert_eq!(fixed.register_param(&rdx).as_deref(), Some("param_2"));
+}
+
+#[test]
 fn materialized_mapped_ram_output_keeps_global_lvalue_provenance() {
     let runtime_marker = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x80, 4);
     let mapped_ram = register(UNIQUE_SPACE_ID, 0x1400_1800, 4);
