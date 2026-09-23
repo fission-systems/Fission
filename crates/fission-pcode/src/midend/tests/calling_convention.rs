@@ -60,6 +60,49 @@ fn win64_r9_is_param_4() {
 }
 
 #[test]
+fn cspec_stack_probe_target_does_not_turn_preserved_registers_into_c_formals() {
+    let base = 0x401000;
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: base,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: base,
+                    output: Some(reg(0, 8)),
+                    inputs: vec![reg(0x08, 8), cst(1, 8)],
+                    asm_mnemonic: Some("add rax, rcx".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: base + 1,
+                    output: None,
+                    inputs: vec![reg(0, 8)],
+                    asm_mnemonic: Some("ret".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut probe_options = preview_options_for(CallingConvention::WindowsX64);
+    probe_options.cspec_alloca_probe_targets = vec!["probe_helper".to_string()];
+    let probe = render_mlil_preview(&func, "probe_helper", base, &probe_options)
+        .expect("render cspec stack-probe target");
+    assert!(probe.contains("probe_helper(void)"), "{probe}");
+    assert!(!probe.contains("param_1"), "{probe}");
+
+    let ordinary_options = preview_options_for(CallingConvention::WindowsX64);
+    let ordinary = render_mlil_preview(&func, "ordinary_helper", base, &ordinary_options)
+        .expect("render ordinary Win64 function");
+    assert!(ordinary.contains("ordinary_helper("), "{ordinary}");
+    assert!(ordinary.contains("param_1"), "{ordinary}");
+}
+
+#[test]
 fn x64_live_argument_slots_cross_only_proven_nonwriting_calls() {
     fn render_with_leaf_effect(leaf_writes: Option<Vec<usize>>) -> String {
         let base = 0x401000;

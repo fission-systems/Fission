@@ -26,6 +26,7 @@ pub(crate) fn should_retry_with_strict_indirect_stop(error: &str) -> bool {
 /// - `cspec_param_offsets` — integer parameter register REGISTER-space offsets
 /// - `cspec_stack_arg_base` — stack argument base offset
 /// - `sla_register_map` — inverted SLA `(offset, size)` → name for all registers
+/// - `cspec_alloca_probe_targets` — names covered by the compiler's stack-probe callfixup
 ///
 /// ## `.pspec` populates:
 /// - `pspec_programcounter` — authoritative PC register name (`RIP`, `pc`, …)
@@ -64,9 +65,11 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
         language_id,
         compiler_spec_id,
         &reg_map,
-    ) && let Some(proto) = resolved.default_proto.as_ref()
-    {
-        fission_pcode::midend::cspec::apply::apply_resolved_proto_to_options(options, proto);
+    ) {
+        options.cspec_alloca_probe_targets = resolved.callfixup_targets("alloca_probe");
+        if let Some(proto) = resolved.default_proto.as_ref() {
+            fission_pcode::midend::cspec::apply::apply_resolved_proto_to_options(options, proto);
+        }
     }
 
     // Step 4: Ghidra-style .pspec lookup via the same .ldefs index.
@@ -88,6 +91,34 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
         if !pspec.hidden_registers.is_empty() {
             options.pspec_hidden_registers = pspec.hidden_registers.into_iter().collect();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_spec_overrides;
+    use fission_loader::loader::LoadedBinary;
+
+    #[test]
+    fn apply_spec_overrides_carries_alloca_probe_targets_into_render_options() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fission-emulator/testdata/win_x64_exit.exe");
+        let binary = LoadedBinary::from_file(fixture).expect("load Win64 PE fixture");
+        let mut options = crate::seed_nir_render_options(&binary);
+
+        apply_spec_overrides(&binary, &mut options);
+
+        assert!(
+            options
+                .cspec_alloca_probe_targets
+                .iter()
+                .any(|target| target
+                    .trim_start_matches('_')
+                    .eq_ignore_ascii_case("chkstk_ms")),
+            "Windows x64 cspec alloca_probe targets were not propagated: {:?}; load spec: {:?}",
+            options.cspec_alloca_probe_targets,
+            binary.load_spec().map(|spec| &spec.pair)
+        );
     }
 }
 

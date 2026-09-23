@@ -401,7 +401,17 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn should_suppress_entry_register_params(&self, name: &str, address: u64) -> bool {
-        if is_compiler_runtime_param_suppressed_name(name) {
+        let normalized_name = name.trim_start_matches('_');
+        let is_cspec_alloca_probe_target =
+            self.options
+                .cspec_alloca_probe_targets
+                .iter()
+                .any(|target| {
+                    target
+                        .trim_start_matches('_')
+                        .eq_ignore_ascii_case(normalized_name)
+                });
+        if is_compiler_runtime_param_suppressed_name(name) || is_cspec_alloca_probe_target {
             return true;
         }
         let lower = name.to_ascii_lowercase();
@@ -1281,4 +1291,37 @@ fn is_compiler_runtime_param_suppressed_name(name: &str) -> bool {
 
 pub(super) fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     self::materialize::test_refine_partitions(accesses)
+}
+
+#[cfg(test)]
+mod entry_param_suppression_tests {
+    use super::PreviewBuilder;
+    use crate::midend::MlilPreviewOptions;
+    use crate::pcode::PcodeFunction;
+
+    fn options_with_probe_targets(targets: &[&str]) -> MlilPreviewOptions {
+        let mut options = MlilPreviewOptions::default();
+        options.cspec_alloca_probe_targets =
+            targets.iter().map(|target| target.to_string()).collect();
+        options
+    }
+
+    #[test]
+    fn cspec_stack_probe_target_suppresses_normal_entry_formals() {
+        let pcode = PcodeFunction { blocks: Vec::new() };
+        let options = options_with_probe_targets(&["chkstk_ms"]);
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder.should_suppress_entry_register_params("___chkstk_ms", 0x1000));
+        assert!(!builder.should_suppress_entry_register_params("ordinary_helper", 0x2000));
+    }
+
+    #[test]
+    fn entry_param_suppression_matches_cspec_targets_without_leading_underscores() {
+        let pcode = PcodeFunction { blocks: Vec::new() };
+        let options = options_with_probe_targets(&["___CHKSTK_MS"]);
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder.should_suppress_entry_register_params("chkstk_ms", 0x1000));
+    }
 }
