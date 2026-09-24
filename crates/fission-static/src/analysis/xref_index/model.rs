@@ -1,4 +1,4 @@
-//! Canonical xref record types (loader + disassembly + future pcode layers).
+//! Canonical xref record types for loader, relocation, disassembly, and p-code evidence layers.
 
 use std::collections::BTreeMap;
 

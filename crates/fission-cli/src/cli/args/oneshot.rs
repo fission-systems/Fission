@@ -81,6 +81,8 @@ pub struct OneShotArgs {
     pub xrefs_cmd: bool,
     /// Loader seeds only (`xrefs --no-disassembly`).
     pub xref_no_disassembly: bool,
+    /// Include bounded value-set xrefs from lifted p-code (`xrefs --pcode`).
+    pub xref_pcode: bool,
     /// Optional function VA for JSON slice (`xrefs --function`).
     pub xref_function: Option<u64>,
     /// `xrefs --to`: report only references whose target is this address.
@@ -190,6 +192,7 @@ impl Default for OneShotArgs {
             emit_program_metadata: false,
             xrefs_cmd: false,
             xref_no_disassembly: false,
+            xref_pcode: false,
             xref_function: None,
             xref_to: None,
             info_xrefs: false,

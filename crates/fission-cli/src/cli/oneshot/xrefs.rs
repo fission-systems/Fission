@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::{FunctionXrefsSummary, build_xref_index};
+use fission_static::analysis::{FunctionXrefsSummary, build_xref_index_with_options};
 use serde_json::json;
 use std::io::Write;
 
@@ -10,8 +10,9 @@ use crate::cli::args::OneShotArgs;
 
 pub(super) fn run_xrefs(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> {
     let include_disasm = !cli.xref_no_disassembly;
-    let idx = build_xref_index(binary, include_disasm);
+    let idx = build_xref_index_with_options(binary, include_disasm, cli.xref_pcode);
     let summary = idx.summary();
+    let pcode_refs = summary.by_layer.get("pcode").copied().unwrap_or(0);
 
     let mut stdout = std::io::stdout().lock();
 
@@ -49,7 +50,7 @@ pub(super) fn run_xrefs(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> 
 
     writeln!(
         stdout,
-        "xref_index: total={} calls={} jumps={} data={} imports={} exports={} strings={} globals={}; relocations={}",
+        "xref_index: total={} calls={} jumps={} data={} imports={} exports={} strings={} globals={}; relocations={} pcode={}",
         summary.total,
         summary.calls,
         summary.jumps,
@@ -59,6 +60,7 @@ pub(super) fn run_xrefs(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> 
         summary.strings,
         summary.globals,
         summary.relocations,
+        pcode_refs,
     )
     .context("write xref summary")?;
 

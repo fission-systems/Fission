@@ -1020,7 +1020,9 @@ fn print_help() {
     println!("  fission_cli pcode-topology <binary> --addr <ADDR> [--json]");
     println!("  fission_cli decomp <binary> (--addr <ADDR> | --all) [OPTIONS]");
     println!("  fission_cli strings <binary> [--min-len N] [--json]");
-    println!("  fission_cli xrefs <binary> [--json] [--no-disassembly] [--function ADDR]");
+    println!(
+        "  fission_cli xrefs <binary> [--json] [--no-disassembly] [--pcode] [--function ADDR]"
+    );
     println!("  fission_cli callgraph <binary> [--json]");
     println!("  fission_cli inventory <SUBCOMMAND> <binary> [OPTIONS]");
     println!("  fission_cli script check --script <FILE>");
@@ -1066,7 +1068,7 @@ fn print_help() {
     println!("  pcode-topology  Emit raw p-code block topology");
     println!("  decomp     Decompile one function or all discovered functions");
     println!("  strings    Extract strings");
-    println!("  xrefs      Canonical xref index (loader + optional disassembly)");
+    println!("  xrefs      Canonical xref index (loader + optional disassembly/p-code)");
     println!("  callgraph  Call graph from xref analysis");
     println!("  inventory  Operator-oriented inventory and batch emitters");
     println!("  script     Rhai automation against read-only binary inventory");

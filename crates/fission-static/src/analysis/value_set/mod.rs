@@ -143,14 +143,17 @@ pub enum VsaFact {
     DataRead {
         instruction_addr: u64,
         target_addr: u64,
+        pcode_op: PcodeOpcode,
     },
     DataWrite {
         instruction_addr: u64,
         target_addr: u64,
+        pcode_op: PcodeOpcode,
     },
     JumpTableTarget {
         instruction_addr: u64,
         targets: Vec<u64>,
+        pcode_op: PcodeOpcode,
     },
 }
 
@@ -176,6 +179,7 @@ impl ValueSetAnalyzer {
                 VsaFact::DataRead {
                     instruction_addr,
                     target_addr,
+                    pcode_op: _,
                 } => {
                     xrefs.push(crate::analysis::xrefs::Xref {
                         from_addr: *instruction_addr,
@@ -189,6 +193,7 @@ impl ValueSetAnalyzer {
                 VsaFact::DataWrite {
                     instruction_addr,
                     target_addr,
+                    pcode_op: _,
                 } => {
                     xrefs.push(crate::analysis::xrefs::Xref {
                         from_addr: *instruction_addr,
@@ -202,12 +207,17 @@ impl ValueSetAnalyzer {
                 VsaFact::JumpTableTarget {
                     instruction_addr,
                     targets,
+                    pcode_op,
                 } => {
                     for &target in targets {
                         xrefs.push(crate::analysis::xrefs::Xref {
                             from_addr: *instruction_addr,
                             to_addr: target,
-                            xref_type: crate::analysis::xrefs::XrefType::Jump,
+                            xref_type: if *pcode_op == PcodeOpcode::CallInd {
+                                crate::analysis::xrefs::XrefType::Call
+                            } else {
+                                crate::analysis::xrefs::XrefType::Jump
+                            },
                             operand_index: -1,
                             sleigh_kind: None,
                             flow_kind: None,
@@ -336,6 +346,7 @@ impl ValueSetAnalyzer {
                             self.facts.push(VsaFact::DataRead {
                                 instruction_addr: op.address,
                                 target_addr: addr,
+                                pcode_op: op.opcode,
                             });
                         }
                         AbstractValue::Set(addrs) => {
@@ -343,6 +354,7 @@ impl ValueSetAnalyzer {
                                 self.facts.push(VsaFact::DataRead {
                                     instruction_addr: op.address,
                                     target_addr: addr,
+                                    pcode_op: op.opcode,
                                 });
                             }
                         }
@@ -361,6 +373,7 @@ impl ValueSetAnalyzer {
                             self.facts.push(VsaFact::DataWrite {
                                 instruction_addr: op.address,
                                 target_addr: addr,
+                                pcode_op: op.opcode,
                             });
                         }
                         AbstractValue::Set(addrs) => {
@@ -368,6 +381,7 @@ impl ValueSetAnalyzer {
                                 self.facts.push(VsaFact::DataWrite {
                                     instruction_addr: op.address,
                                     target_addr: addr,
+                                    pcode_op: op.opcode,
                                 });
                             }
                         }
@@ -375,19 +389,21 @@ impl ValueSetAnalyzer {
                     }
                 }
             }
-            PcodeOpcode::BranchInd | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+            PcodeOpcode::BranchInd | PcodeOpcode::CallInd => {
                 if let Some(target_in) = op.inputs.get(0) {
                     match state.get_value(target_in) {
                         AbstractValue::Constant(target) => {
                             self.facts.push(VsaFact::JumpTableTarget {
                                 instruction_addr: op.address,
                                 targets: vec![target],
+                                pcode_op: op.opcode,
                             });
                         }
                         AbstractValue::Set(addrs) => {
                             self.facts.push(VsaFact::JumpTableTarget {
                                 instruction_addr: op.address,
                                 targets: addrs,
+                                pcode_op: op.opcode,
                             });
                         }
                         _ => {}
@@ -482,6 +498,7 @@ mod tests {
             vec![VsaFact::JumpTableTarget {
                 instruction_addr: 0x1000,
                 targets: vec![0x401000],
+                pcode_op: PcodeOpcode::BranchInd,
             }]
         );
     }

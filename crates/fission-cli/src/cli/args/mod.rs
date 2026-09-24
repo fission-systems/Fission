@@ -826,8 +826,8 @@ struct StringsArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Emit canonical cross-reference records (`fission-static::xref_index`): loader-derived seeds plus optional Sleigh disassembly layer.\n\nDisassembly requires a usable load spec on `LoadedBinary`. Use `--no-disassembly` for import/export/string/global anchors only.",
-    after_help = "Examples:\n  fission_cli xrefs app.exe --json\n  fission_cli xrefs app.exe --no-disassembly --json\n  fission_cli xrefs app.exe --function 0x140001000 --json"
+    long_about = "Emit canonical cross-reference records (`fission-static::xref_index`): loader-derived seeds plus optional Sleigh disassembly and bounded p-code value-set layers.\n\nDisassembly and p-code require a usable load spec. `--pcode` enables the more expensive, conservative p-code layer; only complete function lifts and targets proven to be mapped addresses are emitted. Use `--no-disassembly` for loader anchors plus any explicitly requested p-code records.",
+    after_help = "Examples:\n  fission_cli xrefs app.exe --json\n  fission_cli xrefs app.exe --no-disassembly --json\n  fission_cli xrefs app.exe --pcode --json\n  fission_cli xrefs app.exe --function 0x140001000 --json"
 )]
 struct XrefsArgs {
     /// Path to the binary file to analyze
@@ -844,6 +844,10 @@ struct XrefsArgs {
     /// Skip Sleigh xref extraction (loader seeds only)
     #[arg(long)]
     no_disassembly: bool,
+
+    /// Add bounded p-code value-set references with operation-level evidence
+    #[arg(long)]
+    pcode: bool,
 
     /// Include per-function xref slice for this function entry VA in JSON output
     #[arg(long, value_parser = parse_hex_address)]
@@ -1293,6 +1297,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     let mut args = OneShotArgs::with_binary(xrefs.binary);
                     args.xrefs_cmd = true;
                     args.xref_no_disassembly = xrefs.no_disassembly;
+                    args.xref_pcode = xrefs.pcode;
                     args.xref_function = xrefs.function;
                     args.xref_to = xrefs.to;
                     args.function_discovery_profile = xrefs.function_discovery_profile;
@@ -1715,12 +1720,14 @@ mod tests {
             "xrefs",
             "bin.exe",
             "--no-disassembly",
+            "--pcode",
             "--function",
             "0x140001000",
             "--json",
         ]);
         assert!(parsed.args.xrefs_cmd);
         assert!(parsed.args.xref_no_disassembly);
+        assert!(parsed.args.xref_pcode);
         assert_eq!(parsed.args.xref_function, Some(0x140001000));
         assert!(parsed.args.json);
     }

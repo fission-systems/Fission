@@ -7,7 +7,9 @@
 //! **Deferred:** explicit fall-through edges (Ghidra `FALL_THROUGH`) and indirect/computed
 //! flow placeholders are out of scope for this module; track as a follow-up if CFG consumers need them.
 
-use fission_sleigh::runtime::{DecodedFlowKind, DecodedReferenceKind, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{
+    DecodeStopReason, DecodedFlowKind, DecodedReferenceKind, RuntimeSleighFrontend,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Ghidra-compatible sentinel: reference arises from mnemonic / primary decode path (no operand slot).
@@ -142,20 +144,38 @@ impl XrefDatabase {
         frontend: &RuntimeSleighFrontend,
         function_addrs: &[u64],
     ) {
-        let mut analyzer = crate::analysis::value_set::ValueSetAnalyzer::new();
-        let code = binary.data.as_slice();
         for &addr in function_addrs {
-            let start = addr as usize;
-            if start >= code.len() {
+            let Some(function) = binary.function_at_exact(addr) else {
+                continue;
+            };
+            if function.is_import || function.size == 0 || function.size > 1 << 20 {
                 continue;
             }
-            if let Ok(pcode_fn) = frontend.lift_raw_pcode_function(&code[start..], addr) {
-                analyzer.analyze(&pcode_fn);
+            let Ok(size) = usize::try_from(function.size) else {
+                continue;
+            };
+            if binary
+                .available_execution_bytes(addr)
+                .map_or(true, |available| available < size)
+            {
+                continue;
             }
-        }
-        let vsa_xrefs = analyzer.into_xrefs();
-        for xref in vsa_xrefs {
-            self.add_xref(xref);
+            let Some(code) = binary.view_executable_bytes(addr, size) else {
+                continue;
+            };
+            let Ok(decoded) = frontend.lift_raw_pcode_function_with_contract(code, addr, 4096)
+            else {
+                continue;
+            };
+            if decoded.stop_reason != DecodeStopReason::TerminalControlFlow {
+                continue;
+            }
+            let mut analyzer = crate::analysis::value_set::ValueSetAnalyzer::new();
+            if analyzer.analyze(&decoded.function) {
+                for xref in analyzer.into_xrefs() {
+                    self.add_xref(xref);
+                }
+            }
         }
     }
 

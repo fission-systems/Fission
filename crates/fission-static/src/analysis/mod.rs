@@ -52,6 +52,6 @@ pub use value_set::{AbstractValue, ValueSetAnalyzer, ValueState};
 pub use xref_index::{
     FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndex, XrefIndexBuilder, XrefIndexSummary,
     XrefKind, XrefRecord, XrefSource, XrefSourceCategory, XrefSourceLayer, XrefTarget,
-    build_xref_index, resolve_enclosing_function,
+    build_xref_index, build_xref_index_with_options, push_pcode_layer, resolve_enclosing_function,
 };
 pub use xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefDatabase, XrefType};

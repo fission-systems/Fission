@@ -25,7 +25,7 @@ struct XrefRecordDraft {
     evidence: XrefEvidence,
 }
 
-/// Canonical merged cross-reference index (loader + disassembly + future layers).
+/// Canonical merged cross-reference index (loader + disassembly + optional p-code layers).
 #[derive(Debug, Clone)]
 pub struct XrefIndex {
     pub refs: Vec<XrefRecord>,
@@ -71,6 +71,7 @@ impl XrefIndexBuilder {
                 .then_with(|| left.kind.cmp(&right.kind))
                 .then_with(|| left.target.symbol.cmp(&right.target.symbol))
                 .then_with(|| left.evidence.symbol_name.cmp(&right.evidence.symbol_name))
+                .then_with(|| left.evidence.pcode_op.cmp(&right.evidence.pcode_op))
                 .then_with(|| left.evidence.note.cmp(&right.evidence.note))
         });
         let mut refs = Vec::with_capacity(self.pending.len());
@@ -620,11 +621,24 @@ pub fn push_disassembly_layer(
 /// Build full index: loader seeds + optional disassembly (`include_disassembly` requires load_spec).
 #[must_use]
 pub fn build_xref_index(binary: &LoadedBinary, include_disassembly: bool) -> XrefIndex {
+    build_xref_index_with_options(binary, include_disassembly, false)
+}
+
+/// Build loader, optional disassembly, and optional p-code xref layers.
+#[must_use]
+pub fn build_xref_index_with_options(
+    binary: &LoadedBinary,
+    include_disassembly: bool,
+    include_pcode: bool,
+) -> XrefIndex {
     let mut b = XrefIndexBuilder::new();
     push_loader_seeds(&mut b, binary);
     if include_disassembly && binary.load_spec().is_some() {
         let db = XrefDatabase::build_from_binary(binary);
         push_disassembly_layer(&mut b, binary, &db);
+    }
+    if include_pcode {
+        super::pcode::push_pcode_layer(&mut b, binary);
     }
     b.finish()
 }
@@ -636,6 +650,8 @@ mod tests {
     use fission_loader::loader::{
         DataBuffer, FunctionInfo, LoadedBinaryBuilder, RelocationEntry, SectionInfo,
     };
+    use fission_pcode::PcodeOpcode;
+    use fission_sleigh::runtime::RuntimeSleighFrontend;
 
     #[test]
     fn empty_builder_finishes() {
@@ -679,6 +695,119 @@ mod tests {
         assert!(sum.exports >= 1);
         assert!(idx.refs.iter().any(|r| {
             r.kind == XrefKind::ImportRef && r.confidence == fission_loader::Confidence::High
+        }));
+    }
+
+    #[test]
+    fn pcode_layer_records_rip_relative_load_with_operation_evidence() {
+        let mut image = vec![0x8b, 0x05, 0xfa, 0x0f, 0, 0, 0xc3];
+        image.extend_from_slice(&[0x11, 0x22, 0x33, 0x44]);
+        let binary = LoadedBinaryBuilder::new("rip_load.bin".to_string(), DataBuffer::Heap(image))
+            .format("ELF64")
+            .entry_point(0x401000)
+            .image_base(0x400000)
+            .is_64bit(true)
+            .arch_spec("x86:LE:64:default")
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x401000,
+                virtual_size: 7,
+                file_offset: 0,
+                file_size: 7,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".rodata".to_string(),
+                virtual_address: 0x402000,
+                virtual_size: 4,
+                file_offset: 7,
+                file_size: 4,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_function(FunctionInfo {
+                name: "read_global".into(),
+                address: 0x401000,
+                size: 7,
+                ..Default::default()
+            })
+            .build()
+            .expect("build");
+
+        let index = build_xref_index_with_options(&binary, false, true);
+        let pcode_read = index
+            .refs
+            .iter()
+            .find(|record| {
+                record.source.address == 0x401000
+                    && record.target.address == Some(0x402000)
+                    && record.kind == XrefKind::DataRead
+                    && record.evidence.layer == XrefSourceLayer::Pcode
+            })
+            .expect("p-code should recover the absolute load target");
+
+        assert_eq!(pcode_read.evidence.pcode_op.as_deref(), Some("COPY"));
+    }
+
+    #[test]
+    fn pcode_layer_does_not_promote_cmov_semantics_to_machine_flow() {
+        let binary = LoadedBinaryBuilder::new(
+            "cmov.bin".to_string(),
+            DataBuffer::Heap(vec![0x0f, 0x4e, 0xd7, 0xc3]),
+        )
+        .format("ELF64")
+        .entry_point(0x401000)
+        .image_base(0x400000)
+        .is_64bit(true)
+        .arch_spec("x86:LE:64:default")
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 4,
+            file_offset: 0,
+            file_size: 4,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_function(FunctionInfo {
+            name: "select_value".into(),
+            address: 0x401000,
+            size: 4,
+            ..Default::default()
+        })
+        .build()
+        .expect("build");
+
+        let frontend =
+            RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().expect("load spec"))
+                .expect("frontend");
+        let code = binary
+            .view_executable_bytes(0x401000, 4)
+            .expect("fixture code");
+        let decoded = frontend
+            .lift_raw_pcode_function_with_contract(code, 0x401000, 64)
+            .expect("lift fixture");
+        let cmov_branch = decoded
+            .function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.ops)
+            .find(|op| op.address == 0x401000 && op.opcode == PcodeOpcode::CBranch)
+            .expect("Sleigh models CMOV with an internal conditional p-code branch");
+        assert_eq!(cmov_branch.inputs[0].offset, 0x401003);
+
+        let index = build_xref_index_with_options(&binary, false, true);
+        assert!(!index.refs.iter().any(|record| {
+            record.source.address == 0x401000
+                && record.evidence.layer == XrefSourceLayer::Pcode
+                && matches!(
+                    record.kind,
+                    XrefKind::Call | XrefKind::Jump | XrefKind::ConditionalJump
+                )
         }));
     }
 
