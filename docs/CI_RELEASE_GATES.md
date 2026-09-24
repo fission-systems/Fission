@@ -1,6 +1,6 @@
 # CI / CD release gates (conservative)
 
-**Last updated:** 2026-07-17
+**Last updated:** 2026-09-25
 
 This document is the policy source for how Fission promotes a git commit to a
 **SemVer tag** and a **GitHub Release**. It aligns automation with
@@ -23,6 +23,25 @@ This document is the policy source for how Fission promotes a git commit to a
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
 | **L3 CD** | [`cd.yml`](../.github/workflows/cd.yml) | Tag push `v*.*.*` / `X.Y.Z` | Multi-platform CLI archives (each includes `utils/`) → GitHub Release |
+
+## Main branch required status check
+
+Configure `main` branch protection to require these two Fast Gate checks by
+their exact check-run names:
+
+- **`🔎 Detect changes`** — the path/lane classifier, which must complete;
+- **`✅ CI Summary`** — the aggregate gate for every lane-enabled check.
+
+Do not require lane-specific leaf contexts: the Fast Gate intentionally skips
+unrelated jobs for docs/scripts/CI-only changes, and its documented PR lane is
+Linux-first; the macOS smoke/build gates run after merge in L0/L1.
+
+`CI Summary` runs for every Fast Gate lane, independently fails when change
+detection fails or returns an unknown lane, and checks that every lane-enabled
+job succeeded. Requiring both contexts keeps strict protection attached to the
+current lane-aware contract instead of retired or conditionally absent job
+names. If either check is renamed, update branch protection and recheck all
+open PRs as part of the same change.
 
 ```text
 main push ──► L0 Fast Gate ──► L1 Heavy (async)
