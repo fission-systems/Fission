@@ -1304,8 +1304,8 @@
 </tr>
 <tr>
 <td>Relocation</td>
-<td>—</td>
-<td>Reserved; PE/ELF relocation tables are not yet first-class on <code>LoadedBinary</code> (counts stay <code>0</code> with <code>relocation_note</code> in summaries)</td>
+<td><code>LoadedBinary::relocations</code> plus legacy <code>relocation_symbols</code></td>
+<td>Structured entries preserve raw type, size, addend, and optional symbol; symbol-use-site entries without a matching table row remain supported. Empty symbol names are represented as unresolved, never as empty target symbols.</td>
 </tr>
 </tbody>
 </table>
