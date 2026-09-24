@@ -908,8 +908,8 @@ struct IdentifyArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Fuzzy function similarity: find functions that are structurally similar but not byte-identical (different compiler/optimization level, renamed duplicate helper, patched-but-related versions).\n\nA Fission-native, BSim-inspired analog -- NOT a byte-compatible clone of Ghidra's BSim (no `.bsim` database import/export, no LSH server). Each function's p-code data-flow and control-flow graph is turned into a sparse feature-hash multiset, compared with TF-IDF-weighted cosine-like similarity against every other discovered function in the same binary. Pass `--function-discovery-profile balanced` (or `aggressive`) first -- without it, only import/export-table functions are known, which defeats the purpose.",
-    after_help = "Examples:\n  fission_cli similar app.exe --function-discovery-profile balanced\n  fission_cli similar app.exe --function-discovery-profile balanced --function 0x140001000\n  fission_cli similar app.exe --function-discovery-profile balanced --top 3 --json"
+    long_about = "Fuzzy function similarity: find functions that are structurally similar but not byte-identical (different compiler/optimization level, renamed duplicate helper, patched-but-related versions).\n\nA Fission-native, BSim-inspired analog -- NOT a byte-compatible clone of Ghidra's BSim. Without `--index`, functions are compared within the input binary. Build or update a portable offline feature index with `--update-index`, then query it with `--index`. Index identity is based on binary content hash and function entry; names and paths are result provenance. Pass `--function-discovery-profile balanced` (or `aggressive`) first -- without it, only import/export-table functions may be known.",
+    after_help = "Examples:\n  fission_cli similar app.exe --function-discovery-profile balanced\n  fission_cli similar app.exe --function-discovery-profile balanced --function 0x140001000\n  fission_cli similar app.exe --update-index corpus.json --function-discovery-profile balanced\n  fission_cli similar query.exe --index corpus.json --function 0x140001000 --json"
 )]
 struct SimilarArgs {
     /// Path to the binary file to analyze
@@ -922,6 +922,15 @@ struct SimilarArgs {
     /// Max similar matches to report per function
     #[arg(long, default_value_t = 5)]
     top: usize,
+
+    /// Query this versioned cross-binary similarity index instead of the
+    /// current binary's in-memory corpus.
+    #[arg(long, conflicts_with = "update_index")]
+    index: Option<PathBuf>,
+
+    /// Upsert all lifted functions from this binary into the index and exit.
+    #[arg(long, conflicts_with_all = ["index", "function"])]
+    update_index: Option<PathBuf>,
 
     /// Function discovery profile (conservative|balanced|aggressive) -- without
     /// this, only import/export-table functions are known, which defeats the
@@ -1312,6 +1321,8 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.similar_cmd = true;
                     args.similar_function = similar.function;
                     args.similar_top_k = similar.top;
+                    args.similar_index = similar.index;
+                    args.similar_update_index = similar.update_index;
                     args.function_discovery_profile = similar.function_discovery_profile;
                     args.json = similar.common.json;
                     args.verbose = similar.common.verbose;
@@ -1512,6 +1523,30 @@ mod tests {
         assert_eq!(parsed.args.similar_function, Some(0x1000));
         assert_eq!(parsed.args.similar_top_k, 3);
         assert_eq!(parsed.args.binary.to_str(), Some("bin.exe"));
+
+        let query = parse_canonical(&[
+            "fission_cli",
+            "similar",
+            "query.exe",
+            "--index",
+            "corpus.json",
+        ]);
+        assert_eq!(
+            query.args.similar_index.as_deref(),
+            Some(std::path::Path::new("corpus.json"))
+        );
+
+        let update = parse_canonical(&[
+            "fission_cli",
+            "similar",
+            "source.exe",
+            "--update-index",
+            "corpus.json",
+        ]);
+        assert_eq!(
+            update.args.similar_update_index.as_deref(),
+            Some(std::path::Path::new("corpus.json"))
+        );
     }
 
     #[test]

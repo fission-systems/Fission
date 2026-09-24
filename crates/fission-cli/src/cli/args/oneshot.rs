@@ -104,6 +104,10 @@ pub struct OneShotArgs {
     pub similar_function: Option<u64>,
     /// Max similar matches to report per function (`similar --top`).
     pub similar_top_k: usize,
+    /// Query an on-disk cross-binary function-feature index.
+    pub similar_index: Option<PathBuf>,
+    /// Upsert the current binary's lifted functions into this feature index.
+    pub similar_update_index: Option<PathBuf>,
     /// Force a specific SLEIGH language ID instead of auto-detecting one
     /// (global `--language` flag, canonical parser only).
     pub language_override: Option<String>,
@@ -197,6 +201,8 @@ impl Default for OneShotArgs {
             similar_cmd: false,
             similar_function: None,
             similar_top_k: 5,
+            similar_index: None,
+            similar_update_index: None,
             language_override: None,
             analysis_db: None,
             no_analysis_db: false,

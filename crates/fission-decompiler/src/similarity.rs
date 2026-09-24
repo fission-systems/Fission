@@ -26,9 +26,16 @@
 //! equivalent reference corpus here, and a self-consistent corpus-relative
 //! IDF is the standard fallback for any TF-IDF-style scheme without one.
 
-use std::collections::HashMap;
+use std::{
+    cmp::Ordering,
+    collections::{BinaryHeap, HashMap, HashSet},
+};
 
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, Varnode};
+use serde::{Deserialize, Serialize};
+
+/// Version of the on-disk feature format and feature-extraction contract.
+pub const SIMILARITY_INDEX_VERSION: u32 = 1;
 
 /// Sentinel hash used in place of a "no definer inside this function"
 /// neighbor (an external register/memory read) during data-flow refinement.
@@ -448,6 +455,289 @@ impl SimilarityCorpus {
     }
 }
 
+/// A stable function record persisted in a cross-binary similarity index.
+///
+/// Function identity is `(binary_hash, language_id, function_address)`. The
+/// path and name are retained as result provenance, but do not participate in
+/// identity. Language is necessary for multi-architecture containers such as
+/// universal binaries, where one file hash can contain several code images.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimilarityIndexDocument {
+    pub binary_hash: String,
+    pub binary_path: String,
+    pub function_address: u64,
+    pub function_name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    pub language_id: String,
+    pub features: Vec<u32>,
+}
+
+/// Ranked function result with enough provenance to identify the source file
+/// and entry point in another binary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilaritySearchHit {
+    pub binary_hash: String,
+    pub binary_path: String,
+    pub function_address: u64,
+    pub function_name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    pub language_id: String,
+    pub score: f64,
+}
+
+/// Versioned, deterministic, offline corpus index for cross-binary queries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimilarityIndex {
+    format_version: u32,
+    documents: Vec<SimilarityIndexDocument>,
+}
+
+impl Default for SimilarityIndex {
+    fn default() -> Self {
+        Self {
+            format_version: SIMILARITY_INDEX_VERSION,
+            documents: Vec::new(),
+        }
+    }
+}
+
+impl SimilarityIndex {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_compatible(&self) -> bool {
+        self.format_version == SIMILARITY_INDEX_VERSION
+    }
+
+    pub fn format_version(&self) -> u32 {
+        self.format_version
+    }
+
+    pub fn documents(&self) -> &[SimilarityIndexDocument] {
+        &self.documents
+    }
+
+    /// Canonicalize records loaded from an external file before they enter a
+    /// query path. Identity duplicates remain detectable via
+    /// [`Self::has_unique_identities`].
+    pub fn canonicalize(&mut self) {
+        self.documents.sort_by(|left, right| {
+            left.binary_hash
+                .cmp(&right.binary_hash)
+                .then_with(|| left.language_id.cmp(&right.language_id))
+                .then_with(|| left.function_address.cmp(&right.function_address))
+        });
+    }
+
+    pub fn has_unique_identities(&self) -> bool {
+        let mut identities = HashSet::with_capacity(self.documents.len());
+        self.documents.iter().all(|document| {
+            identities.insert((
+                document.binary_hash.as_str(),
+                document.language_id.as_str(),
+                document.function_address,
+            ))
+        })
+    }
+
+    /// Insert a function or refresh its provenance/features if the same
+    /// binary hash and entry address were already indexed. Returns `true` only
+    /// when a new identity was inserted.
+    pub fn upsert(&mut self, document: SimilarityIndexDocument) -> bool {
+        self.upsert_many([document]).0 > 0
+    }
+
+    /// Batch variant used while indexing a whole binary. It avoids sorting or
+    /// rescanning the full corpus once per function.
+    pub fn upsert_many(
+        &mut self,
+        documents: impl IntoIterator<Item = SimilarityIndexDocument>,
+    ) -> (usize, usize) {
+        let mut positions: HashMap<(String, String, u64), usize> = self
+            .documents
+            .iter()
+            .enumerate()
+            .map(|(index, document)| {
+                (
+                    (
+                        document.binary_hash.clone(),
+                        document.language_id.clone(),
+                        document.function_address,
+                    ),
+                    index,
+                )
+            })
+            .collect();
+        let original_identities: HashSet<_> = positions.keys().cloned().collect();
+        let mut refreshed_identities = HashSet::new();
+        let (mut inserted, mut refreshed) = (0, 0);
+        for document in documents {
+            if document.features.is_empty() {
+                continue;
+            }
+            let key = (
+                document.binary_hash.clone(),
+                document.language_id.clone(),
+                document.function_address,
+            );
+            if let Some(index) = positions.get(&key).copied() {
+                let current = &mut self.documents[index];
+                current.binary_path = document.binary_path;
+                current.features = document.features;
+                let mut names: Vec<_> = current
+                    .aliases
+                    .iter()
+                    .chain(std::iter::once(&current.function_name))
+                    .chain(document.aliases.iter())
+                    .chain(std::iter::once(&document.function_name))
+                    .filter(|name| !name.is_empty())
+                    .cloned()
+                    .collect();
+                names.sort();
+                names.dedup();
+                if names.is_empty() {
+                    current.function_name.clear();
+                    current.aliases.clear();
+                } else {
+                    current.function_name = names.remove(0);
+                    current.aliases = names;
+                }
+                if original_identities.contains(&key) && refreshed_identities.insert(key) {
+                    refreshed += 1;
+                }
+            } else {
+                let index = self.documents.len();
+                positions.insert(key, index);
+                self.documents.push(document);
+                inserted += 1;
+            }
+        }
+        self.canonicalize();
+        (inserted, refreshed)
+    }
+
+    pub fn len(&self) -> usize {
+        self.documents.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.documents.is_empty()
+    }
+
+    /// Query the index using an external function's raw feature vector.
+    /// `exclude` removes that exact source identity if it is already indexed.
+    pub fn query_top_k(
+        &self,
+        query_features: &[u32],
+        exclude: Option<(&str, &str, u64)>,
+        top_k: usize,
+    ) -> Vec<SimilaritySearchHit> {
+        if top_k == 0 || query_features.is_empty() || self.documents.is_empty() {
+            return Vec::new();
+        }
+
+        let mut idf = IdfTable::default();
+        for document in &self.documents {
+            idf.add_document(&document.features);
+        }
+        let query = WeightedVector::from_raw_features(query_features.to_vec(), &idf);
+        if query.is_empty() {
+            return Vec::new();
+        }
+
+        let mut ranked = BinaryHeap::with_capacity(top_k.min(self.documents.len()));
+        for (index, document) in self.documents.iter().enumerate() {
+            if exclude
+                == Some((
+                    document.binary_hash.as_str(),
+                    document.language_id.as_str(),
+                    document.function_address,
+                ))
+            {
+                continue;
+            }
+            let candidate = WeightedVector::from_raw_features(document.features.clone(), &idf);
+            let rank = RankedDocument {
+                score: compare(&query, &candidate),
+                binary_hash: document.binary_hash.clone(),
+                language_id: document.language_id.clone(),
+                function_address: document.function_address,
+                document_index: index,
+            };
+            if ranked.len() < top_k {
+                ranked.push(rank);
+            } else if ranked.peek().is_some_and(|worst| rank < *worst) {
+                ranked.pop();
+                ranked.push(rank);
+            }
+        }
+
+        let mut ranked = ranked.into_vec();
+        ranked.sort_by(|left, right| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| left.binary_hash.cmp(&right.binary_hash))
+                .then_with(|| left.language_id.cmp(&right.language_id))
+                .then_with(|| left.function_address.cmp(&right.function_address))
+        });
+        ranked
+            .into_iter()
+            .map(|rank| {
+                let document = &self.documents[rank.document_index];
+                SimilaritySearchHit {
+                    binary_hash: document.binary_hash.clone(),
+                    binary_path: document.binary_path.clone(),
+                    function_address: document.function_address,
+                    function_name: document.function_name.clone(),
+                    aliases: document.aliases.clone(),
+                    language_id: document.language_id.clone(),
+                    score: rank.score,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Heap ordering keeps the worst currently-selected hit at the root, so query
+/// memory is bounded by `top_k` rather than the corpus size.
+#[derive(Debug, Clone)]
+struct RankedDocument {
+    score: f64,
+    binary_hash: String,
+    language_id: String,
+    function_address: u64,
+    document_index: usize,
+}
+
+impl PartialEq for RankedDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for RankedDocument {}
+
+impl PartialOrd for RankedDocument {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for RankedDocument {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .score
+            .total_cmp(&self.score)
+            .then_with(|| self.binary_hash.cmp(&other.binary_hash))
+            .then_with(|| self.language_id.cmp(&other.language_id))
+            .then_with(|| self.function_address.cmp(&other.function_address))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +755,25 @@ mod tests {
 
     fn const_vn(val: i64, size: u32) -> Varnode {
         Varnode::constant(val, size)
+    }
+
+    fn index_document(
+        binary_hash: &str,
+        binary_path: &str,
+        function_address: u64,
+        function_name: &str,
+        language_id: &str,
+        features: &[u32],
+    ) -> SimilarityIndexDocument {
+        SimilarityIndexDocument {
+            binary_hash: binary_hash.into(),
+            binary_path: binary_path.into(),
+            function_address,
+            function_name: function_name.into(),
+            aliases: Vec::new(),
+            language_id: language_id.into(),
+            features: features.into(),
+        }
     }
 
     fn simple_add_function(reg_offset: u64) -> PcodeFunction {
@@ -615,5 +924,182 @@ mod tests {
     fn empty_function_yields_no_features() {
         let empty = PcodeFunction { blocks: vec![] };
         assert!(extract_function_features(&empty).is_empty());
+    }
+
+    #[test]
+    fn cross_binary_index_is_versioned_deterministic_and_round_trips() {
+        let mut index = SimilarityIndex::new();
+        assert!(index.is_compatible());
+        assert!(index.upsert(index_document(
+            "hash-b",
+            "b.elf",
+            0x2000,
+            "same_name",
+            "ARM:LE:32:v8",
+            &[1, 2, 3],
+        )));
+        assert!(index.upsert(index_document(
+            "hash-a",
+            "a.elf",
+            0x1000,
+            "same_name",
+            "x86:LE:64:default",
+            &[1, 2, 3],
+        )));
+
+        assert_eq!(index.documents[0].binary_hash, "hash-a");
+        assert!(!index.upsert(index_document(
+            "hash-a",
+            "moved/a.elf",
+            0x1000,
+            "renamed",
+            "x86:LE:64:default",
+            &[1, 2, 3],
+        )));
+        assert_eq!(index.len(), 2);
+        assert_eq!(index.documents[0].binary_path, "moved/a.elf");
+
+        let json = serde_json::to_string_pretty(&index).expect("serialize index");
+        let decoded: SimilarityIndex = serde_json::from_str(&json).expect("deserialize index");
+        assert_eq!(decoded, index);
+        assert_eq!(
+            serde_json::to_string_pretty(&decoded).expect("serialize again"),
+            json,
+            "serialization should be stable after canonical upsert ordering"
+        );
+    }
+
+    #[test]
+    fn cross_binary_query_ranks_other_architecture_and_excludes_source_identity() {
+        let mut index = SimilarityIndex::new();
+        index.upsert(index_document(
+            "same-binary",
+            "source.elf",
+            0x1000,
+            "source_function",
+            "x86:LE:64:default",
+            &[1, 2, 3],
+        ));
+        index.upsert(index_document(
+            "other-binary",
+            "arm.elf",
+            0x8000,
+            "candidate",
+            "AARCH64:LE:64:v8A",
+            &[1, 2, 3],
+        ));
+        index.upsert(index_document(
+            "unrelated-binary",
+            "unrelated.elf",
+            0x9000,
+            "unrelated",
+            "x86:LE:64:default",
+            &[90, 91],
+        ));
+
+        let results = index.query_top_k(
+            &[1, 2, 3],
+            Some(("same-binary", "x86:LE:64:default", 0x1000)),
+            1,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].binary_hash, "other-binary");
+        assert_eq!(results[0].function_address, 0x8000);
+        assert_eq!(results[0].language_id, "AARCH64:LE:64:v8A");
+        assert!(results[0].score > 0.99);
+        assert!(
+            results
+                .iter()
+                .all(|hit| { hit.binary_hash != "same-binary" || hit.function_address != 0x1000 })
+        );
+    }
+
+    #[test]
+    fn same_universal_binary_can_index_multiple_architectures_at_one_address() {
+        let mut index = SimilarityIndex::new();
+        assert!(index.upsert(index_document(
+            "fat-binary",
+            "universal",
+            0x1000,
+            "entry_x86",
+            "x86:LE:64:default",
+            &[1, 2],
+        )));
+        assert!(index.upsert(index_document(
+            "fat-binary",
+            "universal",
+            0x1000,
+            "entry_arm",
+            "AARCH64:LE:64:v8A",
+            &[1, 2],
+        )));
+        assert_eq!(index.len(), 2);
+        assert!(index.has_unique_identities());
+    }
+
+    #[test]
+    fn cross_binary_index_rejects_unknown_format_versions() {
+        let mut index = SimilarityIndex::new();
+        index.format_version += 1;
+        assert!(!index.is_compatible());
+    }
+
+    #[test]
+    fn duplicate_function_entries_merge_names_without_inflating_update_counts() {
+        let mut index = SimilarityIndex::new();
+        let (inserted, refreshed) = index.upsert_many([
+            index_document(
+                "binary",
+                "app.elf",
+                0x1000,
+                "",
+                "x86:LE:64:default",
+                &[1, 2],
+            ),
+            index_document(
+                "binary",
+                "app.elf",
+                0x1000,
+                "main",
+                "x86:LE:64:default",
+                &[1, 2],
+            ),
+            index_document(
+                "binary",
+                "app.elf",
+                0x1000,
+                "sub_1000",
+                "x86:LE:64:default",
+                &[1, 2],
+            ),
+            index_document(
+                "other",
+                "other.elf",
+                0x2000,
+                "helper",
+                "AARCH64:LE:64:v8A",
+                &[3, 4],
+            ),
+        ]);
+        assert_eq!((inserted, refreshed), (2, 0));
+        assert_eq!(index.len(), 2);
+        assert_eq!(index.documents[0].function_name, "main");
+        assert_eq!(index.documents[0].aliases, vec!["sub_1000"]);
+
+        let (inserted, refreshed) = index.upsert_many([index_document(
+            "binary",
+            "app.elf",
+            0x1000,
+            "renamed_main",
+            "x86:LE:64:default",
+            &[1, 2],
+        )]);
+        assert_eq!((inserted, refreshed), (0, 1));
+        assert_eq!(index.documents[0].function_name, "main");
+        assert!(
+            index.documents[0]
+                .aliases
+                .contains(&"renamed_main".to_string())
+        );
     }
 }
