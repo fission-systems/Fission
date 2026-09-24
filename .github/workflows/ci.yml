@@ -361,6 +361,7 @@ jobs:
       # loader → analysis-db → midend/pcode stack (ADR 0010 + 0012 owners)
       crates: "fission-loader,fission-analysis-db,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode"
       profile: debug
+      run_optional_feature_tests: true
 
   cli-smoke-linux:
     name: 🧭 CLI Smoke (Linux · PE sample)
