@@ -403,7 +403,20 @@ jobs:
       - name: Check Status
         run: |
           set -euo pipefail
+          CHANGES_RESULT="${{ needs.changes.result }}"
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "❌ Change detection failed (result=${CHANGES_RESULT})"
+            exit 1
+          fi
+
           LANE="${{ needs.changes.outputs.lane }}"
+          case "$LANE" in
+            docs|scripts|ci|rust) ;;
+            *)
+              echo "❌ Change detection returned an unknown lane: '${LANE}'"
+              exit 1
+              ;;
+          esac
           echo "Lane: ${LANE}"
 
           require_if() {
