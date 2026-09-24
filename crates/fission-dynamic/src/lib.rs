@@ -10,6 +10,7 @@
 //! |-------|---------|
 //! | `--no-default-features` | Baseline: [`runtime_status()`], examples, unit tests (`default` features remain empty). |
 //! | `--features interactive_runtime` | Full interactive stack (Tokio, plugin facade, OS helpers): **`nix` on Linux**, **`windows` on Windows**. Expect longer builds. |
+//! | `--features windows_native_debugger` | Interactive runtime plus the live Win32 debugger (Windows targets only). |
 //!
 //! Canonical decompiler crates (`fission-pcode`, `fission-decompiler`, `fission-sleigh`) must not depend on this crate.
 

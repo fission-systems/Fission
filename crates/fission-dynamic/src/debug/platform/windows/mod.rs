@@ -1,11 +1,9 @@
 //! Windows platform integration: Win32 memory PAL + debugger API.
 //!
-//! The memory PAL, module walking and PE helpers build. The *debugger* --
-//! attach, breakpoints, thread contexts, the Win32 debug-event loop -- does
-//! not, and has not for a long time: see `windows_native_debugger` in this
-//! crate's manifest for what is wrong with it. It is behind that feature so
-//! that a build which does not turn it on is a build that says so, rather
-//! than one that quietly contains no debugger at all.
+//! The live-process debugger and its auxiliary Windows analysis APIs are
+//! gated by `windows_native_debugger`; the feature stays opt-in so the normal
+//! cross-platform emulator/debugger build does not activate Windows runtime
+//! dependencies.
 
 // Everything that operates on a *live* Windows process. All of it is the
 // same unported code and nothing outside this directory uses any of it.

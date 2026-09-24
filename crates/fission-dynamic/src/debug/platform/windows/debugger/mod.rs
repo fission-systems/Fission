@@ -31,15 +31,15 @@ use windows::Win32::System::Diagnostics::Debug::{
     Wow64GetThreadContext, Wow64SetThreadContext, WriteProcessMemory,
 };
 use windows::Win32::System::Memory::{
-    MEM_COMMIT, MEM_RESERVE, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_GUARD,
-    PAGE_NOACCESS, PAGE_PROTECTION_FLAGS, PAGE_READONLY, PAGE_READWRITE, VIRTUAL_ALLOCATION_TYPE,
-    VIRTUAL_FREE_TYPE, VirtualAllocEx, VirtualFreeEx, VirtualProtectEx, VirtualQueryEx,
+    MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE,
+    PAGE_PROTECTION_FLAGS, VIRTUAL_ALLOCATION_TYPE, VIRTUAL_FREE_TYPE, VirtualAllocEx,
+    VirtualFreeEx, VirtualProtectEx, VirtualQueryEx,
 };
 use windows::Win32::System::SystemInformation::{IMAGE_FILE_MACHINE, IMAGE_FILE_MACHINE_I386};
 use windows::Win32::System::Threading::{
     CreateProcessW, IsWow64Process2, OpenProcess, OpenThread, PROCESS_ALL_ACCESS,
-    PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, SuspendThread, THREAD_ALL_ACCESS,
-    TerminateProcess,
+    PROCESS_INFORMATION, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, ResumeThread, STARTUPINFOW,
+    SuspendThread, THREAD_ALL_ACCESS, TerminateProcess,
 };
 use windows::core::PWSTR;
 
@@ -53,7 +53,6 @@ const CONTEXT_INTEGER: u32 = CONTEXT_AMD64 | 0x2;
 const CONTEXT_SEGMENTS: u32 = CONTEXT_AMD64 | 0x4;
 const CONTEXT_FLOATING_POINT: u32 = CONTEXT_AMD64 | 0x8;
 const CONTEXT_DEBUG_REGISTERS: u32 = CONTEXT_AMD64 | 0x10;
-const CONTEXT_FULL: u32 = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT;
 const CONTEXT_ALL: u32 = CONTEXT_CONTROL
     | CONTEXT_INTEGER
     | CONTEXT_SEGMENTS
@@ -115,10 +114,12 @@ pub struct WindowsDebugger {
     /// Whether the attached process is a WOW64 (32-bit on 64-bit Windows) target.
     /// `None` when not yet determined (no process attached).
     pub(crate) is_wow64: Option<bool>,
+    /// Status to pass when resuming the debug event most recently returned by
+    /// `poll_event` (notably `DBG_EXCEPTION_NOT_HANDLED` for first-chance
+    /// exceptions).
+    pub(crate) pending_continue_status: Option<NTSTATUS>,
     /// Active hardware breakpoints: address → DR slot index (0-3).
     pub(crate) hw_breakpoints: std::collections::BTreeMap<u64, u8>,
-    /// Active memory breakpoints: address → (size, old_protect).
-    pub(crate) memory_breakpoints: std::collections::BTreeMap<u64, (usize, PAGE_PROTECTION_FLAGS)>,
 }
 
 impl WindowsDebugger {
@@ -133,8 +134,8 @@ impl WindowsDebugger {
             ttd_timeline: None,
             decoder,
             is_wow64: None,
+            pending_continue_status: None,
             hw_breakpoints: std::collections::BTreeMap::new(),
-            memory_breakpoints: std::collections::BTreeMap::new(),
         }
     }
 
@@ -253,6 +254,78 @@ impl WindowsDebugger {
         }
     }
 
+    fn wait_for_debug_event(
+        &mut self,
+        timeout_ms: u32,
+    ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
+        if self.pending_continue_status.is_some() {
+            return Err(FissionError::debug(
+                "Continue the pending Windows debug event before polling again",
+            ));
+        }
+
+        let mut raw = DEBUG_EVENT::default();
+        match unsafe { WaitForDebugEvent(&mut raw, timeout_ms) } {
+            Ok(()) => {
+                let (event, status) = self.process_debug_event(&raw);
+                self.pending_continue_status = Some(status);
+
+                if self.state.status == DebugStatus::Suspended {
+                    let thread_id = self
+                        .state
+                        .last_thread_id
+                        .or(self.state.current_thread_id)
+                        .or(self.state.main_thread_id);
+                    if let Some(thread_id) = thread_id {
+                        if let Ok(registers) = self.fetch_registers(thread_id) {
+                            self.state.registers = Some(registers);
+                        }
+                    }
+                }
+
+                // The common event enum intentionally omits raw Win32 events
+                // that carry no user-visible state. They still must be
+                // continued here or the target would remain suspended with
+                // no event for the caller to acknowledge.
+                if event.is_none() {
+                    self.continue_pending_debug_event()?;
+                }
+                if matches!(
+                    event.as_ref(),
+                    Some(crate::debug::types::DebugEvent::ProcessExited { .. })
+                ) {
+                    self.continue_pending_debug_event()?;
+                }
+
+                Ok(event)
+            }
+            Err(error) if error.code().0 as u32 == 0x8007_0079 => Ok(None),
+            Err(error) => Err(FissionError::debug(format!(
+                "WaitForDebugEvent failed: {error:?}"
+            ))),
+        }
+    }
+
+    fn continue_pending_debug_event(&mut self) -> FissionResult<()> {
+        let pid = self
+            .state
+            .attached_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
+        let tid = self
+            .state
+            .last_thread_id
+            .or(self.state.main_thread_id)
+            .ok_or_else(|| FissionError::debug("No thread id"))?;
+        let status = self.pending_continue_status.unwrap_or(DBG_CONTINUE);
+
+        unsafe {
+            ContinueDebugEvent(pid, tid, status)
+                .map_err(|e| FissionError::debug(format!("Continue failed: {e:?}")))?;
+        }
+        self.pending_continue_status = None;
+        Ok(())
+    }
+
     /// Record a TTD snapshot if recording is active
     fn record_ttd_snapshot(&self, thread_id: u32, registers: &crate::debug::types::RegisterState) {
         if let Some(timeline_arc) = &self.ttd_timeline {
@@ -301,7 +374,7 @@ impl WindowsDebugger {
                 // Register main module
                 let base = info.lpBaseOfImage as u64;
                 let module_name =
-                    self.read_image_name_safe(info.lpImageName as u64, info.fUnicode.0 != 0);
+                    self.read_image_name_safe(info.lpImageName as usize as u64, info.fUnicode != 0);
                 let short = module_short_name(&module_name);
                 let mod_size = self.get_module_size(base) as u64;
                 self.state.modules.insert(
@@ -359,7 +432,8 @@ impl WindowsDebugger {
             LOAD_DLL_DEBUG_EVENT => {
                 let info = unsafe { debug_event.u.LoadDll };
                 let base = info.lpBaseOfDll as u64;
-                let name = self.read_image_name_safe(info.lpImageName as u64, info.fUnicode.0 != 0);
+                let name =
+                    self.read_image_name_safe(info.lpImageName as usize as u64, info.fUnicode != 0);
                 let short = module_short_name(&name);
                 let mod_size = self.get_module_size(base) as u64;
                 self.state.modules.insert(
@@ -625,7 +699,7 @@ impl WindowsDebugger {
     /// The data is read directly from the target process address space using
     /// the address and length fields in the `OUTPUT_DEBUG_STRING_INFO` struct.
     fn read_debug_string(&self, info: &OUTPUT_DEBUG_STRING_INFO) -> String {
-        let addr = info.lpDebugStringData as u64;
+        let addr = info.lpDebugStringData.0 as usize as u64;
         let len = info.nDebugStringLength as usize;
         if addr == 0 || len == 0 {
             return String::new();
@@ -633,7 +707,7 @@ impl WindowsDebugger {
         // nDebugStringLength includes the null terminator; read the full buffer
         match self.read_memory(addr, len.min(4096)) {
             Ok(raw) => {
-                if info.fUnicode.0 != 0 {
+                if info.fUnicode != 0 {
                     let u16s: Vec<u16> = raw
                         .chunks_exact(2)
                         .map(|p| u16::from_le_bytes([p[0], p[1]]))
@@ -762,33 +836,14 @@ impl WindowsDebugger {
         &mut self,
         timeout_ms: u32,
     ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
-        let mut raw = DEBUG_EVENT::default();
-        let wait_ok = unsafe { WaitForDebugEvent(&mut raw, timeout_ms) };
-        if wait_ok.is_err() {
-            return Ok(None);
-        }
-        let pid = raw.dwProcessId;
-        let tid = raw.dwThreadId;
-        let (evt, status) = self.process_debug_event(&raw);
-
-        // Auto-refresh register cache whenever the debuggee is suspended.
-        if self.state.status == DebugStatus::Suspended {
-            let thread_id = self
-                .state
-                .last_thread_id
-                .or(self.state.current_thread_id)
-                .or(self.state.main_thread_id);
-            if let Some(tid_for_regs) = thread_id {
-                if let Ok(regs) = self.fetch_registers(tid_for_regs) {
-                    self.state.registers = Some(regs);
-                }
+        let event = self.wait_for_debug_event(timeout_ms)?;
+        if self.pending_continue_status.is_some() {
+            self.continue_pending_debug_event()?;
+            if self.state.status != DebugStatus::Terminated {
+                self.state.status = DebugStatus::Running;
             }
         }
-
-        unsafe {
-            let _ = ContinueDebugEvent(pid, tid, status);
-        }
-        Ok(evt)
+        Ok(event)
     }
 }
 
@@ -805,6 +860,8 @@ pub fn start_event_loop(
     stop_rx: Receiver<()>,
 ) {
     thread::spawn(move || {
+        let process_handle =
+            unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid).ok() };
         let mut debug_event = DEBUG_EVENT::default();
         loop {
             if stop_rx.try_recv().is_ok() {
@@ -858,11 +915,15 @@ pub fn start_event_loop(
                     }
                     LOAD_DLL_DEBUG_EVENT => {
                         let info = unsafe { debug_event.u.LoadDll };
-                        let name = WindowsDebugger::read_image_name_from_process(
-                            handle,
-                            info.lpImageName as u64,
-                            info.fUnicode.0 != 0,
-                        );
+                        let name = process_handle
+                            .map(|handle| {
+                                WindowsDebugger::read_image_name_from_process(
+                                    handle,
+                                    info.lpImageName as usize as u64,
+                                    info.fUnicode != 0,
+                                )
+                            })
+                            .unwrap_or_else(|| "<unknown>".to_string());
                         Some(crate::debug::types::DebugEvent::DllLoaded {
                             base_address: info.lpBaseOfDll as u64,
                             name,
@@ -883,6 +944,11 @@ pub fn start_event_loop(
                 thread::sleep(Duration::from_millis(10));
             }
         }
+        if let Some(handle) = process_handle {
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+        }
     });
 }
 
@@ -901,6 +967,21 @@ impl Default for WindowsDebugger {
     }
 }
 
+impl Drop for WindowsDebugger {
+    fn drop(&mut self) {
+        if let Some(pid) = self.state.attached_pid {
+            unsafe {
+                let _ = DebugActiveProcessStop(pid);
+            }
+        }
+        if let Some(handle) = self.process_handle.take() {
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+        }
+    }
+}
+
 // SAFETY: Windows HANDLE values are system-wide references (kernel objects) that are safe
 // to pass between threads; the debugger is protected by an external Mutex in AppState.
 unsafe impl Send for WindowsDebugger {}
@@ -914,6 +995,145 @@ impl ExecutionBackend for WindowsDebugger {
         process::enumerate_processes()
     }
 
+    fn attach(&mut self, pid: u32) -> FissionResult<()> {
+        WindowsDebugger::attach(self, pid)
+    }
+
+    fn detach(&mut self) -> FissionResult<()> {
+        WindowsDebugger::detach(self)
+    }
+
+    fn is_attached(&self) -> bool {
+        WindowsDebugger::is_attached(self)
+    }
+
+    fn attached_pid(&self) -> Option<u32> {
+        WindowsDebugger::attached_pid(self)
+    }
+
+    fn continue_execution(&mut self) -> FissionResult<()> {
+        WindowsDebugger::continue_execution(self)
+    }
+
+    fn single_step(&mut self) -> FissionResult<()> {
+        WindowsDebugger::single_step(self)
+    }
+
+    fn poll_event(
+        &mut self,
+        timeout_ms: u32,
+    ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
+        self.wait_for_debug_event(timeout_ms)
+    }
+
+    fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
+        WindowsDebugger::set_sw_breakpoint(self, address)
+    }
+
+    fn remove_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
+        WindowsDebugger::remove_sw_breakpoint(self, address)
+    }
+
+    fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        WindowsDebugger::read_memory(self, address, size)
+    }
+
+    fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
+        WindowsDebugger::write_memory(self, address, data)
+    }
+
+    fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<RegisterState> {
+        WindowsDebugger::fetch_registers(self, thread_id)
+    }
+
+    fn set_registers(&mut self, thread_id: u32, regs: &RegisterState) -> FissionResult<()> {
+        WindowsDebugger::set_registers(self, thread_id, regs)
+    }
+
+    fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
+        WindowsDebugger::launch(self, path, args)
+    }
+
+    fn step_over(&mut self) -> FissionResult<()> {
+        WindowsDebugger::step_over(self)
+    }
+
+    fn step_out(&mut self) -> FissionResult<()> {
+        WindowsDebugger::step_out(self)
+    }
+
+    fn pause(&mut self) -> FissionResult<()> {
+        WindowsDebugger::pause(self)
+    }
+
+    fn terminate(&mut self) -> FissionResult<()> {
+        WindowsDebugger::terminate(self)
+    }
+
+    fn set_current_thread(&mut self, thread_id: u32) -> FissionResult<()> {
+        WindowsDebugger::set_current_thread(self, thread_id)
+    }
+
+    fn suspend_thread(&mut self, thread_id: u32) -> FissionResult<u32> {
+        WindowsDebugger::suspend_thread(self, thread_id)
+    }
+
+    fn resume_thread(&mut self, thread_id: u32) -> FissionResult<u32> {
+        WindowsDebugger::resume_thread(self, thread_id)
+    }
+
+    fn skip_instruction(&mut self) -> FissionResult<()> {
+        WindowsDebugger::skip_instruction(self)
+    }
+
+    fn enable_breakpoint(&mut self, address: u64) -> FissionResult<bool> {
+        WindowsDebugger::enable_breakpoint(self, address)
+    }
+
+    fn disable_breakpoint(&mut self, address: u64) -> FissionResult<bool> {
+        WindowsDebugger::disable_breakpoint(self, address)
+    }
+
+    fn list_breakpoints(&self) -> Vec<Breakpoint> {
+        WindowsDebugger::list_breakpoints(self)
+    }
+
+    fn remote_alloc(&mut self, address: u64, size: usize) -> FissionResult<u64> {
+        WindowsDebugger::remote_alloc(self, address, size)
+    }
+
+    fn remote_free(&mut self, address: u64) -> FissionResult<()> {
+        WindowsDebugger::remote_free(self, address)
+    }
+
+    fn get_page_rights(&self, address: u64) -> FissionResult<u32> {
+        WindowsDebugger::get_page_rights(self, address)
+    }
+
+    fn set_page_rights(&mut self, address: u64, size: usize, protect: u32) -> FissionResult<()> {
+        WindowsDebugger::set_page_rights(self, address, size, protect)
+    }
+
+    fn stack_peek(&self, offset: isize) -> FissionResult<u64> {
+        WindowsDebugger::stack_peek(self, offset)
+    }
+
+    fn stack_pop(&mut self) -> FissionResult<u64> {
+        WindowsDebugger::stack_pop(self)
+    }
+
+    fn stack_push(&mut self, value: u64) -> FissionResult<()> {
+        WindowsDebugger::stack_push(self, value)
+    }
+
+    fn get_module_exports(&self, base: u64) -> FissionResult<Vec<crate::debug::types::ExportInfo>> {
+        WindowsDebugger::get_module_exports(self, base)
+    }
+
+    fn get_module_imports(&self, base: u64) -> FissionResult<Vec<crate::debug::types::ImportInfo>> {
+        WindowsDebugger::get_module_imports(self, base)
+    }
+
     fn get_state(&self) -> crate::debug::types::DebugState {
         self.state.clone()
     }
@@ -922,6 +1142,7 @@ impl ExecutionBackend for WindowsDebugger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::debug::types::DebugEvent;
 
     #[test]
     fn debugger_new_not_attached() {
@@ -929,6 +1150,25 @@ mod tests {
         assert!(!dbg.is_attached());
         assert_eq!(dbg.attached_pid(), None);
         assert_eq!(dbg.state().status, DebugStatus::Detached);
+    }
+
+    #[test]
+    fn unsupported_native_breakpoint_operations_return_errors() {
+        let mut debugger = WindowsDebugger::new();
+        assert!(
+            ExecutionBackend::set_memory_breakpoint(
+                &mut debugger,
+                0x1000,
+                4,
+                crate::debug::types::MemoryBpKind::Write,
+            )
+            .is_err()
+        );
+        assert!(ExecutionBackend::remove_memory_breakpoint(&mut debugger, 0x1000).is_err());
+        assert!(ExecutionBackend::set_dll_breakpoint(&mut debugger, "example.dll").is_err());
+        assert!(ExecutionBackend::remove_dll_breakpoint(&mut debugger, "example.dll").is_err());
+        assert!(ExecutionBackend::set_exception_breakpoint(&mut debugger, 0xc0000005).is_err());
+        assert!(ExecutionBackend::remove_exception_breakpoint(&mut debugger, 0xc0000005).is_err());
     }
 
     #[test]
@@ -1032,9 +1272,7 @@ mod tests {
         evt.dwProcessId = 1234;
         evt.dwThreadId = 1;
         evt.dwDebugEventCode = LOAD_DLL_DEBUG_EVENT;
-        unsafe {
-            evt.u.LoadDll.lpBaseOfDll = 0x7ff00000 as *mut c_void;
-        }
+        evt.u.LoadDll.lpBaseOfDll = 0x7ff00000 as *mut c_void;
         let (de, _) = dbg.process_debug_event(&evt);
         assert!(
             matches!(
@@ -1054,9 +1292,7 @@ mod tests {
         evt2.dwProcessId = 1234;
         evt2.dwThreadId = 1;
         evt2.dwDebugEventCode = UNLOAD_DLL_DEBUG_EVENT;
-        unsafe {
-            evt2.u.UnloadDll.lpBaseOfDll = 0x7ff00000 as *mut c_void;
-        }
+        evt2.u.UnloadDll.lpBaseOfDll = 0x7ff00000 as *mut c_void;
         let (de2, _) = dbg.process_debug_event(&evt2);
         assert!(matches!(
             de2,
@@ -1077,10 +1313,8 @@ mod tests {
         evt.dwProcessId = 1234;
         evt.dwThreadId = 1;
         evt.dwDebugEventCode = EXCEPTION_DEBUG_EVENT;
-        unsafe {
-            evt.u.Exception.ExceptionRecord.ExceptionCode = EXCEPTION_BREAKPOINT_CODE;
-            evt.u.Exception.ExceptionRecord.ExceptionAddress = 0x401000 as *mut c_void;
-        }
+        evt.u.Exception.ExceptionRecord.ExceptionCode = NTSTATUS(EXCEPTION_BREAKPOINT_CODE as i32);
+        evt.u.Exception.ExceptionRecord.ExceptionAddress = 0x401000 as *mut c_void;
         let (de, _) = dbg.process_debug_event(&evt);
         assert!(
             matches!(
@@ -1117,5 +1351,110 @@ mod tests {
             .take_while(|&c| c != 0)
             .collect();
         assert_eq!(String::from_utf16_lossy(&parsed), "Hello");
+    }
+
+    #[test]
+    fn windows_native_backend_launches_steps_and_accesses_target() {
+        let mut debugger: Box<dyn ExecutionBackend> = Box::new(WindowsDebugger::new());
+        let command = vec!["/C".to_string(), "ping -n 10 127.0.0.1 >NUL".to_string()];
+
+        let result = (|| -> FissionResult<()> {
+            debugger.launch(r"C:\Windows\System32\cmd.exe", &command)?;
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            let mut stopped_at_breakpoint = false;
+            while std::time::Instant::now() < deadline {
+                if let Some(event) = debugger.poll_event(500)? {
+                    if matches!(event, crate::debug::types::DebugEvent::BreakpointHit { .. }) {
+                        stopped_at_breakpoint = true;
+                        break;
+                    }
+                    debugger.continue_execution()?;
+                }
+            }
+            assert!(
+                stopped_at_breakpoint,
+                "launch did not reach the initial breakpoint"
+            );
+            assert!(
+                debugger.poll_event(0).is_err(),
+                "polling must not bypass an uncontinued debug event"
+            );
+
+            let thread_id = debugger
+                .get_state()
+                .last_thread_id
+                .ok_or_else(|| FissionError::debug("debug event did not identify a thread"))?;
+            let registers = debugger.fetch_registers(thread_id)?;
+            assert_ne!(registers.pc, 0, "target instruction pointer is unavailable");
+            let original_byte = debugger.read_memory(registers.pc, 1)?[0];
+            assert_ne!(original_byte, 0xCC, "test address already contains INT3");
+            debugger.set_registers(thread_id, &registers)?;
+            assert_eq!(debugger.fetch_registers(thread_id)?.pc, registers.pc);
+
+            debugger.set_sw_breakpoint(registers.pc)?;
+            assert_eq!(debugger.read_memory(registers.pc, 1)?, [0xCC]);
+            assert!(debugger.disable_breakpoint(registers.pc)?);
+            assert_eq!(debugger.read_memory(registers.pc, 1)?, [original_byte]);
+            assert!(debugger.enable_breakpoint(registers.pc)?);
+            assert_eq!(debugger.read_memory(registers.pc, 1)?, [0xCC]);
+            debugger.remove_sw_breakpoint(registers.pc)?;
+            assert_eq!(debugger.read_memory(registers.pc, 1)?, [original_byte]);
+            debugger.single_step()?;
+
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            let mut stepped = false;
+            while std::time::Instant::now() < deadline {
+                if let Some(event) = debugger.poll_event(500)? {
+                    if matches!(event, crate::debug::types::DebugEvent::SingleStep { .. }) {
+                        stepped = true;
+                        break;
+                    }
+                    debugger.continue_execution()?;
+                }
+            }
+            assert!(stepped, "single-step did not produce a single-step event");
+            debugger.continue_execution()?;
+            Ok(())
+        })();
+
+        let _ = debugger.terminate();
+        assert!(
+            result.is_ok(),
+            "native debugger launch/step path failed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn windows_native_backend_attaches_and_detaches_child_process() {
+        let mut child = std::process::Command::new(r"C:\Windows\System32\cmd.exe")
+            .args(["/C", "ping -n 10 127.0.0.1 >NUL"])
+            .spawn()
+            .expect("spawn debugger test target");
+        let mut debugger: Box<dyn ExecutionBackend> = Box::new(WindowsDebugger::new());
+
+        let result = (|| -> FissionResult<()> {
+            debugger.attach(child.id())?;
+            assert_eq!(debugger.attached_pid(), Some(child.id()));
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            let mut received_event = false;
+            while std::time::Instant::now() < deadline {
+                if debugger.poll_event(500)?.is_some() {
+                    received_event = true;
+                    break;
+                }
+            }
+            assert!(received_event, "attach did not produce a debug event");
+            debugger.continue_execution()?;
+            debugger.detach()?;
+            assert!(!debugger.is_attached());
+            Ok(())
+        })();
+
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            result.is_ok(),
+            "native debugger attach/detach path failed: {result:?}"
+        );
     }
 }

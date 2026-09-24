@@ -70,6 +70,32 @@ jobs:
       profile: release
       timeout_minutes: 120
 
+  test-windows-native-debugger:
+    name: 🪟 Native Win32 Debugger (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+          submodules: false
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fission-native-debugger-${{ runner.os }}
+          cache-on-failure: true
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Check Win32 debugger and CLI feature builds
+        run: |
+          cargo check --locked -p fission-dynamic --features windows_native_debugger
+          cargo check --locked -p fission-cli --features windows_native_debugger
+      - name: Run native debugger tests
+        run: cargo nextest run --locked -p fission-dynamic --features windows_native_debugger
+
   build-macos-heavy:
     name: 🍎 Heavy Build (macOS)
     uses: ./.github/workflows/reusable-build-cli.yml
@@ -125,6 +151,7 @@ jobs:
       - test-linux-release-critical
       - build-macos-heavy
       - test-windows-heavy
+      - test-windows-native-debugger
       - msrv-check
       - test-linux-full
       - coverage
@@ -167,6 +194,7 @@ jobs:
           fi
           require_success "macOS heavy build" "${{ needs.build-macos-heavy.result }}"
           require_success "Windows heavy tests" "${{ needs.test-windows-heavy.result }}"
+          require_success "Windows native debugger" "${{ needs.test-windows-native-debugger.result }}"
           require_success "MSRV" "${{ needs.msrv-check.result }}"
 
           if [ "${{ github.event_name }}" = "push" ]; then

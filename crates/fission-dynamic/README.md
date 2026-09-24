@@ -16,6 +16,7 @@ cargo test -p fission-dynamic --no-default-features
 | Feature | Notes |
 |---------|--------|
 | `interactive_runtime` | Heavy stack (Tokio, plugins, OS helpers). **`nix`** on Linux; **`windows`** on Windows. **`cargo check --features interactive_runtime`** succeeds on macOS (verified in development); expect longer builds. |
+| `windows_native_debugger` | Enables the opt-in live Win32 debugger on Windows. The feature implies `interactive_runtime`; Windows CI checks the dynamic crate, CLI, and native debugger tests. |
 | `unpacker_runtime` | Intended for **Windows** targets (`windows` sys crates). On **macOS**, `cargo check -p fission-dynamic --features unpacker_runtime` has been observed to succeed (cross-target stubs); Linux/CI should still treat Windows as the primary validation OS for unpack behavior. |
 
-Full debugger attach / unpack execution are separate follow-ups.
+The emulator backend remains available independently of the native Win32 debugger feature.

@@ -1,28 +1,16 @@
-use super::WindowsDebugger;
-use crate::debug::traits::ExecutionBackend;
+use super::*;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl ExecutionBackend for WindowsDebugger {
-    fn continue_execution(&mut self) -> FissionResult<()> {
-        let pid = self
-            .state
-            .attached_pid
-            .ok_or_else(|| FissionError::debug("Not attached"))?;
-        let tid = self
-            .state
-            .last_thread_id
-            .or(self.state.main_thread_id)
-            .ok_or_else(|| FissionError::debug("No thread id"))?;
-
-        unsafe {
-            ContinueDebugEvent(pid, tid, DBG_CONTINUE)
-                .map_err(|e| FissionError::debug(format!("Continue failed: {:?}", e)))?;
+impl WindowsDebugger {
+    pub(super) fn continue_execution(&mut self) -> FissionResult<()> {
+        self.continue_pending_debug_event()?;
+        if self.state.status != DebugStatus::Terminated {
+            self.state.status = DebugStatus::Running;
         }
-        self.state.status = DebugStatus::Running;
         Ok(())
     }
 
-    fn single_step(&mut self) -> FissionResult<()> {
+    pub(super) fn single_step(&mut self) -> FissionResult<()> {
         let tid = self
             .state
             .last_thread_id
@@ -32,7 +20,7 @@ impl ExecutionBackend for WindowsDebugger {
             let h_thread = OpenThread(THREAD_ALL_ACCESS, false, tid)
                 .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
 
-            let mut registers: crate::debug::types::RegisterState;
+            let registers: crate::debug::types::RegisterState;
 
             if self.is_wow64 == Some(true) {
                 let mut ctx: WOW64_CONTEXT = std::mem::zeroed();
@@ -94,21 +82,8 @@ impl ExecutionBackend for WindowsDebugger {
             let _ = CloseHandle(h_thread);
         }
 
-        // Continue to let the CPU execute one instruction and hit the trap
-        let pid = self
-            .state
-            .attached_pid
-            .ok_or_else(|| FissionError::debug("Not attached"))?;
-        let tid = self
-            .state
-            .last_thread_id
-            .or(self.state.main_thread_id)
-            .ok_or_else(|| FissionError::debug("No thread id"))?;
-        unsafe {
-            ContinueDebugEvent(pid, tid, DBG_CONTINUE)
-                .map_err(|e| FissionError::debug(format!("Continue for step failed: {:?}", e)))?;
-        }
-
+        // Continue to let the CPU execute one instruction and hit the trap.
+        self.continue_pending_debug_event()?;
         self.state.status = DebugStatus::Running;
         Ok(())
     }

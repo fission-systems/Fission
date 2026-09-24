@@ -12,17 +12,13 @@ categories = ["development-tools::debugging"]
 
 [features]
 default = []
-# The Win32 debugger backend. Off by default because it does not compile:
-# 269 errors against windows-rs 0.54, from imports that moved (`Nt*` to `Wdk`,
-# `HMODULE` to `Foundation`), an event constant that never had the name it is
-# given, and an `ExecutionBackend` impl declaring five methods the trait does
-# not have. Nothing has built it in a long time, and a feature nobody turns on
-# is a feature nobody can tell is broken -- so it is named, off, and honest,
-# rather than silently wired into a build that never happens.
+# The live Win32 debugger is opt-in: the emulator remains the default
+# cross-platform execution backend, while this feature enables OS-specific
+# debugger dependencies and APIs only for callers that request them.
 #
 # The emulator backend runs Windows binaries on every host and is the one
 # under test; this is only for driving a *live* Windows process.
-windows_native_debugger = []
+windows_native_debugger = ["interactive_runtime"]
 # `tokio`, `sysinfo`, `libloading` and `rayon` were in here and no source
 # file in this crate referenced any of them. They came along whenever the
 # feature was on, which -- now that the CLI's `debugger` is a default -- is

@@ -5,9 +5,7 @@
 //! executables.
 
 use std::collections::HashMap;
-use windows::{
-    Win32::Foundation::*, Win32::System::ProcessStatus::*, Win32::System::SystemServices::*,
-};
+use windows::{Win32::Foundation::*, Win32::System::ProcessStatus::*};
 
 use super::pe_raw::{self, ExportedFunction};
 
@@ -50,7 +48,7 @@ impl ImportReconstructor {
             let cb = (capacity * std::mem::size_of::<HMODULE>()) as u32;
             let ok = unsafe {
                 EnumProcessModules(self.process_handle, buf.as_mut_ptr(), cb, &mut cb_needed)
-                    .as_bool()
+                    .is_ok()
             };
             if !ok {
                 return Err("EnumProcessModules failed".to_string());
@@ -83,7 +81,7 @@ impl ImportReconstructor {
                         &mut mod_info,
                         std::mem::size_of::<MODULEINFO>() as u32,
                     )
-                    .as_bool()
+                    .is_ok()
                     {
                         self.module_cache.insert(
                             base_addr,

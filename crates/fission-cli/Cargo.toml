@@ -30,6 +30,7 @@ path = "src/lib.rs"
 # nothing. Measured cost of including it: 19.44 MB -> 19.82 MB, 2%.
 default = ["allocator-mimalloc", "debugger"]
 debugger = ["dep:fission-dynamic", "fission-script/emulator"]
+windows_native_debugger = ["debugger", "fission-dynamic/windows_native_debugger"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]
 

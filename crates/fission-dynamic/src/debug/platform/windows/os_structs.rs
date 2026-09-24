@@ -4,7 +4,9 @@
 //! to locate the structures, then `ReadProcessMemory` to extract fields.
 
 use std::ffi::c_void;
-use windows::Wdk::System::Threading::{NtQueryInformationProcess, NtQueryInformationThread};
+use windows::Wdk::System::Threading::{
+    NtQueryInformationProcess, NtQueryInformationThread, PROCESSINFOCLASS, THREADINFOCLASS,
+};
 use windows::Win32::Foundation::{HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 
@@ -53,16 +55,20 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
         inherited_from_unique_process_id: 0,
     };
     let mut return_length: u32 = 0;
-    unsafe {
+    let status = unsafe {
         NtQueryInformationProcess(
             process,
-            0, // ProcessBasicInformation
+            PROCESSINFOCLASS(0), // ProcessBasicInformation
             &mut pbi as *mut _ as *mut c_void,
             std::mem::size_of::<ProcessBasicInformation>() as u32,
             &mut return_length,
         )
-        .ok()
-        .map_err(|e| format!("NtQueryInformationProcess failed: {:?}", e))?;
+    };
+    if status.0 < 0 {
+        return Err(format!(
+            "NtQueryInformationProcess failed: NTSTATUS 0x{:08x}",
+            status.0 as u32
+        ));
     }
 
     let peb = pbi.peb_base_address;
@@ -92,7 +98,7 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
             1,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (peb + 0x08) as *const c_void,
@@ -100,7 +106,7 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (peb + 0x18) as *const c_void,
@@ -108,7 +114,7 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (peb + 0x20) as *const c_void,
@@ -116,7 +122,7 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (peb + 0xBC) as *const c_void,
@@ -124,7 +130,7 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
             4,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
     }
 
     Ok(PebInfo {
@@ -167,16 +173,20 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
         base_priority: 0,
     };
     let mut return_length: u32 = 0;
-    unsafe {
+    let status = unsafe {
         NtQueryInformationThread(
             h_thread,
-            0, // ThreadBasicInformation
+            THREADINFOCLASS(0), // ThreadBasicInformation
             &mut tbi as *mut _ as *mut c_void,
             std::mem::size_of::<ThreadBasicInformation>() as u32,
             &mut return_length,
         )
-        .ok()
-        .map_err(|e| format!("NtQueryInformationThread failed: {:?}", e))?;
+    };
+    if status.0 < 0 {
+        return Err(format!(
+            "NtQueryInformationThread failed: NTSTATUS 0x{:08x}",
+            status.0 as u32
+        ));
     }
 
     let teb = tbi.teb_base_address;
@@ -209,7 +219,7 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (teb + 0x08) as *const c_void,
@@ -217,7 +227,7 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (teb + 0x10) as *const c_void,
@@ -225,7 +235,7 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (teb + 0x30) as *const c_void,
@@ -233,7 +243,7 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (teb + 0x40) as *const c_void,
@@ -241,7 +251,7 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (teb + 0x48) as *const c_void,
@@ -249,7 +259,7 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         ReadProcessMemory(
             process,
             (teb + 0x60) as *const c_void,
@@ -257,7 +267,7 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
             8,
             Some(&mut read),
         )
-        .ok()?;
+        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
     }
 
     Ok(TebInfo {

@@ -9,7 +9,7 @@ use clap::{Args, Subcommand};
 
 #[derive(Clone, Args, Debug, PartialEq, Eq)]
 #[command(
-    long_about = "Live process debugger (Windows only).\n\nAttach to a running process and inspect or control execution.\n",
+    long_about = "Debugger commands.\n\nUse `--emulator` for cross-platform emulated execution. Native live-process debugging is available on Windows builds compiled with `--features windows_native_debugger`.\n",
     after_help = "Examples:\n  fission_cli debug attach 1234\n  fission_cli debug regs\n  fission_cli debug step\n  fission_cli debug bp 0x401000\n  fission_cli debug read 0x401000 --size 32\n  fission_cli debug modules\n  fission_cli debug continue\n  fission_cli debug detach"
 )]
 pub struct DebugArgs {
@@ -53,19 +53,19 @@ pub enum DebugCommand {
     BpDisable(DebugBpArgs),
     /// List all breakpoints
     BpList(DebugBpListArgs),
-    /// Set a hardware breakpoint at an address (Windows only)
+    /// Hardware breakpoints (not currently exposed by the native debugger)
     HwBp(DebugHwBpArgs),
-    /// Set a memory breakpoint at an address (Windows only)
+    /// Memory breakpoints (not currently supported by the native debugger)
     MemBp(DebugMemBpArgs),
-    /// Remove a memory breakpoint at an address (Windows only)
+    /// Remove a memory breakpoint (not currently supported by the native debugger)
     RmMemBp(DebugBpArgs),
-    /// Set a DLL load breakpoint (Windows only)
+    /// DLL load breakpoints (not currently supported by the native debugger)
     DllBp(DebugDllBpArgs),
-    /// Remove a DLL load breakpoint (Windows only)
+    /// Remove a DLL load breakpoint (not currently supported by the native debugger)
     RmDllBp(DebugDllBpArgs),
-    /// Set an exception breakpoint (Windows only)
+    /// Exception breakpoints (not currently supported by the native debugger)
     ExBp(DebugExBpArgs),
-    /// Remove an exception breakpoint (Windows only)
+    /// Remove an exception breakpoint (not currently supported by the native debugger)
     RmExBp(DebugExBpArgs),
     /// Show CPU registers for the active thread
     Regs,

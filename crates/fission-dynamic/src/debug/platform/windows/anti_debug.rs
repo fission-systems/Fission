@@ -8,7 +8,7 @@ use windows::Win32::Foundation::{HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows::Win32::System::Memory::{PAGE_PROTECTION_FLAGS, PAGE_READWRITE, VirtualProtectEx};
 // `Nt*` lives under `Wdk`, not `Win32`, in windows-rs 0.54.
-use windows::Wdk::System::Threading::NtQueryInformationProcess;
+use windows::Wdk::System::Threading::{NtQueryInformationProcess, PROCESSINFOCLASS};
 
 /// Represents a single anti-debug bypass that was applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +57,6 @@ impl AntiDebugBypassEngine {
                 PAGE_READWRITE,
                 &mut old_protect,
             )
-            .ok()
             .map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
 
             let patch: u8 = 0;
@@ -69,7 +68,6 @@ impl AntiDebugBypassEngine {
                 1,
                 Some(&mut written),
             )
-            .ok()
             .map_err(|e| format!("WriteProcessMemory failed: {:?}", e))?;
 
             VirtualProtectEx(
@@ -98,7 +96,6 @@ impl AntiDebugBypassEngine {
                 PAGE_READWRITE,
                 &mut old_protect,
             )
-            .ok()
             .map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
 
             let patch: u32 = 0;
@@ -110,7 +107,6 @@ impl AntiDebugBypassEngine {
                 4,
                 Some(&mut written),
             )
-            .ok()
             .map_err(|e| format!("WriteProcessMemory failed: {:?}", e))?;
 
             VirtualProtectEx(
@@ -141,7 +137,6 @@ impl AntiDebugBypassEngine {
                 8,
                 Some(&mut read),
             )
-            .ok()
             .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         }
 
@@ -159,7 +154,6 @@ impl AntiDebugBypassEngine {
                 8,
                 Some(&mut read),
             )
-            .ok()
             .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         }
 
@@ -243,7 +237,7 @@ impl AntiDebugBypassEngine {
         unsafe {
             NtQueryInformationProcess(
                 process,
-                0, // ProcessBasicInformation
+                PROCESSINFOCLASS(0), // ProcessBasicInformation
                 &mut pbi as *mut _ as *mut c_void,
                 std::mem::size_of::<ProcessBasicInformation>() as u32,
                 &mut return_length,

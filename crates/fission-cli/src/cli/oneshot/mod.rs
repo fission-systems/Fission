@@ -1070,7 +1070,9 @@ fn print_help() {
     println!("  callgraph  Call graph from xref analysis");
     println!("  inventory  Operator-oriented inventory and batch emitters");
     println!("  script     Rhai automation against read-only binary inventory");
-    println!("  debug      Live process debugger (requires --features debugger)");
+    println!(
+        "  debug      Debug emulated targets; native Windows debugging requires --features windows_native_debugger"
+    );
     println!();
     println!("Decomp options:");
     println!("      --profile <P>          balanced|quality|speed|nir");

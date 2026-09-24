@@ -1,5 +1,4 @@
-use super::WindowsDebugger;
-use crate::debug::traits::ExecutionBackend;
+use super::*;
 use crate::debug::types::RegisterState;
 use fission_core::{FissionError, Result as FissionResult};
 
@@ -17,8 +16,8 @@ fn set_stack_pointer(regs: &mut RegisterState, value: u64) {
     }
 }
 
-impl ExecutionBackend for WindowsDebugger {
-    fn stack_peek(&self, offset: isize) -> FissionResult<u64> {
+impl WindowsDebugger {
+    pub(super) fn stack_peek(&self, offset: isize) -> FissionResult<u64> {
         let tid = self
             .state
             .current_thread_id
@@ -42,7 +41,7 @@ impl ExecutionBackend for WindowsDebugger {
         }
     }
 
-    fn stack_pop(&mut self) -> FissionResult<u64> {
+    pub(super) fn stack_pop(&mut self) -> FissionResult<u64> {
         let tid = self
             .state
             .current_thread_id
@@ -65,7 +64,7 @@ impl ExecutionBackend for WindowsDebugger {
         Ok(value)
     }
 
-    fn stack_push(&mut self, value: u64) -> FissionResult<()> {
+    pub(super) fn stack_push(&mut self, value: u64) -> FissionResult<()> {
         let tid = self
             .state
             .current_thread_id

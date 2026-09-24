@@ -184,7 +184,7 @@ enum CliCommand {
     Db(DbArgs),
     /// Rhai scripts over read-only binary inventory (`binary.*`, `emit`)
     Script(ScriptArgs),
-    /// Live process debugger (Windows only)
+    /// Debug emulated targets, or live Windows processes with the native-debugger feature
     Debug(DebugArgs),
     /// Sandbox (emulator) execution
     Sandbox(SandboxArgs),

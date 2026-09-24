@@ -1,32 +1,19 @@
-//! What a Windows build has instead of the Win32 debugger, until that is
-//! ported.
-//!
-//! Not a placeholder for something unwritten -- the real backend exists, in
-//! `debugger/`, and is roughly two thousand lines. It stopped compiling
-//! against windows-rs 0.54 and nothing noticed, because no job built it: the
-//! crate's debug layer is behind `interactive_runtime`, the CLI's is behind
-//! `debugger`, and neither was a default. Turning them on is what made 269
-//! errors visible.
-//!
-//! So this says so, once, at the point where a caller would otherwise get a
-//! debugger that does nothing. Every method fails with the same sentence, and
-//! the emulator backend -- which runs Windows binaries on every host and is
-//! the one under test -- is unaffected and is what `--emulator` selects.
+//! The explicit fallback for Windows builds that do not enable the opt-in
+//! native debugger. The emulator remains available independently.
 
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{DebugState, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
 use std::sync::mpsc::{Receiver, Sender};
 
-const UNPORTED: &str = "the Win32 debugger backend is not in this build (it does not compile \
-                        against windows-rs 0.54); use --emulator, or build with \
-                        --features fission-dynamic/windows_native_debugger to work on the port";
+const UNPORTED: &str = "the Win32 debugger backend is not in this build; use --emulator, or build with \
+                        --features fission-dynamic/windows_native_debugger to enable live debugging";
 
 fn unported<T>() -> FissionResult<T> {
     Err(FissionError::debug(UNPORTED))
 }
 
-/// Stands in for the Win32 `WindowsDebugger`.
+/// Stands in for the feature-gated Win32 `WindowsDebugger`.
 pub struct WindowsDebugger {
     state: DebugState,
 }
@@ -103,9 +90,7 @@ impl ExecutionBackend for WindowsDebugger {
     }
 }
 
-/// The Win32 debug-event loop is part of the unported backend; there is
-/// nothing to listen to, so this returns rather than spawning a thread that
-/// would never send anything.
+/// No native event loop is available when the feature is disabled.
 pub fn start_event_loop(
     _pid: u32,
     _tx: Sender<crate::debug::types::DebugEvent>,
@@ -113,9 +98,7 @@ pub fn start_event_loop(
 ) {
 }
 
-/// Process enumeration lives in the unported backend too. An empty list is
-/// the truthful answer here -- a caller that wanted one gets no candidates
-/// rather than a wrong one.
+/// Process enumeration is unavailable when the feature is disabled.
 pub fn enumerate_processes() -> Vec<ProcessInfo> {
     Vec::new()
 }

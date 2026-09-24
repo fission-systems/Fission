@@ -1,5 +1,6 @@
 //! Process enumeration using Windows API.
 
+use super::*;
 use crate::debug::types::ProcessInfo;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, MAX_PATH};
@@ -112,17 +113,23 @@ fn get_process_exe_path(handle: HANDLE) -> Option<String> {
 }
 
 use super::WindowsDebugger;
-use crate::debug::traits::ExecutionBackend;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl ExecutionBackend for WindowsDebugger {
-    fn attach(&mut self, pid: u32) -> FissionResult<()> {
+impl WindowsDebugger {
+    pub(super) fn attach(&mut self, pid: u32) -> FissionResult<()> {
+        if self.is_attached() {
+            return Err(FissionError::debug(
+                "Detach from the current process before attaching another one",
+            ));
+        }
         self.state.status = DebugStatus::Attaching;
 
-        unsafe {
-            DebugActiveProcess(pid).map_err(|e| {
-                FissionError::debug(format!("Failed to attach to process {}: {:?}", pid, e))
-            })?;
+        if let Err(error) = unsafe { DebugActiveProcess(pid) } {
+            self.state.status = DebugStatus::Detached;
+            return Err(FissionError::debug(format!(
+                "Failed to attach to process {}: {:?}",
+                pid, error
+            )));
         }
 
         self.state.attached_pid = Some(pid);
@@ -130,13 +137,23 @@ impl ExecutionBackend for WindowsDebugger {
         self.state.last_event = Some(format!("Attached to PID {}", pid));
 
         // Open process handle immediately
-        let _ = self.ensure_process_handle();
+        if let Err(error) = self.ensure_process_handle() {
+            unsafe {
+                let _ = DebugActiveProcessStop(pid);
+            }
+            self.state.attached_pid = None;
+            self.state.status = DebugStatus::Detached;
+            self.state.last_event = Some("Attach failed while opening process handle".to_string());
+            return Err(error);
+        }
 
         // Detect WOW64 (32-bit process on 64-bit Windows)
         if let Some(h) = self.process_handle {
             let mut process_machine = IMAGE_FILE_MACHINE(0);
             let mut native_machine = IMAGE_FILE_MACHINE(0);
-            if unsafe { IsWow64Process2(h, &mut process_machine, &mut native_machine) }.is_ok() {
+            if unsafe { IsWow64Process2(h, &mut process_machine, Some(&mut native_machine)) }
+                .is_ok()
+            {
                 self.is_wow64 = Some(process_machine == IMAGE_FILE_MACHINE_I386);
             } else {
                 self.is_wow64 = Some(false);
@@ -149,11 +166,15 @@ impl ExecutionBackend for WindowsDebugger {
         Ok(())
     }
 
-    fn detach(&mut self) -> FissionResult<()> {
+    pub(super) fn detach(&mut self) -> FissionResult<()> {
         let pid = self
             .state
             .attached_pid
             .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
+
+        if self.pending_continue_status.is_some() {
+            self.continue_pending_debug_event()?;
+        }
 
         unsafe {
             DebugActiveProcessStop(pid).map_err(|e| {
@@ -180,17 +201,23 @@ impl ExecutionBackend for WindowsDebugger {
         Ok(())
     }
 
-    fn is_attached(&self) -> bool {
+    pub(super) fn is_attached(&self) -> bool {
         self.state.attached_pid.is_some()
     }
 
-    fn attached_pid(&self) -> Option<u32> {
+    pub(super) fn attached_pid(&self) -> Option<u32> {
         self.state.attached_pid
     }
 
-    fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
+    pub(super) fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
+
+        if self.is_attached() {
+            return Err(FissionError::debug(
+                "Detach from the current process before launching another one",
+            ));
+        }
 
         let wide_path: Vec<u16> = OsStr::new(path).encode_wide().chain(Some(0)).collect();
         let mut cmd_line = path.to_string();
@@ -209,21 +236,29 @@ impl ExecutionBackend for WindowsDebugger {
 
         unsafe {
             CreateProcessW(
-                PWSTR(wide_path.as_ptr() as *mut u16),
+                windows::core::PCWSTR(wide_path.as_ptr()),
                 PWSTR(wide_cmd.as_mut_ptr()),
-                std::ptr::null(),
-                std::ptr::null(),
+                None,
+                None,
                 false,
                 creation_flags,
-                std::ptr::null(),
-                PWSTR(std::ptr::null_mut()),
+                None,
+                windows::core::PCWSTR::null(),
                 &si,
-                &pi,
+                &mut pi,
             )
             .map_err(|e| FissionError::debug(format!("CreateProcessW failed: {:?}", e)))?;
         }
 
         let pid = pi.dwProcessId;
+        if let Some(old_handle) = self.process_handle.replace(pi.hProcess) {
+            unsafe {
+                let _ = CloseHandle(old_handle);
+            }
+        }
+        unsafe {
+            let _ = CloseHandle(pi.hThread);
+        }
         self.state.attached_pid = Some(pid);
         self.state.status = DebugStatus::Running;
         self.state.last_event = Some(format!("Launched PID {} ({})", pid, path));
@@ -235,7 +270,9 @@ impl ExecutionBackend for WindowsDebugger {
         if let Some(h) = self.process_handle {
             let mut process_machine = IMAGE_FILE_MACHINE(0);
             let mut native_machine = IMAGE_FILE_MACHINE(0);
-            if unsafe { IsWow64Process2(h, &mut process_machine, &mut native_machine) }.is_ok() {
+            if unsafe { IsWow64Process2(h, &mut process_machine, Some(&mut native_machine)) }
+                .is_ok()
+            {
                 self.is_wow64 = Some(process_machine == IMAGE_FILE_MACHINE_I386);
             } else {
                 self.is_wow64 = Some(false);
@@ -247,7 +284,7 @@ impl ExecutionBackend for WindowsDebugger {
 
         Ok(pid)
     }
-    fn pause(&mut self) -> FissionResult<()> {
+    pub(super) fn pause(&mut self) -> FissionResult<()> {
         let h = self
             .process_handle
             .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
@@ -258,7 +295,7 @@ impl ExecutionBackend for WindowsDebugger {
         self.state.last_event = Some("Break requested".to_string());
         Ok(())
     }
-    fn terminate(&mut self) -> FissionResult<()> {
+    pub(super) fn terminate(&mut self) -> FissionResult<()> {
         let h = self
             .process_handle
             .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
@@ -266,7 +303,7 @@ impl ExecutionBackend for WindowsDebugger {
             TerminateProcess(h, 1)
                 .map_err(|e| FissionError::debug(format!("TerminateProcess failed: {:?}", e)))?;
         }
-        self.state.status = DebugStatus::Stopped;
+        self.state.status = DebugStatus::Terminated;
         self.state.last_event = Some("Process terminated".to_string());
         Ok(())
     }

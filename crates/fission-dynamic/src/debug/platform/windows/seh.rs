@@ -4,7 +4,7 @@
 //! registered SEH handlers for a given thread.
 
 use std::ffi::c_void;
-use windows::Wdk::System::Threading::NtQueryInformationThread;
+use windows::Wdk::System::Threading::{NtQueryInformationThread, THREADINFOCLASS};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 
@@ -50,16 +50,20 @@ pub fn read_seh_chain(process: HANDLE, thread_id: u32) -> Result<Vec<SehRecord>,
         base_priority: 0,
     };
     let mut return_length: u32 = 0;
-    unsafe {
+    let status = unsafe {
         NtQueryInformationThread(
             h_thread,
-            0, // ThreadBasicInformation
+            THREADINFOCLASS(0), // ThreadBasicInformation
             &mut tbi as *mut _ as *mut c_void,
             std::mem::size_of::<ThreadBasicInformation>() as u32,
             &mut return_length,
         )
-        .ok()
-        .map_err(|e| format!("NtQueryInformationThread failed: {:?}", e))?;
+    };
+    if status.0 < 0 {
+        return Err(format!(
+            "NtQueryInformationThread failed: NTSTATUS 0x{:08x}",
+            status.0 as u32
+        ));
     }
 
     let teb = tbi.teb_base_address;
@@ -90,7 +94,6 @@ pub fn read_seh_chain(process: HANDLE, thread_id: u32) -> Result<Vec<SehRecord>,
                 8,
                 Some(&mut read),
             )
-            .ok()
             .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
 
             ReadProcessMemory(
@@ -100,7 +103,6 @@ pub fn read_seh_chain(process: HANDLE, thread_id: u32) -> Result<Vec<SehRecord>,
                 8,
                 Some(&mut read),
             )
-            .ok()
             .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
         }
 

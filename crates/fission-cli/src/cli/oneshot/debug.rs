@@ -4,8 +4,6 @@
 //! executes the operation, prints output, and persists state back.
 
 use crate::cli::args::DebugCommand;
-#[cfg(target_os = "windows")]
-use crate::cli::args::HwBpKindArg;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -256,24 +254,22 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         DebugCommand::HwBp(args) => {
             #[cfg(target_os = "windows")]
             {
-                // `set_hw_breakpoint` is on the Win32 backend, not on
-                // `ExecutionBackend`, so this could never have compiled --
-                // and nothing built it, because the `debugger` feature was
-                // not a default. Debug registers are part of that backend and
-                // it is not in this build; see `windows_native_debugger`.
+                // Hardware breakpoints are not part of the cross-platform
+                // ExecutionBackend contract, even when the Win32 backend is
+                // enabled.
                 let _ = args;
                 anyhow::bail!(
-                    "hardware breakpoints need the Win32 debugger backend, which is not in \
-                     this build; a software breakpoint (`bp`) or an emulator watchpoint \
-                     (`--emulator mem-bp`) does the same job"
+                    "hardware breakpoints are not exposed by the debugger interface; \
+                     use a software breakpoint (`bp`) for instruction addresses; \
+                     hardware data watchpoints are not available in this backend"
                 );
             }
             #[cfg(not(target_os = "windows"))]
             {
                 let _ = args;
-                println!("Hardware breakpoints are only supported on Windows.");
+                println!("Hardware breakpoints are not exposed by this debugger interface.");
+                Ok(())
             }
-            Ok(())
         }
 
         DebugCommand::Regs => {

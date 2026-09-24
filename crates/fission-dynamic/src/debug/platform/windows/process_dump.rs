@@ -52,8 +52,9 @@ pub fn dump_process(
         let raw_ptr = section.PointerToRawData as usize;
         let raw_size = section.SizeOfRawData as usize;
 
-        let read_size = if section.VirtualSize > 0 {
-            section.VirtualSize as usize
+        let virtual_size = unsafe { section.Misc.VirtualSize };
+        let read_size = if virtual_size > 0 {
+            virtual_size as usize
         } else {
             raw_size
         };
@@ -113,7 +114,7 @@ pub fn rebuild_imports(
     let descriptor_size = std::mem::size_of::<IMAGE_IMPORT_DESCRIPTOR>();
     let thunk_size = 8;
 
-    let mut total_size = (sorted_modules.len() + 1) * descriptor_size;
+    let total_size = (sorted_modules.len() + 1) * descriptor_size;
     let mut current_offset = total_size;
 
     struct ModuleLayout {
@@ -154,7 +155,7 @@ pub fn rebuild_imports(
             },
         );
 
-        for imp in *imps {
+        for imp in imps {
             if let Some(func_name) = &imp.function_name {
                 let entry_len = 2 + func_name.len() + 1;
                 current_offset += entry_len;
@@ -166,8 +167,6 @@ pub fn rebuild_imports(
     }
 
     let mut new_section_data = vec![0u8; current_offset];
-
-    let mut descriptor_offset = 0;
 
     for mod_name in &sorted_modules {
         let imps = match modules.get(mod_name) {
@@ -186,7 +185,7 @@ pub fn rebuild_imports(
         let mut current_thunk_offset = 0;
         let mut hint_name_offset_counter = mod_layout.ft_offset + ((imps.len() + 1) * thunk_size);
 
-        for imp in *imps {
+        for imp in imps {
             let thunk_value: u64;
 
             if let Some(func_name) = &imp.function_name {
@@ -215,8 +214,6 @@ pub fn rebuild_imports(
 
             current_thunk_offset += 8;
         }
-
-        descriptor_offset += descriptor_size;
     }
 
     let file_align = nt_headers.OptionalHeader.FileAlignment;
@@ -234,12 +231,13 @@ pub fn rebuild_imports(
     let last_section =
         unsafe { &*(file_data.as_ptr().add(last_section_offset) as *const IMAGE_SECTION_HEADER) };
 
-    let last_section_end_rva = last_section.VirtualAddress + last_section.VirtualSize;
+    let last_section_end_rva =
+        last_section.VirtualAddress + unsafe { last_section.Misc.VirtualSize };
     let new_section_rva = (last_section_end_rva + sect_align - 1) & !(sect_align - 1);
 
     let new_section_raw_ptr = file_data.len() as u32;
 
-    descriptor_offset = 0;
+    let mut descriptor_offset = 0;
     for mod_name in &sorted_modules {
         let mod_layout = match layout.get(mod_name) {
             Some(l) => l,
@@ -251,7 +249,7 @@ pub fn rebuild_imports(
         };
 
         let mut current_thunk_offset = 0;
-        for imp in *imps {
+        for imp in imps {
             if imp.function_name.is_some() {
                 let ilt_pos = mod_layout.iat_offset + current_thunk_offset;
                 let offset_bytes = &new_section_data[ilt_pos..ilt_pos + 8];
@@ -275,12 +273,14 @@ pub fn rebuild_imports(
         }
 
         let mut descriptor = IMAGE_IMPORT_DESCRIPTOR::default();
-        descriptor.OriginalFirstThunk = (new_section_rva as usize + mod_layout.iat_offset) as u32;
+        descriptor.Anonymous.OriginalFirstThunk =
+            (new_section_rva as usize + mod_layout.iat_offset) as u32;
         descriptor.FirstThunk = (new_section_rva as usize + mod_layout.ft_offset) as u32;
         descriptor.Name = (new_section_rva as usize + mod_layout.name_offset) as u32;
 
-        let desc_ptr =
-            new_section_data.as_mut_ptr().add(descriptor_offset) as *mut IMAGE_IMPORT_DESCRIPTOR;
+        let desc_ptr = unsafe {
+            new_section_data.as_mut_ptr().add(descriptor_offset) as *mut IMAGE_IMPORT_DESCRIPTOR
+        };
         unsafe {
             *desc_ptr = descriptor;
         }
@@ -296,11 +296,11 @@ pub fn rebuild_imports(
 
     let mut new_section_header = IMAGE_SECTION_HEADER::default();
     new_section_header.Name = *b".fission";
-    new_section_header.VirtualSize = current_offset as u32;
+    new_section_header.Misc.VirtualSize = current_offset as u32;
     new_section_header.VirtualAddress = new_section_rva;
     new_section_header.SizeOfRawData = raw_size;
     new_section_header.PointerToRawData = new_section_raw_ptr;
-    new_section_header.Characteristics = 0xC0000040;
+    new_section_header.Characteristics = IMAGE_SECTION_CHARACTERISTICS(0xC0000040);
 
     unsafe {
         let header_ptr = file_data.as_mut_ptr().add(new_header_offset) as *mut IMAGE_SECTION_HEADER;

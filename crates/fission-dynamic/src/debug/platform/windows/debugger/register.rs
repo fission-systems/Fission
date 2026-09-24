@@ -1,10 +1,9 @@
-use super::WindowsDebugger;
-use crate::debug::traits::ExecutionBackend;
+use super::*;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl ExecutionBackend for WindowsDebugger {
-    fn fetch_registers(
-        &mut self,
+impl WindowsDebugger {
+    pub(super) fn fetch_registers(
+        &self,
         thread_id: u32,
     ) -> FissionResult<crate::debug::types::RegisterState> {
         unsafe {
@@ -70,7 +69,7 @@ impl ExecutionBackend for WindowsDebugger {
     ///
     /// Maps our [`RegisterState`] into a Win32 `CONTEXT` and calls
     /// `SetThreadContext`.  Requires the thread to be suspended.
-    fn set_registers(
+    pub(super) fn set_registers(
         &mut self,
         thread_id: u32,
         regs: &crate::debug::types::RegisterState,
@@ -133,7 +132,7 @@ impl ExecutionBackend for WindowsDebugger {
 
     /// Check whether a `STATUS_SINGLE_STEP` exception was actually a hardware
     /// breakpoint hit by inspecting `Dr6`.
-    fn check_hw_breakpoint_hit(&mut self, thread_id: u32) -> Option<u64> {
+    pub(super) fn check_hw_breakpoint_hit(&mut self, thread_id: u32) -> Option<u64> {
         if self.hw_breakpoints.is_empty() {
             return None;
         }
@@ -165,6 +164,9 @@ impl ExecutionBackend for WindowsDebugger {
     /// Set a hardware breakpoint (x86 debug register DR0-DR3).
     ///
     /// Only 4 slots are available.  `kind` maps to DR7 type/length bits.
+    // Kept internal until the shared debugger interface can expose hardware
+    // breakpoint lifecycle operations; the CLI currently rejects them.
+    #[allow(dead_code)]
     fn set_hw_breakpoint(
         &mut self,
         address: u64,
@@ -229,6 +231,8 @@ impl ExecutionBackend for WindowsDebugger {
     }
 
     /// Remove a hardware breakpoint previously set with [`set_hw_breakpoint`].
+    // See `set_hw_breakpoint`: this is not reachable through ExecutionBackend.
+    #[allow(dead_code)]
     fn remove_hw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
         let slot = self
             .hw_breakpoints

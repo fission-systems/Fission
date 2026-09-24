@@ -1,9 +1,11 @@
-use super::WindowsDebugger;
-use crate::debug::traits::ExecutionBackend;
+use super::*;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl ExecutionBackend for WindowsDebugger {
-    fn get_module_exports(&self, base: u64) -> FissionResult<Vec<crate::debug::types::ExportInfo>> {
+impl WindowsDebugger {
+    pub(super) fn get_module_exports(
+        &self,
+        base: u64,
+    ) -> FissionResult<Vec<crate::debug::types::ExportInfo>> {
         let dos = self.read_memory(base, 64)?;
         let e_lfanew = u32::from_le_bytes([dos[60], dos[61], dos[62], dos[63]]) as u64;
         let pe_sig = self.read_memory(base + e_lfanew, 4)?;
@@ -13,7 +15,6 @@ impl ExecutionBackend for WindowsDebugger {
 
         let coff = self.read_memory(base + e_lfanew + 4, 20)?;
         let machine = u16::from_le_bytes([coff[0], coff[1]]);
-        let num_sections = u16::from_le_bytes([coff[2], coff[3]]);
         let size_optional = u16::from_le_bytes([coff[16], coff[17]]);
 
         let is_64 = if machine == 0x8664 && size_optional >= 240 {
@@ -90,7 +91,10 @@ impl ExecutionBackend for WindowsDebugger {
         Ok(exports)
     }
 
-    fn get_module_imports(&self, base: u64) -> FissionResult<Vec<crate::debug::types::ImportInfo>> {
+    pub(super) fn get_module_imports(
+        &self,
+        base: u64,
+    ) -> FissionResult<Vec<crate::debug::types::ImportInfo>> {
         let dos = self.read_memory(base, 64)?;
         let e_lfanew = u32::from_le_bytes([dos[60], dos[61], dos[62], dos[63]]) as u64;
         let pe_sig = self.read_memory(base + e_lfanew, 4)?;
