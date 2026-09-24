@@ -40,9 +40,6 @@ jobs:
         with:
           components: clippy,rustfmt
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
-
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
         with:
