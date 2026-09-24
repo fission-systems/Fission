@@ -19,7 +19,10 @@ env:
 jobs:
   lint:
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 15
+    # The compile-surface audit is intentionally exhaustive and can take
+    # ~11 minutes on a cold runner. Keep enough margin for cold-cache variance;
+    # optional-feature tests run in the required Linux test job instead.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -92,18 +95,6 @@ jobs:
       - name: Tests nothing runs
         shell: bash
         run: scripts/audit/unrun_tests_scan.py
-
-      # And running the tests those configurations hold. A check catches
-      # "does not build"; it catches nothing about "does not work", and these
-      # suites are the only coverage the debugger, the session and the machine
-      # scripting have.
-      - name: Test optional features (interactive_runtime)
-        shell: bash
-        run: cargo test -p fission-dynamic --features interactive_runtime --locked
-
-      - name: Test optional features (script emulator)
-        shell: bash
-        run: cargo test -p fission-script --features emulator --locked
 
       - name: sccache stats
         if: always()
