@@ -5,6 +5,11 @@ use fission_pcode::PcodeOpcode;
 use fission_sleigh::runtime::{DecodeStopReason, DecodedFlowKind, RuntimeSleighFrontend};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::analysis::xref_coverage::{
+    XrefAnalysisLayer, XrefAnalysisState, XrefCoverageUnit, XrefLayerCoverage, XrefOmissionReason,
+    XrefUnsupportedReason,
+};
+
 use super::build::XrefIndexBuilder;
 use super::model::{
     XrefEvidence, XrefKind, XrefSource, XrefSourceCategory, XrefSourceLayer, XrefTarget,
@@ -21,11 +26,40 @@ const PCODE_FUNCTION_BYTE_LIMIT: u64 = 1 << 20;
 /// sections or be known import slots. Unsupported/unknown values produce no
 /// record rather than promoting arbitrary immediates to addresses.
 pub fn push_pcode_layer(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) {
+    let _ = push_pcode_layer_with_coverage(builder, binary);
+}
+
+pub(crate) fn push_pcode_layer_with_coverage(
+    builder: &mut XrefIndexBuilder,
+    binary: &LoadedBinary,
+) -> XrefLayerCoverage {
+    let mut functions: Vec<_> = binary
+        .functions
+        .iter()
+        .filter(|function| !function.is_import)
+        .collect();
+    functions.sort_by_key(|function| function.address);
+
+    let mut coverage = XrefLayerCoverage::requested(
+        XrefAnalysisLayer::Pcode,
+        "discovered non-import functions with a complete file-backed extent, at most 1 MiB and 4,096 decoded instructions, terminal control flow, and successful value-set analysis",
+        XrefCoverageUnit::DiscoveredFunction,
+    );
+    coverage.candidate_units = functions.len();
+    let initial_pcode_records = builder.pending_layer_count(XrefSourceLayer::Pcode);
+
     let Some(load_spec) = binary.load_spec() else {
-        return;
+        coverage.mark_unsupported(XrefUnsupportedReason::LoadSpecUnavailable);
+        coverage.finalize();
+        return coverage;
     };
-    let Ok(frontend) = RuntimeSleighFrontend::new_for_load_spec(load_spec) else {
-        return;
+    let frontend = match RuntimeSleighFrontend::new_for_load_spec(load_spec) {
+        Ok(frontend) => frontend,
+        Err(_) => {
+            coverage.mark_unsupported(XrefUnsupportedReason::SleighFrontendUnavailable);
+            coverage.finalize();
+            return coverage;
+        }
     };
     let Some(ram_space) = frontend.compiled_frontend().and_then(|compiled| {
         compiled
@@ -33,35 +67,43 @@ pub fn push_pcode_layer(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) {
             .values()
             .find(|space| space.name.eq_ignore_ascii_case("ram"))
     }) else {
-        return;
+        coverage.mark_unsupported(XrefUnsupportedReason::RamSpaceUnavailable);
+        coverage.finalize();
+        return coverage;
     };
     let ram_space_id = ram_space.index;
     let ram_addressable_unit_bytes = u64::from(ram_space.word_size);
     if ram_addressable_unit_bytes == 0 {
-        return;
+        coverage.mark_unsupported(XrefUnsupportedReason::InvalidRamAddressableUnit);
+        coverage.finalize();
+        return coverage;
     }
 
-    let mut functions = binary.functions.clone();
-    functions.sort_by_key(|function| function.address);
     let mut emitted = FxHashSet::default();
 
-    for function in functions
-        .iter()
-        .filter(|function| !function.is_import && function.size > 0)
-    {
+    for function in functions {
+        if function.size == 0 {
+            coverage.omit(XrefOmissionReason::MissingFunctionExtent, 1);
+            continue;
+        }
         if function.size > PCODE_FUNCTION_BYTE_LIMIT {
+            coverage.omit(XrefOmissionReason::FunctionOverByteLimit, 1);
             continue;
         }
         let Ok(size) = usize::try_from(function.size) else {
+            coverage.omit(XrefOmissionReason::FunctionSizeUnrepresentable, 1);
             continue;
         };
         let Some(available) = binary.available_execution_bytes(function.address) else {
+            coverage.omit(XrefOmissionReason::FunctionBytesUnavailable, 1);
             continue;
         };
         if available < size {
+            coverage.omit(XrefOmissionReason::FunctionBytesUnavailable, 1);
             continue;
         }
         let Some(bytes) = binary.view_executable_bytes(function.address, size) else {
+            coverage.omit(XrefOmissionReason::FunctionBytesUnavailable, 1);
             continue;
         };
         let Ok(decoded) = frontend.lift_raw_pcode_function_with_contract(
@@ -69,9 +111,24 @@ pub fn push_pcode_layer(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) {
             function.address,
             PCODE_FUNCTION_INSTRUCTION_LIMIT,
         ) else {
+            coverage.omit(XrefOmissionReason::FunctionLiftFailed, 1);
             continue;
         };
         if decoded.stop_reason != DecodeStopReason::TerminalControlFlow {
+            coverage.omit(
+                match decoded.stop_reason {
+                    DecodeStopReason::InputExhausted => {
+                        XrefOmissionReason::FunctionLiftInputExhausted
+                    }
+                    DecodeStopReason::InstructionLimit => {
+                        XrefOmissionReason::FunctionLiftInstructionLimit
+                    }
+                    DecodeStopReason::TerminalControlFlow => {
+                        XrefOmissionReason::FunctionLiftNotTerminal
+                    }
+                },
+                1,
+            );
             continue;
         }
         let decoded_instructions: FxHashMap<_, _> = decoded
@@ -87,8 +144,10 @@ pub fn push_pcode_layer(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) {
 
         let mut analyzer = ValueSetAnalyzer::new();
         if !analyzer.analyze(&decoded.function) {
+            coverage.omit(XrefOmissionReason::ValueSetAnalysisIncomplete, 1);
             continue;
         }
+        coverage.completed_units += 1;
 
         for fact in &analyzer.facts {
             let (source, target, kind, pcode_op) = match fact {
@@ -281,6 +340,12 @@ pub fn push_pcode_layer(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) {
             }
         }
     }
+
+    coverage.records_emitted = builder
+        .pending_layer_count(XrefSourceLayer::Pcode)
+        .saturating_sub(initial_pcode_records);
+    coverage.finalize();
+    coverage
 }
 
 fn pcode_flow_xref_kind(
