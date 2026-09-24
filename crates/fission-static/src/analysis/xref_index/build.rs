@@ -351,6 +351,9 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
                 instruction_mnemonic: None,
                 pcode_op: None,
                 relocation_kind: None,
+                relocation_type: None,
+                relocation_size: None,
+                relocation_addend: None,
                 symbol_name: Some(name.clone()),
                 note: Some("IAT/import thunk slot".into()),
             },
@@ -376,6 +379,9 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
                 instruction_mnemonic: None,
                 pcode_op: None,
                 relocation_kind: None,
+                relocation_type: None,
+                relocation_size: None,
+                relocation_addend: None,
                 symbol_name: Some(export.name.clone()),
                 note: Some("Exported symbol".into()),
             },
@@ -403,6 +409,9 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
                 instruction_mnemonic: None,
                 pcode_op: None,
                 relocation_kind: None,
+                relocation_type: None,
+                relocation_size: None,
+                relocation_addend: None,
                 symbol_name: None,
                 note: Some(format!("section={section}; preview={preview:?}")),
             },
@@ -427,23 +436,83 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
                 instruction_mnemonic: None,
                 pcode_op: None,
                 relocation_kind: None,
+                relocation_type: None,
+                relocation_size: None,
+                relocation_addend: None,
                 symbol_name: Some(name.clone()),
                 note: Some("global_symbols map".into()),
             },
         );
     }
 
-    for (&addr, name) in binary.inner().relocation_symbols.iter() {
+    let mut structured_relocation_sites = FxHashSet::default();
+    for relocation in &binary.relocations {
+        structured_relocation_sites.insert(relocation.address);
+        let table_symbol = relocation
+            .symbol_name
+            .as_deref()
+            .filter(|name| !name.is_empty());
+        let mapped_symbol = binary
+            .inner()
+            .relocation_symbols
+            .get(&relocation.address)
+            .map(String::as_str)
+            .filter(|name| !name.is_empty());
+        let symbol = mapped_symbol.or(table_symbol).map(str::to_owned);
+        let mut note = format!(
+            "relocation_table; size={}; addend={}",
+            relocation.size, relocation.addend
+        );
+        if let (Some(mapped_symbol), Some(table_symbol)) = (mapped_symbol, table_symbol) {
+            if mapped_symbol != table_symbol {
+                note.push_str(&format!("; table_symbol={table_symbol}"));
+            }
+        }
+
         builder.push_record(
             XrefSource {
-                address: addr,
-                category: XrefSourceCategory::Instruction {
-                    enclosing_function: resolve_enclosing_function(&sorted_funcs, addr, 0x40),
-                },
+                address: relocation.address,
+                category: relocation_source_category(binary, &sorted_funcs, relocation.address),
             },
             XrefTarget {
                 address: None,
-                symbol: Some(name.clone()),
+                symbol: symbol.clone(),
+            },
+            XrefKind::Relocation,
+            fission_loader::Confidence::High,
+            XrefEvidence {
+                layer: XrefSourceLayer::Relocation,
+                instruction_mnemonic: None,
+                pcode_op: None,
+                relocation_kind: Some(format!(
+                    "r_type={}; size={}",
+                    relocation.r_type, relocation.size
+                )),
+                relocation_type: Some(relocation.r_type),
+                relocation_size: Some(relocation.size),
+                relocation_addend: Some(relocation.addend),
+                symbol_name: symbol,
+                note: Some(note),
+            },
+        );
+    }
+
+    // Keep legacy symbol use-sites that do not have a structured table row.
+    // Empty names are meaningful only as unresolved relocation markers, not as
+    // symbols; retain the site but never expose an empty target name.
+    for (&addr, name) in binary.inner().relocation_symbols.iter() {
+        if structured_relocation_sites.contains(&addr) {
+            continue;
+        }
+        let symbol = (!name.is_empty()).then(|| name.clone());
+        builder.push_record(
+            XrefSource {
+                address: addr,
+                category: relocation_source_category(binary, &sorted_funcs, addr),
+            },
+            XrefTarget {
+                address: None,
+                symbol: symbol.clone(),
             },
             XrefKind::Relocation,
             fission_loader::Confidence::High,
@@ -452,10 +521,40 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
                 instruction_mnemonic: None,
                 pcode_op: None,
                 relocation_kind: None,
-                symbol_name: Some(name.clone()),
-                note: Some("relocation symbol use-site".into()),
+                relocation_type: None,
+                relocation_size: None,
+                relocation_addend: None,
+                symbol_name: symbol,
+                note: Some(if name.is_empty() {
+                    "relocation symbol use-site; symbol unresolved".into()
+                } else {
+                    "relocation symbol use-site".into()
+                }),
             },
         );
+    }
+}
+
+fn relocation_source_category(
+    binary: &LoadedBinary,
+    sorted_funcs: &[FunctionInfo],
+    address: u64,
+) -> XrefSourceCategory {
+    if let Some(section) = binary.sections.iter().find(|section| {
+        let end = section
+            .virtual_address
+            .saturating_add(section.virtual_size.max(section.file_size));
+        address >= section.virtual_address && address < end
+    }) {
+        if !section.is_executable {
+            return XrefSourceCategory::Data {
+                section: section.name.clone(),
+            };
+        }
+    }
+
+    XrefSourceCategory::Instruction {
+        enclosing_function: resolve_enclosing_function(sorted_funcs, address, 0x40),
     }
 }
 
@@ -508,6 +607,9 @@ pub fn push_disassembly_layer(
                 instruction_mnemonic: None,
                 pcode_op: None,
                 relocation_kind: None,
+                relocation_type: None,
+                relocation_size: None,
+                relocation_addend: None,
                 symbol_name: None,
                 note: Some(note),
             },
@@ -531,7 +633,9 @@ pub fn build_xref_index(binary: &LoadedBinary, include_disassembly: bool) -> Xre
 mod tests {
     use super::*;
     use crate::analysis::xref_index::model::XrefKind;
-    use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo};
+    use fission_loader::loader::{
+        DataBuffer, FunctionInfo, LoadedBinaryBuilder, RelocationEntry, SectionInfo,
+    };
 
     #[test]
     fn empty_builder_finishes() {
@@ -619,6 +723,144 @@ mod tests {
                 && r.source.address == 0x10003a8
                 && r.target.symbol.as_deref() == Some("control_sink")
                 && r.evidence.layer == XrefSourceLayer::Relocation
+        }));
+    }
+
+    #[test]
+    fn structured_relocations_preserve_typed_evidence_and_merge_symbol_sites() {
+        let mut relocation_symbols = std::collections::HashMap::new();
+        relocation_symbols.insert(0x100020, "control_sink".to_string());
+        relocation_symbols.insert(0x100040, "legacy_target".to_string());
+        relocation_symbols.insert(0x100048, String::new());
+
+        let bin = LoadedBinaryBuilder::new("reloc.o".to_string(), DataBuffer::Heap(vec![0u8; 256]))
+            .format("ELF64")
+            .entry_point(0x100000)
+            .image_base(0x100000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x100000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".data".to_string(),
+                virtual_address: 0x100100,
+                virtual_size: 0x100,
+                file_offset: 0x100,
+                file_size: 0x100,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_function(FunctionInfo {
+                name: "run_control_flow".into(),
+                address: 0x100000,
+                size: 0x80,
+                is_export: true,
+                is_import: false,
+                ..Default::default()
+            })
+            .add_relocations([
+                RelocationEntry {
+                    address: 0x100020,
+                    r_type: 42,
+                    size: 8,
+                    addend: -4,
+                    symbol_name: Some("raw_control_sink".into()),
+                },
+                RelocationEntry {
+                    address: 0x100130,
+                    r_type: 10,
+                    size: 8,
+                    addend: 8,
+                    symbol_name: None,
+                },
+            ])
+            .add_relocation_symbols(relocation_symbols)
+            .build()
+            .expect("build");
+
+        let idx = build_xref_index(&bin, false);
+        let relocations: Vec<_> = idx
+            .refs
+            .iter()
+            .filter(|record| record.kind == XrefKind::Relocation)
+            .collect();
+
+        assert_eq!(relocations.len(), 4);
+
+        let merged = relocations
+            .iter()
+            .find(|record| record.source.address == 0x100020)
+            .expect("typed relocation with symbol use-site");
+        assert_eq!(merged.target.symbol.as_deref(), Some("control_sink"));
+        assert_eq!(merged.evidence.symbol_name.as_deref(), Some("control_sink"));
+        assert_eq!(
+            merged.evidence.relocation_kind.as_deref(),
+            Some("r_type=42; size=8")
+        );
+        assert_eq!(merged.evidence.relocation_type, Some(42));
+        assert_eq!(merged.evidence.relocation_size, Some(8));
+        assert_eq!(merged.evidence.relocation_addend, Some(-4));
+        assert!(
+            merged
+                .evidence
+                .note
+                .as_deref()
+                .unwrap()
+                .contains("addend=-4")
+        );
+        assert!(
+            merged
+                .evidence
+                .note
+                .as_deref()
+                .unwrap()
+                .contains("table_symbol=raw_control_sink")
+        );
+
+        let unresolved = relocations
+            .iter()
+            .find(|record| record.source.address == 0x100130)
+            .expect("structured relocation without symbol");
+        assert!(unresolved.target.symbol.is_none());
+        assert!(matches!(
+            unresolved.source.category,
+            XrefSourceCategory::Data { ref section } if section == ".data"
+        ));
+        assert_eq!(
+            unresolved.evidence.relocation_kind.as_deref(),
+            Some("r_type=10; size=8")
+        );
+        assert_eq!(unresolved.evidence.relocation_type, Some(10));
+        assert_eq!(unresolved.evidence.relocation_size, Some(8));
+        assert_eq!(unresolved.evidence.relocation_addend, Some(8));
+        assert!(
+            unresolved
+                .evidence
+                .note
+                .as_deref()
+                .unwrap()
+                .contains("addend=8")
+        );
+
+        let legacy_unresolved = relocations
+            .iter()
+            .find(|record| record.source.address == 0x100048)
+            .expect("unresolved legacy marker");
+        assert!(legacy_unresolved.target.symbol.is_none());
+        assert!(legacy_unresolved.evidence.symbol_name.is_none());
+
+        assert!(relocations.iter().any(|record| {
+            record.source.address == 0x100040
+                && record.target.symbol.as_deref() == Some("legacy_target")
+                && record.evidence.relocation_kind.is_none()
         }));
     }
 }

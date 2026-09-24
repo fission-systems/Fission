@@ -76,6 +76,12 @@ pub struct XrefEvidence {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relocation_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub relocation_type: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relocation_size: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relocation_addend: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,

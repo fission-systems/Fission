@@ -13,7 +13,7 @@ This note captures **ownership**, **surface APIs**, and the intended **p-code at
 |-------|--------|--------|
 | Loader | `LoadedBinary` (`iat_symbols`, exports, `string_map`, `global_symbols`) | High confidence where symbols are authoritative |
 | Disassembly | [`XrefDatabase`](../../crates/fission-static/src/analysis/xrefs/mod.rs) built via `RuntimeSleighFrontend::decode_window` | Operand references + decoded flow targets; merged as `XrefSourceLayer::Disassembly` |
-| Relocation | — | Reserved; PE/ELF relocation tables are not yet first-class on `LoadedBinary` (counts stay `0` with `relocation_note` in summaries) |
+| Relocation | `LoadedBinary::relocations` plus legacy `relocation_symbols` | Structured entries preserve raw type, size, addend, and optional symbol; symbol-use-site entries without a matching table row remain supported. Empty symbol names are represented as unresolved, never as empty target symbols. |
 
 Confidence follows [`fission_loader::Confidence`](../../crates/fission-loader/src/detector/mod.rs); Low-confidence facts remain eligible for omission from downstream “confirmed” surfaces.
 
