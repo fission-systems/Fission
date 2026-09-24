@@ -348,6 +348,9 @@ pub struct TaintReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaintHitReport {
     pub pc: u64,
+    /// Whether this sink was reached through a value or a controlled path.
+    #[serde(default)]
+    pub kind: crate::taint::TaintDependencyKind,
     pub sink: String,
     pub detail: String,
     pub sources: Vec<String>,
@@ -527,6 +530,7 @@ impl SandboxMetricsReport {
                 .iter()
                 .map(|h| TaintHitReport {
                     pc: h.pc,
+                    kind: h.kind,
                     sink: h.sink.clone(),
                     detail: h.detail.clone(),
                     sources: h.sources.clone(),

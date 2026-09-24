@@ -356,8 +356,9 @@ pub struct SandboxArgs {
     /// Track where untrusted input flows
     ///
     /// Marks what the run reads from outside (`read`, `recvfrom`,
-    /// `getrandom`) and reports when that data reaches a syscall. Data flow
-    /// only: a value that merely *decides* a branch is not carried across it.
+    /// `getrandom`) and reports when that data reaches a syscall. Also reports
+    /// bounded control dependence when a tainted branch selects a value before
+    /// a proven control-flow reconvergence. Reports label the dependency kind.
     #[arg(long)]
     pub taint: bool,
 

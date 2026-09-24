@@ -112,7 +112,8 @@ pub extern "C" fn jit_write_space(
 //            jit_write_bytes(emu, space, offset, src_ptr, size)
 // Used for XMM/YMM and multi-chunk stores when size > 8.
 
-/// Execute one p-code op from `emu.wide_ops` through the evaluator.
+/// Execute one p-code op from `emu.wide_ops` through the evaluator, or recover
+/// its taint shadow after the compiled operation has produced a concrete value.
 ///
 /// The 128-bit integer ops are not lowered by the compiler at all. They could
 /// be -- Cranelift has an `I128` -- but the reason not to is agreement: these
@@ -146,6 +147,7 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
                 .unwrap_or_else(|| "<unknown>".into());
             emu.metrics.note_unhandled_userop(&name);
         }
+        emu.apply_taint_to_op(op, None);
         return 0;
     }
 
@@ -161,6 +163,7 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
     if let Some(opcode) = unimplemented {
         emu.metrics.note_unimplemented(opcode);
     }
+    emu.apply_taint_to_op(op, None);
     if !handled {
         tracing::warn!("jit_wide_op: {:?} was not handled", op.opcode);
     }
@@ -249,8 +252,9 @@ pub extern "C" fn jit_int_flag(kind: u32, size: u32, a: u64, b: u64) -> u64 {
 
 /// Count one guest instruction inside a multi-instruction TB.
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator) {
+pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator, pc: u64) {
     let emu = unsafe { &mut *emu_ptr };
+    emu.note_guest_instruction(pc);
     emu.inst_count = emu.inst_count.saturating_add(1);
     if let Some(m) = emu.max_inst {
         if emu.inst_count >= m && emu.metrics.exit_reason.is_none() {
@@ -493,7 +497,7 @@ pub extern "C" fn jit_shadow_copy(
     }
 }
 
-/// After LOAD: if memory at `addr` is tainted, mark dest varnode.
+/// After LOAD: propagate memory-value and tainted-address provenance to dst.
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_shadow_load(
     emu_ptr: *mut Emulator,
@@ -502,13 +506,51 @@ pub extern "C" fn jit_shadow_load(
     dst_sz: u64,
     mem_sp: u64,
     addr: u64,
+    addr_sp: u64,
+    addr_off: u64,
+    addr_size: u64,
 ) {
     let emu = unsafe { &mut *emu_ptr };
     if dst_sp == 0 {
         return;
     }
-    let node = emu.state.get_shadow_memory(mem_sp, addr);
     let n = (dst_sz as usize).min(64) as u64;
+    if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+        let pointer_size = (addr_size as usize).min(64) as u64;
+        let mut pointer_data = None;
+        let mut pointer_control = None;
+        for offset in 0..pointer_size {
+            let pointer_set = if addr_sp == 0 {
+                None
+            } else {
+                emu.state.get_shadow_memory(addr_sp, addr_off + offset)
+            };
+            let direct = pointer_set.and_then(|set| emu.taint.data_projection(set));
+            pointer_data = emu.taint.union(pointer_data, direct);
+            let implicit = pointer_set.and_then(|set| emu.taint.control_projection(set));
+            pointer_control = emu.taint.union(pointer_control, implicit);
+        }
+        let active = emu.taint.active_control_set();
+        let control = emu.taint.union(active, pointer_control);
+        for i in 0..n {
+            let node = emu
+                .state
+                .get_shadow_memory(mem_sp, addr + i)
+                .or_else(|| emu.state.get_shadow_memory(mem_sp, addr));
+            let data = node.and_then(|set| emu.taint.data_projection(set));
+            let data = emu.taint.union(data, pointer_data);
+            let memory_control = node.and_then(|set| emu.taint.control_projection(set));
+            let combined = emu.taint.union(control, memory_control);
+            let merged = emu.taint.union(data, combined);
+            if let Some(set) = merged {
+                emu.state.set_shadow_memory(dst_sp, dst_off + i, set);
+            } else {
+                emu.state.clear_shadow_memory(dst_sp, dst_off + i);
+            }
+        }
+        return;
+    }
+    let node = emu.state.get_shadow_memory(mem_sp, addr);
     for i in 0..n {
         if let Some(id) = node {
             // Prefer per-byte shadow when present.
@@ -520,7 +562,7 @@ pub extern "C" fn jit_shadow_load(
     }
 }
 
-/// After STORE: if value varnode is tainted, taint memory; else clear.
+/// After STORE: propagate value, address, and active-control provenance to memory.
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_shadow_store(
     emu_ptr: *mut Emulator,
@@ -529,6 +571,9 @@ pub extern "C" fn jit_shadow_store(
     size: u64,
     val_sp: u64,
     val_off: u64,
+    ptr_sp: u64,
+    ptr_off: u64,
+    ptr_size: u64,
 ) {
     let emu = unsafe { &mut *emu_ptr };
     let node = if val_sp == 0 {
@@ -537,6 +582,46 @@ pub extern "C" fn jit_shadow_store(
         emu.state.get_shadow_memory(val_sp, val_off)
     };
     let n = (size as usize).min(64) as u64;
+    if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+        let value_control = node.and_then(|set| emu.taint.control_projection(set));
+        let pointer_size = (ptr_size as usize).min(64) as u64;
+        let mut pointer_data = None;
+        let mut pointer_control = None;
+        for offset in 0..pointer_size {
+            let pointer_set = if ptr_sp == 0 {
+                None
+            } else {
+                emu.state.get_shadow_memory(ptr_sp, ptr_off + offset)
+            };
+            let direct = pointer_set.and_then(|set| emu.taint.data_projection(set));
+            pointer_data = emu.taint.union(pointer_data, direct);
+            let implicit = pointer_set.and_then(|set| emu.taint.control_projection(set));
+            pointer_control = emu.taint.union(pointer_control, implicit);
+        }
+        let active = emu.taint.active_control_set();
+        let active = emu.taint.union(active, value_control);
+        let active = emu.taint.union(active, pointer_control);
+        for i in 0..n {
+            let value_set = if val_sp == 0 {
+                None
+            } else {
+                emu.state.get_shadow_memory(val_sp, val_off + i)
+            };
+            let data = value_set.and_then(|set| emu.taint.data_projection(set));
+            let data = emu.taint.union(data, pointer_data);
+            let value_control = value_set.and_then(|set| emu.taint.control_projection(set));
+            let mut byte_control = emu.taint.union(active, value_control);
+            byte_control = emu.taint.union(byte_control, pointer_control);
+            let merged = emu.taint.union(data, byte_control);
+            if let Some(set) = merged {
+                emu.state.set_shadow_memory(mem_sp, addr + i, set);
+            } else {
+                emu.state.clear_shadow_memory(mem_sp, addr + i);
+            }
+        }
+        emu.invalidate_control_reconvergence_for_write(mem_sp, addr, size);
+        return;
+    }
     for i in 0..n {
         if let Some(id) = node {
             emu.state.set_shadow_memory(mem_sp, addr + i, id);
@@ -791,6 +876,7 @@ pub extern "C" fn jit_shadow_unop(
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_sym_cbranch_gate(
     emu_ptr: *mut Emulator,
+    branch_pc: u64,
     cond_val: u64,
     cond_space: u64,
     cond_offset: u64,
@@ -798,6 +884,13 @@ pub extern "C" fn jit_sym_cbranch_gate(
     not_taken_addr: u64,
 ) -> u64 {
     let emu = unsafe { &mut *emu_ptr };
+    emu.note_tainted_conditional_branch(
+        branch_pc,
+        cond_space,
+        cond_offset,
+        taken_addr,
+        not_taken_addr,
+    );
     if cond_space == 0 {
         return 0;
     }
@@ -807,7 +900,7 @@ pub extern "C" fn jit_sym_cbranch_gate(
     let taken = cond_val != 0;
     emu.sym_events.push(crate::core::SymBranch {
         step_index: emu.inst_count,
-        pc: emu.pc,
+        pc: branch_pc,
         condition_val_taken: taken,
         condition_node: Some(node),
         alt_rel_idx: None,
@@ -833,6 +926,20 @@ pub extern "C" fn jit_sym_cbranch_gate(
         );
         0
     }
+}
+
+/// Rebuild data/control provenance after a p-code output operation. The op is
+/// in the emulator's append-only JIT side table, alongside wide evaluator ops.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_taint_output(emu_ptr: *mut Emulator, index: u64) {
+    let emu = unsafe { &mut *emu_ptr };
+    let Some(op) = emu.wide_ops.get(index as usize) else {
+        tracing::error!("jit_taint_output: no op at index {index}");
+        return;
+    };
+    let op = op as *const fission_pcode::ir::PcodeOp;
+    let op = unsafe { &*op };
+    emu.apply_taint_to_op(op, None);
 }
 
 // ── CallOther / HLE ──────────────────────────────────────────────────────────

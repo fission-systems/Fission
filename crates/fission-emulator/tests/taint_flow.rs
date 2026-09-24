@@ -15,9 +15,76 @@ use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
 fn build(stdin: &[u8]) -> Emulator {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_concolic_branch_sys.elf");
+    let path = fixture_path();
     let binary = LoadedBinary::from_file(&path).expect("load");
+    build_from_binary(stdin, binary)
+}
+
+fn fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_concolic_branch_sys.elf")
+}
+
+fn build_with_inserted_code(stdin: &[u8], offset: usize, code: &[u8], suffix: &str) -> Emulator {
+    let path = fixture_path();
+    let mut bytes = std::fs::read(&path).expect("read fixture");
+    bytes.splice(offset..offset, code.iter().copied());
+    for field in [0x60, 0x68] {
+        let old = u64::from_le_bytes(bytes[field..field + 8].try_into().unwrap());
+        bytes[field..field + 8].copy_from_slice(&(old + code.len() as u64).to_le_bytes());
+    }
+    let binary = LoadedBinary::from_bytes(bytes, format!("{}-{suffix}", path.display()))
+        .expect("load modified fixture");
+    build_from_binary(stdin, binary)
+}
+
+fn build_with_clean_overwrite(stdin: &[u8]) -> Emulator {
+    // Insert `mov rdi, 0` at the diamond's join, immediately before the exit
+    // syscall. This makes the joined value independent of the branch.
+    build_with_inserted_code(
+        stdin,
+        0xB2,
+        &[0x48, 0xC7, 0xC7, 0, 0, 0, 0],
+        "clean-overwrite",
+    )
+}
+
+fn build_with_direct_write(stdin: &[u8]) -> Emulator {
+    // After read(0, rsp, 1), write(1, rsp, 1) sends the untrusted byte to a
+    // syscall sink before the fixture tests it in a branch.
+    build_with_inserted_code(
+        stdin,
+        0x96,
+        &[
+            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+            0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+            0x48, 0x89, 0xE6, // mov rsi, rsp
+            0x48, 0xC7, 0xC2, 0x01, 0x00, 0x00, 0x00, // mov rdx, 1
+            0x0F, 0x05, // syscall
+        ],
+        "direct-write",
+    )
+}
+
+fn build_with_transformed_write(stdin: &[u8]) -> Emulator {
+    // Exercise data taint through MOVZX (IntZExt), which has no dedicated JIT
+    // shadow callback, before the value is stored and sent to write(2).
+    build_with_inserted_code(
+        stdin,
+        0x96,
+        &[
+            0x0F, 0xB6, 0x04, 0x24, // movzx eax, byte ptr [rsp]
+            0x88, 0x44, 0x24, 0x01, // mov byte ptr [rsp+1], al
+            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+            0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00, // mov rdi, 1
+            0x48, 0x8D, 0x74, 0x24, 0x01, // lea rsi, [rsp+1]
+            0x48, 0xC7, 0xC2, 0x01, 0x00, 0x00, 0x00, // mov rdx, 1
+            0x0F, 0x05, // syscall
+        ],
+        "transformed-write",
+    )
+}
+
+fn build_from_binary(stdin: &[u8], binary: LoadedBinary) -> Emulator {
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");
     let load_spec = binary.load_spec().expect("spec").clone();
@@ -48,49 +115,128 @@ fn taint_is_off_unless_asked_for() {
 }
 
 #[test]
-fn a_run_that_reads_gets_a_source_but_a_branch_alone_is_not_a_flow() {
-    let mut emu = build(b"A");
-    emu.set_shadow_mode(ShadowMode::Taint);
-    let _ = emu.run();
+fn branch_controlled_syscall_argument_is_reported_as_control_flow() {
+    for force_interpreter in [false, true] {
+        let mut emu = build(b"A");
+        emu.force_interpreter = force_interpreter;
+        emu.set_shadow_mode(ShadowMode::Taint);
+        let _ = emu.run();
 
-    // `read` filled a guest buffer from outside, so the run has a source.
-    let sources: Vec<&str> = emu
-        .taint
-        .sources()
-        .iter()
-        .map(|s| s.label.as_str())
-        .collect();
-    assert!(
-        sources.contains(&"read"),
-        "stdin should be a source, got {sources:?}"
-    );
-
-    // The fixture branches on the byte it read and exits with a constant the
-    // branch picked. The byte decides *which* constant, and never flows into
-    // it -- that is control dependence, not data dependence, and this taint
-    // deliberately does not follow it: implicit flows reach everything, so
-    // tracking them turns every report into noise.
-    //
-    // So the right answer here is no hit at all. Pinning that is the point:
-    // the cheap failure for a taint engine is not missing a flow, it is
-    // reporting one that is not there.
-    for hit in &emu.taint.hits {
-        eprintln!(
-            "  0x{:X}  {} -- {}  <- {:?}",
-            hit.pc, hit.sink, hit.detail, hit.sources
+        // `read` filled a guest buffer from outside, so the run has a source.
+        let sources: Vec<&str> = emu
+            .taint
+            .sources()
+            .iter()
+            .map(|s| s.label.as_str())
+            .collect();
+        assert!(
+            sources.contains(&"read"),
+            "stdin should be a source, got {sources:?}"
         );
+
+        assert!(
+            emu.taint.hits.iter().any(|hit| {
+                hit.kind == fission_emulator::TaintDependencyKind::Control
+                    && hit.sink == "syscall arg"
+                    && hit.sources.iter().any(|source| source == "read")
+            }),
+            "the branch-selected exit argument should retain control dependence (interpreter={force_interpreter}): {:?}",
+            emu.taint.hits
+        );
+        assert!(
+            !emu.taint.hits.iter().any(|hit| {
+                hit.kind == fission_emulator::TaintDependencyKind::Data
+                    && hit.sink == "syscall arg"
+                    && hit.sources.iter().any(|source| source == "read")
+            }),
+            "a branch-only source must not be mislabeled direct data: {:?}",
+            emu.taint.hits
+        );
+
+        let hit = emu
+            .taint
+            .hits
+            .iter()
+            .find(|hit| hit.kind == fission_emulator::TaintDependencyKind::Control)
+            .expect("control hit was checked above");
+        let serialized = serde_json::to_value(fission_emulator::metrics::TaintHitReport {
+            pc: hit.pc,
+            kind: hit.kind,
+            sink: hit.sink.clone(),
+            detail: hit.detail.clone(),
+            sources: hit.sources.clone(),
+        })
+        .expect("taint hit serializes");
+        assert_eq!(serialized["kind"], "control");
     }
-    assert!(
-        emu.taint.hits.is_empty(),
-        "a control-flow-only dependence was reported as a data flow: {:?}",
-        emu.taint.hits
-    );
 }
 
 #[test]
-fn a_declared_source_propagates_through_arithmetic() {
-    // Independent of any syscall: mark memory, let the guest compute with it,
-    // and check the label survives the arithmetic rather than the copy alone.
+fn a_clean_write_at_reconvergence_removes_control_taint() {
+    for force_interpreter in [false, true] {
+        let mut emu = build_with_clean_overwrite(b"A");
+        emu.force_interpreter = force_interpreter;
+        emu.set_shadow_mode(ShadowMode::Taint);
+        let _ = emu.run();
+
+        assert!(
+            !emu.taint.hits.iter().any(|hit| {
+                hit.kind == fission_emulator::TaintDependencyKind::Control
+                    && hit.sink == "syscall arg"
+                    && hit.detail == "exit arg0"
+            }),
+            "a clean post-join overwrite retained control taint (interpreter={force_interpreter}): {:?}",
+            emu.taint.hits
+        );
+    }
+}
+
+#[test]
+fn direct_input_reaching_a_syscall_buffer_stays_data_taint() {
+    for force_interpreter in [false, true] {
+        let mut emu = build_with_direct_write(b"A");
+        emu.force_interpreter = force_interpreter;
+        emu.set_shadow_mode(ShadowMode::Taint);
+        let _ = emu.run();
+
+        assert!(
+            emu.taint.hits.iter().any(|hit| {
+                hit.kind == fission_emulator::TaintDependencyKind::Data
+                    && hit.sink == "syscall buffer"
+                    && hit.detail.starts_with("write arg1")
+                    && hit.sources.iter().any(|source| source == "read")
+            }),
+            "the byte read from stdin should remain direct data taint (interpreter={force_interpreter}): {:?}",
+            emu.taint.hits
+        );
+    }
+}
+
+#[test]
+fn direct_data_taint_survives_an_unary_extension_in_both_engines() {
+    for force_interpreter in [false, true] {
+        let mut emu = build_with_transformed_write(b"A");
+        emu.force_interpreter = force_interpreter;
+        emu.set_shadow_mode(ShadowMode::Taint);
+        let _ = emu.run();
+
+        assert!(
+            emu.taint.hits.iter().any(|hit| {
+                hit.kind == fission_emulator::TaintDependencyKind::Data
+                    && hit.sink == "syscall buffer"
+                    && hit.detail.starts_with("write arg1")
+                    && hit.sources.iter().any(|source| source == "read")
+            }),
+            "MOVZX must preserve direct data provenance (interpreter={force_interpreter}): {:?}",
+            emu.taint.hits
+        );
+    }
+}
+
+#[test]
+fn taint_range_marks_guest_memory_as_a_source() {
+    // Independent of any syscall: explicitly mark a guest memory range and
+    // verify that it has a source label.
     let mut emu = build(b"A");
     emu.set_shadow_mode(ShadowMode::Taint);
     let scratch = 0x7FFF_0000u64;

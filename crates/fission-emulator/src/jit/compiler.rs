@@ -133,6 +133,10 @@ impl JitCompiler {
                 crate::jit::callbacks::jit_sym_cbranch_gate as *const u8,
             ),
             (
+                "jit_taint_output",
+                crate::jit::callbacks::jit_taint_output as *const u8,
+            ),
+            (
                 "jit_host_reg_base",
                 crate::jit::callbacks::jit_host_reg_base as *const u8,
             ),
@@ -418,7 +422,9 @@ impl JitCompiler {
             .unwrap();
 
         let mut sig_count = self.module.make_signature();
-        sig_count.params.push(AbiParam::new(types::I64));
+        sig_count
+            .params
+            .extend([AbiParam::new(types::I64), AbiParam::new(types::I64)]);
         let count_fn = self
             .module
             .declare_function("jit_count_insn", Linkage::Import, &sig_count)
@@ -463,20 +469,20 @@ impl JitCompiler {
             .declare_function("jit_exit_tb", Linkage::Import, &sig_exit)
             .unwrap();
 
-        // jit_sym_cbranch_gate(emu, cond_val, space, offset, taken, not_taken) -> u64
+        // jit_sym_cbranch_gate(emu, pc, cond_val, space, offset, taken, not_taken) -> u64
         let mut sig_sym = self.module.make_signature();
-        sig_sym.params.extend([
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-        ]);
+        sig_sym.params.extend([AbiParam::new(types::I64); 7]);
         sig_sym.returns.push(AbiParam::new(types::I64));
         let sym_gate_fn = self
             .module
             .declare_function("jit_sym_cbranch_gate", Linkage::Import, &sig_sym)
+            .unwrap();
+
+        let mut sig_taint = self.module.make_signature();
+        sig_taint.params.extend([AbiParam::new(types::I64); 2]);
+        let taint_output_fn = self
+            .module
+            .declare_function("jit_taint_output", Linkage::Import, &sig_taint)
             .unwrap();
 
         // jit_host_reg_base(emu) -> ptr
@@ -504,28 +510,14 @@ impl JitCompiler {
             .unwrap();
 
         let mut sig_sh_load = self.module.make_signature();
-        sig_sh_load.params.extend([
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-        ]);
+        sig_sh_load.params.extend([AbiParam::new(types::I64); 9]);
         let shadow_load_fn = self
             .module
             .declare_function("jit_shadow_load", Linkage::Import, &sig_sh_load)
             .unwrap();
 
         let mut sig_sh_store = self.module.make_signature();
-        sig_sh_store.params.extend([
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-            AbiParam::new(types::I64),
-        ]);
+        sig_sh_store.params.extend([AbiParam::new(types::I64); 9]);
         let shadow_store_fn = self
             .module
             .declare_function("jit_shadow_store", Linkage::Import, &sig_sh_store)
@@ -610,6 +602,9 @@ impl JitCompiler {
             .declare_func_in_func(count_pcode_fn, builder.func);
         let exit_tb_ref = self.module.declare_func_in_func(exit_tb_fn, builder.func);
         let sym_gate_ref = self.module.declare_func_in_func(sym_gate_fn, builder.func);
+        let taint_output_ref = self
+            .module
+            .declare_func_in_func(taint_output_fn, builder.func);
         let host_reg_base_ref = self
             .module
             .declare_func_in_func(host_reg_base_fn, builder.func);
@@ -1010,8 +1005,9 @@ impl JitCompiler {
 
         if n_ops == 0 {
             // Still count guest insns and exit.
-            for _ in insns {
-                builder.ins().call(count_ref, &[emu_ptr]);
+            for insn in insns {
+                let pc = builder.ins().iconst(types::I64, insn.pc as i64);
+                builder.ins().call(count_ref, &[emu_ptr, pc]);
             }
             let arg = BlockArg::from(default_next);
             builder.ins().jump(exit_block, &[arg]);
@@ -1042,9 +1038,9 @@ impl JitCompiler {
             // Guest-insn boundary accounting: one per instruction starting
             // here, in order, so a zero-op instruction still counts.
             for start_pc in &insn_starts_at[idx] {
-                builder.ins().call(count_ref, &[emu_ptr]);
+                let pc = builder.ins().iconst(types::I64, *start_pc as i64);
+                builder.ins().call(count_ref, &[emu_ptr, pc]);
                 if observe.insn {
-                    let pc = builder.ins().iconst(types::I64, *start_pc as i64);
                     builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
                 }
             }
@@ -1125,6 +1121,25 @@ impl JitCompiler {
                 }
                 continue;
             }
+
+            let taint_output_index = if matches!(shadow, crate::observe::ShadowMode::Taint)
+                && !dead_ops[idx]
+                && op.output.as_ref().is_some_and(|output| !output.is_constant)
+                && !matches!(
+                    op.opcode,
+                    PcodeOpcode::Load
+                        | PcodeOpcode::Store
+                        | PcodeOpcode::CallOther
+                        | PcodeOpcode::Branch
+                        | PcodeOpcode::CBranch
+                        | PcodeOpcode::Return
+                ) {
+                let index = wide_ops.len();
+                wide_ops.push(op.clone());
+                Some(index)
+            } else {
+                None
+            };
 
             match emit_opcode {
                 PcodeOpcode::Copy | PcodeOpcode::Cast => {
@@ -1234,9 +1249,35 @@ impl JitCompiler {
                                 let doff = builder.ins().iconst(types::I64, out.offset as i64);
                                 let dsz = builder.ins().iconst(types::I64, out.size as i64);
                                 let msp = builder.ins().iconst(types::I64, space_id as i64);
-                                builder
-                                    .ins()
-                                    .call(shadow_load_ref, &[emu_ptr, dsp, doff, dsz, msp, addr]);
+                                let address = &op.inputs[1];
+                                let asp = builder.ins().iconst(
+                                    types::I64,
+                                    if address.is_constant {
+                                        0
+                                    } else {
+                                        address.space_id as i64
+                                    },
+                                );
+                                let aoff = builder.ins().iconst(
+                                    types::I64,
+                                    if address.is_constant {
+                                        0
+                                    } else {
+                                        address.offset as i64
+                                    },
+                                );
+                                let asz = builder.ins().iconst(
+                                    types::I64,
+                                    if address.is_constant {
+                                        0
+                                    } else {
+                                        address.size as i64
+                                    },
+                                );
+                                builder.ins().call(
+                                    shadow_load_ref,
+                                    &[emu_ptr, dsp, doff, dsz, msp, addr, asp, aoff, asz],
+                                );
                             }
                         }
                     }
@@ -1294,10 +1335,36 @@ impl JitCompiler {
                                 val_vn.offset as i64
                             },
                         );
+                        let pointer = &op.inputs[1];
+                        let psp = builder.ins().iconst(
+                            types::I64,
+                            if pointer.is_constant {
+                                0
+                            } else {
+                                pointer.space_id as i64
+                            },
+                        );
+                        let poff = builder.ins().iconst(
+                            types::I64,
+                            if pointer.is_constant {
+                                0
+                            } else {
+                                pointer.offset as i64
+                            },
+                        );
+                        let psz = builder.ins().iconst(
+                            types::I64,
+                            if pointer.is_constant {
+                                0
+                            } else {
+                                pointer.size as i64
+                            },
+                        );
                         if shadow.is_on() {
-                            builder
-                                .ins()
-                                .call(shadow_store_ref, &[emu_ptr, msp, addr, sz, vsp, voff]);
+                            builder.ins().call(
+                                shadow_store_ref,
+                                &[emu_ptr, msp, addr, sz, vsp, voff, psp, poff, psz],
+                            );
                         }
                     }
                 }
@@ -1876,9 +1943,11 @@ impl JitCompiler {
                         );
                         let t_a = builder.ins().iconst(types::I64, taken_addr as i64);
                         let n_a = builder.ins().iconst(types::I64, not_taken_addr as i64);
-                        let gcall = builder
-                            .ins()
-                            .call(sym_gate_ref, &[emu_ptr, cond, csp, coff, t_a, n_a]);
+                        let branch_pc = builder.ins().iconst(types::I64, op.address as i64);
+                        let gcall = builder.ins().call(
+                            sym_gate_ref,
+                            &[emu_ptr, branch_pc, cond, csp, coff, t_a, n_a],
+                        );
                         let stop = builder.inst_results(gcall)[0];
                         let is_stop = builder.ins().icmp_imm(IntCC::NotEqual, stop, 0);
                         let stop_b = builder.create_block();
@@ -2124,6 +2193,11 @@ impl JitCompiler {
                 }
             }
 
+            if let Some(index) = taint_output_index {
+                let index = builder.ins().iconst(types::I64, index as i64);
+                builder.ins().call(taint_output_ref, &[emu_ptr, index]);
+            }
+
             if !branched {
                 if let Some(ft) = fallthrough {
                     builder.ins().jump(ft, &[]);
@@ -2134,9 +2208,9 @@ impl JitCompiler {
                     // an early branch skips them -- so this is the one edge
                     // they belong on.
                     for start_pc in &insn_starts_at[n_ops] {
-                        builder.ins().call(count_ref, &[emu_ptr]);
+                        let pc = builder.ins().iconst(types::I64, *start_pc as i64);
+                        builder.ins().call(count_ref, &[emu_ptr, pc]);
                         if observe.insn {
-                            let pc = builder.ins().iconst(types::I64, *start_pc as i64);
                             builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
                         }
                     }

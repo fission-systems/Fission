@@ -498,7 +498,7 @@ fn check_syscall_taint(emu: &mut Emulator, number: u64) {
     let name = spec
         .map(|s| s.name.to_string())
         .unwrap_or_else(|| format!("syscall_{number}"));
-    let pc = emu.pc;
+    let pc = emu.current_instruction_pc();
 
     let regs = ["RDI", "RSI", "RDX", "R10", "R8", "R9"];
     let mut args = [0u64; 6];
@@ -508,8 +508,9 @@ fn check_syscall_taint(emu: &mut Emulator, number: u64) {
 
     for (index, reg) in regs.iter().enumerate() {
         if let Some(set) = emu.register_taint(reg) {
-            emu.taint
-                .hit(pc, "syscall arg", format!("{name} arg{index}"), set);
+            let detail = format!("{name} arg{index}");
+            emu.taint.hit(pc, "syscall arg", detail.clone(), set);
+            emu.taint.hit_control(pc, "syscall arg", detail, set);
         }
     }
 
@@ -532,12 +533,9 @@ fn check_syscall_taint(emu: &mut Emulator, number: u64) {
         // First tainted byte is enough: the finding is that the buffer carries
         // untrusted data, not how much of it does.
         if let Some(set) = (0..span).find_map(|i| emu.state.get_shadow_memory(ram, addr + i)) {
-            emu.taint.hit(
-                pc,
-                "syscall buffer",
-                format!("{name} arg{index} at 0x{addr:X}"),
-                set,
-            );
+            let detail = format!("{name} arg{index} at 0x{addr:X}");
+            emu.taint.hit(pc, "syscall buffer", detail.clone(), set);
+            emu.taint.hit_control(pc, "syscall buffer", detail, set);
         }
     }
 }

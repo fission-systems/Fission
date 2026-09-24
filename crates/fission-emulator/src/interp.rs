@@ -61,6 +61,10 @@ impl Emulator {
             bail!("interpreter: empty translation block");
         }
         let entry_pc = insns[0].pc;
+        let instruction_fallthroughs = insns
+            .iter()
+            .map(|insn| (insn.pc, insn.pc.wrapping_add(u64::from(insn.len))))
+            .collect::<std::collections::HashMap<_, _>>();
         let fallthrough = {
             let last = &insns[insns.len() - 1];
             last.pc.wrapping_add(u64::from(last.len))
@@ -108,6 +112,7 @@ impl Emulator {
         while idx < flat.len() {
             for pc in starts_at[idx].clone() {
                 self.pc = pc;
+                self.note_guest_instruction(pc);
                 self.inst_count = self.inst_count.saturating_add(1);
                 if let Some(limit) = self.max_inst {
                     if self.inst_count >= limit {
@@ -165,6 +170,19 @@ impl Emulator {
                 None
             };
 
+            let control_mem = if matches!(self.shadow_mode, crate::observe::ShadowMode::Taint)
+                && matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store)
+                && op.inputs.len() >= 2
+            {
+                Some((
+                    op.inputs[0].constant_val as u64,
+                    self.varnode_value(&op.inputs[1]),
+                ))
+            } else {
+                None
+            };
+            let taint_snapshot = self.snapshot_taint_op(op, control_mem);
+
             let (step, unimplemented) = {
                 let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
                 let step = evaluator.step(op)?;
@@ -182,6 +200,8 @@ impl Emulator {
                 };
                 self.notify_mem(addr, size, write, value);
             }
+
+            self.apply_taint_to_op_with_snapshot(op, control_mem, taint_snapshot.as_ref());
 
             match step {
                 StepResult::Next => idx += 1,
@@ -202,10 +222,23 @@ impl Emulator {
                 }
                 StepResult::CBranch {
                     condition_val,
+                    condition_node: _,
                     true_rel_idx,
                     true_addr,
-                    ..
                 } => {
+                    if let Some(taken_pc) = true_addr {
+                        let branch_pc = self.pc;
+                        if let Some(fallthrough_pc) = instruction_fallthroughs.get(&branch_pc) {
+                            let condition = &op.inputs[1];
+                            self.note_tainted_conditional_branch(
+                                branch_pc,
+                                condition.space_id,
+                                condition.offset,
+                                taken_pc,
+                                *fallthrough_pc,
+                            );
+                        }
+                    }
                     if !condition_val {
                         idx += 1;
                     } else if let Some(rel) = true_rel_idx {
@@ -279,6 +312,7 @@ impl Emulator {
         // falling out of the block, same as in the compiled path.
         for pc in starts_at[flat.len()].clone() {
             self.pc = pc;
+            self.note_guest_instruction(pc);
             self.inst_count = self.inst_count.saturating_add(1);
             if self.observe.insn {
                 self.notify_insn(pc);

@@ -1,4 +1,5 @@
 pub mod arch;
+mod control_flow;
 pub mod core;
 pub mod interp;
 pub mod jit;
@@ -24,4 +25,4 @@ pub use snapshot::EmulatorSnapshot;
 pub use srd::{
     CaptureOpts, FieldDelta, MallocngProbe, OwnerLayer, SemanticReplayDelta, SemanticReplaySnapshot,
 };
-pub use taint::{TaintHit, TaintSource, TaintState};
+pub use taint::{TaintDependencyKind, TaintHit, TaintSource, TaintState};

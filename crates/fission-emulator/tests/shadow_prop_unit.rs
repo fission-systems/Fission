@@ -51,7 +51,7 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
     let emu_ptr = &mut emu as *mut Emulator;
 
     // LOAD: mem → unique:0x10 (simulating dest varnode)
-    jit_shadow_load(emu_ptr, uniq, 0x10, 1, ram, 0x7000_0000);
+    jit_shadow_load(emu_ptr, uniq, 0x10, 1, ram, 0x7000_0000, 0, 0, 0);
     assert_eq!(emu.state.get_shadow_memory(uniq, 0x10), Some(77));
 
     // COPY to unique:0x20
@@ -105,14 +105,14 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
     let cond_id = emu.state.get_shadow_memory(uniq, 0x40).expect("cmp shadow");
 
     // STORE taint back to memory
-    jit_shadow_store(emu_ptr, ram, 0x7000_0010, 1, uniq, 0x40);
+    jit_shadow_store(emu_ptr, ram, 0x7000_0010, 1, uniq, 0x40, 0, 0, 0);
     assert_eq!(emu.state.get_shadow_memory(ram, 0x7000_0010), Some(cond_id));
 
     // CBranch gate: record always; stop only when concolic_stop_on_branch.
     emu.sym_events.clear();
     emu.sym_stop_requested = false;
     emu.concolic_stop_on_branch = false;
-    let stop_record = jit_sym_cbranch_gate(emu_ptr, 1, uniq, 0x40, 0x401000, 0x401010);
+    let stop_record = jit_sym_cbranch_gate(emu_ptr, 0x400FF0, 1, uniq, 0x40, 0x401000, 0x401010);
     assert_eq!(stop_record, 0, "record-only must not stop");
     assert!(!emu.sym_stop_requested);
     assert_eq!(emu.sym_events.len(), 1);
@@ -120,7 +120,7 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
 
     emu.sym_events.clear();
     emu.concolic_stop_on_branch = true;
-    let stop = jit_sym_cbranch_gate(emu_ptr, 1, uniq, 0x40, 0x401000, 0x401010);
+    let stop = jit_sym_cbranch_gate(emu_ptr, 0x400FF0, 1, uniq, 0x40, 0x401000, 0x401010);
     assert_eq!(stop, 1);
     assert!(emu.sym_stop_requested);
     assert_eq!(emu.sym_events.len(), 1);

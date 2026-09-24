@@ -141,9 +141,9 @@ pub struct Emulator {
     /// The access that tripped a watchpoint, waiting for the run loop to see
     /// it. Set inside a compiled block, which cannot stop by itself.
     watch_hit: Option<WatchHit>,
-    /// The guest instruction currently executing, recorded only while
-    /// something asked for per-instruction callbacks. A watchpoint asks,
-    /// because "what wrote this" is the question watchpoints exist to answer.
+    /// The guest instruction currently executing, recorded while a watcher or
+    /// taint sink needs its address. A watchpoint asks for provenance, while
+    /// taint reporting needs the syscall's exact guest instruction.
     current_insn_pc: u64,
 
     /// Addresses the run loop stops at, for a debugger front end.
@@ -152,6 +152,8 @@ pub struct Emulator {
     /// compiled before the breakpoint existed runs straight through it.
     /// Use [`Self::set_breakpoint`] / [`Self::clear_breakpoint`].
     breakpoints: std::collections::BTreeSet<u64>,
+    /// Bounded static postdominator proofs used to end control-taint scopes.
+    control_reconvergence_cache: std::collections::HashMap<(u64, u64, u64), Option<u64>>,
 
     /// Set by HLE/CallOther when guest requests process exit.
     pub halt_requested: bool,
@@ -171,12 +173,12 @@ pub struct Emulator {
     /// ARMv7-M system registers. See [`crate::arch::cortex_m`]; inert on every
     /// other architecture, because nothing reaches for them.
     pub cortex_m: crate::arch::cortex_m::CortexMState,
-    /// P-code ops the JIT compiled a call-out for rather than lowering.
+    /// P-code metadata referenced by compiled JIT call-outs.
     ///
     /// Append-only, and never touched while a block is running: a compiled
-    /// block names an entry by index, and `jit_wide_op` reads it back. The
-    /// ops are the 128-bit integer ones, which go through the evaluator so
-    /// that the two engines cannot lower them differently.
+    /// block names an entry by index, and callbacks read it back. Entries
+    /// include 128-bit/vector ops routed through the evaluator and taint-mode
+    /// outputs whose shadow needs rebuilding after lowering.
     pub(crate) wide_ops: Vec<fission_pcode::ir::PcodeOp>,
 
     /// Linux ELF process image metadata (stack/auxv/brk) when loaded via ELF loader.
@@ -251,6 +253,13 @@ pub struct SymBranch {
     /// Target if we inverted the condition (if false it would be rel_idx, if true it would be fallback rel_idx)
     pub alt_rel_idx: Option<usize>,
     pub alt_addr: Option<u64>,
+}
+
+/// Taint inputs captured before the interpreter mutates output varnodes.
+#[derive(Debug, Clone)]
+pub(crate) struct TaintOpSnapshot {
+    inputs: Vec<Vec<u32>>,
+    loaded_bytes: Vec<Option<u32>>,
 }
 
 impl Emulator {
@@ -418,6 +427,7 @@ impl Emulator {
             watch_hit: None,
             current_insn_pc: 0,
             breakpoints: std::collections::BTreeSet::new(),
+            control_reconvergence_cache: std::collections::HashMap::new(),
             halt_requested: false,
             magic_range,
             decode_context,
@@ -809,6 +819,316 @@ impl Emulator {
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| *v)?;
         (0..u64::from(size).min(8)).find_map(|i| self.state.get_shadow_memory(space_id, offset + i))
+    }
+
+    pub(crate) fn note_guest_instruction(&mut self, pc: u64) {
+        if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
+            return;
+        }
+        self.current_insn_pc = pc;
+        self.taint.expire_control_scopes_at(pc);
+    }
+
+    pub(crate) fn current_instruction_pc(&self) -> u64 {
+        self.current_insn_pc
+    }
+
+    pub(crate) fn snapshot_taint_op(
+        &self,
+        op: &fission_pcode::ir::PcodeOp,
+        memory_address: Option<(u64, u64)>,
+    ) -> Option<TaintOpSnapshot> {
+        if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
+            return None;
+        }
+        let inputs = op
+            .inputs
+            .iter()
+            .map(|input| {
+                if input.is_constant {
+                    Vec::new()
+                } else {
+                    (0..u64::from(input.size).min(64))
+                        .filter_map(|byte| {
+                            self.state
+                                .get_shadow_memory(input.space_id, input.offset + byte)
+                        })
+                        .collect()
+                }
+            })
+            .collect();
+        let loaded_bytes = if op.opcode == fission_pcode::ir::PcodeOpcode::Load {
+            if let (Some((space, address)), Some(output)) = (memory_address, op.output.as_ref()) {
+                (0..u64::from(output.size).min(64))
+                    .map(|offset| self.state.get_shadow_memory(space, address + offset))
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        Some(TaintOpSnapshot {
+            inputs,
+            loaded_bytes,
+        })
+    }
+
+    /// Start an implicit-flow scope only when the predicate is tainted and a
+    /// bounded intraprocedural CFG proof identifies a concrete join.
+    pub(crate) fn note_tainted_conditional_branch(
+        &mut self,
+        branch_pc: u64,
+        condition_space: u64,
+        condition_offset: u64,
+        taken_pc: u64,
+        fallthrough_pc: u64,
+    ) {
+        if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint)
+            || taken_pc == fallthrough_pc
+        {
+            return;
+        }
+        let Some(predicate_set) = self
+            .state
+            .get_shadow_memory(condition_space, condition_offset)
+        else {
+            return;
+        };
+        let key = (branch_pc, taken_pc, fallthrough_pc);
+        let join_pc = self
+            .control_reconvergence_cache
+            .get(&key)
+            .copied()
+            .unwrap_or_else(|| {
+                let join = crate::control_flow::conditional_reconvergence(
+                    &self.binary,
+                    &self.state,
+                    &self.sleigh,
+                    self.decode_context,
+                    branch_pc,
+                    taken_pc,
+                    fallthrough_pc,
+                );
+                if self.control_reconvergence_cache.len() >= 4096 {
+                    self.control_reconvergence_cache.clear();
+                }
+                self.control_reconvergence_cache.insert(key, join);
+                join
+            });
+        if let Some(join_pc) = join_pc {
+            self.taint
+                .begin_control_scope(branch_pc, join_pc, predicate_set);
+        }
+    }
+
+    /// Propagate direct-data and active control provenance through this p-code operation.
+    pub(crate) fn apply_taint_to_op(
+        &mut self,
+        op: &fission_pcode::ir::PcodeOp,
+        memory_address: Option<(u64, u64)>,
+    ) {
+        self.apply_taint_to_op_with_snapshot(op, memory_address, None);
+    }
+
+    pub(crate) fn apply_taint_to_op_with_snapshot(
+        &mut self,
+        op: &fission_pcode::ir::PcodeOp,
+        memory_address: Option<(u64, u64)>,
+        snapshot: Option<&TaintOpSnapshot>,
+    ) {
+        if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
+            return;
+        }
+
+        use fission_pcode::ir::PcodeOpcode;
+        if op.opcode == PcodeOpcode::CBranch {
+            return;
+        }
+
+        if let Some(snapshot) = snapshot {
+            self.apply_interpreter_taint_snapshot(op, memory_address, snapshot);
+            return;
+        }
+
+        let input_sets = op
+            .inputs
+            .iter()
+            .flat_map(|input| {
+                (0..if input.is_constant {
+                    0
+                } else {
+                    u64::from(input.size).min(64)
+                })
+                    .filter_map(|byte| {
+                        self.state
+                            .get_shadow_memory(input.space_id, input.offset + byte)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let mut data_set = None;
+        let mut control_set = self.taint.active_control_set();
+        for input_set in input_sets {
+            if let Some(projected) = self.taint.data_projection(input_set) {
+                data_set = self.taint.union(data_set, Some(projected));
+            }
+            if let Some(projected) = self.taint.control_projection(input_set) {
+                control_set = self.taint.union(control_set, Some(projected));
+            }
+        }
+
+        match op.opcode {
+            PcodeOpcode::Load => {
+                let Some(out) = op.output.as_ref() else {
+                    return;
+                };
+                let Some((space, addr)) = memory_address else {
+                    return;
+                };
+                for offset in 0..u64::from(out.size).min(64) {
+                    let memory_set = self.state.get_shadow_memory(space, addr + offset);
+                    let memory_data = memory_set.and_then(|set| self.taint.data_projection(set));
+                    let memory_control =
+                        memory_set.and_then(|set| self.taint.control_projection(set));
+                    let output_data = self
+                        .state
+                        .get_shadow_memory(out.space_id, out.offset + offset)
+                        .and_then(|set| self.taint.data_projection(set));
+                    let output_control = self
+                        .state
+                        .get_shadow_memory(out.space_id, out.offset + offset)
+                        .and_then(|set| self.taint.control_projection(set));
+                    let direct = self.taint.union(data_set, memory_data);
+                    let direct = self.taint.union(direct, output_data);
+                    let implicit = self.taint.union(control_set, memory_control);
+                    let implicit = self.taint.union(implicit, output_control);
+                    let propagated = self.taint.union(direct, implicit);
+                    self.set_taint_shadow_byte(out.space_id, out.offset + offset, propagated);
+                }
+            }
+            PcodeOpcode::Store => {
+                let Some((space, addr)) = memory_address else {
+                    return;
+                };
+                for offset in 0..u64::from(op.inputs.get(2).map_or(0, |input| input.size)).min(64) {
+                    let value_set = self.state.get_shadow_memory(space, addr + offset);
+                    let value_data = value_set.and_then(|set| self.taint.data_projection(set));
+                    let value_control =
+                        value_set.and_then(|set| self.taint.control_projection(set));
+                    let direct = self.taint.union(data_set, value_data);
+                    let implicit = self.taint.union(control_set, value_control);
+                    let propagated = self.taint.union(direct, implicit);
+                    self.set_taint_shadow_byte(space, addr + offset, propagated);
+                }
+                self.invalidate_control_reconvergence_for_write(
+                    space,
+                    addr,
+                    op.inputs[2].size as u64,
+                );
+            }
+            _ => {
+                if let Some(out) = op.output.as_ref().filter(|output| !output.is_constant) {
+                    let propagated = self.taint.union(data_set, control_set);
+                    for offset in 0..u64::from(out.size).min(64) {
+                        self.set_taint_shadow_byte(out.space_id, out.offset + offset, propagated);
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_interpreter_taint_snapshot(
+        &mut self,
+        op: &fission_pcode::ir::PcodeOp,
+        memory_address: Option<(u64, u64)>,
+        snapshot: &TaintOpSnapshot,
+    ) {
+        use fission_pcode::ir::PcodeOpcode;
+
+        let mut data = None;
+        let mut control = self.taint.active_control_set();
+        for set in snapshot.inputs.iter().flatten().copied() {
+            let direct = self.taint.data_projection(set);
+            data = self.taint.union(data, direct);
+            let implicit = self.taint.control_projection(set);
+            control = self.taint.union(control, implicit);
+        }
+
+        match op.opcode {
+            PcodeOpcode::Store => {
+                if let Some((space, address)) = memory_address {
+                    let propagated = self.taint.union(data, control);
+                    let size = u64::from(op.inputs.get(2).map_or(0, |input| input.size)).min(64);
+                    for offset in 0..size {
+                        self.set_taint_shadow_byte(space, address + offset, propagated);
+                    }
+                    self.invalidate_control_reconvergence_for_write(space, address, size);
+                }
+            }
+            PcodeOpcode::Load => {
+                let Some(output) = op.output.as_ref().filter(|output| !output.is_constant) else {
+                    return;
+                };
+                for offset in 0..u64::from(output.size).min(64) {
+                    let memory_set = snapshot
+                        .loaded_bytes
+                        .get(offset as usize)
+                        .copied()
+                        .flatten();
+                    let memory_data = memory_set.and_then(|set| self.taint.data_projection(set));
+                    let memory_control =
+                        memory_set.and_then(|set| self.taint.control_projection(set));
+                    let byte_data = self.taint.union(data, memory_data);
+                    let byte_control = self.taint.union(control, memory_control);
+                    let propagated = self.taint.union(byte_data, byte_control);
+                    self.set_taint_shadow_byte(output.space_id, output.offset + offset, propagated);
+                }
+            }
+            _ => {
+                if let Some(output) = op.output.as_ref().filter(|output| !output.is_constant) {
+                    let propagated = self.taint.union(data, control);
+                    for offset in 0..u64::from(output.size).min(64) {
+                        self.set_taint_shadow_byte(
+                            output.space_id,
+                            output.offset + offset,
+                            propagated,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_taint_shadow_byte(&mut self, space: u64, offset: u64, set: Option<u32>) {
+        if let Some(set) = set {
+            self.state.set_shadow_memory(space, offset, set);
+        } else {
+            self.state.clear_shadow_memory(space, offset);
+        }
+    }
+
+    pub(crate) fn invalidate_control_reconvergence_for_write(
+        &mut self,
+        space: u64,
+        address: u64,
+        size: u64,
+    ) {
+        if space != self.state.ram_space() || size == 0 {
+            return;
+        }
+        let write_end = address.saturating_add(size);
+        let touches_code = self.binary.inner().sections.iter().any(|section| {
+            if !section.is_executable {
+                return false;
+            }
+            let section_end = section
+                .virtual_address
+                .saturating_add(section.virtual_size.max(section.file_size));
+            address < section_end && section.virtual_address < write_end
+        });
+        if touches_code {
+            self.control_reconvergence_cache.clear();
+        }
     }
 
     pub(crate) fn notify_translate(&mut self, entry_pc: u64, insns: &[(u64, u32)]) {
