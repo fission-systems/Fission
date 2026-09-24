@@ -78,55 +78,126 @@ impl WindowsDebugger {
             let h_thread = OpenThread(THREAD_ALL_ACCESS, false, thread_id)
                 .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
 
-            if self.is_wow64 == Some(true) {
+            let result: FissionResult<()> = if self.is_wow64 == Some(true) {
                 let mut ctx: WOW64_CONTEXT = std::mem::zeroed();
                 ctx.ContextFlags = WOW64_CONTEXT_ALL;
-                // Either naming: `EAX` from this backend's own read-back,
-                // `RAX` from a state recorded on an x86-64 machine.
-                let get = |wide: &str, narrow: &str| regs.get(narrow).or_else(|| regs.get(wide));
-                ctx.Eax = get("RAX", "EAX").unwrap_or(0) as u32;
-                ctx.Ebx = get("RBX", "EBX").unwrap_or(0) as u32;
-                ctx.Ecx = get("RCX", "ECX").unwrap_or(0) as u32;
-                ctx.Edx = get("RDX", "EDX").unwrap_or(0) as u32;
-                ctx.Esi = get("RSI", "ESI").unwrap_or(0) as u32;
-                ctx.Edi = get("RDI", "EDI").unwrap_or(0) as u32;
-                ctx.Ebp = get("RBP", "EBP").unwrap_or(0) as u32;
-                ctx.Esp = get("RSP", "ESP").unwrap_or(0) as u32;
-                ctx.Eip = regs.pc as u32;
-                ctx.EFlags = regs.get("EFLAGS").unwrap_or(0) as u32;
-                let res = Wow64SetThreadContext(h_thread, &ctx);
-                let _ = CloseHandle(h_thread);
-                return res.map_err(|e| {
-                    FissionError::debug(format!("Wow64SetThreadContext failed: {:?}", e))
-                });
-            }
-
-            let mut ctx: CONTEXT = std::mem::zeroed();
-            ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
-
-            ctx.Rax = regs.get("RAX").unwrap_or(0);
-            ctx.Rbx = regs.get("RBX").unwrap_or(0);
-            ctx.Rcx = regs.get("RCX").unwrap_or(0);
-            ctx.Rdx = regs.get("RDX").unwrap_or(0);
-            ctx.Rsi = regs.get("RSI").unwrap_or(0);
-            ctx.Rdi = regs.get("RDI").unwrap_or(0);
-            ctx.Rbp = regs.get("RBP").unwrap_or(0);
-            ctx.Rsp = regs.get("RSP").unwrap_or(0);
-            ctx.R8 = regs.get("R8").unwrap_or(0);
-            ctx.R9 = regs.get("R9").unwrap_or(0);
-            ctx.R10 = regs.get("R10").unwrap_or(0);
-            ctx.R11 = regs.get("R11").unwrap_or(0);
-            ctx.R12 = regs.get("R12").unwrap_or(0);
-            ctx.R13 = regs.get("R13").unwrap_or(0);
-            ctx.R14 = regs.get("R14").unwrap_or(0);
-            ctx.R15 = regs.get("R15").unwrap_or(0);
-            ctx.Rip = regs.pc;
-            ctx.EFlags = regs.get("RFLAGS").unwrap_or(0) as u32;
-
-            let res = SetThreadContext(h_thread, &ctx);
+                match Wow64GetThreadContext(h_thread, &mut ctx) {
+                    Ok(()) => {
+                        // Either naming: `EAX` from this backend's own read-back,
+                        // `RAX` from a state recorded on an x86-64 machine. Read
+                        // first so registers this API does not expose survive a
+                        // partial RegisterState write.
+                        let get =
+                            |wide: &str, narrow: &str| regs.get(narrow).or_else(|| regs.get(wide));
+                        if let Some(value) = get("RAX", "EAX") {
+                            ctx.Eax = value as u32;
+                        }
+                        if let Some(value) = get("RBX", "EBX") {
+                            ctx.Ebx = value as u32;
+                        }
+                        if let Some(value) = get("RCX", "ECX") {
+                            ctx.Ecx = value as u32;
+                        }
+                        if let Some(value) = get("RDX", "EDX") {
+                            ctx.Edx = value as u32;
+                        }
+                        if let Some(value) = get("RSI", "ESI") {
+                            ctx.Esi = value as u32;
+                        }
+                        if let Some(value) = get("RDI", "EDI") {
+                            ctx.Edi = value as u32;
+                        }
+                        if let Some(value) = get("RBP", "EBP") {
+                            ctx.Ebp = value as u32;
+                        }
+                        if let Some(value) = get("RSP", "ESP") {
+                            ctx.Esp = value as u32;
+                        }
+                        ctx.Eip = regs.pc as u32;
+                        if let Some(value) = regs.get("EFLAGS").or_else(|| regs.get("RFLAGS")) {
+                            ctx.EFlags = value as u32;
+                        }
+                        Wow64SetThreadContext(h_thread, &ctx).map_err(|e| {
+                            FissionError::debug(format!("Wow64SetThreadContext failed: {:?}", e))
+                        })
+                    }
+                    Err(error) => Err(FissionError::debug(format!(
+                        "Wow64GetThreadContext failed: {:?}",
+                        error
+                    ))),
+                }
+            } else {
+                let mut ctx: CONTEXT = std::mem::zeroed();
+                ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
+                match GetThreadContext(h_thread, &mut ctx) {
+                    Ok(()) => {
+                        // The portable RegisterState intentionally omits FP,
+                        // vector, segment, and debug state. Preserve those
+                        // context fields rather than writing zeroes for them.
+                        if let Some(value) = regs.get("RAX") {
+                            ctx.Rax = value;
+                        }
+                        if let Some(value) = regs.get("RBX") {
+                            ctx.Rbx = value;
+                        }
+                        if let Some(value) = regs.get("RCX") {
+                            ctx.Rcx = value;
+                        }
+                        if let Some(value) = regs.get("RDX") {
+                            ctx.Rdx = value;
+                        }
+                        if let Some(value) = regs.get("RSI") {
+                            ctx.Rsi = value;
+                        }
+                        if let Some(value) = regs.get("RDI") {
+                            ctx.Rdi = value;
+                        }
+                        if let Some(value) = regs.get("RBP") {
+                            ctx.Rbp = value;
+                        }
+                        if let Some(value) = regs.get("RSP") {
+                            ctx.Rsp = value;
+                        }
+                        if let Some(value) = regs.get("R8") {
+                            ctx.R8 = value;
+                        }
+                        if let Some(value) = regs.get("R9") {
+                            ctx.R9 = value;
+                        }
+                        if let Some(value) = regs.get("R10") {
+                            ctx.R10 = value;
+                        }
+                        if let Some(value) = regs.get("R11") {
+                            ctx.R11 = value;
+                        }
+                        if let Some(value) = regs.get("R12") {
+                            ctx.R12 = value;
+                        }
+                        if let Some(value) = regs.get("R13") {
+                            ctx.R13 = value;
+                        }
+                        if let Some(value) = regs.get("R14") {
+                            ctx.R14 = value;
+                        }
+                        if let Some(value) = regs.get("R15") {
+                            ctx.R15 = value;
+                        }
+                        ctx.Rip = regs.pc;
+                        if let Some(value) = regs.get("RFLAGS") {
+                            ctx.EFlags = value as u32;
+                        }
+                        SetThreadContext(h_thread, &ctx).map_err(|e| {
+                            FissionError::debug(format!("SetThreadContext failed: {:?}", e))
+                        })
+                    }
+                    Err(error) => Err(FissionError::debug(format!(
+                        "GetThreadContext failed: {:?}",
+                        error
+                    ))),
+                }
+            };
             let _ = CloseHandle(h_thread);
-
-            res.map_err(|e| FissionError::debug(format!("SetThreadContext failed: {:?}", e)))
+            result
         }
     }
 

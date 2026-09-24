@@ -1389,7 +1389,16 @@ mod tests {
             let original_byte = debugger.read_memory(registers.pc, 1)?[0];
             assert_ne!(original_byte, 0xCC, "test address already contains INT3");
             debugger.set_registers(thread_id, &registers)?;
-            assert_eq!(debugger.fetch_registers(thread_id)?.pc, registers.pc);
+            let restored_registers = debugger.fetch_registers(thread_id)?;
+            assert_eq!(
+                restored_registers.pc,
+                registers.pc,
+                "register context round-trip changed PC (before RIP={:?}, EIP={:?}; after RIP={:?}, EIP={:?})",
+                registers.get("RIP"),
+                registers.get("EIP"),
+                restored_registers.get("RIP"),
+                restored_registers.get("EIP"),
+            );
 
             debugger.set_sw_breakpoint(registers.pc)?;
             assert_eq!(debugger.read_memory(registers.pc, 1)?, [0xCC]);
