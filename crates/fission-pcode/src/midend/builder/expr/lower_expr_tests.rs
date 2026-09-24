@@ -1052,14 +1052,19 @@ fn x64_byte_add_movzx_does_not_double_add_load() {
         .split_once('{')
         .map(|(_, body)| body)
         .expect("rendered function body");
+    let return_line = body
+        .lines()
+        .find(|line| line.trim().starts_with("return"))
+        .expect("rendered return");
     let compact_body: String = body.chars().filter(|ch| !ch.is_whitespace()).collect();
     let parameter_uses = compact_body.matches("param_1").count();
     let byte_reads =
         compact_body.matches("*param_1").count() + compact_body.matches("param_1[").count();
     let additions = body.matches('+').count();
+    let return_uses_byte = return_line.contains("*param_1") || return_line.contains("param_1[");
     assert!(
-        parameter_uses == 1 && byte_reads == 1 && additions <= 1,
-        "expected one byte-source read and at most one add across the body; got {parameter_uses} source uses, {byte_reads} reads, and {additions} adds:\n{code}"
+        parameter_uses == 1 && byte_reads == 1 && return_uses_byte && additions <= 1,
+        "expected the return to use the one byte-source read with at most one add; got {parameter_uses} source uses, {byte_reads} reads, {additions} adds:\n{code}"
     );
 }
 
@@ -1329,13 +1334,16 @@ fn movzx_after_byte_add_zero_extends_unsigned() {
         .lines()
         .find(|line| line.trim().starts_with("return"))
         .expect("rendered return");
+    let return_uses_byte = return_line.contains("*rdx") || return_line.contains("rdx[");
     let promoted_unsigned_byte = code.contains("uchar * rdx")
+        && return_uses_byte
         && (return_line.contains("0 + *rdx") || return_line.trim() == "return *rdx;");
-    let explicit_low_byte = return_line.contains("(uchar)")
-        || return_line.contains("& 0xff")
-        || return_line.contains("& 255")
-        || return_line.contains("% 256")
-        || return_line.contains("%256");
+    let explicit_low_byte = return_uses_byte
+        && (return_line.contains("(uchar)")
+            || return_line.contains("& 0xff")
+            || return_line.contains("& 255")
+            || return_line.contains("% 256")
+            || return_line.contains("%256"));
 
     // AL starts at zero and the load is unsigned. Thus 0 + uchar promotes to
     // int in [0, 255] and already equals the zero-extended byte; a mask/cast is
