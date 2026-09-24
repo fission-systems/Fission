@@ -2,8 +2,9 @@
 
 use anyhow::{Context, Result, bail};
 use fission_decompiler::similarity::{
-    SIMILARITY_INDEX_VERSION, SimilarityCorpus, SimilarityIndex, SimilarityIndexDocument,
-    SimilaritySearchHit, extract_function_features,
+    SIMILARITY_INDEX_VERSION, SimilarityCorpus, SimilarityFeatureFamily, SimilarityIndex,
+    SimilarityIndexDocument, SimilaritySearchResult, extract_function_features,
+    extract_function_features_with_provenance,
 };
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
@@ -46,9 +47,9 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
         else {
             continue;
         };
-        let features = extract_function_features(&lifted.function);
         let key = format!("{}@{:#x}", func.name, decode_addr);
         if cross_index_mode {
+            let extracted = extract_function_features_with_provenance(&lifted.function);
             documents.push(SimilarityIndexDocument {
                 binary_hash: binary.hash.clone(),
                 binary_path: binary.path.clone(),
@@ -56,10 +57,11 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
                 function_name: func.name.clone(),
                 aliases: Vec::new(),
                 language_id: language_id.clone(),
-                features,
+                features: extracted.features,
+                feature_provenance: Some(extracted.provenance),
             });
         } else {
-            corpus.add(key.clone(), features);
+            corpus.add(key.clone(), extract_function_features(&lifted.function));
         }
         keys.push((key, decode_addr));
     }
@@ -128,8 +130,9 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
         let results: Vec<_> = queries
             .into_iter()
             .map(|query| {
-                let matches = prepared_index.query_top_k(
+                let matches = prepared_index.query_top_k_with_evidence(
                     &query.features,
+                    query.feature_provenance.as_ref(),
                     Some((
                         &query.binary_hash,
                         &query.language_id,
@@ -243,23 +246,72 @@ fn write_index(path: &Path, index: &SimilarityIndex) -> Result<()> {
 
 fn print_index_matches_text(
     stdout: &mut impl Write,
-    matches: &[SimilaritySearchHit],
+    matches: &[SimilaritySearchResult],
 ) -> Result<()> {
-    for hit in matches {
+    if !matches.is_empty() {
+        writeln!(
+            stdout,
+            "  evidence uses opaque structural fingerprints; family names identify extraction radius, not semantic categories"
+        )?;
+    }
+    for result in matches {
+        let hit = &result.hit;
+        let explanation = &result.explanation;
         writeln!(
             stdout,
             "  {:.4}  {}@{:#x}  [{}]",
             hit.score, hit.function_name, hit.function_address, hit.binary_path
         )?;
+        writeln!(
+            stdout,
+            "    evidence: formula=numerator/(query_l2*candidate_l2), normalization_defined={}, shared={} fingerprints, numerator={:.6}, query_l2={:.6}, candidate_l2={:.6}, provenance={}/{}",
+            explanation.normalization_defined,
+            explanation.shared_fingerprint_count,
+            explanation.numerator,
+            explanation.query_l2_norm,
+            explanation.candidate_l2_norm,
+            explanation.query_feature_provenance.as_str(),
+            explanation.candidate_feature_provenance.as_str(),
+        )?;
+        for contributor in explanation.top_contributors.iter().take(3) {
+            writeln!(
+                stdout,
+                "      0x{:08x}: numerator_contribution={:.6}, query_weight={:.6} [{}], candidate_weight={:.6} [{}]",
+                contributor.fingerprint,
+                contributor.numerator_contribution,
+                contributor.query_weight,
+                format_feature_families(&contributor.query_families),
+                contributor.candidate_weight,
+                format_feature_families(&contributor.candidate_families),
+            )?;
+        }
+        if explanation.omitted_contributor_count > 0 {
+            writeln!(
+                stdout,
+                "      ... {} more shared fingerprints (omitted numerator contribution={:.6})",
+                explanation.omitted_contributor_count, explanation.omitted_numerator_contribution,
+            )?;
+        }
     }
     Ok(())
+}
+
+fn format_feature_families(families: &[SimilarityFeatureFamily]) -> String {
+    if families.is_empty() {
+        return "unavailable".to_string();
+    }
+    families
+        .iter()
+        .map(|family| family.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn print_index_json(
     stdout: &mut impl Write,
     query_hash: &str,
     query_path: &str,
-    results: &[(&SimilarityIndexDocument, Vec<SimilaritySearchHit>)],
+    results: &[(&SimilarityIndexDocument, Vec<SimilaritySearchResult>)],
 ) -> Result<()> {
     let rows: Vec<_> = results
         .iter()
@@ -268,14 +320,15 @@ fn print_index_json(
                 "function": query.function_name,
                 "aliases": query.aliases,
                 "address": query.function_address,
-                "matches": matches.iter().map(|hit| json!({
-                    "binary_hash": hit.binary_hash,
-                    "binary_path": hit.binary_path,
-                    "function": hit.function_name,
-                    "aliases": hit.aliases,
-                    "address": hit.function_address,
-                    "language_id": hit.language_id,
-                    "score": hit.score,
+                "matches": matches.iter().map(|result| json!({
+                    "binary_hash": result.hit.binary_hash,
+                    "binary_path": result.hit.binary_path,
+                    "function": result.hit.function_name,
+                    "aliases": result.hit.aliases,
+                    "address": result.hit.function_address,
+                    "language_id": result.hit.language_id,
+                    "score": result.hit.score,
+                    "score_explanation": &result.explanation,
                 })).collect::<Vec<_>>(),
             })
         })
@@ -343,4 +396,97 @@ fn print_json(stdout: &mut impl Write, results: &[(String, Vec<(String, f64)>)])
     let text = serde_json::to_string_pretty(&payload).context("serialize similar JSON")?;
     writeln!(stdout, "{text}").context("write similar JSON")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_decompiler::similarity::SimilarityFeatureProvenance;
+
+    #[test]
+    fn cross_binary_output_includes_score_evidence_in_json_and_text() {
+        let provenance = SimilarityFeatureProvenance::for_features(
+            &[1, 2],
+            &[
+                SimilarityFeatureFamily::LocalOperation,
+                SimilarityFeatureFamily::LocalOperation,
+            ],
+        )
+        .expect("provenance aligned with features");
+        let mut candidate = SimilarityIndexDocument {
+            binary_hash: "candidate-hash".into(),
+            binary_path: "candidate.elf".into(),
+            function_address: 0x2000,
+            function_name: "candidate_fn".into(),
+            aliases: Vec::new(),
+            language_id: "x86:LE:64:default".into(),
+            features: vec![1, 2],
+            feature_provenance: Some(provenance.clone()),
+        };
+        let mut index = SimilarityIndex::new();
+        index.upsert_many([candidate.clone()]);
+        let matches =
+            index
+                .prepare_search()
+                .query_top_k_with_evidence(&[1, 2], Some(&provenance), None, 1);
+        candidate.binary_hash = "query-hash".into();
+        candidate.binary_path = "query.elf".into();
+        candidate.function_address = 0x1000;
+        candidate.function_name = "query_fn".into();
+        let query = candidate;
+
+        let mut json_output = Vec::new();
+        print_index_json(
+            &mut json_output,
+            "query-hash",
+            "query.elf",
+            &[(&query, matches.clone())],
+        )
+        .expect("render cross-binary JSON");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&json_output).expect("parse cross-binary JSON");
+        let explanation = &payload["results"][0]["matches"][0]["score_explanation"];
+        assert_eq!(explanation["schema_version"], 1);
+        assert_eq!(explanation["shared_fingerprint_count"], 2);
+        assert_eq!(explanation["query_feature_provenance"], "complete");
+        assert_eq!(explanation["candidate_feature_provenance"], "complete");
+        assert_eq!(
+            explanation["top_contributors"][0]["query_families"][0],
+            "local_operation"
+        );
+
+        let mut text_output = Vec::new();
+        print_index_matches_text(&mut text_output, &matches).expect("render match text");
+        let text_output = String::from_utf8(text_output).expect("UTF-8 text output");
+        assert!(text_output.contains("shared=2 fingerprints"));
+        assert!(text_output.contains("0x00000001"));
+        assert!(text_output.contains("local_operation"));
+    }
+
+    #[test]
+    fn same_binary_json_shape_is_unchanged() {
+        let mut output = Vec::new();
+        print_json(
+            &mut output,
+            &[(
+                "query@0x1000".into(),
+                vec![("candidate@0x2000".into(), 0.5)],
+            )],
+        )
+        .expect("render same-binary JSON");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&output).expect("parse same-binary JSON");
+        assert_eq!(
+            payload,
+            json!({
+                "results": [{
+                    "function": "query@0x1000",
+                    "matches": [{
+                        "name": "candidate@0x2000",
+                        "score": 0.5,
+                    }],
+                }],
+            })
+        );
+    }
 }
