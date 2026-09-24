@@ -313,25 +313,63 @@ jobs:
           chmod +x scripts/check/owner_boundaries.sh
           ./scripts/check/owner_boundaries.sh
 
-      - name: Enforce Targeted Tests for NIR/Render Changes
-        if: github.event_name == 'pull_request' && needs.changes.outputs.run_tests == 'true'
+      # CI-only PRs also exercise this shallow-checkout comparison.
+      - name: Collect PR changes for scoped gates
+        id: pr_changes
+        if: github.event_name == 'pull_request' && (needs.changes.outputs.run_tests == 'true' || needs.changes.outputs.lane == 'ci')
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          git fetch origin ${{ github.base_ref }} --depth=1
-          CHANGED=$(git diff origin/${{ github.base_ref }}...HEAD --name-only)
-          if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/src/midend/" \
+          # Pull-request checkouts use a synthetic merge commit. Fetching only
+          # the base tip does not guarantee a merge base, so compare trees.
+          git fetch --no-tags origin "$BASE_REF" --depth=1
+          BASE_SHA=$(git rev-parse FETCH_HEAD)
+          CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
+          echo "Changed paths relative to fetched base $BASE_SHA:"
+          printf '%s\n' "$CHANGED"
+
+          NIR_RENDER_MIDEND_CHANGED=false
+          HAS_TARGETED_TEST=false
+          SLEIGH_CHANGED=false
+
+          if printf '%s\n' "$CHANGED" | grep -q -e "^crates/fission-pcode/src/midend/" \
               -e "^crates/fission-pcode/src/render/" \
               -e "^crates/fission-midend-structuring/" \
               -e "^crates/fission-midend-normalize/" \
               -e "^crates/fission-midend-core/"; then
-            if echo "$CHANGED" | grep -q -e "tests/" -e ".*test" -e ".*_tests\.rs"; then
-              echo "✅ Targeted tests included."
-            elif git diff origin/${{ github.base_ref }}...HEAD -- \
+            NIR_RENDER_MIDEND_CHANGED=true
+            if printf '%s\n' "$CHANGED" | grep -q -e "tests/" -e ".*test" -e ".*_tests\.rs"; then
+              HAS_TARGETED_TEST=true
+            elif git diff "$BASE_SHA" HEAD -- \
                 crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
                 crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
                 crates/fission-midend-core/ \
                 | grep -q "+.*#\[test\]"; then
-              echo "✅ Inline tests added."
+              HAS_TARGETED_TEST=true
+            fi
+          fi
+
+          if printf '%s\n' "$CHANGED" | grep -q -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/"; then
+            SLEIGH_CHANGED=true
+          fi
+
+          {
+            echo "nir_render_midend_changed=$NIR_RENDER_MIDEND_CHANGED"
+            echo "has_targeted_test=$HAS_TARGETED_TEST"
+            echo "sleigh_changed=$SLEIGH_CHANGED"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Enforce Targeted Tests for NIR/Render Changes
+        if: github.event_name == 'pull_request' && needs.changes.outputs.run_tests == 'true'
+        env:
+          NIR_RENDER_MIDEND_CHANGED: ${{ steps.pr_changes.outputs.nir_render_midend_changed }}
+          HAS_TARGETED_TEST: ${{ steps.pr_changes.outputs.has_targeted_test }}
+        run: |
+          set -euo pipefail
+          if [ "$NIR_RENDER_MIDEND_CHANGED" = "true" ]; then
+            if [ "$HAS_TARGETED_TEST" = "true" ]; then
+              echo "✅ Targeted tests included."
             else
               echo "❌ Targeted test missing for NIR/render/midend changes."
               exit 1
@@ -342,9 +380,11 @@ jobs:
 
       - name: Enforce Sleigh Exact Match Parity
         if: github.event_name == 'pull_request' && needs.changes.outputs.run_tests == 'true'
+        env:
+          SLEIGH_CHANGED: ${{ steps.pr_changes.outputs.sleigh_changed }}
         run: |
           set -euo pipefail
-          if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/"; then
+          if [ "$SLEIGH_CHANGED" = "true" ]; then
             echo "🔍 Sleigh changes detected. Parity enforcement active via fission-sleigh tests."
           else
             echo "ℹ️ No Sleigh changes detected."
