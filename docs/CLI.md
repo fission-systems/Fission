@@ -137,6 +137,34 @@ fission_cli list app.exe --json
 
 Use `list` to discover candidate addresses before running targeted `disasm` or `decomp`.
 
+### Search for related functions across binaries
+
+Build or refresh an offline index, then query it from another binary:
+
+```bash
+fission_cli similar build-v1.exe --update-index functions.json --function-discovery-profile balanced
+fission_cli similar build-v2.exe --update-index functions.json --function-discovery-profile balanced
+fission_cli similar query.exe --index functions.json --function 0x140001000 --top 15 --json
+```
+
+Cross-binary matches include a `score_explanation` with the score formula,
+shared-fingerprint numerator, both vector norms, provenance status, and up to
+five leading fingerprint contributions. Omitted contributions are summarized
+so the numerator remains auditable. The family names (`local_operation`,
+`refined_dataflow_operation`, `local_block`, and
+`refined_control_flow_block`) identify extraction radii only; fingerprints
+are opaque structural hashes, not semantic labels or proof that functions
+implement the same behavior. Text output shows the three leading contributors.
+The score is `sum(min(query_weight, candidate_weight)^2) /
+(query_l2_norm * candidate_l2_norm)`; family labels are provenance only and do
+not split a fingerprint's aggregate weight or score contribution.
+
+Family provenance is optional additive metadata in index format v2. Existing
+v2 indexes remain queryable; matches against documents without that metadata
+report provenance as `unavailable` rather than inferring a family. The
+persisted family tags are compactly packed and checksummed against the ordered
+feature vector. The same-binary similarity JSON shape is unchanged.
+
 ### Disassemble by address
 
 Instruction-window form:

@@ -47,6 +47,18 @@ const DEFAULT_DATAFLOW_ITERATIONS: u32 = 4;
 /// Number of control-flow hash-refinement rounds for [`PcodeBasicBlock`] features.
 const DEFAULT_BLOCK_ITERATIONS: u32 = 2;
 
+/// Version of the structured score-explanation payload (independent of the
+/// persisted feature/index format).
+pub const SIMILARITY_EVIDENCE_VERSION: u32 = 1;
+
+/// Formula used to normalize the shared-fingerprint numerator.
+pub const SIMILARITY_SCORE_FORMULA: &str =
+    "sum(min(query_weight, candidate_weight)^2) / (query_l2_norm * candidate_l2_norm)";
+
+const SIMILARITY_FEATURE_PROVENANCE_ENCODING_VERSION: u8 = 1;
+
+const MAX_EXPLAINED_FINGERPRINTS: usize = 5;
+
 /// FNV-1a mix of a running hash with one more `u64` word. Deterministic
 /// across runs/platforms (unlike `std::hash`), which matters here since
 /// hashes are compared, stored, and re-derived independently per function.
@@ -135,6 +147,236 @@ fn local_block_hash(block: &PcodeBasicBlock) -> u64 {
 /// they're in.
 type OpId = usize;
 
+/// The structural radius that emitted one or more opaque 32-bit fingerprints.
+/// A family is provenance, not a human-readable semantic label, and does not
+/// independently contribute to the score when hashes occur in multiple
+/// families.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SimilarityFeatureFamily {
+    LocalOperation,
+    RefinedDataflowOperation,
+    LocalBlock,
+    RefinedControlFlowBlock,
+}
+
+impl SimilarityFeatureFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalOperation => "local_operation",
+            Self::RefinedDataflowOperation => "refined_dataflow_operation",
+            Self::LocalBlock => "local_block",
+            Self::RefinedControlFlowBlock => "refined_control_flow_block",
+        }
+    }
+
+    fn encoding_code(self) -> u8 {
+        match self {
+            Self::LocalOperation => 0,
+            Self::RefinedDataflowOperation => 1,
+            Self::LocalBlock => 2,
+            Self::RefinedControlFlowBlock => 3,
+        }
+    }
+
+    fn from_encoding_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::LocalOperation),
+            1 => Some(Self::RefinedDataflowOperation),
+            2 => Some(Self::LocalBlock),
+            3 => Some(Self::RefinedControlFlowBlock),
+            _ => None,
+        }
+    }
+}
+
+/// Optional, additive provenance for the existing flat feature multiset.
+///
+/// The flat multiset remains the sole input to IDF weighting and ranking.
+/// `family_tags_hex` packs two-bit family IDs in feature order (two IDs per
+/// hexadecimal character). The checksum binds those labels to the exact
+/// feature sequence so sorting or stale metadata cannot silently relabel a
+/// fingerprint. It is an accidental-corruption guard, not a security hash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimilarityFeatureProvenance {
+    #[serde(default = "default_provenance_encoding_version")]
+    pub encoding_version: u8,
+    #[serde(default)]
+    pub feature_count: usize,
+    #[serde(default = "empty_feature_provenance_checksum")]
+    pub feature_checksum: u64,
+    #[serde(default)]
+    pub family_tags_hex: String,
+}
+
+impl SimilarityFeatureProvenance {
+    /// Create provenance aligned with `features`. Returns `None` when the
+    /// family list does not contain exactly one label per feature occurrence.
+    pub fn for_features(features: &[u32], families: &[SimilarityFeatureFamily]) -> Option<Self> {
+        if features.len() != families.len() {
+            return None;
+        }
+        Some(Self {
+            encoding_version: SIMILARITY_FEATURE_PROVENANCE_ENCODING_VERSION,
+            feature_count: features.len(),
+            feature_checksum: feature_provenance_checksum(features, families),
+            family_tags_hex: encode_feature_families(families),
+        })
+    }
+
+    fn canonicalize_with_features(&mut self, features: &mut Vec<u32>) {
+        if !self.matches_features(features) {
+            features.sort_unstable();
+            return;
+        }
+
+        let mut paired: Vec<_> = features
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, feature)| {
+                (
+                    feature,
+                    self.family_at(index).expect("validated family tag"),
+                )
+            })
+            .collect();
+        paired.sort_unstable_by_key(|(feature, family)| (*feature, family.encoding_code()));
+        for (index, (feature, _)) in paired.iter().enumerate() {
+            features[index] = *feature;
+        }
+        let families: Vec<_> = paired.into_iter().map(|(_, family)| family).collect();
+        self.family_tags_hex = encode_feature_families(&families);
+        self.feature_checksum = feature_provenance_checksum(features, &families);
+    }
+
+    fn matches_features(&self, features: &[u32]) -> bool {
+        if self.encoding_version != SIMILARITY_FEATURE_PROVENANCE_ENCODING_VERSION
+            || self.feature_count != features.len()
+            || !self.has_valid_tag_encoding()
+        {
+            return false;
+        }
+        feature_provenance_checksum_from_hex(features, self) == Some(self.feature_checksum)
+    }
+
+    fn has_valid_tag_encoding(&self) -> bool {
+        self.family_tags_hex.len() == self.feature_count.div_ceil(2)
+            && self
+                .family_tags_hex
+                .bytes()
+                .all(|byte| hex_nibble(byte).is_some())
+            && (self.feature_count % 2 == 0
+                || self
+                    .family_tags_hex
+                    .as_bytes()
+                    .last()
+                    .and_then(|byte| hex_nibble(*byte))
+                    .is_none_or(|nibble| nibble & 0b11 == 0))
+    }
+
+    fn family_at(&self, index: usize) -> Option<SimilarityFeatureFamily> {
+        if index >= self.feature_count {
+            return None;
+        }
+        let nibble = hex_nibble(*self.family_tags_hex.as_bytes().get(index / 2)?)?;
+        let code = if index % 2 == 0 {
+            nibble >> 2
+        } else {
+            nibble & 0b11
+        };
+        SimilarityFeatureFamily::from_encoding_code(code)
+    }
+
+    fn families_for(&self, fingerprint: u32, features: &[u32]) -> Vec<SimilarityFeatureFamily> {
+        let mut found = [false; 4];
+        for (index, feature) in features.iter().enumerate() {
+            if *feature == fingerprint
+                && let Some(family) = self.family_at(index)
+            {
+                found[usize::from(family.encoding_code())] = true;
+            }
+        }
+        found
+            .into_iter()
+            .enumerate()
+            .filter_map(|(code, present)| {
+                present.then(|| SimilarityFeatureFamily::from_encoding_code(code as u8).unwrap())
+            })
+            .collect()
+    }
+}
+
+impl Default for SimilarityFeatureProvenance {
+    fn default() -> Self {
+        Self {
+            encoding_version: SIMILARITY_FEATURE_PROVENANCE_ENCODING_VERSION,
+            feature_count: 0,
+            feature_checksum: empty_feature_provenance_checksum(),
+            family_tags_hex: String::new(),
+        }
+    }
+}
+
+fn default_provenance_encoding_version() -> u8 {
+    SIMILARITY_FEATURE_PROVENANCE_ENCODING_VERSION
+}
+
+fn empty_feature_provenance_checksum() -> u64 {
+    fnv1a_mix(fnv1a_start(), 0)
+}
+
+fn feature_provenance_checksum(features: &[u32], families: &[SimilarityFeatureFamily]) -> u64 {
+    let mut checksum = fnv1a_mix(fnv1a_start(), features.len() as u64);
+    for (feature, family) in features.iter().zip(families) {
+        checksum = fnv1a_mix(checksum, u64::from(*feature));
+        checksum = fnv1a_mix(checksum, u64::from(family.encoding_code()));
+    }
+    checksum
+}
+
+fn feature_provenance_checksum_from_hex(
+    features: &[u32],
+    provenance: &SimilarityFeatureProvenance,
+) -> Option<u64> {
+    if features.len() != provenance.feature_count || !provenance.has_valid_tag_encoding() {
+        return None;
+    }
+    let mut checksum = fnv1a_mix(fnv1a_start(), features.len() as u64);
+    for (index, feature) in features.iter().enumerate() {
+        let family = provenance.family_at(index)?;
+        checksum = fnv1a_mix(checksum, u64::from(*feature));
+        checksum = fnv1a_mix(checksum, u64::from(family.encoding_code()));
+    }
+    Some(checksum)
+}
+
+fn encode_feature_families(families: &[SimilarityFeatureFamily]) -> String {
+    let mut encoded = String::with_capacity(families.len().div_ceil(2));
+    for pair in families.chunks(2) {
+        let high = pair[0].encoding_code() << 2;
+        let low = pair.get(1).map_or(0, |family| family.encoding_code());
+        encoded.push(char::from_digit(u32::from(high | low), 16).expect("four-bit nibble"));
+    }
+    encoded
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// The unchanged flat feature multiset plus optional extraction provenance.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtractedSimilarityFeatures {
+    pub features: Vec<u32>,
+    pub provenance: SimilarityFeatureProvenance,
+}
+
 /// Extract a function's raw feature multiset (unsorted, may contain
 /// duplicates -- term frequency is exactly "how many times this hash
 /// appears"). This is the data Fission-analog of Ghidra's `VarnodeSignature`
@@ -147,12 +389,36 @@ pub fn extract_function_features(pcode: &PcodeFunction) -> Vec<u32> {
     )
 }
 
+/// Extract the existing flat feature multiset and identify the extraction
+/// family for each fingerprint occurrence.
+pub fn extract_function_features_with_provenance(
+    pcode: &PcodeFunction,
+) -> ExtractedSimilarityFeatures {
+    extract_feature_set_with_iterations(
+        pcode,
+        DEFAULT_DATAFLOW_ITERATIONS,
+        DEFAULT_BLOCK_ITERATIONS,
+        true,
+    )
+}
+
 pub fn extract_function_features_with_iterations(
     pcode: &PcodeFunction,
     dataflow_iterations: u32,
     block_iterations: u32,
 ) -> Vec<u32> {
+    extract_feature_set_with_iterations(pcode, dataflow_iterations, block_iterations, false)
+        .features
+}
+
+fn extract_feature_set_with_iterations(
+    pcode: &PcodeFunction,
+    dataflow_iterations: u32,
+    block_iterations: u32,
+    collect_provenance: bool,
+) -> ExtractedSimilarityFeatures {
     let mut features = Vec::new();
+    let mut feature_families = Vec::new();
 
     // ---- flatten ops, index them, and map each defined varnode to its definer ----
     let mut flat_ops: Vec<&PcodeOp> = Vec::new();
@@ -164,7 +430,7 @@ pub fn extract_function_features_with_iterations(
         }
     }
     if flat_ops.is_empty() {
-        return features;
+        return ExtractedSimilarityFeatures::default();
     }
 
     let mut definer: HashMap<(u64, u64), OpId> = HashMap::new();
@@ -195,7 +461,14 @@ pub fn extract_function_features_with_iterations(
     // the local radius lets compiler/optimization variants still match the
     // operation shape without discarding the stronger final context hash.
     let mut cur: Vec<u64> = flat_ops.iter().map(|op| local_op_hash(op)).collect();
-    features.extend(cur.iter().map(|hash| fold_to_u32(*hash)));
+    if collect_provenance {
+        for hash in &cur {
+            features.push(fold_to_u32(*hash));
+            feature_families.push(SimilarityFeatureFamily::LocalOperation);
+        }
+    } else {
+        features.extend(cur.iter().map(|hash| fold_to_u32(*hash)));
+    }
     for _round in 0..dataflow_iterations {
         let mut next = Vec::with_capacity(cur.len());
         for (id, _op) in flat_ops.iter().enumerate() {
@@ -213,14 +486,28 @@ pub fn extract_function_features_with_iterations(
         cur = next;
     }
     if dataflow_iterations > 0 {
-        features.extend(cur.iter().map(|hash| fold_to_u32(*hash)));
+        if collect_provenance {
+            for hash in &cur {
+                features.push(fold_to_u32(*hash));
+                feature_families.push(SimilarityFeatureFamily::RefinedDataflowOperation);
+            }
+        } else {
+            features.extend(cur.iter().map(|hash| fold_to_u32(*hash)));
+        }
     }
 
     // Keep local CFG shape alongside the final refined control-flow hash for
     // the same multi-radius matching behavior.
     let n_blocks = pcode.blocks.len();
     let mut block_hash: Vec<u64> = pcode.blocks.iter().map(local_block_hash).collect();
-    features.extend(block_hash.iter().map(|hash| fold_to_u32(*hash)));
+    if collect_provenance {
+        for hash in &block_hash {
+            features.push(fold_to_u32(*hash));
+            feature_families.push(SimilarityFeatureFamily::LocalBlock);
+        }
+    } else {
+        features.extend(block_hash.iter().map(|hash| fold_to_u32(*hash)));
+    }
     let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); n_blocks];
     for (idx, block) in pcode.blocks.iter().enumerate() {
         for &succ in &block.successors {
@@ -251,10 +538,26 @@ pub fn extract_function_features_with_iterations(
         block_hash = next;
     }
     if block_iterations > 0 {
-        features.extend(block_hash.iter().map(|hash| fold_to_u32(*hash)));
+        if collect_provenance {
+            for hash in &block_hash {
+                features.push(fold_to_u32(*hash));
+                feature_families.push(SimilarityFeatureFamily::RefinedControlFlowBlock);
+            }
+        } else {
+            features.extend(block_hash.iter().map(|hash| fold_to_u32(*hash)));
+        }
     }
 
-    features
+    let provenance = if collect_provenance {
+        SimilarityFeatureProvenance::for_features(&features, &feature_families)
+            .expect("one provenance family per extracted feature")
+    } else {
+        SimilarityFeatureProvenance::default()
+    };
+    ExtractedSimilarityFeatures {
+        features,
+        provenance,
+    }
 }
 
 // ─── Weighted vectors + comparison ────────────────────────────────────────
@@ -485,6 +788,10 @@ pub struct SimilarityIndexDocument {
     pub aliases: Vec<String>,
     pub language_id: String,
     pub features: Vec<u32>,
+    /// Optional extraction-family metadata. Missing data in existing v2
+    /// indexes remains readable and is reported as unavailable evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature_provenance: Option<SimilarityFeatureProvenance>,
 }
 
 /// Ranked function result with enough provenance to identify the source file
@@ -499,6 +806,75 @@ pub struct SimilaritySearchHit {
     pub aliases: Vec<String>,
     pub language_id: String,
     pub score: f64,
+}
+
+/// Availability of extraction-family provenance for one side of a match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SimilarityFeatureProvenanceStatus {
+    Complete,
+    Unavailable,
+    Inconsistent,
+    Unsupported,
+}
+
+impl SimilarityFeatureProvenanceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Unavailable => "unavailable",
+            Self::Inconsistent => "inconsistent",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+
+/// One opaque fingerprint's contribution to the current aggregate score.
+///
+/// The feature hash is not a semantic identifier. Family occurrences report
+/// only where the hash came from; the weighted contribution is computed once
+/// per hash after all families have been combined, exactly as in ranking.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilarityFeatureContribution {
+    pub fingerprint: u32,
+    pub query_weight: f64,
+    pub candidate_weight: f64,
+    pub numerator_contribution: f64,
+    pub query_families: Vec<SimilarityFeatureFamily>,
+    pub candidate_families: Vec<SimilarityFeatureFamily>,
+}
+
+/// Auditable components for the aggregate similarity score.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilarityScoreExplanation {
+    pub schema_version: u32,
+    pub formula: String,
+    pub numerator: f64,
+    pub query_l2_norm: f64,
+    pub candidate_l2_norm: f64,
+    /// False only when a vector has zero length, in which case the current
+    /// ranking contract returns score 0 without normalization.
+    pub normalization_defined: bool,
+    /// Number of unique shared 32-bit fingerprints, not feature occurrences.
+    pub shared_fingerprint_count: usize,
+    pub query_feature_provenance: SimilarityFeatureProvenanceStatus,
+    pub candidate_feature_provenance: SimilarityFeatureProvenanceStatus,
+    /// Highest-contribution fingerprints, ordered by contribution descending
+    /// then fingerprint ascending. This list is intentionally bounded.
+    pub top_contributors: Vec<SimilarityFeatureContribution>,
+    pub omitted_contributor_count: usize,
+    /// Sum of numerator contributions omitted from `top_contributors`, so the
+    /// full numerator remains auditable without returning an unbounded list.
+    pub omitted_numerator_contribution: f64,
+}
+
+/// A ranked hit paired with an explanation, returned by the opt-in evidence
+/// query API. The original [`SimilaritySearchHit`] and query API remain
+/// unchanged for existing callers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilaritySearchResult {
+    pub hit: SimilaritySearchHit,
+    pub explanation: SimilarityScoreExplanation,
 }
 
 /// Versioned, deterministic, offline corpus index for cross-binary queries.
@@ -556,7 +932,11 @@ impl SimilarityIndex {
     /// [`Self::has_unique_identities`].
     pub fn canonicalize(&mut self) {
         for document in &mut self.documents {
-            document.features.sort_unstable();
+            if let Some(provenance) = &mut document.feature_provenance {
+                provenance.canonicalize_with_features(&mut document.features);
+            } else {
+                document.features.sort_unstable();
+            }
         }
         self.documents.sort_by(|left, right| {
             left.binary_hash
@@ -621,6 +1001,7 @@ impl SimilarityIndex {
                 let current = &mut self.documents[index];
                 current.binary_path = document.binary_path;
                 current.features = document.features;
+                current.feature_provenance = document.feature_provenance;
                 let mut names: Vec<_> = current
                     .aliases
                     .iter()
@@ -705,6 +1086,24 @@ impl SimilarityIndex {
         self.prepare_search()
             .query_top_k(query_features, exclude, top_k)
     }
+
+    /// Query with optional family provenance and retain the structured score
+    /// explanation for each hit. This does not change feature weighting or
+    /// candidate ordering.
+    pub fn query_top_k_with_evidence(
+        &self,
+        query_features: &[u32],
+        query_provenance: Option<&SimilarityFeatureProvenance>,
+        exclude: Option<(&str, &str, u64)>,
+        top_k: usize,
+    ) -> Vec<SimilaritySearchResult> {
+        self.prepare_search().query_top_k_with_evidence(
+            query_features,
+            query_provenance,
+            exclude,
+            top_k,
+        )
+    }
 }
 
 impl PreparedSimilaritySearch<'_> {
@@ -717,13 +1116,73 @@ impl PreparedSimilaritySearch<'_> {
         exclude: Option<(&str, &str, u64)>,
         top_k: usize,
     ) -> Vec<SimilaritySearchHit> {
-        if top_k == 0 || query_features.is_empty() || self.index.documents.is_empty() {
+        let Some((_, ranked)) = self.rank_documents(query_features, exclude, top_k) else {
             return Vec::new();
+        };
+        ranked.iter().map(|rank| self.hit_for_rank(rank)).collect()
+    }
+
+    /// Evidence-bearing form of [`Self::query_top_k`]. The ranked hit and its
+    /// score are identical; extra work to materialize the bounded explanation
+    /// is limited to returned top-k documents.
+    pub fn query_top_k_with_evidence(
+        &self,
+        query_features: &[u32],
+        query_provenance: Option<&SimilarityFeatureProvenance>,
+        exclude: Option<(&str, &str, u64)>,
+        top_k: usize,
+    ) -> Vec<SimilaritySearchResult> {
+        let Some((query, ranked)) = self.rank_documents(query_features, exclude, top_k) else {
+            return Vec::new();
+        };
+        ranked
+            .into_iter()
+            .map(|rank| {
+                let document = &self.index.documents[rank.document_index];
+                let candidate = WeightedVector::from_sorted_features(&document.features, &self.idf);
+                let explanation = explain_similarity_score(
+                    &query,
+                    &candidate,
+                    rank.numerator,
+                    query_features,
+                    query_provenance,
+                    &document.features,
+                    document.feature_provenance.as_ref(),
+                );
+                SimilaritySearchResult {
+                    hit: self.hit_for_rank(&rank),
+                    explanation,
+                }
+            })
+            .collect()
+    }
+
+    fn hit_for_rank(&self, rank: &RankedDocument) -> SimilaritySearchHit {
+        let document = &self.index.documents[rank.document_index];
+        SimilaritySearchHit {
+            binary_hash: document.binary_hash.clone(),
+            binary_path: document.binary_path.clone(),
+            function_address: document.function_address,
+            function_name: document.function_name.clone(),
+            aliases: document.aliases.clone(),
+            language_id: document.language_id.clone(),
+            score: rank.score,
+        }
+    }
+
+    fn rank_documents(
+        &self,
+        query_features: &[u32],
+        exclude: Option<(&str, &str, u64)>,
+        top_k: usize,
+    ) -> Option<(WeightedVector, Vec<RankedDocument>)> {
+        if top_k == 0 || query_features.is_empty() || self.index.documents.is_empty() {
+            return None;
         }
 
         let query = WeightedVector::from_raw_features(query_features.to_vec(), &self.idf);
         if query.is_empty() {
-            return Vec::new();
+            return None;
         }
 
         let mut dot_products = HashMap::<usize, f64>::new();
@@ -760,6 +1219,7 @@ impl PreparedSimilaritySearch<'_> {
                 &mut ranked,
                 RankedDocument {
                     score,
+                    numerator: *dot_product,
                     binary_hash: document.binary_hash.clone(),
                     language_id: document.language_id.clone(),
                     function_address: document.function_address,
@@ -785,6 +1245,7 @@ impl PreparedSimilaritySearch<'_> {
                     &mut ranked,
                     RankedDocument {
                         score: 0.0,
+                        numerator: 0.0,
                         binary_hash: document.binary_hash.clone(),
                         language_id: document.language_id.clone(),
                         function_address: document.function_address,
@@ -808,22 +1269,127 @@ impl PreparedSimilaritySearch<'_> {
                 .then_with(|| left.function_address.cmp(&right.function_address))
                 .then_with(|| left.document_index.cmp(&right.document_index))
         });
-        ranked
-            .into_iter()
-            .map(|rank| {
-                let document = &self.index.documents[rank.document_index];
-                SimilaritySearchHit {
-                    binary_hash: document.binary_hash.clone(),
-                    binary_path: document.binary_path.clone(),
-                    function_address: document.function_address,
-                    function_name: document.function_name.clone(),
-                    aliases: document.aliases.clone(),
-                    language_id: document.language_id.clone(),
-                    score: rank.score,
-                }
-            })
-            .collect()
+        Some((query, ranked))
     }
+}
+
+fn feature_provenance_status(
+    provenance: Option<&SimilarityFeatureProvenance>,
+    features: &[u32],
+) -> SimilarityFeatureProvenanceStatus {
+    match provenance {
+        None => SimilarityFeatureProvenanceStatus::Unavailable,
+        Some(provenance)
+            if provenance.encoding_version != SIMILARITY_FEATURE_PROVENANCE_ENCODING_VERSION =>
+        {
+            SimilarityFeatureProvenanceStatus::Unsupported
+        }
+        Some(provenance) if provenance.matches_features(features) => {
+            SimilarityFeatureProvenanceStatus::Complete
+        }
+        Some(_) => SimilarityFeatureProvenanceStatus::Inconsistent,
+    }
+}
+
+fn explain_similarity_score(
+    query: &WeightedVector,
+    candidate: &WeightedVector,
+    numerator: f64,
+    query_features: &[u32],
+    query_provenance: Option<&SimilarityFeatureProvenance>,
+    candidate_features: &[u32],
+    candidate_provenance: Option<&SimilarityFeatureProvenance>,
+) -> SimilarityScoreExplanation {
+    let query_provenance_status = feature_provenance_status(query_provenance, query_features);
+    let candidate_provenance_status =
+        feature_provenance_status(candidate_provenance, candidate_features);
+    let query_provenance = (query_provenance_status == SimilarityFeatureProvenanceStatus::Complete)
+        .then_some(query_provenance)
+        .flatten();
+    let candidate_provenance = (candidate_provenance_status
+        == SimilarityFeatureProvenanceStatus::Complete)
+        .then_some(candidate_provenance)
+        .flatten();
+
+    let mut contributors = Vec::with_capacity(MAX_EXPLAINED_FINGERPRINTS);
+    let mut shared_fingerprint_count = 0usize;
+    let mut explained_numerator = 0.0;
+    let (mut query_index, mut candidate_index) = (0usize, 0usize);
+    while query_index < query.entries.len() && candidate_index < candidate.entries.len() {
+        let query_entry = query.entries[query_index];
+        let candidate_entry = candidate.entries[candidate_index];
+        match query_entry.hash.cmp(&candidate_entry.hash) {
+            Ordering::Equal => {
+                let common_weight = query_entry.coeff.min(candidate_entry.coeff);
+                let mut contribution = SimilarityFeatureContribution {
+                    fingerprint: query_entry.hash,
+                    query_weight: query_entry.coeff,
+                    candidate_weight: candidate_entry.coeff,
+                    numerator_contribution: common_weight * common_weight,
+                    query_families: Vec::new(),
+                    candidate_families: Vec::new(),
+                };
+                explained_numerator += contribution.numerator_contribution;
+                shared_fingerprint_count += 1;
+
+                let insertion_index = contributors
+                    .iter()
+                    .position(|existing| compare_contributions(&contribution, existing).is_lt())
+                    .unwrap_or(contributors.len());
+                if insertion_index < MAX_EXPLAINED_FINGERPRINTS {
+                    if let Some(provenance) = query_provenance {
+                        contribution.query_families =
+                            provenance.families_for(query_entry.hash, query_features);
+                    }
+                    if let Some(provenance) = candidate_provenance {
+                        contribution.candidate_families =
+                            provenance.families_for(query_entry.hash, candidate_features);
+                    }
+                    contributors.insert(insertion_index, contribution);
+                    if contributors.len() > MAX_EXPLAINED_FINGERPRINTS {
+                        contributors.pop();
+                    }
+                }
+                query_index += 1;
+                candidate_index += 1;
+            }
+            Ordering::Less => query_index += 1,
+            Ordering::Greater => candidate_index += 1,
+        }
+    }
+
+    debug_assert!((explained_numerator - numerator).abs() <= numerator.abs().max(1.0) * 1e-12);
+
+    let omitted_contributor_count = shared_fingerprint_count - contributors.len();
+    let explained_top_numerator: f64 = contributors
+        .iter()
+        .map(|contributor| contributor.numerator_contribution)
+        .sum();
+
+    SimilarityScoreExplanation {
+        schema_version: SIMILARITY_EVIDENCE_VERSION,
+        formula: SIMILARITY_SCORE_FORMULA.to_string(),
+        numerator,
+        query_l2_norm: query.length,
+        candidate_l2_norm: candidate.length,
+        normalization_defined: query.length > 0.0 && candidate.length > 0.0,
+        shared_fingerprint_count,
+        query_feature_provenance: query_provenance_status,
+        candidate_feature_provenance: candidate_provenance_status,
+        top_contributors: contributors,
+        omitted_contributor_count,
+        omitted_numerator_contribution: (numerator - explained_top_numerator).max(0.0),
+    }
+}
+
+fn compare_contributions(
+    left: &SimilarityFeatureContribution,
+    right: &SimilarityFeatureContribution,
+) -> Ordering {
+    right
+        .numerator_contribution
+        .total_cmp(&left.numerator_contribution)
+        .then_with(|| left.fingerprint.cmp(&right.fingerprint))
 }
 
 fn retain_top_k(ranked: &mut BinaryHeap<RankedDocument>, rank: RankedDocument, top_k: usize) {
@@ -841,6 +1407,7 @@ fn retain_top_k(ranked: &mut BinaryHeap<RankedDocument>, rank: RankedDocument, t
 #[derive(Debug, Clone)]
 struct RankedDocument {
     score: f64,
+    numerator: f64,
     binary_hash: String,
     language_id: String,
     function_address: u64,
@@ -908,7 +1475,16 @@ mod tests {
             aliases: Vec::new(),
             language_id: language_id.into(),
             features: features.into(),
+            feature_provenance: None,
         }
+    }
+
+    fn local_operation_provenance(features: &[u32]) -> SimilarityFeatureProvenance {
+        SimilarityFeatureProvenance::for_features(
+            features,
+            &vec![SimilarityFeatureFamily::LocalOperation; features.len()],
+        )
+        .expect("one local-operation family per feature")
     }
 
     fn simple_add_function(reg_offset: u64) -> PcodeFunction {
@@ -1032,6 +1608,35 @@ mod tests {
     }
 
     #[test]
+    fn feature_provenance_preserves_the_existing_flat_feature_multiset() {
+        let function = simple_add_function(0x38);
+        let extracted = extract_function_features_with_provenance(&function);
+        let existing = extract_function_features_with_iterations(&function, 4, 2);
+        let mut expected = existing.clone();
+        expected.sort_unstable();
+
+        assert_eq!(extracted.features, existing);
+        let mut actual = extracted.features.clone();
+        actual.sort_unstable();
+        assert_eq!(actual, expected);
+        let families: Vec<_> = (0..extracted.provenance.feature_count)
+            .map(|index| extracted.provenance.family_at(index).expect("family tag"))
+            .collect();
+        for (family, expected_count) in [
+            (SimilarityFeatureFamily::LocalOperation, 2),
+            (SimilarityFeatureFamily::RefinedDataflowOperation, 2),
+            (SimilarityFeatureFamily::LocalBlock, 1),
+            (SimilarityFeatureFamily::RefinedControlFlowBlock, 1),
+        ] {
+            assert_eq!(
+                families.iter().filter(|actual| **actual == family).count(),
+                expected_count
+            );
+        }
+        assert!(extracted.provenance.matches_features(&extracted.features));
+    }
+
+    #[test]
     fn dissimilar_functions_score_lower_than_identical() {
         let f1a = simple_add_function(0x38);
         let f1b = simple_add_function(0x38);
@@ -1073,6 +1678,9 @@ mod tests {
     fn empty_function_yields_no_features() {
         let empty = PcodeFunction { blocks: vec![] };
         assert!(extract_function_features(&empty).is_empty());
+        let extracted = extract_function_features_with_provenance(&empty);
+        assert!(extracted.features.is_empty());
+        assert!(extracted.provenance.matches_features(&extracted.features));
     }
 
     #[test]
@@ -1116,6 +1724,351 @@ mod tests {
             serde_json::to_string_pretty(&decoded).expect("serialize again"),
             json,
             "serialization should be stable after canonical upsert ordering"
+        );
+    }
+
+    #[test]
+    fn optional_feature_provenance_round_trips_in_index_v2() {
+        let mut document = index_document(
+            "hash-with-provenance",
+            "candidate.elf",
+            0x1000,
+            "candidate",
+            "x86:LE:64:default",
+            &[3, 1, 2],
+        );
+        document.feature_provenance = Some(local_operation_provenance(&[3, 1, 2]));
+        let mut index = SimilarityIndex::new();
+        index.upsert(document);
+
+        let serialized = serde_json::to_string(&index).expect("serialize index v2");
+        assert_eq!(index.format_version(), 2);
+        let decoded: SimilarityIndex = serde_json::from_str(&serialized).expect("read index v2");
+        assert_eq!(decoded, index);
+        assert_eq!(decoded.documents()[0].features, vec![1, 2, 3]);
+        assert_eq!(
+            decoded.documents()[0]
+                .feature_provenance
+                .as_ref()
+                .expect("stored provenance")
+                .families_for(1, &decoded.documents()[0].features),
+            vec![SimilarityFeatureFamily::LocalOperation]
+        );
+    }
+
+    #[test]
+    fn packed_provenance_is_compact_and_stays_aligned_when_features_are_sorted() {
+        let features = [9, 3, 9, 1, 3];
+        let families = [
+            SimilarityFeatureFamily::LocalOperation,
+            SimilarityFeatureFamily::RefinedDataflowOperation,
+            SimilarityFeatureFamily::LocalBlock,
+            SimilarityFeatureFamily::RefinedDataflowOperation,
+            SimilarityFeatureFamily::RefinedControlFlowBlock,
+        ];
+        let provenance =
+            SimilarityFeatureProvenance::for_features(&features, &families).expect("aligned tags");
+        assert_eq!(provenance.family_tags_hex.len(), features.len().div_ceil(2));
+        assert!(provenance.matches_features(&features));
+        assert!(!provenance.matches_features(&[3, 9, 9, 1, 3]));
+
+        let serialized = serde_json::to_string(&provenance).expect("serialize packed tags");
+        let decoded: SimilarityFeatureProvenance =
+            serde_json::from_str(&serialized).expect("deserialize packed tags");
+        assert_eq!(decoded, provenance);
+        assert!(serialized.contains("\"family_tags_hex\":\""));
+
+        let mut document = index_document(
+            "packed-provenance",
+            "packed.elf",
+            0x1000,
+            "packed",
+            "x86:LE:64:default",
+            &features,
+        );
+        document.feature_provenance = Some(provenance);
+        let mut index = SimilarityIndex::new();
+        index.upsert(document);
+        let document = &index.documents()[0];
+        assert_eq!(document.features, vec![1, 3, 3, 9, 9]);
+        let provenance = document.feature_provenance.as_ref().expect("stored tags");
+        assert_eq!(
+            provenance.families_for(3, &document.features),
+            vec![
+                SimilarityFeatureFamily::RefinedDataflowOperation,
+                SimilarityFeatureFamily::RefinedControlFlowBlock,
+            ]
+        );
+        assert_eq!(
+            provenance.families_for(9, &document.features),
+            vec![
+                SimilarityFeatureFamily::LocalOperation,
+                SimilarityFeatureFamily::LocalBlock,
+            ]
+        );
+        assert_eq!(
+            feature_provenance_status(Some(provenance), &document.features),
+            SimilarityFeatureProvenanceStatus::Complete
+        );
+    }
+
+    #[test]
+    fn unsupported_feature_provenance_encoding_is_not_reported_as_complete() {
+        let features = [1, 2];
+        let mut provenance = local_operation_provenance(&features);
+        provenance.encoding_version += 1;
+        assert_eq!(
+            feature_provenance_status(Some(&provenance), &features),
+            SimilarityFeatureProvenanceStatus::Unsupported
+        );
+    }
+
+    #[test]
+    fn legacy_v2_index_without_provenance_stays_queryable_and_reports_unavailable() {
+        let legacy = r#"{
+            "format_version": 2,
+            "documents": [{
+                "binary_hash": "legacy-hash",
+                "binary_path": "legacy.elf",
+                "function_address": 4096,
+                "function_name": "legacy_candidate",
+                "aliases": [],
+                "language_id": "x86:LE:64:default",
+                "features": [1, 2]
+            }]
+        }"#;
+        let index: SimilarityIndex = serde_json::from_str(legacy).expect("read legacy index v2");
+        let query = [1, 2];
+        let query_provenance = local_operation_provenance(&query);
+        let result = index
+            .query_top_k_with_evidence(&query, Some(&query_provenance), None, 1)
+            .pop()
+            .expect("legacy candidate");
+
+        assert!(index.is_compatible());
+        assert!((result.hit.score - 1.0).abs() < 1e-12);
+        assert_eq!(
+            result.explanation.query_feature_provenance,
+            SimilarityFeatureProvenanceStatus::Complete
+        );
+        assert_eq!(
+            result.explanation.candidate_feature_provenance,
+            SimilarityFeatureProvenanceStatus::Unavailable
+        );
+        assert!(
+            result.explanation.top_contributors[0]
+                .candidate_families
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn inconsistent_feature_provenance_is_never_used_as_match_evidence() {
+        let mut candidate = index_document(
+            "inconsistent",
+            "inconsistent.elf",
+            0x1800,
+            "candidate",
+            "x86:LE:64:default",
+            &[1, 2],
+        );
+        candidate.feature_provenance = Some(local_operation_provenance(&[1, 99]));
+        let mut index = SimilarityIndex::new();
+        index.upsert(candidate);
+        let query = [1, 2];
+        let query_provenance = local_operation_provenance(&query);
+        let result = index
+            .query_top_k_with_evidence(&query, Some(&query_provenance), None, 1)
+            .pop()
+            .expect("candidate result");
+
+        assert_eq!(
+            result.explanation.candidate_feature_provenance,
+            SimilarityFeatureProvenanceStatus::Inconsistent
+        );
+        assert!(
+            result
+                .explanation
+                .top_contributors
+                .iter()
+                .all(|contributor| contributor.candidate_families.is_empty())
+        );
+    }
+
+    #[test]
+    fn score_evidence_reconciles_exact_and_partial_overlap() {
+        let query_features = [1, 2, 2, 4];
+        let query_provenance = SimilarityFeatureProvenance::for_features(
+            &query_features,
+            &[
+                SimilarityFeatureFamily::LocalOperation,
+                SimilarityFeatureFamily::LocalOperation,
+                SimilarityFeatureFamily::LocalOperation,
+                SimilarityFeatureFamily::RefinedDataflowOperation,
+            ],
+        )
+        .expect("query provenance aligned with features");
+        let mut exact = index_document(
+            "exact",
+            "exact.elf",
+            0x1000,
+            "exact_candidate",
+            "x86:LE:64:default",
+            &query_features,
+        );
+        exact.feature_provenance = Some(
+            SimilarityFeatureProvenance::for_features(
+                &query_features,
+                &[
+                    SimilarityFeatureFamily::LocalOperation,
+                    SimilarityFeatureFamily::LocalOperation,
+                    SimilarityFeatureFamily::RefinedDataflowOperation,
+                    SimilarityFeatureFamily::RefinedDataflowOperation,
+                ],
+            )
+            .expect("candidate provenance aligned with features"),
+        );
+        let mut partial = index_document(
+            "partial",
+            "partial.elf",
+            0x2000,
+            "partial_candidate",
+            "x86:LE:64:default",
+            &[1, 8],
+        );
+        partial.feature_provenance = Some(local_operation_provenance(&[1, 8]));
+        let mut index = SimilarityIndex::new();
+        index.upsert_many([exact, partial]);
+
+        let results =
+            index.query_top_k_with_evidence(&query_features, Some(&query_provenance), None, 2);
+        let exact = results
+            .iter()
+            .find(|result| result.hit.binary_hash == "exact")
+            .expect("exact overlap");
+        let partial = results
+            .iter()
+            .find(|result| result.hit.binary_hash == "partial")
+            .expect("partial overlap");
+
+        assert!((exact.hit.score - 1.0).abs() < 1e-12);
+        assert_eq!(exact.explanation.shared_fingerprint_count, 3);
+        assert_eq!(
+            exact.explanation.query_feature_provenance,
+            SimilarityFeatureProvenanceStatus::Complete
+        );
+        assert_eq!(
+            exact.explanation.candidate_feature_provenance,
+            SimilarityFeatureProvenanceStatus::Complete
+        );
+        let repeated = exact
+            .explanation
+            .top_contributors
+            .iter()
+            .find(|contributor| contributor.fingerprint == 2)
+            .expect("repeated fingerprint");
+        assert_eq!(
+            repeated.query_families,
+            vec![SimilarityFeatureFamily::LocalOperation]
+        );
+        assert_eq!(
+            repeated.candidate_families,
+            vec![
+                SimilarityFeatureFamily::LocalOperation,
+                SimilarityFeatureFamily::RefinedDataflowOperation,
+            ]
+        );
+
+        assert_eq!(partial.explanation.shared_fingerprint_count, 1);
+        assert!(partial.hit.score < exact.hit.score);
+        for result in [&exact, &partial] {
+            let recomputed = result.explanation.numerator
+                / (result.explanation.query_l2_norm * result.explanation.candidate_l2_norm);
+            assert!((recomputed - result.hit.score).abs() < 1e-12);
+            let visible: f64 = result
+                .explanation
+                .top_contributors
+                .iter()
+                .map(|contributor| contributor.numerator_contribution)
+                .sum();
+            assert!(
+                (visible + result.explanation.omitted_numerator_contribution
+                    - result.explanation.numerator)
+                    .abs()
+                    < 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn score_evidence_reports_no_overlap_without_inventing_provenance() {
+        let mut candidate = index_document(
+            "unrelated",
+            "unrelated.elf",
+            0x3000,
+            "unrelated",
+            "x86:LE:64:default",
+            &[90, 91],
+        );
+        candidate.feature_provenance = Some(local_operation_provenance(&[90, 91]));
+        let mut index = SimilarityIndex::new();
+        index.upsert(candidate);
+        let query = [1, 2];
+        let query_provenance = local_operation_provenance(&query);
+        let result = index
+            .query_top_k_with_evidence(&query, Some(&query_provenance), None, 1)
+            .pop()
+            .expect("zero-score candidate retained for top-k");
+
+        assert_eq!(result.hit.score, 0.0);
+        assert_eq!(result.explanation.numerator, 0.0);
+        assert_eq!(result.explanation.shared_fingerprint_count, 0);
+        assert!(result.explanation.top_contributors.is_empty());
+        assert!(result.explanation.normalization_defined);
+    }
+
+    #[test]
+    fn top_contributors_are_bounded_and_ties_are_deterministic() {
+        let features: Vec<_> = (1..=10).collect();
+        let mut candidate = index_document(
+            "tied",
+            "tied.elf",
+            0x4000,
+            "tied_candidate",
+            "x86:LE:64:default",
+            &features,
+        );
+        candidate.feature_provenance = Some(local_operation_provenance(&features));
+        let mut index = SimilarityIndex::new();
+        index.upsert(candidate);
+        let query_provenance = local_operation_provenance(&features);
+        let prepared = index.prepare_search();
+
+        let first = prepared.query_top_k_with_evidence(&features, Some(&query_provenance), None, 1);
+        let second =
+            prepared.query_top_k_with_evidence(&features, Some(&query_provenance), None, 1);
+        let explanation = &first[0].explanation;
+        assert_eq!(first, second);
+        assert_eq!(explanation.shared_fingerprint_count, 10);
+        assert_eq!(
+            explanation.top_contributors.len(),
+            MAX_EXPLAINED_FINGERPRINTS
+        );
+        assert_eq!(explanation.omitted_contributor_count, 5);
+        assert!(
+            explanation
+                .top_contributors
+                .windows(2)
+                .all(|pair| pair[0].fingerprint < pair[1].fingerprint)
+        );
+        let reported: f64 = explanation
+            .top_contributors
+            .iter()
+            .map(|contributor| contributor.numerator_contribution)
+            .sum();
+        assert!(
+            (reported + explanation.omitted_numerator_contribution - explanation.numerator).abs()
+                < 1e-12
         );
     }
 
