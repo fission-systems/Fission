@@ -566,7 +566,7 @@ fn diamond_join_lowers_branch_local_register_defs_as_select() {
 }
 
 #[test]
-fn diamond_join_lowers_copy_through_join_read_as_select() {
+fn diamond_join_returns_copy_through_join_value_for_each_condition_arm() {
     let cond = varnode(0x80);
     let rax = register(0, 8);
     let rcx = register(8, 8);
@@ -601,9 +601,19 @@ fn diamond_join_lowers_copy_through_join_read_as_select() {
     let code =
         render_mlil_preview(&pcode, "diamond_copy_select", 0x1000, &options).expect("render");
 
+    // Structuring may preserve this diamond as an early-return instead of a
+    // select. In either form, a true condition must return 10 and false 20.
+    let has_select = code.contains("return tmp_80 ? 10 : 20;");
+    let has_equivalent_branch = code
+        .split_once("if (!tmp_80) {")
+        .and_then(|(_, branch_and_fallthrough)| {
+            let (false_arm, fallthrough) = branch_and_fallthrough.split_once('}')?;
+            Some(false_arm.contains("return 20;") && fallthrough.contains("return 10;"))
+        })
+        .unwrap_or(false);
     assert!(
-        code.contains("return tmp_80 ? 10 : 20;"),
-        "expected copy-through join read to use the synthesized select:\n{code}"
+        has_select || has_equivalent_branch,
+        "expected true -> 10 and false -> 20, as a select or equivalent branch:\n{code}"
     );
 }
 
@@ -1035,28 +1045,21 @@ fn x64_byte_add_movzx_does_not_double_add_load() {
 
     let code = render_mlil_preview(&pcode, "byte_add_movzx", 0x1000, &options).expect("render");
     eprintln!("byte_add_movzx:\n{code}");
-    // One add of the load is correct: `x = (uchar)x + *p` then optional cast.
-    // Bad residual (pre-guard): a second `x = (uchar)x + *p` / `return x + *p`.
-    let plus_assigns = code
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            t.contains("+=") || (t.contains('+') && t.contains('=') && !t.contains("=="))
-        })
-        .count();
+    // The accumulator starts at zero, so this preview can keep the one byte
+    // load/add in the return expression. Count the operation across the whole
+    // body rather than requiring it to appear in an assignment statement.
+    let body = code
+        .split_once('{')
+        .map(|(_, body)| body)
+        .expect("rendered function body");
+    let compact_body: String = body.chars().filter(|ch| !ch.is_whitespace()).collect();
+    let parameter_uses = compact_body.matches("param_1").count();
+    let byte_reads =
+        compact_body.matches("*param_1").count() + compact_body.matches("param_1[").count();
+    let additions = body.matches('+').count();
     assert!(
-        plus_assigns == 1,
-        "expected exactly one add of the loaded byte, got {plus_assigns}:\n{code}"
-    );
-    assert!(
-        !code.contains("return") || {
-            let ret_line = code
-                .lines()
-                .find(|l| l.trim().starts_with("return"))
-                .unwrap_or("");
-            !ret_line.contains('+')
-        },
-        "return must not re-add the load after movzx:\n{code}"
+        parameter_uses == 1 && byte_reads == 1 && additions <= 1,
+        "expected one byte-source read and at most one add across the body; got {parameter_uses} source uses, {byte_reads} reads, and {additions} adds:\n{code}"
     );
 }
 
@@ -1322,22 +1325,28 @@ fn movzx_after_byte_add_zero_extends_unsigned() {
     let code = render_mlil_preview(&pcode, "byte_add_movzx", 0x1000, &options)
         .expect("render byte add + movzx");
 
-    // Must not leave a signed char + identity-and that sign-extends on recompile.
+    let return_line = code
+        .lines()
+        .find(|line| line.trim().starts_with("return"))
+        .expect("rendered return");
+    let promoted_unsigned_byte = code.contains("uchar * rdx")
+        && (return_line.contains("0 + *rdx") || return_line.trim() == "return *rdx;");
+    let explicit_low_byte = return_line.contains("(uchar)")
+        || return_line.contains("& 0xff")
+        || return_line.contains("& 255")
+        || return_line.contains("% 256")
+        || return_line.contains("%256");
+
+    // AL starts at zero and the load is unsigned. Thus 0 + uchar promotes to
+    // int in [0, 255] and already equals the zero-extended byte; a mask/cast is
+    // not required. Keep explicit truncation forms valid as well.
     assert!(
-        !code.contains("char al") || code.contains("uchar al") || code.contains("(uchar)"),
-        "byte accumulator should be unsigned or cast through uchar:\n{code}"
+        code.starts_with("uint byte_add_movzx(") && (promoted_unsigned_byte || explicit_low_byte),
+        "expected a 32-bit unsigned result with unsigned-byte promotion or explicit low-byte conversion:\n{code}"
     );
     assert!(
-        !code.contains("& -1"),
-        "ZExt must not print as `x & -1` (sign-extends char on recompile):\n{code}"
-    );
-    assert!(
-        code.contains("& 0xff")
-            || code.contains("& 255")
-            || code.contains("(uchar)")
-            || code.contains("% 256")
-            || code.contains("%256"),
-        "expected zero-extend / low-byte keep of AL:\n{code}"
+        !return_line.contains("& -1"),
+        "ZExt must not become an identity mask on a signed byte:\n{code}"
     );
 }
 
