@@ -495,34 +495,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "requires the local benchmark corpus; set FISSION_BENCHMARK_ROOT to override the default checkout path"]
-    fn test_profile_loader_on_fixture() {
-        use std::time::Instant;
-        let benchmark_root = std::env::var_os("FISSION_BENCHMARK_ROOT")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmark")
-            });
-        let fixture_path =
-            benchmark_root.join("binary/x86-64/window/small/binary/c/test_functions.exe");
-        assert!(
-            fixture_path.is_file(),
-            "benchmark fixture not found at {}; set FISSION_BENCHMARK_ROOT to the benchmark checkout",
-            fixture_path.display()
-        );
-
-        println!("=== Loader profiling on fixture (RUN 1 - COLD) ===");
-        let start1 = Instant::now();
-        let _binary1 = LoadedBinary::from_file(fixture_path.clone()).unwrap();
-        println!("LoadedBinary::from_file RUN 1 took: {:?}", start1.elapsed());
-
-        println!("=== Loader profiling on fixture (RUN 2 - WARM CACHED) ===");
-        let start2 = Instant::now();
-        let _binary2 = LoadedBinary::from_file(fixture_path).unwrap();
-        println!("LoadedBinary::from_file RUN 2 took: {:?}", start2.elapsed());
-    }
-
-    #[test]
     fn test_parse_self() {
         // Parse the test executable itself
         let Ok(exe_path) = std::env::current_exe() else {
