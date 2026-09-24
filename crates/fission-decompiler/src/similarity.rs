@@ -16,7 +16,7 @@
 //! over `PcodeOp`/`PcodeBasicBlock` (this crate's own IR, not Ghidra's
 //! Varnode graph), so it cannot read or write real `.bsim` databases or
 //! query Ghidra's BSim servers. What it reproduces is the *shape* of the
-//! approach -- k-hop data-flow fingerprints + control-flow fingerprints,
+//! approach -- local and k-hop data-flow fingerprints + control-flow fingerprints,
 //! collected into a sparse multiset, compared with document-frequency-aware
 //! weighting -- which is the part that actually finds similar functions.
 //!
@@ -35,7 +35,7 @@ use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, Varnode};
 use serde::{Deserialize, Serialize};
 
 /// Version of the on-disk feature format and feature-extraction contract.
-pub const SIMILARITY_INDEX_VERSION: u32 = 1;
+pub const SIMILARITY_INDEX_VERSION: u32 = 2;
 
 /// Sentinel hash used in place of a "no definer inside this function"
 /// neighbor (an external register/memory read) during data-flow refinement.
@@ -189,8 +189,13 @@ pub fn extract_function_features_with_iterations(
         input_defs.push(defs);
     }
 
-    // ---- iterative data-flow hash refinement (k-hop op fingerprints) ----
+    // Preserve the local operation signature as a separate feature radius.
+    // The refined fingerprint below is intentionally strict: a changed
+    // def-use neighbor can change every hash in its dependency cone. Keeping
+    // the local radius lets compiler/optimization variants still match the
+    // operation shape without discarding the stronger final context hash.
     let mut cur: Vec<u64> = flat_ops.iter().map(|op| local_op_hash(op)).collect();
+    features.extend(cur.iter().map(|hash| fold_to_u32(*hash)));
     for _round in 0..dataflow_iterations {
         let mut next = Vec::with_capacity(cur.len());
         for (id, _op) in flat_ops.iter().enumerate() {
@@ -207,13 +212,15 @@ pub fn extract_function_features_with_iterations(
         }
         cur = next;
     }
-    for h in &cur {
-        features.push(fold_to_u32(*h));
+    if dataflow_iterations > 0 {
+        features.extend(cur.iter().map(|hash| fold_to_u32(*hash)));
     }
 
-    // ---- iterative control-flow hash refinement (k-hop block fingerprints) ----
+    // Keep local CFG shape alongside the final refined control-flow hash for
+    // the same multi-radius matching behavior.
     let n_blocks = pcode.blocks.len();
     let mut block_hash: Vec<u64> = pcode.blocks.iter().map(local_block_hash).collect();
+    features.extend(block_hash.iter().map(|hash| fold_to_u32(*hash)));
     let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); n_blocks];
     for (idx, block) in pcode.blocks.iter().enumerate() {
         for &succ in &block.successors {
@@ -243,8 +250,8 @@ pub fn extract_function_features_with_iterations(
         }
         block_hash = next;
     }
-    for h in &block_hash {
-        features.push(fold_to_u32(*h));
+    if block_iterations > 0 {
+        features.extend(block_hash.iter().map(|hash| fold_to_u32(*hash)));
     }
 
     features
@@ -290,6 +297,10 @@ pub struct WeightedVector {
 impl WeightedVector {
     fn from_raw_features(mut raw: Vec<u32>, idf: &IdfTable) -> Self {
         raw.sort_unstable();
+        Self::from_sorted_features(&raw, idf)
+    }
+
+    fn from_sorted_features(raw: &[u32], idf: &IdfTable) -> Self {
         let mut entries = Vec::new();
         let mut i = 0;
         while i < raw.len() {
@@ -367,13 +378,15 @@ impl IdfTable {
         self.doc_freq.get(&hash).copied().unwrap_or(1)
     }
 
-    fn add_document(&mut self, raw_features: &[u32]) {
+    fn add_sorted_document(&mut self, raw_features: &[u32]) {
         self.total_docs += 1;
-        let mut seen = raw_features.to_vec();
-        seen.sort_unstable();
-        seen.dedup();
-        for hash in seen {
+        let mut previous = None;
+        for &hash in raw_features {
+            if previous == Some(hash) {
+                continue;
+            }
             *self.doc_freq.entry(hash).or_insert(0) += 1;
+            previous = Some(hash);
         }
     }
 }
@@ -406,11 +419,12 @@ impl SimilarityCorpus {
 
     /// Add a function's raw feature multiset (from [`extract_function_features`])
     /// to the corpus under `name`.
-    pub fn add(&mut self, name: impl Into<String>, raw_features: Vec<u32>) {
+    pub fn add(&mut self, name: impl Into<String>, mut raw_features: Vec<u32>) {
         if raw_features.is_empty() {
             return;
         }
-        self.idf.add_document(&raw_features);
+        raw_features.sort_unstable();
+        self.idf.add_sorted_document(&raw_features);
         self.entries.push((name.into(), raw_features));
     }
 
@@ -445,7 +459,7 @@ impl SimilarityCorpus {
             .iter()
             .filter(|(name, _)| exclude != Some(name.as_str()))
             .map(|(name, raw)| {
-                let v = WeightedVector::from_raw_features(raw.clone(), &self.idf);
+                let v = WeightedVector::from_sorted_features(raw, &self.idf);
                 (name.clone(), compare(&query_vec, &v))
             })
             .collect();
@@ -494,6 +508,23 @@ pub struct SimilarityIndex {
     documents: Vec<SimilarityIndexDocument>,
 }
 
+/// In-memory search view prepared once for one or more queries against an
+/// immutable [`SimilarityIndex`]. Feature postings avoid reweighting and
+/// rescanning every candidate vector for each query function.
+#[derive(Debug)]
+pub struct PreparedSimilaritySearch<'a> {
+    index: &'a SimilarityIndex,
+    idf: IdfTable,
+    document_lengths: Vec<f64>,
+    postings: HashMap<u32, Vec<SimilarityPosting>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SimilarityPosting {
+    document_index: usize,
+    coefficient: f64,
+}
+
 impl Default for SimilarityIndex {
     fn default() -> Self {
         Self {
@@ -524,6 +555,9 @@ impl SimilarityIndex {
     /// query path. Identity duplicates remain detectable via
     /// [`Self::has_unique_identities`].
     pub fn canonicalize(&mut self) {
+        for document in &mut self.documents {
+            document.features.sort_unstable();
+        }
         self.documents.sort_by(|left, right| {
             left.binary_hash
                 .cmp(&right.binary_hash)
@@ -627,6 +661,39 @@ impl SimilarityIndex {
         self.documents.is_empty()
     }
 
+    /// Prepare corpus-relative weights and an inverted feature index for
+    /// repeated queries. The prepared view borrows this immutable index and
+    /// remains valid until it is dropped.
+    pub fn prepare_search(&self) -> PreparedSimilaritySearch<'_> {
+        let mut idf = IdfTable::default();
+        for document in &self.documents {
+            idf.add_sorted_document(&document.features);
+        }
+
+        let mut document_lengths = Vec::with_capacity(self.documents.len());
+        let mut postings: HashMap<u32, Vec<SimilarityPosting>> = HashMap::new();
+        for (document_index, document) in self.documents.iter().enumerate() {
+            let weighted = WeightedVector::from_sorted_features(&document.features, &idf);
+            document_lengths.push(weighted.length);
+            for entry in weighted.entries {
+                postings
+                    .entry(entry.hash)
+                    .or_default()
+                    .push(SimilarityPosting {
+                        document_index,
+                        coefficient: entry.coeff,
+                    });
+            }
+        }
+
+        PreparedSimilaritySearch {
+            index: self,
+            idf,
+            document_lengths,
+            postings,
+        }
+    }
+
     /// Query the index using an external function's raw feature vector.
     /// `exclude` removes that exact source identity if it is already indexed.
     pub fn query_top_k(
@@ -635,43 +702,99 @@ impl SimilarityIndex {
         exclude: Option<(&str, &str, u64)>,
         top_k: usize,
     ) -> Vec<SimilaritySearchHit> {
-        if top_k == 0 || query_features.is_empty() || self.documents.is_empty() {
+        self.prepare_search()
+            .query_top_k(query_features, exclude, top_k)
+    }
+}
+
+impl PreparedSimilaritySearch<'_> {
+    /// Rank indexed documents against one query feature set. Only documents
+    /// sharing at least one query feature need a full score; zero-score
+    /// entries are appended deterministically only when top-k has room.
+    pub fn query_top_k(
+        &self,
+        query_features: &[u32],
+        exclude: Option<(&str, &str, u64)>,
+        top_k: usize,
+    ) -> Vec<SimilaritySearchHit> {
+        if top_k == 0 || query_features.is_empty() || self.index.documents.is_empty() {
             return Vec::new();
         }
 
-        let mut idf = IdfTable::default();
-        for document in &self.documents {
-            idf.add_document(&document.features);
-        }
-        let query = WeightedVector::from_raw_features(query_features.to_vec(), &idf);
+        let query = WeightedVector::from_raw_features(query_features.to_vec(), &self.idf);
         if query.is_empty() {
             return Vec::new();
         }
 
-        let mut ranked = BinaryHeap::with_capacity(top_k.min(self.documents.len()));
-        for (index, document) in self.documents.iter().enumerate() {
-            if exclude
-                == Some((
-                    document.binary_hash.as_str(),
-                    document.language_id.as_str(),
-                    document.function_address,
-                ))
-            {
+        let mut dot_products = HashMap::<usize, f64>::new();
+        for query_entry in &query.entries {
+            let Some(postings) = self.postings.get(&query_entry.hash) else {
                 continue;
-            }
-            let candidate = WeightedVector::from_raw_features(document.features.clone(), &idf);
-            let rank = RankedDocument {
-                score: compare(&query, &candidate),
-                binary_hash: document.binary_hash.clone(),
-                language_id: document.language_id.clone(),
-                function_address: document.function_address,
-                document_index: index,
             };
-            if ranked.len() < top_k {
-                ranked.push(rank);
-            } else if ranked.peek().is_some_and(|worst| rank < *worst) {
-                ranked.pop();
-                ranked.push(rank);
+            for posting in postings {
+                let document = &self.index.documents[posting.document_index];
+                if exclude
+                    == Some((
+                        document.binary_hash.as_str(),
+                        document.language_id.as_str(),
+                        document.function_address,
+                    ))
+                {
+                    continue;
+                }
+                let common_weight = query_entry.coeff.min(posting.coefficient);
+                *dot_products.entry(posting.document_index).or_default() +=
+                    common_weight * common_weight;
+            }
+        }
+
+        let mut ranked = BinaryHeap::with_capacity(top_k.min(self.index.documents.len()));
+        for (document_index, dot_product) in &dot_products {
+            let document = &self.index.documents[*document_index];
+            let score = if self.document_lengths[*document_index] == 0.0 {
+                0.0
+            } else {
+                dot_product / (query.length * self.document_lengths[*document_index])
+            };
+            retain_top_k(
+                &mut ranked,
+                RankedDocument {
+                    score,
+                    binary_hash: document.binary_hash.clone(),
+                    language_id: document.language_id.clone(),
+                    function_address: document.function_address,
+                    document_index: *document_index,
+                },
+                top_k,
+            );
+        }
+
+        if ranked.len() < top_k {
+            for (document_index, document) in self.index.documents.iter().enumerate() {
+                if dot_products.contains_key(&document_index)
+                    || exclude
+                        == Some((
+                            document.binary_hash.as_str(),
+                            document.language_id.as_str(),
+                            document.function_address,
+                        ))
+                {
+                    continue;
+                }
+                retain_top_k(
+                    &mut ranked,
+                    RankedDocument {
+                        score: 0.0,
+                        binary_hash: document.binary_hash.clone(),
+                        language_id: document.language_id.clone(),
+                        function_address: document.function_address,
+                        document_index,
+                    },
+                    top_k,
+                );
+                if ranked.len() == top_k {
+                    break;
+                }
             }
         }
 
@@ -683,11 +806,12 @@ impl SimilarityIndex {
                 .then_with(|| left.binary_hash.cmp(&right.binary_hash))
                 .then_with(|| left.language_id.cmp(&right.language_id))
                 .then_with(|| left.function_address.cmp(&right.function_address))
+                .then_with(|| left.document_index.cmp(&right.document_index))
         });
         ranked
             .into_iter()
             .map(|rank| {
-                let document = &self.documents[rank.document_index];
+                let document = &self.index.documents[rank.document_index];
                 SimilaritySearchHit {
                     binary_hash: document.binary_hash.clone(),
                     binary_path: document.binary_path.clone(),
@@ -702,8 +826,18 @@ impl SimilarityIndex {
     }
 }
 
-/// Heap ordering keeps the worst currently-selected hit at the root, so query
-/// memory is bounded by `top_k` rather than the corpus size.
+fn retain_top_k(ranked: &mut BinaryHeap<RankedDocument>, rank: RankedDocument, top_k: usize) {
+    if ranked.len() < top_k {
+        ranked.push(rank);
+    } else if ranked.peek().is_some_and(|worst| rank < *worst) {
+        ranked.pop();
+        ranked.push(rank);
+    }
+}
+
+/// Heap ordering keeps the worst currently-selected hit at the root, so the
+/// result heap is bounded by `top_k`. The per-query score accumulator is
+/// bounded by the documents touched by the query's feature postings.
 #[derive(Debug, Clone)]
 struct RankedDocument {
     score: f64,
@@ -735,6 +869,7 @@ impl Ord for RankedDocument {
             .then_with(|| self.binary_hash.cmp(&other.binary_hash))
             .then_with(|| self.language_id.cmp(&other.language_id))
             .then_with(|| self.function_address.cmp(&other.function_address))
+            .then_with(|| self.document_index.cmp(&other.document_index))
     }
 }
 
@@ -883,6 +1018,20 @@ mod tests {
     }
 
     #[test]
+    fn feature_extraction_keeps_local_and_refined_radii() {
+        let function = simple_add_function(0x38);
+        let local_only = extract_function_features_with_iterations(&function, 0, 0);
+        let local_and_refined = extract_function_features_with_iterations(&function, 1, 1);
+
+        assert_eq!(local_only.len(), 3); // two operations and one block
+        assert_eq!(local_and_refined.len(), 6);
+        assert!(
+            local_and_refined.contains(&fold_to_u32(local_op_hash(&function.blocks[0].ops[0])))
+        );
+        assert!(local_and_refined.contains(&fold_to_u32(local_block_hash(&function.blocks[0]))));
+    }
+
+    #[test]
     fn dissimilar_functions_score_lower_than_identical() {
         let f1a = simple_add_function(0x38);
         let f1b = simple_add_function(0x38);
@@ -936,7 +1085,7 @@ mod tests {
             0x2000,
             "same_name",
             "ARM:LE:32:v8",
-            &[1, 2, 3],
+            &[3, 1, 2],
         )));
         assert!(index.upsert(index_document(
             "hash-a",
@@ -948,6 +1097,7 @@ mod tests {
         )));
 
         assert_eq!(index.documents[0].binary_hash, "hash-a");
+        assert_eq!(index.documents[0].features, vec![1, 2, 3]);
         assert!(!index.upsert(index_document(
             "hash-a",
             "moved/a.elf",
@@ -966,6 +1116,41 @@ mod tests {
             serde_json::to_string_pretty(&decoded).expect("serialize again"),
             json,
             "serialization should be stable after canonical upsert ordering"
+        );
+    }
+
+    #[test]
+    fn cross_binary_index_serialization_is_insertion_order_independent() {
+        let documents = [
+            index_document(
+                "hash-b",
+                "b.elf",
+                0x2000,
+                "function_b",
+                "AARCH64:LE:64:v8A",
+                &[3, 1, 2],
+            ),
+            index_document(
+                "hash-a",
+                "a.elf",
+                0x1000,
+                "function_a",
+                "x86:LE:64:default",
+                &[6, 4, 5],
+            ),
+        ];
+        let mut forward = SimilarityIndex::new();
+        forward.upsert_many(documents.clone());
+
+        let mut reversed = SimilarityIndex::new();
+        reversed.upsert_many(documents.into_iter().rev().map(|mut document| {
+            document.features.reverse();
+            document
+        }));
+
+        assert_eq!(
+            serde_json::to_vec(&forward).expect("serialize forward index"),
+            serde_json::to_vec(&reversed).expect("serialize reversed index")
         );
     }
 
@@ -997,11 +1182,11 @@ mod tests {
             &[90, 91],
         ));
 
-        let results = index.query_top_k(
-            &[1, 2, 3],
-            Some(("same-binary", "x86:LE:64:default", 0x1000)),
-            1,
-        );
+        let prepared = index.prepare_search();
+        let exclude = Some(("same-binary", "x86:LE:64:default", 0x1000));
+        let results = prepared.query_top_k(&[1, 2, 3], exclude, 1);
+        let rebuilt_results = index.query_top_k(&[1, 2, 3], exclude, 1);
+        assert_eq!(results, rebuilt_results);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].binary_hash, "other-binary");
         assert_eq!(results[0].function_address, 0x8000);
@@ -1012,6 +1197,81 @@ mod tests {
                 .iter()
                 .all(|hit| { hit.binary_hash != "same-binary" || hit.function_address != 0x1000 })
         );
+    }
+
+    #[test]
+    fn prepared_search_matches_exhaustive_scores_with_duplicates_and_ties() {
+        let mut index = SimilarityIndex::new();
+        for (hash, address, features) in [
+            ("binary-c", 0x3000, vec![1, 2, 2, 5]),
+            ("binary-a", 0x1000, vec![1, 1, 2]),
+            ("binary-b", 0x2000, vec![2, 1, 1]),
+            ("binary-d", 0x4000, vec![1, 9]),
+            ("binary-e", 0x5000, vec![88, 89]),
+        ] {
+            index.upsert(index_document(
+                hash,
+                "corpus.elf",
+                address,
+                "candidate",
+                "x86:LE:64:default",
+                &features,
+            ));
+        }
+
+        let query_features = [2, 1, 1, 42];
+        let excluded = Some(("binary-a", "x86:LE:64:default", 0x1000));
+        let prepared = index.prepare_search();
+        let actual = prepared.query_top_k(&query_features, excluded, 4);
+
+        let mut idf = IdfTable::default();
+        for document in index.documents() {
+            idf.add_sorted_document(&document.features);
+        }
+        let query = WeightedVector::from_raw_features(query_features.to_vec(), &idf);
+        let mut expected: Vec<_> = index
+            .documents()
+            .iter()
+            .enumerate()
+            .filter(|(_, document)| {
+                excluded
+                    != Some((
+                        document.binary_hash.as_str(),
+                        document.language_id.as_str(),
+                        document.function_address,
+                    ))
+            })
+            .map(|(document_index, document)| {
+                let candidate = WeightedVector::from_sorted_features(&document.features, &idf);
+                (
+                    compare(&query, &candidate),
+                    document.binary_hash.as_str(),
+                    document.language_id.as_str(),
+                    document.function_address,
+                    document_index,
+                )
+            })
+            .collect();
+        expected.sort_by(|left, right| {
+            right
+                .0
+                .total_cmp(&left.0)
+                .then_with(|| left.1.cmp(right.1))
+                .then_with(|| left.2.cmp(right.2))
+                .then_with(|| left.3.cmp(&right.3))
+                .then_with(|| left.4.cmp(&right.4))
+        });
+        expected.truncate(4);
+
+        assert_eq!(actual.len(), expected.len());
+        for (hit, (score, binary_hash, language_id, address, _)) in actual.iter().zip(expected) {
+            assert_eq!(hit.binary_hash, binary_hash);
+            assert_eq!(hit.language_id, language_id);
+            assert_eq!(hit.function_address, address);
+            assert_eq!(hit.score, score);
+        }
+        assert_eq!(actual[0].binary_hash, "binary-b");
+        assert_eq!(actual[1].binary_hash, "binary-c");
     }
 
     #[test]
@@ -1042,6 +1302,12 @@ mod tests {
         let mut index = SimilarityIndex::new();
         index.format_version += 1;
         assert!(!index.is_compatible());
+
+        index.format_version = 1;
+        assert!(
+            !index.is_compatible(),
+            "v1 hashes use the old feature contract"
+        );
     }
 
     #[test]

@@ -124,10 +124,11 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
         } else {
             documents.iter().collect()
         };
+        let prepared_index = index.prepare_search();
         let results: Vec<_> = queries
             .into_iter()
             .map(|query| {
-                let matches = index.query_top_k(
+                let matches = prepared_index.query_top_k(
                     &query.features,
                     Some((
                         &query.binary_hash,
