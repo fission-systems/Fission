@@ -36,6 +36,11 @@ on:
         required: false
         default: false
         description: "Install webkit/GTK sysdeps (only needed for dioxus / full GUI workspace)"
+      run_optional_feature_tests:
+        type: boolean
+        required: false
+        default: false
+        description: "Run the interactive-runtime and script-emulator feature test suites"
 
 env:
   CARGO_TERM_COLOR: always
@@ -173,6 +178,19 @@ jobs:
         run: |
           cargo test --doc --workspace --locked \
             ${{ inputs.profile == 'release' && '--release' || '' }} || true
+
+      # These suites exercise feature-specific behavior, not linting. Keep them
+      # in the required test job's longer budget and gate them with an explicit
+      # caller input so platform/test lanes cannot silently inherit them.
+      - name: Test optional features (interactive_runtime)
+        if: ${{ inputs.run_optional_feature_tests }}
+        shell: bash
+        run: cargo test -p fission-dynamic --features interactive_runtime --locked
+
+      - name: Test optional features (script emulator)
+        if: ${{ inputs.run_optional_feature_tests }}
+        shell: bash
+        run: cargo test -p fission-script --features emulator --locked
 
       - name: sccache stats
         if: always()
