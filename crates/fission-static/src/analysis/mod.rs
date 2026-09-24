@@ -16,6 +16,7 @@ pub mod prototype_hint;
 pub mod string_xrefs;
 pub mod strings;
 pub mod value_set;
+pub mod xref_coverage;
 pub mod xref_index;
 pub mod xrefs;
 
@@ -49,6 +50,10 @@ pub use string_xrefs::{
 };
 pub use strings::{ExtractedString, StringType, build_string_lookup, extract_strings};
 pub use value_set::{AbstractValue, ValueSetAnalyzer, ValueState};
+pub use xref_coverage::{
+    XrefAnalysisLayer, XrefAnalysisReport, XrefAnalysisState, XrefCoverageUnit, XrefLayerCoverage,
+    XrefOmissionReason, XrefUnsupportedReason,
+};
 pub use xref_index::{
     FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndex, XrefIndexBuilder, XrefIndexSummary,
     XrefKind, XrefRecord, XrefSource, XrefSourceCategory, XrefSourceLayer, XrefTarget,

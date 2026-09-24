@@ -85,7 +85,7 @@ pub(super) fn print_binary_info(
             if let Value::Object(ref mut map) = payload {
                 map.insert(
                     "xrefs".to_string(),
-                    serde_json::json!({ "summary": summary }),
+                    serde_json::json!({ "summary": summary, "analysis": idx.analysis }),
                 );
             }
         }
@@ -295,6 +295,16 @@ pub(super) fn print_binary_info(
                 sum.strings,
                 sum.globals,
                 sum.relocations
+            )?;
+            writeln!(
+                stdout,
+                "  xref_analysis: {}",
+                serde_json::to_string(&idx.analysis).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("xref analysis coverage serialization failed: {e}"),
+                    )
+                })?
             )?;
             if let Some(ref note) = sum.relocation_note {
                 writeln!(stdout, "  note: {}", note)?;

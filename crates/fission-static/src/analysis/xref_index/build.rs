@@ -9,11 +9,15 @@ use super::model::{
     FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndexSummary, XrefKind, XrefRecord, XrefSource,
     XrefSourceCategory, XrefSourceLayer, XrefTarget,
 };
+use crate::analysis::xref_coverage::{
+    XrefAnalysisLayer, XrefAnalysisReport, XrefCoverageUnit, XrefLayerCoverage,
+};
 use crate::analysis::xrefs::{XrefDatabase, XrefType};
 
 #[derive(Debug, Default)]
 pub struct XrefIndexBuilder {
     pending: Vec<XrefRecordDraft>,
+    analysis: Vec<XrefLayerCoverage>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +33,7 @@ struct XrefRecordDraft {
 #[derive(Debug, Clone)]
 pub struct XrefIndex {
     pub refs: Vec<XrefRecord>,
+    pub analysis: XrefAnalysisReport,
     by_source: FxHashMap<u64, Vec<XrefId>>,
     by_target: FxHashMap<u64, Vec<XrefId>>,
 }
@@ -55,6 +60,17 @@ impl XrefIndexBuilder {
         });
     }
 
+    pub fn push_layer_coverage(&mut self, coverage: XrefLayerCoverage) {
+        self.analysis.push(coverage);
+    }
+
+    pub(crate) fn pending_layer_count(&self, layer: XrefSourceLayer) -> usize {
+        self.pending
+            .iter()
+            .filter(|record| record.evidence.layer == layer)
+            .count()
+    }
+
     pub fn finish(mut self) -> XrefIndex {
         // Records arrive in whatever order the maps they were gathered from
         // iterate in, so two runs over the same binary emitted the same set in
@@ -74,6 +90,7 @@ impl XrefIndexBuilder {
                 .then_with(|| left.evidence.pcode_op.cmp(&right.evidence.pcode_op))
                 .then_with(|| left.evidence.note.cmp(&right.evidence.note))
         });
+        self.analysis.sort_by_key(|coverage| coverage.layer);
         let mut refs = Vec::with_capacity(self.pending.len());
         let mut by_source: FxHashMap<u64, Vec<XrefId>> = FxHashMap::default();
         let mut by_target: FxHashMap<u64, Vec<XrefId>> = FxHashMap::default();
@@ -99,6 +116,9 @@ impl XrefIndexBuilder {
 
         XrefIndex {
             refs,
+            analysis: XrefAnalysisReport {
+                layers: self.analysis,
+            },
             by_source,
             by_target,
         }
@@ -632,13 +652,68 @@ pub fn build_xref_index_with_options(
     include_pcode: bool,
 ) -> XrefIndex {
     let mut b = XrefIndexBuilder::new();
+    let first_loader_record = b.pending.len();
     push_loader_seeds(&mut b, binary);
-    if include_disassembly && binary.load_spec().is_some() {
-        let db = XrefDatabase::build_from_binary(binary);
+    let metadata_coverage = [
+        (
+            XrefAnalysisLayer::Loader,
+            XrefSourceLayer::Loader,
+            "imports, exports, and strings already exposed by LoadedBinary",
+        ),
+        (
+            XrefAnalysisLayer::SymbolTable,
+            XrefSourceLayer::SymbolTable,
+            "global symbols already exposed by LoadedBinary",
+        ),
+        (
+            XrefAnalysisLayer::Relocation,
+            XrefSourceLayer::Relocation,
+            "structured relocation rows and legacy relocation use-sites already exposed by LoadedBinary",
+        ),
+    ]
+    .into_iter()
+    .map(|(analysis_layer, source_layer, scope)| {
+        let count = b.pending[first_loader_record..]
+            .iter()
+            .filter(|record| record.evidence.layer == source_layer)
+            .count();
+        let mut coverage = XrefLayerCoverage::requested(
+            analysis_layer,
+            scope,
+            XrefCoverageUnit::LoaderFact,
+        );
+        coverage.candidate_units = count;
+        coverage.completed_units = count;
+        coverage.records_emitted = count;
+        coverage.finalize();
+        coverage
+    })
+    .collect::<Vec<_>>();
+    for coverage in metadata_coverage {
+        b.push_layer_coverage(coverage);
+    }
+
+    if include_disassembly {
+        let (db, mut coverage) = XrefDatabase::build_from_binary_with_coverage(binary);
         push_disassembly_layer(&mut b, binary, &db);
+        coverage.records_emitted = b.pending_layer_count(XrefSourceLayer::Disassembly);
+        b.push_layer_coverage(coverage);
+    } else {
+        b.push_layer_coverage(XrefLayerCoverage::not_requested(
+            XrefAnalysisLayer::Disassembly,
+            "file-backed executable sections and pointer-sized slots in readable non-executable sections",
+            XrefCoverageUnit::ExecutableOrPointerDataSection,
+        ));
     }
     if include_pcode {
-        super::pcode::push_pcode_layer(&mut b, binary);
+        let coverage = super::pcode::push_pcode_layer_with_coverage(&mut b, binary);
+        b.push_layer_coverage(coverage);
+    } else {
+        b.push_layer_coverage(XrefLayerCoverage::not_requested(
+            XrefAnalysisLayer::Pcode,
+            "discovered non-import functions with a complete file-backed extent and bounded terminal p-code lift",
+            XrefCoverageUnit::DiscoveredFunction,
+        ));
     }
     b.finish()
 }
@@ -646,6 +721,9 @@ pub fn build_xref_index_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::xref_coverage::{
+        XrefAnalysisLayer, XrefAnalysisState, XrefOmissionReason, XrefUnsupportedReason,
+    };
     use crate::analysis::xref_index::model::XrefKind;
     use fission_loader::loader::{
         DataBuffer, FunctionInfo, LoadedBinaryBuilder, RelocationEntry, SectionInfo,
@@ -658,6 +736,147 @@ mod tests {
         let idx = XrefIndexBuilder::new().finish();
         assert_eq!(idx.refs.len(), 0);
         assert_eq!(idx.summary().total, 0);
+        assert!(idx.analysis.layers.is_empty());
+    }
+
+    #[test]
+    fn xref_analysis_distinguishes_empty_complete_unrequested_and_unsupported() {
+        let binary =
+            LoadedBinaryBuilder::new("coverage_raw.bin".to_string(), DataBuffer::Heap(Vec::new()))
+                .format("RAW")
+                .build()
+                .expect("build raw binary without architecture metadata");
+
+        let unrequested = build_xref_index_with_options(&binary, false, false);
+        let disassembly = unrequested
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Disassembly)
+            .expect("disassembly layer status");
+        let pcode = unrequested
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Pcode)
+            .expect("p-code layer status");
+        let loader = unrequested
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Loader)
+            .expect("loader layer status");
+        assert_eq!(disassembly.status, XrefAnalysisState::NotRequested);
+        assert_eq!(pcode.status, XrefAnalysisState::NotRequested);
+        assert_eq!(loader.status, XrefAnalysisState::CompleteForScope);
+        assert_eq!(loader.candidate_units, 0);
+
+        let requested = build_xref_index_with_options(&binary, true, true);
+        assert_eq!(requested.summary().total, 0);
+        let disassembly = requested
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Disassembly)
+            .expect("disassembly layer status");
+        let pcode = requested
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Pcode)
+            .expect("p-code layer status");
+        assert_eq!(disassembly.status, XrefAnalysisState::Unsupported);
+        assert_eq!(pcode.status, XrefAnalysisState::Unsupported);
+        assert_eq!(disassembly.candidate_units, 0);
+        assert_eq!(disassembly.omitted_units, 0);
+        assert_eq!(
+            disassembly.unsupported_reason,
+            Some(XrefUnsupportedReason::LoadSpecUnavailable)
+        );
+        assert_eq!(
+            pcode.unsupported_reason,
+            Some(XrefUnsupportedReason::LoadSpecUnavailable)
+        );
+        assert!(disassembly.omissions.is_empty());
+        assert!(pcode.omissions.is_empty());
+
+        let binary_with_candidates = LoadedBinaryBuilder::new(
+            "coverage_raw_with_candidates.bin".to_string(),
+            DataBuffer::Heap(vec![0]),
+        )
+        .format("RAW")
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 1,
+            file_offset: 0,
+            file_size: 1,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_function(FunctionInfo {
+            address: 0x1000,
+            size: 1,
+            ..Default::default()
+        })
+        .build()
+        .expect("build raw binary with coverage candidates");
+        let requested = build_xref_index_with_options(&binary_with_candidates, true, true);
+        let disassembly = requested
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Disassembly)
+            .expect("disassembly layer status");
+        let pcode = requested
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Pcode)
+            .expect("p-code layer status");
+        assert_eq!(disassembly.status, XrefAnalysisState::Unsupported);
+        assert_eq!(pcode.status, XrefAnalysisState::Unsupported);
+        assert_eq!(disassembly.candidate_units, 1);
+        assert_eq!(disassembly.omitted_units, 1);
+        assert_eq!(pcode.candidate_units, 1);
+        assert_eq!(pcode.omitted_units, 1);
+    }
+
+    #[test]
+    fn pcode_coverage_marks_unprocessed_candidates_partial() {
+        let binary = LoadedBinaryBuilder::new(
+            "missing_extent.bin".to_string(),
+            DataBuffer::Heap(Vec::new()),
+        )
+        .format("ELF64")
+        .is_64bit(true)
+        .arch_spec("x86:LE:64:default")
+        .add_function(FunctionInfo {
+            address: 0x1000,
+            size: 0,
+            ..Default::default()
+        })
+        .build()
+        .expect("build binary with discovered function without an extent");
+
+        let index = build_xref_index_with_options(&binary, false, true);
+        let pcode = index
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Pcode)
+            .expect("p-code layer status");
+        assert_eq!(pcode.status, XrefAnalysisState::Partial);
+        assert_eq!(pcode.candidate_units, 1);
+        assert_eq!(pcode.completed_units, 0);
+        assert_eq!(pcode.omitted_units, 1);
+        assert_eq!(
+            pcode
+                .omissions
+                .get(&XrefOmissionReason::MissingFunctionExtent),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -750,6 +969,16 @@ mod tests {
             .expect("p-code should recover the absolute load target");
 
         assert_eq!(pcode_read.evidence.pcode_op.as_deref(), Some("COPY"));
+        let pcode_coverage = index
+            .analysis
+            .layers
+            .iter()
+            .find(|layer| layer.layer == XrefAnalysisLayer::Pcode)
+            .expect("p-code coverage");
+        assert_eq!(pcode_coverage.status, XrefAnalysisState::CompleteForScope);
+        assert_eq!(pcode_coverage.candidate_units, 1);
+        assert_eq!(pcode_coverage.completed_units, 1);
+        assert_eq!(pcode_coverage.records_emitted, 1);
     }
 
     #[test]

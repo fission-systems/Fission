@@ -21,7 +21,23 @@ Confidence follows [`fission_loader::Confidence`](../../crates/fission-loader/sr
 ## CLI surfaces
 
 - `fission_cli xrefs <binary> [--json] [--no-disassembly] [--pcode] [--function ADDR]` emits the merged index (full `refs` in JSON). P-code analysis is opt-in because it adds a bounded lift over known functions.
-- `fission_cli info <binary> --xrefs [--json]` embeds `{ "summary": … }` under `xrefs` without dumping every record.
+- `fission_cli info <binary> --xrefs [--json]` embeds the summary and analysis coverage under `xrefs` without dumping every record.
+
+## Analysis coverage contract
+
+The `xrefs` JSON result includes `analysis.layers`; the `--to` result includes the same report, including when it finds no records. `info --xrefs` includes it beside the summary. Each layer reports its state, bounded scope, candidate/completed/omitted input-unit counts, emitted records, and typed omission counts.
+
+States mean:
+
+- `not_requested`: the caller disabled this layer.
+- `complete_for_scope`: every candidate unit in the layer's documented scope was processed. This is not a claim that every possible binary reference was found.
+- `partial`: the layer started, but one or more candidate units were omitted. This includes a run where every candidate was omitted; `completed_units` reports whether any work completed.
+- `unsupported`: a layer-level prerequisite prevented analysis, for example because the binary has no load spec or the Sleigh frontend/RAM space is unavailable. `unsupported_reason` gives the prerequisite failure separately from per-candidate `omissions`.
+- `failed`: reserved for a layer that reports an analysis failure distinct from unsupported inputs.
+
+`candidate_units`, `completed_units`, and `omitted_units` count the layer's declared unit type. Each value in `omissions` counts candidate units skipped after layer setup; layer-level prerequisite failures appear in `unsupported_reason` and do not fabricate an omission count when there were no candidates.
+
+Loader, symbol-table, and relocation layers are complete only for facts already present in `LoadedBinary`. Disassembly coverage is limited to file-backed executable sections decoded linearly and pointer-sized aligned slots in readable, non-executable file-backed sections. P-code coverage is limited to discovered non-import functions with complete file-backed extents within the 1 MiB/4,096-instruction bounds, terminal control flow, and successful value-set analysis. An empty `refs` list or absent `by_layer` entry must therefore be interpreted together with the corresponding coverage state; it is not by itself proof that no references exist.
 
 ## P-code evidence contract
 

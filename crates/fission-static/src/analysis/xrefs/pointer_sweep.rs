@@ -10,6 +10,19 @@ pub struct PointerSweeper {
     is_little_endian: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PointerSweepCoverage {
+    pub candidate_sections: usize,
+    pub completed_sections: usize,
+    pub omitted_sections: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PointerSweepResult {
+    pub xrefs: Vec<Xref>,
+    pub coverage: PointerSweepCoverage,
+}
+
 impl PointerSweeper {
     pub fn new(binary: &LoadedBinary) -> Self {
         let mut valid_regions = BTreeMap::new();
@@ -34,6 +47,16 @@ impl PointerSweeper {
         }
     }
 
+    #[must_use]
+    pub fn candidate_section_count(binary: &LoadedBinary) -> usize {
+        binary
+            .inner()
+            .sections
+            .iter()
+            .filter(|section| is_pointer_sweep_candidate(section))
+            .count()
+    }
+
     /// Checks if a given value is a valid virtual address within the binary's mapped sections.
     pub fn is_valid_pointer(&self, val: u64) -> bool {
         if val == 0 {
@@ -51,19 +74,27 @@ impl PointerSweeper {
 
     /// Sweeps all non-executable data sections and returns newly discovered Xrefs.
     pub fn sweep(&self, binary: &LoadedBinary) -> Vec<Xref> {
-        let mut new_xrefs = Vec::new();
+        self.sweep_with_coverage(binary).xrefs
+    }
+
+    /// Sweeps the documented pointer-sized slots and reports file-backed coverage.
+    pub fn sweep_with_coverage(&self, binary: &LoadedBinary) -> PointerSweepResult {
+        let mut result = PointerSweepResult::default();
 
         for section in &binary.inner().sections {
             // Only sweep non-executable sections that are readable and have actual file data.
-            if section.is_executable || !section.is_readable || section.file_size == 0 {
+            if !is_pointer_sweep_candidate(section) {
                 continue;
             }
+            result.coverage.candidate_sections += 1;
 
             let start_offset = section.file_offset as usize;
             let end_offset = start_offset.saturating_add(section.file_size as usize);
             let Some(code) = binary.data.as_slice().get(start_offset..end_offset) else {
+                result.coverage.omitted_sections += 1;
                 continue;
             };
+            result.coverage.completed_sections += 1;
 
             let base_addr = section.virtual_address;
 
@@ -92,7 +123,7 @@ impl PointerSweeper {
                 };
 
                 if self.is_valid_pointer(val) {
-                    new_xrefs.push(Xref {
+                    result.xrefs.push(Xref {
                         from_addr: base_addr + i as u64,
                         to_addr: val,
                         xref_type: XrefType::Data,
@@ -106,8 +137,12 @@ impl PointerSweeper {
             }
         }
 
-        new_xrefs
+        result
     }
+}
+
+fn is_pointer_sweep_candidate(section: &fission_loader::loader::SectionInfo) -> bool {
+    !section.is_executable && section.is_readable && section.file_size > 0
 }
 
 #[cfg(test)]
