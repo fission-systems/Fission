@@ -72,7 +72,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           # Share cache across Fast Gate / Heavy jobs on the same OS+profile.
-          shared-key: fission-test-${{ runner.os }}-${{ inputs.profile }}
+          shared-key: fission-test-134-cold-validation-${{ runner.os }}-${{ inputs.profile }}
           cache-on-failure: true
 
       - name: Install cargo-nextest

@@ -46,7 +46,7 @@ jobs:
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: fission-lint-${{ runner.os }}
+          shared-key: fission-lint-134-cold-validation-${{ runner.os }}
           cache-on-failure: true
 
       - name: Check Rust formatting
