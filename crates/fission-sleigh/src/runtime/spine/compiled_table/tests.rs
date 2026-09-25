@@ -388,6 +388,41 @@ fn generated_runtime_aarch64_conditional_branch_exposes_only_its_target() {
 }
 
 #[test]
+fn generated_runtime_aarch64_unconditional_branch_keeps_its_relative_target() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled =
+        compile_frontend_for_entry_spec(&aarch64_spec).expect("compile AARCH64 frontend");
+    let bytes = [0x21, 0x00, 0x00, 0x14]; // b +0x84
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("decode b");
+
+    assert!(matches!(decoded.flow_kind, DecodedFlowKind::Jump));
+    assert_eq!(decoded.direct_target, Some(0x1084));
+    assert_eq!(
+        decoded.references,
+        vec![DecodedReference {
+            target: 0x1084,
+            kind: DecodedReferenceKind::BranchTarget,
+            operand_index: 0,
+        }]
+    );
+}
+
+#[test]
+fn generated_runtime_aarch64_break_does_not_promote_trap_code_to_target() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled =
+        compile_frontend_for_entry_spec(&aarch64_spec).expect("compile AARCH64 frontend");
+    let bytes = [0x00, 0x7d, 0x20, 0xd4]; // brk #0x3e8
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("decode brk");
+
+    assert_eq!(decoded.mnemonic, "brk");
+    assert!(decoded.references.is_empty());
+    assert_eq!(decoded.direct_target, None);
+}
+
+#[test]
 fn generated_runtime_aarch64_conditional_compare_has_no_control_flow_xref() {
     require_packaged_ghidra_sla!();
     let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
