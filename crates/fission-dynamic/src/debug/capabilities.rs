@@ -187,6 +187,8 @@ impl DebugOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeRequirement {
+    /// The host permits a launched child to opt in with `PTRACE_TRACEME`.
+    PtracePolicyAllowsLaunch,
     /// The host's ptrace policy and permissions allow the requested process.
     PtracePolicyAllowsAttach,
     /// The operating system permits debugging the selected process.

@@ -59,15 +59,15 @@ fn linux_capabilities_separate_ptrace_permission_from_build_support() {
     assert_eq!(report.backend, DebugBackendKind::LinuxPtrace);
     assert_eq!(report.availability, BackendAvailability::Available);
     assert_eq!(
-        support(&report, DebugOperation::Attach),
+        support(&report, DebugOperation::Launch),
         &OperationSupport::Conditional {
-            requirements: vec![RuntimeRequirement::PtracePolicyAllowsAttach],
+            requirements: vec![RuntimeRequirement::PtracePolicyAllowsLaunch],
         }
     );
     assert_eq!(
-        support(&report, DebugOperation::Launch),
-        &OperationSupport::Unsupported {
-            reason: CapabilityReason::OperationNotImplemented,
+        support(&report, DebugOperation::Attach),
+        &OperationSupport::Conditional {
+            requirements: vec![RuntimeRequirement::PtracePolicyAllowsAttach],
         }
     );
     assert_eq!(
