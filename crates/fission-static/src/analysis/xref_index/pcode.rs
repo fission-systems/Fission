@@ -42,7 +42,7 @@ pub(crate) fn push_pcode_layer_with_coverage(
 
     let mut coverage = XrefLayerCoverage::requested(
         XrefAnalysisLayer::Pcode,
-        "discovered non-import functions with a complete file-backed extent, at most 1 MiB and 4,096 decoded instructions, terminal control flow, and successful value-set analysis",
+        "all discovered non-import functions; a function completes only with a nonzero complete file-backed extent of at most 1 MiB, terminal control flow within 4,096 decoded instructions, and successful value-set analysis",
         XrefCoverageUnit::DiscoveredFunction,
     );
     coverage.candidate_units = functions.len();

@@ -711,7 +711,7 @@ pub fn build_xref_index_with_options(
     } else {
         b.push_layer_coverage(XrefLayerCoverage::not_requested(
             XrefAnalysisLayer::Pcode,
-            "discovered non-import functions with a complete file-backed extent and bounded terminal p-code lift",
+            "all discovered non-import functions; completion requires a nonzero complete file-backed extent, a bounded terminal p-code lift, and successful value-set analysis",
             XrefCoverageUnit::DiscoveredFunction,
         ));
     }
