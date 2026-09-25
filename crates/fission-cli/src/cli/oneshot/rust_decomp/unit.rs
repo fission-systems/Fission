@@ -50,8 +50,40 @@ struct SplitRender<'a> {
     body: &'a str,
 }
 
+/// The assembled source and any unresolved conflicts found while combining
+/// per-function declarations.
+pub(crate) struct ProjectAssembly {
+    pub code: String,
+    pub diagnostics: Vec<ProjectAssemblyDiagnostic>,
+}
+
+/// A machine-readable conflict in the project-wide global prelude.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct ProjectAssemblyDiagnostic {
+    pub code: &'static str,
+    pub severity: &'static str,
+    pub analysis_status: &'static str,
+    pub global_name: String,
+    pub message: String,
+    pub resolution: &'static str,
+    pub declarations: Vec<ProjectGlobalDeclarationCandidate>,
+}
+
+/// One distinct spelling and an example function render that supplied it.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct ProjectGlobalDeclarationCandidate {
+    pub declaration: String,
+    pub function: Option<String>,
+}
+
+struct SeenGlobalDeclaration<'a> {
+    declaration: &'a str,
+    function: Option<String>,
+    diagnostic_index: Option<usize>,
+}
+
 /// Assemble `renders` (in emission order) into a single translation unit.
-pub(crate) fn assemble(renders: &[String]) -> String {
+pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
     let split: Vec<SplitRender<'_>> = renders.iter().map(|text| split_render(text)).collect();
 
     let defined: HashSet<&str> = split
@@ -70,8 +102,13 @@ pub(crate) fn assemble(renders: &[String]) -> String {
     let mut typedef_names: HashMap<&str, &str> = HashMap::new();
     let mut extern_names: HashSet<&str> = HashSet::new();
     let mut seen: HashSet<&str> = HashSet::new();
+    let mut global_declarations: HashMap<&str, SeenGlobalDeclaration<'_>> = HashMap::new();
+    let mut diagnostics: Vec<ProjectAssemblyDiagnostic> = Vec::new();
 
     for render in &split {
+        let function = definition_line(render.body)
+            .and_then(declared_function_name)
+            .map(str::to_owned);
         for decl in render.declarations.iter().map(String::as_str) {
             if let Some(name) = extern_function_name(decl) {
                 // The unit defines it; a prototype below says so exactly.
@@ -106,9 +143,70 @@ pub(crate) fn assemble(renders: &[String]) -> String {
             // global. The unit defines that name as a function, so the data
             // declaration is not just redundant -- it is a different kind of
             // symbol under the same name, which does not compile.
-            if global_name(decl).is_some_and(|name| defined.contains(name)) {
+            if let Some(name) = global_name(decl) {
+                if defined.contains(name) {
+                    continue;
+                }
+
+                if let Some(existing) = global_declarations.get(name) {
+                    if existing.declaration != decl {
+                        let current_candidate = ProjectGlobalDeclarationCandidate {
+                            declaration: decl.to_owned(),
+                            function: function.clone(),
+                        };
+                        if let Some(index) = existing.diagnostic_index {
+                            let diagnostic = &mut diagnostics[index];
+                            if !diagnostic
+                                .declarations
+                                .iter()
+                                .any(|candidate| candidate.declaration == decl)
+                            {
+                                diagnostic.declarations.push(current_candidate);
+                            }
+                        } else {
+                            diagnostics.push(ProjectAssemblyDiagnostic {
+                                code: "project_global_declaration_disagreement",
+                                severity: "warning",
+                                analysis_status: "incomplete",
+                                global_name: name.to_owned(),
+                                message: format!(
+                                    "Per-function renders disagree on the declaration for global `{name}`; compatibility is unresolved."
+                                ),
+                                resolution: "first_declaration_emitted",
+                                declarations: vec![
+                                    ProjectGlobalDeclarationCandidate {
+                                        declaration: existing.declaration.to_owned(),
+                                        function: existing.function.clone(),
+                                    },
+                                    current_candidate,
+                                ],
+                            });
+                            let index = diagnostics.len() - 1;
+                            global_declarations
+                                .get_mut(name)
+                                .expect("global declaration was observed")
+                                .diagnostic_index = Some(index);
+                        }
+                    }
+                    continue;
+                }
+
+                // The emitted C namespace is the only identity still available
+                // at this assembly boundary. Keep one declaration per name;
+                // when spellings disagree, the diagnostic records that the
+                // first spelling was retained without claiming it is safe.
+                globals.push(decl);
+                global_declarations.insert(
+                    name,
+                    SeenGlobalDeclaration {
+                        declaration: decl,
+                        function: function.clone(),
+                        diagnostic_index: None,
+                    },
+                );
                 continue;
             }
+
             if seen.insert(decl) {
                 globals.push(decl);
             }
@@ -138,7 +236,10 @@ pub(crate) fn assemble(renders: &[String]) -> String {
         out.push_str(render.body.trim_end());
         out.push_str("\n\n");
     }
-    out
+    ProjectAssembly {
+        code: out,
+        diagnostics,
+    }
 }
 
 fn push_section(out: &mut String, title: &str, lines: &[&str]) {
@@ -267,10 +368,11 @@ mod tests {
         // The extern is dropped because the unit defines the function -- which
         // only works if the name was read past the `·`.
         assert!(
-            !unit.contains("extern unsigned long long main·main();"),
-            "{unit}"
+            !unit.code.contains("extern unsigned long long main·main();"),
+            "{}",
+            unit.code
         );
-        assert!(unit.contains("void main·main(void);"), "{unit}");
+        assert!(unit.code.contains("void main·main(void);"), "{}", unit.code);
     }
 
     #[test]
@@ -281,11 +383,12 @@ mod tests {
             "void helper(void)\n{\n    return;\n}\n".to_string(),
         ]);
         assert!(
-            !unit.contains("extern unsigned long long helper();"),
-            "{unit}"
+            !unit.code.contains("extern unsigned long long helper();"),
+            "{}",
+            unit.code
         );
         // It still needs a declaration before the call -- the definition's own.
-        assert!(unit.contains("void helper(void);"), "{unit}");
+        assert!(unit.code.contains("void helper(void);"), "{}", unit.code);
     }
 
     #[test]
@@ -296,12 +399,17 @@ mod tests {
                 .to_string(),
         ]);
         assert!(
-            !unit.contains("extern int fprintf(FILE* __stream, const char* __format, ...);"),
-            "{unit}"
+            !unit
+                .code
+                .contains("extern int fprintf(FILE* __stream, const char* __format, ...);"),
+            "{}",
+            unit.code
         );
         assert!(
-            unit.contains("int fprintf(FILE* __stream, const char* __format, ...);"),
-            "{unit}"
+            unit.code
+                .contains("int fprintf(FILE* __stream, const char* __format, ...);"),
+            "{}",
+            unit.code
         );
     }
 
@@ -321,11 +429,21 @@ mod tests {
             "extern unsigned long long helper();\n\nvoid b(void)\n{\n    helper();\n}\n"
                 .to_string(),
         ]);
-        assert_eq!(unit.matches("helper();").count() - 2, 1, "{unit}");
-        assert!(unit.contains("extern uchar helper();"), "{unit}");
+        assert_eq!(
+            unit.code.matches("helper();").count() - 2,
+            1,
+            "{}",
+            unit.code
+        );
         assert!(
-            !unit.contains("extern unsigned long long helper();"),
-            "{unit}"
+            unit.code.contains("extern uchar helper();"),
+            "{}",
+            unit.code
+        );
+        assert!(
+            !unit.code.contains("extern unsigned long long helper();"),
+            "{}",
+            unit.code
         );
     }
 
@@ -338,9 +456,12 @@ mod tests {
         };
         let unit = assemble(&[render("first"), render("second")]);
         assert_eq!(
-            unit.matches("typedef unsigned long long HANDLE;").count(),
+            unit.code
+                .matches("typedef unsigned long long HANDLE;")
+                .count(),
             1,
-            "{unit}"
+            "{}",
+            unit.code
         );
     }
 
@@ -350,8 +471,16 @@ mod tests {
             "typedef unsigned long long FILE;\n\nvoid a(FILE f)\n{\n    return;\n}\n".to_string(),
             "typedef long long FILE;\n\nvoid b(FILE f)\n{\n    return;\n}\n".to_string(),
         ]);
-        assert!(unit.contains("typedef unsigned long long FILE;"), "{unit}");
-        assert!(!unit.contains("typedef long long FILE;"), "{unit}");
+        assert!(
+            unit.code.contains("typedef unsigned long long FILE;"),
+            "{}",
+            unit.code
+        );
+        assert!(
+            !unit.code.contains("typedef long long FILE;"),
+            "{}",
+            unit.code
+        );
     }
 
     #[test]
@@ -361,8 +490,12 @@ mod tests {
                 .to_string(),
             "void handler(void)\n{\n    return;\n}\n".to_string(),
         ]);
-        assert!(!unit.contains("unsigned long long handler;"), "{unit}");
-        assert!(unit.contains("void handler(void);"), "{unit}");
+        assert!(
+            !unit.code.contains("unsigned long long handler;"),
+            "{}",
+            unit.code
+        );
+        assert!(unit.code.contains("void handler(void);"), "{}", unit.code);
     }
 
     #[test]
@@ -375,7 +508,76 @@ mod tests {
             "void takes(fission_agg16 v)\n{\n    return;\n}\n"
         )
         .to_string()]);
-        let prelude_end = unit.find("void takes(fission_agg16 v)\n{").expect("body");
-        assert!(unit[..prelude_end].contains("} fission_agg16;"), "{unit}");
+        let prelude_end = unit
+            .code
+            .find("void takes(fission_agg16 v)\n{")
+            .expect("body");
+        assert!(
+            unit.code[..prelude_end].contains("} fission_agg16;"),
+            "{}",
+            unit.code
+        );
+    }
+
+    #[test]
+    fn conflicting_global_declarations_emit_one_name_and_structured_incomplete_diagnostic() {
+        let assembly = assemble(&[
+            "uint * tmp_140007020;\n\nvoid reads_as_pointer(void)\n{\n    take(tmp_140007020);\n}\n"
+                .to_string(),
+            "uint tmp_140007020;\n\nvoid reads_as_scalar(void)\n{\n    take(tmp_140007020);\n}\n"
+                .to_string(),
+        ]);
+
+        assert_eq!(
+            assembly.code.matches("tmp_140007020;").count(),
+            1,
+            "{}",
+            assembly.code
+        );
+        assert!(
+            assembly.code.contains("uint * tmp_140007020;"),
+            "{}",
+            assembly.code
+        );
+        assert!(
+            !assembly.code.contains("uint tmp_140007020;"),
+            "{}",
+            assembly.code
+        );
+        assert_eq!(assembly.diagnostics.len(), 1);
+        let diagnostic = &assembly.diagnostics[0];
+        assert_eq!(diagnostic.code, "project_global_declaration_disagreement");
+        assert_eq!(diagnostic.analysis_status, "incomplete");
+        assert_eq!(diagnostic.global_name, "tmp_140007020");
+        assert_eq!(diagnostic.resolution, "first_declaration_emitted");
+        assert_eq!(diagnostic.declarations.len(), 2);
+        assert_eq!(
+            diagnostic.declarations[0].function.as_deref(),
+            Some("reads_as_pointer")
+        );
+        assert_eq!(
+            diagnostic.declarations[1].function.as_deref(),
+            Some("reads_as_scalar")
+        );
+
+        let json = serde_json::to_value(diagnostic).expect("diagnostic serializes");
+        assert_eq!(json["analysis_status"], "incomplete");
+        assert_eq!(json["global_name"], "tmp_140007020");
+        assert_eq!(
+            json["declarations"][1]["declaration"],
+            "uint tmp_140007020;"
+        );
+    }
+
+    #[test]
+    fn matching_global_declarations_are_deduplicated_without_a_conflict() {
+        let declaration = "uint tmp_140007020;\n\n";
+        let render = |name: &str| {
+            format!("{declaration}void {name}(void)\n{{\n    take(tmp_140007020);\n}}\n")
+        };
+        let assembly = assemble(&[render("first"), render("second")]);
+
+        assert_eq!(assembly.code.matches("uint tmp_140007020;").count(), 1);
+        assert!(assembly.diagnostics.is_empty());
     }
 }

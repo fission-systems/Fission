@@ -352,6 +352,28 @@ Suppresses the generated function banner comment in the text output.
 
 Suppresses `WARNING` and `NOTICE` diagnostics in text output.
 
+Project assembly diagnostics for conflicting global declarations are emitted
+as one JSON object per line on stderr, including when `--no-warnings` is set.
+They carry `analysis_status: "incomplete"` because the assembler retains the
+first declaration for the C output but cannot establish that it is compatible
+with the other per-function declarations.
+
+Each object includes a stable `code`, `severity`, `global_name`, `resolution`,
+and `declarations` array. Each declaration entry contains its emitted spelling
+and an example function that supplied it.
+
+```json
+{"code":"project_global_declaration_disagreement","severity":"warning","analysis_status":"incomplete","global_name":"tmp_140007020","message":"Per-function renders disagree on the declaration for global `tmp_140007020`; compatibility is unresolved.","resolution":"first_declaration_emitted","declarations":[{"declaration":"uint * tmp_140007020;","function":"reads_as_pointer"},{"declaration":"uint tmp_140007020;","function":"reads_as_scalar"}]}
+```
+
+#### `--project`
+
+Combines the selected functions into one translation unit with shared
+declarations in a prelude. This implies `--all`. If per-function renders
+disagree about a global declaration, the translation unit contains only one
+declaration for that identifier and stderr reports the conflicting spellings
+as structured JSON diagnostics.
+
 #### `--ghidra-compat`
 
 Requests a more Ghidra-compatible output mode.
