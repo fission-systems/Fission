@@ -26,6 +26,7 @@
 //! dbg.continue_execution()?;
 //! ```
 
+use super::capabilities::DebugBackendCapabilities;
 use super::timeline::Timeline;
 use super::types::{ProcessInfo, RegisterState};
 use fission_core::Result as FissionResult;
@@ -36,6 +37,17 @@ use std::sync::{Arc, Mutex};
 /// This trait defines the common interface for all platform-specific debugger implementations.
 /// Each platform (Windows, Linux, macOS) provides its own implementation.
 pub trait ExecutionBackend: Send {
+    /// Describe this backend's build availability and implemented operations.
+    ///
+    /// The default fails closed for external backends that have not adopted
+    /// the capability contract; callers must not infer support from missing
+    /// entries. Built-in backends override this with their implementation
+    /// facts. A supported operation can still fail because of target state,
+    /// permissions, or runtime semantics.
+    fn capabilities(&self) -> DebugBackendCapabilities {
+        DebugBackendCapabilities::unreported()
+    }
+
     /// Attach the session-owned timeline used for stop snapshots.
     ///
     /// Backends that do not execute a target can keep the default no-op.  A

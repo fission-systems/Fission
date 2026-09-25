@@ -987,6 +987,59 @@ impl Drop for WindowsDebugger {
 unsafe impl Send for WindowsDebugger {}
 
 impl ExecutionBackend for WindowsDebugger {
+    fn capabilities(&self) -> crate::debug::capabilities::DebugBackendCapabilities {
+        use crate::debug::capabilities::{
+            BackendAvailability, DebugBackendCapabilities, DebugBackendKind, DebugOperation,
+            RuntimeRequirement,
+        };
+
+        DebugBackendCapabilities::new(
+            DebugBackendKind::WindowsNative,
+            BackendAvailability::Available,
+            &[
+                DebugOperation::ProcessEnumeration,
+                DebugOperation::Launch,
+                DebugOperation::Attach,
+                DebugOperation::Detach,
+                DebugOperation::ContinueExecution,
+                DebugOperation::PollEvent,
+                DebugOperation::SingleStep,
+                DebugOperation::StepOver,
+                DebugOperation::StepOut,
+                DebugOperation::Pause,
+                DebugOperation::Terminate,
+                DebugOperation::SkipInstruction,
+                DebugOperation::SoftwareBreakpoints,
+                DebugOperation::BreakpointEnableDisable,
+                DebugOperation::BreakpointList,
+                DebugOperation::RegisterRead,
+                DebugOperation::RegisterWrite,
+                DebugOperation::MemoryRead,
+                DebugOperation::MemoryWrite,
+                DebugOperation::RemoteMemoryAllocate,
+                DebugOperation::RemoteMemoryFree,
+                DebugOperation::PageProtectionRead,
+                DebugOperation::PageProtectionWrite,
+                DebugOperation::StackPeek,
+                DebugOperation::StackPop,
+                DebugOperation::StackPush,
+                DebugOperation::ModuleList,
+                DebugOperation::ThreadList,
+                DebugOperation::ThreadSwitch,
+                DebugOperation::ModuleExports,
+                DebugOperation::ModuleImports,
+            ],
+        )
+        .conditionally_supporting(
+            DebugOperation::Launch,
+            &[RuntimeRequirement::TargetProcessAllowsDebugging],
+        )
+        .conditionally_supporting(
+            DebugOperation::Attach,
+            &[RuntimeRequirement::TargetProcessAllowsDebugging],
+        )
+    }
+
     fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
         self.set_ttd_timeline(timeline);
     }

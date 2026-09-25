@@ -1,4 +1,4 @@
-//! Debugger CLI dispatch (Windows only)
+//! Debugger CLI dispatch across the selected native or emulator backend.
 //!
 //! One-shot model: each command loads the session state from a temp file,
 //! executes the operation, prints output, and persists state back.
@@ -8,6 +8,32 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
+
+fn print_capabilities_text(report: &fission_dynamic::debug::DebugBackendCapabilities) {
+    println!("Backend: {:?}", report.backend);
+    println!("Host: {} ({})", report.host.os, report.host.architecture);
+    match report.availability {
+        fission_dynamic::debug::BackendAvailability::Available => {
+            println!("Availability: available");
+        }
+        fission_dynamic::debug::BackendAvailability::Unavailable { reason } => {
+            println!("Availability: unavailable ({reason:?})");
+        }
+    }
+    println!("Operations:");
+    for capability in &report.operations {
+        let support = match &capability.support {
+            fission_dynamic::debug::OperationSupport::Supported => "supported".to_string(),
+            fission_dynamic::debug::OperationSupport::Conditional { requirements } => {
+                format!("conditional ({requirements:?})")
+            }
+            fission_dynamic::debug::OperationSupport::Unsupported { reason } => {
+                format!("unsupported ({reason:?})")
+            }
+        };
+        println!("  {:?}: {support}", capability.operation);
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct DebugStateFile {
@@ -124,6 +150,19 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
     };
 
     match args.command {
+        DebugCommand::Capabilities(capability_args) => {
+            // Constructing a backend is side-effect free. In particular, this
+            // path never launches or attaches to a target.
+            let session = build_session();
+            let report = session.debugger.capabilities();
+            if capability_args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_capabilities_text(&report);
+            }
+            Ok(())
+        }
+
         DebugCommand::Attach(args) => {
             let mut session = build_session();
             session.attach(args.pid).with_context(|| {
@@ -438,21 +477,14 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Event => {
-            #[cfg(target_os = "windows")]
-            {
-                let state = find_active_state()?;
-                let mut session = build_session();
-                session.attach(state.pid)?;
-                let event = session.debugger.poll_event(5000)?;
-                if let Some(evt) = event {
-                    println!("{:?}", evt);
-                } else {
-                    println!("No event within timeout.");
-                }
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                println!("poll_event is only supported on Windows.");
+            let state = find_active_state()?;
+            let mut session = build_session();
+            session.attach(state.pid)?;
+            let event = session.debugger.poll_event(5000)?;
+            if let Some(evt) = event {
+                println!("{:?}", evt);
+            } else {
+                println!("No event within timeout.");
             }
             Ok(())
         }

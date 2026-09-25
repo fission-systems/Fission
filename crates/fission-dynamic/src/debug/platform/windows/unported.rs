@@ -37,6 +37,20 @@ impl Default for WindowsDebugger {
 }
 
 impl ExecutionBackend for WindowsDebugger {
+    fn capabilities(&self) -> crate::debug::capabilities::DebugBackendCapabilities {
+        use crate::debug::capabilities::{
+            BackendAvailability, CapabilityReason, DebugBackendCapabilities, DebugBackendKind,
+        };
+
+        DebugBackendCapabilities::new(
+            DebugBackendKind::WindowsNative,
+            BackendAvailability::Unavailable {
+                reason: CapabilityReason::BuildFeatureDisabled,
+            },
+            &[],
+        )
+    }
+
     fn enumerate_processes() -> Vec<ProcessInfo> {
         Vec::new()
     }

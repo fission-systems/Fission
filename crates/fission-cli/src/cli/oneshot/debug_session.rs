@@ -205,6 +205,7 @@ fn execute(
     command: DebugCommand,
 ) -> Result<Value> {
     let value = match command {
+        DebugCommand::Capabilities(_) => serde_json::to_value(backend.capabilities())?,
         DebugCommand::Bp(a) => {
             backend.set_sw_breakpoint(a.addr)?;
             json!({ "action": "set_breakpoint", "address": format!("0x{:x}", a.addr) })

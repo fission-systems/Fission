@@ -97,6 +97,34 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
 }
 
 impl ExecutionBackend for LinuxDebugger {
+    fn capabilities(&self) -> crate::debug::capabilities::DebugBackendCapabilities {
+        use crate::debug::capabilities::{
+            BackendAvailability, DebugBackendCapabilities, DebugBackendKind, DebugOperation,
+            RuntimeRequirement,
+        };
+
+        DebugBackendCapabilities::new(
+            DebugBackendKind::LinuxPtrace,
+            BackendAvailability::Available,
+            &[
+                DebugOperation::ProcessEnumeration,
+                DebugOperation::Attach,
+                DebugOperation::Detach,
+                DebugOperation::ContinueExecution,
+                DebugOperation::PollEvent,
+                DebugOperation::SingleStep,
+                DebugOperation::SoftwareBreakpoints,
+                DebugOperation::RegisterRead,
+                DebugOperation::MemoryRead,
+                DebugOperation::MemoryWrite,
+            ],
+        )
+        .conditionally_supporting(
+            DebugOperation::Attach,
+            &[RuntimeRequirement::PtracePolicyAllowsAttach],
+        )
+    }
+
     fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
         self.ttd_timeline = Some(timeline);
     }
