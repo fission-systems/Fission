@@ -341,8 +341,16 @@ pub struct TaintReport {
     /// What the run treated as untrusted input.
     pub sources: Vec<String>,
     pub hits: Vec<TaintHitReport>,
-    #[serde(skip_serializing_if = "is_zero_u64")]
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub hits_dropped: u64,
+    /// False when one or more proven control scopes exceeded the bounded
+    /// tracker. This is specifically a retention signal, not a claim that all
+    /// execution semantics were modeled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_tracking_complete: Option<bool>,
+    /// Number of proven scope activations omitted at the active-scope cap.
+    #[serde(default)]
+    pub control_scopes_dropped: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -537,6 +545,8 @@ impl SandboxMetricsReport {
                 })
                 .collect(),
             hits_dropped: taint.hits_dropped,
+            control_tracking_complete: Some(taint.control_tracking_complete()),
+            control_scopes_dropped: taint.control_scopes_dropped(),
         };
         match self.behavior.as_mut() {
             Some(behavior) => behavior.taint = Some(report),

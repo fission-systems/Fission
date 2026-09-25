@@ -67,6 +67,25 @@ fn sandbox_metrics_report_json_budget() {
 }
 
 #[test]
+fn taint_report_adds_scope_completeness_without_breaking_older_json() {
+    use fission_emulator::metrics::TaintReport;
+
+    let old_report: TaintReport =
+        serde_json::from_str(r#"{"sources":[],"hits":[]}"#).expect("old taint JSON");
+    assert_eq!(old_report.control_tracking_complete, None);
+    assert_eq!(old_report.control_scopes_dropped, 0);
+
+    let current = TaintReport {
+        control_tracking_complete: Some(false),
+        control_scopes_dropped: 1,
+        ..TaintReport::default()
+    };
+    let json = serde_json::to_value(current).expect("current taint JSON");
+    assert_eq!(json["control_tracking_complete"], false);
+    assert_eq!(json["control_scopes_dropped"], 1);
+}
+
+#[test]
 fn piece_and_lzcount_are_supported() {
     assert!(is_jit_supported(PcodeOpcode::Piece));
     assert!(is_jit_supported(PcodeOpcode::LzCount));
