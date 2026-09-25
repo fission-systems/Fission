@@ -518,7 +518,7 @@ pub(super) fn decoded_references(
 ) -> Vec<DecodedReference> {
     let mut refs = Vec::new();
     let flow_target_kind = flow_reference_kind(flow_kind);
-    let mut immediate_flow_references = Vec::new();
+    let mut immediate_call_references = Vec::new();
     for (operand_index, handle) in handles.iter().enumerate() {
         if let Some(reference) = handle.subtable_state.as_deref().and_then(|state| {
             reference_from_subtable_state(address, length, flow_kind, operand_index, state).or_else(
@@ -633,26 +633,26 @@ pub(super) fn decoded_references(
                     kind: flow_target_kind.unwrap_or(DecodedReferenceKind::ImmediateAddress),
                     operand_index,
                 };
-                if flow_target_kind.is_some() {
-                    immediate_flow_references.push(reference);
-                } else {
+                if flow_kind == DecodedFlowKind::Call {
+                    immediate_call_references.push(reference);
+                } else if flow_target_kind.is_none() {
                     refs.push(reference);
                 }
             }
             _ => {}
         }
     }
-    // Immediate-only fallback is useful for resolved direct calls and
-    // unconditional jumps, but a conditional-flow template may contain
-    // scalar predicates or conditional semantics that do not change the
-    // instruction address. Conditional targets therefore require one of the
-    // address-bearing forms handled above.
-    if matches!(flow_kind, DecodedFlowKind::Call | DecodedFlowKind::Jump)
+    // Immediate-only fallback is useful for resolved direct calls, whose
+    // constructor carries call semantics. A Jump classification alone does
+    // not prove that an immediate is its destination: terminal instructions
+    // can pass scalar operands to a userop and then emit an indirect branch.
+    // Direct branch targets must use one of the address-bearing forms above.
+    if flow_kind == DecodedFlowKind::Call
         && !refs
             .iter()
             .any(|reference| Some(reference.kind) == flow_target_kind)
     {
-        refs.extend(immediate_flow_references);
+        refs.extend(immediate_call_references);
     }
     refs
 }
@@ -1137,6 +1137,17 @@ mod tests {
                 operand_index: 0,
             }]
         );
+    }
+
+    #[test]
+    fn immediate_only_jump_operand_is_not_promoted_to_a_target() {
+        let trap_code = handle(BoundOperand::Immediate {
+            value: 0x3e8,
+            encoded_size: 2,
+            signed: false,
+        });
+
+        assert!(decoded_references(0x1000, 4, DecodedFlowKind::Jump, &[trap_code]).is_empty());
     }
 
     #[test]
