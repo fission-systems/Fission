@@ -445,9 +445,10 @@ Add screenshots for GUI changes
 - Approve changes that meet the project requirements
 
 For non-draft pull requests targeting `main`, GitHub Actions requests native
-squash auto-merge after the required approval. The workflow checks every 15
-minutes; GitHub completes the merge only after all branch protection rules pass.
-Manual workflow runs default to a dry run.
+squash auto-merge after approval or when an approved draft becomes ready for
+review. A 15-minute scheduled check catches missed events. GitHub completes the
+merge only after all branch protection rules pass. Manual workflow runs default
+to a dry run.
 
 ---
 
