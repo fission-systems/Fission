@@ -627,6 +627,20 @@ This command is for corpus curation and candidate analysis, not normal first-pas
 
 ## JSON And Automation Notes
 
+### Sandbox taint completeness
+
+```bash
+fission_cli sandbox app.elf --stdin-mock A --taint --json
+```
+
+Control-taint tracking retains at most 128 simultaneously active scopes. The
+taint object reports `control_tracking_complete: false` and increments
+`control_scopes_dropped` when proven scope activations exceed that bound. A
+true value means only that no scope was dropped by this bound; it is not a
+claim that every instruction or external interaction has modeled taint
+semantics. Older reports without these fields deserialize with completeness
+unknown.
+
 ### When to prefer JSON
 
 Prefer `--json` when:

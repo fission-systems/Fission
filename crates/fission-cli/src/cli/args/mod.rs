@@ -359,6 +359,11 @@ pub struct SandboxArgs {
     /// `getrandom`) and reports when that data reaches a syscall. Also reports
     /// bounded control dependence when a tainted branch selects a value before
     /// a proven control-flow reconvergence. Reports label the dependency kind.
+    /// At most 128 control scopes are tracked at once. With `--json`,
+    /// `behavior.taint.control_tracking_complete` is false and
+    /// `control_scopes_dropped` counts omitted scope activations after overflow.
+    /// A true value only means this bound was not exceeded; it does not claim
+    /// that every execution semantic was modeled.
     #[arg(long)]
     pub taint: bool,
 
