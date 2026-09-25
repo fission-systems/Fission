@@ -14,6 +14,9 @@ impl PointerSweeper {
     pub fn new(binary: &LoadedBinary) -> Self {
         let mut valid_regions = BTreeMap::new();
         for section in &binary.inner().sections {
+            if !section.is_addressable() {
+                continue;
+            }
             let start = section.virtual_address;
             let end = start.saturating_add(section.virtual_size);
             if start < end {
@@ -261,6 +264,67 @@ mod tests {
                 .map(|xref| (xref.from_addr, xref.to_addr))
                 .collect::<Vec<_>>(),
             vec![(0x2000, 0x1008), (0x2008, 0x2050)]
+        );
+    }
+
+    #[test]
+    fn non_loadable_zero_address_section_is_not_a_pointer_target() {
+        let mut file_data = vec![0u8; 0x38];
+        file_data[0..8].copy_from_slice(&8u64.to_le_bytes());
+        file_data[8..16].copy_from_slice(&0x3fu64.to_le_bytes());
+        file_data[16..24].copy_from_slice(&0x1008u64.to_le_bytes());
+
+        let binary = LoadedBinaryBuilder::new(
+            "zero-vma-debug-pointer-test".to_string(),
+            DataBuffer::Heap(file_data),
+        )
+        .format("ELF")
+        .is_64bit(true)
+        .add_sections(vec![
+            SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x10,
+                file_offset: 0x30,
+                file_size: 0,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            },
+            SectionInfo {
+                name: ".data".to_string(),
+                virtual_address: 0x2000,
+                virtual_size: 0x18,
+                file_offset: 0,
+                file_size: 0x18,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            },
+            SectionInfo {
+                name: ".debug_info".to_string(),
+                virtual_address: 0,
+                virtual_size: 0x100,
+                file_offset: 0x18,
+                file_size: 0x20,
+                is_executable: false,
+                is_readable: false,
+                is_writable: false,
+            },
+        ])
+        .build()
+        .expect("build synthetic ELF sections");
+
+        let sweeper = PointerSweeper::new(&binary);
+        let xrefs = sweeper.sweep(&binary);
+
+        assert_eq!(
+            xrefs
+                .iter()
+                .map(|xref| (xref.from_addr, xref.to_addr))
+                .collect::<Vec<_>>(),
+            vec![(0x2010, 0x1008)],
+            "small values covered only by a zero-VMA debug section are not pointers"
         );
     }
 }

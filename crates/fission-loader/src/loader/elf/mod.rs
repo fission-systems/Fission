@@ -78,6 +78,15 @@ const R_LARCH_B26: u32 = 66;
 const RELOCATABLE_IMAGE_BASE: u64 = 0x100000;
 const ELF_EXTERNAL_IMAGE_BASE: u64 = 0xffff_2000_0000_0000;
 
+fn elf_section_runtime_access(sh_flags: u64) -> (bool, bool, bool) {
+    let allocated = sh_flags & SHF_ALLOC != 0;
+    (
+        allocated && sh_flags & SHF_EXECINSTR != 0,
+        allocated,
+        allocated && sh_flags & SHF_WRITE != 0,
+    )
+}
+
 fn elf_section_file_size(section_type: u32, virtual_size: u64) -> u64 {
     if section_type == SHT_NOBITS {
         0
@@ -209,15 +218,17 @@ impl ElfLoader {
 
                 let name = section_names.get(index).cloned().unwrap_or_default();
 
+                let (is_executable, is_readable, is_writable) =
+                    elf_section_runtime_access(shdr.sh_flags);
                 sections_info.push(SectionInfo {
                     name: name.clone(),
                     virtual_address,
                     virtual_size: shdr.sh_size, // ELF does not distinguish VSize/RawSize clearly in SH, mostly same
                     file_offset: shdr.sh_offset,
                     file_size: elf_section_file_size(shdr.sh_type, shdr.sh_size),
-                    is_executable: (shdr.sh_flags & SHF_EXECINSTR) != 0,
-                    is_readable: (shdr.sh_flags & SHF_ALLOC) != 0,
-                    is_writable: (shdr.sh_flags & SHF_WRITE) != 0,
+                    is_executable,
+                    is_readable,
+                    is_writable,
                 });
 
                 // If this is a symbol table, read functions
@@ -497,15 +508,17 @@ impl ElfLoader {
 
                 let name = section_names.get(index).cloned().unwrap_or_default();
 
+                let (is_executable, is_readable, is_writable) =
+                    elf_section_runtime_access(shdr.sh_flags as u64);
                 sections_info.push(SectionInfo {
                     name,
                     virtual_address,
                     virtual_size: shdr.sh_size as u64,
                     file_offset: shdr.sh_offset as u64,
                     file_size: elf_section_file_size(shdr.sh_type, shdr.sh_size as u64),
-                    is_executable: (shdr.sh_flags as u64 & SHF_EXECINSTR) != 0,
-                    is_readable: (shdr.sh_flags as u64 & SHF_ALLOC) != 0,
-                    is_writable: (shdr.sh_flags as u64 & SHF_WRITE) != 0,
+                    is_executable,
+                    is_readable,
+                    is_writable,
                 });
 
                 // If this is a symbol table, read functions
@@ -2582,6 +2595,19 @@ mod tests {
     fn elf_nobits_sections_have_no_file_bytes() {
         assert_eq!(elf_section_file_size(SHT_NOBITS, 0x158), 0);
         assert_eq!(elf_section_file_size(SHT_SYMTAB, 0x158), 0x158);
+    }
+
+    #[test]
+    fn non_allocated_sections_do_not_claim_runtime_access() {
+        for flags in [SHF_WRITE, SHF_EXECINSTR, SHF_WRITE | SHF_EXECINSTR] {
+            assert_eq!(elf_section_runtime_access(flags), (false, false, false));
+        }
+
+        assert_eq!(elf_section_runtime_access(SHF_ALLOC), (false, true, false));
+        assert_eq!(
+            elf_section_runtime_access(SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR),
+            (true, true, true)
+        );
     }
 
     #[test]

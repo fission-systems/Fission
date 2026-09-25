@@ -363,6 +363,9 @@ fn push_pcode_reference(
 
 fn is_mapped_target(binary: &LoadedBinary, target: u64) -> bool {
     binary.sections.iter().any(|section| {
+        if !section.is_addressable() {
+            return false;
+        }
         let end = section
             .virtual_address
             .saturating_add(section.virtual_size.max(section.file_size));
@@ -385,4 +388,47 @@ fn pcode_target_symbol(binary: &LoadedBinary, target: u64) -> Option<String> {
                 .function_at_exact(target)
                 .map(|function| function.name.clone())
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+    #[test]
+    fn mapped_target_ignores_non_loadable_zero_address_sections() {
+        let binary = LoadedBinaryBuilder::new(
+            "zero-vma-debug-pcode-test".to_string(),
+            DataBuffer::Heap(vec![0; 16]),
+        )
+        .format("ELF")
+        .is_64bit(true)
+        .add_sections(vec![
+            SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x10,
+                file_offset: 0,
+                file_size: 0x10,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            },
+            SectionInfo {
+                name: ".debug_info".to_string(),
+                virtual_address: 0,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0,
+                is_executable: false,
+                is_readable: false,
+                is_writable: false,
+            },
+        ])
+        .build()
+        .expect("build synthetic ELF sections");
+
+        assert!(!is_mapped_target(&binary, 8));
+        assert!(is_mapped_target(&binary, 0x1008));
+    }
 }

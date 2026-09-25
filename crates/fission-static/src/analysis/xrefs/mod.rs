@@ -110,6 +110,7 @@ impl XrefDatabase {
         let mapped: Vec<(u64, u64)> = binary
             .sections
             .iter()
+            .filter(|section| section.is_addressable())
             .filter_map(|section| {
                 let size = section.virtual_size.max(section.file_size);
                 let end = section.virtual_address.checked_add(size)?;
@@ -382,6 +383,54 @@ mod tests {
         assert!(
             !db.get_refs_to(0x2000).is_empty(),
             "the instruction at 0x1000 loads 0x2000; that reference must reach the index"
+        );
+    }
+
+    #[test]
+    fn non_loadable_zero_address_section_does_not_validate_scalar_immediate() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+        let binary = LoadedBinaryBuilder::new(
+            "zero-vma-debug-section.elf".to_string(),
+            DataBuffer::Heap(vec![0x48, 0x83, 0xec, 0x08]), // sub rsp, 8
+        )
+        .format("ELF")
+        .entry_point(0x401000)
+        .image_base(0x400000)
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".init".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 4,
+            file_offset: 0,
+            file_size: 4,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_section(SectionInfo {
+            name: ".debug_info".to_string(),
+            virtual_address: 0,
+            virtual_size: 0x100,
+            file_offset: 4,
+            file_size: 0,
+            is_executable: false,
+            is_readable: false,
+            is_writable: false,
+        })
+        .build()
+        .expect("build synthetic ELF sections");
+
+        let frontend = RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 frontend");
+        let db = XrefDatabase::build_with_frontend(&binary, &frontend);
+
+        assert!(
+            !db.iter().any(|xref| {
+                xref.from_addr == 0x401000
+                    && xref.to_addr == 8
+                    && matches!(xref.xref_type, XrefType::Data)
+            }),
+            "the immediate in sub rsp, 8 is not a reference into non-loadable debug data"
         );
     }
 
