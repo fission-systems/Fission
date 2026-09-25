@@ -38,10 +38,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_review" && "$HEAD_REPOSITORY" != "$REPOSITORY" ]]; then
+            echo "::notice::Fork review events use a read-only token; the scheduled check will queue eligible PRs."
+            exit 0
+          fi
 
           pull_requests="$(
             gh pr list \
