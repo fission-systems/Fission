@@ -94,8 +94,9 @@ pub struct DecompArgs {
     #[arg(long)]
     pub no_header: bool,
 
-    /// Emit one buildable translation unit: shared declarations hoisted to a
-    /// single prelude, then every function body. Implies --all.
+    /// Emit one translation unit: shared declarations hoisted to a single
+    /// prelude, then every function body. Implies --all. Conflicting global
+    /// declarations are reported as JSON lines on stderr.
     #[arg(long)]
     pub project: bool,
 
