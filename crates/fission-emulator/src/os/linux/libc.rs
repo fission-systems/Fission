@@ -193,8 +193,9 @@ impl SimProcedure for Puts {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         let addr = emu.read_arg(0).unwrap_or(0);
         let s = read_string(emu, addr)?;
-        // Host-visible stdout (smoke / sandbox).
-        println!("{}", s);
+        let mut output = s.as_bytes().to_vec();
+        output.push(b'\n');
+        emu.guest_stdout(&output);
         tracing::info!("SimProcedure: puts(\"{}\")", s);
         emu.write_return_val(s.len() as u64 + 1)?;
         Ok(HleResult::Continue)
@@ -207,7 +208,7 @@ impl SimProcedure for Printf {
         let addr = emu.read_arg(0).unwrap_or(0);
         let fmt = read_string(emu, addr)?;
         let out = format_printf(emu, &fmt, 1)?;
-        print!("{}", out);
+        emu.guest_stdout(out.as_bytes());
         tracing::info!("SimProcedure: printf => {:?}", out);
         emu.write_return_val(out.len() as u64)?;
         Ok(HleResult::Continue)
@@ -344,7 +345,7 @@ impl SimProcedure for Write {
                 .state
                 .read_space(emu.state.ram_space(), buf, count as usize)
                 .unwrap_or_default();
-            print!("{}", String::from_utf8_lossy(&data));
+            let _ = emu.guest_write(fd, &data);
         } else {
             tracing::info!("SimProcedure: write({}, 0x{:X}, {})", fd, buf, count);
         }
