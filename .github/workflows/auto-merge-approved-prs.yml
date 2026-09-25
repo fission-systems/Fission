@@ -1,0 +1,83 @@
+name: Queue approved PRs
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List eligible PRs without enabling auto-merge"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: queue-approved-prs
+  cancel-in-progress: false
+
+jobs:
+  queue:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Queue approved main PRs for native auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pull_requests="$(
+            gh pr list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --base main \
+              --limit 1000 \
+              --json number,isDraft,reviewDecision,autoMergeRequest
+          )"
+
+          eligible_prs="$(
+            jq -r '
+              .[]
+              | select(
+                  .isDraft == false
+                  and .reviewDecision == "APPROVED"
+                  and .autoMergeRequest == null
+                )
+              | .number
+            ' <<< "$pull_requests"
+          )"
+
+          if [[ -z "$eligible_prs" ]]; then
+            echo "No approved, non-draft main PRs need auto-merge queued."
+            exit 0
+          fi
+
+          while IFS= read -r pr_number; do
+            if [[ ! "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Unexpected pull request number: $pr_number"
+              exit 1
+            fi
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Dry run: would queue native squash auto-merge for PR #$pr_number."
+            else
+              echo "Requesting native squash auto-merge for PR #$pr_number."
+              gh pr merge "$pr_number" \
+                --repo "$REPOSITORY" \
+                --auto \
+                --squash
+            fi
+          done <<< "$eligible_prs"
