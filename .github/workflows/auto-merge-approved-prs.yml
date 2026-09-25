@@ -1,6 +1,14 @@
 name: Queue approved PRs
 
 on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+  pull_request_review:
+    types:
+      - submitted
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
@@ -12,7 +20,6 @@ on:
         default: true
 
 permissions:
-  contents: read
   pull-requests: write
 
 concurrency:
@@ -21,15 +28,12 @@ concurrency:
 
 jobs:
   queue:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-          persist-credentials: false
-
       - name: Queue approved main PRs for native auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
