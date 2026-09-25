@@ -96,6 +96,8 @@ jobs:
             librsvg2-dev \
             libayatana-appindicator3-dev
 
+      # macOS runners use Bash 3.2, where `set -u` rejects direct expansion of
+      # an empty array. Keep array expansions in the `${array[@]+...}` form.
       # --- Specific crates mode (single cargo/nextest process) ---
       - name: Run Tests (Specific Crates) [nextest]
         if: ${{ inputs.crates != '' }}
@@ -105,7 +107,7 @@ jobs:
           crates="${{ inputs.crates }}"
           package_flags=()
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
-          for crate in "${CRATE_ARRAY[@]}"; do
+          for crate in "${CRATE_ARRAY[@]+"${CRATE_ARRAY[@]}"}"; do
             crate="$(echo "$crate" | tr -d '[:space:]')"
             [ -z "$crate" ] && continue
             package_flags+=(-p "$crate")
@@ -122,7 +124,7 @@ jobs:
           fi
           cargo nextest run \
             "${package_flags[@]}" \
-            "${feature_flags[@]}" \
+            "${feature_flags[@]+"${feature_flags[@]}"}" \
             --locked \
             --no-fail-fast \
             --retries ${{ inputs.retries }} \
@@ -137,7 +139,7 @@ jobs:
           crates="${{ inputs.crates }}"
           package_flags=()
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
-          for crate in "${CRATE_ARRAY[@]}"; do
+          for crate in "${CRATE_ARRAY[@]+"${CRATE_ARRAY[@]}"}"; do
             crate="$(echo "$crate" | tr -d '[:space:]')"
             [ -z "$crate" ] && continue
             package_flags+=(-p "$crate")
@@ -148,7 +150,8 @@ jobs:
             feature_flags+=(--features "$features")
           fi
           # Soft: doctests are not release-blocking in Fast Gate historically.
-          cargo test --doc "${package_flags[@]}" "${feature_flags[@]}" --locked \
+          cargo test --doc "${package_flags[@]+"${package_flags[@]}"}" \
+            "${feature_flags[@]+"${feature_flags[@]}"}" --locked \
             ${{ inputs.profile == 'release' && '--release' || '' }} || true
 
       # --- Full workspace mode ---
@@ -165,7 +168,7 @@ jobs:
           exclude_flags=()
           if [ -n "${{ inputs.exclude_crates }}" ]; then
             IFS=',' read -ra EX <<< "${{ inputs.exclude_crates }}"
-            for c in "${EX[@]}"; do
+            for c in "${EX[@]+"${EX[@]}"}"; do
               c="$(echo "$c" | tr -d '[:space:]')"
               [ -z "$c" ] && continue
               exclude_flags+=(--exclude "$c")
@@ -173,8 +176,8 @@ jobs:
           fi
           cargo nextest run \
             --workspace \
-            "${feature_flags[@]}" \
-            "${exclude_flags[@]}" \
+            "${feature_flags[@]+"${feature_flags[@]}"}" \
+            "${exclude_flags[@]+"${exclude_flags[@]}"}" \
             --locked \
             --no-fail-fast \
             --retries ${{ inputs.retries }} \
@@ -183,7 +186,7 @@ jobs:
           if echo "${{ inputs.exclude_crates }}" | tr ',' '\n' | grep -qx 'fission-static'; then
             cargo nextest run \
               -p fission-static \
-              "${feature_flags[@]}" \
+              "${feature_flags[@]+"${feature_flags[@]}"}" \
               --locked \
               --no-fail-fast \
               --retries ${{ inputs.retries }} \
