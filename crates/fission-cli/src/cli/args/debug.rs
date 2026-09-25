@@ -9,7 +9,7 @@ use clap::{Args, Subcommand};
 
 #[derive(Clone, Args, Debug, PartialEq, Eq)]
 #[command(
-    long_about = "Debugger commands.\n\nUse `--emulator` for cross-platform emulated execution. Native live-process debugging is available on Windows builds compiled with `--features windows_native_debugger`.\n",
+    long_about = "Debugger commands.\n\nUse `--emulator` for emulated execution. Native debugging uses Linux ptrace on Linux builds; Windows requires `--features windows_native_debugger`; macOS native process control is not implemented. Query `debug capabilities` before selecting operations. Reported support does not guarantee target availability or operating-system permissions.\n",
     after_help = "Examples:\n  fission_cli debug attach 1234\n  fission_cli debug regs\n  fission_cli debug step\n  fission_cli debug bp 0x401000\n  fission_cli debug read 0x401000 --size 32\n  fission_cli debug modules\n  fission_cli debug continue\n  fission_cli debug detach"
 )]
 pub struct DebugArgs {
@@ -23,6 +23,8 @@ pub struct DebugArgs {
 
 #[derive(Clone, Subcommand, Debug, PartialEq, Eq)]
 pub enum DebugCommand {
+    /// Report selected backend availability and per-operation support
+    Capabilities(DebugCapabilitiesArgs),
     /// Launch a new process under the debugger
     Init(DebugInitArgs),
     /// Attach to a running process by PID
@@ -109,6 +111,14 @@ pub enum DebugCommand {
     Event,
     /// Run a list of debugger commands against one live session
     Session(DebugSessionArgs),
+}
+
+/// Output controls for the side-effect-free capability query.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugCapabilitiesArgs {
+    /// Emit the versioned machine-readable capability report
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// One invocation, one live machine, a list of commands, structured output.
