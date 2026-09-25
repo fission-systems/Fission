@@ -5,10 +5,17 @@
 use crate::debug::timeline::Timeline;
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{
-    Breakpoint, DebugEvent, DebugState, DebugStatus, ProcessInfo, RegisterState, ThreadInfo,
+    Breakpoint, DebugEvent, DebugState, DebugStatus, ModuleAddressTransform,
+    ModuleListCompleteness, ModuleListReport, ProcessInfo, ProcessMemoryMapping, ProcessModule,
+    RegisterState, ThreadInfo,
 };
 use fission_core::{FissionError, Result as FissionResult};
-use std::collections::VecDeque;
+use fission_loader::loader::elf::{ElfLoadSegment, ElfLoader};
+use std::collections::{BTreeMap, VecDeque};
+use std::fs::File;
+use std::io::Read;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -58,6 +65,129 @@ impl LinuxDebugger {
             }
         }
     }
+}
+
+fn output_mapping(mapping: &super::memory::LinuxProcessMapping) -> ProcessMemoryMapping {
+    ProcessMemoryMapping {
+        runtime_start: mapping.start,
+        runtime_end: mapping.end,
+        file_offset: Some(mapping.file_offset),
+        permissions: Some(mapping.permissions.clone()),
+        path: mapping.path.clone(),
+    }
+}
+
+fn derive_elf_load_bias(
+    mappings: &[super::memory::LinuxProcessMapping],
+    segments: &[ElfLoadSegment],
+) -> Result<i64, String> {
+    let mut candidates = std::collections::BTreeSet::new();
+    for mapping in mappings {
+        let mapping_file_end = mapping
+            .file_offset
+            .checked_add(mapping.end.saturating_sub(mapping.start))
+            .ok_or_else(|| "mapping file range overflows".to_string())?;
+        for segment in segments.iter().filter(|segment| segment.file_size > 0) {
+            let segment_file_end = segment
+                .file_offset
+                .checked_add(segment.file_size)
+                .ok_or_else(|| "ELF segment file range overflows".to_string())?;
+            let overlap_start = mapping.file_offset.max(segment.file_offset);
+            let overlap_end = mapping_file_end.min(segment_file_end);
+            if overlap_start >= overlap_end {
+                continue;
+            }
+
+            let runtime_address = mapping
+                .start
+                .checked_add(overlap_start - mapping.file_offset)
+                .ok_or_else(|| "runtime mapping address overflows".to_string())?;
+            let analysis_address = segment
+                .virtual_address
+                .checked_add(overlap_start - segment.file_offset)
+                .ok_or_else(|| "ELF virtual address overflows".to_string())?;
+            let bias = i64::try_from(i128::from(runtime_address) - i128::from(analysis_address))
+                .map_err(|_| "ELF load bias is outside the supported signed range".to_string())?;
+            candidates.insert(bias);
+        }
+    }
+
+    match candidates.len() {
+        0 => Err("no process mapping overlaps a file-backed PT_LOAD range".to_string()),
+        1 => Ok(*candidates.first().expect("one load-bias candidate")),
+        _ => Err("file-backed PT_LOAD mappings disagree on the ELF load bias".to_string()),
+    }
+}
+
+fn linux_device_number(device: &str) -> Option<u64> {
+    let (major, minor) = device.split_once(':')?;
+    let major = u64::from_str_radix(major, 16).ok()?;
+    let minor = u64::from_str_radix(minor, 16).ok()?;
+    Some(
+        ((major & 0x0000_0fff) << 8)
+            | (minor & 0x0000_00ff)
+            | ((minor & 0xffff_ff00) << 12)
+            | ((major & 0xffff_f000) << 32),
+    )
+}
+
+fn module_address_transform(
+    path: &str,
+    device: &str,
+    inode: u64,
+    mappings: &[super::memory::LinuxProcessMapping],
+) -> ModuleAddressTransform {
+    let file_path = path.strip_suffix(" (deleted)").unwrap_or(path);
+    let unavailable = |reason: String| ModuleAddressTransform::Unavailable { reason };
+    let mut file = match File::open(file_path) {
+        Ok(file) => file,
+        Err(error) => {
+            return unavailable(format!("mapped file is unavailable: {error}"));
+        }
+    };
+
+    let metadata = match file.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) => return unavailable(format!("could not inspect mapped file: {error}")),
+    };
+    if metadata.ino() != inode || linux_device_number(device) != Some(metadata.dev()) {
+        return unavailable(
+            "mapped path no longer identifies the device/inode observed in procfs".to_string(),
+        );
+    }
+
+    let mut magic = [0; 4];
+    if let Err(error) = file.read_exact(&mut magic) {
+        return unavailable(format!("could not read mapped-file signature: {error}"));
+    }
+    if magic != *b"\x7fELF" {
+        return ModuleAddressTransform::NotApplicable {
+            reason: "mapped file is not ELF; ELF VA conversion does not apply".to_string(),
+        };
+    }
+
+    let segments = match ElfLoader::load_segments_from_reader(&mut file) {
+        Ok(segments) => segments,
+        Err(error) => return unavailable(format!("could not parse ELF load segments: {error}")),
+    };
+    match derive_elf_load_bias(mappings, &segments) {
+        Ok(load_bias) => ModuleAddressTransform::Resolved {
+            format: "elf".to_string(),
+            analysis_address_domain: "elf_virtual_address".to_string(),
+            runtime_address_domain: "process_virtual_address".to_string(),
+            formula: "runtime_va = analysis_va + load_bias".to_string(),
+            load_bias,
+        },
+        Err(reason) => unavailable(reason),
+    }
+}
+
+fn module_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_string()
 }
 
 impl Default for LinuxDebugger {
@@ -124,6 +254,7 @@ impl ExecutionBackend for LinuxDebugger {
                 DebugOperation::RegisterRead,
                 DebugOperation::MemoryRead,
                 DebugOperation::MemoryWrite,
+                DebugOperation::ModuleList,
             ],
         )
         .conditionally_supporting(
@@ -134,6 +265,115 @@ impl ExecutionBackend for LinuxDebugger {
             DebugOperation::Attach,
             &[RuntimeRequirement::PtracePolicyAllowsAttach],
         )
+        .conditionally_supporting(
+            DebugOperation::ModuleList,
+            &[RuntimeRequirement::TargetProcessAllowsDebugging],
+        )
+    }
+
+    fn list_modules(&mut self) -> FissionResult<ModuleListReport> {
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached to a process"))?;
+        let (process_mappings, mut diagnostics) = super::memory::read_process_mappings(pid)
+            .map_err(|error| {
+                FissionError::debug(format!("Could not read /proc/{pid}/maps: {error}"))
+            })?;
+
+        let mut grouped: BTreeMap<(String, u64), Vec<super::memory::LinuxProcessMapping>> =
+            BTreeMap::new();
+        let mut other_mappings = Vec::new();
+        for mapping in process_mappings {
+            let file_backed = mapping.inode != 0
+                && mapping
+                    .path
+                    .as_deref()
+                    .is_some_and(|path| !path.starts_with('['));
+            if file_backed {
+                grouped
+                    .entry((mapping.device.clone(), mapping.inode))
+                    .or_default()
+                    .push(mapping);
+            } else {
+                other_mappings.push(output_mapping(&mapping));
+            }
+        }
+
+        let mut modules = Vec::with_capacity(grouped.len());
+        for ((device, inode), mappings) in grouped {
+            let path = mappings
+                .iter()
+                .find_map(|mapping| mapping.path.clone())
+                .expect("file-backed mapping has a path");
+            let address_transform = module_address_transform(&path, &device, inode, &mappings);
+            if let ModuleAddressTransform::Unavailable { reason } = &address_transform {
+                diagnostics.push(format!("{}: {reason}", path));
+            }
+            modules.push(ProcessModule {
+                name: module_name(&path),
+                path,
+                device: Some(device),
+                inode: Some(inode),
+                mappings: mappings.iter().map(output_mapping).collect(),
+                address_transform,
+            });
+        }
+        modules.sort_by_key(|module| {
+            module
+                .mappings
+                .iter()
+                .map(|mapping| mapping.runtime_start)
+                .min()
+                .unwrap_or_default()
+        });
+        other_mappings.sort_by_key(|mapping| mapping.runtime_start);
+
+        self.state.modules = modules
+            .iter()
+            .map(|module| {
+                let base_address = module
+                    .mappings
+                    .iter()
+                    .map(|mapping| mapping.runtime_start)
+                    .min()
+                    .unwrap_or_default();
+                let end_address = module
+                    .mappings
+                    .iter()
+                    .map(|mapping| mapping.runtime_end)
+                    .max()
+                    .unwrap_or(base_address);
+                (
+                    base_address,
+                    crate::debug::types::ModuleInfo {
+                        base_address,
+                        size: end_address.saturating_sub(base_address),
+                        path: module.path.clone(),
+                        name: module.name.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let partial = !diagnostics.is_empty()
+            || modules.iter().any(|module| {
+                matches!(
+                    module.address_transform,
+                    ModuleAddressTransform::Unavailable { .. }
+                )
+            });
+        Ok(ModuleListReport {
+            schema_version: 1,
+            pid,
+            completeness: if partial {
+                ModuleListCompleteness::Partial
+            } else {
+                ModuleListCompleteness::Complete
+            },
+            modules,
+            other_mappings,
+            diagnostics,
+        })
     }
 
     fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
@@ -601,5 +841,151 @@ impl ExecutionBackend for LinuxDebugger {
             .with("R15", regs.r15)
             .with("RIP", regs.rip)
             .with("RFLAGS", regs.eflags))
+    }
+
+    fn get_state(&self) -> DebugState {
+        self.state.clone()
+    }
+}
+
+#[cfg(all(test, target_os = "linux", feature = "interactive_runtime"))]
+mod tests {
+    #[cfg(target_arch = "x86_64")]
+    use super::LinuxDebugger;
+    use super::derive_elf_load_bias;
+    use crate::debug::platform::linux::memory::LinuxProcessMapping;
+    #[cfg(target_arch = "x86_64")]
+    use crate::debug::traits::ExecutionBackend;
+    #[cfg(target_arch = "x86_64")]
+    use crate::debug::types::ModuleAddressTransform;
+
+    fn mapping(start: u64, end: u64, file_offset: u64) -> LinuxProcessMapping {
+        LinuxProcessMapping {
+            start,
+            end,
+            permissions: "r-xp".to_string(),
+            file_offset,
+            device: "08:02".to_string(),
+            inode: 42,
+            path: Some("/tmp/fixture.so".to_string()),
+        }
+    }
+
+    #[test]
+    fn load_bias_requires_consistent_evidence_from_multiple_load_segments() {
+        let segments = [
+            fission_loader::loader::elf::ElfLoadSegment {
+                file_offset: 0,
+                virtual_address: 0,
+                file_size: 0x1000,
+                memory_size: 0x1000,
+            },
+            fission_loader::loader::elf::ElfLoadSegment {
+                file_offset: 0x1000,
+                virtual_address: 0x2000,
+                file_size: 0x1000,
+                memory_size: 0x1000,
+            },
+        ];
+        let mappings = [
+            mapping(0x7f00_0000, 0x7f00_1000, 0),
+            mapping(0x7f00_2000, 0x7f00_3000, 0x1000),
+        ];
+
+        assert_eq!(derive_elf_load_bias(&mappings, &segments), Ok(0x7f00_0000));
+    }
+
+    #[test]
+    fn load_bias_rejects_inconsistent_segment_evidence() {
+        let segments = [
+            fission_loader::loader::elf::ElfLoadSegment {
+                file_offset: 0,
+                virtual_address: 0x400000,
+                file_size: 0x1000,
+                memory_size: 0x1000,
+            },
+            fission_loader::loader::elf::ElfLoadSegment {
+                file_offset: 0x1000,
+                virtual_address: 0x402000,
+                file_size: 0x1000,
+                memory_size: 0x1000,
+            },
+        ];
+        let mappings = [
+            mapping(0x400000, 0x401000, 0),
+            mapping(0x403000, 0x404000, 0x1000),
+        ];
+
+        assert!(derive_elf_load_bias(&mappings, &segments).is_err());
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn linux_launch_pc_correlates_to_a_mapped_elf_address() {
+        use fission_loader::loader::elf::ElfLoader;
+
+        let mut debugger = LinuxDebugger::new();
+        let pid = debugger
+            .launch("/bin/true", &[])
+            .expect("launch a child under ptrace");
+
+        let outcome = (|| {
+            let registers = debugger
+                .fetch_registers(pid)
+                .map_err(|error| error.to_string())?;
+            let report = debugger.list_modules().map_err(|error| error.to_string())?;
+            let module = report
+                .modules
+                .iter()
+                .find(|module| {
+                    module.mappings.iter().any(|mapping| {
+                        mapping.runtime_start <= registers.pc && registers.pc < mapping.runtime_end
+                    })
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "launch PC {:#x} was not in a file-backed module",
+                        registers.pc
+                    )
+                })?;
+            let ModuleAddressTransform::Resolved { load_bias, .. } = &module.address_transform
+            else {
+                return Err(format!(
+                    "launch-PC module {} has no resolved ELF transform: {:?}",
+                    module.path, module.address_transform
+                ));
+            };
+            let analysis_pc = u64::try_from(i128::from(registers.pc) - i128::from(*load_bias))
+                .map_err(|_| "runtime PC is outside the ELF VA domain".to_string())?;
+            let mut file = std::fs::File::open(&module.path)
+                .map_err(|error| format!("could not reopen {}: {error}", module.path))?;
+            let segments = ElfLoader::load_segments_from_reader(&mut file)
+                .map_err(|error| format!("could not read {} PT_LOADs: {error}", module.path))?;
+            if !segments.iter().any(|segment| {
+                segment.virtual_address <= analysis_pc
+                    && analysis_pc < segment.virtual_address.saturating_add(segment.memory_size)
+            }) {
+                return Err(format!(
+                    "translated launch PC {analysis_pc:#x} is outside {} PT_LOAD ranges",
+                    module.path
+                ));
+            }
+            Ok::<(), String>(())
+        })();
+
+        let child = nix::unistd::Pid::from_raw(pid as i32);
+        let detach = debugger.detach();
+        let cleanup = if detach.is_ok() {
+            nix::sys::wait::waitpid(child, None).map(|_| ())
+        } else {
+            match nix::sys::ptrace::kill(child) {
+                Ok(()) => nix::sys::wait::waitpid(child, None).map(|_| ()),
+                Err(error) => Err(error),
+            }
+        };
+
+        assert!(outcome.is_ok(), "{}", outcome.unwrap_err());
+        assert!(detach.is_ok(), "could not detach test child: {detach:?}");
+        assert!(cleanup.is_ok(), "could not reap test child: {cleanup:?}");
     }
 }

@@ -13,7 +13,15 @@
 //! These types are platform-agnostic and used by all debugger implementations.
 
 pub use fission_ttd::RegisterState;
+use serde::{Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
+
+fn serialize_hex_address<S>(address: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&format!("0x{address:x}"))
+}
 
 /// Information about a running process
 #[derive(Debug, Clone)]
@@ -50,6 +58,90 @@ pub struct ModuleInfo {
     pub path: String,
     /// Short name (e.g., "ntdll.dll")
     pub name: String,
+}
+
+/// Completeness of a backend's current process-mapping observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModuleListCompleteness {
+    /// All mapping records exposed by the backend were parsed successfully.
+    Complete,
+    /// Some mappings or address transforms could not be established.
+    Partial,
+}
+
+/// Permissions and file-offset facts for one runtime memory mapping.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessMemoryMapping {
+    /// Inclusive runtime start address.
+    #[serde(serialize_with = "serialize_hex_address")]
+    pub runtime_start: u64,
+    /// Exclusive runtime end address.
+    #[serde(serialize_with = "serialize_hex_address")]
+    pub runtime_end: u64,
+    /// File offset corresponding to `runtime_start`, when the backend reports it.
+    #[serde(serialize_with = "serialize_optional_hex_address")]
+    pub file_offset: Option<u64>,
+    /// Native permission string when available (for Linux, for example `r-xp`).
+    pub permissions: Option<String>,
+    /// Mapping pathname or special-region name, if available.
+    pub path: Option<String>,
+}
+
+fn serialize_optional_hex_address<S>(
+    address: &Option<u64>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match address {
+        Some(address) => serializer.serialize_some(&format!("0x{address:x}")),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Address conversion evidence for one mapped file.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ModuleAddressTransform {
+    /// ELF file offsets consistently map to ELF VAs with this additive bias.
+    Resolved {
+        format: String,
+        analysis_address_domain: String,
+        runtime_address_domain: String,
+        formula: String,
+        load_bias: i64,
+    },
+    /// The mapped file was readable but does not expose ELF VA coordinates.
+    NotApplicable { reason: String },
+    /// The mapping is known, but a trustworthy address conversion is unavailable.
+    Unavailable { reason: String },
+}
+
+/// File-backed module and the mappings that comprise its runtime image.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessModule {
+    pub path: String,
+    pub name: String,
+    /// Linux device/inode identity; absent on backends that do not expose it.
+    pub device: Option<String>,
+    pub inode: Option<u64>,
+    pub mappings: Vec<ProcessMemoryMapping>,
+    pub address_transform: ModuleAddressTransform,
+}
+
+/// Structured module/mapping query result for an attached process.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModuleListReport {
+    pub schema_version: u16,
+    pub pid: u32,
+    pub completeness: ModuleListCompleteness,
+    pub modules: Vec<ProcessModule>,
+    /// Non-file-backed or special mappings such as stacks, heaps, and vDSO.
+    pub other_mappings: Vec<ProcessMemoryMapping>,
+    /// Reasons this report is partial or lacks some address transforms.
+    pub diagnostics: Vec<String>,
 }
 
 /// Debug event received from the debugger

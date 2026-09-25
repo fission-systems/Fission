@@ -350,13 +350,56 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             Ok(())
         }
 
-        DebugCommand::Modules => {
-            find_active_state()?;
-            let session = build_session();
-            let modules = session.debugger.get_state().modules.clone();
-            println!("Loaded modules ({}):", modules.len());
-            for (base, info) in modules {
-                println!("  {:016x} - {:016x}  {}", base, base + info.size, info.name);
+        DebugCommand::Modules(args) => {
+            let state = find_active_state()?;
+            let mut session = build_session();
+            session.attach(state.pid)?;
+            let report_result = session.debugger.list_modules();
+            let detach_result = session.debugger.detach();
+            let report = report_result?;
+            detach_result?;
+
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                return Ok(());
+            }
+
+            println!(
+                "Loaded modules ({}; {:?} mapping completeness):",
+                report.modules.len(),
+                report.completeness
+            );
+            for module in &report.modules {
+                println!("  {} ({})", module.name, module.path);
+                match &module.address_transform {
+                    fission_dynamic::debug::types::ModuleAddressTransform::Resolved {
+                        load_bias,
+                        ..
+                    } => println!("    ELF runtime = analysis VA + {load_bias:#x}"),
+                    fission_dynamic::debug::types::ModuleAddressTransform::NotApplicable {
+                        reason,
+                    }
+                    | fission_dynamic::debug::types::ModuleAddressTransform::Unavailable {
+                        reason,
+                    } => println!("    address transform unavailable: {reason}"),
+                }
+                for mapping in &module.mappings {
+                    println!(
+                        "    {:#016x}-{:#016x} {} file_offset={}",
+                        mapping.runtime_start,
+                        mapping.runtime_end,
+                        mapping.permissions.as_deref().unwrap_or("????"),
+                        mapping
+                            .file_offset
+                            .map_or_else(|| "unknown".to_string(), |offset| format!("{offset:#x}"))
+                    );
+                }
+            }
+            if !report.other_mappings.is_empty() {
+                println!("Other mappings: {}", report.other_mappings.len());
+            }
+            for diagnostic in &report.diagnostics {
+                println!("  note: {diagnostic}");
             }
             Ok(())
         }

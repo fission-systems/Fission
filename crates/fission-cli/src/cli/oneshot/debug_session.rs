@@ -312,6 +312,7 @@ fn execute(
             Some(event) => json!({ "action": "event", "event": event_json(&event) }),
             None => json!({ "action": "event", "event": Value::Null }),
         },
+        DebugCommand::Modules(_) => serde_json::to_value(backend.list_modules()?)?,
         DebugCommand::Threads => {
             let state = backend.get_state();
             let threads: Vec<Value> = state

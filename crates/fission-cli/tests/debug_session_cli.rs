@@ -109,7 +109,7 @@ fn an_emulated_session_reports_the_backend_it_is_actually_using() {
     assert_eq!(result["schema_version"], 1);
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn a_linux_native_session_reports_its_initial_launch_event() {
     let output = cli()
@@ -120,7 +120,11 @@ fn a_linux_native_session_reports_its_initial_launch_event() {
             "--command",
             "event",
             "--command",
+            "modules --json",
+            "--command",
             "regs",
+            "--command",
+            "detach",
             "--json",
         ])
         .output()
@@ -139,10 +143,50 @@ fn a_linux_native_session_reports_its_initial_launch_event() {
     assert_eq!(report["final"]["status"], "Detached");
     assert_eq!(report["results"][0]["event"]["event"], "process_created");
     assert_eq!(report["results"][0]["event"]["pid"], report["pid"]);
+    let modules = report["results"][1]["modules"]
+        .as_array()
+        .expect("structured module list");
+    assert!(!modules.is_empty(), "no file-backed modules: {report:#}");
+    let pc = u64::from_str_radix(
+        report["results"][2]["registers"]["pc"]
+            .as_str()
+            .expect("launch-stop PC")
+            .trim_start_matches("0x"),
+        16,
+    )
+    .expect("hex PC");
+    assert!(
+        modules.iter().any(|module| {
+            module["address_transform"]["status"] == "resolved"
+                && module["mappings"].as_array().is_some_and(|mappings| {
+                    mappings.iter().any(|mapping| {
+                        let start = u64::from_str_radix(
+                            mapping["runtime_start"]
+                                .as_str()
+                                .unwrap_or("0")
+                                .trim_start_matches("0x"),
+                            16,
+                        )
+                        .unwrap_or_default();
+                        let end = u64::from_str_radix(
+                            mapping["runtime_end"]
+                                .as_str()
+                                .unwrap_or("0")
+                                .trim_start_matches("0x"),
+                            16,
+                        )
+                        .unwrap_or_default();
+                        start <= pc && pc < end
+                    })
+                })
+        }),
+        "launch PC {pc:#x} did not map to a file-backed ELF transform: {report:#}"
+    );
     assert_ne!(
-        report["results"][1]["registers"]["pc"], "0x0",
+        report["results"][2]["registers"]["pc"], "0x0",
         "the agent could not inspect the launch-stop PC"
     );
+    assert_eq!(report["results"][3]["action"], "detach");
 }
 
 /// A watchpoint answers "what wrote this", and the answer is two addresses:

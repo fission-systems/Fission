@@ -1410,9 +1410,9 @@ pub use debug::{
     DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs,
     DebugCapabilitiesArgs, DebugCommand, DebugDllBpArgs, DebugExBpArgs, DebugFindArgs,
     DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs, DebugMemBpArgs, DebugModuleArgs,
-    DebugProtectArgs, DebugReadArgs, DebugSessionArgs, DebugSetRegArgs, DebugStackPeekArgs,
-    DebugStackPopArgs, DebugStackPushArgs, DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg,
-    MemoryBpKindArg,
+    DebugModulesArgs, DebugProtectArgs, DebugReadArgs, DebugSessionArgs, DebugSetRegArgs,
+    DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs, DebugSwitchThreadArgs,
+    DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
 };
 
 #[cfg(test)]

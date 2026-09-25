@@ -5,6 +5,7 @@ use crate::loader::types::{
 use crate::prelude::*;
 use fission_core::architecture::select_elf_load_spec;
 use std::collections::{HashMap, HashSet};
+use std::io::{Read, Seek, SeekFrom};
 
 pub mod eh_frame;
 pub mod lsda;
@@ -23,6 +24,20 @@ use relocation_patches::{
     ppc64_function_descriptor_map_64, riscv_relocation_patches_64, x86_64_relocation_patches_64,
 };
 pub struct ElfLoader;
+
+/// A loadable ELF program-header range, retaining the file/virtual-coordinate
+/// pair needed to correlate an ELF image with process mappings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ElfLoadSegment {
+    /// Byte offset of the segment in the ELF file.
+    pub file_offset: u64,
+    /// ELF virtual address corresponding to `file_offset`.
+    pub virtual_address: u64,
+    /// Number of file-backed bytes in the segment.
+    pub file_size: u64,
+    /// Number of bytes occupied in memory, including any zero-filled tail.
+    pub memory_size: u64,
+}
 
 const ET_REL: u16 = 1;
 const PT_LOAD: u32 = 1;
@@ -87,6 +102,65 @@ fn elf_section_file_size(section_type: u32, virtual_size: u64) -> u64 {
 }
 
 impl ElfLoader {
+    /// Read the `PT_LOAD` facts needed to map file offsets to ELF virtual
+    /// addresses. This deliberately avoids the full loader pipeline: callers
+    /// such as a live debugger need only the program-header coordinate pairs,
+    /// not symbol analysis or post-load enrichment.
+    pub fn load_segments(bytes: &[u8]) -> Result<Vec<ElfLoadSegment>> {
+        Self::load_segments_from_reader(&mut std::io::Cursor::new(bytes))
+    }
+
+    /// Read loadable segment facts without loading or analyzing the whole
+    /// mapped file. The reader is repositioned as needed and may be reused by
+    /// callers that also need to verify the file identity.
+    pub fn load_segments_from_reader<R: Read + Seek>(
+        reader: &mut R,
+    ) -> Result<Vec<ElfLoadSegment>> {
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| err!(loader, "Could not seek to ELF header: {error}"))?;
+        let mut ident_bytes = [0; 16];
+        reader
+            .read_exact(&mut ident_bytes)
+            .map_err(|error| err!(loader, "Could not read ELF identification: {error}"))?;
+        let ident = ElfIdent::parse(&ident_bytes)?;
+        let endian = match ident.endian {
+            1 => Endian::Little,
+            2 => Endian::Big,
+            other => return Err(err!(loader, "Invalid ELF byte order {other}")),
+        };
+
+        let segments = match ident.class {
+            2 => {
+                reader
+                    .seek(SeekFrom::Start(0))
+                    .map_err(|error| err!(loader, "Could not seek to ELF64 header: {error}"))?;
+                let mut header_bytes = [0; 64];
+                reader
+                    .read_exact(&mut header_bytes)
+                    .map_err(|error| err!(loader, "Could not read ELF64 header: {error}"))?;
+                let header_reader = ByteReader::new(&header_bytes, endian);
+                let header = Elf64Header::parse(&header_bytes, &header_reader)?;
+                read_load_segments_64(reader, &header, endian)?
+            }
+            1 => {
+                reader
+                    .seek(SeekFrom::Start(0))
+                    .map_err(|error| err!(loader, "Could not seek to ELF32 header: {error}"))?;
+                let mut header_bytes = [0; 52];
+                reader
+                    .read_exact(&mut header_bytes)
+                    .map_err(|error| err!(loader, "Could not read ELF32 header: {error}"))?;
+                let header_reader = ByteReader::new(&header_bytes, endian);
+                let header = Elf32Header::parse(&header_bytes, &header_reader)?;
+                read_load_segments_32(reader, &header, endian)?
+            }
+            other => return Err(err!(loader, "Unsupported ELF class {other}")),
+        };
+
+        Ok(segments)
+    }
+
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         // 1. Read Identification (first 16 bytes)
         let ident = ElfIdent::parse(data.as_slice())?;
@@ -1464,6 +1538,99 @@ fn is_elf_mapping_symbol(name: &str) -> bool {
             .is_some()
 }
 
+fn read_load_segments_64<R: Read + Seek>(
+    reader: &mut R,
+    header: &Elf64Header,
+    endian: Endian,
+) -> Result<Vec<ElfLoadSegment>> {
+    if header.phoff == 0 || header.phnum == 0 {
+        return Ok(Vec::new());
+    }
+    let entry_size = if header.phentsize == 0 {
+        Elf64Phdr::SIZE
+    } else {
+        header.phentsize as usize
+    };
+    if entry_size < Elf64Phdr::SIZE {
+        return Err(err!(loader, "ELF64 program-header entry is too small"));
+    }
+
+    let mut segments = Vec::new();
+    for index in 0..header.phnum as u64 {
+        let offset = header
+            .phoff
+            .checked_add(
+                index
+                    .checked_mul(entry_size as u64)
+                    .ok_or_else(|| err!(loader, "ELF64 program-header offset overflow"))?,
+            )
+            .ok_or_else(|| err!(loader, "ELF64 program-header offset overflow"))?;
+        reader
+            .seek(SeekFrom::Start(offset))
+            .map_err(|error| err!(loader, "Could not seek to ELF64 program header: {error}"))?;
+        let mut bytes = [0; Elf64Phdr::SIZE];
+        reader
+            .read_exact(&mut bytes)
+            .map_err(|error| err!(loader, "Truncated ELF64 program-header table: {error}"))?;
+        let phdr = Elf64Phdr::parse(&ByteReader::new(&bytes, endian), 0)?;
+        if phdr.p_type == PT_LOAD && phdr.p_memsz > 0 {
+            segments.push(ElfLoadSegment {
+                file_offset: phdr.p_offset,
+                virtual_address: phdr.p_vaddr,
+                file_size: phdr.p_filesz,
+                memory_size: phdr.p_memsz,
+            });
+        }
+    }
+    Ok(segments)
+}
+
+fn read_load_segments_32<R: Read + Seek>(
+    reader: &mut R,
+    header: &Elf32Header,
+    endian: Endian,
+) -> Result<Vec<ElfLoadSegment>> {
+    if header.phoff == 0 || header.phnum == 0 {
+        return Ok(Vec::new());
+    }
+    let entry_size = if header.phentsize == 0 {
+        Elf32Phdr::SIZE
+    } else {
+        header.phentsize as usize
+    };
+    if entry_size < Elf32Phdr::SIZE {
+        return Err(err!(loader, "ELF32 program-header entry is too small"));
+    }
+
+    let mut segments = Vec::new();
+    for index in 0..header.phnum as u64 {
+        let offset = (header.phoff as u64)
+            .checked_add(
+                index
+                    .checked_mul(entry_size as u64)
+                    .ok_or_else(|| err!(loader, "ELF32 program-header offset overflow"))?,
+            )
+            .ok_or_else(|| err!(loader, "ELF32 program-header offset overflow"))?;
+        reader
+            .seek(SeekFrom::Start(offset))
+            .map_err(|error| err!(loader, "Could not seek to ELF32 program header: {error}"))?;
+        let mut bytes = [0; Elf32Phdr::SIZE];
+        reader
+            .read_exact(&mut bytes)
+            .map_err(|error| err!(loader, "Truncated ELF32 program-header table: {error}"))?;
+        let phdr = Elf32Phdr::parse(&ByteReader::new(&bytes, endian), 0)?;
+        if phdr.p_type == PT_LOAD && phdr.p_memsz > 0 {
+            segments.push(ElfLoadSegment {
+                file_offset: phdr.p_offset as u64,
+                virtual_address: phdr.p_vaddr as u64,
+                file_size: phdr.p_filesz as u64,
+                memory_size: phdr.p_memsz as u64,
+            });
+        }
+    }
+    Ok(segments)
+}
+
 fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -> Vec<Elf64Phdr> {
     if header.phoff == 0 || header.phnum == 0 {
         return Vec::new();
@@ -2582,6 +2749,36 @@ mod tests {
     fn elf_nobits_sections_have_no_file_bytes() {
         assert_eq!(elf_section_file_size(SHT_NOBITS, 0x158), 0);
         assert_eq!(elf_section_file_size(SHT_SYMTAB, 0x158), 0x158);
+    }
+
+    #[test]
+    fn load_segments_exposes_file_and_va_coordinates_for_exec_and_pie() {
+        let exec_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_lsda_test.elf");
+        let pie_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_lsda_pie_test.elf");
+        let exec_bytes = std::fs::read(exec_path).expect("read ET_EXEC fixture");
+        let pie_bytes = std::fs::read(pie_path).expect("read ET_DYN fixture");
+
+        let exec = ElfLoader::load_segments(&exec_bytes).expect("parse ET_EXEC PT_LOADs");
+        let pie = ElfLoader::load_segments(&pie_bytes).expect("parse ET_DYN PT_LOADs");
+
+        assert!(
+            exec.len() >= 2,
+            "expected multiple ET_EXEC PT_LOAD segments"
+        );
+        assert!(pie.len() >= 2, "expected multiple ET_DYN PT_LOAD segments");
+        assert!(exec.iter().all(|segment| segment.memory_size > 0));
+        assert!(pie.iter().all(|segment| segment.memory_size > 0));
+        assert!(
+            exec.iter()
+                .any(|segment| segment.virtual_address >= 0x400000)
+        );
+        assert_eq!(
+            pie.iter().map(|segment| segment.virtual_address).min(),
+            Some(0),
+            "PIE fixture should use the conventional ET_DYN zero-based VA domain"
+        );
     }
 
     #[test]
