@@ -251,7 +251,7 @@ initial process event and inspect that startup state in the same debugger
 session, for example:
 
 ```bash
-fission_cli debug session ./target --command event --json
+fission_cli debug session ./target --command event --command regs --json
 ```
 
 Launch and attach can still fail when host security policy, permissions, or a

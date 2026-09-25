@@ -119,6 +119,8 @@ fn a_linux_native_session_reports_its_initial_launch_event() {
             "/bin/true",
             "--command",
             "event",
+            "--command",
+            "regs",
             "--json",
         ])
         .output()
@@ -134,9 +136,13 @@ fn a_linux_native_session_reports_its_initial_launch_event() {
     let report: serde_json::Value =
         serde_json::from_str(&stdout[start..]).expect("valid session JSON");
     assert_eq!(report["backend"], "native");
-    assert_eq!(report["final"]["status"], "Suspended");
+    assert_eq!(report["final"]["status"], "Detached");
     assert_eq!(report["results"][0]["event"]["event"], "process_created");
     assert_eq!(report["results"][0]["event"]["pid"], report["pid"]);
+    assert_ne!(
+        report["results"][1]["registers"]["pc"], "0x0",
+        "the agent could not inspect the launch-stop PC"
+    );
 }
 
 /// A watchpoint answers "what wrote this", and the answer is two addresses:
