@@ -109,6 +109,11 @@ pub struct Emulator {
     /// tainted stdin continue on the concrete path; enable for concolic explore.
     pub concolic_stop_on_branch: bool,
 
+    /// Whether guest stdout is echoed to this process's stdout.
+    /// Command-line tools that use stdout for a machine protocol disable this
+    /// and surface guest output through their structured event channel instead.
+    host_stdout: bool,
+
     /// The Virtual File System.
     pub vfs: crate::os::vfs::SimVFS,
 
@@ -408,6 +413,7 @@ impl Emulator {
             pcode_budget_pc: None,
             stdin_buffer: None,
             host_stdin: false,
+            host_stdout: true,
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,
             tick_count: 0,
@@ -1376,7 +1382,27 @@ impl Emulator {
         })
     }
 
-    /// Record bytes the guest wrote to its standard output, and echo them.
+    /// Whether guest stdout should also be echoed to the host process.
+    pub fn set_host_stdout_echo(&mut self, enabled: bool) {
+        self.host_stdout = enabled;
+    }
+
+    /// Write bytes through the guest's virtual file system and echo standard
+    /// output to the host when enabled. Guest stderr stays on host stderr.
+    pub fn guest_write(&mut self, fd: u64, bytes: &[u8]) -> Result<usize> {
+        let written = self.vfs.write(fd, bytes)?;
+        if written > 0 {
+            match fd {
+                1 if self.host_stdout => print!("{}", String::from_utf8_lossy(&bytes[..written])),
+                2 => eprint!("{}", String::from_utf8_lossy(&bytes[..written])),
+                _ => {}
+            }
+        }
+        Ok(written)
+    }
+
+    /// Record bytes the guest wrote to its standard output, and echo them
+    /// unless host stdout echo is disabled for this emulator.
     ///
     /// Recording matters more than echoing: for a program under examination
     /// the output *is* the evidence, and printing it straight to the host's
@@ -1384,9 +1410,7 @@ impl Emulator {
     /// layer has always written through the simulated filesystem; the Windows
     /// stubs printed and forgot.
     pub fn guest_stdout(&mut self, bytes: &[u8]) {
-        const GUEST_STDOUT: u64 = 1;
-        let _ = self.vfs.write(GUEST_STDOUT, bytes);
-        print!("{}", String::from_utf8_lossy(bytes));
+        let _ = self.guest_write(1, bytes);
     }
 
     /// What the guest wrote to its standard error.
@@ -1396,9 +1420,7 @@ impl Emulator {
     /// are doing different things, and a single merged stream loses which was
     /// which.
     pub fn guest_stderr(&mut self, bytes: &[u8]) {
-        const GUEST_STDERR: u64 = 2;
-        let _ = self.vfs.write(GUEST_STDERR, bytes);
-        eprint!("{}", String::from_utf8_lossy(bytes));
+        let _ = self.guest_write(2, bytes);
     }
 
     /// Up to `limit` bytes of whatever stands in for standard input: the

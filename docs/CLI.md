@@ -265,6 +265,25 @@ fission_cli debug session ./target \
   --json
 ```
 
+For observation-driven control, use `--interactive`. The CLI launches or
+attaches first, then reads one command per stdin line. It emits a `session_started`
+JSON line, flushes one `command_result` line for each command, and ends with a
+`session_ended` line. Command errors are returned as `status: "error"` while the
+same session remains available. EOF detaches a live target; the end frame
+reports the cleanup result and final known state. Interactive mode always uses
+JSON Lines, whether or not `--json` is also present. A launch or attach failure
+emits a `session_start_failed` JSON line and exits unsuccessfully.
+
+```bash
+fission_cli debug --emulator session ./guest.elf --interactive
+fission_cli debug session --attach 1234 --interactive
+```
+
+Keep stdin open while choosing commands from prior responses. Use
+`event --timeout-ms 1000` to wait for a native stop or process-exit event. If
+detaching fails during shutdown, the final state is marked unknown and includes
+the last observed state rather than reporting the target as suspended.
+
 The module report keeps runtime mapping ranges and file offsets separate from
 ELF analysis VAs. A resolved ELF transform includes `load_bias` and the formula
 `runtime_va = analysis_va + load_bias`; the bias is derived by matching actual

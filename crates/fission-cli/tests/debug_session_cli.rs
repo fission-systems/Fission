@@ -9,7 +9,11 @@
 //! runs on the host but the CLI itself.
 #![cfg(feature = "debugger")]
 
-use std::process::Command;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_fission_cli"))
@@ -21,6 +25,104 @@ fn pe_fixture() -> String {
         "/../fission-emulator/testdata/win_x64_write.exe"
     )
     .to_string()
+}
+
+fn elf_fixture() -> String {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fission-emulator/testdata/x64_concolic_branch_sys.elf"
+    )
+    .to_string()
+}
+
+fn linux_hello_fixture() -> String {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fission-emulator/testdata/linux_x64_hello_sys.elf"
+    )
+    .to_string()
+}
+
+struct InteractiveCli {
+    child: Child,
+    input: Option<ChildStdin>,
+    responses: Receiver<String>,
+}
+
+impl InteractiveCli {
+    fn spawn(args: &[&str]) -> Self {
+        let mut child = cli()
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start the interactive CLI");
+        let input = child.stdin.take().expect("CLI stdin");
+        let stdout = child.stdout.take().expect("CLI stdout");
+        let (sender, responses) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else {
+                    break;
+                };
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            input: Some(input),
+            responses,
+        }
+    }
+
+    fn send(&mut self, command: &str) {
+        let input = self.input.as_mut().expect("session stdin is open");
+        writeln!(input, "{command}").expect("write command");
+        input.flush().expect("flush command");
+    }
+
+    fn close_input(&mut self) {
+        self.input.take();
+    }
+
+    fn next_response(&self) -> serde_json::Value {
+        let line = self
+            .responses
+            .recv_timeout(Duration::from_secs(5))
+            .expect("interactive response arrived before timeout");
+        serde_json::from_str(&line).unwrap_or_else(|error| {
+            panic!("invalid JSONL response ({error}): {line}");
+        })
+    }
+
+    fn wait_success(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = self.child.try_wait().expect("poll CLI status") {
+                assert!(status.success(), "interactive CLI exited with {status}");
+                return;
+            }
+            if Instant::now() >= deadline {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                panic!("interactive CLI did not exit after the session ended");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for InteractiveCli {
+    fn drop(&mut self) {
+        self.input.take();
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
 }
 
 fn run_session(args: &[&str]) -> (bool, serde_json::Value) {
@@ -308,4 +410,270 @@ fn a_script_continues_from_where_the_commands_left_the_machine() {
         "the instruction at the breakpoint disassembled to nothing: {findings:#?}"
     );
     assert_eq!(findings.len(), 4, "{findings:#?}");
+}
+
+#[test]
+fn interactive_emulator_session_answers_each_command_before_eof() {
+    let fixture = elf_fixture();
+    let mut session =
+        InteractiveCli::spawn(&["debug", "--emulator", "session", &fixture, "--interactive"]);
+
+    let started = session.next_response();
+    assert_eq!(started["type"], "session_started");
+    assert_eq!(started["backend"], "emulator");
+    assert_eq!(started["state"]["status"], "suspended");
+    let session_id = started["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_owned();
+    let target = started["target"].clone();
+
+    // The error is a response, not a lost session; the next command still
+    // reaches the same emulator process.
+    session.send("init /tmp/unused-target");
+    let failed = session.next_response();
+    assert_eq!(failed["type"], "command_result");
+    assert_eq!(failed["status"], "error");
+    assert_eq!(failed["session_id"], session_id);
+    assert_eq!(failed["target"], target);
+    assert_eq!(failed["state"]["status"], "suspended");
+
+    session.send("regs");
+    let registers = session.next_response();
+    assert_eq!(registers["status"], "ok");
+    assert_eq!(registers["result"]["registers"]["pc"], "0x400078");
+    assert_eq!(registers["session_id"], session_id);
+    assert_eq!(registers["target"], target);
+
+    // Choose the next command from the first response while stdin remains
+    // open. This is the behavior the former EOF-buffered script could not do.
+    let next = match registers["result"]["registers"]["pc"].as_str() {
+        Some("0x400078") => "step",
+        other => panic!("unexpected initial PC: {other:?}"),
+    };
+    session.send(next);
+    let stepped = session.next_response();
+    assert_eq!(stepped["status"], "ok");
+    assert_eq!(stepped["result"]["pc"], "0x40007c");
+    assert_eq!(stepped["session_id"], session_id);
+    assert_eq!(stepped["target"], target);
+
+    session.send("detach");
+    let detached = session.next_response();
+    assert_eq!(detached["status"], "ok");
+    assert_eq!(detached["state"]["status"], "detached");
+    let ended = session.next_response();
+    assert_eq!(ended["type"], "session_ended");
+    assert_eq!(ended["reason"], "detached");
+    assert_eq!(ended["state"]["status"], "detached");
+    session.wait_success();
+}
+
+#[test]
+fn interactive_emulator_eof_detaches_and_target_exit_is_reported() {
+    let fixture = elf_fixture();
+    let mut eof_session =
+        InteractiveCli::spawn(&["debug", "--emulator", "session", &fixture, "--interactive"]);
+    let started = eof_session.next_response();
+    eof_session.close_input();
+    let ended = eof_session.next_response();
+    assert_eq!(ended["reason"], "input_eof");
+    assert_eq!(ended["cleanup"]["status"], "detached");
+    assert_eq!(ended["state"]["status"], "detached");
+    assert_eq!(ended["session_id"], started["session_id"]);
+    eof_session.wait_success();
+
+    let fixture = pe_fixture();
+    let mut exit_session =
+        InteractiveCli::spawn(&["debug", "--emulator", "session", &fixture, "--interactive"]);
+    assert_eq!(exit_session.next_response()["type"], "session_started");
+    exit_session.send("continue");
+    let continued = exit_session.next_response();
+    assert_eq!(continued["status"], "ok", "{continued:#}");
+    assert_eq!(continued["state"]["status"], "terminated");
+    assert!(
+        continued["events"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|event| event["event"] == "output"
+                && event["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("hi"))),
+        "target output should stay in the structured response: {continued:#}"
+    );
+    assert!(
+        continued["events"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|event| event["event"] == "process_exited")
+    );
+    let ended = exit_session.next_response();
+    assert_eq!(ended["reason"], "target_exited");
+    assert_eq!(ended["state"]["status"], "terminated");
+    exit_session.wait_success();
+}
+
+#[test]
+fn interactive_emulator_linux_stdout_is_a_structured_event() {
+    let fixture = linux_hello_fixture();
+    let mut session =
+        InteractiveCli::spawn(&["debug", "--emulator", "session", &fixture, "--interactive"]);
+
+    assert_eq!(session.next_response()["type"], "session_started");
+    session.send("continue");
+    let continued = session.next_response();
+    assert_eq!(continued["status"], "ok", "{continued:#}");
+    assert_eq!(continued["state"]["status"], "terminated");
+    assert!(
+        continued["events"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|event| event["event"] == "output"
+                && event["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("hi\n"))),
+        "Linux guest stdout should be captured in the structured response: {continued:#}"
+    );
+    let ended = session.next_response();
+    assert_eq!(ended["reason"], "target_exited");
+    assert_eq!(ended["state"]["status"], "terminated");
+    session.wait_success();
+}
+
+#[test]
+fn interactive_backend_start_failure_is_structured() {
+    let output = cli()
+        .args([
+            "debug",
+            "--emulator",
+            "session",
+            "--attach",
+            "12345",
+            "--interactive",
+        ])
+        .output()
+        .expect("run the CLI");
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("invalid start-failure JSON: {error}; {output:?}"));
+    assert_eq!(report["type"], "session_start_failed");
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["backend"], "emulator");
+    assert!(
+        report["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("--attach"))
+    );
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn interactive_native_attach_replies_and_detaches_on_eof() {
+    use std::os::unix::process::CommandExt;
+
+    const PR_SET_PTRACER: i32 = 0x59616d61;
+    const PR_SET_PTRACER_ANY: std::ffi::c_ulong = std::ffi::c_ulong::MAX;
+
+    unsafe extern "C" {
+        fn prctl(option: std::ffi::c_int, ...) -> std::ffi::c_int;
+    }
+
+    let mut target_command = Command::new("/bin/sleep");
+    target_command.arg("30");
+    // Yama's restricted ptrace policy allows the test CLI to attach to this
+    // child without changing the host policy.
+    unsafe {
+        target_command.pre_exec(|| {
+            let result = unsafe {
+                prctl(
+                    PR_SET_PTRACER,
+                    PR_SET_PTRACER_ANY,
+                    0 as std::ffi::c_ulong,
+                    0 as std::ffi::c_ulong,
+                    0 as std::ffi::c_ulong,
+                )
+            };
+            if result == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    let mut target = target_command
+        .spawn()
+        .expect("start attachable Linux target");
+    let pid = target.id();
+    let pid_arg = pid.to_string();
+    let mut session =
+        InteractiveCli::spawn(&["debug", "session", "--attach", &pid_arg, "--interactive"]);
+
+    let started = session.next_response();
+    assert_eq!(started["type"], "session_started");
+    assert_eq!(started["backend"], "native");
+    assert_eq!(started["target"]["pid"], pid);
+    let session_id = started["session_id"].clone();
+    session.send("regs");
+    let registers = session.next_response();
+    assert_eq!(registers["status"], "ok", "{registers:#}");
+    assert_eq!(registers["target"]["pid"], pid);
+    assert_eq!(registers["session_id"], session_id);
+
+    session.close_input();
+    let ended = session.next_response();
+    assert_eq!(ended["reason"], "input_eof");
+    assert_eq!(ended["cleanup"]["status"], "detached");
+    assert_eq!(ended["state"]["status"], "detached");
+    session.wait_success();
+
+    assert!(target.try_wait().expect("poll attached target").is_none());
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .expect("attached target is still present");
+    let process_state = stat
+        .rsplit_once(')')
+        .and_then(|(_, tail)| tail.split_whitespace().next())
+        .expect("Linux process state");
+    assert_ne!(process_state, "t", "target remained ptrace-stopped");
+    assert_ne!(process_state, "T", "target remained job-control stopped");
+    target.kill().expect("clean up attached test target");
+    target.wait().expect("reap attached test target");
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn interactive_native_launch_reports_exit_events() {
+    let mut session = InteractiveCli::spawn(&["debug", "session", "/bin/true", "--interactive"]);
+    let started = session.next_response();
+    assert_eq!(started["state"]["status"], "suspended");
+
+    session.send("regs");
+    let registers = session.next_response();
+    assert_eq!(registers["status"], "ok");
+    assert_eq!(registers["target"]["pid"], started["target"]["pid"]);
+
+    session.send("continue");
+    let continued = session.next_response();
+    assert_eq!(continued["status"], "ok", "{continued:#}");
+    if continued["state"]["status"] == "running" {
+        session.send("event --timeout-ms 2000");
+        let event = session.next_response();
+        assert_eq!(event["status"], "ok", "{event:#}");
+        assert_eq!(event["result"]["event"]["event"], "process_exited");
+    } else {
+        assert_eq!(continued["state"]["status"], "terminated", "{continued:#}");
+        assert!(
+            continued["events"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|event| event["event"] == "process_exited")
+        );
+    }
+    let ended = session.next_response();
+    assert_eq!(ended["reason"], "target_exited");
+    assert_eq!(ended["state"]["status"], "terminated");
+    session.wait_success();
 }
