@@ -136,6 +136,7 @@ jobs:
 
             case "$f" in
               crates/fission-dynamic/*|\
+              crates/fission-loader/src/loader/elf/*|\
               crates/fission-cli/src/cli/args/debug.rs|\
               crates/fission-cli/src/cli/args/mod.rs|\
               crates/fission-cli/src/cli/oneshot/debug*.rs|\
@@ -378,7 +379,7 @@ jobs:
 
   # Native debugger tests are feature-gated and exercise OS process control.
   # Keep them out of unrelated Rust changes, but always run them when the
-  # dynamic debugger or its CLI surface changes.
+  # dynamic debugger, its CLI surface, or its ELF loader facts change.
   test-linux-debugger:
     name: 🐛 Native Debugger Tests (Linux)
     needs: [changes]
