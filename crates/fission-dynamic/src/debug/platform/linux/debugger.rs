@@ -896,6 +896,31 @@ mod tests {
     }
 
     #[test]
+    fn non_pie_et_exec_keeps_its_analysis_addresses_at_runtime() {
+        let segments = [
+            fission_loader::loader::elf::ElfLoadSegment {
+                file_offset: 0,
+                virtual_address: 0x0040_0000,
+                file_size: 0x1000,
+                memory_size: 0x1000,
+            },
+            fission_loader::loader::elf::ElfLoadSegment {
+                file_offset: 0x1000,
+                virtual_address: 0x0040_1000,
+                file_size: 0x1000,
+                memory_size: 0x1000,
+            },
+        ];
+        let mappings = [
+            mapping(0x0040_0000, 0x0040_1000, 0),
+            mapping(0x0040_1000, 0x0040_2000, 0x1000),
+        ];
+
+        let load_bias = derive_elf_load_bias(&mappings, &segments).expect("ET_EXEC mapping");
+        assert_eq!(load_bias, 0);
+    }
+
+    #[test]
     fn load_bias_rejects_inconsistent_segment_evidence() {
         let segments = [
             fission_loader::loader::elf::ElfLoadSegment {
