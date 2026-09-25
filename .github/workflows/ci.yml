@@ -36,6 +36,7 @@ jobs:
       run_pass_gate: ${{ steps.filter.outputs.run_pass_gate }}
       run_script_checks: ${{ steps.filter.outputs.run_script_checks }}
       run_tests: ${{ steps.filter.outputs.run_tests }}
+      run_debugger_tests: ${{ steps.filter.outputs.run_debugger_tests }}
       run_cli_smoke: ${{ steps.filter.outputs.run_cli_smoke }}
       run_macos_test: ${{ steps.filter.outputs.run_macos_test }}
     steps:
@@ -72,6 +73,7 @@ jobs:
               echo "run_pass_gate=true"
               echo "run_script_checks=true"
               echo "run_tests=true"
+              echo "run_debugger_tests=true"
               echo "run_cli_smoke=true"
               echo "run_macos_test=true"
             } >> "$GITHUB_OUTPUT"
@@ -90,6 +92,7 @@ jobs:
               echo "run_pass_gate=true"
               echo "run_script_checks=false"
               echo "run_tests=true"
+              echo "run_debugger_tests=true"
               echo "run_cli_smoke=true"
               if [ "${{ github.event_name }}" = "push" ]; then
                 echo "run_macos_test=true"
@@ -109,6 +112,7 @@ jobs:
           SECURITY_META=false
           DOCS=false
           OTHER=false
+          DEBUGGER_TESTS=false
 
           while IFS= read -r f; do
             [ -z "$f" ] && continue
@@ -128,6 +132,15 @@ jobs:
               *)
                 # unknown paths are treated as rust-adjacent for safety
                 OTHER=true ;;
+            esac
+
+            case "$f" in
+              crates/fission-dynamic/*|\
+              crates/fission-cli/src/cli/args/debug.rs|\
+              crates/fission-cli/src/cli/args/mod.rs|\
+              crates/fission-cli/src/cli/oneshot/debug*.rs|\
+              crates/fission-cli/tests/debug_*.rs)
+                DEBUGGER_TESTS=true ;;
             esac
           done <<< "$CHANGED"
 
@@ -180,6 +193,7 @@ jobs:
             echo "run_pass_gate=${RUN_PASS}"
             echo "run_script_checks=${RUN_SCRIPTS}"
             echo "run_tests=${RUN_TESTS}"
+            echo "run_debugger_tests=${DEBUGGER_TESTS}"
             echo "run_cli_smoke=${RUN_SMOKE}"
             echo "run_macos_test=${RUN_MACOS}"
           } >> "$GITHUB_OUTPUT"
@@ -362,6 +376,20 @@ jobs:
       crates: "fission-loader,fission-analysis-db,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode"
       profile: debug
 
+  # Native debugger tests are feature-gated and exercise OS process control.
+  # Keep them out of unrelated Rust changes, but always run them when the
+  # dynamic debugger or its CLI surface changes.
+  test-linux-debugger:
+    name: 🐛 Native Debugger Tests (Linux)
+    needs: [changes]
+    if: needs.changes.outputs.run_debugger_tests == 'true'
+    uses: ./.github/workflows/reusable-run-tests.yml
+    with:
+      os: ubuntu-latest
+      crates: "fission-dynamic,fission-cli"
+      features: "fission-dynamic/interactive_runtime,fission-cli/debugger"
+      profile: debug
+
   cli-smoke-linux:
     name: 🧭 CLI Smoke (Linux · PE sample)
     needs: [changes, test-linux]
@@ -394,6 +422,7 @@ jobs:
         script-checks,
         pass-gate-lint,
         test-linux,
+        test-linux-debugger,
         cli-smoke-linux,
         test-macos,
       ]
@@ -436,6 +465,7 @@ jobs:
           require_if "${{ needs.changes.outputs.run_script_checks }}" "Script checks" "${{ needs.script-checks.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_pass_gate }}" "Pass-gate lint" "${{ needs.pass-gate-lint.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_tests }}" "Linux tests" "${{ needs.test-linux.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_debugger_tests }}" "Linux debugger tests" "${{ needs.test-linux-debugger.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_cli_smoke }}" "CLI smoke" "${{ needs.cli-smoke-linux.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_macos_test }}" "macOS tests" "${{ needs.test-macos.result }}" || FAILED=1
 

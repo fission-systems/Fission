@@ -11,6 +11,11 @@ on:
         type: string
         required: false
         description: "Specific crates to test (comma-separated, e.g. fission-pcode,fission-loader)"
+      features:
+        type: string
+        required: false
+        default: ""
+        description: "Cargo features to enable for the selected packages"
       profile:
         type: string
         required: false
@@ -110,8 +115,14 @@ jobs:
             exit 1
           fi
           echo "Testing packages: ${package_flags[*]}"
+          features="${{ inputs.features }}"
+          feature_flags=()
+          if [ -n "$features" ]; then
+            feature_flags+=(--features "$features")
+          fi
           cargo nextest run \
             "${package_flags[@]}" \
+            "${feature_flags[@]}" \
             --locked \
             --no-fail-fast \
             --retries ${{ inputs.retries }} \
@@ -131,8 +142,13 @@ jobs:
             [ -z "$crate" ] && continue
             package_flags+=(-p "$crate")
           done
+          features="${{ inputs.features }}"
+          feature_flags=()
+          if [ -n "$features" ]; then
+            feature_flags+=(--features "$features")
+          fi
           # Soft: doctests are not release-blocking in Fast Gate historically.
-          cargo test --doc "${package_flags[@]}" --locked \
+          cargo test --doc "${package_flags[@]}" "${feature_flags[@]}" --locked \
             ${{ inputs.profile == 'release' && '--release' || '' }} || true
 
       # --- Full workspace mode ---
@@ -141,6 +157,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          features="${{ inputs.features }}"
+          feature_flags=()
+          if [ -n "$features" ]; then
+            feature_flags+=(--features "$features")
+          fi
           exclude_flags=()
           if [ -n "${{ inputs.exclude_crates }}" ]; then
             IFS=',' read -ra EX <<< "${{ inputs.exclude_crates }}"
@@ -152,6 +173,7 @@ jobs:
           fi
           cargo nextest run \
             --workspace \
+            "${feature_flags[@]}" \
             "${exclude_flags[@]}" \
             --locked \
             --no-fail-fast \
@@ -161,6 +183,7 @@ jobs:
           if echo "${{ inputs.exclude_crates }}" | tr ',' '\n' | grep -qx 'fission-static'; then
             cargo nextest run \
               -p fission-static \
+              "${feature_flags[@]}" \
               --locked \
               --no-fail-fast \
               --retries ${{ inputs.retries }} \
