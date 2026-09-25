@@ -619,6 +619,110 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
 }
 
 #[test]
+fn preview_type_hints_elide_incompatible_pointer_return_cast() {
+    let int32 = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let uint8 = NirType::Int {
+        bits: 8,
+        signed: false,
+    };
+    let pointer = NirType::Ptr(Box::new(NirType::Unknown));
+    let mut integer_func = HirFunction {
+        name: "returns_integer".to_string(),
+        locals: vec![NirBinding {
+            name: "integer_temp".to_string(),
+            ty: int32.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }],
+        return_type: pointer.clone(),
+        body: vec![HirStmt::Return(Some(HirExpr::Cast {
+            ty: pointer.clone(),
+            expr: Box::new(HirExpr::Cast {
+                ty: uint8.clone(),
+                expr: Box::new(HirExpr::Var("integer_temp".to_string())),
+            }),
+        }))],
+        ..Default::default()
+    };
+    let integer_context = PreviewTypeContext {
+        function_hints: Some(PreviewFunctionHints {
+            return_type_name: Some("int".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    apply_preview_type_hints(
+        &mut integer_func,
+        &integer_context,
+        &crate::midend::HashMap::default(),
+    );
+
+    assert_eq!(integer_func.return_type, int32);
+    let HirStmt::Return(Some(HirExpr::Cast { ty, .. })) = &integer_func.body[0] else {
+        panic!("the inner integer cast should remain on the return expression");
+    };
+    assert_eq!(ty, &uint8);
+    let rendered = print_hir_function(&integer_func);
+    assert!(
+        rendered.starts_with("int returns_integer(void)"),
+        "rendered:\n{rendered}"
+    );
+    assert!(!rendered.contains("(void *)"), "rendered:\n{rendered}");
+
+    let mut pointer_func = HirFunction {
+        name: "returns_pointer".to_string(),
+        locals: vec![NirBinding {
+            name: "pointer_temp".to_string(),
+            ty: pointer.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }],
+        return_type: pointer.clone(),
+        body: vec![HirStmt::Return(Some(HirExpr::Cast {
+            ty: pointer,
+            expr: Box::new(HirExpr::Var("pointer_temp".to_string())),
+        }))],
+        ..Default::default()
+    };
+    let pointer_context = PreviewTypeContext {
+        function_hints: Some(PreviewFunctionHints {
+            return_type_name: Some("void *".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    apply_preview_type_hints(
+        &mut pointer_func,
+        &pointer_context,
+        &crate::midend::HashMap::default(),
+    );
+
+    assert!(matches!(
+        &pointer_func.body[0],
+        HirStmt::Return(Some(HirExpr::Cast {
+            ty: NirType::Ptr(_),
+            ..
+        }))
+    ));
+    let rendered = print_hir_function(&pointer_func);
+    assert!(
+        rendered.starts_with("void * returns_pointer(void)"),
+        "rendered:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("return (void *)pointer_temp;"),
+        "rendered:\n{rendered}"
+    );
+}
+
+#[test]
 fn preview_type_hints_create_missing_surface_params_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001420".to_string(),
