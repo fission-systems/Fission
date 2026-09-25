@@ -92,6 +92,31 @@ mod layered_tests {
     }
 
     #[test]
+    fn render_import_thunk_uses_c11_unspecified_parameter_list() {
+        let hir = HirFunction {
+            name: "import_thunk".to_string(),
+            return_type: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "__fission_branchind".to_string(),
+                args: vec![HirExpr::Var("callee".to_string())],
+                ty: NirType::Unknown,
+            })],
+            ..HirFunction::default()
+        };
+
+        let rendered = render_hir_function_with_global_decls(&hir, &MlilPreviewOptions::default());
+
+        assert!(
+            rendered.contains("unsigned long long import_thunk()\n"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("import_thunk(...)"), "{rendered}");
+    }
+
+    #[test]
     fn unknown_arity_called_extern_uses_c11_unspecified_parameter_list() {
         assert_eq!(
             render_called_extern("callee", &NirType::Float { bits: 64 }, None,),
@@ -1181,7 +1206,7 @@ fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
     let return_type = opaque_pcodeop_return_type_name(return_ty);
     let return_stmt = opaque_pcodeop_default_return(return_ty);
     format!(
-        "static inline {return_type} {}(...) {{ {return_stmt} }}\n",
+        "static inline {return_type} {}() {{ {return_stmt} }}\n",
         sanitize_c_identifier(target)
     )
 }
@@ -2486,7 +2511,7 @@ mod global_decl_tests {
         );
         assert!(
             rendered.contains(
-                "static inline fission_agg16 __pcodeop_294(...) { fission_agg16 out = {0}; return out; }"
+                "static inline fission_agg16 __pcodeop_294() { fission_agg16 out = {0}; return out; }"
             ),
             "{rendered}"
         );

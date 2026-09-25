@@ -544,15 +544,15 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
         // through the import slot, which carries no evidence of arity either
         // way, while the call sites pass arguments. Six of the sixteen thunks
         // in a mingw-built PE are called with arguments and every one of them
-        // was an error. `(...)` is the C23 spelling for "arity unknown", and
-        // is legal on a definition as well as a declaration.
-        out.push_str(
-            if is_import_thunk_body(&func.body) || variadic_fixed_arity == Some(0) {
-                "..."
-            } else {
-                "void"
-            },
-        );
+        // was an error. Use the empty non-prototype list supported by the
+        // project's C11 output contract; `(...)` is only valid starting in C23.
+        out.push_str(if is_import_thunk_body(&func.body) {
+            ""
+        } else if variadic_fixed_arity == Some(0) {
+            "..."
+        } else {
+            "void"
+        });
     } else {
         let fixed_arity = variadic_fixed_arity.unwrap_or(func.params.len());
         for (idx, param) in func.params.iter().take(fixed_arity).enumerate() {
@@ -1150,9 +1150,10 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                     }
                 };
                 (
-                    // `(*)()` asserts an arity of zero since C23; the arity of an
-                    // indirect call is exactly what is not known here.
-                    format!("(({ret_ty} (*)(...))({fn_ptr}))({remaining_args})"),
+                    // An empty function-pointer parameter list is a C11
+                    // non-prototype type, so the call keeps its observed args
+                    // without asserting a signature that was not recovered.
+                    format!("(({ret_ty} (*)())({fn_ptr}))({remaining_args})"),
                     120,
                 )
             } else {
@@ -1849,9 +1850,10 @@ fn print_expr_prec_ctx(
                     }
                 };
                 (
-                    // `(*)()` asserts an arity of zero since C23; the arity of an
-                    // indirect call is exactly what is not known here.
-                    format!("(({ret_ty} (*)(...))({fn_ptr}))({remaining_args})"),
+                    // An empty function-pointer parameter list is a C11
+                    // non-prototype type, so the call keeps its observed args
+                    // without asserting a signature that was not recovered.
+                    format!("(({ret_ty} (*)())({fn_ptr}))({remaining_args})"),
                     120,
                 )
             } else {
@@ -2567,6 +2569,50 @@ mod tests {
             rendered.starts_with("unsigned long long defined_helper(const char* format, ...)\n"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn import_thunk_definition_uses_c11_unspecified_parameter_list() {
+        let hir = HirFunction {
+            name: "import_thunk".to_string(),
+            return_type: u64_ty(),
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "__fission_branchind".to_string(),
+                args: vec![HirExpr::Var("callee".to_string())],
+                ty: NirType::Unknown,
+            })],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.starts_with("unsigned long long import_thunk()\n"),
+            "{rendered}"
+        );
+        assert!(!rendered.starts_with("unsigned long long import_thunk(...)"));
+    }
+
+    #[test]
+    fn opaque_indirect_call_uses_c11_nonprototype_function_pointer() {
+        let expr = HirExpr::Call {
+            target: "__fission_callind_opaque".to_string(),
+            args: vec![
+                HirExpr::Var("callee".to_string()),
+                HirExpr::Const(7, u64_ty()),
+            ],
+            ty: u64_ty(),
+        };
+        let expected = "((unsigned long long (*)())(callee))(7)";
+
+        assert_eq!(print_expr_prec(&expr, 0, 0), expected);
+
+        let hir = HirFunction {
+            body: vec![HirStmt::Expr(expr.clone())],
+            ..HirFunction::default()
+        };
+        let ctx = PrintCtx::build(&hir);
+        assert_eq!(print_expr_prec_ctx(&expr, 0, 0, &ctx), expected);
     }
 
     #[test]
