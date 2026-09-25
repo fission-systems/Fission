@@ -244,13 +244,23 @@ whether the backend is available in this build, and lists every debugger
 operation as supported, conditional, or unsupported with structured reasons.
 The text form is intended for inspection; Agents should use `--json`.
 
-Native debugging currently uses Linux `ptrace` on Linux. Attach can still fail
-when the host's ptrace policy or permissions deny access. Windows live
-debugging requires a build with `--features windows_native_debugger`, and
-access to an individual process can still be denied. The macOS process-listing
-helper exists, but native debugger process control is not implemented. Use
-`--emulator` for supported guest binaries; a reported emulator capability
-does not guarantee that every guest architecture or instruction is supported.
+Native debugging currently uses Linux `ptrace` on Linux. Linux launch starts
+the child with `PTRACE_TRACEME` and returns at the exec stop, before the target
+executes its first user-space instruction. Use `debug session` to consume the
+initial process event and inspect that startup state in the same debugger
+session, for example:
+
+```bash
+fission_cli debug session ./target --command event --command regs --json
+```
+
+Launch and attach can still fail when host security policy, permissions, or a
+container's syscall filter denies ptrace. Windows live debugging requires a
+build with `--features windows_native_debugger`, and access to an individual
+process can still be denied. The macOS process-listing helper exists, but
+native debugger process control is not implemented. Use `--emulator` for
+supported guest binaries; a reported emulator capability does not guarantee
+that every guest architecture or instruction is supported.
 
 Treat a supported operation as an implementation capability, not as proof
 that a target exists, is accessible, or will execute successfully. Inspect the

@@ -109,6 +109,42 @@ fn an_emulated_session_reports_the_backend_it_is_actually_using() {
     assert_eq!(result["schema_version"], 1);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_linux_native_session_reports_its_initial_launch_event() {
+    let output = cli()
+        .args([
+            "debug",
+            "session",
+            "/bin/true",
+            "--command",
+            "event",
+            "--command",
+            "regs",
+            "--json",
+        ])
+        .output()
+        .expect("run native Linux debug session");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "native launch failed.\nstdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let start = stdout.find('{').expect("session JSON report");
+    let report: serde_json::Value =
+        serde_json::from_str(&stdout[start..]).expect("valid session JSON");
+    assert_eq!(report["backend"], "native");
+    assert_eq!(report["final"]["status"], "Detached");
+    assert_eq!(report["results"][0]["event"]["event"], "process_created");
+    assert_eq!(report["results"][0]["event"]["pid"], report["pid"]);
+    assert_ne!(
+        report["results"][1]["registers"]["pc"], "0x0",
+        "the agent could not inspect the launch-stop PC"
+    );
+}
+
 /// A watchpoint answers "what wrote this", and the answer is two addresses:
 /// the memory and the instruction.
 #[test]
