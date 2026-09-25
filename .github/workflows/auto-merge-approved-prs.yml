@@ -1,0 +1,93 @@
+name: Queue approved PRs
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+  pull_request_review:
+    types:
+      - submitted
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List eligible PRs without enabling auto-merge"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: queue-approved-prs
+  cancel-in-progress: false
+
+jobs:
+  queue:
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Queue approved main PRs for native auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_review" && "$HEAD_REPOSITORY" != "$REPOSITORY" ]]; then
+            echo "::notice::Fork review events use a read-only token; the scheduled check will queue eligible PRs."
+            exit 0
+          fi
+
+          pull_requests="$(
+            gh pr list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --base main \
+              --limit 1000 \
+              --json number,isDraft,reviewDecision,autoMergeRequest
+          )"
+
+          eligible_prs="$(
+            jq -r '
+              .[]
+              | select(
+                  .isDraft == false
+                  and .reviewDecision == "APPROVED"
+                  and .autoMergeRequest == null
+                )
+              | .number
+            ' <<< "$pull_requests"
+          )"
+
+          if [[ -z "$eligible_prs" ]]; then
+            echo "No approved, non-draft main PRs need auto-merge queued."
+            exit 0
+          fi
+
+          while IFS= read -r pr_number; do
+            if [[ ! "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Unexpected pull request number: $pr_number"
+              exit 1
+            fi
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Dry run: would queue native squash auto-merge for PR #$pr_number."
+            else
+              echo "Requesting native squash auto-merge for PR #$pr_number."
+              gh pr merge "$pr_number" \
+                --repo "$REPOSITORY" \
+                --auto \
+                --squash
+            fi
+          done <<< "$eligible_prs"
