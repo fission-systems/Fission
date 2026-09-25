@@ -442,7 +442,12 @@ Add screenshots for GUI changes
 **Maintainers will:**
 - Review within 3-7 days
 - Provide constructive feedback
-- Merge when approved
+- Approve changes that meet the project requirements
+
+For non-draft pull requests targeting `main`, GitHub Actions requests native
+squash auto-merge after the required approval. The workflow checks every 15
+minutes; GitHub completes the merge only after all branch protection rules pass.
+Manual workflow runs default to a dry run.
 
 ---
 
