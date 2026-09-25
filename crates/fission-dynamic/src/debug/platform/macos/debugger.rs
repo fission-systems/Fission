@@ -71,6 +71,23 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
 }
 
 impl ExecutionBackend for MacOSDebugger {
+    fn capabilities(&self) -> crate::debug::capabilities::DebugBackendCapabilities {
+        use crate::debug::capabilities::{
+            BackendAvailability, CapabilityReason, DebugBackendCapabilities, DebugBackendKind,
+            DebugOperation,
+        };
+
+        DebugBackendCapabilities::new(
+            DebugBackendKind::MacOsNative,
+            BackendAvailability::Unavailable {
+                reason: CapabilityReason::NativeDebuggerNotImplemented,
+            },
+            // Process discovery uses `ps`; native process control is still a
+            // stub and must not be advertised as available.
+            &[DebugOperation::ProcessEnumeration],
+        )
+    }
+
     fn enumerate_processes() -> Vec<ProcessInfo> {
         enumerate_processes()
     }

@@ -1027,6 +1027,8 @@ fn print_help() {
     println!("  fission_cli inventory <SUBCOMMAND> <binary> [OPTIONS]");
     println!("  fission_cli script check --script <FILE>");
     println!("  fission_cli script run <binary> --script <FILE> [--json]");
+    println!("  fission_cli debug capabilities [--json]");
+    println!("  fission_cli debug --emulator capabilities [--json]");
     println!("  fission_cli debug init <path> [args...] [--json]");
     println!("  fission_cli debug attach <PID> [--json]");
     println!("  fission_cli debug detach");
@@ -1073,7 +1075,7 @@ fn print_help() {
     println!("  inventory  Operator-oriented inventory and batch emitters");
     println!("  script     Rhai automation against read-only binary inventory");
     println!(
-        "  debug      Debug emulated targets; native Windows debugging requires --features windows_native_debugger"
+        "  debug      Headless emulation and platform-native debugger operations; run debug capabilities"
     );
     println!();
     println!("Decomp options:");

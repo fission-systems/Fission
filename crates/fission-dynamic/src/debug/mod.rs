@@ -22,6 +22,7 @@
 //! ```
 
 // Core modules
+pub mod capabilities;
 pub mod memory;
 pub mod platform;
 pub mod timeline;
@@ -52,6 +53,11 @@ pub mod macos {
 }
 
 // Re-export the Debugger trait and TimeTravelDebugger trait
+pub use capabilities::{
+    BackendAvailability, CapabilityReason, DEBUG_CAPABILITIES_SCHEMA_VERSION,
+    DebugBackendCapabilities, DebugBackendKind, DebugOperation, OperationCapability,
+    OperationSupport, RuntimeRequirement,
+};
 pub use traits::{ExecutionBackend, TimeTravelDebugger};
 
 // Re-export commonly used types

@@ -184,7 +184,10 @@ enum CliCommand {
     Db(DbArgs),
     /// Rhai scripts over read-only binary inventory (`binary.*`, `emit`)
     Script(ScriptArgs),
-    /// Debug emulated targets, or live Windows processes with the native-debugger feature
+    /// Headless emulation and platform-native debugger operations
+    #[command(
+        long_about = "Headless debugger commands for emulated and native targets.\n\nNative debugging uses Linux ptrace on Linux builds; Windows requires `--features windows_native_debugger`; macOS native process control is not implemented. Run `fission_cli debug capabilities --json` to inspect the selected backend and operation support before use. Reported support does not guarantee target availability or operating-system permissions.\n"
+    )]
     Debug(DebugArgs),
     /// Sandbox (emulator) execution
     Sandbox(SandboxArgs),
@@ -1404,11 +1407,12 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
 mod debug;
 #[allow(unused_imports)]
 pub use debug::{
-    DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs, DebugCommand,
-    DebugDllBpArgs, DebugExBpArgs, DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs,
-    DebugInitArgs, DebugMemBpArgs, DebugModuleArgs, DebugProtectArgs, DebugReadArgs,
-    DebugSessionArgs, DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
-    DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
+    DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs,
+    DebugCapabilitiesArgs, DebugCommand, DebugDllBpArgs, DebugExBpArgs, DebugFindArgs,
+    DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs, DebugMemBpArgs, DebugModuleArgs,
+    DebugProtectArgs, DebugReadArgs, DebugSessionArgs, DebugSetRegArgs, DebugStackPeekArgs,
+    DebugStackPopArgs, DebugStackPushArgs, DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg,
+    MemoryBpKindArg,
 };
 
 #[cfg(test)]
