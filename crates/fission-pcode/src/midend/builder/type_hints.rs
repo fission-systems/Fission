@@ -1,6 +1,7 @@
 use super::*;
 use crate::midend::abstract_location::AbstractStackSlot;
 use crate::midend::support::pcode_util::InputMetatype;
+use fission_midend_core::util::expr::expr_type as hir_expr_type;
 use fission_midend_core::util::var_rename::{
     rename_var_in_expr, rename_vars_in_stmts, rewrite_field_access_names_in_stmts,
 };
@@ -881,7 +882,8 @@ fn apply_function_name_hints(
     {
         func.surface_return_type_name = Some(return_type_name.to_string());
         stats.explicit_return_type_hit += 1;
-        if let Some(bits) = surface_integer_return_bits(return_type_name) {
+        if let Some(NirType::Int { bits, signed }) = surface_integer_return_type(return_type_name) {
+            func.return_type = NirType::Int { bits, signed };
             elide_surface_return_casts(&mut func.body, bits);
         }
         if return_type_name == "void" {
@@ -2032,7 +2034,7 @@ fn struct_base_name_for_single_pointer(type_name: &str) -> Option<&str> {
     if inner.is_empty() { None } else { Some(inner) }
 }
 
-fn surface_integer_return_bits(type_name: &str) -> Option<u32> {
+fn surface_integer_return_type(type_name: &str) -> Option<NirType> {
     let normalized = type_name
         .trim()
         .trim_start_matches("const ")
@@ -2043,19 +2045,23 @@ fn surface_integer_return_bits(type_name: &str) -> Option<u32> {
     if normalized.contains('*') {
         return None;
     }
-    match normalized.as_str() {
-        "int" | "signed int" | "unsigned int" | "uint" | "dword" | "undefined4" => Some(32),
-        "short" | "signed short" | "unsigned short" | "word" | "undefined2" => Some(16),
-        "char" | "signed char" | "unsigned char" | "byte" | "undefined1" => Some(8),
-        _ => None,
-    }
+    let (bits, signed) = match normalized.as_str() {
+        "int" | "signed int" => (32, true),
+        "unsigned int" | "uint" | "dword" | "undefined4" => (32, false),
+        "short" | "signed short" => (16, true),
+        "unsigned short" | "word" | "undefined2" => (16, false),
+        "char" | "signed char" => (8, true),
+        "unsigned char" | "byte" | "undefined1" => (8, false),
+        _ => return None,
+    };
+    Some(NirType::Int { bits, signed })
 }
 
 fn elide_surface_return_casts(stmts: &mut [HirStmt], return_bits: u32) {
     for stmt in stmts {
         match stmt {
             HirStmt::Return(Some(expr)) => {
-                if return_cast_is_surface_implied(expr, return_bits) {
+                if return_cast_needs_elision_for_surface_integer(expr, return_bits) {
                     let HirExpr::Cast { expr: inner, .. } = expr else {
                         continue;
                     };
@@ -2095,11 +2101,15 @@ fn elide_surface_return_casts(stmts: &mut [HirStmt], return_bits: u32) {
     }
 }
 
-fn return_cast_is_surface_implied(expr: &HirExpr, return_bits: u32) -> bool {
-    let HirExpr::Cast { ty, .. } = expr else {
+fn return_cast_needs_elision_for_surface_integer(expr: &HirExpr, return_bits: u32) -> bool {
+    let HirExpr::Cast { ty, expr } = expr else {
         return false;
     };
-    matches!(ty, NirType::Int { bits, .. } if *bits == return_bits)
+    match ty {
+        NirType::Int { bits, .. } => *bits == return_bits,
+        NirType::Ptr(_) => matches!(hir_expr_type(expr), NirType::Int { .. }),
+        _ => false,
+    }
 }
 
 fn ensure_missing_hinted_params(
