@@ -47,6 +47,7 @@ struct InteractiveCli {
     child: Child,
     input: Option<ChildStdin>,
     responses: Receiver<String>,
+    stdout_reader: Option<thread::JoinHandle<()>>,
 }
 
 impl InteractiveCli {
@@ -61,7 +62,7 @@ impl InteractiveCli {
         let input = child.stdin.take().expect("CLI stdin");
         let stdout = child.stdout.take().expect("CLI stdout");
         let (sender, responses) = mpsc::channel();
-        thread::spawn(move || {
+        let stdout_reader = thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else {
                     break;
@@ -75,6 +76,7 @@ impl InteractiveCli {
             child,
             input: Some(input),
             responses,
+            stdout_reader: Some(stdout_reader),
         }
     }
 
@@ -103,6 +105,7 @@ impl InteractiveCli {
         loop {
             if let Some(status) = self.child.try_wait().expect("poll CLI status") {
                 assert!(status.success(), "interactive CLI exited with {status}");
+                self.join_stdout_reader();
                 return;
             }
             if Instant::now() >= deadline {
@@ -113,6 +116,12 @@ impl InteractiveCli {
             thread::sleep(Duration::from_millis(10));
         }
     }
+
+    fn join_stdout_reader(&mut self) {
+        if let Some(reader) = self.stdout_reader.take() {
+            reader.join().expect("interactive CLI stdout reader");
+        }
+    }
 }
 
 impl Drop for InteractiveCli {
@@ -121,6 +130,9 @@ impl Drop for InteractiveCli {
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
             let _ = self.child.wait();
+        }
+        if let Some(reader) = self.stdout_reader.take() {
+            let _ = reader.join();
         }
     }
 }
