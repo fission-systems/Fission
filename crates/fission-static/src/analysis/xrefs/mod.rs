@@ -12,6 +12,11 @@ use fission_sleigh::runtime::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::analysis::xref_coverage::{
+    XrefAnalysisLayer, XrefAnalysisState, XrefCoverageUnit, XrefLayerCoverage, XrefOmissionReason,
+    XrefUnsupportedReason,
+};
+
 /// Ghidra-compatible sentinel: reference arises from mnemonic / primary decode path (no operand slot).
 pub const OPERAND_INDEX_MNEMONIC: i32 = -1;
 
@@ -86,15 +91,41 @@ impl XrefDatabase {
 
     /// Build xref database from disassembled executable sections (same criterion as loader).
     pub fn build_from_binary(binary: &fission_loader::loader::LoadedBinary) -> Self {
-        let frontend = binary
-            .load_spec()
-            .and_then(|load_spec| RuntimeSleighFrontend::new_for_load_spec(load_spec).ok());
+        Self::build_from_binary_with_coverage(binary).0
+    }
 
-        let Some(frontend) = frontend.as_ref() else {
-            return Self::new();
+    /// Build xrefs and report the executable/data sections covered by this scan.
+    pub fn build_from_binary_with_coverage(
+        binary: &fission_loader::loader::LoadedBinary,
+    ) -> (Self, XrefLayerCoverage) {
+        let executable_sections = binary
+            .executable_sections()
+            .into_iter()
+            .filter(|section| section.file_size > 0)
+            .count();
+        let pointer_sections = pointer_sweep::PointerSweeper::candidate_section_count(binary);
+        let mut coverage = XrefLayerCoverage::requested(
+            XrefAnalysisLayer::Disassembly,
+            "file-backed executable sections decoded linearly, plus aligned pointer-sized slots in readable non-executable file-backed sections",
+            XrefCoverageUnit::ExecutableOrPointerDataSection,
+        );
+        coverage.candidate_units = executable_sections + pointer_sections;
+
+        let Some(load_spec) = binary.load_spec() else {
+            coverage.mark_unsupported(XrefUnsupportedReason::LoadSpecUnavailable);
+            coverage.finalize();
+            return (Self::new(), coverage);
+        };
+        let frontend = match RuntimeSleighFrontend::new_for_load_spec(load_spec) {
+            Ok(frontend) => frontend,
+            Err(_) => {
+                coverage.mark_unsupported(XrefUnsupportedReason::SleighFrontendUnavailable);
+                coverage.finalize();
+                return (Self::new(), coverage);
+            }
         };
 
-        Self::build_with_frontend(binary, frontend)
+        Self::build_with_frontend_and_coverage(binary, &frontend, coverage)
     }
 
     /// Build xref database using a caller-provided Sleigh frontend.
@@ -102,6 +133,26 @@ impl XrefDatabase {
         binary: &fission_loader::loader::LoadedBinary,
         frontend: &RuntimeSleighFrontend,
     ) -> Self {
+        let executable_sections = binary
+            .executable_sections()
+            .into_iter()
+            .filter(|section| section.file_size > 0)
+            .count();
+        let pointer_sections = pointer_sweep::PointerSweeper::candidate_section_count(binary);
+        let mut coverage = XrefLayerCoverage::requested(
+            XrefAnalysisLayer::Disassembly,
+            "file-backed executable sections decoded linearly, plus aligned pointer-sized slots in readable non-executable file-backed sections",
+            XrefCoverageUnit::ExecutableOrPointerDataSection,
+        );
+        coverage.candidate_units = executable_sections + pointer_sections;
+        Self::build_with_frontend_and_coverage(binary, frontend, coverage).0
+    }
+
+    fn build_with_frontend_and_coverage(
+        binary: &fission_loader::loader::LoadedBinary,
+        frontend: &RuntimeSleighFrontend,
+        mut coverage: XrefLayerCoverage,
+    ) -> (Self, XrefLayerCoverage) {
         let mut db = Self::new();
 
         // Every address the image maps, so a data reference can be judged by
@@ -118,23 +169,37 @@ impl XrefDatabase {
             .collect();
 
         for section in binary.executable_sections() {
+            if section.file_size == 0 {
+                continue;
+            }
             let start = section.file_offset as usize;
             let end = start.saturating_add(section.file_size as usize);
             let Some(code) = binary.data.as_slice().get(start..end) else {
+                coverage.omit(XrefOmissionReason::SectionBytesUnavailable, 1);
                 continue;
             };
             let base_addr = section.virtual_address;
-            db.analyze_code(frontend, code, base_addr, &mapped);
+            match db.analyze_code(frontend, code, base_addr, &mapped) {
+                Some(reason) => coverage.omit(reason, 1),
+                None => coverage.completed_units += 1,
+            }
         }
 
         // Sweep data sections for hardcoded pointers to enrich xref coverage
         let sweeper = pointer_sweep::PointerSweeper::new(binary);
-        let data_xrefs = sweeper.sweep(binary);
-        for xref in data_xrefs {
+        let sweep = sweeper.sweep_with_coverage(binary);
+        coverage.completed_units += sweep.coverage.completed_sections;
+        coverage.omit(
+            XrefOmissionReason::SectionBytesUnavailable,
+            sweep.coverage.omitted_sections,
+        );
+        for xref in sweep.xrefs {
             db.add_xref(xref);
         }
 
-        db
+        coverage.records_emitted = db.total_refs();
+        coverage.finalize();
+        (db, coverage)
     }
 
     /// Refines the xref database using Value Set Analysis (VSA) over known functions.
@@ -185,9 +250,22 @@ impl XrefDatabase {
         code: &[u8],
         base_addr: u64,
         mapped: &[(u64, u64)],
-    ) {
+    ) -> Option<XrefOmissionReason> {
         let Ok(instructions) = frontend.decode_window(code, base_addr, usize::MAX) else {
-            return;
+            return Some(XrefOmissionReason::InstructionDecodeFailed);
+        };
+        let decoded_bytes = instructions
+            .iter()
+            .map(|instruction| usize::from(instruction.length))
+            .sum::<usize>();
+        let omission = if decoded_bytes < code.len() {
+            Some(if instructions.is_empty() {
+                XrefOmissionReason::InstructionDecodeFailed
+            } else {
+                XrefOmissionReason::UndecodedExecutableTail
+            })
+        } else {
+            None
         };
 
         for instr in instructions {
@@ -255,6 +333,7 @@ impl XrefDatabase {
                 }
             }
         }
+        omission
     }
 }
 

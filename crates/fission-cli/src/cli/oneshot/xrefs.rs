@@ -25,6 +25,7 @@ pub(super) fn run_xrefs(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> 
     if cli.json {
         let mut payload = json!({
             "summary": summary,
+            "analysis": idx.analysis,
             "refs": idx.refs,
         });
 
@@ -67,6 +68,12 @@ pub(super) fn run_xrefs(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> 
     if let Some(note) = &summary.relocation_note {
         writeln!(stdout, "note: {}", note).context("write xref note")?;
     }
+    writeln!(
+        stdout,
+        "xref_analysis: {}",
+        serde_json::to_string(&idx.analysis).context("serialize xref analysis coverage")?
+    )
+    .context("write xref analysis coverage")?;
 
     if let Some(fa) = cli.xref_function {
         match idx.function_summary_for(binary, fa, 0x100) {
@@ -202,6 +209,7 @@ fn report_references_to(
         let payload = json!({
             "target": format!("0x{target:x}"),
             "count": hits.len(),
+            "analysis": idx.analysis,
             "refs": hits,
         });
         println!(
@@ -214,15 +222,26 @@ fn report_references_to(
     if hits.is_empty() {
         writeln!(
             w,
-            "no reference points at 0x{target:x} (try --function-discovery-profile aggressive, \
-             or check the address is the start of the referenced object)"
+            "no indexed reference points at 0x{target:x}; xref_analysis reports which requested layers completed"
         )
         .context("write empty xref --to")?;
+        writeln!(
+            w,
+            "xref_analysis: {}",
+            serde_json::to_string(&idx.analysis).context("serialize xref analysis coverage")?
+        )
+        .context("write xref analysis coverage")?;
         return Ok(());
     }
 
     writeln!(w, "{} reference(s) to 0x{target:x}:", hits.len())
         .context("write xref --to header")?;
+    writeln!(
+        w,
+        "xref_analysis: {}",
+        serde_json::to_string(&idx.analysis).context("serialize xref analysis coverage")?
+    )
+    .context("write xref analysis coverage")?;
     writeln!(
         w,
         "{:>18}  {:<18}  {:<24}  {}",
