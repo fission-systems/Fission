@@ -48,6 +48,18 @@ pub struct SectionInfo {
     pub is_writable: bool,
 }
 
+impl SectionInfo {
+    /// Whether this section describes addressable memory in the loaded image.
+    ///
+    /// Some file-only sections (for example non-allocated ELF debug sections)
+    /// have a virtual-address field, often zero, without any runtime access
+    /// permission. They must not make scalar values look like memory targets.
+    #[must_use]
+    pub const fn is_addressable(&self) -> bool {
+        self.is_readable || self.is_writable || self.is_executable
+    }
+}
+
 /// Information about a loaded binary (safe to send to plugins)
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 pub struct BinaryInfo {

@@ -130,7 +130,7 @@ impl MachoLoader {
                         file_offset: sect.offset as u64,
                         file_size: macho_section_file_size(sect.flags, sect.size),
                         is_executable,
-                        is_readable: true,
+                        is_readable: macho_segment_is_readable(seg.initprot),
                         is_writable: (seg.initprot & 0x02) != 0, // VM_PROT_WRITE = 0x02
                     });
                 }
@@ -346,7 +346,7 @@ impl MachoLoader {
                         file_offset: sect.offset as u64,
                         file_size: macho_section_file_size(sect.flags, sect.size as u64),
                         is_executable,
-                        is_readable: true,
+                        is_readable: macho_segment_is_readable(seg.initprot),
                         is_writable: (seg.initprot & 0x02) != 0,
                     });
                 }
@@ -794,6 +794,11 @@ fn macho_section_has_instructions(flags: u32) -> bool {
     (flags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS)) != 0
 }
 
+fn macho_segment_is_readable(initprot: i32) -> bool {
+    const VM_PROT_READ: i32 = 0x01;
+    initprot & VM_PROT_READ != 0
+}
+
 fn macho_section_file_size(flags: u32, virtual_size: u64) -> u64 {
     const SECTION_TYPE_MASK: u32 = 0x0000_00ff;
     const S_ZEROFILL: u32 = 0x1;
@@ -1004,8 +1009,9 @@ fn parse_macho_thread_entry_point(
 mod tests {
     use super::{
         MachoLoader, MachoSectionRelocInfo, infer_macho_function_sizes, macho_section_file_size,
-        macho_section_has_instructions, macho_thread_state_layout, normalize_macho_symbol_name,
-        parse_macho_relocation_symbols_64, parse_macho_thread_entry_point,
+        macho_section_has_instructions, macho_segment_is_readable, macho_thread_state_layout,
+        normalize_macho_symbol_name, parse_macho_relocation_symbols_64,
+        parse_macho_thread_entry_point,
     };
     use crate::loader::macho::schema::{LC_UNIXTHREAD, SymtabCommand};
     use crate::loader::reader::{ByteReader, Endian};
@@ -1111,6 +1117,14 @@ mod tests {
         assert!(macho_section_has_instructions(0x8000_0400));
         assert!(macho_section_has_instructions(0x0000_0400));
         assert!(!macho_section_has_instructions(0x0000_0001));
+    }
+
+    #[test]
+    fn macho_readability_uses_segment_protection() {
+        assert!(macho_segment_is_readable(0x01));
+        assert!(macho_segment_is_readable(0x03));
+        assert!(!macho_segment_is_readable(0x00));
+        assert!(!macho_segment_is_readable(0x02));
     }
 
     #[test]
