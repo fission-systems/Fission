@@ -37,6 +37,69 @@ fn build_with_inserted_code(stdin: &[u8], offset: usize, code: &[u8], suffix: &s
     build_from_binary(stdin, binary)
 }
 
+fn build_with_many_active_control_branches(stdin: &[u8], branch_count: usize) -> Emulator {
+    let path = fixture_path();
+    let mut bytes = std::fs::read(&path).expect("read fixture");
+    let code_offset = bytes.len();
+    let old_file_size = u64::from_le_bytes(bytes[0x60..0x68].try_into().unwrap());
+    let old_memory_size = u64::from_le_bytes(bytes[0x68..0x70].try_into().unwrap());
+    assert_eq!(old_file_size, code_offset as u64);
+
+    // Append a small x86-64 program to the fixture's executable PT_LOAD:
+    // read one tainted byte, then execute distinct conditional branches that
+    // all reconverge after the final branch. The concrete input keeps each
+    // JNE on its fallthrough path, so every proven scope overlaps at the cap.
+    let mut code = vec![
+        0xb8, 0, 0, 0, 0, // mov eax, 0 (read)
+        0x31, 0xff, // xor edi, edi
+        0x48, 0x89, 0xe6, // mov rsi, rsp
+        0xba, 1, 0, 0, 0, // mov edx, 1
+        0x0f, 0x05, // syscall
+    ];
+    let mut branch_displacements = Vec::with_capacity(branch_count);
+    for _ in 0..branch_count {
+        code.extend_from_slice(&[
+            0x80, 0x3c, 0x24, 0x41, // cmp byte ptr [rsp], 'A'
+            0x0f, 0x85, // jne rel32 to common join
+        ]);
+        branch_displacements.push(code.len());
+        code.extend_from_slice(&[0; 4]);
+    }
+    code.extend_from_slice(&[
+        0x31, 0xff, // xor edi, edi
+        0xe9, // jmp rel32 to common join
+    ]);
+    let final_jump_displacement = code.len();
+    code.extend_from_slice(&[0; 4]);
+    let common_join_offset = code.len();
+    code.extend_from_slice(&[
+        0xb8, 60, 0, 0, 0, // mov eax, 60 (exit)
+        0x0f, 0x05, // syscall
+    ]);
+
+    let image_base = 0x400000u64;
+    let target = image_base + code_offset as u64 + common_join_offset as u64;
+    for displacement_offset in branch_displacements
+        .into_iter()
+        .chain(std::iter::once(final_jump_displacement))
+    {
+        let instruction_end = image_base + code_offset as u64 + displacement_offset as u64 + 4;
+        let displacement = i32::try_from(target as i64 - instruction_end as i64)
+            .expect("generated branch target fits rel32");
+        code[displacement_offset..displacement_offset + 4]
+            .copy_from_slice(&displacement.to_le_bytes());
+    }
+
+    let entry = image_base + code_offset as u64;
+    bytes[0x18..0x20].copy_from_slice(&entry.to_le_bytes());
+    bytes.extend_from_slice(&code);
+    bytes[0x60..0x68].copy_from_slice(&(old_file_size + code.len() as u64).to_le_bytes());
+    bytes[0x68..0x70].copy_from_slice(&(old_memory_size + code.len() as u64).to_le_bytes());
+    let binary = LoadedBinary::from_bytes(bytes, format!("{}-many-branches", path.display()))
+        .expect("load generated executable");
+    build_from_binary(stdin, binary)
+}
+
 fn build_with_clean_overwrite(stdin: &[u8]) -> Emulator {
     // Insert `mov rdi, 0` at the diamond's join, immediately before the exit
     // syscall. This makes the joined value independent of the branch.
@@ -168,7 +231,60 @@ fn branch_controlled_syscall_argument_is_reported_as_control_flow() {
         })
         .expect("taint hit serializes");
         assert_eq!(serialized["kind"], "control");
+
+        let report = fission_emulator::SandboxMetricsReport::from_run(
+            "generated.elf",
+            "ELF",
+            true,
+            emu.pc,
+            emu.metrics.clone(),
+            None,
+        )
+        .with_taint(&emu.taint);
+        let json = serde_json::to_value(report).expect("taint report serializes");
+        assert_eq!(json["behavior"]["taint"]["control_tracking_complete"], true);
+        assert_eq!(json["behavior"]["taint"]["control_scopes_dropped"], 0);
     }
+}
+
+#[test]
+fn control_scope_truncation_is_reported_by_jit_and_test_interpreter() {
+    let mut engine_results = Vec::new();
+    for force_interpreter in [false, true] {
+        let mut emu = build_with_many_active_control_branches(
+            b"A",
+            fission_emulator::TaintState::DEFAULT_CONTROL_SCOPE_CAP + 1,
+        );
+        emu.force_interpreter = force_interpreter;
+        emu.set_shadow_mode(ShadowMode::Taint);
+        let _ = emu.run();
+
+        assert_eq!(emu.taint.control_scopes_dropped(), 1);
+        assert!(!emu.taint.control_tracking_complete());
+        assert!(emu.taint.hits.iter().any(|hit| {
+            hit.kind == fission_emulator::TaintDependencyKind::Control
+                && hit.sink == "syscall arg"
+                && hit.sources.iter().any(|source| source == "read")
+        }));
+
+        let report = fission_emulator::SandboxMetricsReport::from_run(
+            "generated-many-branches.elf",
+            "ELF",
+            true,
+            emu.pc,
+            emu.metrics.clone(),
+            None,
+        )
+        .with_taint(&emu.taint);
+        let json = serde_json::to_value(report).expect("taint report serializes");
+        assert_eq!(
+            json["behavior"]["taint"]["control_tracking_complete"],
+            false
+        );
+        assert_eq!(json["behavior"]["taint"]["control_scopes_dropped"], 1);
+        engine_results.push(emu.taint.hits.clone());
+    }
+    assert_eq!(engine_results[0], engine_results[1]);
 }
 
 #[test]

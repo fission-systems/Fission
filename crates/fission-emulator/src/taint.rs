@@ -74,6 +74,8 @@ pub struct TaintState {
     sets: Vec<Vec<u32>>,
     interner: HashMap<Vec<u32>, u32>,
     control_scopes: Vec<ControlScope>,
+    /// Proven control scopes refused because the active-scope bound was full.
+    control_scopes_dropped: u64,
     pub hits: Vec<TaintHit>,
     /// Hits past the cap. A tainted value in a loop reaches the same sink
     /// every iteration, and a report that grows with the run is unreadable.
@@ -90,7 +92,8 @@ struct ControlScope {
 
 impl TaintState {
     pub const DEFAULT_HIT_CAP: usize = 4096;
-    const DEFAULT_CONTROL_SCOPE_CAP: usize = 128;
+    /// Maximum number of simultaneously tracked implicit-flow scopes.
+    pub const DEFAULT_CONTROL_SCOPE_CAP: usize = 128;
 
     pub fn new() -> Self {
         let mut state = Self {
@@ -109,6 +112,17 @@ impl TaintState {
 
     pub fn sources(&self) -> &[TaintSource] {
         &self.sources
+    }
+
+    /// Number of proven control-scope activations omitted because the active
+    /// scope bound was full. A non-zero value means control-taint tracking for
+    /// this execution is incomplete.
+    pub fn control_scopes_dropped(&self) -> u64 {
+        self.control_scopes_dropped
+    }
+
+    pub fn control_tracking_complete(&self) -> bool {
+        self.control_scopes_dropped == 0
     }
 
     /// Declare a source and return the set id naming just it.
@@ -265,6 +279,8 @@ impl TaintState {
                 reconvergence_pc: join_pc,
                 source_set,
             });
+        } else {
+            self.control_scopes_dropped = self.control_scopes_dropped.saturating_add(1);
         }
     }
 
@@ -408,6 +424,43 @@ mod tests {
         assert_eq!(t.hits[3].kind, TaintDependencyKind::Control);
         assert_eq!(t.data_projection(control), None);
         assert_eq!(t.control_projection(source), None);
+    }
+
+    #[test]
+    fn scope_overflow_is_counted_but_updates_to_tracked_scopes_are_retained() {
+        let mut t = TaintState::new();
+        for index in 0..TaintState::DEFAULT_CONTROL_SCOPE_CAP {
+            let label = format!("branch-{index}");
+            let predicate = t.add_source(source(&label));
+            t.begin_control_scope(0x1000 + index as u64, 0x2000, predicate);
+        }
+
+        let updated = t.add_source(source("existing-scope-update"));
+        t.begin_control_scope(0x1000, 0x2000, updated);
+        assert_eq!(t.control_scopes_dropped(), 0);
+
+        let omitted = t.add_source(source("overflow-scope"));
+        t.begin_control_scope(
+            0x1000 + TaintState::DEFAULT_CONTROL_SCOPE_CAP as u64,
+            0x2000,
+            omitted,
+        );
+        assert_eq!(t.control_scopes_dropped(), 1);
+        assert!(!t.control_tracking_complete());
+
+        let active = t.active_control_set().expect("active control provenance");
+        let labels = t.labels(active);
+        assert!(labels.contains(&"existing-scope-update".to_string()));
+        assert!(!labels.contains(&"overflow-scope".to_string()));
+    }
+
+    #[test]
+    fn control_tracking_is_complete_until_a_scope_is_dropped() {
+        let mut t = TaintState::new();
+        let source = t.add_source(source("input"));
+        assert!(t.control_tracking_complete());
+        t.begin_control_scope(0x10, 0x20, source);
+        assert!(t.control_tracking_complete());
     }
 
     #[test]
