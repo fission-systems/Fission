@@ -407,13 +407,17 @@ fn binding_by_name_mut<'a>(
     bindings.iter_mut().find(|b| b.name == name)
 }
 
-/// Extract the plain variable name from a Call argument expression (if it's
-/// `Var(x)` or `Cast(_, Var(x))`).  Returns `None` for complex expressions.
+/// Extract the binding whose value is passed to a call.
+///
+/// `AddressOfLocal(x)` passes the address of `x`'s storage, not the value
+/// represented by `x`. A callee's pointer parameter contract therefore must
+/// not become a pointer declaration on that local binding. Addressed globals
+/// remain available here for string-literal format inference; they do not
+/// resolve to local or parameter bindings during type propagation.
 fn arg_var_name(expr: &PreHirExpr) -> Option<String> {
     match expr {
-        PreHirExpr::Var(name)
-        | PreHirExpr::AddressOfGlobal(name)
-        | PreHirExpr::AddressOfLocal(name) => Some(name.clone()),
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => Some(name.clone()),
+        PreHirExpr::AddressOfLocal(_) => None,
         PreHirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
         _ => None,
     }
@@ -1011,6 +1015,46 @@ mod tests {
             origin,
             initializer: None,
         }
+    }
+
+    #[test]
+    fn api_pointer_contract_does_not_retype_addressed_aggregate_storage() {
+        let aggregate = NirType::Aggregate {
+            size: 16,
+            fields: Vec::new(),
+        };
+        let mut func = PreHirFunction {
+            name: "aggregate_buffer".to_owned(),
+            locals: vec![PreHirBinding {
+                name: "buffer".to_owned(),
+                ty: aggregate.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(-32)),
+                initializer: None,
+            }],
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                target: "strncpy".to_owned(),
+                args: vec![
+                    PreHirExpr::AddressOfLocal("buffer".to_owned()),
+                    PreHirExpr::AddressOfGlobal("\"seed\"".to_owned()),
+                    PreHirExpr::Const(
+                        12,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    ),
+                ],
+                ty: NirType::Unknown,
+            })],
+            ..Default::default()
+        };
+
+        assert!(api_signature_via_import_aliases("strncpy").is_some());
+        apply_callsite_type_prop_pass(&mut func);
+
+        assert_eq!(func.locals[0].ty, aggregate);
+        assert_eq!(func.locals[0].surface_type_name, None);
     }
 
     fn direct_pointer_summary(
