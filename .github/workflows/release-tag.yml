@@ -64,7 +64,10 @@ jobs:
               const runs = runsData.workflow_runs || [];
               const ok = runs.some((r) => {
                 if (r.status !== "completed" || r.conclusion !== "success") return false;
-                if (eventFilter && r.event !== eventFilter) return false;
+                if (
+                  eventFilter &&
+                  !(Array.isArray(eventFilter) ? eventFilter : [eventFilter]).includes(r.event)
+                ) return false;
                 return true;
               });
               core.info(
@@ -86,12 +89,12 @@ jobs:
             }
             core.info("L0 CI Fast Gate (ci.yml, push) succeeded for this commit.");
 
-            // L1: Heavy may be push / schedule / workflow_dispatch — any success on SHA.
-            const heavyOk = await hasSuccessfulRun("ci-heavy.yml", null);
+            // L1: Heavy must have a successful nightly or manual run on this exact SHA.
+            const heavyOk = await hasSuccessfulRun("ci-heavy.yml", ["schedule", "workflow_dispatch"]);
             if (!heavyOk) {
               core.setFailed(
                 `No successful completed run of workflow ci-heavy.yml for commit ${sha}. ` +
-                  'Wait for "CI Heavy Validation" on this SHA (main push or manual dispatch), then retry. ' +
+                  'Dispatch "CI Heavy Validation" on the candidate ref (or wait for a nightly run on this exact SHA), then retry. ' +
                   "See docs/CI_RELEASE_GATES.md.",
               );
               return;
