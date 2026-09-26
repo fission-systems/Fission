@@ -108,7 +108,7 @@ pub enum DebugCommand {
     /// Switch active thread
     SwitchThread(DebugSwitchThreadArgs),
     /// Poll for the next debug event
-    Event,
+    Event(DebugEventArgs),
     /// Run a list of debugger commands against one live session
     Session(DebugSessionArgs),
 }
@@ -121,7 +121,7 @@ pub struct DebugCapabilitiesArgs {
     pub json: bool,
 }
 
-/// One invocation, one live machine, a list of commands, structured output.
+/// One invocation, one live machine, a list or stream of commands.
 ///
 /// The subcommands above each build a session, attach to a pid, do one thing
 /// and exit -- which works because the OS keeps a native process alive between
@@ -130,12 +130,26 @@ pub struct DebugCapabilitiesArgs {
 /// them against a session that lasts as long as the command does.
 #[derive(Clone, Args, Debug, PartialEq, Eq)]
 #[command(
-    long_about = "Run several debugger commands against one live session.\n\nCommands use the same vocabulary as the subcommands above: `bp 0x401000`, `continue`, `regs`, `read 0x7ffe0000 --size 64`.\n\nThe emulator backend needs this: an emulated process exists only inside the command that launched it, so `debug --emulator bp` followed by `debug --emulator continue` would be two different programs.",
-    after_help = "Examples:\n  fission_cli debug --emulator session sample.exe -c 'bp 0x140001016' -c continue -c regs\n  fission_cli debug --emulator session sample.exe --script plan.txt --json\n  echo 'step\\nregs' | fission_cli debug --emulator session sample.exe --script -"
+    long_about = "Run debugger commands against one live session.\n\nCommands use the same vocabulary as the subcommands above: `bp 0x401000`, `continue`, `regs`, `event --timeout-ms 1000`, `read 0x7ffe0000 --size 64`.\n\nThe emulator backend needs a session because an emulated process exists only inside the command that launched it. `--interactive` reads one command per stdin line and writes one JSON response per line, flushing each response before it reads the next command. EOF detaches the target.\n\nUse `--attach PID` instead of a binary path to keep an existing native process attached for the session.",
+    after_help = "Examples:\n  fission_cli debug --emulator session sample.exe -c 'bp 0x140001016' -c continue -c regs --json\n  fission_cli debug --emulator session sample.exe --script plan.txt --json\n  fission_cli debug --emulator session sample.exe --interactive\n  fission_cli debug session --attach 1234 --interactive"
 )]
 pub struct DebugSessionArgs {
-    /// Executable to launch
-    pub path: String,
+    /// Executable to launch (omit when attaching with --attach)
+    #[arg(
+        value_name = "BINARY",
+        required_unless_present = "attach",
+        conflicts_with = "attach"
+    )]
+    pub path: Option<String>,
+    /// Attach to an existing native process by PID instead of launching a binary
+    #[arg(long, value_name = "PID", conflicts_with = "path")]
+    pub attach: Option<u32>,
+    /// Read commands incrementally from stdin and emit newline-delimited JSON
+    ///
+    /// EOF detaches the process. Each command error is returned in its own
+    /// response and leaves the session available for the next command.
+    #[arg(long, conflicts_with_all = ["script", "rhai", "keep_going"])]
+    pub interactive: bool,
     /// A command to run, repeatable, in order
     #[arg(short = 'c', long = "command")]
     pub commands: Vec<String>,
@@ -154,6 +168,16 @@ pub struct DebugSessionArgs {
     /// Carry on after a command fails instead of stopping there
     #[arg(long)]
     pub keep_going: bool,
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
+}
+
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugEventArgs {
+    /// Maximum time to wait for an event, in milliseconds
+    #[arg(long, default_value_t = 5000)]
+    pub timeout_ms: u32,
     /// Output in JSON format
     #[arg(short, long)]
     pub json: bool,

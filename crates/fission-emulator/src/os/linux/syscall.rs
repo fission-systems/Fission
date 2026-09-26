@@ -75,11 +75,8 @@ impl SimProcedure for SysWrite {
         tracing::info!("sys_write({}, 0x{:X}, {})", fd, buf, count);
 
         let data = ram_read(emu, buf, count as usize).unwrap_or_default();
-        match emu.vfs.write(fd, &data) {
+        match emu.guest_write(fd, &data) {
             Ok(written) => {
-                if fd == 1 || fd == 2 {
-                    print!("{}", String::from_utf8_lossy(&data[..written]));
-                }
                 emu.set_syscall_return(written as u64)?;
             }
             Err(_) => {
@@ -255,10 +252,7 @@ impl SimProcedure for SysWritev {
                 continue;
             }
             let data = ram_read(emu, base, len).unwrap_or_default();
-            if let Ok(n) = emu.vfs.write(fd, &data) {
-                if fd == 1 || fd == 2 {
-                    print!("{}", String::from_utf8_lossy(&data[..n]));
-                }
+            if let Ok(n) = emu.guest_write(fd, &data) {
                 total += n;
             }
         }

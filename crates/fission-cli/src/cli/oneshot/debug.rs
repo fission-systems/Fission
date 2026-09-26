@@ -519,15 +519,28 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             Ok(())
         }
 
-        DebugCommand::Event => {
+        DebugCommand::Event(args) => {
             let state = find_active_state()?;
             let mut session = build_session();
             session.attach(state.pid)?;
-            let event = session.debugger.poll_event(5000)?;
-            if let Some(evt) = event {
+            let event = session.debugger.poll_event(args.timeout_ms)?;
+            if args.json {
+                let report = match event {
+                    Some(event) => serde_json::json!({
+                        "status": "event",
+                        "event": super::debug_session::event_json(&event),
+                    }),
+                    None => serde_json::json!({
+                        "status": "timeout",
+                        "event": null,
+                        "timeout_ms": args.timeout_ms,
+                    }),
+                };
+                println!("{}", serde_json::to_string(&report)?);
+            } else if let Some(evt) = event {
                 println!("{:?}", evt);
             } else {
-                println!("No event within timeout.");
+                println!("No event within {} ms.", args.timeout_ms);
             }
             Ok(())
         }

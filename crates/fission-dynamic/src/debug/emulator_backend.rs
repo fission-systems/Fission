@@ -581,6 +581,10 @@ impl ExecutionBackend for EmulatorBackend {
 
         let mut emu = Emulator::new(state, binary, sleigh, arch, os)
             .map_err(|e| fission_core::err!(debug, "Emulator init failed: {}", e))?;
+        // Guest output is reported as OutputString events. Echoing it to the
+        // host would corrupt machine-readable CLI output such as interactive
+        // JSONL sessions.
+        emu.set_host_stdout_echo(false);
         match image {
             Ok(pe) => emu
                 .apply_windows_image(pe)
