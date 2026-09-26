@@ -689,6 +689,9 @@ pub enum NirTerminator {
 pub struct HirFunction {
     pub name: String,
     pub params: Vec<NirBinding>,
+    /// True when the function's parameter count is unknown. C11 can express
+    /// this as a declaration without a prototype, but cannot define it.
+    pub has_unknown_arity_prototype: bool,
     /// Number of named parameters before a declaration-level variadic tail.
     pub variadic_fixed_arity: Option<usize>,
     pub locals: Vec<NirBinding>,
@@ -721,6 +724,7 @@ impl Default for HirFunction {
         Self {
             name: String::new(),
             params: Vec::new(),
+            has_unknown_arity_prototype: false,
             variadic_fixed_arity: None,
             locals: Vec::new(),
             return_type: NirType::Unknown,
