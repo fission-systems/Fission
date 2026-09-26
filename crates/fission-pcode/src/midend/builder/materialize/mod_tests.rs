@@ -3155,6 +3155,89 @@ fn lookup_def_site_allows_unique_low_view_of_wide_temp() {
 }
 
 #[test]
+fn recursive_stack_address_uses_producer_site() {
+    let rsp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 8);
+    let rdi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x38, 8);
+    let r12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // Preserve the incoming output pointer in a callee-saved register.
+            op(0, PcodeOpcode::Copy, Some(r12.clone()), vec![rdi.clone()]),
+            // Reuse the argument register later as a local stack address.
+            op(
+                1,
+                PcodeOpcode::IntAdd,
+                Some(rdi.clone()),
+                vec![rsp, Varnode::constant(0x30, 8)],
+            ),
+            op(
+                2,
+                PcodeOpcode::Store,
+                None,
+                vec![
+                    Varnode::constant(3, 4),
+                    r12.clone(),
+                    Varnode::constant(0, 16),
+                ],
+            ),
+            op(
+                3,
+                PcodeOpcode::Store,
+                None,
+                vec![
+                    Varnode::constant(3, 4),
+                    rdi.clone(),
+                    Varnode::constant(0, 16),
+                ],
+            ),
+        ],
+    )]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.selection_axis = fission_midend_core::ir::SelectionAxis::Jumps;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.stack_frame_size = 0x40;
+    builder.rsp_prologue_delta_table.insert(
+        LoweringSite {
+            block_idx: 0,
+            op_idx: 1,
+        },
+        -0x10,
+    );
+    builder.rsp_prologue_delta_table.insert(
+        LoweringSite {
+            block_idx: 0,
+            op_idx: 3,
+        },
+        -0x20,
+    );
+
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 2,
+    });
+    assert_eq!(
+        builder.resolve_stack_address(&r12),
+        None,
+        "the preserved output pointer must not inherit the argument register's later stack value"
+    );
+
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 3,
+    });
+    assert_eq!(
+        builder
+            .resolve_stack_address(&rdi)
+            .map(|(_, offset)| offset),
+        Some(0x60),
+        "the copied stack address must use the RSP value at its producer operation"
+    );
+}
+
+#[test]
 fn arm_immediate_through_unique_temp_recovers_stack_local_address() {
     // ARM lifts `add.w r3,sp,#0x6` as `Copy u <- const(6)` followed by
     // `IntAdd r3 <- sp, u`, so the displacement reaches the add as a
