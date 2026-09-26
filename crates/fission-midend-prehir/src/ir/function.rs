@@ -93,6 +93,7 @@ impl PreHirFunction {
                 .into_iter()
                 .map(dir_binding_to_nir_binding)
                 .collect(),
+            has_unknown_arity_prototype: false,
             variadic_fixed_arity: self.variadic_fixed_arity,
             locals: self
                 .locals

@@ -505,54 +505,40 @@ pub(crate) fn print_hir_function_with_profile(
     print_hir_function_impl(func, ctx)
 }
 
-/// Whether a body is nothing but an indirect jump through an import slot.
-///
-/// This is what the midend synthesises for a PE import thunk: the real callee
-/// lives in another module, so the body has no parameter uses to recover an
-/// arity from. Distinguishing it from a function that genuinely takes nothing
-/// is the difference between "unknown" and "none".
-fn is_import_thunk_body(body: &[HirStmt]) -> bool {
-    let [HirStmt::Expr(HirExpr::Call { target, .. })] = body else {
-        return false;
-    };
-    matches!(
-        target.as_str(),
-        "__fission_branchind" | "__fission_dispatcher_indirect" | "__fission_callind_opaque"
-    )
+/// Whether C11 can only express this callable as a declaration without a
+/// prototype. A C function definition with an empty parameter list declares
+/// zero parameters, so it cannot stand in for an unknown-arity thunk.
+pub(super) fn has_unknown_arity_declaration(func: &HirFunction) -> bool {
+    let variadic_fixed_arity = func
+        .variadic_fixed_arity
+        .or_else(|| is_known_variadic_runtime_symbol(&func.name).then_some(func.params.len()));
+    func.params.is_empty() && (func.has_unknown_arity_prototype || variadic_fixed_arity == Some(0))
 }
 
 fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
-    let mut out = String::new();
     let return_type = func
         .surface_return_type_name
         .clone()
         .unwrap_or_else(|| print_return_type(&func.return_type));
-    out.push_str(&format!(
-        "{return_type} {}(",
-        if ctx.sanitize_symbols {
-            sanitize_c_identifier(&func.name)
-        } else {
-            func.name.clone()
-        }
-    ));
+    let function_name = if ctx.sanitize_symbols {
+        sanitize_c_identifier(&func.name)
+    } else {
+        func.name.clone()
+    };
+    if has_unknown_arity_declaration(func) {
+        // C11 has no syntax for defining a function with an unknown number of
+        // parameters. Keep the no-prototype contract as a declaration; the
+        // opaque thunk body cannot be represented faithfully in this dialect.
+        return format!("extern {return_type} {function_name}();\n");
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!("{return_type} {function_name}("));
     let variadic_fixed_arity = func
         .variadic_fixed_arity
         .or_else(|| is_known_variadic_runtime_symbol(&func.name).then_some(func.params.len()));
     if func.params.is_empty() {
-        // `(void)` asserts the function takes nothing. For an import thunk
-        // that is false and provably so: its whole body is one indirect jump
-        // through the import slot, which carries no evidence of arity either
-        // way, while the call sites pass arguments. Six of the sixteen thunks
-        // in a mingw-built PE are called with arguments and every one of them
-        // was an error. Use the empty non-prototype list supported by the
-        // project's C11 output contract; `(...)` is only valid starting in C23.
-        out.push_str(if is_import_thunk_body(&func.body) {
-            ""
-        } else if variadic_fixed_arity == Some(0) {
-            "..."
-        } else {
-            "void"
-        });
+        out.push_str("void");
     } else {
         let fixed_arity = variadic_fixed_arity.unwrap_or(func.params.len());
         for (idx, param) in func.params.iter().take(fixed_arity).enumerate() {
@@ -2572,10 +2558,11 @@ mod tests {
     }
 
     #[test]
-    fn import_thunk_definition_uses_c11_unspecified_parameter_list() {
+    fn import_thunk_uses_c11_unknown_arity_declaration() {
         let hir = HirFunction {
             name: "import_thunk".to_string(),
             return_type: u64_ty(),
+            has_unknown_arity_prototype: true,
             body: vec![HirStmt::Expr(HirExpr::Call {
                 target: "__fission_branchind".to_string(),
                 args: vec![HirExpr::Var("callee".to_string())],
@@ -2587,10 +2574,26 @@ mod tests {
         let rendered = print_hir_function(&hir);
 
         assert!(
-            rendered.starts_with("unsigned long long import_thunk()\n"),
+            rendered.starts_with("extern unsigned long long import_thunk();\n"),
             "{rendered}"
         );
-        assert!(!rendered.starts_with("unsigned long long import_thunk(...)"));
+        assert!(!rendered.contains("import_thunk()\n{"));
+        assert!(!rendered.contains("import_thunk(...)"));
+    }
+
+    #[test]
+    fn zero_fixed_variadic_definition_uses_c11_no_prototype_declaration() {
+        let hir = HirFunction {
+            name: "opaque_variadic".to_string(),
+            return_type: u64_ty(),
+            variadic_fixed_arity: Some(0),
+            body: vec![HirStmt::Return(Some(HirExpr::Const(0, u64_ty())))],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert_eq!(rendered, "extern unsigned long long opaque_variadic();\n");
     }
 
     #[test]
