@@ -6,6 +6,7 @@
 use super::globals::is_c_identifier;
 use super::layer::{LayeredPseudocode, PrintProfile};
 use super::presentation::apply_hir_presentation_with_globals;
+use super::printer::has_unknown_arity_declaration;
 use super::printer::surface_type_definition_source;
 use super::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
@@ -92,9 +93,10 @@ mod layered_tests {
     }
 
     #[test]
-    fn render_import_thunk_uses_c11_unspecified_parameter_list() {
+    fn render_import_thunk_uses_c11_unknown_arity_declaration() {
         let hir = HirFunction {
             name: "import_thunk".to_string(),
+            has_unknown_arity_prototype: true,
             return_type: NirType::Int {
                 bits: 64,
                 signed: false,
@@ -110,10 +112,12 @@ mod layered_tests {
         let rendered = render_hir_function_with_global_decls(&hir, &MlilPreviewOptions::default());
 
         assert!(
-            rendered.contains("unsigned long long import_thunk()\n"),
+            rendered.contains("extern unsigned long long import_thunk();"),
             "{rendered}"
         );
+        assert!(!rendered.contains("import_thunk()\n{"), "{rendered}");
         assert!(!rendered.contains("import_thunk(...)"), "{rendered}");
+        assert!(!rendered.contains("__fission_branchind"), "{rendered}");
     }
 
     #[test]
@@ -577,12 +581,18 @@ fn render_hir_function_with_profile(
     options: &MlilPreviewOptions,
     profile: PrintProfile,
 ) -> String {
-    let decls = collect_referenced_global_decls(hir, options);
+    let mut printable = hir.clone();
+    if has_unknown_arity_declaration(hir) {
+        // An unknown-arity thunk is a declaration in C11. Its forwarding
+        // body cannot be defined faithfully without knowing its parameters.
+        printable.body.clear();
+        printable.locals.clear();
+    }
+    let decls = collect_referenced_global_decls(&printable, options);
     // Address-spelled globals could have acquired a rescue Temp binding in an
     // older/alternate lowering path. Once the mapped address and a referenced
     // global declaration prove the storage class, do not print a shadowing
     // automatic declaration for the same object.
-    let mut printable = hir.clone();
     printable
         .locals
         .retain(|binding| !decls.contains_key(&binding.name));
@@ -1204,9 +1214,8 @@ fn render_called_extern(target: &str, return_ty: &NirType, declared: Option<&Str
 
 fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
     let return_type = opaque_pcodeop_return_type_name(return_ty);
-    let return_stmt = opaque_pcodeop_default_return(return_ty);
     format!(
-        "static inline {return_type} {}() {{ {return_stmt} }}\n",
+        "extern {return_type} {}();\n",
         sanitize_c_identifier(target)
     )
 }
@@ -1215,18 +1224,6 @@ fn opaque_pcodeop_return_type_name(return_ty: &NirType) -> String {
     match return_ty {
         NirType::Unknown => "unsigned long long".to_string(),
         _ => print_type(return_ty),
-    }
-}
-
-fn opaque_pcodeop_default_return(return_ty: &NirType) -> String {
-    match return_ty {
-        NirType::Aggregate { size, .. } => {
-            format!("fission_agg{size} out = {{0}}; return out;")
-        }
-        NirType::Ptr(_) => format!("return ({})0;", print_type(return_ty)),
-        NirType::Float { .. } => "return 0.0;".to_string(),
-        NirType::Bool => "return false;".to_string(),
-        NirType::Unknown | NirType::Int { .. } => "return 0;".to_string(),
     }
 }
 
@@ -2510,9 +2507,7 @@ mod global_decl_tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains(
-                "static inline fission_agg16 __pcodeop_294() { fission_agg16 out = {0}; return out; }"
-            ),
+            rendered.contains("extern fission_agg16 __pcodeop_294();"),
             "{rendered}"
         );
         assert!(rendered.contains("xVar30 = __pcodeop_294();"), "{rendered}");

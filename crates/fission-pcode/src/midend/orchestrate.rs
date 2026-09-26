@@ -18,7 +18,7 @@ use super::{
     render_layered_pseudocode, structuring,
 };
 use crate::pcode::PcodeFunction;
-use fission_loader::loader::LoadedBinary;
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_midend_structuring::StructuringHost;
 // Owner crate (not pcode re-export path) — keeps orchestrate boundary explicit.
 use fission_midend_normalize::{
@@ -516,6 +516,9 @@ fn render_mlil_preview_with_binary_and_context_output(
     // structural conversion (`prehir_stmts_to_hir_stmts`).
     let hir_body = fission_midend_prehir::ir::prehir_stmts_to_hir_stmts(hir.body.clone());
     let mut hir = hir.into_hir_function(hir_body);
+    hir.has_unknown_arity_prototype = binary
+        .and_then(|binary| binary.function_at_exact(address))
+        .is_some_and(is_unknown_arity_thunk);
     // Returned structured observation, captured for the typed output for the
     // same reason the legacy compatibility snapshot exists below
     // above: the fully-finalized `HirFunction` (structured body, plus the
@@ -615,6 +618,11 @@ fn render_mlil_preview_with_binary_and_context_output(
         build_stats: Some(build_stats),
         hint_stats,
     })
+}
+
+fn is_unknown_arity_thunk(function: &FunctionInfo) -> bool {
+    function.kind.as_deref() == Some("import_thunk")
+        || (function.is_thunk_like && !function.is_export)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -719,6 +727,30 @@ pub fn render_nir_with_binary_and_context_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_non_export_thunk_metadata_marks_unknown_arity() {
+        let import_thunk = FunctionInfo {
+            kind: Some("import_thunk".to_string()),
+            is_thunk_like: true,
+            ..FunctionInfo::default()
+        };
+        let hidden_thunk = FunctionInfo {
+            is_thunk_like: true,
+            ..FunctionInfo::default()
+        };
+        let export_thunk = FunctionInfo {
+            kind: Some("export_thunk".to_string()),
+            is_export: true,
+            is_thunk_like: true,
+            ..FunctionInfo::default()
+        };
+
+        assert!(is_unknown_arity_thunk(&import_thunk));
+        assert!(is_unknown_arity_thunk(&hidden_thunk));
+        assert!(!is_unknown_arity_thunk(&export_thunk));
+        assert!(!is_unknown_arity_thunk(&FunctionInfo::default()));
+    }
 
     #[test]
     fn dual_layer_stitch_preserves_scored_nir_surface() {

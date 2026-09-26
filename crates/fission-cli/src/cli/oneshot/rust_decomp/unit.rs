@@ -291,15 +291,12 @@ mod tests {
     #[test]
     fn project_keeps_c11_unspecified_parameter_list_for_import_thunk() {
         let unit = assemble(&[
-            "unsigned long long sub_11c0()\n{\n    return 0;\n}\n".to_string(),
+            "extern unsigned long long sub_11c0();\n".to_string(),
             "void caller(void)\n{\n    sub_11c0(1);\n}\n".to_string(),
         ]);
 
         assert!(unit.contains("unsigned long long sub_11c0();"), "{unit}");
-        assert!(
-            unit.contains("unsigned long long sub_11c0()\n{\n"),
-            "{unit}"
-        );
+        assert!(!unit.contains("sub_11c0()\n{"), "{unit}");
         assert!(!unit.contains("sub_11c0(...)"), "{unit}");
     }
 
