@@ -31,6 +31,10 @@ pub(super) fn read_process_mappings(
 ) -> std::io::Result<(Vec<LinuxProcessMapping>, Vec<String>)> {
     let path = format!("/proc/{pid}/maps");
     let content = std::fs::read_to_string(&path)?;
+    Ok(parse_process_mappings(&content, &path))
+}
+
+fn parse_process_mappings(content: &str, path: &str) -> (Vec<LinuxProcessMapping>, Vec<String>) {
     let mut mappings = Vec::new();
     let mut diagnostics = Vec::new();
 
@@ -41,7 +45,11 @@ pub(super) fn read_process_mappings(
         }
     }
 
-    Ok((mappings, diagnostics))
+    if mappings.is_empty() && diagnostics.is_empty() {
+        diagnostics.push(format!("{path} contained no mapping records"));
+    }
+
+    (mappings, diagnostics)
 }
 
 /// Linux-specific memory manager
@@ -256,7 +264,7 @@ impl PlatformMemory for LinuxMemory {
 
 #[cfg(test)]
 mod tests {
-    use super::{LinuxMemory, decode_proc_maps_path};
+    use super::{LinuxMemory, decode_proc_maps_path, parse_process_mappings};
 
     #[test]
     fn proc_maps_parser_preserves_file_coordinates_and_decodes_path() {
@@ -293,6 +301,15 @@ mod tests {
     fn proc_maps_parser_rejects_invalid_ranges_and_offsets() {
         assert!(LinuxMemory::parse_maps_line("1000-1000 r--p 0 00:00 0 [heap]").is_none());
         assert!(LinuxMemory::parse_maps_line("1000-2000 r--p nope 00:00 0 [heap]").is_none());
+    }
+
+    #[test]
+    fn empty_proc_maps_response_is_reported_incomplete() {
+        let (mappings, diagnostics) = parse_process_mappings("", "/proc/123/maps");
+
+        assert!(mappings.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].contains("no mapping records"));
     }
 
     #[test]
