@@ -57,6 +57,16 @@ fn native_capability_query_is_structured_and_does_not_need_a_target() {
             "conditional"
         }
     );
+    assert_eq!(
+        operation(&report, "module_list")["support"]["status"],
+        if cfg!(target_os = "linux")
+            || (cfg!(target_os = "windows") && cfg!(feature = "windows_native_debugger"))
+        {
+            "conditional"
+        } else {
+            "unsupported"
+        }
+    );
 }
 
 #[test]

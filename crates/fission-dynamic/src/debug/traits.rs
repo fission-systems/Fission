@@ -400,6 +400,70 @@ pub trait ExecutionBackend: Send {
     fn get_state(&self) -> super::types::DebugState {
         super::types::DebugState::default()
     }
+
+    /// Query the currently attached process's modules and runtime mappings.
+    ///
+    /// The default preserves event-driven backends: it returns their known
+    /// modules but labels the result partial because those events do not prove
+    /// that every mapping or static/runtime address transform is available.
+    /// Backends with an authoritative live mapping source should override it.
+    fn list_modules(&mut self) -> FissionResult<super::types::ModuleListReport> {
+        use super::capabilities::{DebugOperation, OperationSupport};
+        use super::types::{
+            ModuleAddressTransform, ModuleListCompleteness, ModuleListReport, ProcessMemoryMapping,
+            ProcessModule,
+        };
+
+        let supported = self
+            .capabilities()
+            .operation(DebugOperation::ModuleList)
+            .is_some_and(|capability| {
+                !matches!(&capability.support, OperationSupport::Unsupported { .. })
+            });
+        if !supported {
+            return Err(fission_core::FissionError::debug(
+                "modules listing is not supported by this backend",
+            ));
+        }
+
+        let pid = self
+            .attached_pid()
+            .ok_or_else(|| fission_core::FissionError::debug("Not attached to a process"))?;
+        let state = self.get_state();
+        let modules = state
+            .modules
+            .into_values()
+            .map(|module| ProcessModule {
+                path: module.path.clone(),
+                name: module.name,
+                device: None,
+                inode: None,
+                mappings: vec![ProcessMemoryMapping {
+                    runtime_start: module.base_address,
+                    runtime_end: module.base_address.saturating_add(module.size),
+                    file_offset: None,
+                    permissions: None,
+                    path: Some(module.path),
+                }],
+                address_transform: ModuleAddressTransform::Unavailable {
+                    reason: "backend reports module events but not file-offset address mapping"
+                        .to_string(),
+                },
+            })
+            .collect();
+
+        Ok(ModuleListReport {
+            schema_version: 1,
+            pid,
+            completeness: ModuleListCompleteness::Partial,
+            modules,
+            other_mappings: Vec::new(),
+            diagnostics: vec![
+                "module records reflect backend-observed events; mapping completeness is not guaranteed"
+                    .to_string(),
+            ],
+        })
+    }
 }
 
 // ============================================================================

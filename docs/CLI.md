@@ -254,6 +254,28 @@ session, for example:
 fission_cli debug session ./target --command event --command regs --json
 ```
 
+Linux sessions can also query loaded files and non-file-backed mappings while
+the process is stopped:
+
+```bash
+fission_cli debug session ./target \
+  --command 'modules --json' \
+  --command regs \
+  --command detach \
+  --json
+```
+
+The module report keeps runtime mapping ranges and file offsets separate from
+ELF analysis VAs. A resolved ELF transform includes `load_bias` and the formula
+`runtime_va = analysis_va + load_bias`; the bias is derived by matching actual
+process-map file offsets against `PT_LOAD` ranges and is reported only when
+those matches agree. Addresses in the report are hexadecimal strings.
+`other_mappings` holds anonymous and special mappings (for example stacks,
+heaps, and vDSO). A `partial` completeness status or a per-module unavailable
+transform means the Agent must not infer an address conversion from that data.
+Other backends may return event-observed modules without Linux file-offset
+details, and label those reports partial.
+
 Launch and attach can still fail when host security policy, permissions, or a
 container's syscall filter denies ptrace. Windows live debugging requires a
 build with `--features windows_native_debugger`, and access to an individual
