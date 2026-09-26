@@ -26,6 +26,8 @@ jobs:
     name: Code Coverage
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Coverage is diagnostic; tool or infrastructure failures must not block L1.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 
