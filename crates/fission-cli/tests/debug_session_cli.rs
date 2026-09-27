@@ -97,6 +97,18 @@ fn a_windows_binary_is_debugged_from_one_command_line() {
     assert_eq!(report["final"]["status"], "Terminated");
 }
 
+#[test]
+fn an_emulated_session_reports_the_backend_it_is_actually_using() {
+    let (ok, report) = run_session(&["-c", "capabilities"]);
+    assert!(ok, "capability query failed in the session: {report:#}");
+
+    let result = &report["results"][0];
+    assert_eq!(result["status"], "ok");
+    assert_eq!(result["backend"], "emulator");
+    assert_eq!(result["availability"]["status"], "available");
+    assert_eq!(result["schema_version"], 1);
+}
+
 /// A watchpoint answers "what wrote this", and the answer is two addresses:
 /// the memory and the instruction.
 #[test]

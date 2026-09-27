@@ -186,6 +186,44 @@ impl Default for EmulatorBackend {
 }
 
 impl ExecutionBackend for EmulatorBackend {
+    fn capabilities(&self) -> crate::debug::capabilities::DebugBackendCapabilities {
+        use crate::debug::capabilities::{
+            BackendAvailability, DebugBackendCapabilities, DebugBackendKind, DebugOperation,
+            RuntimeRequirement,
+        };
+
+        DebugBackendCapabilities::new(
+            DebugBackendKind::Emulator,
+            BackendAvailability::Available,
+            &[
+                DebugOperation::Launch,
+                DebugOperation::Attach,
+                DebugOperation::Detach,
+                DebugOperation::ContinueExecution,
+                DebugOperation::PollEvent,
+                DebugOperation::SingleStep,
+                DebugOperation::StepOver,
+                DebugOperation::StepOut,
+                DebugOperation::SoftwareBreakpoints,
+                DebugOperation::MemoryWatchpoints,
+                DebugOperation::RegisterRead,
+                DebugOperation::RegisterWrite,
+                DebugOperation::MemoryRead,
+                DebugOperation::MemoryWrite,
+                DebugOperation::ThreadList,
+                DebugOperation::ThreadSwitch,
+            ],
+        )
+        .conditionally_supporting(
+            DebugOperation::Attach,
+            &[RuntimeRequirement::EmulatedMachineIsRunning],
+        )
+        .conditionally_supporting(
+            DebugOperation::Launch,
+            &[RuntimeRequirement::BinaryFormatAndArchitectureAreSupported],
+        )
+    }
+
     fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
         self.timeline = Some(timeline);
     }
