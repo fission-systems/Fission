@@ -19,13 +19,14 @@ This document is the policy source for how Fission promotes a git commit to a
 | Layer | Workflow | When | Role |
 |-------|----------|------|------|
 | **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core+midend tests, CLI smoke, NIR gate. **PR = Linux-first**; macOS test smoke on `main` push. Windows release tests remain in L1. Docs/wiki-only short-circuits |
-| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every non-documentation `main` push + nightly + dispatch | **Push:** release-critical crates, platforms, NIR-check, MSRV. **Nightly/dispatch:** also full workspace tests, Miri, coverage. Docs/wiki-only pushes skip L1. |
+| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Nightly + manual dispatch | Full Linux workspace tests, Windows tests and native debugger, macOS release CLI build, MSRV, and non-blocking coverage. Dispatch it for the release candidate SHA before tagging. |
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
 | **L3 CD** | [`cd.yml`](../.github/workflows/cd.yml) | Tag push `v*.*.*` / `X.Y.Z` | Multi-platform CLI archives (each includes `utils/`) → GitHub Release |
 
 ```text
-main push ──► L0 Fast Gate ──► L1 Heavy (async)
+main push ──► L0 Fast Gate
+nightly or manual dispatch on candidate ref ──► L1 Heavy
                     │
                     ▼
      Actions / gh workflow run "Release Tag (CI green)"
@@ -47,7 +48,6 @@ main push ──► L0 Fast Gate ──► L1 Heavy (async)
 - MinGW-built PE fixture from [`.github/fixtures/test_functions.c`](../.github/fixtures/test_functions.c)
 - `info`, `list --json`, `decomp --json` (validated), `raw-pcode` at a listed address
 - Decompile several listed functions (multi-addr smoke)
-- Fast automation NIR-check lane with `--no-update-latest` (no baseline promotion)
 
 **Does not cover:**
 
@@ -57,16 +57,18 @@ main push ──► L0 Fast Gate ──► L1 Heavy (async)
 
 ## Operator runbook (tag a release)
 
-1. Land changes on `main`; wait for **CI Fast Gate** and **CI Heavy Validation**
-   green on that commit.
-2. Actions → **Release Tag (CI green)** → set `tag` (`v0.1.4`) and `ref` (`main` or SHA),
+1. Land changes on `main` and wait for **CI Fast Gate** to pass on that commit.
+2. Run **CI Heavy Validation** manually on the release candidate ref and wait for
+   it to pass on the same commit. A nightly run counts when `main` has not moved
+   since that run.
+3. Actions → **Release Tag (CI green)** → set `tag` (`v0.1.4`) and `ref` (`main` or SHA),
    or CLI:
    `gh workflow run "Release Tag (CI green)" -f tag=v0.1.4 -f ref=main`
-3. Workflow verifies L0+L1, runs L2, pushes the annotated tag, then runs
+4. Workflow verifies L0+L1, runs L2, pushes the annotated tag, then runs
    `gh workflow run "CD Release" -f tag=v0.1.4` (same-repo `workflow_dispatch`
    is allowed to chain with `GITHUB_TOKEN`; bare tag push from the token is not).
-4. **CD Release** builds Linux/macOS/Windows assets automatically.
-5. Edit GitHub Release notes; complete remaining checklist in
+5. **CD Release** builds Linux/macOS/Windows assets automatically.
+6. Edit GitHub Release notes; complete remaining checklist in
    [`docs/RELEASE.md`](RELEASE.md).
 
 Manual CD re-run for an existing tag:
@@ -97,20 +99,20 @@ after CD is queued.
 
 Optional: run **Release E2E Gate** alone (dispatch) to pre-validate a SHA without tagging.
 
-## L1 job split (main push vs extended)
+## L1 execution (nightly and release candidates)
 
-On a non-documentation **`push` to `main`**, Heavy runs the **release-critical** set only (so a green
-L1 is achievable and meaningful for decompiler releases):
+Heavy does not run on every `main` push. Nightly and manual runs cover:
 
-- Linux (single nextest process): `fission-core`, midend crates, `loader`,
-  `analysis-db`, `pcode`, `static`, `decompiler`, `automation`, `cli`,
-  `signatures`
-- L0 Fast Gate Linux also runs `fission-analysis-db` (typed program metadata;
-  ADR 0010) so PRs catch snapshot regressions without waiting for L1
-- Windows release tests (midend-structuring/pcode/decompiler/automation)
+- Full Linux workspace tests (including `fission-static`)
+- Windows release tests and native Win32 debugger tests
 - macOS release CLI build
-- Automation NIR-check (`--no-update-latest`)
 - MSRV
+- Coverage (non-blocking)
+
+For a release, dispatch Heavy on the candidate branch or ref and wait for that
+run to finish before starting **Release Tag (CI green)**. The tag workflow
+accepts only a successful Heavy run whose head SHA exactly matches the target.
+A nightly run is sufficient when the candidate has not moved since it ran.
 
 **L0 performance notes (2026-07-17):**
 
@@ -128,17 +130,9 @@ L1 is achievable and meaningful for decompiler releases):
 - **sccache** (GitHub Actions backend) on lint / test / CLI build reusables via
   [`.github/actions/setup-sccache`](../.github/actions/setup-sccache).
 
-On **nightly schedule** or **`workflow_dispatch`**, Heavy runs the full Linux
-workspace suite in place of the narrower release-critical Linux suite, and also runs:
-
-- Full Linux workspace tests
-- The full suite includes the release-critical packages, so Linux tests are not duplicated.
-- Miri (soft environmental issues may still fail until isolation is fixed)
-- Coverage (non-blocking)
-
-`release-tag.yml` requires any successful `ci-heavy.yml` run on the SHA, so a
-green **main-push** Heavy is sufficient to tag (nightly extended failures do
-not block once that SHA already has a green push Heavy).
+`release-tag.yml` requires a successful `ci-heavy.yml` run on the target SHA.
+Scheduled and manually dispatched runs qualify; a run on an earlier commit does
+not satisfy the release gate.
 
 ## Escape hatches
 
