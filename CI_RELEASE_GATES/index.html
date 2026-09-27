@@ -1245,10 +1245,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#l1-job-split-main-push-vs-extended" class="md-nav__link">
+  <a href="#l1-execution-nightly-and-release-candidates" class="md-nav__link">
     <span class="md-ellipsis">
       
-        L1 job split (main push vs extended)
+        L1 execution (nightly and release candidates)
       
     </span>
   </a>
@@ -1341,8 +1341,8 @@
 <tr>
 <td><strong>L1 Heavy</strong></td>
 <td><a href="../.github/workflows/ci-heavy.yml"><code>ci-heavy.yml</code></a></td>
-<td>Every non-documentation <code>main</code> push + nightly + dispatch</td>
-<td><strong>Push:</strong> release-critical crates, platforms, NIR-check, MSRV. <strong>Nightly/dispatch:</strong> also full workspace tests, Miri, coverage. Docs/wiki-only pushes skip L1.</td>
+<td>Nightly + manual dispatch</td>
+<td>Full Linux workspace tests, Windows tests and native debugger, macOS release CLI build, MSRV, and non-blocking coverage. Dispatch it for the release candidate SHA before tagging.</td>
 </tr>
 <tr>
 <td><strong>L2 Release E2E</strong></td>
@@ -1364,18 +1364,19 @@
 </tr>
 </tbody>
 </table>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>main push ──► L0 Fast Gate ──► L1 Heavy (async)
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                    │
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                    ▼
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>     Actions / gh workflow run "Release Tag (CI green)"
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                    │
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                    ├─ verify L0 success (push event, that SHA)
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                    ├─ verify L1 success (that SHA; any event)
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                    ├─ run L2 Release E2E on that SHA
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                    ├─ annotated tag push
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                    └─ gh workflow run "CD Release" -f tag=vX.Y.Z  ──► L3 CD
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                       (GITHUB_TOKEN tag pushes do not re-fire on.push CD;
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                        workflow_dispatch is the reliable path)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>main push ──► L0 Fast Gate
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>nightly or manual dispatch on candidate ref ──► L1 Heavy
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                    │
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                    ▼
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>     Actions / gh workflow run "Release Tag (CI green)"
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                    │
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                    ├─ verify L0 success (push event, that SHA)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                    ├─ verify L1 success (that SHA; any event)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                    ├─ run L2 Release E2E on that SHA
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                    ├─ annotated tag push
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                    └─ gh workflow run "CD Release" -f tag=vX.Y.Z  ──► L3 CD
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                       (GITHUB_TOKEN tag pushes do not re-fire on.push CD;
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>                        workflow_dispatch is the reliable path)
 </span></code></pre></div>
 <h2 id="what-release-e2e-covers-and-does-not">What Release E2E covers (and does not)<a class="headerlink" href="#what-release-e2e-covers-and-does-not" title="Permanent link">&para;</a></h2>
 <p><strong>Covers (blocking for tag):</strong></p>
@@ -1384,7 +1385,6 @@
 <li>MinGW-built PE fixture from <a href="../.github/fixtures/test_functions.c"><code>.github/fixtures/test_functions.c</code></a></li>
 <li><code>info</code>, <code>list --json</code>, <code>decomp --json</code> (validated), <code>raw-pcode</code> at a listed address</li>
 <li>Decompile several listed functions (multi-addr smoke)</li>
-<li>Fast automation NIR-check lane with <code>--no-update-latest</code> (no baseline promotion)</li>
 </ul>
 <p><strong>Does not cover:</strong></p>
 <ul>
@@ -1394,8 +1394,10 @@
 </ul>
 <h2 id="operator-runbook-tag-a-release">Operator runbook (tag a release)<a class="headerlink" href="#operator-runbook-tag-a-release" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Land changes on <code>main</code>; wait for <strong>CI Fast Gate</strong> and <strong>CI Heavy Validation</strong>
-   green on that commit.</li>
+<li>Land changes on <code>main</code> and wait for <strong>CI Fast Gate</strong> to pass on that commit.</li>
+<li>Run <strong>CI Heavy Validation</strong> manually on the release candidate ref and wait for
+   it to pass on the same commit. A nightly run counts when <code>main</code> has not moved
+   since that run.</li>
 <li>Actions → <strong>Release Tag (CI green)</strong> → set <code>tag</code> (<code>v0.1.4</code>) and <code>ref</code> (<code>main</code> or SHA),
    or CLI:
    <code>gh workflow run "Release Tag (CI green)" -f tag=v0.1.4 -f ref=main</code></li>
@@ -1426,20 +1428,19 @@
 <code>actions:write</code> on <code>fission-benchmark</code>) so <strong>Release Tag</strong> auto-runs the bake
 after CD is queued.</p>
 <p>Optional: run <strong>Release E2E Gate</strong> alone (dispatch) to pre-validate a SHA without tagging.</p>
-<h2 id="l1-job-split-main-push-vs-extended">L1 job split (main push vs extended)<a class="headerlink" href="#l1-job-split-main-push-vs-extended" title="Permanent link">&para;</a></h2>
-<p>On a non-documentation <strong><code>push</code> to <code>main</code></strong>, Heavy runs the <strong>release-critical</strong> set only (so a green
-L1 is achievable and meaningful for decompiler releases):</p>
+<h2 id="l1-execution-nightly-and-release-candidates">L1 execution (nightly and release candidates)<a class="headerlink" href="#l1-execution-nightly-and-release-candidates" title="Permanent link">&para;</a></h2>
+<p>Heavy does not run on every <code>main</code> push. Nightly and manual runs cover:</p>
 <ul>
-<li>Linux (single nextest process): <code>fission-core</code>, midend crates, <code>loader</code>,
-  <code>analysis-db</code>, <code>pcode</code>, <code>static</code>, <code>decompiler</code>, <code>automation</code>, <code>cli</code>,
-  <code>signatures</code></li>
-<li>L0 Fast Gate Linux also runs <code>fission-analysis-db</code> (typed program metadata;
-  ADR 0010) so PRs catch snapshot regressions without waiting for L1</li>
-<li>Windows release tests (midend-structuring/pcode/decompiler/automation)</li>
+<li>Full Linux workspace tests (including <code>fission-static</code>)</li>
+<li>Windows release tests and native Win32 debugger tests</li>
 <li>macOS release CLI build</li>
-<li>Automation NIR-check (<code>--no-update-latest</code>)</li>
 <li>MSRV</li>
+<li>Coverage (non-blocking)</li>
 </ul>
+<p>For a release, dispatch Heavy on the candidate branch or ref and wait for that
+run to finish before starting <strong>Release Tag (CI green)</strong>. The tag workflow
+accepts only a successful Heavy run whose head SHA exactly matches the target.
+A nightly run is sufficient when the candidate has not moved since it ran.</p>
 <p><strong>L0 performance notes (2026-07-17):</strong></p>
 <ul>
 <li>Path-filter <strong>lanes</strong>: <code>docs</code> | <code>scripts</code> | <code>ci</code> | <code>rust</code></li>
@@ -1456,17 +1457,9 @@ L1 is achievable and meaningful for decompiler releases):</p>
 <li><strong>sccache</strong> (GitHub Actions backend) on lint / test / CLI build reusables via
   <a href="../.github/actions/setup-sccache"><code>.github/actions/setup-sccache</code></a>.</li>
 </ul>
-<p>On <strong>nightly schedule</strong> or <strong><code>workflow_dispatch</code></strong>, Heavy runs the full Linux
-workspace suite in place of the narrower release-critical Linux suite, and also runs:</p>
-<ul>
-<li>Full Linux workspace tests</li>
-<li>The full suite includes the release-critical packages, so Linux tests are not duplicated.</li>
-<li>Miri (soft environmental issues may still fail until isolation is fixed)</li>
-<li>Coverage (non-blocking)</li>
-</ul>
-<p><code>release-tag.yml</code> requires any successful <code>ci-heavy.yml</code> run on the SHA, so a
-green <strong>main-push</strong> Heavy is sufficient to tag (nightly extended failures do
-not block once that SHA already has a green push Heavy).</p>
+<p><code>release-tag.yml</code> requires a successful <code>ci-heavy.yml</code> run on the target SHA.
+Scheduled and manually dispatched runs qualify; a run on an earlier commit does
+not satisfy the release gate.</p>
 <h2 id="escape-hatches">Escape hatches<a class="headerlink" href="#escape-hatches" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Emergency hot-fix tag without waiting for heavy:</strong> not supported by the
