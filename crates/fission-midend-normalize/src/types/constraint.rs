@@ -20,8 +20,10 @@ pub fn apply_type_constraint_propagation(func: &mut PreHirFunction) -> bool {
     // and assignments (dataflow edges)
     let mut field_accesses = HashMap::<String, HashMap<u32, NirType>>::default();
     let mut assignments = Vec::new(); // Pairs of (lhs_var, rhs_expr)
+    let mut whole_aggregate_store_values = HashSet::default();
 
     collect_constraints(&func.body, &mut field_accesses, &mut assignments);
+    collect_whole_aggregate_store_values(&func.body, &mut whole_aggregate_store_values);
 
     // Initial upgrade of variables to Ptr(Aggregate) if they have field accesses
     for (var_name, fields) in &field_accesses {
@@ -62,7 +64,16 @@ pub fn apply_type_constraint_propagation(func: &mut PreHirFunction) -> bool {
             let lhs_ty = var_types.get(lhs).cloned().unwrap_or(NirType::Unknown);
             let rhs_ty = get_expr_type(rhs, &var_types);
 
-            let unified = if is_fieldless_aggregate(&lhs_ty) && rhs_ty != NirType::Unknown {
+            let has_whole_store_use = match &lhs_ty {
+                NirType::Aggregate { size, fields } if fields.is_empty() => {
+                    whole_aggregate_store_values.contains(&(lhs.clone(), *size))
+                }
+                _ => false,
+            };
+            let unified = if is_fieldless_aggregate(&lhs_ty)
+                && rhs_ty != NirType::Unknown
+                && !has_whole_store_use
+            {
                 Some(rhs_ty.clone())
             } else {
                 unify_types(&lhs_ty, &rhs_ty)
@@ -379,6 +390,77 @@ fn collect_constraints(
                 collect_constraints(default, field_accesses, assignments);
             }
             _ => {}
+        }
+    }
+}
+
+fn direct_value_binding(expr: &PreHirExpr) -> Option<&str> {
+    match expr {
+        PreHirExpr::Var(name) => Some(name),
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::AggregateCopy { src: expr, .. } => {
+            direct_value_binding(expr)
+        }
+        _ => None,
+    }
+}
+
+/// Record bindings whose full aggregate value is stored through a memory
+/// access. A narrow assignment to one of these bindings describes an
+/// initialized portion of the aggregate; it must not collapse the binding to
+/// that one assignment's scalar type.
+fn collect_whole_aggregate_store_values(stmts: &[PreHirStmt], out: &mut HashSet<(String, u32)>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                let access_ty = match lhs {
+                    PreHirLValue::Deref { ty, .. } => Some(ty),
+                    PreHirLValue::Index { elem_ty, .. } => Some(elem_ty),
+                    PreHirLValue::FieldAccess { ty, .. } => Some(ty),
+                    _ => None,
+                };
+                if let (Some(NirType::Aggregate { size, .. }), Some(value)) =
+                    (access_ty, direct_value_binding(rhs))
+                {
+                    out.insert((value.to_owned(), *size));
+                }
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                collect_whole_aggregate_store_values(body, out);
+            }
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(stmt) = init {
+                    collect_whole_aggregate_store_values(std::slice::from_ref(stmt.as_ref()), out);
+                }
+                if let Some(stmt) = update {
+                    collect_whole_aggregate_store_values(std::slice::from_ref(stmt.as_ref()), out);
+                }
+                collect_whole_aggregate_store_values(body, out);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_whole_aggregate_store_values(then_body, out);
+                collect_whole_aggregate_store_values(else_body, out);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_whole_aggregate_store_values(&case.body, out);
+                }
+                collect_whole_aggregate_store_values(default, out);
+            }
+            PreHirStmt::Expr(_)
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
 }
@@ -1168,6 +1250,51 @@ mod tests {
             panic!("expected constant assignment");
         };
         assert_eq!(rhs_ty, &int128);
+    }
+
+    #[test]
+    fn narrow_initializer_does_not_scalarize_whole_aggregate_store_value() {
+        let agg = aggregate(16);
+        let narrow = NirType::Int {
+            bits: 16,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            locals: vec![
+                binding("buffer", agg.clone()),
+                binding("output", NirType::Ptr(Box::new(agg.clone()))),
+                binding("initial_bytes", narrow.clone()),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("buffer".to_owned()),
+                    rhs: PreHirExpr::Var("initial_bytes".to_owned()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::FieldAccess {
+                        base: Box::new(PreHirExpr::Var("output".to_owned())),
+                        field_name: "field_20".to_owned(),
+                        offset: 32,
+                        ty: agg.clone(),
+                    },
+                    rhs: PreHirExpr::Var("buffer".to_owned()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_type_constraint_propagation(&mut func);
+
+        assert_eq!(func.locals[0].ty, agg);
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::FieldAccess { ty, .. },
+            rhs: PreHirExpr::Var(value),
+        } = &func.body[1]
+        else {
+            panic!("expected whole-value aggregate store");
+        };
+        assert_eq!(ty, &agg);
+        assert_eq!(value, "buffer");
     }
 
     #[test]

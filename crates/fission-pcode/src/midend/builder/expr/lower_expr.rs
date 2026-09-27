@@ -285,6 +285,20 @@ impl<'a> PreviewBuilder<'a> {
         vn: &Varnode,
     ) -> Option<(LoweringSite, &'a PcodeOp)> {
         let scope = self.current_lowering_site;
+        self.lookup_def_site_at(vn, scope)
+    }
+
+    /// Resolve a varnode using an explicit use site.
+    ///
+    /// Recursive analyses must move this site to the operation that consumes
+    /// each input. Reusing `current_lowering_site` after following a producer
+    /// can select a later definition of a reused register instead of the value
+    /// that producer actually read.
+    pub(in crate::midend) fn lookup_def_site_at(
+        &self,
+        vn: &Varnode,
+        scope: Option<LoweringSite>,
+    ) -> Option<(LoweringSite, &'a PcodeOp)> {
         let key = VarnodeKey::from(vn);
         let cache_key = (scope, key.clone());
         if let Some(cached_site) = self.lookup_site_cache.borrow().get(&cache_key).copied() {

@@ -680,11 +680,15 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         ptr: &Varnode,
     ) -> Option<(StackBase, i64)> {
-        self.resolve_stack_address_inner(ptr, &mut HashSet::default())
+        self.resolve_stack_address_inner_at(
+            ptr,
+            self.current_lowering_site,
+            &mut HashSet::default(),
+        )
     }
 
     /// Resolves what a *bare* RSP/ESP register-space varnode's occurrence at
-    /// `self.current_lowering_site` should map to in `self.locals`'
+    /// `site` should map to in `self.locals`'
     /// steady-state-rsp-relative coordinate system (the same coordinate
     /// system `resolve_stack_address_from_memory_op`'s asm-text-parsed
     /// `[rsp+K]` displacements and `rsp_local_display_offset` already use --
@@ -729,8 +733,8 @@ impl<'a> PreviewBuilder<'a> {
     /// to fire when RSP's SSA value isn't provably a prologue-constant
     /// offset (falls back to raw pointer arithmetic on a normal local
     /// rather than fabricating a wrong stack-slot name).
-    fn rsp_register_space_offset(&self) -> Option<i64> {
-        if let Some(site) = self.current_lowering_site {
+    fn rsp_register_space_offset_at(&self, site: Option<LoweringSite>) -> Option<i64> {
+        if let Some(site) = site {
             if let Some(delta) = self.rsp_prologue_delta_table.get(&site) {
                 return Some(delta + self.stack_frame_size);
             }
@@ -789,9 +793,10 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn resolve_stack_address_inner(
+    fn resolve_stack_address_inner_at(
         &self,
         ptr: &Varnode,
+        use_site: Option<LoweringSite>,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<(StackBase, i64)> {
         if is_register_space_id(ptr.space_id) {
@@ -845,18 +850,18 @@ impl<'a> PreviewBuilder<'a> {
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => match ptr.offset
                 {
                     0x20 => self
-                        .rsp_register_space_offset()
+                        .rsp_register_space_offset_at(use_site)
                         .map(|off| (StackBase::Rsp, off)),
                     0x28 => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     0x10 if !self.options.is_64bit => self
-                        .rsp_register_space_offset()
+                        .rsp_register_space_offset_at(use_site)
                         .map(|off| (StackBase::Rsp, off)),
                     0x14 if !self.options.is_64bit => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
                 },
                 CallingConvention::X86_32 => match ptr.offset {
                     0x10 => self
-                        .rsp_register_space_offset()
+                        .rsp_register_space_offset_at(use_site)
                         .map(|off| (StackBase::Rsp, off)),
                     0x14 => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
@@ -884,7 +889,9 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(name) = crate::arch::x86::unique_x86_register_name(ptr.offset, ptr.size)
         {
             return match name {
-                "rsp" | "esp" => Some((StackBase::Rsp, 0)),
+                "rsp" | "esp" => self
+                    .rsp_register_space_offset_at(use_site)
+                    .map(|offset| (StackBase::Rsp, offset)),
                 "rbp" | "ebp" => Some((StackBase::Rbp, 0)),
                 _ => None,
             };
@@ -894,8 +901,10 @@ impl<'a> PreviewBuilder<'a> {
         if !visiting.insert(key.clone()) {
             return None;
         }
-        let resolved = match self.lookup_def_site(ptr).map(|(_, op)| op) {
-            Some(op) => self.resolve_stack_address_of_op(op, visiting),
+        let resolved = match self.lookup_def_site_at(ptr, use_site) {
+            Some((definition_site, op)) => {
+                self.resolve_stack_address_of_op(op, Some(definition_site), visiting)
+            }
             None => None,
         };
         visiting.remove(&key);
@@ -913,25 +922,34 @@ impl<'a> PreviewBuilder<'a> {
     fn resolve_stack_address_of_op(
         &self,
         op: &PcodeOp,
+        op_site: Option<LoweringSite>,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<(StackBase, i64)> {
         match op.opcode {
             PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
-                self.resolve_stack_address_inner(op.inputs.first()?, visiting)
+                self.resolve_stack_address_inner_at(op.inputs.first()?, op_site, visiting)
             }
             PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd => {
                 if op.inputs.len() < 2 {
                     None
                 } else if let Some((base, offset)) =
-                    self.resolve_stack_address_inner(&op.inputs[0], visiting)
+                    self.resolve_stack_address_inner_at(&op.inputs[0], op_site, visiting)
                 {
-                    self.resolve_constant_operand(&op.inputs[1])
-                        .map(|delta| (base, offset + delta))
+                    self.resolve_constant_operand_at(
+                        &op.inputs[1],
+                        op_site,
+                        &mut HashSet::default(),
+                    )
+                    .map(|delta| (base, offset + delta))
                 } else if let Some((base, offset)) =
-                    self.resolve_stack_address_inner(&op.inputs[1], visiting)
+                    self.resolve_stack_address_inner_at(&op.inputs[1], op_site, visiting)
                 {
-                    self.resolve_constant_operand(&op.inputs[0])
-                        .map(|delta| (base, offset + delta))
+                    self.resolve_constant_operand_at(
+                        &op.inputs[0],
+                        op_site,
+                        &mut HashSet::default(),
+                    )
+                    .map(|delta| (base, offset + delta))
                 } else {
                     None
                 }
@@ -940,10 +958,14 @@ impl<'a> PreviewBuilder<'a> {
                 if op.inputs.len() < 2 {
                     None
                 } else if let Some((base, offset)) =
-                    self.resolve_stack_address_inner(&op.inputs[0], visiting)
+                    self.resolve_stack_address_inner_at(&op.inputs[0], op_site, visiting)
                 {
-                    self.resolve_constant_operand(&op.inputs[1])
-                        .map(|delta| (base, offset - delta))
+                    self.resolve_constant_operand_at(
+                        &op.inputs[1],
+                        op_site,
+                        &mut HashSet::default(),
+                    )
+                    .map(|delta| (base, offset - delta))
                 } else {
                     None
                 }
@@ -952,10 +974,14 @@ impl<'a> PreviewBuilder<'a> {
                 if op.inputs.len() < 2 {
                     None
                 } else if let Some((base, offset)) =
-                    self.resolve_stack_address_inner(&op.inputs[0], visiting)
+                    self.resolve_stack_address_inner_at(&op.inputs[0], op_site, visiting)
                 {
-                    self.resolve_constant_operand(&op.inputs[1])
-                        .map(|delta| (base, offset + delta))
+                    self.resolve_constant_operand_at(
+                        &op.inputs[1],
+                        op_site,
+                        &mut HashSet::default(),
+                    )
+                    .map(|delta| (base, offset + delta))
                 } else {
                     None
                 }
@@ -1195,12 +1221,13 @@ impl<'a> PreviewBuilder<'a> {
     /// `rbp = rsp(after the unresolved sub) + 0x80` couldn't resolve to a
     /// real offset at all.
     fn resolve_constant_operand(&self, vn: &Varnode) -> Option<i64> {
-        self.resolve_constant_operand_inner(vn, &mut HashSet::default())
+        self.resolve_constant_operand_at(vn, self.current_lowering_site, &mut HashSet::default())
     }
 
-    fn resolve_constant_operand_inner(
+    fn resolve_constant_operand_at(
         &self,
         vn: &Varnode,
+        use_site: Option<LoweringSite>,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<i64> {
         if let Some(value) = signed_const_displacement(vn) {
@@ -1221,15 +1248,14 @@ impl<'a> PreviewBuilder<'a> {
         if !visiting.insert(key.clone()) {
             return None;
         }
-        let resolved = match self.lookup_def_site(vn).map(|(_, op)| op) {
-            Some(op) => match op.opcode {
+        let resolved = match self.lookup_def_site_at(vn, use_site) {
+            Some((definition_site, op)) => match op.opcode {
                 PcodeOpcode::Copy
                 | PcodeOpcode::Cast
                 | PcodeOpcode::IntZExt
-                | PcodeOpcode::IntSExt => op
-                    .inputs
-                    .first()
-                    .and_then(|input| self.resolve_constant_operand_inner(input, visiting)),
+                | PcodeOpcode::IntSExt => op.inputs.first().and_then(|input| {
+                    self.resolve_constant_operand_at(input, Some(definition_site), visiting)
+                }),
                 _ => None,
             },
             None => None,
@@ -1270,7 +1296,11 @@ impl<'a> PreviewBuilder<'a> {
         {
             return None;
         }
-        let (_, offset) = self.resolve_stack_address_of_op(op, &mut HashSet::default())?;
+        let (_, offset) = self.resolve_stack_address_of_op(
+            op,
+            self.current_lowering_site,
+            &mut HashSet::default(),
+        )?;
         let (start, slot) = self.stack_slot_covering(offset)?;
         let base = PreHirExpr::AddressOfLocal(slot.name.clone());
         Some(if offset == start {
