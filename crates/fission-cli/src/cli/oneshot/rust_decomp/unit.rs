@@ -398,9 +398,13 @@ mod tests {
             "void caller(void)\n{\n    sub_11c0(1);\n}\n".to_string(),
         ]);
 
-        assert!(unit.contains("unsigned long long sub_11c0();"), "{unit}");
-        assert!(!unit.contains("sub_11c0()\n{"), "{unit}");
-        assert!(!unit.contains("sub_11c0(...)"), "{unit}");
+        assert!(
+            unit.code.contains("unsigned long long sub_11c0();"),
+            "{}",
+            unit.code
+        );
+        assert!(!unit.code.contains("sub_11c0()\n{"), "{}", unit.code);
+        assert!(!unit.code.contains("sub_11c0(...)"), "{}", unit.code);
     }
 
     #[test]
