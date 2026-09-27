@@ -166,6 +166,52 @@ fn semantic_naming_does_not_duplicate_an_existing_binding_name() {
 }
 
 #[test]
+fn semantic_naming_does_not_rename_a_pointer_local_to_a_parameter_name() {
+    // The first pointer local takes `ptr`; the second may be proposed as `p`,
+    // but a parameter already owns that identifier in the function scope.
+    let mut func = HirFunction {
+        name: "f".into(),
+        params: vec![param("p", ptr_ty())],
+        locals: vec![local("xVar1", ptr_ty()), local("xVar2", ptr_ty())],
+        return_type: NirType::Unknown,
+        body: vec![
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("xVar1".into())),
+                ty: int_ty(32, true),
+            }),
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("xVar2".into())),
+                ty: int_ty(32, true),
+            }),
+        ],
+        ..Default::default()
+    };
+
+    assert!(apply_semantic_naming(&mut func));
+    assert_eq!(func.params[0].name, "p");
+    assert_eq!(
+        func.locals
+            .iter()
+            .map(|binding| binding.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ptr", "xVar2"]
+    );
+    assert_eq!(
+        func.body,
+        vec![
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("ptr".into())),
+                ty: int_ty(32, true),
+            }),
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("xVar2".into())),
+                ty: int_ty(32, true),
+            }),
+        ]
+    );
+}
+
+#[test]
 fn size_naming_renames_memcpy_length_argument() {
     // memcpy(dst, src, param_3);
     let mut func = HirFunction {
