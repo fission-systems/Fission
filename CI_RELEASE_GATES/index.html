@@ -1223,6 +1223,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#main-branch-required-status-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main branch required status check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-release-e2e-covers-and-does-not" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1309,7 +1320,7 @@
 
 
 <h1 id="ci-cd-release-gates-conservative">CI / CD release gates (conservative)<a class="headerlink" href="#ci-cd-release-gates-conservative" title="Permanent link">&para;</a></h1>
-<p><strong>Last updated:</strong> 2026-07-17</p>
+<p><strong>Last updated:</strong> 2026-09-25</p>
 <p>This document is the policy source for how Fission promotes a git commit to a
 <strong>SemVer tag</strong> and a <strong>GitHub Release</strong>. It aligns automation with
 <a href="../RELEASE/"><code>docs/RELEASE.md</code></a> and <a href="../VERSIONING/"><code>docs/VERSIONING.md</code></a>.</p>
@@ -1364,6 +1375,22 @@
 </tr>
 </tbody>
 </table>
+<h2 id="main-branch-required-status-check">Main branch required status check<a class="headerlink" href="#main-branch-required-status-check" title="Permanent link">&para;</a></h2>
+<p>Configure <code>main</code> branch protection to require these two Fast Gate checks by
+their exact check-run names:</p>
+<ul>
+<li><strong><code>🔎 Detect changes</code></strong> — the path/lane classifier, which must complete;</li>
+<li><strong><code>✅ CI Summary</code></strong> — the aggregate gate for every lane-enabled check.</li>
+</ul>
+<p>Do not require lane-specific leaf contexts: the Fast Gate intentionally skips
+unrelated jobs for docs/scripts/CI-only changes, and its documented PR lane is
+Linux-first; the macOS smoke/build gates run after merge in L0/L1.</p>
+<p><code>CI Summary</code> runs for every Fast Gate lane, independently fails when change
+detection fails or returns an unknown lane, and checks that every lane-enabled
+job succeeded. Requiring both contexts keeps strict protection attached to the
+current lane-aware contract instead of retired or conditionally absent job
+names. If either check is renamed, update branch protection and recheck all
+open PRs as part of the same change.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>main push ──► L0 Fast Gate
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>nightly or manual dispatch on candidate ref ──► L1 Heavy
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                    │
