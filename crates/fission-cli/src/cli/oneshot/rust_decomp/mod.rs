@@ -425,6 +425,7 @@ fn run_with_functions(
     let total_postprocess_secs: f64 = results.iter().map(|entry| entry.postprocess_sec).sum();
 
     let mut project_renders: Vec<String> = Vec::new();
+    let mut project_diagnostics = Vec::new();
     for entry in &results {
         if effective_json {
             let mut je = entry.json_entry.clone();
@@ -460,7 +461,9 @@ fn run_with_functions(
     }
 
     if cli.project {
-        all_output = unit::assemble(&project_renders);
+        let assembly = unit::assemble(&project_renders);
+        all_output = assembly.code;
+        project_diagnostics = assembly.diagnostics;
     }
 
     let wall_clock_sec = round_six(init_start.elapsed().as_secs_f64());
@@ -489,6 +492,21 @@ fn run_with_functions(
     } else {
         all_output
     };
+
+    // Project assembly diagnostics describe unresolved declaration evidence,
+    // not optional printer warnings. Keep them available even with
+    // `--no-warnings`, and use one JSON object per line so agents can consume
+    // them without mixing metadata into the emitted C translation unit.
+    if !project_diagnostics.is_empty() {
+        let stderr = io::stderr();
+        let mut stderr = stderr.lock();
+        for diagnostic in &project_diagnostics {
+            serde_json::to_writer(&mut stderr, diagnostic).map_err(|error| {
+                io::Error::other(format!("serialize project diagnostic: {error}"))
+            })?;
+            writeln!(stderr)?;
+        }
+    }
 
     if let Some(ref path) = cli.debug_decomp_bundle {
         if let Some(rows) = debug_bundle_rows.as_ref() {
@@ -664,12 +682,16 @@ mod project_call_arity_tests {
         let project =
             super::unit::assemble(&[rendered_caller.code.clone(), rendered_entry.code.clone()]);
         assert!(
-            project.contains("int main(int argc, char ** argv, char ** envp);"),
-            "the project prototype should come from the typed definition:\n{project}"
+            project
+                .code
+                .contains("int main(int argc, char ** argv, char ** envp);"),
+            "the project prototype should come from the typed definition:\n{}",
+            project.code
         );
         assert!(
-            !project.contains("extern unsigned long long main();"),
-            "the stale inferred declaration must not shadow the project definition:\n{project}"
+            !project.code.contains("extern unsigned long long main();"),
+            "the stale inferred declaration must not shadow the project definition:\n{}",
+            project.code
         );
     }
 }
