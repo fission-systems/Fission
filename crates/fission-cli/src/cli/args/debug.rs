@@ -10,7 +10,7 @@ use clap::{Args, Subcommand};
 #[derive(Clone, Args, Debug, PartialEq, Eq)]
 #[command(
     long_about = "Debugger commands.\n\nUse `--emulator` for emulated execution. Native debugging uses Linux ptrace on Linux builds; Windows requires `--features windows_native_debugger`; macOS native process control is not implemented. Query `debug capabilities` before selecting operations. Reported support does not guarantee target availability or operating-system permissions.\n",
-    after_help = "Examples:\n  fission_cli debug attach 1234\n  fission_cli debug regs\n  fission_cli debug step\n  fission_cli debug bp 0x401000\n  fission_cli debug read 0x401000 --size 32\n  fission_cli debug modules\n  fission_cli debug continue\n  fission_cli debug detach"
+    after_help = "Examples:\n  fission_cli debug attach 1234\n  fission_cli debug regs\n  fission_cli debug step\n  fission_cli debug bp 0x401000\n  fission_cli debug read 0x401000 --size 32\n  fission_cli debug modules --json\n  fission_cli debug continue\n  fission_cli debug detach"
 )]
 pub struct DebugArgs {
     /// Use emulator backend instead of native OS debugger
@@ -102,7 +102,7 @@ pub enum DebugCommand {
     /// List imports from a module
     Imports(DebugModuleArgs),
     /// List loaded modules
-    Modules,
+    Modules(DebugModulesArgs),
     /// List active threads
     Threads,
     /// Switch active thread
@@ -378,6 +378,13 @@ pub struct DebugModuleArgs {
     pub base: u64,
     /// Output in JSON format
     #[arg(short, long)]
+    pub json: bool,
+}
+
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugModulesArgs {
+    /// Emit structured mapping and address-transform evidence
+    #[arg(long)]
     pub json: bool,
 }
 
