@@ -4,8 +4,11 @@
 
 use crate::debug::timeline::Timeline;
 use crate::debug::traits::ExecutionBackend;
-use crate::debug::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
+use crate::debug::types::{
+    Breakpoint, DebugEvent, DebugState, DebugStatus, ProcessInfo, RegisterState, ThreadInfo,
+};
 use fission_core::{FissionError, Result as FissionResult};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,6 +18,8 @@ pub struct LinuxDebugger {
     state: DebugState,
     /// Target process ID
     target_pid: Option<u32>,
+    /// Events produced synchronously while establishing the initial launch stop.
+    pending_events: VecDeque<DebugEvent>,
     /// Session-owned timeline for snapshots at ptrace stop boundaries.
     ttd_timeline: Option<Arc<Mutex<Timeline>>>,
 }
@@ -25,6 +30,7 @@ impl LinuxDebugger {
         Self {
             state: DebugState::default(),
             target_pid: None,
+            pending_events: VecDeque::new(),
             ttd_timeline: None,
         }
     }
@@ -108,6 +114,7 @@ impl ExecutionBackend for LinuxDebugger {
             BackendAvailability::Available,
             &[
                 DebugOperation::ProcessEnumeration,
+                DebugOperation::Launch,
                 DebugOperation::Attach,
                 DebugOperation::Detach,
                 DebugOperation::ContinueExecution,
@@ -118,6 +125,10 @@ impl ExecutionBackend for LinuxDebugger {
                 DebugOperation::MemoryRead,
                 DebugOperation::MemoryWrite,
             ],
+        )
+        .conditionally_supporting(
+            DebugOperation::Launch,
+            &[RuntimeRequirement::PtracePolicyAllowsLaunch],
         )
         .conditionally_supporting(
             DebugOperation::Attach,
@@ -154,6 +165,111 @@ impl ExecutionBackend for LinuxDebugger {
         }
 
         Ok(())
+    }
+
+    fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
+        use nix::sys::ptrace;
+        use nix::sys::signal::Signal;
+        use nix::sys::wait::{WaitStatus, waitpid};
+        use nix::unistd::Pid;
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+
+        if self.is_attached() {
+            return Err(FissionError::debug(
+                "Detach from the current process before launching another one",
+            ));
+        }
+
+        let mut command = Command::new(path);
+        command.args(args);
+        // PTRACE_TRACEME makes the child stop with SIGTRAP after exec, before
+        // it can execute its first user-space instruction. Keep the child-side
+        // pre-exec hook limited to the ptrace syscall and error conversion.
+        unsafe {
+            command.pre_exec(|| {
+                ptrace::traceme().map_err(|error| std::io::Error::from_raw_os_error(error as i32))
+            });
+        }
+
+        let mut child = command.spawn().map_err(|error| {
+            FissionError::debug(format!(
+                "Failed to launch '{}' under ptrace: {}",
+                path, error
+            ))
+        })?;
+        let pid = child.id();
+        let child_pid = Pid::from_raw(pid as i32);
+
+        let initial_status = match waitpid(child_pid, None) {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(FissionError::debug(format!(
+                    "Failed waiting for '{}' to stop after exec: {}",
+                    path, error
+                )));
+            }
+        };
+
+        if !matches!(
+            initial_status,
+            WaitStatus::Stopped(stopped_pid, Signal::SIGTRAP)
+                if stopped_pid.as_raw() == child_pid.as_raw()
+        ) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FissionError::debug(format!(
+                "Launched '{}' did not enter the expected ptrace exec stop: {:?}",
+                path, initial_status
+            )));
+        }
+
+        self.target_pid = Some(pid);
+        let registers = match self.fetch_registers(pid) {
+            Ok(registers) => registers,
+            Err(error) => {
+                self.target_pid = None;
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        };
+
+        let mut state = DebugState {
+            attached_pid: Some(pid),
+            main_thread_id: Some(pid),
+            last_thread_id: Some(pid),
+            current_thread_id: Some(pid),
+            status: DebugStatus::Suspended,
+            registers: Some(registers.clone()),
+            last_event: Some(format!("Launched PID {} and stopped after exec", pid)),
+            ..DebugState::default()
+        };
+        state.threads.insert(
+            pid,
+            ThreadInfo {
+                thread_id: pid,
+                start_address: registers.pc,
+                suspended: true,
+                is_main: true,
+            },
+        );
+        self.state = state;
+        self.pending_events.push_back(DebugEvent::ProcessCreated {
+            pid,
+            main_thread_id: pid,
+        });
+
+        if let Some(timeline) = &self.ttd_timeline {
+            if let Ok(mut timeline) = timeline.lock() {
+                timeline.start_recording();
+            }
+        }
+        self.record_ttd_snapshot(pid, registers);
+
+        Ok(pid)
     }
 
     fn detach(&mut self) -> FissionResult<()> {
@@ -223,6 +339,11 @@ impl ExecutionBackend for LinuxDebugger {
         use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
         use nix::unistd::Pid;
 
+        if let Some(event) = self.pending_events.pop_front() {
+            self.state.event_count = self.state.event_count.saturating_add(1);
+            return Ok(Some(event));
+        }
+
         let pid = self
             .target_pid
             .ok_or_else(|| FissionError::debug("Not attached"))?;
@@ -240,6 +361,8 @@ impl ExecutionBackend for LinuxDebugger {
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 WaitStatus::Exited(_, code) => {
+                    self.target_pid = None;
+                    self.state.attached_pid = None;
                     self.state.status = DebugStatus::Terminated;
                     self.state.event_count = self.state.event_count.saturating_add(1);
                     self.stop_ttd_recording();
@@ -248,6 +371,8 @@ impl ExecutionBackend for LinuxDebugger {
                     }));
                 }
                 WaitStatus::Signaled(_, signal, _) => {
+                    self.target_pid = None;
+                    self.state.attached_pid = None;
                     self.state.status = DebugStatus::Terminated;
                     self.state.event_count = self.state.event_count.saturating_add(1);
                     self.stop_ttd_recording();
