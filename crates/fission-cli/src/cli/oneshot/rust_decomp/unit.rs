@@ -84,6 +84,7 @@ struct SeenGlobalDeclaration<'a> {
 
 /// Assemble `renders` (in emission order) into a single translation unit.
 pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
+    let renders = disambiguate_conflicting_typedefs(renders);
     let split: Vec<SplitRender<'_>> = renders.iter().map(|text| split_render(text)).collect();
 
     let defined: HashSet<&str> = split
@@ -96,9 +97,10 @@ pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
     let mut aggregates: Vec<&str> = Vec::new();
     let mut globals: Vec<&str> = Vec::new();
     let mut externs: Vec<&str> = Vec::new();
-    // A typedef name may be reached two different ways in two functions. The
-    // first spelling wins: a second one is a compile error, not extra
-    // information, and nothing downstream can choose between them.
+    // Non-aggregate typedefs with conflicting spellings keep the first
+    // declaration. Aggregate variants were assigned distinct names before
+    // splitting so each function body retains the layout it was rendered
+    // against.
     let mut typedef_names: HashMap<&str, &str> = HashMap::new();
     let mut extern_names: HashSet<&str> = HashSet::new();
     let mut seen: HashSet<&str> = HashSet::new();
@@ -242,6 +244,190 @@ pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
     }
 }
 
+/// Keep same-sized aggregate layouts from different functions distinct.
+///
+/// The per-function renderer names aggregates by byte size, so two unrelated
+/// 16-byte layouts both arrive as `fission_agg16`. Keeping the first typedef
+/// while leaving later function bodies unchanged makes valid field accesses
+/// refer to members absent from the retained layout. Rename a conflicting
+/// aggregate and all of its C identifier references in that render. Repeat
+/// when a renamed aggregate is nested in another aggregate or a surface
+/// typedef, so those dependent declarations remain consistent too.
+fn disambiguate_conflicting_typedefs(renders: &[String]) -> Vec<String> {
+    let mut reserved_names = HashSet::new();
+    for render in renders {
+        visit_c_identifiers(render, |_, _, name| {
+            reserved_names.insert(name.to_string());
+        });
+    }
+
+    let mut known_typedefs: HashMap<String, String> = HashMap::new();
+    let mut variant_counters: HashMap<String, u32> = HashMap::new();
+    let mut rewritten_renders = Vec::with_capacity(renders.len());
+
+    for render in renders {
+        let mut renames = HashMap::new();
+        let rewritten = loop {
+            let rewritten = replace_c_identifiers(render, &renames);
+            let split = split_render(&rewritten);
+            let mut added_rename = false;
+
+            for declaration in &split.declarations {
+                let Some(name) = typedef_name(declaration) else {
+                    continue;
+                };
+                let Some(existing) = known_typedefs.get(name) else {
+                    continue;
+                };
+                if existing == declaration {
+                    continue;
+                }
+
+                let is_aggregate = name.starts_with("fission_agg");
+                let depends_on_renamed_type =
+                    declaration_references_renamed_name(declaration, &renames);
+                if (is_aggregate || depends_on_renamed_type) && !renames.contains_key(name) {
+                    let variant =
+                        fresh_typedef_variant(name, &mut reserved_names, &mut variant_counters);
+                    renames.insert(name.to_string(), variant);
+                    added_rename = true;
+                }
+            }
+
+            if !added_rename {
+                break rewritten;
+            }
+        };
+
+        for declaration in split_render(&rewritten).declarations {
+            if let Some(name) = typedef_name(&declaration) {
+                known_typedefs
+                    .entry(name.to_string())
+                    .or_insert_with(|| declaration.clone());
+            }
+        }
+        rewritten_renders.push(rewritten);
+    }
+
+    rewritten_renders
+}
+
+fn fresh_typedef_variant(
+    name: &str,
+    reserved_names: &mut HashSet<String>,
+    variant_counters: &mut HashMap<String, u32>,
+) -> String {
+    let suffix = variant_counters.entry(name.to_string()).or_insert(1);
+    loop {
+        *suffix += 1;
+        let candidate = format!("{name}_variant_{suffix}");
+        if reserved_names.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+}
+
+fn declaration_references_renamed_name(
+    declaration: &str,
+    renames: &HashMap<String, String>,
+) -> bool {
+    if renames.is_empty() {
+        return false;
+    }
+    let renamed: HashSet<&str> = renames.values().map(String::as_str).collect();
+    let mut references_renamed = false;
+    visit_c_identifiers(declaration, |_, _, name| {
+        references_renamed |= renamed.contains(name);
+    });
+    references_renamed
+}
+
+fn replace_c_identifiers(source: &str, replacements: &HashMap<String, String>) -> String {
+    if replacements.is_empty() {
+        return source.to_string();
+    }
+
+    let mut out = String::with_capacity(source.len());
+    let mut copied_through = 0;
+    visit_c_identifiers(source, |start, end, identifier| {
+        if let Some(replacement) = replacements.get(identifier) {
+            out.push_str(&source[copied_through..start]);
+            out.push_str(replacement);
+            copied_through = end;
+        }
+    });
+
+    out.push_str(&source[copied_through..]);
+    out
+}
+
+fn visit_c_identifiers(source: &str, mut visit: impl FnMut(usize, usize, &str)) {
+    let bytes = source.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'/' && bytes.get(cursor + 1) == Some(&b'/') {
+            cursor += 2;
+            while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                cursor += 1;
+            }
+            continue;
+        }
+        if bytes[cursor] == b'/' && bytes.get(cursor + 1) == Some(&b'*') {
+            cursor += 2;
+            while cursor + 1 < bytes.len() && !(bytes[cursor] == b'*' && bytes[cursor + 1] == b'/')
+            {
+                cursor += 1;
+            }
+            cursor = (cursor + 2).min(bytes.len());
+            continue;
+        }
+        if matches!(bytes[cursor], b'\'' | b'"') {
+            let quote = bytes[cursor];
+            cursor += 1;
+            while cursor < bytes.len() {
+                if bytes[cursor] == b'\\' {
+                    cursor = (cursor + 2).min(bytes.len());
+                } else if bytes[cursor] == quote {
+                    cursor += 1;
+                    break;
+                } else {
+                    cursor += 1;
+                }
+            }
+            continue;
+        }
+        if !is_c_identifier_start(bytes[cursor]) {
+            cursor += 1;
+            continue;
+        }
+
+        let start = cursor;
+        cursor += 1;
+        while cursor < bytes.len() && is_c_identifier_continue(bytes[cursor]) {
+            cursor += 1;
+        }
+        if is_standalone_c_identifier(bytes, start, cursor) {
+            visit(start, cursor, &source[start..cursor]);
+        }
+    }
+}
+
+fn is_standalone_c_identifier(bytes: &[u8], start: usize, end: usize) -> bool {
+    let left_is_identifier =
+        start > 0 && (is_c_identifier_continue(bytes[start - 1]) || bytes[start - 1] >= 0x80);
+    let right_is_identifier =
+        end < bytes.len() && (is_c_identifier_continue(bytes[end]) || bytes[end] >= 0x80);
+    !left_is_identifier && !right_is_identifier
+}
+
+fn is_c_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn is_c_identifier_continue(byte: u8) -> bool {
+    is_c_identifier_start(byte) || byte.is_ascii_digit()
+}
+
 fn push_section(out: &mut String, title: &str, lines: &[&str]) {
     if lines.is_empty() {
         return;
@@ -311,9 +497,14 @@ fn extern_function_name(decl: &str) -> Option<&str> {
 }
 
 /// The name a `typedef ... <name>;` record defines, however many lines it took.
+/// Trailing GNU attributes are not part of the typedef name.
 fn typedef_name(decl: &str) -> Option<&str> {
     let rest = decl.trim_start().strip_prefix("typedef ")?;
-    identifier_before(rest.trim_end().strip_suffix(';')?)
+    let definition = rest.trim_end().strip_suffix(';')?;
+    let definition = definition
+        .split_once(" __attribute__")
+        .map_or(definition, |(definition, _)| definition);
+    identifier_before(definition)
 }
 
 /// The name a `<type> <name>;` data declaration declares.
@@ -497,6 +688,129 @@ mod tests {
             "{}",
             unit.code
         );
+    }
+
+    #[test]
+    fn unit_preserves_conflicting_aggregate_shapes_and_rewrites_their_uses() {
+        let unit = assemble(&[
+            concat!(
+                "typedef struct fission_agg16 {\n",
+                "    unsigned int value;\n",
+                "    unsigned char _pad_4[4];\n",
+                "    unsigned long long next;\n",
+                "} fission_agg16;\n\n",
+                "typedef fission_agg16 Node;\n\n",
+                "int list_sum(const Node *head)\n{\n    return head->value;\n}\n"
+            )
+            .to_string(),
+            concat!(
+                "typedef struct fission_agg16 {\n",
+                "    uint field_0;\n",
+                "    unsigned char _pad_4[4];\n",
+                "    unsigned long long field_8;\n",
+                "} fission_agg16;\n\n",
+                "typedef fission_agg16 Node;\n\n",
+                "uint inspect(const Node *p)\n{\n    return p->field_8;\n}\n"
+            )
+            .to_string(),
+        ])
+        .code;
+
+        assert!(unit.contains("} fission_agg16;"), "{unit}");
+        assert!(unit.contains("} fission_agg16_variant_2;"), "{unit}");
+        assert!(unit.contains("typedef fission_agg16 Node;"), "{unit}");
+        assert!(
+            unit.contains("typedef fission_agg16_variant_2 Node_variant_2;"),
+            "{unit}"
+        );
+        assert!(
+            unit.contains("uint inspect(const Node_variant_2 *p)"),
+            "{unit}"
+        );
+        assert!(unit.contains("return p->field_8;"), "{unit}");
+    }
+
+    #[test]
+    fn unit_disambiguates_attribute_qualified_aggregate_typedefs() {
+        let unit = assemble(&[
+            concat!(
+                "typedef struct fission_agg16 {\n",
+                "    uint value;\n",
+                "    unsigned char _pad_4[4];\n",
+                "    unsigned long long next;\n",
+                "} fission_agg16;\n\n",
+                "void use_struct(fission_agg16 *p)\n{\n    return;\n}\n"
+            )
+            .to_string(),
+            concat!(
+                "typedef unsigned __int128 fission_agg16 __attribute__((aligned(1), may_alias));\n\n",
+                "fission_agg16 opaque_value(void)\n{\n    return 0;\n}\n"
+            )
+            .to_string(),
+        ])
+        .code;
+
+        assert!(unit.contains("} fission_agg16;"), "{unit}");
+        assert!(
+            unit.contains("typedef unsigned __int128 fission_agg16_variant_2"),
+            "{unit}"
+        );
+        assert!(
+            unit.contains("fission_agg16_variant_2 opaque_value(void)"),
+            "{unit}"
+        );
+    }
+
+    #[test]
+    fn unit_disambiguates_aggregate_typedefs_that_depend_on_a_renamed_shape() {
+        let unit = assemble(&[
+            concat!(
+                "typedef struct fission_agg8 { uint first; } fission_agg8;\n",
+                "typedef struct fission_agg16 {\n",
+                "    fission_agg8 *child;\n",
+                "    uint count;\n",
+                "} fission_agg16;\n\n",
+                "uint first(fission_agg16 *p)\n{\n    return p->count;\n}\n"
+            )
+            .to_string(),
+            concat!(
+                "typedef struct fission_agg8 { uint second; } fission_agg8;\n",
+                "typedef struct fission_agg16 {\n",
+                "    fission_agg8 *child;\n",
+                "    uint count;\n",
+                "} fission_agg16;\n\n",
+                "uint second(fission_agg16 *p)\n{\n    return p->count;\n}\n"
+            )
+            .to_string(),
+        ])
+        .code;
+
+        assert!(unit.contains("} fission_agg8_variant_2;"), "{unit}");
+        assert!(unit.contains("} fission_agg16_variant_2;"), "{unit}");
+        assert!(unit.contains("fission_agg8_variant_2 *child;"), "{unit}");
+        assert!(
+            unit.contains("uint second(fission_agg16_variant_2 *p)"),
+            "{unit}"
+        );
+    }
+
+    #[test]
+    fn typedef_renames_skip_comments_strings_and_extended_symbol_names() {
+        let replacements = HashMap::from([(
+            "fission_agg16".to_string(),
+            "fission_agg16_variant_2".to_string(),
+        )]);
+        let source = concat!(
+            "fission_agg16 *value;\n",
+            "const char *text = \"fission_agg16\"; // fission_agg16\n",
+            "void main·fission_agg16(void);\n"
+        );
+
+        let rewritten = replace_c_identifiers(source, &replacements);
+
+        assert!(rewritten.contains("fission_agg16_variant_2 *value;"));
+        assert!(rewritten.contains("\"fission_agg16\"; // fission_agg16"));
+        assert!(rewritten.contains("main·fission_agg16(void)"));
     }
 
     #[test]
