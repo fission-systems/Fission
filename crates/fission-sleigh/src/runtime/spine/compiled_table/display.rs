@@ -517,11 +517,13 @@ pub(super) fn decoded_references(
     handles: &[RuntimeHandle],
 ) -> Vec<DecodedReference> {
     let mut refs = Vec::new();
+    let flow_target_kind = flow_reference_kind(flow_kind);
+    let mut immediate_call_references = Vec::new();
     for (operand_index, handle) in handles.iter().enumerate() {
         if let Some(reference) = handle.subtable_state.as_deref().and_then(|state| {
             reference_from_subtable_state(address, length, flow_kind, operand_index, state).or_else(
                 || {
-                    inst_next_relative_reference_from_handle(
+                    instruction_relative_reference_from_handle(
                         operand_index,
                         handle,
                         state,
@@ -619,37 +621,48 @@ pub(super) fn decoded_references(
                 }
             }
             BoundOperand::Immediate { value, .. } if *value != 0 => {
-                // On an instruction that calls or branches, the immediate is
-                // where it goes. The `Relative` and `Memory` arms above
-                // already say so; this one used to report every immediate as
-                // a plain address, which is how ARM's `bl` -- whose target
-                // binds as an already-resolved immediate rather than a
-                // relative displacement -- reached function discovery as a
-                // reference it does not look at, leaving every ARM binary
-                // with no call targets at all.
-                let kind = flow_reference_kind(flow_kind)
-                    .unwrap_or(DecodedReferenceKind::ImmediateAddress);
-                refs.push(DecodedReference {
+                // A control-flow constructor can also expose scalar selector
+                // or condition operands. Defer immediate flow references
+                // until explicit Relative/Memory/subtable targets are known;
+                // those targets are stronger evidence than the instruction's
+                // flow kind alone. The restricted immediate fallback below
+                // retains resolved calls whose target is represented as an
+                // immediate.
+                let reference = DecodedReference {
                     target: *value,
-                    kind,
+                    kind: flow_target_kind.unwrap_or(DecodedReferenceKind::ImmediateAddress),
                     operand_index,
-                });
+                };
+                if flow_kind == DecodedFlowKind::Call {
+                    immediate_call_references.push(reference);
+                } else if flow_target_kind.is_none() {
+                    refs.push(reference);
+                }
             }
             _ => {}
         }
     }
+    // Immediate-only fallback is useful for resolved direct calls, whose
+    // constructor carries call semantics. A Jump classification alone does
+    // not prove that an immediate is its destination: terminal instructions
+    // can pass scalar operands to a userop and then emit an indirect branch.
+    // Direct branch targets must use one of the address-bearing forms above.
+    if flow_kind == DecodedFlowKind::Call
+        && !refs
+            .iter()
+            .any(|reference| Some(reference.kind) == flow_target_kind)
+    {
+        refs.extend(immediate_call_references);
+    }
     refs
 }
 
-fn inst_next_relative_reference_from_handle(
+fn instruction_relative_reference_from_handle(
     operand_index: usize,
     handle: &RuntimeHandle,
     state: &RuntimeConstructState,
     flow_kind: DecodedFlowKind,
 ) -> Option<DecodedReference> {
-    if !state_uses_inst_next_pattern_expression(state) {
-        return None;
-    }
     let target = match handle.debug_value.as_ref() {
         Some(BoundOperand::Immediate { value, .. }) => Some(*value),
         Some(BoundOperand::Memory { absolute, .. }) => *absolute,
@@ -659,6 +672,9 @@ fn inst_next_relative_reference_from_handle(
             .is_none()
             .then_some(handle.fixed.offset_offset),
     }?;
+    if !state_materializes_pc_relative_value(state, target) {
+        return None;
+    }
     let kind = flow_reference_kind(flow_kind).unwrap_or(DecodedReferenceKind::RipRelativeAddress);
     Some(DecodedReference {
         target,
@@ -708,30 +724,47 @@ fn reference_from_subtable_state(
     })
 }
 
-fn state_uses_inst_next_pattern_expression(state: &RuntimeConstructState) -> bool {
+fn state_materializes_pc_relative_value(state: &RuntimeConstructState, target: u64) -> bool {
     state.handles.iter().any(|handle| {
-        operand_spec_uses_inst_next_pattern_expression(&handle.spec)
+        (operand_spec_uses_pc_relative_expression(&handle.spec)
+            && handle_debug_value_matches_address(handle, target))
             || handle
                 .subtable_state
                 .as_deref()
-                .is_some_and(state_uses_inst_next_pattern_expression)
+                .is_some_and(|state| state_materializes_pc_relative_value(state, target))
     })
 }
 
-fn operand_spec_uses_inst_next_pattern_expression(spec: &CompiledOperandSpec) -> bool {
+fn handle_debug_value_matches_address(handle: &RuntimeHandle, target: u64) -> bool {
+    let debug_value_matches = match handle.debug_value.as_ref() {
+        Some(BoundOperand::Immediate { value, .. }) => *value == target,
+        Some(BoundOperand::Relative { target: value }) => *value == target,
+        Some(BoundOperand::Memory {
+            absolute: Some(value),
+            ..
+        }) => *value == target,
+        _ => false,
+    };
+    debug_value_matches
+        || (handle.fixed.offset_space.is_none() && handle.fixed.offset_offset == target)
+}
+
+fn operand_spec_uses_pc_relative_expression(spec: &CompiledOperandSpec) -> bool {
     match spec {
         CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
         | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
         | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
-            pattern_expression_uses_inst_next(expr)
+            pattern_expression_uses_instruction_address(expr)
         }
         _ => false,
     }
 }
 
-fn pattern_expression_uses_inst_next(expr: &CompiledPatternExpression) -> bool {
+fn pattern_expression_uses_instruction_address(expr: &CompiledPatternExpression) -> bool {
     match expr {
-        CompiledPatternExpression::InstNext => true,
+        CompiledPatternExpression::InstStart
+        | CompiledPatternExpression::InstNext
+        | CompiledPatternExpression::InstNext2 => true,
         CompiledPatternExpression::Add(lhs, rhs)
         | CompiledPatternExpression::Sub(lhs, rhs)
         | CompiledPatternExpression::Mul(lhs, rhs)
@@ -741,10 +774,11 @@ fn pattern_expression_uses_inst_next(expr: &CompiledPatternExpression) -> bool {
         | CompiledPatternExpression::And(lhs, rhs)
         | CompiledPatternExpression::Or(lhs, rhs)
         | CompiledPatternExpression::Xor(lhs, rhs) => {
-            pattern_expression_uses_inst_next(lhs) || pattern_expression_uses_inst_next(rhs)
+            pattern_expression_uses_instruction_address(lhs)
+                || pattern_expression_uses_instruction_address(rhs)
         }
         CompiledPatternExpression::Negate(inner) | CompiledPatternExpression::Not(inner) => {
-            pattern_expression_uses_inst_next(inner)
+            pattern_expression_uses_instruction_address(inner)
         }
         _ => false,
     }
@@ -1034,6 +1068,86 @@ mod tests {
                 operand_index: 0,
             }]
         );
+    }
+
+    #[test]
+    fn conditional_branch_scalar_immediate_is_not_an_extra_target() {
+        let target = 0x1084;
+        let condition = handle(BoundOperand::Immediate {
+            value: 1,
+            encoded_size: 1,
+            signed: false,
+        });
+        let branch_target = handle(BoundOperand::Relative { target });
+
+        for (handles, target_operand_index) in [
+            (vec![branch_target.clone(), condition.clone()], 0),
+            (vec![condition, branch_target], 1),
+        ] {
+            let refs = decoded_references(0x1000, 4, DecodedFlowKind::ConditionalJump, &handles);
+
+            assert_eq!(
+                refs,
+                vec![DecodedReference {
+                    target,
+                    kind: DecodedReferenceKind::BranchTarget,
+                    operand_index: target_operand_index,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn conditional_flow_without_address_bearing_target_does_not_promote_scalars() {
+        let immediate = |value| {
+            handle(BoundOperand::Immediate {
+                value,
+                encoded_size: 1,
+                signed: false,
+            })
+        };
+
+        for handles in [vec![immediate(6), immediate(4)], vec![immediate(4)]] {
+            assert!(
+                decoded_references(0x1000, 4, DecodedFlowKind::ConditionalJump, &handles,)
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn immediate_only_flow_target_remains_a_reference() {
+        let target = 0x1234;
+        let refs = decoded_references(
+            0x1000,
+            4,
+            DecodedFlowKind::Call,
+            &[handle(BoundOperand::Immediate {
+                value: target,
+                encoded_size: 4,
+                signed: false,
+            })],
+        );
+
+        assert_eq!(
+            refs,
+            vec![DecodedReference {
+                target,
+                kind: DecodedReferenceKind::CallTarget,
+                operand_index: 0,
+            }]
+        );
+    }
+
+    #[test]
+    fn immediate_only_jump_operand_is_not_promoted_to_a_target() {
+        let trap_code = handle(BoundOperand::Immediate {
+            value: 0x3e8,
+            encoded_size: 2,
+            signed: false,
+        });
+
+        assert!(decoded_references(0x1000, 4, DecodedFlowKind::Jump, &[trap_code]).is_empty());
     }
 
     #[test]

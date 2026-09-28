@@ -364,6 +364,79 @@ fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
 }
 
 #[test]
+fn generated_runtime_aarch64_conditional_branch_exposes_only_its_target() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled =
+        compile_frontend_for_entry_spec(&aarch64_spec).expect("compile AARCH64 frontend");
+    let bytes = [0x21, 0x04, 0x00, 0x54]; // b.ne +0x84
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("decode b.ne");
+
+    assert!(matches!(
+        decoded.flow_kind,
+        DecodedFlowKind::ConditionalJump
+    ));
+    assert_eq!(decoded.direct_target, Some(0x1084));
+    assert_eq!(
+        decoded.references,
+        vec![DecodedReference {
+            target: 0x1084,
+            kind: DecodedReferenceKind::BranchTarget,
+            operand_index: 0,
+        }]
+    );
+}
+
+#[test]
+fn generated_runtime_aarch64_unconditional_branch_keeps_its_relative_target() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled =
+        compile_frontend_for_entry_spec(&aarch64_spec).expect("compile AARCH64 frontend");
+    let bytes = [0x21, 0x00, 0x00, 0x14]; // b +0x84
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("decode b");
+
+    assert!(matches!(decoded.flow_kind, DecodedFlowKind::Jump));
+    assert_eq!(decoded.direct_target, Some(0x1084));
+    assert_eq!(
+        decoded.references,
+        vec![DecodedReference {
+            target: 0x1084,
+            kind: DecodedReferenceKind::BranchTarget,
+            operand_index: 0,
+        }]
+    );
+}
+
+#[test]
+fn generated_runtime_aarch64_break_does_not_promote_trap_code_to_target() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled =
+        compile_frontend_for_entry_spec(&aarch64_spec).expect("compile AARCH64 frontend");
+    let bytes = [0x00, 0x7d, 0x20, 0xd4]; // brk #0x3e8
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("decode brk");
+
+    assert_eq!(decoded.mnemonic, "brk");
+    assert!(decoded.references.is_empty());
+    assert_eq!(decoded.direct_target, None);
+}
+
+#[test]
+fn generated_runtime_aarch64_conditional_compare_has_no_control_flow_xref() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled =
+        compile_frontend_for_entry_spec(&aarch64_spec).expect("compile AARCH64 frontend");
+    let bytes = [0xa4, 0x98, 0x46, 0x7a]; // ccmp w5, #0x6, #0x4, ls
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("decode ccmp");
+
+    assert_eq!(decoded.mnemonic, "ccmp");
+    assert!(decoded.references.is_empty());
+    assert_eq!(decoded.direct_target, None);
+}
+
+#[test]
 fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
@@ -452,6 +525,21 @@ fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
     assert!(matches!(decoded.flow_kind, DecodedFlowKind::Call));
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_013ef);
     assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Call));
+}
+
+#[test]
+fn generated_runtime_preserves_thumb_bl_call_target() {
+    require_packaged_ghidra_sla!();
+    let arm_spec = spec_root_for_arch("ARM").join("ARM8m_le.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM8m_le");
+    let bytes = [0xff, 0xf7, 0xf4, 0xfe]; // bl -0x218 from the following PC
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("decode Thumb bl");
+
+    assert!(matches!(decoded.flow_kind, DecodedFlowKind::Call));
+    assert_eq!(decoded.direct_target, Some(0x0dec));
+    assert_eq!(decoded.references.len(), 1);
+    assert_eq!(decoded.references[0].target, 0x0dec);
+    assert_eq!(decoded.references[0].kind, DecodedReferenceKind::CallTarget);
 }
 
 #[test]
