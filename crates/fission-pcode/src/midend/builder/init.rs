@@ -213,6 +213,14 @@ impl<'a> PreviewBuilder<'a> {
             rbp_frame_bias,
             rsp_prologue_delta_table,
         ) = entry_analysis::infer_entry_stack_layout(pcode, options, type_context);
+        let rsp_frame_coordinate_table = entry_analysis::infer_frame_relative_rsp_offsets(
+            pcode,
+            options,
+            &heritage_successors,
+            stack_frame_size,
+            entry_frame_pointer_established,
+            rbp_frame_bias,
+        );
         if preview_builder_diag_enabled() {
             let duplicate_starts = duplicate_block_start_count(pcode);
             if duplicate_starts > 0 {
@@ -281,9 +289,11 @@ impl<'a> PreviewBuilder<'a> {
             declared_variadic_fixed_arity,
             suppress_entry_register_params: false,
             stack_frame_size,
+            stack_frame_backing: None,
             entry_frame_pointer_established,
             rbp_frame_bias,
             rsp_prologue_delta_table,
+            rsp_frame_coordinate_table,
             linear_exit_cache: BuilderCacheMap::default(),
             linear_body_cache: BuilderCacheMap::default(),
             active_linear_body_keys: BuilderCacheSet::default(),

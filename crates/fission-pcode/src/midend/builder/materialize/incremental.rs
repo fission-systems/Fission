@@ -1,3 +1,4 @@
+use crate::midend::builder::state::StackFrameBacking;
 use crate::midend::builder::*;
 use crate::midend::ir::*;
 use crate::midend::support::*;
@@ -23,15 +24,33 @@ impl<'a> PreviewBuilder<'a> {
 
         let mut rsp_accesses = Vec::new();
         let mut rbp_accesses = Vec::new();
+        let mut has_unresolved_fixed_frame_memory_access = false;
+        let escaped_fixed_frame_addresses = self.escaped_fixed_frame_address_origins();
+        let mut fixed_frame_access_ranges = Vec::new();
 
         for block_idx in 0..self.pcode.blocks.len() {
             for op_idx in 0..self.pcode.blocks[block_idx].ops.len() {
                 let op = self.pcode.blocks[block_idx].ops[op_idx].clone();
                 let site = LoweringSite { block_idx, op_idx };
+                if matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store)
+                    && self.with_lowering_site(site, |this| {
+                        this.unresolved_fixed_frame_memory_base(&op).is_some()
+                    })
+                {
+                    has_unresolved_fixed_frame_memory_access = true;
+                }
                 match op.opcode {
                     PcodeOpcode::Load => {
                         if op.inputs.len() < 2 {
                             continue;
+                        }
+                        let size = op.output.as_ref().map(|out| out.size).unwrap_or(0);
+                        if size > 0
+                            && let Some(range) = self.with_lowering_site(site, |this| {
+                                this.fixed_frame_memory_access_range(&op, size)
+                            })
+                        {
+                            fixed_frame_access_ranges.push(range);
                         }
                         let ptr = &op.inputs[1];
                         let resolved = self.with_lowering_site(site, |this| {
@@ -39,7 +58,6 @@ impl<'a> PreviewBuilder<'a> {
                                 .or_else(|| this.resolve_stack_address(ptr))
                         });
                         if let Some((base, offset)) = resolved {
-                            let size = op.output.as_ref().map(|out| out.size).unwrap_or(0);
                             if size > 0 {
                                 match base {
                                     StackBase::Rsp => rsp_accesses.push((offset, size)),
@@ -67,6 +85,14 @@ impl<'a> PreviewBuilder<'a> {
                         {
                             continue;
                         }
+                        let size = op.inputs.get(2).map(|value| value.size).unwrap_or(0);
+                        if size > 0
+                            && let Some(range) = self.with_lowering_site(site, |this| {
+                                this.fixed_frame_memory_access_range(&op, size)
+                            })
+                        {
+                            fixed_frame_access_ranges.push(range);
+                        }
                         let ptr = &op.inputs[1];
                         let resolved = self.with_lowering_site(site, |this| {
                             this.resolve_stack_address_from_memory_op(&op)
@@ -91,6 +117,19 @@ impl<'a> PreviewBuilder<'a> {
 
         let refined_rsp = refine_partitions(&rsp_accesses);
         let refined_rbp = refine_partitions(&rbp_accesses);
+        let has_uncovered_escaped_frame_address =
+            escaped_fixed_frame_addresses.iter().any(|coordinate| {
+                !fixed_frame_access_ranges
+                    .iter()
+                    .any(|(start, end)| start <= coordinate && coordinate < end)
+            });
+
+        if (has_unresolved_fixed_frame_memory_access || has_uncovered_escaped_frame_address)
+            && let Ok(size) = u32::try_from(self.stack_frame_size)
+            && size > 0
+        {
+            self.register_stack_frame_backing(size);
+        }
 
         for (offset, size) in refined_rsp {
             self.register_refined_slot(StackBase::Rsp, offset, size);
@@ -105,6 +144,11 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn register_refined_slot(&mut self, base: StackBase, offset: i64, size: u32) {
+        if self.fixed_frame_access_offset(base, offset, size).is_some()
+            && self.stack_frame_backing.is_some()
+        {
+            return;
+        }
         let ty = type_from_size(size, false);
         let origin = self.classify_stack_slot_origin(base, offset);
         if let NirBindingOrigin::ParamIndex(index) = origin {
@@ -139,6 +183,29 @@ impl<'a> PreviewBuilder<'a> {
                 origin,
             },
         );
+    }
+
+    fn register_stack_frame_backing(&mut self, size: u32) {
+        if self.locals.contains_key(&0) {
+            return;
+        }
+        let id = self.locals_next_id;
+        self.locals_next_id += 1;
+        let name = self.unique_stack_slot_binding_name("stack_frame", id);
+        self.used_param_local_names.insert(name.clone());
+        self.locals.insert(
+            0,
+            StackSlot {
+                id,
+                name: name.clone(),
+                ty: NirType::Aggregate {
+                    size,
+                    fields: Vec::new(),
+                },
+                origin: NirBindingOrigin::StackOffset(0),
+            },
+        );
+        self.stack_frame_backing = Some(StackFrameBacking { name, size });
     }
 }
 

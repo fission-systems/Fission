@@ -441,6 +441,9 @@ impl<'a> PreviewBuilder<'a> {
         ptr: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<PreHirExpr, MlilPreviewError> {
+        if let Some(address) = self.fixed_frame_address_for_varnode(ptr) {
+            return Ok(address);
+        }
         let outer = std::mem::replace(&mut self.lowering_memory_pointer, true);
         let lowered = self.lower_varnode(ptr, visiting);
         self.lowering_memory_pointer = outer;

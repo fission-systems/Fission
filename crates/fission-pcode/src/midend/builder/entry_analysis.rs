@@ -1,5 +1,6 @@
 use super::*;
 use crate::midend::cspec::RegisterNamer;
+use std::collections::VecDeque;
 
 pub(super) fn collect_entry_register_param_aliases(
     pcode: &PcodeFunction,
@@ -333,6 +334,347 @@ pub(super) fn infer_entry_stack_layout(
     )
 }
 
+/// Propagate the run-time stack pointer's byte coordinate from the entry of a
+/// fixed frame through the function CFG. The coordinate is relative to the
+/// final post-prologue RSP: zero is the bottom of the proven frame and
+/// `stack_frame_size` is the entry RSP. A missing result means at least one
+/// reachable stack adjustment or join could not be represented exactly.
+///
+/// This is deliberately narrower than general pointer analysis. It only
+/// tracks stack-pointer copies from the same pointer-sized register, copies
+/// from an established frame pointer, and constant add/sub operations. That
+/// covers balanced pushes, pops, and call-alignment adjustments while
+/// declining dynamic allocations and conflicting stack depths. On known
+/// caller-clean ABIs, it also treats a same-instruction return-address push
+/// and `Call` as one call effect: the push is visible while lowering the
+/// call's stack store, but the caller resumes with its pre-call stack pointer.
+pub(super) fn infer_frame_relative_rsp_offsets(
+    pcode: &PcodeFunction,
+    options: &MlilPreviewOptions,
+    successors: &[Vec<usize>],
+    stack_frame_size: i64,
+    frame_pointer_established: bool,
+    frame_pointer_bias: i64,
+) -> Option<HashMap<LoweringSite, i64>> {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum OffsetState {
+        Unreachable,
+        Known(i64),
+        Unknown,
+    }
+
+    fn join(left: OffsetState, right: OffsetState) -> OffsetState {
+        match (left, right) {
+            (OffsetState::Unreachable, value) | (value, OffsetState::Unreachable) => value,
+            (OffsetState::Known(left), OffsetState::Known(right)) if left == right => {
+                OffsetState::Known(left)
+            }
+            (OffsetState::Unknown, _) | (_, OffsetState::Unknown) => OffsetState::Unknown,
+            _ => OffsetState::Unknown,
+        }
+    }
+
+    fn register_name(namer: &RegisterNamer, vn: &Varnode) -> Option<String> {
+        is_register_varnode(vn)
+            .then(|| namer.hw_name_at(vn.offset, vn.size))
+            .flatten()
+    }
+
+    fn is_stack_pointer(name: Option<&str>) -> bool {
+        matches!(name, Some("esp") | Some("rsp") | Some("sp"))
+    }
+
+    fn is_frame_pointer(name: Option<&str>) -> bool {
+        matches!(name, Some("ebp") | Some("rbp") | Some("fp"))
+    }
+
+    fn transfer_stack_pointer(
+        op: &PcodeOp,
+        current: i64,
+        namer: &RegisterNamer,
+        frame_pointer_coordinate: Option<i64>,
+    ) -> Option<i64> {
+        let output = op.output.as_ref()?;
+        let output_name = register_name(namer, output);
+        if !is_stack_pointer(output_name.as_deref()) {
+            return Some(current);
+        }
+        if output.size != namer.pointer_size {
+            return None;
+        }
+
+        let input_name = |index: usize| {
+            op.inputs
+                .get(index)
+                .and_then(|input| register_name(namer, input))
+        };
+        match op.opcode {
+            PcodeOpcode::Copy => {
+                let input = op.inputs.first()?;
+                if input.size != output.size {
+                    return None;
+                }
+                let name = input_name(0);
+                if is_stack_pointer(name.as_deref()) {
+                    Some(current)
+                } else if is_frame_pointer(name.as_deref()) {
+                    frame_pointer_coordinate
+                } else {
+                    None
+                }
+            }
+            PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::PtrAdd
+            | PcodeOpcode::PtrSub => {
+                let base_index = (0..op.inputs.len()).find(|&index| {
+                    is_stack_pointer(input_name(index).as_deref())
+                        && op.inputs[index].size == output.size
+                })?;
+                let mut delta = if op.opcode == PcodeOpcode::PtrAdd && op.inputs.len() >= 3 {
+                    const_offset(op.inputs.get(1)?)?
+                        .checked_mul(const_offset(op.inputs.get(2)?)?)?
+                } else {
+                    let offset_index = (0..op.inputs.len()).find(|&index| index != base_index)?;
+                    const_offset(op.inputs.get(offset_index)?)?
+                };
+                if matches!(op.opcode, PcodeOpcode::IntSub | PcodeOpcode::PtrSub) {
+                    if base_index != 0 {
+                        return None;
+                    }
+                    delta = delta.checked_neg()?;
+                }
+                current.checked_add(delta)
+            }
+            _ => None,
+        }
+    }
+
+    /// Classify the stack effect encoded for one source CALL instruction.
+    /// `Some(true)` means the same-instruction stack write is the return
+    /// address push of a call on a caller-clean ABI, so RSP returns to the
+    /// instruction's incoming coordinate after the call. `Some(false)` means
+    /// the instruction does not change RSP. `None` means the p-code shows a
+    /// stack-changing call whose post-call effect is not proven here.
+    fn caller_clean_call_stack_effect(
+        instruction_ops: &[PcodeOp],
+        namer: &RegisterNamer,
+        options: &MlilPreviewOptions,
+    ) -> Option<bool> {
+        let call_count = instruction_ops
+            .iter()
+            .filter(|op| matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd))
+            .count();
+        let has_other_call = instruction_ops
+            .iter()
+            .any(|op| matches!(op.opcode, PcodeOpcode::CallOther));
+        let stack_pointer_writes = instruction_ops
+            .iter()
+            .filter(|op| {
+                op.output.as_ref().is_some_and(|output| {
+                    register_name(namer, output)
+                        .as_deref()
+                        .is_some_and(|name| is_stack_pointer(Some(name)))
+                })
+            })
+            .count();
+        if call_count == 0 && !has_other_call || stack_pointer_writes == 0 {
+            return Some(false);
+        }
+        if call_count != 1 || has_other_call || stack_pointer_writes != 1 {
+            return None;
+        }
+
+        let pointer_size = i64::from(options.pointer_size);
+        let return_address_pushes = instruction_ops
+            .iter()
+            .filter(|op| {
+                matches!(op.opcode, PcodeOpcode::IntSub)
+                    && op.output.as_ref().is_some_and(|output| {
+                        output.size == options.pointer_size
+                            && register_name(namer, output)
+                                .as_deref()
+                                .is_some_and(|name| is_stack_pointer(Some(name)))
+                    })
+                    && op.inputs.first().is_some_and(|input| {
+                        input.size == options.pointer_size
+                            && register_name(namer, input)
+                                .as_deref()
+                                .is_some_and(|name| is_stack_pointer(Some(name)))
+                    })
+                    && op
+                        .inputs
+                        .get(1)
+                        .and_then(const_offset)
+                        .is_some_and(|amount| amount == pointer_size)
+            })
+            .count();
+        let return_address_stores = instruction_ops
+            .iter()
+            .filter(|op| {
+                if !matches!(op.opcode, PcodeOpcode::Store) || op.inputs.len() < 3 {
+                    return false;
+                }
+                let pointer = &op.inputs[1];
+                let value = &op.inputs[2];
+                pointer.size == options.pointer_size
+                    && register_name(namer, pointer)
+                        .as_deref()
+                        .is_some_and(|name| is_stack_pointer(Some(name)))
+                    && value.is_constant
+                    && {
+                        let return_address = value.offset;
+                        return_address > op.address
+                            && op
+                                .address
+                                .checked_add(15)
+                                .is_some_and(|limit| return_address <= limit)
+                    }
+            })
+            .count();
+
+        if return_address_pushes != 1 || return_address_stores != 1 {
+            return None;
+        }
+
+        // X64 Windows and System V both return with the caller's stack
+        // pointer restored. For 32-bit or other ABIs, the callee may clean
+        // arguments as part of RET; without a typed call-site cleanup fact,
+        // the post-call coordinate is unknown and this frame map must fail
+        // closed.
+        (options.is_64bit
+            && options.pointer_size == 8
+            && matches!(
+                options.calling_convention,
+                crate::midend::support::CallingConvention::WindowsX64
+                    | crate::midend::support::CallingConvention::SystemVAmd64
+            ))
+        .then_some(true)
+    }
+
+    if pcode.blocks.is_empty()
+        || successors.len() != pcode.blocks.len()
+        || stack_frame_size <= 0
+        || options.pointer_size == 0
+    {
+        return None;
+    }
+
+    let namer = RegisterNamer::from_options(options);
+    let frame_pointer_coordinate = frame_pointer_established
+        .then(|| stack_frame_size + frame_pointer_bias - i64::from(options.pointer_size));
+    let mut incoming = vec![OffsetState::Unreachable; pcode.blocks.len()];
+    incoming[0] = OffsetState::Known(stack_frame_size);
+    let mut worklist = VecDeque::from([0usize]);
+
+    while let Some(block_index) = worklist.pop_front() {
+        let block = pcode.blocks.get(block_index)?;
+        let mut state = incoming[block_index];
+        let mut op_index = 0;
+        while op_index < block.ops.len() {
+            let instruction_start = op_index;
+            let address = block.ops[op_index].address;
+            let instruction_entry_state = state;
+            while op_index < block.ops.len() && block.ops[op_index].address == address {
+                if let OffsetState::Known(offset) = state
+                    && let Some(output) = block.ops[op_index].output.as_ref()
+                    && register_name(&namer, output)
+                        .as_deref()
+                        .is_some_and(|name| is_stack_pointer(Some(name)))
+                {
+                    state = transfer_stack_pointer(
+                        &block.ops[op_index],
+                        offset,
+                        &namer,
+                        frame_pointer_coordinate,
+                    )
+                    .map_or(OffsetState::Unknown, OffsetState::Known);
+                }
+                op_index += 1;
+            }
+
+            let instruction_ops = &block.ops[instruction_start..op_index];
+            match caller_clean_call_stack_effect(instruction_ops, &namer, options)? {
+                true => state = instruction_entry_state,
+                false => {}
+            }
+        }
+
+        for &successor in &successors[block_index] {
+            let Some(successor_state) = incoming.get_mut(successor) else {
+                return None;
+            };
+            let joined = join(*successor_state, state);
+            if joined != *successor_state {
+                *successor_state = joined;
+                worklist.push_back(successor);
+            }
+        }
+    }
+
+    if incoming
+        .iter()
+        .any(|state| matches!(state, OffsetState::Unknown))
+    {
+        return None;
+    }
+
+    let mut offsets = HashMap::default();
+    for (block_index, block) in pcode.blocks.iter().enumerate() {
+        let OffsetState::Known(mut offset) = incoming[block_index] else {
+            continue;
+        };
+        let mut op_index = 0;
+        while op_index < block.ops.len() {
+            let instruction_start = op_index;
+            let address = block.ops[op_index].address;
+            let instruction_entry_offset = offset;
+            let mut instruction_end = instruction_start + 1;
+            while instruction_end < block.ops.len() && block.ops[instruction_end].address == address
+            {
+                instruction_end += 1;
+            }
+
+            let instruction_ops = &block.ops[instruction_start..instruction_end];
+            let caller_clean_return =
+                caller_clean_call_stack_effect(instruction_ops, &namer, options)?;
+            for site_op_index in instruction_start..instruction_end {
+                let op = &block.ops[site_op_index];
+                // The return-address Store executes with the transient pushed
+                // RSP, but the CALL's operands belong to the caller's frame
+                // coordinate. Keep the push visible only for its p-code Store.
+                let site_offset = if caller_clean_return
+                    && matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                {
+                    instruction_entry_offset
+                } else {
+                    offset
+                };
+                offsets.insert(
+                    LoweringSite {
+                        block_idx: block_index,
+                        op_idx: site_op_index,
+                    },
+                    site_offset,
+                );
+                if let Some(output) = op.output.as_ref()
+                    && register_name(&namer, output)
+                        .as_deref()
+                        .is_some_and(|name| is_stack_pointer(Some(name)))
+                {
+                    offset = transfer_stack_pointer(op, offset, &namer, frame_pointer_coordinate)?;
+                }
+            }
+            op_index = instruction_end;
+
+            if caller_clean_return {
+                offset = instruction_entry_offset;
+            }
+        }
+    }
+    Some(offsets)
+}
+
 /// The frame the entry prologue establishes, read from p-code.
 ///
 /// This used to read `asm_mnemonic` and look for `"PUSH "`, `"SUB RSP,"` and
@@ -532,6 +874,294 @@ mod tests {
                 ops,
             }],
         }
+    }
+
+    fn block(index: u32, ops: Vec<PcodeOp>, successors: Vec<u32>) -> crate::pcode::PcodeBasicBlock {
+        crate::pcode::PcodeBasicBlock {
+            index,
+            start_address: 0x1000 + u64::from(index) * 0x100,
+            successors,
+            ops,
+        }
+    }
+
+    #[test]
+    fn fixed_frame_rsp_coordinates_follow_balanced_adjustments_across_cfg() {
+        let rsp = reg(0x20, 8);
+        let rax = reg(0x00, 8);
+        let pcode = PcodeFunction {
+            blocks: vec![
+                block(
+                    0,
+                    vec![op(
+                        0,
+                        PcodeOpcode::IntSub,
+                        Some(rsp.clone()),
+                        vec![rsp.clone(), imm(0x100, 8)],
+                    )],
+                    vec![1, 2],
+                ),
+                block(
+                    1,
+                    vec![
+                        op(
+                            1,
+                            PcodeOpcode::IntSub,
+                            Some(rsp.clone()),
+                            vec![rsp.clone(), imm(8, 8)],
+                        ),
+                        op(
+                            2,
+                            PcodeOpcode::IntAdd,
+                            Some(rsp.clone()),
+                            vec![rsp.clone(), imm(8, 8)],
+                        ),
+                    ],
+                    vec![3],
+                ),
+                block(2, Vec::new(), vec![3]),
+                block(
+                    3,
+                    vec![op(3, PcodeOpcode::Copy, Some(rax), vec![imm(1, 8)])],
+                    Vec::new(),
+                ),
+            ],
+        };
+        let successors = vec![vec![1, 2], vec![3], vec![3], Vec::new()];
+
+        let offsets =
+            infer_frame_relative_rsp_offsets(&pcode, &x64_options(), &successors, 0x100, false, 0)
+                .expect("balanced stack adjustments keep a fixed coordinate");
+
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 0,
+                op_idx: 0
+            }],
+            0x100
+        );
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 1,
+                op_idx: 0
+            }],
+            0
+        );
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 1,
+                op_idx: 1
+            }],
+            -8
+        );
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 3,
+                op_idx: 0
+            }],
+            0
+        );
+    }
+
+    #[test]
+    fn fixed_frame_rsp_coordinates_reject_conflicting_join_depths() {
+        let rsp = reg(0x20, 8);
+        let pcode = PcodeFunction {
+            blocks: vec![
+                block(
+                    0,
+                    vec![op(
+                        0,
+                        PcodeOpcode::IntSub,
+                        Some(rsp.clone()),
+                        vec![rsp.clone(), imm(0x100, 8)],
+                    )],
+                    vec![1, 2],
+                ),
+                block(
+                    1,
+                    vec![op(
+                        1,
+                        PcodeOpcode::IntSub,
+                        Some(rsp.clone()),
+                        vec![rsp.clone(), imm(8, 8)],
+                    )],
+                    vec![3],
+                ),
+                block(2, Vec::new(), vec![3]),
+                block(3, Vec::new(), Vec::new()),
+            ],
+        };
+        let successors = vec![vec![1, 2], vec![3], vec![3], Vec::new()];
+
+        assert!(
+            infer_frame_relative_rsp_offsets(&pcode, &x64_options(), &successors, 0x100, false, 0,)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn fixed_frame_rsp_coordinates_reject_unknown_stack_adjustments() {
+        let rsp = reg(0x20, 8);
+        let rax = reg(0x00, 8);
+        let pcode = pcode(vec![op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp, rax],
+        )]);
+
+        assert!(
+            infer_frame_relative_rsp_offsets(
+                &pcode,
+                &x64_options(),
+                &[Vec::new()],
+                0x100,
+                false,
+                0,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn fixed_frame_rsp_coordinates_restore_caller_clean_call_return_push() {
+        let rsp = reg(0x20, 8);
+        let rax = reg(0x00, 8);
+        let call_address = 0x1010_u64;
+        let mut frame_sub = op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), imm(0x100, 8)],
+        );
+        frame_sub.address = 0x1000;
+        let mut call_sub = op(
+            1,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), imm(8, 8)],
+        );
+        call_sub.address = call_address;
+        let mut return_address_store = op(
+            2,
+            PcodeOpcode::Store,
+            None,
+            vec![imm(3, 8), rsp.clone(), imm((call_address + 5) as i64, 8)],
+        );
+        return_address_store.address = call_address;
+        let mut call = op(
+            3,
+            PcodeOpcode::Call,
+            None,
+            vec![Varnode::constant(0x2000, 8)],
+        );
+        call.address = call_address;
+        let mut after_call = op(4, PcodeOpcode::Copy, Some(rax), vec![imm(1, 8)]);
+        after_call.address = call_address + 5;
+        let pcode = pcode(vec![
+            frame_sub,
+            call_sub,
+            return_address_store,
+            call,
+            after_call,
+        ]);
+
+        let offsets = infer_frame_relative_rsp_offsets(
+            &pcode,
+            &x64_options(),
+            &[Vec::new()],
+            0x100,
+            false,
+            0,
+        )
+        .expect("caller-clean CALL restores the caller's stack coordinate");
+
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 0,
+                op_idx: 1
+            }],
+            0
+        );
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 0,
+                op_idx: 2
+            }],
+            -8
+        );
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 0,
+                op_idx: 3
+            }],
+            0,
+            "CALL operands use the caller's frame coordinate"
+        );
+        assert_eq!(
+            offsets[&LoweringSite {
+                block_idx: 0,
+                op_idx: 4
+            }],
+            0
+        );
+    }
+
+    #[test]
+    fn fixed_frame_rsp_coordinates_reject_calls_with_unknown_cleanup_abi() {
+        let rsp = reg(0x10, 4);
+        let eax = reg(0x00, 4);
+        let call_address = 0x1010_u64;
+        let mut frame_sub = op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), imm(0x100, 4)],
+        );
+        frame_sub.address = 0x1000;
+        let mut call_sub = op(
+            1,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), imm(4, 4)],
+        );
+        call_sub.address = call_address;
+        let mut return_address_store = op(
+            2,
+            PcodeOpcode::Store,
+            None,
+            vec![imm(3, 4), rsp.clone(), imm((call_address + 5) as i64, 4)],
+        );
+        return_address_store.address = call_address;
+        let mut call = op(
+            3,
+            PcodeOpcode::Call,
+            None,
+            vec![Varnode::constant(0x0040_2000, 4)],
+        );
+        call.address = call_address;
+        let mut after_call = op(4, PcodeOpcode::Copy, Some(eax), vec![imm(1, 4)]);
+        after_call.address = call_address + 5;
+        let pcode = pcode(vec![
+            frame_sub,
+            call_sub,
+            return_address_store,
+            call,
+            after_call,
+        ]);
+
+        assert!(
+            infer_frame_relative_rsp_offsets(
+                &pcode,
+                &x86_32_options(),
+                &[Vec::new()],
+                0x100,
+                false,
+                0,
+            )
+            .is_none()
+        );
     }
 
     /// The exact shape a large (>1 page) Windows/mingw stack frame lifts

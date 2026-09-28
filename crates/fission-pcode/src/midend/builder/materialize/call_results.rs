@@ -8,7 +8,7 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn is_call_return_scaffold_store(
+    pub(in crate::midend::builder) fn is_call_return_scaffold_store(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
