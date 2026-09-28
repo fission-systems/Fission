@@ -1234,6 +1234,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#analysis-coverage-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analysis coverage contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#p-code-evidence-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1318,8 +1329,20 @@
 <h2 id="cli-surfaces">CLI surfaces<a class="headerlink" href="#cli-surfaces" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>fission_cli xrefs &lt;binary&gt; [--json] [--no-disassembly] [--pcode] [--function ADDR]</code> emits the merged index (full <code>refs</code> in JSON). P-code analysis is opt-in because it adds a bounded lift over known functions.</li>
-<li><code>fission_cli info &lt;binary&gt; --xrefs [--json]</code> embeds <code>{ "summary": … }</code> under <code>xrefs</code> without dumping every record.</li>
+<li><code>fission_cli info &lt;binary&gt; --xrefs [--json]</code> embeds the summary and analysis coverage under <code>xrefs</code> without dumping every record.</li>
 </ul>
+<h2 id="analysis-coverage-contract">Analysis coverage contract<a class="headerlink" href="#analysis-coverage-contract" title="Permanent link">&para;</a></h2>
+<p>The <code>xrefs</code> JSON result includes <code>analysis.layers</code>; the <code>--to</code> result includes the same report, including when it finds no records. <code>info --xrefs</code> includes it beside the summary. Each layer reports its state, bounded scope, candidate/completed/omitted input-unit counts, emitted records, and typed omission counts.</p>
+<p>States mean:</p>
+<ul>
+<li><code>not_requested</code>: the caller disabled this layer.</li>
+<li><code>complete_for_scope</code>: every candidate unit in the layer's documented scope was processed. This is not a claim that every possible binary reference was found.</li>
+<li><code>partial</code>: the layer started, but one or more candidate units were omitted. This includes a run where every candidate was omitted; <code>completed_units</code> reports whether any work completed.</li>
+<li><code>unsupported</code>: a layer-level prerequisite prevented analysis, for example because the binary has no load spec or the Sleigh frontend/RAM space is unavailable. <code>unsupported_reason</code> gives the prerequisite failure separately from per-candidate <code>omissions</code>.</li>
+<li><code>failed</code>: reserved for a layer that reports an analysis failure distinct from unsupported inputs.</li>
+</ul>
+<p><code>candidate_units</code>, <code>completed_units</code>, and <code>omitted_units</code> count the layer's declared unit type. Each value in <code>omissions</code> counts candidate units skipped after layer setup; layer-level prerequisite failures appear in <code>unsupported_reason</code> and do not fabricate an omission count when there were no candidates.</p>
+<p>Loader, symbol-table, and relocation layers are complete only for facts already present in <code>LoadedBinary</code>. Disassembly coverage is limited to file-backed executable sections decoded linearly and pointer-sized aligned slots in readable, non-executable file-backed sections. Every discovered non-import function is a p-code candidate. A candidate completes only when it has a nonzero, complete file-backed extent of at most 1 MiB, reaches terminal control flow within 4,096 decoded instructions, and passes value-set analysis; candidates that miss any requirement stay in the candidate count and increment a typed omission reason. An empty <code>refs</code> list or absent <code>by_layer</code> entry must therefore be interpreted together with the corresponding coverage state; it is not by itself proof that no references exist.</p>
 <h2 id="p-code-evidence-contract">P-code evidence contract<a class="headerlink" href="#p-code-evidence-contract" title="Permanent link">&para;</a></h2>
 <p>P-code evidence comes from two sources:</p>
 <ul>
