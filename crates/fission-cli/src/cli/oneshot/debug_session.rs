@@ -14,11 +14,12 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use std::io::{BufRead, BufReader, Write};
 
 use crate::cli::args::{DebugCommand, DebugSessionArgs, MemoryBpKindArg};
 use fission_dynamic::debug::traits::ExecutionBackend;
 use fission_dynamic::debug::types as debug_types_alias;
-use fission_dynamic::debug::types::{DebugEvent, MemoryBpKind, RegisterState};
+use fission_dynamic::debug::types::{DebugEvent, DebugStatus, MemoryBpKind, RegisterState};
 
 /// Split a command line on whitespace, honouring double quotes.
 ///
@@ -110,7 +111,7 @@ fn registers_json(regs: &RegisterState) -> Value {
     Value::Object(map)
 }
 
-fn event_json(event: &DebugEvent) -> Value {
+pub(super) fn event_json(event: &DebugEvent) -> Value {
     match event {
         DebugEvent::ProcessCreated {
             pid,
@@ -235,43 +236,19 @@ fn execute(
         }
         DebugCommand::Continue => {
             backend.continue_execution()?;
-            json!({
-                "action": "continue",
-                "pc": format!("0x{:x}", backend.fetch_registers(thread_id)?.pc),
-                // Why it stopped, which `Suspended` cannot say: a breakpoint
-                // and a program that ran out of code look the same otherwise.
-                "stop": backend.stop_reason(),
-            })
+            execution_progress(backend, thread_id, "continue")?
         }
         DebugCommand::Step => {
             backend.single_step()?;
-            json!({
-                "action": "step",
-                "pc": format!("0x{:x}", backend.fetch_registers(thread_id)?.pc),
-                // Why it stopped, which `Suspended` cannot say: a breakpoint
-                // and a program that ran out of code look the same otherwise.
-                "stop": backend.stop_reason(),
-            })
+            execution_progress(backend, thread_id, "step")?
         }
         DebugCommand::StepOver => {
             backend.step_over()?;
-            json!({
-                "action": "step_over",
-                "pc": format!("0x{:x}", backend.fetch_registers(thread_id)?.pc),
-                // Why it stopped, which `Suspended` cannot say: a breakpoint
-                // and a program that ran out of code look the same otherwise.
-                "stop": backend.stop_reason(),
-            })
+            execution_progress(backend, thread_id, "step_over")?
         }
         DebugCommand::StepOut => {
             backend.step_out()?;
-            json!({
-                "action": "step_out",
-                "pc": format!("0x{:x}", backend.fetch_registers(thread_id)?.pc),
-                // Why it stopped, which `Suspended` cannot say: a breakpoint
-                // and a program that ran out of code look the same otherwise.
-                "stop": backend.stop_reason(),
-            })
+            execution_progress(backend, thread_id, "step_out")?
         }
         DebugCommand::Regs => {
             let regs = backend.fetch_registers(thread_id)?;
@@ -308,9 +285,13 @@ fn execute(
             let value = backend.stack_peek(a.offset)?;
             json!({ "action": "stack_peek", "offset": a.offset, "value": format!("0x{value:x}") })
         }
-        DebugCommand::Event => match backend.poll_event(0)? {
+        DebugCommand::Event(args) => match backend.poll_event(args.timeout_ms)? {
             Some(event) => json!({ "action": "event", "event": event_json(&event) }),
-            None => json!({ "action": "event", "event": Value::Null }),
+            None => json!({
+                "action": "event",
+                "event": Value::Null,
+                "timeout_ms": args.timeout_ms,
+            }),
         },
         DebugCommand::Modules(_) => serde_json::to_value(backend.list_modules()?)?,
         DebugCommand::Threads => {
@@ -359,33 +340,80 @@ fn execute(
     Ok(value)
 }
 
-pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
-    let commands = collect_commands(&args)?;
-
-    let mut session = {
-        let mut builder = fission_dynamic::debug::DebugSession::new();
-        if use_emulator {
-            builder = builder.with_emulator();
-        }
-        builder.build()
+/// Some native backends return from `continue` or `step` while the target is
+/// still running. A register read at that point is unsupported by ptrace; use
+/// null for the PC until a stop event makes the register context readable.
+fn execution_progress(
+    backend: &mut dyn ExecutionBackend,
+    thread_id: u32,
+    action: &str,
+) -> Result<Value> {
+    let pc = if backend.get_state().status == DebugStatus::Running {
+        Value::Null
+    } else {
+        json!(format!("0x{:x}", backend.fetch_registers(thread_id)?.pc))
     };
+    Ok(json!({
+        "action": action,
+        "pc": pc,
+        // Why it stopped, which `Suspended` cannot say: a breakpoint and a
+        // program that ran out of code look the same otherwise.
+        "stop": backend.stop_reason(),
+    }))
+}
 
-    let pid = session
-        .debugger
-        .launch(&args.path, &[])
-        .with_context(|| format!("failed to launch {}", args.path))?;
-    let thread_id = session.debugger.get_state().main_thread_id.unwrap_or(1);
+fn start_session(
+    args: &DebugSessionArgs,
+    use_emulator: bool,
+) -> Result<(fission_dynamic::debug::DebugSession, u32, u32)> {
+    if use_emulator && args.attach.is_some() {
+        bail!(
+            "--attach requires a native debugger backend; it cannot attach to an emulator session"
+        );
+    }
+    if args.rhai.is_some() && args.path.is_none() {
+        bail!("--rhai requires a launched binary path and cannot be used with --attach");
+    }
 
-    // Breakpoints and watchpoints someone recorded earlier, put back before
-    // the first command runs. Finding an address worth stopping at is the
-    // expensive part of a session; having to find it again next time is what
-    // makes a debugger a thing you use once.
-    let mut restored: Vec<Value> = Vec::new();
+    let mut builder = fission_dynamic::debug::DebugSession::new();
+    if use_emulator {
+        builder = builder.with_emulator();
+    }
+    let mut session = builder.build();
+    let pid = if let Some(pid) = args.attach {
+        session
+            .debugger
+            .attach(pid)
+            .with_context(|| format!("failed to attach to PID {pid}"))?;
+        pid
+    } else {
+        let path = args
+            .path
+            .as_deref()
+            .context("a binary path is required unless --attach is used")?;
+        session
+            .debugger
+            .launch(path, &[])
+            .with_context(|| format!("failed to launch {path}"))?
+    };
+    let thread_id = session.debugger.get_state().main_thread_id.unwrap_or(pid);
+    Ok((session, pid, thread_id))
+}
+
+/// Breakpoints and watchpoints someone recorded earlier, put back before the
+/// first command runs. Finding an address worth stopping at is the expensive
+/// part of a session; having to find it again next time is what makes a
+/// debugger a thing you use once.
+fn restore_saved_breakpoints(backend: &mut dyn ExecutionBackend, path: Option<&str>) -> Vec<Value> {
+    let Some(path) = path else {
+        return Vec::new();
+    };
+    let mut restored = Vec::new();
     if let Ok(Some(project)) = fission_project::Project::read(
-        &fission_project::Project::default_path(std::path::Path::new(&args.path)),
+        &fission_project::Project::default_path(std::path::Path::new(path)),
     ) {
         for address in &project.breakpoints {
-            if session.debugger.set_sw_breakpoint(*address).is_ok() {
+            if backend.set_sw_breakpoint(*address).is_ok() {
                 restored.push(json!({ "breakpoint": format!("0x{address:x}") }));
             }
         }
@@ -395,8 +423,7 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
                 (true, false) => debug_types_alias::MemoryBpKind::Read,
                 _ => debug_types_alias::MemoryBpKind::Write,
             };
-            if session
-                .debugger
+            if backend
                 .set_memory_breakpoint(watch.address, watch.size as usize, kind)
                 .is_ok()
             {
@@ -404,6 +431,279 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
             }
         }
     }
+    restored
+}
+
+fn session_state_json(backend: &mut dyn ExecutionBackend, thread_id: u32) -> Value {
+    let state = backend.get_state();
+    let pc = if state.status == DebugStatus::Running {
+        Value::Null
+    } else {
+        backend
+            .fetch_registers(thread_id)
+            .ok()
+            .map(|registers| json!(format!("0x{:x}", registers.pc)))
+            .unwrap_or(Value::Null)
+    };
+    json!({
+        "status": format!("{:?}", state.status).to_ascii_lowercase(),
+        "attached_pid": state.attached_pid,
+        "thread_id": state.current_thread_id.or(state.main_thread_id),
+        "pc": pc,
+        "stop": backend.stop_reason(),
+    })
+}
+
+fn write_json_frame(writer: &mut impl Write, frame: &Value) -> Result<()> {
+    serde_json::to_writer(&mut *writer, frame)
+        .context("serialize interactive debugger response")?;
+    writer
+        .write_all(b"\n")
+        .context("write interactive debugger response")?;
+    writer
+        .flush()
+        .context("flush interactive debugger response")?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum InteractiveEndReason {
+    InputEof,
+    Detached,
+    TargetExited,
+}
+
+impl InteractiveEndReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::InputEof => "input_eof",
+            Self::Detached => "detached",
+            Self::TargetExited => "target_exited",
+        }
+    }
+}
+
+fn interactive_command(
+    backend: &mut dyn ExecutionBackend,
+    thread_id: u32,
+    command_index: usize,
+    command_line: &str,
+    session_id: &str,
+    target: &Value,
+    backend_name: &str,
+    writer: &mut impl Write,
+) -> Result<Option<InteractiveEndReason>> {
+    let outcome =
+        parse_command(command_line).and_then(|command| execute(backend, thread_id, command));
+    let events = drain_events(backend);
+    let state = session_state_json(backend, thread_id);
+    let (status, result, error) = match outcome {
+        Ok(result) => ("ok", result, Value::Null),
+        Err(error) => ("error", Value::Null, json!(format!("{error:#}"))),
+    };
+    let frame = json!({
+        "schema_version": 1,
+        "type": "command_result",
+        "session_id": session_id,
+        "target": target,
+        "backend": backend_name,
+        "command_index": command_index,
+        "command": command_line,
+        "status": status,
+        "result": result,
+        "error": error,
+        "events": events,
+        "state": state,
+    });
+    write_json_frame(writer, &frame)?;
+
+    match state["status"].as_str() {
+        Some("terminated") => Ok(Some(InteractiveEndReason::TargetExited)),
+        Some("detached") => Ok(Some(InteractiveEndReason::Detached)),
+        _ => Ok(None),
+    }
+}
+
+fn interactive_end_frame(
+    backend: &mut dyn ExecutionBackend,
+    thread_id: u32,
+    session_id: &str,
+    target: &Value,
+    backend_name: &str,
+    reason: &str,
+    cleanup: Value,
+    events: Vec<Value>,
+) -> Value {
+    let mut state = session_state_json(backend, thread_id);
+    if cleanup["status"] == "failed" {
+        let observed = state["status"].clone();
+        state["status"] = json!("unknown_after_cleanup_failure");
+        state["last_observed_status"] = observed;
+    }
+    json!({
+        "schema_version": 1,
+        "type": "session_ended",
+        "session_id": session_id,
+        "target": target,
+        "backend": backend_name,
+        "reason": reason,
+        "cleanup": cleanup,
+        "events": events,
+        "state": state,
+    })
+}
+
+fn run_interactive_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
+    if args.script.is_some() || args.rhai.is_some() || args.keep_going {
+        bail!(
+            "--interactive reads commands from stdin and cannot be combined with --script, --rhai, or --keep-going"
+        );
+    }
+    let (mut session, pid, thread_id) = match start_session(&args, use_emulator) {
+        Ok(session) => session,
+        Err(error) => {
+            let stdout = std::io::stdout();
+            let mut output = stdout.lock();
+            let frame = json!({
+                "schema_version": 1,
+                "type": "session_start_failed",
+                "backend": if use_emulator { "emulator" } else { "native" },
+                "target": { "path": args.path, "pid": args.attach },
+                "status": "error",
+                "error": format!("{error:#}"),
+            });
+            write_json_frame(&mut output, &frame)?;
+            return Err(error);
+        }
+    };
+    let backend_name = if use_emulator { "emulator" } else { "native" };
+    let session_id = format!("{}-{pid}", std::process::id());
+    let target = json!({ "path": args.path, "pid": pid });
+    let restored = restore_saved_breakpoints(session.debugger.as_mut(), args.path.as_deref());
+
+    let stdout = std::io::stdout();
+    let mut output = stdout.lock();
+    let run_result = (|| -> Result<InteractiveEndReason> {
+        let events = drain_events(session.debugger.as_mut());
+        let started = json!({
+            "schema_version": 1,
+            "type": "session_started",
+            "session_id": session_id,
+            "target": target,
+            "backend": backend_name,
+            "restored": restored,
+            "events": events,
+            "state": session_state_json(session.debugger.as_mut(), thread_id),
+        });
+        write_json_frame(&mut output, &started)?;
+
+        let mut command_index = 0;
+        for command_line in &args.commands {
+            command_index += 1;
+            if let Some(reason) = interactive_command(
+                session.debugger.as_mut(),
+                thread_id,
+                command_index,
+                command_line,
+                &session_id,
+                &target,
+                backend_name,
+                &mut output,
+            )? {
+                return Ok(reason);
+            }
+        }
+
+        let stdin = std::io::stdin();
+        let mut input = BufReader::new(stdin.lock());
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if input
+                .read_line(&mut line)
+                .context("read interactive debugger command")?
+                == 0
+            {
+                return Ok(InteractiveEndReason::InputEof);
+            }
+            let command_line = line.trim();
+            if command_line.is_empty() || command_line.starts_with('#') {
+                continue;
+            }
+            command_index += 1;
+            if let Some(reason) = interactive_command(
+                session.debugger.as_mut(),
+                thread_id,
+                command_index,
+                command_line,
+                &session_id,
+                &target,
+                backend_name,
+                &mut output,
+            )? {
+                return Ok(reason);
+            }
+        }
+    })();
+
+    let mut reason = run_result
+        .as_ref()
+        .copied()
+        .unwrap_or(InteractiveEndReason::InputEof);
+    let mut end_events = Vec::new();
+    if matches!(reason, InteractiveEndReason::InputEof) {
+        // Check once for an exit that raced with stdin closing before deciding
+        // whether there is a live process to detach.
+        end_events = drain_events(session.debugger.as_mut());
+        if session.debugger.get_state().status == DebugStatus::Terminated {
+            reason = InteractiveEndReason::TargetExited;
+        }
+    }
+
+    let terminal = matches!(
+        session.debugger.get_state().status,
+        DebugStatus::Terminated | DebugStatus::Detached
+    );
+    let cleanup = if terminal || !session.debugger.is_attached() {
+        json!({ "status": "not_needed" })
+    } else {
+        match session.debugger.detach() {
+            Ok(()) => json!({ "status": "detached" }),
+            Err(error) => json!({ "status": "failed", "error": format!("{error:#}") }),
+        }
+    };
+    let end = interactive_end_frame(
+        session.debugger.as_mut(),
+        thread_id,
+        &session_id,
+        &target,
+        backend_name,
+        if run_result.is_err() {
+            "io_error"
+        } else {
+            reason.as_str()
+        },
+        cleanup,
+        end_events,
+    );
+
+    match run_result {
+        Ok(_) => write_json_frame(&mut output, &end),
+        Err(error) => {
+            // A broken output pipe still must not leave a native target traced.
+            let _ = write_json_frame(&mut output, &end);
+            Err(error)
+        }
+    }
+}
+
+pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
+    if args.interactive {
+        return run_interactive_session(args, use_emulator);
+    }
+    let commands = collect_commands(&args)?;
+    let (mut session, pid, thread_id) = start_session(&args, use_emulator)?;
+    let restored = restore_saved_breakpoints(session.debugger.as_mut(), args.path.as_deref());
 
     let mut results: Vec<Value> = Vec::new();
     let mut failed = false;
@@ -445,7 +745,11 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
             // The session already stopped; running a script on a machine in
             // an unknown state would report something nobody asked for.
         } else {
-            match run_rhai(&mut session, &args.path, path) {
+            let binary_path = args
+                .path
+                .as_deref()
+                .context("--rhai requires a launched binary path")?;
+            match run_rhai(&mut session, binary_path, path) {
                 Ok(value) => script_result = Some(value),
                 Err(error) => {
                     failed = true;
