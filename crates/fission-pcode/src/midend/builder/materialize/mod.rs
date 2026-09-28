@@ -36,7 +36,7 @@ struct SameBlockRegisterJoinProof {
 }
 
 impl<'a> PreviewBuilder<'a> {
-    fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
+    pub(in crate::midend::builder) fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
         if op.opcode != PcodeOpcode::Store || op.inputs.len() < 3 {
             return false;
         }

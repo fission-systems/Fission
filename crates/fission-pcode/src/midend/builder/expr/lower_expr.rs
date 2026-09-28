@@ -514,6 +514,12 @@ impl<'a> PreviewBuilder<'a> {
             ));
         }
 
+        if self.stack_frame_backing.is_some()
+            && let Some(address) = self.fixed_frame_address_for_varnode(vn)
+        {
+            return Ok(address);
+        }
+
         if vn.space_id == REGISTER_SPACE_ID
             && vn.size >= 16
             && let Some(site) = self.current_lowering_site

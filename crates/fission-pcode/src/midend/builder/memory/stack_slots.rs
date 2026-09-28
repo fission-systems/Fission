@@ -244,6 +244,14 @@ impl<'a> PreviewBuilder<'a> {
         ty: NirType,
     ) -> Option<(String, NirType)> {
         if let Some((base, offset)) = self.resolve_stack_address_from_memory_op(op) {
+            if self.stack_frame_backing.is_some()
+                && stack_slot_byte_size(&ty).is_some_and(|width| {
+                    self.fixed_frame_access_offset(base, offset, width)
+                        .is_some()
+                })
+            {
+                return None;
+            }
             return self.ensure_stack_slot_binding(base, offset, ty);
         }
         self.try_stack_slot_lvalue(ptr, ty)
@@ -673,6 +681,14 @@ impl<'a> PreviewBuilder<'a> {
         ty: NirType,
     ) -> Option<(String, NirType)> {
         let (base, offset) = self.resolve_stack_address(ptr)?;
+        if self.stack_frame_backing.is_some()
+            && stack_slot_byte_size(&ty).is_some_and(|width| {
+                self.fixed_frame_access_offset(base, offset, width)
+                    .is_some()
+            })
+        {
+            return None;
+        }
         self.ensure_stack_slot_binding(base, offset, ty)
     }
 
@@ -680,11 +696,489 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         ptr: &Varnode,
     ) -> Option<(StackBase, i64)> {
+        if self.stack_frame_backing.is_some()
+            && let Some(site) = self.current_lowering_site
+        {
+            return self.resolve_fixed_frame_stack_address_at(ptr, site, &mut HashSet::default());
+        }
         self.resolve_stack_address_inner_at(
             ptr,
             self.current_lowering_site,
             &mut HashSet::default(),
         )
+    }
+
+    pub(in crate::midend::builder) fn resolve_stack_address_of_operation(
+        &self,
+        op: &PcodeOp,
+    ) -> Option<(StackBase, i64)> {
+        if self.stack_frame_backing.is_some()
+            && let Some(site) = self.current_lowering_site
+        {
+            return self.resolve_fixed_frame_stack_address_of_op_at(
+                op,
+                site,
+                &mut HashSet::default(),
+            );
+        }
+        self.resolve_stack_address_of_op(op, self.current_lowering_site, &mut HashSet::default())
+    }
+
+    pub(in crate::midend::builder) fn resolve_stack_address_base_of_operation(
+        &self,
+        op: &PcodeOp,
+    ) -> Option<(StackBase, i64)> {
+        self.resolve_stack_address_of_operation(op).or_else(|| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::IntAdd
+                    | PcodeOpcode::IntSub
+                    | PcodeOpcode::PtrAdd
+                    | PcodeOpcode::PtrSub
+            )
+            .then(|| {
+                op.inputs
+                    .iter()
+                    .find_map(|input| self.resolve_stack_address(input))
+            })
+            .flatten()
+        })
+    }
+
+    /// Find a proven fixed-frame base under an unresolved dynamic memory
+    /// address. Static stack slots keep their existing typed bindings; the
+    /// opaque frame backing is only needed when a load/store reaches a
+    /// frame-derived pointer whose byte displacement cannot be resolved.
+    pub(in crate::midend::builder) fn unresolved_fixed_frame_memory_base(
+        &self,
+        op: &PcodeOp,
+    ) -> Option<(StackBase, i64)> {
+        if !matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store) {
+            return None;
+        }
+        let ptr = op.inputs.get(1)?;
+        let use_site = self.current_lowering_site?;
+        if self
+            .resolve_fixed_frame_stack_address_at(ptr, use_site, &mut HashSet::default())
+            .is_some()
+        {
+            return None;
+        }
+        self.unresolved_dynamic_fixed_frame_base_at(ptr, use_site, &mut HashSet::default())
+    }
+
+    pub(in crate::midend::builder) fn fixed_frame_address_base_of_operation_at(
+        &self,
+        op: &PcodeOp,
+        site: LoweringSite,
+    ) -> Option<(StackBase, i64)> {
+        self.resolve_fixed_frame_stack_address_of_op_at(op, site, &mut HashSet::default())
+            .or_else(|| {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::IntAdd
+                        | PcodeOpcode::IntSub
+                        | PcodeOpcode::PtrAdd
+                        | PcodeOpcode::PtrSub
+                )
+                .then(|| {
+                    op.inputs.iter().find_map(|input| {
+                        self.resolve_fixed_frame_stack_address_at(
+                            input,
+                            site,
+                            &mut HashSet::default(),
+                        )
+                    })
+                })
+                .flatten()
+            })
+    }
+
+    /// Fixed-frame coordinates whose addresses reach an escaping use.
+    ///
+    /// A frame-base alias such as `rbp = rsp + K` is used by later local
+    /// address calculations, but that alone does not make the frame base an
+    /// escaping object. Start from actual escape sinks (ABI integer argument
+    /// registers, stored pointer values, returns, and explicit call operands)
+    /// and trace each pointer back to its nearest fixed-frame base instead.
+    pub(in crate::midend::builder) fn escaped_fixed_frame_address_origins(&mut self) -> Vec<i64> {
+        let mut origins = Vec::new();
+        let argument_registers = self.register_namer().int_param_offsets.clone();
+
+        for (block_idx, block) in self.pcode.blocks.iter().enumerate() {
+            for (op_idx, op) in block.ops.iter().enumerate() {
+                let site = LoweringSite { block_idx, op_idx };
+                if let Some(output) = op.output.as_ref()
+                    && is_register_space_id(output.space_id)
+                    && argument_registers.contains(&output.offset)
+                    && let Some((base, offset)) = self.fixed_frame_address_origin_of_operation_at(
+                        op,
+                        site,
+                        &mut HashSet::default(),
+                    )
+                    && let Some(coordinate) = self.fixed_frame_byte_offset(base, offset)
+                {
+                    origins.push(coordinate);
+                }
+
+                let is_callee_saved_push = op.opcode == PcodeOpcode::Store
+                    && self.with_lowering_site(site, |this| this.is_callee_saved_push_store(op));
+                let is_call_return_store = op.opcode == PcodeOpcode::Store
+                    && self.is_call_return_scaffold_store(block, op_idx, op);
+                let escaped_inputs: Vec<&Varnode> = match op.opcode {
+                    PcodeOpcode::Store if op.inputs.len() >= 3 => (!is_callee_saved_push
+                        && !is_call_return_store)
+                        .then(|| op.inputs.last())
+                        .flatten()
+                        .into_iter()
+                        .collect(),
+                    PcodeOpcode::Return => op.inputs.iter().collect(),
+                    PcodeOpcode::Call | PcodeOpcode::CallInd if op.inputs.len() > 1 => {
+                        op.inputs.iter().skip(1).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                for input in escaped_inputs {
+                    if let Some((base, offset)) = self.fixed_frame_address_origin_of_value_at(
+                        input,
+                        site,
+                        &mut HashSet::default(),
+                    ) && let Some(coordinate) = self.fixed_frame_byte_offset(base, offset)
+                    {
+                        origins.push(coordinate);
+                    }
+                }
+            }
+        }
+
+        origins.sort_unstable();
+        origins.dedup();
+        origins
+    }
+
+    fn fixed_frame_address_origin_of_value_at(
+        &self,
+        value: &Varnode,
+        use_site: LoweringSite,
+        visiting: &mut HashSet<(VarnodeKey, LoweringSite)>,
+    ) -> Option<(StackBase, i64)> {
+        if let Some(address) =
+            self.resolve_fixed_frame_stack_address_at(value, use_site, &mut HashSet::default())
+        {
+            return Some(address);
+        }
+
+        let visit_key = (VarnodeKey::from(value), use_site);
+        if !visiting.insert(visit_key.clone()) {
+            return None;
+        }
+        let resolved = self
+            .lookup_def_site_at(value, Some(use_site))
+            .and_then(|(def_site, op)| {
+                self.fixed_frame_address_origin_of_operation_at(op, def_site, visiting)
+            });
+        visiting.remove(&visit_key);
+        resolved
+    }
+
+    fn fixed_frame_address_origin_of_operation_at(
+        &self,
+        op: &PcodeOp,
+        site: LoweringSite,
+        visiting: &mut HashSet<(VarnodeKey, LoweringSite)>,
+    ) -> Option<(StackBase, i64)> {
+        if let Some(address) =
+            self.resolve_fixed_frame_stack_address_of_op_at(op, site, &mut HashSet::default())
+        {
+            return Some(address);
+        }
+
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                self.fixed_frame_address_origin_of_value_at(op.inputs.first()?, site, visiting)
+            }
+            PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::PtrAdd
+            | PcodeOpcode::PtrSub => {
+                let mut origin = None;
+                for input in &op.inputs {
+                    let Some(candidate) =
+                        self.fixed_frame_address_origin_of_value_at(input, site, visiting)
+                    else {
+                        continue;
+                    };
+                    if origin.replace(candidate).is_some() {
+                        // Multiple independently frame-derived operands do
+                        // not identify which object this arithmetic addresses.
+                        return None;
+                    }
+                }
+                origin
+            }
+            _ => None,
+        }
+    }
+
+    fn unresolved_dynamic_fixed_frame_base_at(
+        &self,
+        ptr: &Varnode,
+        use_site: LoweringSite,
+        visiting: &mut HashSet<(VarnodeKey, LoweringSite)>,
+    ) -> Option<(StackBase, i64)> {
+        let visit_key = (VarnodeKey::from(ptr), use_site);
+        if !visiting.insert(visit_key.clone()) {
+            return None;
+        }
+        let resolved = self
+            .lookup_def_site_at(ptr, Some(use_site))
+            .and_then(|(def_site, op)| match op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt => self.unresolved_dynamic_fixed_frame_base_at(
+                    op.inputs.first()?,
+                    def_site,
+                    visiting,
+                ),
+                PcodeOpcode::IntAdd
+                | PcodeOpcode::IntSub
+                | PcodeOpcode::PtrAdd
+                | PcodeOpcode::PtrSub => {
+                    if self
+                        .resolve_fixed_frame_stack_address_of_op_at(
+                            op,
+                            def_site,
+                            &mut HashSet::default(),
+                        )
+                        .is_some()
+                    {
+                        return None;
+                    }
+
+                    let mut fixed_base = None;
+                    let mut has_dynamic_displacement = false;
+                    for input in &op.inputs {
+                        if let Some((base, offset)) = self.resolve_fixed_frame_stack_address_at(
+                            input,
+                            def_site,
+                            &mut HashSet::default(),
+                        ) {
+                            if self.fixed_frame_byte_offset(base, offset).is_some() {
+                                fixed_base = Some((base, offset));
+                            }
+                        } else if !input.is_constant {
+                            has_dynamic_displacement = true;
+                            if let Some(base) = self
+                                .unresolved_dynamic_fixed_frame_base_at(input, def_site, visiting)
+                            {
+                                fixed_base = Some(base);
+                            }
+                        }
+                    }
+                    has_dynamic_displacement
+                        .then_some(fixed_base?)
+                        .filter(|(base, offset)| {
+                            self.fixed_frame_byte_offset(*base, *offset).is_some()
+                        })
+                }
+                _ => None,
+            });
+        visiting.remove(&visit_key);
+        resolved
+    }
+
+    /// Convert a resolved stack-base offset into the proven fixed frame's
+    /// byte coordinate. RBP offsets already include the prologue's frame
+    /// pointer bias; the frame size and saved return word translate them to
+    /// the same bottom-of-frame coordinate used for RSP.
+    pub(in crate::midend::builder) fn fixed_frame_byte_offset(
+        &self,
+        base: StackBase,
+        offset: i64,
+    ) -> Option<i64> {
+        if self.rsp_frame_coordinate_table.is_none() || self.stack_frame_size <= 0 {
+            return None;
+        }
+        let coordinate = match base {
+            StackBase::Rsp => offset,
+            StackBase::Rbp => offset
+                .checked_add(self.stack_frame_size)?
+                .checked_sub(i64::from(self.options.pointer_size))?,
+        };
+        (0..=self.stack_frame_size)
+            .contains(&coordinate)
+            .then_some(coordinate)
+    }
+
+    pub(in crate::midend::builder) fn fixed_frame_access_offset(
+        &self,
+        base: StackBase,
+        offset: i64,
+        width: u32,
+    ) -> Option<i64> {
+        let coordinate = self.fixed_frame_byte_offset(base, offset)?;
+        let end = coordinate.checked_add(i64::from(width))?;
+        (width > 0 && end <= self.stack_frame_size).then_some(coordinate)
+    }
+
+    pub(in crate::midend::builder) fn fixed_frame_memory_access_range(
+        &self,
+        op: &PcodeOp,
+        width: u32,
+    ) -> Option<(i64, i64)> {
+        let site = self.current_lowering_site?;
+        let ptr = op.inputs.get(1)?;
+        let resolved = self
+            .resolve_fixed_frame_stack_address_at(ptr, site, &mut HashSet::default())
+            .or_else(|| {
+                let (base, displacement) = self.resolve_stack_address_from_memory_op(op)?;
+                let offset = match base {
+                    StackBase::Rsp => self
+                        .rsp_frame_coordinate_table
+                        .as_ref()?
+                        .get(&site)?
+                        .checked_add(displacement)?,
+                    StackBase::Rbp => self.rbp_frame_bias.checked_add(displacement)?,
+                };
+                Some((base, offset))
+            })?;
+        let start = self.fixed_frame_access_offset(resolved.0, resolved.1, width)?;
+        let end = start.checked_add(i64::from(width))?;
+        Some((start, end))
+    }
+
+    fn fixed_frame_address_expr(&self, coordinate: i64) -> Option<PreHirExpr> {
+        let frame = self.stack_frame_backing.as_ref()?;
+        if !(0..=i64::from(frame.size)).contains(&coordinate) {
+            return None;
+        }
+        let base = PreHirExpr::AddressOfLocal(frame.name.clone());
+        Some(if coordinate == 0 {
+            base
+        } else {
+            PreHirExpr::PtrOffset {
+                base: Box::new(base),
+                offset: coordinate,
+            }
+        })
+    }
+
+    pub(in crate::midend::builder) fn fixed_frame_address_for_varnode(
+        &self,
+        ptr: &Varnode,
+    ) -> Option<PreHirExpr> {
+        let (base, offset) = self.resolve_stack_address(ptr)?;
+        let coordinate = self.fixed_frame_byte_offset(base, offset)?;
+        self.fixed_frame_address_expr(coordinate)
+    }
+
+    fn fixed_frame_address_for_op(&self, op: &PcodeOp) -> Option<PreHirExpr> {
+        let (base, offset) = self.resolve_stack_address_of_operation(op)?;
+        let coordinate = self.fixed_frame_byte_offset(base, offset)?;
+        self.fixed_frame_address_expr(coordinate)
+    }
+
+    /// Resolve a stack address with the definition site of each p-code value
+    /// as the scope for its inputs. Unique-space varnodes can be reused by
+    /// separate instructions, so carrying only the value key can select a
+    /// later definition when a call argument walks through register copies.
+    fn resolve_fixed_frame_stack_address_at(
+        &self,
+        ptr: &Varnode,
+        use_site: LoweringSite,
+        visiting: &mut HashSet<(VarnodeKey, LoweringSite)>,
+    ) -> Option<(StackBase, i64)> {
+        if let Some(name) = self.stack_pointer_register_name(ptr) {
+            match name.as_str() {
+                "rsp" | "esp" | "sp" => {
+                    let offset = self.rsp_frame_coordinate_table.as_ref()?.get(&use_site)?;
+                    return Some((StackBase::Rsp, *offset));
+                }
+                "rbp" | "ebp" | "fp" => {
+                    return Some((StackBase::Rbp, self.rbp_frame_bias));
+                }
+                _ => {}
+            }
+        }
+
+        let visit_key = (VarnodeKey::from(ptr), use_site);
+        if !visiting.insert(visit_key.clone()) {
+            return None;
+        }
+        let resolved = self
+            .lookup_def_site_at(ptr, Some(use_site))
+            .and_then(|(def_site, op)| {
+                self.resolve_fixed_frame_stack_address_of_op_at(op, def_site, visiting)
+            });
+        visiting.remove(&visit_key);
+        resolved
+    }
+
+    fn resolve_fixed_frame_stack_address_of_op_at(
+        &self,
+        op: &PcodeOp,
+        op_site: LoweringSite,
+        visiting: &mut HashSet<(VarnodeKey, LoweringSite)>,
+    ) -> Option<(StackBase, i64)> {
+        let resolve_input = |index: usize, visiting: &mut HashSet<(VarnodeKey, LoweringSite)>| {
+            self.resolve_fixed_frame_stack_address_at(op.inputs.get(index)?, op_site, visiting)
+        };
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                resolve_input(0, visiting)
+            }
+            PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd => {
+                if op.inputs.len() < 2 {
+                    None
+                } else if let Some((base, offset)) = resolve_input(0, visiting) {
+                    self.resolve_constant_operand_at(
+                        &op.inputs[1],
+                        Some(op_site),
+                        &mut HashSet::default(),
+                    )
+                    .and_then(|delta| offset.checked_add(delta).map(|value| (base, value)))
+                } else if let Some((base, offset)) = resolve_input(1, visiting) {
+                    self.resolve_constant_operand_at(
+                        &op.inputs[0],
+                        Some(op_site),
+                        &mut HashSet::default(),
+                    )
+                    .and_then(|delta| offset.checked_add(delta).map(|value| (base, value)))
+                } else {
+                    None
+                }
+            }
+            PcodeOpcode::IntSub => {
+                if op.inputs.len() < 2 {
+                    None
+                } else if let Some((base, offset)) = resolve_input(0, visiting) {
+                    self.resolve_constant_operand_at(
+                        &op.inputs[1],
+                        Some(op_site),
+                        &mut HashSet::default(),
+                    )
+                    .and_then(|delta| offset.checked_sub(delta).map(|value| (base, value)))
+                } else {
+                    None
+                }
+            }
+            PcodeOpcode::PtrSub => {
+                if op.inputs.len() < 2 {
+                    None
+                } else if let Some((base, offset)) = resolve_input(0, visiting) {
+                    self.resolve_constant_operand_at(
+                        &op.inputs[1],
+                        Some(op_site),
+                        &mut HashSet::default(),
+                    )
+                    .and_then(|delta| offset.checked_add(delta).map(|value| (base, value)))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Resolves what a *bare* RSP/ESP register-space varnode's occurrence at
@@ -735,6 +1229,11 @@ impl<'a> PreviewBuilder<'a> {
     /// rather than fabricating a wrong stack-slot name).
     fn rsp_register_space_offset_at(&self, site: Option<LoweringSite>) -> Option<i64> {
         if let Some(site) = site {
+            if self.stack_frame_backing.is_some()
+                && let Some(offsets) = &self.rsp_frame_coordinate_table
+            {
+                return offsets.get(&site).copied();
+            }
             if let Some(delta) = self.rsp_prologue_delta_table.get(&site) {
                 return Some(delta + self.stack_frame_size);
             }
@@ -1285,7 +1784,7 @@ impl<'a> PreviewBuilder<'a> {
         // access resolves to the slot on its own, and lowering the arithmetic
         // as `&local` would leave a materialised assignment nothing reads.
         if !self.output_is_used_as_a_value(op)
-            || self.lowering_memory_pointer
+            || (self.lowering_memory_pointer && self.stack_frame_backing.is_none())
             || !matches!(
                 op.opcode,
                 PcodeOpcode::IntAdd
@@ -1295,6 +1794,9 @@ impl<'a> PreviewBuilder<'a> {
             )
         {
             return None;
+        }
+        if let Some(address) = self.fixed_frame_address_for_op(op) {
+            return Some(address);
         }
         let (_, offset) = self.resolve_stack_address_of_op(
             op,
@@ -1317,7 +1819,7 @@ impl<'a> PreviewBuilder<'a> {
     ///
     /// The pointer operand of a `Load`/`Store` is not such a read: it names
     /// where to go, and the access itself already resolves the slot.
-    fn output_is_used_as_a_value(&mut self, op: &PcodeOp) -> bool {
+    pub(in crate::midend::builder) fn output_is_used_as_a_value(&mut self, op: &PcodeOp) -> bool {
         let Some(output) = op.output.as_ref() else {
             return false;
         };
@@ -1568,16 +2070,46 @@ impl<'a> PreviewBuilder<'a> {
         let mem = asm[start..end].replace(' ', "");
 
         if let Some(rest) = mem.strip_prefix("RSP") {
-            return parse_stack_displacement(rest).map(|disp| (StackBase::Rsp, disp));
+            return parse_stack_displacement(rest).and_then(|disp| {
+                if self.stack_frame_backing.is_some() {
+                    self.rsp_register_space_offset_at(self.current_lowering_site)?
+                        .checked_add(disp)
+                        .map(|offset| (StackBase::Rsp, offset))
+                } else {
+                    Some((StackBase::Rsp, disp))
+                }
+            });
         }
         if let Some(rest) = mem.strip_prefix("RBP") {
-            return parse_stack_displacement(rest).map(|disp| (StackBase::Rbp, disp));
+            return parse_stack_displacement(rest).and_then(|disp| {
+                let offset = if self.stack_frame_backing.is_some() {
+                    self.rbp_frame_bias.checked_add(disp)?
+                } else {
+                    disp
+                };
+                Some((StackBase::Rbp, offset))
+            });
         }
         if let Some(rest) = mem.strip_prefix("ESP") {
-            return parse_stack_displacement(rest).map(|disp| (StackBase::Rsp, disp));
+            return parse_stack_displacement(rest).and_then(|disp| {
+                if self.stack_frame_backing.is_some() {
+                    self.rsp_register_space_offset_at(self.current_lowering_site)?
+                        .checked_add(disp)
+                        .map(|offset| (StackBase::Rsp, offset))
+                } else {
+                    Some((StackBase::Rsp, disp))
+                }
+            });
         }
         if let Some(rest) = mem.strip_prefix("EBP") {
-            return parse_stack_displacement(rest).map(|disp| (StackBase::Rbp, disp));
+            return parse_stack_displacement(rest).and_then(|disp| {
+                let offset = if self.stack_frame_backing.is_some() {
+                    self.rbp_frame_bias.checked_add(disp)?
+                } else {
+                    disp
+                };
+                Some((StackBase::Rbp, offset))
+            });
         }
         None
     }

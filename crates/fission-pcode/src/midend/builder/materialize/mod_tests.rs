@@ -16,6 +16,353 @@ fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
 }
 
 #[test]
+fn escaped_fixed_frame_accesses_share_one_byte_backing_object() {
+    let rsp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 8);
+    let index = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 8);
+    let loaded = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let frame_pointer = crate::midend::builder::materialize::test_support::varnode(0x100);
+    let indexed_pointer = crate::midend::builder::materialize::test_support::varnode(0x108);
+    let pcode = pcode_function(vec![block(vec![
+        op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), constant(0x100)],
+        ),
+        op(
+            1,
+            PcodeOpcode::IntAdd,
+            Some(frame_pointer.clone()),
+            vec![rsp.clone(), constant(0x20)],
+        ),
+        op(
+            2,
+            PcodeOpcode::PtrAdd,
+            Some(indexed_pointer.clone()),
+            vec![frame_pointer.clone(), index, constant(8)],
+        ),
+        op(
+            3,
+            PcodeOpcode::Load,
+            Some(loaded.clone()),
+            vec![constant(0), indexed_pointer.clone()],
+        ),
+        op(
+            4,
+            PcodeOpcode::Load,
+            Some(register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8)),
+            vec![constant(0), frame_pointer.clone()],
+        ),
+        op(
+            5,
+            PcodeOpcode::Store,
+            None,
+            vec![constant(0), frame_pointer.clone(), loaded],
+        ),
+    ])]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    builder
+        .run_incremental_heritage()
+        .expect("fixed stack frame should be classified");
+
+    let backing = builder
+        .stack_frame_backing
+        .as_ref()
+        .expect("escaped stack pointer should create frame backing");
+    assert_eq!(backing.size, 0x100);
+    assert_eq!(builder.locals.len(), 1, "overlapping slots share the frame");
+
+    let mut visiting = HashSet::default();
+    let dynamic_address = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 3,
+            },
+            |builder| builder.lower_memory_pointer(&indexed_pointer, &mut visiting),
+        )
+        .expect("dynamic stack pointer should lower");
+    let dynamic_dump = format!("{dynamic_address:?}");
+    assert!(dynamic_dump.contains("AddressOfLocal(\"stack_frame\")"));
+
+    let direct_address = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 4,
+            },
+            |builder| builder.lower_memory_pointer(&frame_pointer, &mut HashSet::default()),
+        )
+        .expect("direct stack pointer should lower");
+    assert!(matches!(
+        direct_address,
+        PreHirExpr::PtrOffset { base, offset: 0x20 }
+            if matches!(base.as_ref(), PreHirExpr::AddressOfLocal(name) if name == "stack_frame")
+    ));
+}
+
+#[test]
+fn uncovered_call_only_frame_address_uses_backing_object() {
+    let rsp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 8);
+    let buffer = crate::midend::builder::materialize::test_support::varnode(0x100);
+    let pcode = pcode_function(vec![block(vec![
+        op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), constant(0x100)],
+        ),
+        op(
+            1,
+            PcodeOpcode::IntAdd,
+            Some(buffer.clone()),
+            vec![rsp, constant(0x20)],
+        ),
+        op(2, PcodeOpcode::Call, None, vec![constant(0x2000), buffer]),
+    ])]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    builder
+        .run_incremental_heritage()
+        .expect("uncovered address-only stack object should be classified");
+
+    let backing = builder
+        .stack_frame_backing
+        .as_ref()
+        .expect("call-only frame address should use the opaque frame object");
+    assert_eq!(backing.size, 0x100);
+}
+
+#[test]
+fn uncovered_frame_address_copied_to_abi_argument_register_uses_backing_object() {
+    let rsp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 8);
+    let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let buffer = crate::midend::builder::materialize::test_support::varnode(0x100);
+    let pcode = pcode_function(vec![block(vec![
+        op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), constant(0x100)],
+        ),
+        op(
+            1,
+            PcodeOpcode::IntAdd,
+            Some(buffer.clone()),
+            vec![rsp, constant(0x20)],
+        ),
+        op(2, PcodeOpcode::Copy, Some(rcx), vec![buffer]),
+        op(
+            3,
+            PcodeOpcode::Call,
+            None,
+            vec![crate::midend::builder::materialize::test_support::varnode(
+                0x2000,
+            )],
+        ),
+    ])]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    builder
+        .run_incremental_heritage()
+        .expect("uncovered ABI argument stack object should be classified");
+
+    let backing = builder
+        .stack_frame_backing
+        .as_ref()
+        .expect("ABI register argument should preserve the address-only frame object");
+    assert_eq!(backing.size, 0x100);
+}
+
+#[test]
+fn frame_pointer_setup_is_not_an_escaped_local_address() {
+    let rsp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 8);
+    let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
+    let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let saved_rbp = crate::midend::builder::materialize::test_support::varnode(0x118);
+    let frame_base = crate::midend::builder::materialize::test_support::varnode(0x100);
+    let local_address = crate::midend::builder::materialize::test_support::varnode(0x108);
+    let loaded = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 8);
+    let mut save_rbp_stack_adjustment = op(
+        1,
+        PcodeOpcode::IntSub,
+        Some(rsp.clone()),
+        vec![rsp.clone(), constant(8)],
+    );
+    let mut save_rbp = op(
+        2,
+        PcodeOpcode::Store,
+        None,
+        vec![constant(3), rsp.clone(), saved_rbp.clone()],
+    );
+    save_rbp_stack_adjustment.address = 0x1001;
+    save_rbp.address = 0x1001;
+    let pcode = pcode_function(vec![block(vec![
+        op(0, PcodeOpcode::Copy, Some(saved_rbp), vec![rbp.clone()]),
+        save_rbp_stack_adjustment,
+        save_rbp,
+        op(
+            3,
+            PcodeOpcode::IntSub,
+            Some(rsp.clone()),
+            vec![rsp.clone(), constant(0x80)],
+        ),
+        op(
+            4,
+            PcodeOpcode::IntAdd,
+            Some(frame_base.clone()),
+            vec![rsp, constant(0x60)],
+        ),
+        op(5, PcodeOpcode::Copy, Some(rbp.clone()), vec![frame_base]),
+        op(
+            6,
+            PcodeOpcode::IntSub,
+            Some(local_address.clone()),
+            vec![rbp, constant(0x20)],
+        ),
+        op(7, PcodeOpcode::Copy, Some(rcx), vec![local_address.clone()]),
+        op(
+            8,
+            PcodeOpcode::Load,
+            Some(loaded),
+            vec![constant(0), local_address],
+        ),
+    ])]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    builder
+        .run_incremental_heritage()
+        .expect("frame-relative local should be classified");
+
+    assert!(
+        builder.stack_frame_backing.is_none(),
+        "frame-base setup must not turn covered locals into an opaque whole-frame object"
+    );
+}
+
+#[test]
+fn fixed_frame_call_arguments_follow_reused_unique_def_sites() {
+    let rsp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x20, 8);
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 8);
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8);
+    let rsi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let r8 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x80, 8);
+    let reused_temporary = crate::midend::builder::materialize::test_support::varnode(0x9d00);
+    let call_address = 0x1030;
+
+    let mut frame_sub = op(
+        0,
+        PcodeOpcode::IntSub,
+        Some(rsp.clone()),
+        vec![rsp.clone(), constant(0x100)],
+    );
+    frame_sub.address = 0x1000;
+    let mut timeout_address = op(
+        1,
+        PcodeOpcode::IntAdd,
+        Some(reused_temporary.clone()),
+        vec![rsp.clone(), constant(0x20)],
+    );
+    timeout_address.address = 0x1010;
+    let mut copy_to_rdx = op(
+        2,
+        PcodeOpcode::Copy,
+        Some(rdx.clone()),
+        vec![reused_temporary.clone()],
+    );
+    copy_to_rdx.address = 0x1011;
+    let mut copy_to_r8 = op(3, PcodeOpcode::Copy, Some(r8.clone()), vec![rdx]);
+    copy_to_r8.address = 0x1012;
+    let mut fd_set_address = op(
+        4,
+        PcodeOpcode::IntAdd,
+        Some(reused_temporary.clone()),
+        vec![rsp.clone(), constant(0x30)],
+    );
+    fd_set_address.address = 0x1020;
+    let mut copy_to_rax = op(
+        5,
+        PcodeOpcode::Copy,
+        Some(rax.clone()),
+        vec![reused_temporary],
+    );
+    copy_to_rax.address = 0x1021;
+    let mut copy_to_rsi = op(6, PcodeOpcode::Copy, Some(rsi.clone()), vec![rax]);
+    copy_to_rsi.address = 0x1022;
+    let mut call_sub = op(
+        7,
+        PcodeOpcode::IntSub,
+        Some(rsp.clone()),
+        vec![rsp.clone(), constant(8)],
+    );
+    call_sub.address = call_address;
+    let mut return_address_store = op(
+        8,
+        PcodeOpcode::Store,
+        None,
+        vec![
+            constant(3),
+            rsp.clone(),
+            constant((call_address + 5) as i64),
+        ],
+    );
+    return_address_store.address = call_address;
+    let mut call = op(
+        9,
+        PcodeOpcode::Call,
+        None,
+        vec![crate::midend::builder::materialize::test_support::varnode(
+            0x2000,
+        )],
+    );
+    call.address = call_address;
+
+    let pcode = pcode_function(vec![block(vec![
+        frame_sub,
+        timeout_address,
+        copy_to_rdx,
+        copy_to_r8,
+        fd_set_address,
+        copy_to_rax,
+        copy_to_rsi,
+        call_sub,
+        return_address_store,
+        call,
+    ])]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.stack_frame_backing = Some(crate::midend::builder::state::StackFrameBacking {
+        name: "stack_frame".to_string(),
+        size: 0x100,
+    });
+
+    let call_site = LoweringSite {
+        block_idx: 0,
+        op_idx: 9,
+    };
+    assert_eq!(
+        builder.with_lowering_site(call_site, |builder| builder.resolve_stack_address(&r8)),
+        Some((StackBase::Rsp, 0x20)),
+        "R8 retains the earlier rsp + 0x20 definition despite reuse of the unique varnode"
+    );
+    assert_eq!(
+        builder.with_lowering_site(call_site, |builder| builder.resolve_stack_address(&rsi)),
+        Some((StackBase::Rsp, 0x30)),
+        "RSI resolves to the later rsp + 0x30 definition"
+    );
+}
+
+#[test]
 fn defined_variadic_function_names_only_its_fixed_register_parameters() {
     let rcx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
     let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8);

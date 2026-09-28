@@ -84,6 +84,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) extra_absorbed_members: Vec<usize>,
     pub(crate) params: BTreeMap<usize, PreHirBinding>,
     pub(crate) locals: BTreeMap<i64, StackSlot>,
+    pub(crate) stack_frame_backing: Option<StackFrameBacking>,
     pub(crate) locals_next_id: StackSlotId,
     /// Which `SsaMemoryHighVariable` group(s) currently "own" each
     /// `self.locals` offset's canonical name -- i.e. have already been
@@ -167,6 +168,10 @@ pub(crate) struct PreviewBuilder<'a> {
     /// registers. See `entry_analysis::infer_entry_stack_layout` and its
     /// use in `resolve_stack_address_inner`.
     pub(crate) rsp_prologue_delta_table: HashMap<LoweringSite, i64>,
+    /// Exact per-op RSP byte offsets from the bottom of a fixed local frame,
+    /// available only when CFG propagation proves every reachable stack
+    /// adjustment and join.
+    pub(crate) rsp_frame_coordinate_table: Option<HashMap<LoweringSite, i64>>,
     pub(crate) linear_exit_cache: BuilderCacheMap<usize, Option<LinearExit>>,
     pub(crate) linear_body_cache: BuilderCacheMap<LinearBodyCacheKey, LinearBodyCachedOutcome>,
     pub(crate) active_linear_body_keys: BuilderCacheSet<LinearBodyCacheKey>,
@@ -276,4 +281,10 @@ pub(crate) struct PreviewBuilder<'a> {
     /// definition explicit.
     pub(crate) explicit_def_sites:
         Option<std::collections::HashSet<fission_midend_core::ir::SsaOpSite>>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct StackFrameBacking {
+    pub(crate) name: String,
+    pub(crate) size: u32,
 }
