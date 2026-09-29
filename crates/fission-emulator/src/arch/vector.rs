@@ -16,12 +16,11 @@
 //!
 //! # What is implemented
 //!
-//! What the corpus reaches, and nothing else. `NEON_umaxp` is glibc's
-//! `strlen`: it is the single most-executed unanswered userop in the dev
-//! corpus at 332,694 occurrences, and both aarch64 binaries spin on it for
-//! ever because an unanswered one returns zero and the search never
-//! terminates. The signed forms come with it because they are the same
-//! instruction family and the same code.
+//! Vector operations are added from observed corpus gaps. `NEON_umaxp` is
+//! glibc's `strlen`: it was the most-executed unanswered userop in the dev
+//! corpus, and the signed and minimum forms share its pairwise reduction
+//! semantics. `NEON_ext` implements AArch64's byte extract from the
+//! concatenation of two vectors.
 
 use fission_pcode::ir::{PcodeOp, PcodeOpcode};
 
@@ -54,6 +53,26 @@ pub fn answer_vector_userop(emu: &mut Emulator, op: &PcodeOp) -> bool {
         "NEON_uminp" => Pairwise::UnsignedMin,
         "NEON_smaxp" => Pairwise::SignedMax,
         "NEON_sminp" => Pairwise::SignedMin,
+        "NEON_ext" => {
+            let Some(index) = op
+                .inputs
+                .get(3)
+                .filter(|vn| vn.is_constant && vn.constant_val >= 0)
+                .and_then(|vn| usize::try_from(vn.constant_val).ok())
+            else {
+                return false;
+            };
+            let (Ok(a), Ok(b)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
+                return false;
+            };
+            let Some(result) = extract_bytes(&a, &b, index) else {
+                return false;
+            };
+            if result.len() != out.size as usize {
+                return false;
+            }
+            return write_bytes(emu, &out, &result);
+        }
         _ => return false,
     };
 
@@ -118,6 +137,18 @@ fn pairwise_reduce(a: &[u8], b: &[u8], esize: usize, kind: Pairwise) -> Vec<u8> 
         out[i * esize..(i + 1) * esize].copy_from_slice(&picked.to_le_bytes()[..esize]);
     }
     out
+}
+
+/// AArch64 `EXT` selects one vector-width window from `a || b`.
+fn extract_bytes(a: &[u8], b: &[u8], index: usize) -> Option<Vec<u8>> {
+    if a.is_empty() || a.len() != b.len() || index >= a.len() {
+        return None;
+    }
+    let end = index.checked_add(a.len())?;
+    let mut joined = Vec::with_capacity(a.len().checked_mul(2)?);
+    joined.extend_from_slice(a);
+    joined.extend_from_slice(b);
+    (end <= joined.len()).then(|| joined[index..end].to_vec())
 }
 
 fn read_bytes(emu: &mut Emulator, op: &PcodeOp, index: usize) -> anyhow::Result<Vec<u8>> {
@@ -191,5 +222,34 @@ mod tests {
         // max(0x0100, 0x00FF) = 0x0100, then max(0x1234, 0x0000) = 0x1234.
         assert_eq!(&out[0..2], &[0x00, 0x01]);
         assert_eq!(&out[2..4], &[0x34, 0x12]);
+    }
+
+    #[test]
+    fn ext_extracts_a_window_across_the_vector_boundary() {
+        let a: Vec<u8> = (0..16).collect();
+        let b: Vec<u8> = (16..32).collect();
+        assert_eq!(
+            extract_bytes(&a, &b, 11).unwrap(),
+            (11..27).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn ext_supports_the_64_bit_vector_form() {
+        let a: Vec<u8> = (0..8).collect();
+        let b: Vec<u8> = (8..16).collect();
+        assert_eq!(
+            extract_bytes(&a, &b, 7).unwrap(),
+            (7..15).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn ext_rejects_out_of_range_or_mismatched_vectors() {
+        let a: Vec<u8> = (0..16).collect();
+        let b: Vec<u8> = (16..32).collect();
+        assert!(extract_bytes(&a, &b, 16).is_none());
+        assert!(extract_bytes(&a, &b[..8], 0).is_none());
+        assert!(extract_bytes(&[], &[], 0).is_none());
     }
 }

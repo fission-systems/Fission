@@ -1171,6 +1171,27 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn aarch64_ands_immediate_decodes_repeated_high_bit_mask() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        // `ands x5, x3, #0xCCCCCCCCCCCCCCCC` uses a mask assembled by
+        // multiplying a 32-bit word by 0x1_0000_0001 in the SLA pattern.
+        let bytes = [0x65, 0xe4, 0x02, 0xf2];
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x100000)
+            .expect("decode and lift AArch64 ANDS immediate");
+
+        assert_eq!(len, 4);
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd));
+        assert!(
+            ops.iter().flat_map(|op| &op.inputs).any(|input| {
+                input.is_constant && input.size == 8 && input.offset == 0xCCCC_CCCC_CCCC_CCCC
+            }),
+            "expected lifted p-code to retain the full repeated mask: {ops:#?}"
+        );
+    }
+
+    #[test]
     fn aarch64_udiv_madd_function_lift_preserves_accumulator_path() {
         let frontend =
             RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");

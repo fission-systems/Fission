@@ -330,11 +330,12 @@ fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
 #[cfg(test)]
 mod construct_state_offset_tests {
     use super::{
-        checked_pattern_add, checked_pattern_div, checked_pattern_left_shift, checked_pattern_mul,
+        checked_pattern_add, checked_pattern_div, checked_pattern_left_shift,
         checked_pattern_negate, checked_pattern_right_shift, checked_pattern_sub,
         checked_relative_offset, checked_selector_display_index, checked_selector_index_i64,
         checked_selector_index_u64, checked_u32_to_usize, context_change_expr_word,
         context_change_mask_word, pattern_context_bits_i64, shifted_context_change_word,
+        wrapping_pattern_mul,
     };
     use crate::compiler::{compile_x86_64_frontend, discovery};
 
@@ -392,19 +393,24 @@ mod construct_state_offset_tests {
     }
 
     #[test]
-    fn pattern_expression_arithmetic_fails_closed_on_overflow() {
+    fn pattern_expression_checked_arithmetic_fails_closed_on_overflow() {
         assert_eq!(checked_pattern_add(40, 2).unwrap(), 42);
         assert_eq!(checked_pattern_sub(40, 2).unwrap(), 38);
-        assert_eq!(checked_pattern_mul(6, 7).unwrap(), 42);
         assert_eq!(checked_pattern_div(84, 2).unwrap(), 42);
         assert_eq!(checked_pattern_negate(42).unwrap(), -42);
 
         assert!(checked_pattern_add(i64::MAX, 1).is_err());
         assert!(checked_pattern_sub(i64::MIN, 1).is_err());
-        assert!(checked_pattern_mul(i64::MAX, 2).is_err());
         assert!(checked_pattern_div(1, 0).is_err());
         assert!(checked_pattern_div(i64::MIN, -1).is_err());
         assert!(checked_pattern_negate(i64::MIN).is_err());
+    }
+
+    #[test]
+    fn pattern_expression_multiplication_preserves_64_bit_bit_patterns() {
+        let repeated_word = wrapping_pattern_mul(0xCCCC_CCCC, 0x1_0000_0001);
+        assert_eq!(repeated_word as u64, 0xCCCC_CCCC_CCCC_CCCC);
+        assert_eq!(wrapping_pattern_mul(i64::MAX, 2), -2);
     }
 
     #[test]
@@ -1622,10 +1628,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 self.eval_pattern_expression(lhs)?,
                 self.eval_pattern_expression(rhs)?,
             ),
-            CompiledPatternExpression::Mul(lhs, rhs) => checked_pattern_mul(
+            CompiledPatternExpression::Mul(lhs, rhs) => Ok(wrapping_pattern_mul(
                 self.eval_pattern_expression(lhs)?,
                 self.eval_pattern_expression(rhs)?,
-            ),
+            )),
             CompiledPatternExpression::Div(lhs, rhs) => {
                 let rhs = self.eval_pattern_expression(rhs)?;
                 checked_pattern_div(self.eval_pattern_expression(lhs)?, rhs)
@@ -1940,9 +1946,12 @@ fn checked_pattern_sub(lhs: i64, rhs: i64) -> Result<i64> {
         .ok_or_else(|| anyhow!("pattern expression subtract overflowed: {lhs} - {rhs}"))
 }
 
-fn checked_pattern_mul(lhs: i64, rhs: i64) -> Result<i64> {
-    lhs.checked_mul(rhs)
-        .ok_or_else(|| anyhow!("pattern expression multiply overflowed: {lhs} * {rhs}"))
+fn wrapping_pattern_mul(lhs: i64, rhs: i64) -> i64 {
+    // SLEIGH uses multiplication to assemble some 64-bit masks by repeating
+    // a 32-bit word. Treat pattern values as 64-bit bit patterns here, so the
+    // intended high-bit result is preserved instead of rejected as signed
+    // integer overflow.
+    lhs.wrapping_mul(rhs)
 }
 
 fn checked_pattern_div(lhs: i64, rhs: i64) -> Result<i64> {

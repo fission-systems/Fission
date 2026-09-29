@@ -121,8 +121,14 @@ fn build_pe32(max_inst: u64, interpret: bool) -> Option<Emulator> {
 /// An aarch64 ELF, from the dev corpus: there is no aarch64 fixture in the
 /// crate and this architecture's SIMD is where the engines are newest.
 fn build_aarch64(max_inst: u64, interpret: bool) -> Option<Emulator> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-aarch64_O0");
+    let path = std::env::var_os("FISSION_SWEEP_ROOT")
+        .map(PathBuf::from)
+        .map(|root| root.join("c/control_flow_gcc-aarch64_O0"))
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+                "../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-aarch64_O0",
+            )
+        });
     if !path.is_file() {
         return None;
     }
@@ -454,51 +460,9 @@ fn the_engines_agree_on_a_32_bit_process() {
     }
 }
 
-/// The engines agree on aarch64, SIMD and all.
-///
-/// This binary does not run to completion yet, so the gate is agreement rather
-/// than success. That distinction is the whole point: if the two engines take
-/// the same path to the same wrong place, the remaining bug is in something
-/// they share (a lift, a userop, the OS layer), and hunting it in one engine
-/// is enough. If they diverge, it is in one of them, and this says where.
-///
-/// They diverged, and it said where -- twice, one bug standing in front of the
-/// other.
-///
-/// The first was the JIT's, measured and fixed 2026-09-18:
-///
-/// - The PC traces split at step 2590, where `cbz w2, 0x42a728` reads
-///   `__libc_single_threaded` (0x490f18) and the engines disagreed on the byte.
-/// - That was the symptom. A write watchpoint on 0x490f18 put the cause 396
-///   steps earlier, at step 2194, `pc=0x41eb44`: both engines stop there, both
-///   hold `X20=1`, and the JIT's store wrote 0 anyway.
-/// - `strb w20, [x2,#0xf18]` lifts to `Copy unique:0x74700:4 <- X20:4` then
-///   `Store <- unique:0x74700:1`. The JIT caches values by
-///   `(space, offset, size)` and never writes uniques through, so the 1-byte
-///   read missed the 4-byte entry and called out to unique memory nothing had
-///   written. Its IR computed the right byte and dropped it on the floor.
-/// - That is bug 6 above, in the one space that fix could not reach. For
-///   registers it drops every overlapping cached view on write, so the next
-///   read re-seeds from `host_reg_file`. A unique has no backing store to
-///   re-seed from, so dropping the view is what *causes* the stale read: the
-///   value has to be derived from the wider entry instead, which is what
-///   `ensure_var!` now does.
-///
-/// Fixing that uncovered a second, older divergence: the engines agreed
-/// through step 3557 and split at 3558, `pc=0x45192C`, where the JIT fell
-/// through to 0x451930 and the interpreter branched back to 0x45191C. The
-/// split was inside the `stxr` p-code at 0x451928. Its
-/// `ExclusiveMonitorPass` userop wrote data result `1` and returned
-/// `HleResult::Continue`; the JIT consumed those two channels correctly, but
-/// the interpreter wrote the control result (`0`) into the `check` varnode.
-/// The interpreter therefore took the failure path and retained the initial
-/// status `1` in W17. The generic CallOther result contract is now shared by
-/// the two paths and has a synthetic regression in `interp.rs`.
-///
-/// After that fix the old split is gone. Both engines now take the same path
-/// through step 12510 and report the same unmapped write at `0x4BA000` from
-/// `stp q0, q0, [x3, #-0x20]` at `0x4188F4`. The process does not complete on
-/// this corpus image, but the differential remains a useful agreement gate.
+/// Both engines run the safe, static AArch64 dev-corpus binary through libc
+/// and `main`, return the source-level result 27, and take the same instruction
+/// path. Startup exercises `DCZID_EL0` and `DC ZVA` in musl's memset routine.
 #[test]
 fn the_engines_agree_on_aarch64() {
     let (Some(mut jitted), Some(mut interpreted)) =
@@ -513,6 +477,29 @@ fn the_engines_agree_on_aarch64() {
     interpreted.add_observer(Box::new(PcTrace::default()));
     let int_run = interpreted.run();
 
+    assert!(jit_run.is_ok(), "JIT AArch64 run failed: {jit_run:?}");
+    assert!(
+        int_run.is_ok(),
+        "interpreter AArch64 run failed: {int_run:?}"
+    );
+    assert!(jitted.halt_requested, "JIT AArch64 guest did not exit");
+    assert!(
+        interpreted.halt_requested,
+        "interpreter AArch64 guest did not exit"
+    );
+    assert_eq!(jitted.exit_code, Some(27), "source-level main result");
+    assert_eq!(interpreted.exit_code, Some(27), "source-level main result");
+    assert_eq!(
+        jitted.metrics.unhandled_userops.get("NEON_ext"),
+        None,
+        "JIT left AArch64 EXT unimplemented"
+    );
+    assert_eq!(
+        interpreted.metrics.unhandled_userops.get("NEON_ext"),
+        None,
+        "interpreter left AArch64 EXT unimplemented"
+    );
+
     let jit_obs = jitted.take_observers();
     let int_obs = interpreted.take_observers();
     let jit_pcs = &jit_obs
@@ -525,7 +512,11 @@ fn the_engines_agree_on_aarch64() {
         .find_map(|o| o.as_any().downcast_ref::<PcTrace>())
         .unwrap()
         .pcs;
-    assert!(jit_pcs.len() > 10_000, "too short to mean anything");
+    assert!(!jit_pcs.is_empty(), "no JIT instruction trace recorded");
+    assert!(
+        !int_pcs.is_empty(),
+        "no interpreter instruction trace recorded"
+    );
     if let Some((i, a, b)) = first_divergence(jit_pcs, int_pcs) {
         panic!(
             "engines diverge at step {i}\n  after: {}\n  jit:    {a:X?}\n  interp: {b:X?}",
@@ -541,4 +532,38 @@ fn the_engines_agree_on_aarch64() {
         int_run.is_ok(),
         "engines disagree on success: jit={jit_run:?} interp={int_run:?}"
     );
+}
+
+#[test]
+fn aarch64_dc_zva_zeroes_one_profiled_cache_block() {
+    let Some(mut emu) = build_aarch64(60_000, false) else {
+        eprintln!("skipping: dev corpus not present");
+        return;
+    };
+
+    assert_eq!(emu.read_register_u64("dczid_el0").unwrap(), 4);
+    let base = 0x7000_0000;
+    assert!(!emu.state.page_map.is_mapped(base));
+    emu.state.page_map.map_region(
+        base,
+        0x1000,
+        fission_emulator::pcode::page_map::prot::RW,
+        true,
+    );
+    let ram = emu.state.ram_space();
+    emu.state
+        .write_space(ram, base, &[0xA5; 128])
+        .expect("seed cache-line test memory");
+
+    assert!(fission_emulator::os::env::answer_processor_userop(
+        &mut emu,
+        "DC_ZVA",
+        &[base + 0x57]
+    ));
+    let bytes = emu
+        .state
+        .read_space(ram, base, 128)
+        .expect("read cache-line test memory");
+    assert_eq!(&bytes[..64], &[0xA5; 64]);
+    assert_eq!(&bytes[64..], &[0; 64]);
 }

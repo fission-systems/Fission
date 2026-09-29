@@ -133,6 +133,8 @@ pub enum ProcessorUserop {
     Cpuid,
     /// `RDTSC`: the cycle counter the guest reads to time itself.
     Rdtsc,
+    /// Zero one AArch64 data-cache block.
+    DataCacheZero,
 
     // ── ARMv7-M system registers ────────────────────────────────────────────
     GetMainStackPointer,
@@ -178,6 +180,7 @@ pub fn classify_processor_userop(name: &str) -> Option<ProcessorUserop> {
         // back equal, or backwards, and a loop that divides by the delta
         // divides by zero.
         "rdtsc" => Rdtsc,
+        "DC_ZVA" => DataCacheZero,
 
         "ExclusiveAccess" => ExclusiveAccessMark,
         "ExclusiveMonitorPass" | "hasExclusiveAccess" => ExclusiveMonitorPass,
@@ -308,6 +311,8 @@ pub fn answer_processor_userop(emu: &mut Emulator, name: &str, inputs: &[u64]) -
                 .saturating_mul(CYCLES_PER_INSTRUCTION)
                 .saturating_add(emu.tsc_reads);
         }
+
+        DataCacheZero => crate::arch::aarch64::data_cache_zero(emu, arg(0)),
 
         ExclusiveAccessMark => {}
         ExclusiveMonitorPass => emu.callother_result = 1,
