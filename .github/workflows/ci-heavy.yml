@@ -88,6 +88,31 @@ jobs:
       profile: debug
       # dioxus needs GUI sys libs; static is covered by its own job.
       exclude_crates: "fission-static"
+      run_interactive_runtime_tests: true
+      run_script_emulator_tests: true
+
+  compile-surface:
+    name: 🧱 Compile Surface (Linux · all features)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+          submodules: false
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fission-compile-surface-${{ runner.os }}
+          cache-on-failure: true
+      - name: Compile every feature configuration
+        run: scripts/audit/compile_surface.sh
 
   # No Miri job. It ran on fission-pcode and fission-loader, and it never
   # checked anything: under isolation it aborted each crate at its first file
@@ -116,6 +141,7 @@ jobs:
       - test-windows-native-debugger
       - msrv-check
       - test-linux-full
+      - compile-surface
       - coverage
     runs-on: ubuntu-latest
     if: always()
@@ -137,6 +163,7 @@ jobs:
           }
 
           require_success "Full Linux tests" "${{ needs.test-linux-full.result }}"
+          require_success "Compile surface" "${{ needs.compile-surface.result }}"
           require_success "macOS heavy build" "${{ needs.build-macos-heavy.result }}"
           require_success "Windows heavy tests" "${{ needs.test-windows-heavy.result }}"
           require_success "Windows native debugger" "${{ needs.test-windows-native-debugger.result }}"

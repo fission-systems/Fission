@@ -12,6 +12,11 @@ on:
         required: false
         default: ""
         description: "Crates to exclude from clippy (comma-separated)"
+      crates:
+        type: string
+        required: false
+        default: ""
+        description: "Affected packages to lint (comma-separated); empty selects the workspace"
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,9 +24,8 @@ env:
 jobs:
   lint:
     runs-on: ${{ inputs.os }}
-    # The compile-surface audit is intentionally exhaustive and can take
-    # ~11 minutes on a cold runner. Keep enough margin for cold-cache variance;
-    # optional-feature tests run in the required Linux test job instead.
+    # Formatting and owner audits remain workspace-wide; Clippy is scoped to
+    # the affected packages selected by the caller.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -54,44 +58,46 @@ jobs:
 
       - name: Lint with Clippy (Deny Warnings)
         shell: bash
+        env:
+          CRATES: ${{ inputs.crates }}
+          EXCLUDE_CRATES: ${{ inputs.exclude_crates }}
         run: |
+          package_flags=()
           exclude_flags=()
-          if [ -n "${{ inputs.exclude_crates }}" ]; then
-            IFS=',' read -ra EX <<< "${{ inputs.exclude_crates }}"
+          if [ -n "$CRATES" ]; then
+            IFS=',' read -ra PACKAGES <<< "$CRATES"
+            IFS=',' read -ra EX <<< "$EXCLUDE_CRATES"
+            for p in "${PACKAGES[@]}"; do
+              p="$(echo "$p" | tr -d '[:space:]')"
+              [ -z "$p" ] && continue
+              skip=false
+              for c in "${EX[@]}"; do
+                c="$(echo "$c" | tr -d '[:space:]')"
+                [ "$p" = "$c" ] && skip=true
+              done
+              [ "$skip" = true ] || package_flags+=(-p "$p")
+            done
+            if [ "${#package_flags[@]}" -eq 0 ]; then
+              echo "No selected packages remain after exclusions; skipping Clippy."
+              exit 0
+            fi
+          fi
+          if [ -n "$EXCLUDE_CRATES" ]; then
+            IFS=',' read -ra EX <<< "$EXCLUDE_CRATES"
             for c in "${EX[@]}"; do
               c="$(echo "$c" | tr -d '[:space:]')"
               [ -z "$c" ] && continue
               exclude_flags+=(--exclude "$c")
             done
           fi
-          cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+          if [ "${#package_flags[@]}" -gt 0 ]; then
+            cargo clippy "${package_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+          else
+            cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+          fi
 
-      # Every build configuration this workspace has, compiled.
-      #
-      # A feature that is not a default is compiled by nothing above:
-      # `--workspace` uses default features, so `interactive_runtime`,
-      # `emulator`, `softfloat` and the allocator choices were built by no job
-      # at all. Five defects hid in exactly that gap -- `fission-dynamic`'s
-      # debug layer had stopped compiling, a new `debug` subcommand left the
-      # CLI dispatcher's match non-exhaustive, `app/snapshot.rs`'s tests were
-      # missing a loader field, a Linux-only `use` kept main red for ten
-      # commits, and the Win32 debugger backend had 269 errors -- and each was
-      # found by accident because nothing looked.
-      #
-      # The list of configurations lives in the script, not here, so adding a
-      # feature and forgetting to cover it is one edit rather than two. The
-      # script also runs on a developer's machine, where `--all` adds the
-      # Windows cross build and a Linux container.
-      - name: Compile surface (every feature combination)
-        shell: bash
-        run: scripts/audit/compile_surface.sh
-
-      # And the tests inside those configurations that no runner runs. A
-      # compile-surface audit cannot see these: the configuration *was* built,
-      # and only the harness skipped the function. Four were found this way in
-      # `fission-dir` (a `#[test]` written twice above a doc comment, leaving
-      # the two functions that followed it with none) and two more elsewhere,
-      # one of which failed the moment it was allowed to run.
+      # Static audit for Rust tests missed by harness discovery. Keep it in
+      # Fast Gate while exhaustive feature compilation runs in Heavy.
       - name: Tests nothing runs
         shell: bash
         run: scripts/audit/unrun_tests_scan.py

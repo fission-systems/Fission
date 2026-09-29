@@ -41,11 +41,31 @@ on:
         required: false
         default: false
         description: "Install webkit/GTK sysdeps (only needed for dioxus / full GUI workspace)"
-      run_optional_feature_tests:
+      run_interactive_runtime_tests:
         type: boolean
         required: false
         default: false
-        description: "Run the interactive-runtime and script-emulator feature test suites"
+        description: "Run the interactive-runtime feature suite when an owner is affected"
+      run_script_emulator_tests:
+        type: boolean
+        required: false
+        default: false
+        description: "Run the script-emulator feature suite when an owner is affected"
+      run_emulator_softfloat_check:
+        type: boolean
+        required: false
+        default: false
+        description: "Compile the emulator softfloat feature when its owner is affected"
+      run_plugin_interactive_check:
+        type: boolean
+        required: false
+        default: false
+        description: "Compile the plugin interactive-runtime feature when its owner is affected"
+      run_cli_alt_feature_checks:
+        type: boolean
+        required: false
+        default: false
+        description: "Compile alternate CLI feature configurations when the CLI is affected"
 
 env:
   CARGO_TERM_COLOR: always
@@ -107,9 +127,12 @@ jobs:
       - name: Run Tests (Specific Crates) [nextest]
         if: ${{ inputs.crates != '' }}
         shell: bash
+        env:
+          CRATES: ${{ inputs.crates }}
+          FEATURES: ${{ inputs.features }}
         run: |
           set -euo pipefail
-          crates="${{ inputs.crates }}"
+          crates="$CRATES"
           package_flags=()
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
           for crate in "${CRATE_ARRAY[@]+"${CRATE_ARRAY[@]}"}"; do
@@ -122,7 +145,7 @@ jobs:
             exit 1
           fi
           echo "Testing packages: ${package_flags[*]}"
-          features="${{ inputs.features }}"
+          features="$FEATURES"
           feature_flags=()
           if [ -n "$features" ]; then
             feature_flags+=(--features "$features")
@@ -139,9 +162,12 @@ jobs:
       - name: Run Doctests (Specific Crates)
         if: ${{ inputs.crates != '' }}
         shell: bash
+        env:
+          CRATES: ${{ inputs.crates }}
+          FEATURES: ${{ inputs.features }}
         run: |
           set -euo pipefail
-          crates="${{ inputs.crates }}"
+          crates="$CRATES"
           package_flags=()
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
           for crate in "${CRATE_ARRAY[@]+"${CRATE_ARRAY[@]}"}"; do
@@ -149,7 +175,7 @@ jobs:
             [ -z "$crate" ] && continue
             package_flags+=(-p "$crate")
           done
-          features="${{ inputs.features }}"
+          features="$FEATURES"
           feature_flags=()
           if [ -n "$features" ]; then
             feature_flags+=(--features "$features")
@@ -205,18 +231,32 @@ jobs:
           cargo test --doc --workspace --locked \
             ${{ inputs.profile == 'release' && '--release' || '' }} || true
 
-      # These suites exercise feature-specific behavior, not linting. Keep them
-      # in the required test job's longer budget and gate them with an explicit
-      # caller input so platform/test lanes cannot silently inherit them.
+      # These suites exercise non-default features. Fast Gate enables each only
+      # when the feature owner or one of its dependencies is affected.
       - name: Test optional features (interactive_runtime)
-        if: ${{ inputs.run_optional_feature_tests }}
+        if: ${{ inputs.run_interactive_runtime_tests }}
         shell: bash
         run: cargo test -p fission-dynamic --features interactive_runtime --locked
 
       - name: Test optional features (script emulator)
-        if: ${{ inputs.run_optional_feature_tests }}
+        if: ${{ inputs.run_script_emulator_tests }}
         shell: bash
         run: cargo test -p fission-script --features emulator --locked
+
+      - name: Check optional feature (emulator softfloat)
+        if: ${{ inputs.run_emulator_softfloat_check }}
+        run: cargo check -p fission-emulator --features softfloat --all-targets --locked
+
+      - name: Check optional feature (plugin interactive_runtime)
+        if: ${{ inputs.run_plugin_interactive_check }}
+        run: cargo check -p fission-plugin --features interactive_runtime --all-targets --locked
+
+      - name: Check alternate CLI feature configurations
+        if: ${{ inputs.run_cli_alt_feature_checks }}
+        shell: bash
+        run: |
+          cargo check -p fission-cli --no-default-features --locked
+          cargo check -p fission-cli --no-default-features --features allocator-jemallocator --locked
 
       - name: sccache stats
         if: always()

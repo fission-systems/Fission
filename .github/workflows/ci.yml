@@ -24,8 +24,8 @@ jobs:
   # Path-filter tiers (see docs/CI_RELEASE_GATES.md):
   #   docs     — docs/wiki/markdown only → short-circuit
   #   scripts  — scripts/** only → pass-gate + script syntax
-  #   ci       — .github/** (and CI meta) only → pass-gate + workflow sanity
-  #   rust     — crates/utils/Cargo/* → full Linux (and macOS test smoke on main)
+  #   ci       — .github/**, CI meta, or mixed CI/script edits → pass-gate + sanity
+  #   rust     — crates/utils/Cargo/* → affected-package Linux checks (and macOS on main)
   changes:
     name: 🔎 Detect changes
     runs-on: ubuntu-latest
@@ -37,8 +37,14 @@ jobs:
       run_script_checks: ${{ steps.filter.outputs.run_script_checks }}
       run_tests: ${{ steps.filter.outputs.run_tests }}
       run_debugger_tests: ${{ steps.filter.outputs.run_debugger_tests }}
-      run_cli_smoke: ${{ steps.filter.outputs.run_cli_smoke }}
+      run_cli_smoke: ${{ steps.impact.outputs.run_cli_smoke || steps.filter.outputs.run_cli_smoke }}
       run_macos_test: ${{ steps.filter.outputs.run_macos_test }}
+      test_crates: ${{ steps.impact.outputs.crates }}
+      run_interactive_runtime_tests: ${{ steps.impact.outputs.run_interactive_runtime_tests }}
+      run_script_emulator_tests: ${{ steps.impact.outputs.run_script_emulator_tests }}
+      run_emulator_softfloat_check: ${{ steps.impact.outputs.run_emulator_softfloat_check }}
+      run_plugin_interactive_check: ${{ steps.impact.outputs.run_plugin_interactive_check }}
+      run_cli_alt_feature_checks: ${{ steps.impact.outputs.run_cli_alt_feature_checks }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -53,6 +59,7 @@ jobs:
           set -euo pipefail
 
           # --- collect changed files ---
+          FULL_VALIDATION=false
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin "${{ github.base_ref }}" --depth=1
             BASE="origin/${{ github.base_ref }}"
@@ -65,19 +72,10 @@ jobs:
               CHANGED=$(git diff --name-only "$BEFORE"...HEAD || true)
             fi
           else
-            # workflow_dispatch: full rust lane
-            {
-              echo "lane=rust"
-              echo "run_security=true"
-              echo "run_lint=true"
-              echo "run_pass_gate=true"
-              echo "run_script_checks=true"
-              echo "run_tests=true"
-              echo "run_debugger_tests=true"
-              echo "run_cli_smoke=true"
-              echo "run_macos_test=true"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
+            # workflow_dispatch: use a workspace manifest sentinel so the
+            # impact resolver selects every package without duplicating names.
+            CHANGED="Cargo.toml"
+            FULL_VALIDATION=true
           fi
 
           echo "Changed files:"
@@ -85,22 +83,8 @@ jobs:
 
           if [ -z "$CHANGED" ]; then
             # empty diff — fail-safe full rust lane
-            {
-              echo "lane=rust"
-              echo "run_security=true"
-              echo "run_lint=true"
-              echo "run_pass_gate=true"
-              echo "run_script_checks=false"
-              echo "run_tests=true"
-              echo "run_debugger_tests=true"
-              echo "run_cli_smoke=true"
-              if [ "${{ github.event_name }}" = "push" ]; then
-                echo "run_macos_test=true"
-              else
-                echo "run_macos_test=false"
-              fi
-            } >> "$GITHUB_OUTPUT"
-            exit 0
+            CHANGED="Cargo.toml"
+            FULL_VALIDATION=true
           fi
 
           has() { echo "$CHANGED" | grep -Eq "$1"; }
@@ -127,7 +111,7 @@ jobs:
                 CI=true ;;
               deny.toml|licenserc.yaml|.github/dependabot.yml|.github/licenserc.yaml)
                 SECURITY_META=true ;;
-              docs/*|wiki/*|*.md|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md|.github/prompts/*)
+              docs/*|wiki/*|*.md|.github/ISSUE_TEMPLATE/*.yml|.github/ISSUE_TEMPLATE/*.yaml)
                 DOCS=true ;;
               *)
                 # unknown paths are treated as rust-adjacent for safety
@@ -154,7 +138,7 @@ jobs:
               && [ "$SECURITY_META" = false ] && [ "$CI" = false ] && [ "$SCRIPTS" = true ]; then
             LANE=scripts
           elif [ "$RUST" = false ] && [ "$UTILS" = false ] && [ "$OTHER" = false ] \
-              && [ "$SCRIPTS" = false ] && { [ "$CI" = true ] || [ "$SECURITY_META" = true ]; }; then
+              && { [ "$CI" = true ] || [ "$SECURITY_META" = true ]; }; then
             LANE=ci
           else
             LANE=rust
@@ -173,7 +157,7 @@ jobs:
             ci)
               RUN_SECURITY=$SECURITY_META; RUN_LINT=false; RUN_PASS=true; RUN_SCRIPTS=true
               RUN_TESTS=false; RUN_SMOKE=false; RUN_MACOS=false
-              # Workflow changes that touch reusable test runners still need a sanity compile? keep pass-gate only.
+              # Script checks include a YAML parse of every workflow file.
               if [ "$SECURITY_META" = true ]; then RUN_SECURITY=true; fi
               ;;
             rust)
@@ -186,6 +170,13 @@ jobs:
               fi
               ;;
           esac
+
+          if [ "$FULL_VALIDATION" = true ]; then
+            DEBUGGER_TESTS=true
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN_SCRIPTS=true
+          fi
 
           {
             echo "lane=${LANE}"
@@ -203,6 +194,20 @@ jobs:
           echo "  security=${RUN_SECURITY} lint=${RUN_LINT} pass_gate=${RUN_PASS} scripts=${RUN_SCRIPTS}"
           echo "  tests=${RUN_TESTS} smoke=${RUN_SMOKE} macos_test=${RUN_MACOS}"
 
+          if [ "$LANE" = "rust" ]; then
+            printf '%s\n' "$CHANGED" > "$RUNNER_TEMP/fission-changed-paths.txt"
+          fi
+
+      - name: Install Rust for package impact selection
+        if: steps.filter.outputs.lane == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve affected crate suites
+        id: impact
+        if: steps.filter.outputs.lane == 'rust'
+        shell: bash
+        run: python3 scripts/ci/select_affected_crates.py < "$RUNNER_TEMP/fission-changed-paths.txt" >> "$GITHUB_OUTPUT"
+
   # Step 1: Security & Lint
   security-check:
     name: 🔒 Security Check
@@ -217,6 +222,7 @@ jobs:
     uses: ./.github/workflows/reusable-lint-format.yml
     with:
       os: ubuntu-latest
+      crates: ${{ needs.changes.outputs.test_crates }}
       exclude_crates: "fission-signatures"
 
   # scripts/ci-only / scripts-only: syntax + owner boundary scripts (no cargo test matrix)
@@ -413,10 +419,13 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
-      # loader → analysis-db → midend/pcode stack (ADR 0010 + 0012 owners)
-      crates: "fission-loader,fission-analysis-db,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode"
+      crates: ${{ needs.changes.outputs.test_crates }}
       profile: debug
-      run_optional_feature_tests: true
+      run_interactive_runtime_tests: ${{ needs.changes.outputs.run_interactive_runtime_tests == 'true' }}
+      run_script_emulator_tests: ${{ needs.changes.outputs.run_script_emulator_tests == 'true' }}
+      run_emulator_softfloat_check: ${{ needs.changes.outputs.run_emulator_softfloat_check == 'true' }}
+      run_plugin_interactive_check: ${{ needs.changes.outputs.run_plugin_interactive_check == 'true' }}
+      run_cli_alt_feature_checks: ${{ needs.changes.outputs.run_cli_alt_feature_checks == 'true' }}
 
   # Native debugger tests are feature-gated and exercise OS process control.
   # Keep them out of unrelated Rust changes, but always run them when the
