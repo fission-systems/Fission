@@ -514,7 +514,10 @@ impl<'a> Evaluator<'a> {
                     let val = self.read_varnode_u64(&op.inputs[2])?;
                     let v_node = self
                         .solver
-                        .register_node(fission_solver::SymExpr::new_const(val, op.inputs[2].size));
+                        .register_node(fission_solver::SymExpr::new_const(
+                            val,
+                            crate::bit_width_from_byte_size(op.inputs[2].size),
+                        ));
                     crate::pcode::memory_mixin::MemoryMixin::handle_symbolic_write(
                         self.state,
                         self.solver,
@@ -552,10 +555,20 @@ impl<'a> Evaluator<'a> {
                     use fission_solver::SymExpr;
                     let a_expr = a_node
                         .and_then(|id| self.solver.nodes.get(&id).cloned())
-                        .unwrap_or_else(|| SymExpr::new_const(a, op.inputs[0].size));
+                        .unwrap_or_else(|| {
+                            SymExpr::new_const(
+                                a,
+                                crate::bit_width_from_byte_size(op.inputs[0].size),
+                            )
+                        });
                     let b_expr = b_node
                         .and_then(|id| self.solver.nodes.get(&id).cloned())
-                        .unwrap_or_else(|| SymExpr::new_const(b, op.inputs[1].size));
+                        .unwrap_or_else(|| {
+                            SymExpr::new_const(
+                                b,
+                                crate::bit_width_from_byte_size(op.inputs[1].size),
+                            )
+                        });
                     let new_expr = SymExpr::new_add(a_expr, b_expr);
                     let new_id = self.solver.register_node(new_expr);
                     self.write_varnode_shadow(out, new_id);

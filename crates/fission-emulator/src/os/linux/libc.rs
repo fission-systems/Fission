@@ -317,9 +317,10 @@ impl SimProcedure for Read {
                     .write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
                 // Taint stdin bytes for concolic exploration.
                 for i in 0..bytes_read {
-                    let node = emu
-                        .solver
-                        .register_var(format!("stdin_{}", buf + i as u64), 1);
+                    let node = emu.solver.register_var(
+                        format!("stdin_{}", buf + i as u64),
+                        crate::bit_width_from_byte_size(1),
+                    );
                     emu.state
                         .set_shadow_memory(emu.state.ram_space(), buf + i as u64, node);
                 }

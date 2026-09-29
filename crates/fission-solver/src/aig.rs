@@ -492,11 +492,21 @@ impl AigManager {
 
     /// Lower a SymExpr into a vector of AigLits (one per bit, LSB first).
     pub fn lower_expr(&mut self, expr: &SymExpr) -> Vec<AigLit> {
+        let width = match expr.get_sort() {
+            crate::ast::Sort::BitVector(width) | crate::ast::Sort::Float(width) => Some(width),
+            crate::ast::Sort::Array { .. } => None,
+        };
+        if let Some(width) = width.filter(|width| *width == 0 || *width > 64) {
+            self.note_unsupported(format!(
+                "bitvector width {width} is outside the supported 1..=64-bit range"
+            ));
+            return self.fresh_bits(width.clamp(1, 64) as usize);
+        }
         match expr {
             SymExpr::Const { val, size } => {
                 let mut bits = Vec::with_capacity(*size as usize);
                 for i in 0..*size {
-                    bits.push(if (val & (1 << i)) != 0 {
+                    bits.push(if i < 64 && (val & (1u64 << i)) != 0 {
                         AigLit::TRUE
                     } else {
                         AigLit::FALSE
@@ -505,12 +515,16 @@ impl AigManager {
                 bits
             }
             SymExpr::Var { id, sort, .. } => {
+                if matches!(sort, crate::ast::Sort::Array { .. }) {
+                    self.note_unsupported("array variable used as a scalar".to_string());
+                    return self.fresh_bits(1);
+                }
                 if let Some(bits) = self.var_map.get(id) {
                     bits.clone()
                 } else {
-                    // Float-sorted vars bit-blast as full IEEE bit patterns (size bytes → bits).
+                    // Float-sorted vars use the same bit-width unit as bitvectors.
                     let bits = match sort {
-                        crate::ast::Sort::Float(sz) => sz.saturating_mul(8).max(1),
+                        crate::ast::Sort::Float(sz) => (*sz).max(1),
                         _ => sort.expect_bv().max(1),
                     };
                     self.add_var(*id, bits)
@@ -520,7 +534,7 @@ impl AigManager {
                 if let Some(bits) = self.array_select_map.get(expr) {
                     bits.clone()
                 } else {
-                    let size = expr.get_size();
+                    let size = expr.get_bit_width();
                     let mut bits = Vec::with_capacity(size as usize);
                     for _ in 0..size {
                         let idx = self.nodes.len() as u32 + 1;
@@ -603,7 +617,16 @@ impl AigManager {
             SymExpr::Slt(a, b) => {
                 let a_bits = self.lower_expr(a);
                 let b_bits = self.lower_expr(b);
-                vec![self.add_slt(&a_bits, &b_bits)]
+                if a_bits.len() != b_bits.len() {
+                    self.note_unsupported(format!(
+                        "Slt operands have different widths: {} and {} bits",
+                        a_bits.len(),
+                        b_bits.len()
+                    ));
+                    self.fresh_bits(1)
+                } else {
+                    vec![self.add_slt(&a_bits, &b_bits)]
+                }
             }
             SymExpr::Sle(a, b) => {
                 // a <=_s b  ≡  !(b <_s a)
@@ -623,7 +646,14 @@ impl AigManager {
                     _ => ShiftKind::ArithmeticRight,
                 };
                 let a_bits = self.lower_expr(a);
-                if let SymExpr::Const { val, .. } = b.as_ref() {
+                if a_bits.len() != b.get_bit_width() as usize {
+                    self.note_unsupported(format!(
+                        "shift amount width {} differs from value width {}",
+                        b.get_bit_width(),
+                        a_bits.len()
+                    ));
+                    self.fresh_bits(a_bits.len().max(1))
+                } else if let SymExpr::Const { val, .. } = b.as_ref() {
                     Self::shift_by_constant(&a_bits, *val, kind)
                 } else {
                     let amount = self.lower_expr(b);
@@ -632,13 +662,17 @@ impl AigManager {
             }
             SymExpr::Extract { expr, lsb, size } => {
                 let bits = self.lower_expr(expr);
-                let lsb = *lsb as usize;
-                let end = (lsb + *size as usize).min(bits.len());
-                let mut out = bits[lsb..end].to_vec();
-                while out.len() < *size as usize {
-                    out.push(AigLit::FALSE);
+                let Some(end) = lsb.checked_add(*size) else {
+                    self.note_unsupported("Extract width overflow".to_string());
+                    return self.fresh_bits((*size).max(1) as usize);
+                };
+                if *size == 0 || end as usize > bits.len() {
+                    self.note_unsupported("Extract outside source bit width".to_string());
+                    return self.fresh_bits((*size).max(1) as usize);
                 }
-                out
+                let lsb = *lsb as usize;
+                let end = end as usize;
+                bits[lsb..end].to_vec()
             }
             SymExpr::Concat(a, b) => {
                 // Concat(a, b): b is the low bits, a is the high bits
@@ -647,7 +681,7 @@ impl AigManager {
                 out
             }
             // ── IEEE float bit-blast (soft-float style for bit patterns) ─────
-            // Operands are treated as bitvectors of width size*8 when Float-sorted.
+            // Float widths, like bitvector widths, are measured in bits.
             SymExpr::FNeg(a) => {
                 // Flip sign bit (MSB of the bit pattern).
                 let bits = self.lower_float_bits(a);
@@ -680,59 +714,42 @@ impl AigManager {
                 vec![self.add_and(exp_all1, mant_nz)]
             }
             SymExpr::FEq(a, b) => {
-                // Simplified: pure bit equality of IEEE patterns.
-                let a_bits = self.lower_float_bits(a);
-                let b_bits = self.lower_float_bits(b);
-                vec![self.add_eq(&a_bits, &b_bits)]
+                // IEEE equality differs from bit equality for NaNs and signed
+                // zero. Until those cases are modeled, this cannot prove a
+                // verdict soundly.
+                let _ = (a, b);
+                self.note_unsupported("FEq IEEE semantics".to_string());
+                self.fresh_bits(1)
             }
             SymExpr::FNeq(a, b) => {
-                let a_bits = self.lower_float_bits(a);
-                let b_bits = self.lower_float_bits(b);
-                vec![self.add_eq(&a_bits, &b_bits).not()]
+                let _ = (a, b);
+                self.note_unsupported("FNeq IEEE semantics".to_string());
+                self.fresh_bits(1)
             }
             SymExpr::FLt(a, b) | SymExpr::FLe(a, b) => {
-                let a_bits = self.lower_float_bits(a);
-                let b_bits = self.lower_float_bits(b);
-                let a_ord = self.float_total_order_bits(&a_bits);
-                let b_ord = self.float_total_order_bits(&b_bits);
-                let is_le = matches!(expr, SymExpr::FLe(_, _));
-                if is_le {
-                    let blt = self.bv_ult(&b_ord, &a_ord);
-                    vec![blt.not()]
-                } else {
-                    vec![self.bv_ult(&a_ord, &b_ord)]
-                }
+                let _ = (a, b);
+                self.note_unsupported("ordered float comparison IEEE semantics".to_string());
+                self.fresh_bits(1)
             }
             SymExpr::FAdd(a, b)
             | SymExpr::FSub(a, b)
             | SymExpr::FMul(a, b)
             | SymExpr::FDiv(a, b) => {
-                // Full IEEE arithmetic bit-blast is enormous; for symbolic operands
-                // allocate a free result bitvector of the float width (under-approx
-                // of theory axioms). Concrete cases are already folded in SymExpr::new_f*.
+                // Concrete cases are folded by SymExpr::new_f*. Symbolic IEEE
+                // arithmetic has no circuit yet; free result bits are not a
+                // valid substitute for the operation.
                 let width = self
                     .lower_float_bits(a)
                     .len()
                     .max(self.lower_float_bits(b).len());
-                let mut out = Vec::with_capacity(width);
-                for _ in 0..width {
-                    let idx = self.nodes.len() as u32 + 1;
-                    self.nodes.push(AigNode::Var(idx));
-                    out.push(AigLit::new(idx, false));
-                }
-                // Touch b for dependency tracking in future axiom expansion.
                 let _ = b;
-                out
+                self.note_unsupported("symbolic float arithmetic".to_string());
+                self.fresh_bits(width.max(1))
             }
             SymExpr::FSqrt(a) => {
                 let width = self.lower_float_bits(a).len();
-                let mut out = Vec::with_capacity(width);
-                for _ in 0..width {
-                    let idx = self.nodes.len() as u32 + 1;
-                    self.nodes.push(AigNode::Var(idx));
-                    out.push(AigLit::new(idx, false));
-                }
-                out
+                self.note_unsupported("symbolic FSqrt".to_string());
+                self.fresh_bits(width.max(1))
             }
             SymExpr::Mul(a, b) => {
                 let a_bits = self.lower_expr(a);
@@ -757,7 +774,16 @@ impl AigManager {
                 };
                 let a_bits = self.lower_expr(a);
                 let b_bits = self.lower_expr(b);
-                self.add_signed_division(&a_bits, &b_bits, kind)
+                if a_bits.len() != b_bits.len() {
+                    self.note_unsupported(format!(
+                        "signed division operands have different widths: {} and {} bits",
+                        a_bits.len(),
+                        b_bits.len()
+                    ));
+                    self.fresh_bits(a_bits.len().max(b_bits.len()).max(1))
+                } else {
+                    self.add_signed_division(&a_bits, &b_bits, kind)
+                }
             }
             SymExpr::Ite { cond, t, f } => {
                 let c_bits = self.lower_expr(cond);
@@ -792,9 +818,9 @@ impl AigManager {
                 tracing::warn!("Unsupported AIG lowering for {name}");
                 self.note_unsupported(name);
                 let n = match expr.get_sort() {
-                    crate::ast::Sort::Float(sz) => sz * 8,
+                    crate::ast::Sort::Float(sz) => sz,
                     crate::ast::Sort::BitVector(sz) => sz,
-                    crate::ast::Sort::Array { range, .. } => range.byte_size(),
+                    crate::ast::Sort::Array { range, .. } => range.expect_bv(),
                 };
                 self.fresh_bits(n.max(1) as usize)
             }
@@ -804,19 +830,22 @@ impl AigManager {
     /// Lower a float-sorted (or BV) expression to IEEE bit-pattern bits (LSB first).
     fn lower_float_bits(&mut self, expr: &SymExpr) -> Vec<AigLit> {
         let bits = self.lower_expr(expr);
-        // If we got byte-sized false vectors from Const with size=in-bytes, expand.
         let want = match expr.get_sort() {
-            crate::ast::Sort::Float(sz) => (sz as usize) * 8,
-            crate::ast::Sort::BitVector(sz) if sz == 4 || sz == 8 => (sz as usize) * 8,
+            crate::ast::Sort::Float(sz) | crate::ast::Sort::BitVector(sz) => sz as usize,
             _ => bits.len(),
         };
+        if want != 32 && want != 64 {
+            self.note_unsupported(format!(
+                "IEEE bit-pattern width {want} is not 32 or 64 bits"
+            ));
+        }
         if bits.len() == want {
             return bits;
         }
         if let SymExpr::Const { val, .. } = expr {
             let mut out = Vec::with_capacity(want);
             for i in 0..want {
-                out.push(if (val & (1u64 << i)) != 0 {
+                out.push(if i < 64 && (val & (1u64 << i)) != 0 {
                     AigLit::TRUE
                 } else {
                     AigLit::FALSE
@@ -848,43 +877,6 @@ impl AigManager {
         }
     }
 
-    /// Map float bits to a total-order integer encoding for comparison.
-    fn float_total_order_bits(&mut self, bits: &[AigLit]) -> Vec<AigLit> {
-        // If sign bit set: flip all bits; else flip only sign (classic float→int map).
-        let n = bits.len();
-        if n == 0 {
-            return vec![];
-        }
-        let sign = bits[n - 1];
-        let mut out = Vec::with_capacity(n);
-        for i in 0..n - 1 {
-            // out[i] = sign ? !bits[i] : bits[i]
-            let flipped = bits[i].not();
-            // MUX: (sign & flipped) | (!sign & bits[i])
-            let t = self.add_and(sign, flipped);
-            let f = self.add_and(sign.not(), bits[i]);
-            out.push(self.add_or(t, f));
-        }
-        // Sign bit becomes inverted sense for order: keep as !sign for positives first?
-        // Standard: positive sign bit 1 in ordered map.
-        out.push(sign.not());
-        out
-    }
-
-    fn bv_ult(&mut self, a: &[AigLit], b: &[AigLit]) -> AigLit {
-        let len = a.len().max(b.len());
-        let mut carry = AigLit::TRUE; // a + ~b + 1
-        for i in 0..len {
-            let ax = a.get(i).copied().unwrap_or(AigLit::FALSE);
-            let bx = b.get(i).copied().unwrap_or(AigLit::FALSE).not();
-            let axb = self.add_xor(ax, bx);
-            let a_and_b = self.add_and(ax, bx);
-            let axb_and_c = self.add_and(axb, carry);
-            carry = self.add_or(a_and_b, axb_and_c);
-        }
-        carry.not() // borrow ⇒ a < b
-    }
-
     /// Converts the entire AIG into a CNF formula.
     pub fn to_cnf(&mut self, cnf: &mut crate::cnf::CnfBuilder) {
         for i in self.last_cnf_node..self.nodes.len() {
@@ -904,6 +896,7 @@ mod tests {
     use crate::ast::SymExpr;
     use crate::cnf::CnfBuilder;
     use crate::sat::SatSolver;
+    use crate::solver::{SatResult, Solver};
 
     /// Lower a boolean SymExpr (must yield 1 bit) into SAT and check satisfiability.
     fn check_sat(expr: SymExpr) -> bool {
@@ -1017,7 +1010,7 @@ mod tests {
     #[test]
     fn test_float_fneg_bitblast_width() {
         // FNeg of f32-sorted var → 32 IEEE bits (sign flip is structural).
-        let x = SymExpr::new_float_var("fx", 4);
+        let x = SymExpr::new_float_var("fx", 32);
         let neg = SymExpr::FNeg(Box::new(x));
         let mut aig = AigManager::new();
         let bits = aig.lower_expr(&neg);
@@ -1029,7 +1022,7 @@ mod tests {
         // 1.0 is not NaN → FIsNan folds or bit-blasts to false → UNSAT when asserted.
         let one = SymExpr::Const {
             val: 1.0f32.to_bits() as u64,
-            size: 4,
+            size: 32,
         };
         // Avoid constant-folder path by going through Var + free FIsNan on concrete via fold:
         let folded = SymExpr::new_fisnan(one.clone());
@@ -1039,20 +1032,21 @@ mod tests {
     }
 
     #[test]
-    fn test_float_feq_symbolic_sat() {
-        // two equal float vars → SAT (x == x free)
-        let x = SymExpr::new_float_var("a", 4);
-        let y = SymExpr::new_float_var("b", 4);
+    fn symbolic_float_equality_is_unknown_until_ieee_semantics_are_encoded() {
+        let x = SymExpr::new_float_var("a", 32);
+        let y = SymExpr::new_float_var("b", 32);
         let eq = SymExpr::FEq(Box::new(x), Box::new(y));
-        assert!(check_sat(eq));
+        let mut solver = Solver::new();
+        solver.assert(eq);
+        assert_eq!(solver.check_sat().expect("check_sat"), SatResult::Unknown);
     }
 
     #[test]
     fn test_float_flt_bitblast_is_bool() {
-        // Symbolic FLt bit-blasts to a single comparison bit (SAT may be deep;
-        // structural width is the gate for this layer).
-        let x = SymExpr::new_float_var("p", 4);
-        let y = SymExpr::new_float_var("q", 4);
+        // Unsupported symbolic float comparisons still have a one-bit result
+        // shape, but the solver records that it cannot decide their semantics.
+        let x = SymExpr::new_float_var("p", 32);
+        let y = SymExpr::new_float_var("q", 32);
         let lt = SymExpr::FLt(Box::new(x), Box::new(y));
         let mut aig = AigManager::new();
         let bits = aig.lower_expr(&lt);
@@ -1060,11 +1054,11 @@ mod tests {
         // Concrete fold path: 1.0 < 2.0
         let one = SymExpr::Const {
             val: 1.0f32.to_bits() as u64,
-            size: 4,
+            size: 32,
         };
         let two = SymExpr::Const {
             val: 2.0f32.to_bits() as u64,
-            size: 4,
+            size: 32,
         };
         let folded = SymExpr::new_flt(one, two);
         assert_eq!(folded, SymExpr::Const { val: 1, size: 1 });
@@ -1072,14 +1066,14 @@ mod tests {
     }
 
     #[test]
-    fn test_float_fadd_allocates_result_bits() {
-        // Symbolic FAdd under-approximates with free result bits (width preserved).
-        let a = SymExpr::new_float_var("fa", 4);
-        let b = SymExpr::new_float_var("fb", 4);
+    fn symbolic_float_arithmetic_is_unknown_until_encoded() {
+        let a = SymExpr::new_float_var("fa", 32);
+        let b = SymExpr::new_float_var("fb", 32);
         let sum = SymExpr::FAdd(Box::new(a), Box::new(b));
-        let mut aig = AigManager::new();
-        let bits = aig.lower_expr(&sum);
-        assert_eq!(bits.len(), 32);
+        let differs_from_zero = SymExpr::Neq(Box::new(sum), Box::new(SymExpr::new_const(0, 32)));
+        let mut solver = Solver::new();
+        solver.assert(differs_from_zero);
+        assert_eq!(solver.check_sat().expect("check_sat"), SatResult::Unknown);
     }
 
     #[test]
@@ -1116,8 +1110,8 @@ mod tests {
     #[test]
     fn test_slt_signed_wrap() {
         // -1 <_s 0: i8(-1) = 0xFF, i8(0) = 0x00 => -1 < 0 signed => SAT
-        let neg_one = SymExpr::new_const(0xFF, 1); // 1-byte -1
-        let zero = SymExpr::new_const(0, 1);
+        let neg_one = SymExpr::new_const(0xFF, 8);
+        let zero = SymExpr::new_const(0, 8);
         assert!(check_sat(SymExpr::new_slt(neg_one, zero)));
     }
 

@@ -65,7 +65,7 @@ This crate is a **dynamic analysis pillar**, not a decompiler semantic repair la
 stdin (--stdin mock)
   → sys_read() in os/linux/mod.rs
     → write bytes to MachineState RAM
-    → call solver.register_var() for each byte
+    → convert each byte to an 8-bit solver variable with bit_width_from_byte_size(1)
     → tag shadow_memory entries
       → MachineState.shadow_memory[(3, addr)] = SymNodeId
 
