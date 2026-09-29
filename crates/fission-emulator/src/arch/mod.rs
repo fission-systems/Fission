@@ -1,3 +1,4 @@
+pub mod aarch64;
 pub mod calling_convention;
 pub mod cortex_m;
 pub mod vector;

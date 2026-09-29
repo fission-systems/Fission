@@ -2773,11 +2773,11 @@ mod tests {
             unsafe { std::mem::transmute(func_ptr) };
         assert_eq!(f(&mut emu as *mut _), 0x1004);
         assert!(
-            emu.jit_fault
+            emu.memory_fault
                 .as_deref()
                 .is_some_and(|message| message.contains("not mapped")),
             "expected a recorded memory fault, got {:?}",
-            emu.jit_fault
+            emu.memory_fault
         );
         assert_eq!(read_reg(&mut emu, 24), 0, "the next p-code op must not run");
     }

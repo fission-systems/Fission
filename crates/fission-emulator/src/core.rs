@@ -217,7 +217,7 @@ pub struct Emulator {
     /// Last CallOther/userop data result (consumed by JIT after `jit_call_other`).
     pub callother_result: u64,
     /// First memory fault raised by a compiled JIT block, if any.
-    pub(crate) jit_fault: Option<String>,
+    pub(crate) memory_fault: Option<String>,
 }
 
 /// Max guest instructions per translation block.
@@ -450,7 +450,7 @@ impl Emulator {
             gs_base: 0,
             clear_child_tid: 0,
             callother_result: 0,
-            jit_fault: None,
+            memory_fault: None,
         };
 
         // Default SP if no ELF image_info applied yet (Windows / bare-metal).
@@ -460,6 +460,10 @@ impl Emulator {
             0x7FFF_E000u64
         };
         let _ = emu.write_register_u64(emu.arch.sp_reg, sp_init);
+
+        if emu.arch.name.starts_with("AARCH64") {
+            crate::arch::aarch64::initialize_cpu_state(&mut emu)?;
+        }
 
         // Enable PageFault checks for user-mode RAM after layout is ready.
         emu.state.enforce_page_faults = true;
@@ -828,11 +832,28 @@ impl Emulator {
     }
 
     pub(crate) fn note_guest_instruction(&mut self, pc: u64) {
+        self.current_insn_pc = pc;
         if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
             return;
         }
-        self.current_insn_pc = pc;
         self.taint.expire_control_scopes_at(pc);
+    }
+
+    pub(crate) fn record_memory_fault(
+        &mut self,
+        operation: &str,
+        space_id: u64,
+        offset: u64,
+        size: usize,
+        error: impl std::fmt::Display,
+    ) {
+        if self.memory_fault.is_none() {
+            self.metrics.memory_faults = self.metrics.memory_faults.saturating_add(1);
+            let guest_pc = self.current_instruction_pc();
+            self.memory_fault = Some(format!(
+                "memory {operation} failed at guest PC 0x{guest_pc:X}, space {space_id} offset 0x{offset:X} size {size}: {error}"
+            ));
+        }
     }
 
     pub(crate) fn current_instruction_pc(&self) -> u64 {
@@ -2005,7 +2026,7 @@ impl Emulator {
                 // inst_count is advanced inside the TB via jit_count_insn.
                 let next_pc = func(self as *mut _);
                 self.pc = next_pc;
-                if let Some(error) = self.jit_fault.take() {
+                if let Some(error) = self.memory_fault.take() {
                     self.metrics.exit_reason = Some("memory_fault".into());
                     return Err(anyhow::anyhow!(error));
                 }
@@ -2115,7 +2136,7 @@ impl Emulator {
             unsafe { std::mem::transmute(block.host_func_ptr) };
         let next_pc = func(self as *mut _);
         self.pc = next_pc;
-        if let Some(error) = self.jit_fault.take() {
+        if let Some(error) = self.memory_fault.take() {
             self.metrics.exit_reason = Some("memory_fault".into());
             return Err(anyhow::anyhow!(error));
         }
@@ -2128,6 +2149,10 @@ impl Emulator {
         use crate::interp::InterpExit;
         self.interpreted_blocks = self.interpreted_blocks.saturating_add(1);
         let exit = self.interpret_translation_block(insns)?;
+        if let Some(error) = self.memory_fault.take() {
+            self.metrics.exit_reason = Some("memory_fault".into());
+            return Err(anyhow::anyhow!(error));
+        }
         let pc_override = self.pc_override.take();
         match exit {
             InterpExit::Branch(pc) | InterpExit::FallThrough(pc) => {
@@ -2176,7 +2201,7 @@ impl Emulator {
     fn run_inner(&mut self, stop_pc: Option<u64>) -> Result<RunOutcome> {
         tracing::info!("Sandbox execution started at PC=0x{:X}", self.pc);
         self.halt_requested = false;
-        self.jit_fault = None;
+        self.memory_fault = None;
         self.chain_depth = 0;
         self.pcode_budget_pc = None;
         self.watch_hit = None;
