@@ -1508,14 +1508,34 @@ impl JitCompiler {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
-                        store_vn!(out, builder.ins().ishl(a, b));
+                        // Cranelift follows the host ISA for oversized shift
+                        // counts (which may mask them modulo the word size).
+                        // P-code instead returns zero once the count reaches
+                        // the input varnode's bit width.
+                        let bit_width = (op.inputs[0].size.min(8) * 8) as i64;
+                        let too_large =
+                            builder
+                                .ins()
+                                .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, b, bit_width);
+                        let shifted = builder.ins().ishl(a, b);
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        let value = builder.ins().select(too_large, zero, shifted);
+                        store_vn!(out, value);
                     }
                 }
                 PcodeOpcode::IntRight => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
-                        store_vn!(out, builder.ins().ushr(a, b));
+                        let bit_width = (op.inputs[0].size.min(8) * 8) as i64;
+                        let too_large =
+                            builder
+                                .ins()
+                                .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, b, bit_width);
+                        let shifted = builder.ins().ushr(a, b);
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        let value = builder.ins().select(too_large, zero, shifted);
+                        store_vn!(out, value);
                     }
                 }
                 PcodeOpcode::IntSRight => {
@@ -1526,7 +1546,15 @@ impl JitCompiler {
                         // wrong if its own high bit happened to be set.
                         let a = load_vn_signed!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
-                        store_vn!(out, builder.ins().sshr(a, b));
+                        let bit_width = (op.inputs[0].size.min(8) * 8) as i64;
+                        let too_large =
+                            builder
+                                .ins()
+                                .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, b, bit_width);
+                        let shifted = builder.ins().sshr(a, b);
+                        let sign_fill = builder.ins().sshr_imm(a, 63);
+                        let value = builder.ins().select(too_large, sign_fill, shifted);
+                        store_vn!(out, value);
                     }
                 }
                 PcodeOpcode::IntNegate => {

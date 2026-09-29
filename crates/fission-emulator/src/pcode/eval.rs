@@ -668,13 +668,23 @@ impl<'a> Evaluator<'a> {
             }
             PcodeOpcode::IntLeft => {
                 let (a, b, o) = self.int_binary(&op)?;
-                let shift = (b & 0x7F) as u32;
-                self.write_varnode_u64(o, if shift >= 64 { 0 } else { a << shift })?;
+                let bit_width = op.inputs[0].size.saturating_mul(8);
+                let value = if b >= u64::from(bit_width) {
+                    0
+                } else {
+                    a << (b as u32)
+                };
+                self.write_varnode_u64(o, value)?;
             }
             PcodeOpcode::IntRight => {
                 let (a, b, o) = self.int_binary(&op)?;
-                let shift = (b & 0x7F) as u32;
-                self.write_varnode_u64(o, if shift >= 64 { 0 } else { a >> shift })?;
+                let bit_width = op.inputs[0].size.saturating_mul(8);
+                let value = if b >= u64::from(bit_width) {
+                    0
+                } else {
+                    a >> (b as u32)
+                };
+                self.write_varnode_u64(o, value)?;
             }
             PcodeOpcode::IntSRight => {
                 let a_raw = self.read_varnode_u64(&op.inputs[0])?;
@@ -682,11 +692,11 @@ impl<'a> Evaluator<'a> {
                 let out = op.output.as_ref().expect("INT_SRIGHT must have output");
                 let sz = op.inputs[0].size;
                 let a = sign_extend(a_raw, sz);
-                let shift = (b_raw & 0x7F) as u32;
-                let res = if shift >= 64 {
+                let bit_width = sz.saturating_mul(8);
+                let res = if b_raw >= u64::from(bit_width) {
                     if a < 0 { -1i64 } else { 0i64 }
                 } else {
-                    a >> shift
+                    a >> (b_raw as u32)
                 };
                 self.write_varnode_u64(out, res as u64)?;
             }
