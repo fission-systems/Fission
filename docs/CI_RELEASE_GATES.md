@@ -1,6 +1,6 @@
 # CI / CD release gates (conservative)
 
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-29
 
 This document is the policy source for how Fission promotes a git commit to a
 **SemVer tag** and a **GitHub Release**. It aligns automation with
@@ -18,8 +18,8 @@ This document is the policy source for how Fission promotes a git commit to a
 
 | Layer | Workflow | When | Role |
 |-------|----------|------|------|
-| **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core+midend tests, CLI smoke, NIR gate. **PR = Linux-first**; macOS test smoke on `main` push. Windows release tests remain in L1. Docs/wiki-only short-circuits |
-| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Nightly + manual dispatch | Full Linux workspace tests, Windows tests and native debugger, macOS release CLI build, MSRV, and non-blocking coverage. Dispatch it for the release candidate SHA before tagging. |
+| **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, changed-crate dependency tests, affected optional-feature suites, relevant CLI smoke, NIR gate. **PR = Linux-first**; macOS test smoke on `main` push. Windows release tests remain in L1. Docs/wiki-only short-circuits |
+| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Nightly + manual dispatch | Full Linux workspace tests and exhaustive feature compile-surface, Windows tests and native debugger, macOS release CLI build, MSRV, and non-blocking coverage. Dispatch it for the release candidate SHA before tagging. |
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
 | **L3 CD** | [`cd.yml`](../.github/workflows/cd.yml) | Tag push `v*.*.*` / `X.Y.Z` | Multi-platform CLI archives (each includes `utils/`) → GitHub Release |
@@ -138,8 +138,8 @@ A nightly run is sufficient when the candidate has not moved since it ran.
 - Path-filter **lanes**: `docs` | `scripts` | `ci` | `rust`
   - `docs` — short-circuit green
   - `scripts` — pass-gate + Python/shell syntax only
-  - `ci` — pass-gate + workflow YAML parse (+ security if `deny.toml`/dependabot)
-  - `rust` — full Linux Fast Gate (macOS test smoke on `main` push)
+  - `ci` — `.github/**`, CI metadata, or mixed CI/script edits → pass-gate + workflow YAML parse (+ security if `deny.toml`/dependabot)
+  - `rust` — affected-package Linux Fast Gate (macOS test smoke on `main` push)
 - PR Fast Gate no longer runs macOS/Windows tests (macOS smoke is on main L0;
   Windows release tests are on L1).
 - Fast Gate no longer performs separate macOS/Windows CLI release builds on `main`;
@@ -148,6 +148,17 @@ A nightly run is sufficient when the candidate has not moved since it ran.
   skips webkit/GTK sysdeps unless GUI packages are required.
 - **sccache** (GitHub Actions backend) on lint / test / CLI build reusables via
   [`.github/actions/setup-sccache`](../.github/actions/setup-sccache).
+- Rust PRs use Cargo package metadata to select the changed crates and their
+  reverse-dependency closure for Linux tests and Clippy. The CLI smoke runs only
+  when `fission-cli` is in that set. Non-default interactive-runtime,
+  script-emulator, emulator softfloat, plugin runtime, and alternate CLI
+  configurations run only when their package is affected. Workspace manifests,
+  lockfiles, unknown crate paths, and unknown resource paths fail safe to all
+  workspace packages.
+- `scripts/audit/compile_surface.sh` remains exhaustive, but runs in L1 Heavy
+  instead of every Rust PR. Fast Gate still checks formatting, Clippy for the
+  affected package set, and the affected test suites; release tagging still
+  requires successful Heavy validation on the exact candidate SHA.
 
 `release-tag.yml` requires a successful `ci-heavy.yml` run on the target SHA.
 Scheduled and manually dispatched runs qualify; a run on an earlier commit does
