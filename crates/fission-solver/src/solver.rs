@@ -52,12 +52,13 @@ impl Solver {
         id
     }
 
-    pub fn register_var(&mut self, name: String, size: u32) -> SymNodeId {
+    /// Register a symbolic bitvector variable whose width is measured in bits.
+    pub fn register_var(&mut self, name: String, width_bits: u32) -> SymNodeId {
         let id = crate::ast::VAR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let expr = SymExpr::Var {
             id,
             name,
-            sort: Sort::BitVector(size),
+            sort: Sort::BitVector(width_bits),
         };
         self.nodes.insert(id, expr);
         id
@@ -65,7 +66,7 @@ impl Solver {
 
     /// Add a constraint (boolean expression) to the solver context.
     pub fn assert(&mut self, expr: SymExpr) {
-        if expr.get_size() != 1 {
+        if expr.get_bit_width() != 1 {
             tracing::warn!("Asserted expression does not evaluate to a boolean (size != 1)");
         }
         self.assertions.push(expr.clone());
@@ -155,13 +156,16 @@ impl Solver {
                                         // Lemma: index == c_idx => ArraySelect == oracle_val
                                         let eq_idx = SymExpr::Eq(
                                             index.clone(),
-                                            Box::new(SymExpr::new_const(c_idx, index.get_size())),
+                                            Box::new(SymExpr::new_const(
+                                                c_idx,
+                                                index.get_bit_width(),
+                                            )),
                                         );
                                         let eq_val = SymExpr::Eq(
                                             Box::new(expr.clone()),
                                             Box::new(SymExpr::new_const(
                                                 oracle_val as u64,
-                                                expr.get_size(),
+                                                expr.get_bit_width(),
                                             )),
                                         );
                                         let implies = SymExpr::Or(
@@ -281,7 +285,7 @@ impl Solver {
         while results.len() < n {
             let last = *results.last().expect("the first model value is recorded");
             let exclusion =
-                SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_size()));
+                SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_bit_width()));
             extra_exclusions.push(exclusion);
 
             let sat = matches!(
@@ -364,7 +368,7 @@ impl Solver {
             let mid = lo + (hi - lo) / 2;
             let constraint = SymExpr::Ule(
                 Box::new(expr.clone()),
-                Box::new(SymExpr::new_const(mid, expr.get_size())),
+                Box::new(SymExpr::new_const(mid, expr.get_bit_width())),
             );
             // A bound the solver could not decide is not a bound.
             match self
@@ -399,7 +403,7 @@ impl Solver {
         // Multiplying by eight makes an 8-bit query search a 64-bit range;
         // the resulting truncated probe values are not monotonic, so the
         // binary search can return a value that is not the maximum.
-        let size_bits = expr.get_size();
+        let size_bits = expr.get_bit_width();
         let mut hi = if size_bits >= 64 {
             u64::MAX
         } else {
@@ -412,7 +416,7 @@ impl Solver {
             let span = hi - lo;
             let mid = lo + span / 2 + span % 2;
             let constraint = SymExpr::Ult(
-                Box::new(SymExpr::new_const(mid, expr.get_size())),
+                Box::new(SymExpr::new_const(mid, expr.get_bit_width())),
                 Box::new(expr.clone()),
             );
             match self

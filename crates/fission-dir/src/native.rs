@@ -13,7 +13,7 @@ use fission_emulator::{
     pcode::eval::{Evaluator, StepResult},
 };
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
-use fission_solver::{SatResult, Solver, SymExpr};
+use fission_solver::{Solver, SymExpr};
 
 use crate::product::{
     AssumptionKind, CallObservation, CandidateSemantics, CandidateSource, DirCandidate,
@@ -23,6 +23,7 @@ use crate::product::{
     PcodeRegionSelection, UnresolvedEffect, UnresolvedEffectKind, ValidationAssumption,
     ValidationBudget, ValidationEvidence, ValidationVerdict,
 };
+use crate::symbolic::{SolverVerdict, classify_solver_result};
 
 /// Reconstructs one explicitly selected P-code region.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1162,10 +1163,10 @@ fn prove_symbolically(
         candidate_expression,
     ));
 
-    match solver.check_sat().map_err(|error| error.to_string())? {
-        SatResult::Unsat => Ok(SymbolicOutcome::Equivalent),
-        SatResult::Unknown => Ok(SymbolicOutcome::Unknown),
-        SatResult::Sat => {
+    match classify_solver_result(solver.check_sat().map_err(|error| error.to_string())?) {
+        SolverVerdict::Equivalent => Ok(SymbolicOutcome::Equivalent),
+        SolverVerdict::Unknown => Ok(SymbolicOutcome::Unknown),
+        SolverVerdict::Counterexample => {
             let sample = symbolic_inputs
                 .iter()
                 .map(|expression| {

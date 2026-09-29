@@ -1,9 +1,8 @@
-//! Does the solver answer operations it has no circuit for?
+//! Does each supported bitvector operation match its SMT-LIB definition?
 //!
-//! `AigManager::lower_expr` has no arm for `Mul`, `Udiv` or `Ite`, and its
-//! fallback lowers them to all-false bits: the solver believes `a * b`,
-//! `a / b` and `ite(c, x, y)` are always zero. These are the questions whose
-//! right answer that belief gets wrong. Not committed until they pass.
+//! This is the definition-based conformance lane. It exhaustively checks
+//! small widths and separately requires operations outside the supported
+//! fragment to return `Unknown` instead of a guessed verdict.
 
 use fission_solver::{SatResult, Solver, SymExpr};
 
@@ -133,6 +132,35 @@ fn check_exhaustively(
             }
         }
     }
+}
+
+#[test]
+fn add_subtract_and_bitwise_ops_match_every_4_bit_pair() {
+    check_exhaustively(
+        "bvadd",
+        |x, y| SymExpr::Add(Box::new(x), Box::new(y)),
+        |x, y| x + y,
+    );
+    check_exhaustively(
+        "bvsub",
+        |x, y| SymExpr::Sub(Box::new(x), Box::new(y)),
+        |x, y| x.wrapping_sub(y),
+    );
+    check_exhaustively(
+        "bvand",
+        |x, y| SymExpr::And(Box::new(x), Box::new(y)),
+        |x, y| x & y,
+    );
+    check_exhaustively(
+        "bvor",
+        |x, y| SymExpr::Or(Box::new(x), Box::new(y)),
+        |x, y| x | y,
+    );
+    check_exhaustively(
+        "bvxor",
+        |x, y| SymExpr::Xor(Box::new(x), Box::new(y)),
+        |x, y| x ^ y,
+    );
 }
 
 #[test]
@@ -326,9 +354,9 @@ fn arithmetic_right_shift_matches_its_definition_on_every_4_bit_pair() {
 /// truncating. It is zero, and answering that must not cost memory.
 #[test]
 fn a_huge_constant_shift_is_zero_without_allocating_it() {
-    let x = SymExpr::new_var("x", 8);
-    let shifted = SymExpr::Shl(Box::new(x), Box::new(SymExpr::new_const(1 << 40, 8)));
-    let non_zero = SymExpr::Neq(Box::new(shifted), Box::new(SymExpr::new_const(0, 8)));
+    let x = SymExpr::new_var("x", 64);
+    let shifted = SymExpr::Shl(Box::new(x), Box::new(SymExpr::new_const(1 << 40, 64)));
+    let non_zero = SymExpr::Neq(Box::new(shifted), Box::new(SymExpr::new_const(0, 64)));
     assert!(
         matches!(sat(non_zero), SatResult::Unsat),
         "x << 2^40 is zero for every x"
@@ -538,6 +566,20 @@ fn check_comparison_exhaustively(
 }
 
 #[test]
+fn equality_and_inequality_match_their_definitions_on_every_4_bit_pair() {
+    check_comparison_exhaustively(
+        "=",
+        |a, b| SymExpr::Eq(Box::new(a), Box::new(b)),
+        |x, y| x == y,
+    );
+    check_comparison_exhaustively(
+        "distinct",
+        |a, b| SymExpr::Neq(Box::new(a), Box::new(b)),
+        |x, y| x != y,
+    );
+}
+
+#[test]
 fn unsigned_comparisons_match_their_definitions_on_every_4_bit_pair() {
     check_comparison_exhaustively(
         "bvult",
@@ -580,6 +622,184 @@ fn a_64_bit_signed_comparison_does_not_overflow_and_is_right() {
     assert!(matches!(sat(lt), SatResult::Sat), "-2^63 <s 0");
     let gt = SymExpr::Slt(Box::new(zero), Box::new(min));
     assert!(matches!(sat(gt), SatResult::Unsat), "0 <s -2^63 is false");
+}
+
+#[test]
+fn signed_constant_folding_uses_bit_widths_at_boundaries() {
+    for (width, negative) in [(1, 1), (8, 0x80), (32, 0x8000_0000), (64, 1u64 << 63)] {
+        let below_zero = SymExpr::new_slt(
+            SymExpr::new_const(negative, width),
+            SymExpr::new_const(0, width),
+        );
+        assert_eq!(
+            below_zero,
+            SymExpr::new_const(1, 1),
+            "signed {width}-bit value"
+        );
+
+        let unsigned_below_zero = SymExpr::new_ult(
+            SymExpr::new_const(negative, width),
+            SymExpr::new_const(0, width),
+        );
+        assert_eq!(
+            unsigned_below_zero,
+            SymExpr::new_const(0, 1),
+            "unsigned {width}-bit value"
+        );
+    }
+}
+
+#[test]
+fn extract_matches_its_definition_on_every_4_bit_input() {
+    for x in 0..=MASK {
+        let expected = (x >> 1) & 0b11;
+        for negate in [false, true] {
+            let value = SymExpr::new_var("extract", WIDTH);
+            let mut solver = Solver::new();
+            solver.assert(SymExpr::Eq(
+                Box::new(value.clone()),
+                Box::new(SymExpr::new_const(x, WIDTH)),
+            ));
+            let extracted = SymExpr::Extract {
+                expr: Box::new(value),
+                lsb: 1,
+                size: 2,
+            };
+            let target = Box::new(SymExpr::new_const(expected, 2));
+            solver.assert(if negate {
+                SymExpr::Neq(Box::new(extracted), target)
+            } else {
+                SymExpr::Eq(Box::new(extracted), target)
+            });
+            let got = solver.check_sat().expect("check_sat");
+            assert_eq!(
+                got,
+                if negate {
+                    SatResult::Unsat
+                } else {
+                    SatResult::Sat
+                },
+                "extract [2:1] from {x:#06b} should equal {expected:#04b}"
+            );
+        }
+    }
+}
+
+#[test]
+fn concat_matches_its_definition_on_every_4_bit_pair() {
+    for x in 0..=MASK {
+        for y in 0..=MASK {
+            let expected = (x << WIDTH) | y;
+            for negate in [false, true] {
+                let xv = SymExpr::new_var("concat_hi", WIDTH);
+                let yv = SymExpr::new_var("concat_lo", WIDTH);
+                let mut solver = Solver::new();
+                solver.assert(SymExpr::Eq(
+                    Box::new(xv.clone()),
+                    Box::new(SymExpr::new_const(x, WIDTH)),
+                ));
+                solver.assert(SymExpr::Eq(
+                    Box::new(yv.clone()),
+                    Box::new(SymExpr::new_const(y, WIDTH)),
+                ));
+                let concatenated = SymExpr::Concat(Box::new(xv), Box::new(yv));
+                let target = Box::new(SymExpr::new_const(expected, WIDTH * 2));
+                solver.assert(if negate {
+                    SymExpr::Neq(Box::new(concatenated), target)
+                } else {
+                    SymExpr::Eq(Box::new(concatenated), target)
+                });
+                let got = solver.check_sat().expect("check_sat");
+                assert_eq!(
+                    got,
+                    if negate {
+                        SatResult::Unsat
+                    } else {
+                        SatResult::Sat
+                    },
+                    "concat({x:#06b}, {y:#06b}) should equal {expected:#010b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn invalid_extract_is_unknown_instead_of_zero_extension() {
+    let mut solver = Solver::new();
+    solver.assert(SymExpr::Eq(
+        Box::new(SymExpr::Extract {
+            expr: Box::new(SymExpr::new_var("source", 8)),
+            lsb: 7,
+            size: 2,
+        }),
+        Box::new(SymExpr::new_const(0, 2)),
+    ));
+    assert_eq!(solver.check_sat().expect("check_sat"), SatResult::Unknown);
+}
+
+#[test]
+fn widths_larger_than_the_u64_model_are_unknown() {
+    let mut direct_compare = Solver::new();
+    direct_compare.assert(SymExpr::Eq(
+        Box::new(SymExpr::new_var("wide", 65)),
+        Box::new(SymExpr::new_const(0, 65)),
+    ));
+    assert_eq!(
+        direct_compare.check_sat().expect("check_sat"),
+        SatResult::Unknown
+    );
+
+    let wrapped_sum = SymExpr::new_add(SymExpr::new_const(u64::MAX, 65), SymExpr::new_const(1, 65));
+    let mut folded_compare = Solver::new();
+    folded_compare.assert(SymExpr::new_eq(wrapped_sum, SymExpr::new_const(0, 65)));
+    assert_eq!(
+        folded_compare.check_sat().expect("check_sat"),
+        SatResult::Unknown,
+        "the u64 payload must not let a wide addition fold to a false value"
+    );
+}
+
+#[test]
+fn symbolic_float_operations_without_full_ieee_circuits_are_unknown() {
+    for operation in [
+        "FAdd", "FSub", "FMul", "FDiv", "FSqrt", "FEq", "FNeq", "FLt", "FLe",
+    ] {
+        let a = SymExpr::new_float_var("a", 32);
+        let b = SymExpr::new_float_var("b", 32);
+        let (result, is_boolean) = match operation {
+            "FAdd" => (SymExpr::FAdd(Box::new(a), Box::new(b)), false),
+            "FSub" => (SymExpr::FSub(Box::new(a), Box::new(b)), false),
+            "FMul" => (SymExpr::FMul(Box::new(a), Box::new(b)), false),
+            "FDiv" => (SymExpr::FDiv(Box::new(a), Box::new(b)), false),
+            "FSqrt" => (SymExpr::FSqrt(Box::new(a)), false),
+            "FEq" => (SymExpr::FEq(Box::new(a), Box::new(b)), true),
+            "FNeq" => (SymExpr::FNeq(Box::new(a), Box::new(b)), true),
+            "FLt" => (SymExpr::FLt(Box::new(a), Box::new(b)), true),
+            "FLe" => (SymExpr::FLe(Box::new(a), Box::new(b)), true),
+            _ => unreachable!(),
+        };
+        let assertion = if is_boolean {
+            result
+        } else {
+            SymExpr::Eq(Box::new(result), Box::new(SymExpr::new_const(0, 32)))
+        };
+        let mut solver = Solver::new();
+        solver.assert(assertion);
+        assert_eq!(
+            solver.check_sat().expect("check_sat"),
+            SatResult::Unknown,
+            "unmodeled symbolic {operation} must not produce a verdict"
+        );
+    }
+}
+
+#[test]
+fn non_ieee_float_width_is_unknown() {
+    let value = SymExpr::new_float_var("half", 16);
+    let mut solver = Solver::new();
+    solver.assert(SymExpr::new_fisnan(value));
+    assert_eq!(solver.check_sat().expect("check_sat"), SatResult::Unknown);
 }
 
 // ── The same variable on both sides ─────────────────────────────────────────

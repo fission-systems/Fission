@@ -26,8 +26,11 @@ impl MemoryMixin {
         let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
             id
         } else {
-            let arr_expr =
-                SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
+            let arr_expr = SymExpr::new_array_var(
+                &format!("space_{}", space_id),
+                ptr_expr.get_bit_width(),
+                crate::bit_width_from_byte_size(1),
+            );
             let id = solver.register_node(arr_expr);
             state.set_theory_array_id(space_id, id);
             id
@@ -43,7 +46,7 @@ impl MemoryMixin {
         };
 
         for i in 1..size_bytes {
-            let offset = SymExpr::new_const(i as u64, ptr_expr.get_size());
+            let offset = SymExpr::new_const(i as u64, ptr_expr.get_bit_width());
             let next_ptr = SymExpr::new_add(ptr_expr.clone(), offset);
             let next_byte = SymExpr::ArraySelect {
                 array: Box::new(array_expr.clone()),
@@ -71,8 +74,11 @@ impl MemoryMixin {
         let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
             id
         } else {
-            let arr_expr =
-                SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
+            let arr_expr = SymExpr::new_array_var(
+                &format!("space_{}", space_id),
+                ptr_expr.get_bit_width(),
+                crate::bit_width_from_byte_size(1),
+            );
             let id = solver.register_node(arr_expr);
             state.set_theory_array_id(space_id, id);
             id
@@ -82,7 +88,7 @@ impl MemoryMixin {
 
         // If writing multiple bytes, we need multiple ArrayStores
         for i in 0..size_bytes {
-            let offset = SymExpr::new_const(i as u64, ptr_expr.get_size());
+            let offset = SymExpr::new_const(i as u64, ptr_expr.get_bit_width());
             let next_ptr = SymExpr::new_add(ptr_expr.clone(), offset);
 
             // Extract byte i from val_expr

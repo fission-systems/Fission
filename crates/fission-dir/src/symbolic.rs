@@ -39,6 +39,22 @@ pub enum SymbolicOutcome {
     Unsupported(UnsupportedReason),
 }
 
+/// The only solver verdict that proves equivalence is `Unsat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SolverVerdict {
+    Equivalent,
+    Counterexample,
+    Unknown,
+}
+
+pub(crate) fn classify_solver_result(result: SatResult) -> SolverVerdict {
+    match result {
+        SatResult::Unsat => SolverVerdict::Equivalent,
+        SatResult::Sat => SolverVerdict::Counterexample,
+        SatResult::Unknown => SolverVerdict::Unknown,
+    }
+}
+
 /// Check whether `prehir` and `hir` compute the same return value for every
 /// input, for the symbolic tier's modeled subset (see [`crate::lower_sym`]'s
 /// scope notes -- acyclic, `Bool`/`Int` only, no `Div`/`Mod`/`Sar`).
@@ -102,9 +118,18 @@ pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) ->
     }
     solver.assert(SymExpr::new_neq(prehir_cmp, hir_cmp));
 
-    match solver.check_sat() {
-        Ok(SatResult::Unsat) => SymbolicOutcome::Equivalent,
-        Ok(SatResult::Sat) => {
+    let result = match solver.check_sat() {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::debug!("lower_sym: solver error: {err}");
+            return SymbolicOutcome::Unsupported(UnsupportedReason::Construct(
+                "solver query failed",
+            ));
+        }
+    };
+    match classify_solver_result(result) {
+        SolverVerdict::Equivalent => SymbolicOutcome::Equivalent,
+        SolverVerdict::Counterexample => {
             let args = param_vars
                 .iter()
                 .map(|v| match v {
@@ -114,13 +139,9 @@ pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) ->
                 .collect();
             SymbolicOutcome::Diverged(Counterexample { args })
         }
-        Ok(SatResult::Unknown) => SymbolicOutcome::Unsupported(UnsupportedReason::Construct(
+        SolverVerdict::Unknown => SymbolicOutcome::Unsupported(UnsupportedReason::Construct(
             "solver returned Unknown -- should be rare/never with no memory theory engaged",
         )),
-        Err(err) => {
-            tracing::debug!("lower_sym: solver error: {err}");
-            SymbolicOutcome::Unsupported(UnsupportedReason::Construct("solver query failed"))
-        }
     }
 }
 
@@ -144,4 +165,31 @@ fn zext_to(e: SymExpr, from_bits: u32, to_bits: u32) -> SymExpr {
         }),
         Box::new(e),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SolverVerdict, classify_solver_result};
+    use fission_solver::ast::SymExpr;
+    use fission_solver::{SatResult, Solver};
+
+    #[test]
+    fn unknown_from_an_unencoded_operation_cannot_prove_dir_equivalence() {
+        let a = SymExpr::new_float_var("a", 32);
+        let b = SymExpr::new_float_var("b", 32);
+        let unsupported = SymExpr::FAdd(Box::new(a), Box::new(b));
+        let mut solver = Solver::new();
+        solver.assert(SymExpr::Neq(
+            Box::new(unsupported),
+            Box::new(SymExpr::new_const(0, 32)),
+        ));
+
+        let result = solver.check_sat().expect("solver result");
+        assert_eq!(result, SatResult::Unknown);
+        assert_eq!(classify_solver_result(result), SolverVerdict::Unknown);
+        assert_ne!(
+            classify_solver_result(SatResult::Unknown),
+            SolverVerdict::Equivalent
+        );
+    }
 }

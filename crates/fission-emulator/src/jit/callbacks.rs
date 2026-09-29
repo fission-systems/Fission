@@ -735,14 +735,14 @@ pub extern "C" fn jit_shadow_binop(
     }
 
     use fission_solver::SymExpr;
-    let a_sz = (a_size as u32).max(1).min(8);
-    let b_sz = (b_size as u32).max(1).min(8);
+    let a_width_bits = crate::bit_width_from_byte_size((a_size as u32).clamp(1, 8));
+    let b_width_bits = crate::bit_width_from_byte_size((b_size as u32).clamp(1, 8));
     let a_expr = a_node
         .and_then(|id| emu.solver.nodes.get(&id).cloned())
-        .unwrap_or_else(|| SymExpr::new_const(a_val, a_sz));
+        .unwrap_or_else(|| SymExpr::new_const(a_val, a_width_bits));
     let b_expr = b_node
         .and_then(|id| emu.solver.nodes.get(&id).cloned())
-        .unwrap_or_else(|| SymExpr::new_const(b_val, b_sz));
+        .unwrap_or_else(|| SymExpr::new_const(b_val, b_width_bits));
 
     let new_expr = match op_kind {
         x if x == SymBinOpKind::Add as u32 => SymExpr::new_add(a_expr, b_expr),
@@ -823,14 +823,16 @@ pub extern "C" fn jit_shadow_unop(
         return;
     }
     use fission_solver::SymExpr;
-    let a_sz = (a_size as u32).max(1).min(8);
+    let a_width_bits = crate::bit_width_from_byte_size((a_size as u32).clamp(1, 8));
     let a_expr = a_node
         .and_then(|id| emu.solver.nodes.get(&id).cloned())
-        .unwrap_or_else(|| SymExpr::new_const(a_val, a_sz));
+        .unwrap_or_else(|| SymExpr::new_const(a_val, a_width_bits));
 
     let new_expr = match op_kind {
         x if x == SymUnOpKind::Not as u32 => SymExpr::new_not(a_expr),
-        x if x == SymUnOpKind::Neg as u32 => SymExpr::new_sub(SymExpr::new_const(0, a_sz), a_expr),
+        x if x == SymUnOpKind::Neg as u32 => {
+            SymExpr::new_sub(SymExpr::new_const(0, a_width_bits), a_expr)
+        }
         x if x == SymUnOpKind::BoolNot as u32 => SymExpr::new_eq(a_expr, SymExpr::new_const(0, 1)),
         x if x == SymUnOpKind::FloatNeg as u32 => SymExpr::new_fneg(a_expr),
         x if x == SymUnOpKind::FloatAbs as u32 => SymExpr::new_fabs(a_expr),
@@ -839,8 +841,8 @@ pub extern "C" fn jit_shadow_unop(
         // Ceil/Floor/Round/Trunc/casts: keep as float-sorted symbolic leaf for now.
         x if (14..=19).contains(&x) => {
             let name = format!("fsym_{op_kind}_{}", a_node.unwrap_or(0));
-            let out_sz = (dst_sz as u32).max(1).min(8);
-            SymExpr::new_float_var(&name, out_sz)
+            let out_width_bits = crate::bit_width_from_byte_size((dst_sz as u32).clamp(1, 8));
+            SymExpr::new_float_var(&name, out_width_bits)
         }
         _ => a_expr,
     };

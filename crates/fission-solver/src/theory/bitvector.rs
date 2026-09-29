@@ -111,6 +111,13 @@ impl BvTheorySolver {
             .collect();
 
         for (node_id, expr) in &var_nodes {
+            let width_bits = expr.get_bit_width();
+            if width_bits == 0 || width_bits > 64 {
+                self.aig.note_unsupported(format!(
+                    "cannot extract a {width_bits}-bit value into the u64 model"
+                ));
+                continue;
+            }
             let bits_opt = match expr {
                 SymExpr::Var {
                     id: ast_id, sort, ..
@@ -130,7 +137,7 @@ impl BvTheorySolver {
             };
 
             if let Some(bits) = bits_opt {
-                let size = expr.get_size();
+                let size = width_bits;
                 let mut value: u64 = 0;
                 for (bit_idx, aig_lit) in bits.iter().enumerate() {
                     let aig_node_idx = aig_lit.index();
@@ -181,7 +188,7 @@ impl BvTheorySolver {
             } as u64;
             value |= bit_val << bit_idx;
         }
-        let size = expr.get_size();
+        let size = expr.get_bit_width();
         let mask = if size >= 64 {
             u64::MAX
         } else {

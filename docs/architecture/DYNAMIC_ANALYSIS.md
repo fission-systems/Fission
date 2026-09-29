@@ -125,7 +125,7 @@ Fission's taint and symbolic engine is a pure-Rust implementation — no Z3 bind
 ```
 fission-solver            — Pure-Rust SMT/Constraint engine
   ├── ast.rs              — SymExpr: the symbolic expression AST
-  └── solver.rs           — Solver: node registry, path conditions, SAT stub
+  └── solver.rs           — Solver: node registry, path conditions, bit-blasted SAT checks
 
 fission-emulator          — Concrete + Symbolic execution
   └── pcode/
@@ -148,6 +148,18 @@ Every symbolic value is represented as a node in the `SymExpr` tree:
 | `Ite { cond, t, f }` | If-then-else |
 | `Extract { expr, lsb, size }` | Bit extraction |
 | `Concat(a, b)` | Bitvector concatenation |
+
+### Width Contract
+
+Every bitvector and floating-point expression width is measured in **bits**:
+`SymExpr::new_var("x", 8)` is an 8-bit value. `get_bit_width()` and the
+legacy `get_size()` alias return bits; `Sort::byte_size()` is the explicit
+storage-size query. Float sorts use widths 32 and 64.
+
+P-Code varnode sizes, shadow-memory spans, and OS read sizes are measured in
+bytes. The emulator converts those sizes with `bit_width_from_byte_size()` at
+the boundary where it creates solver expressions. A symbolic memory array
+uses the pointer's bit width as its address width and 8 bits for each byte.
 
 ### Shadow Memory (Taint State)
 
@@ -179,7 +191,7 @@ When a concrete byte is written, its shadow entry is cleared. When a symbolic va
 The primary taint source is `stdin`. In `os/linux/mod.rs`, the `sys_read(fd=0, ...)` handler:
 1. Reads bytes from `stdin_buffer` (the `--stdin` mock).
 2. Writes them into RAM as concrete bytes.
-3. For each byte, calls `solver.register_var("stdin_<addr>", 1)` to create a `SymExpr::Var`.
+3. For each byte, converts 1 byte to 8 bits and calls `solver.register_var` to create an 8-bit `SymExpr::Var`.
 4. Tags the corresponding `shadow_memory` entries with the new node ID.
 
 From that point forward, any P-Code operation that reads those bytes will propagate the taint forward into new `SymExpr` constraint trees.
@@ -231,5 +243,5 @@ The current implementation is **concolic scaffolding**: it explores paths by for
 3. Use `solver.get_value(var_id)` to obtain a concrete input that triggers the alternate path.
 4. Replay with that concrete input instead of forcing PC.
 
-This requires implementing the DPLL/CDCL bit-blasting core inside `fission-solver`, which is the next development milestone.
-
+The pure-Rust solver now has a DPLL/CDCL bit-blasting core. Alternate-path
+inversion and replay remain follow-up work in `SymbolicExecutor`.
