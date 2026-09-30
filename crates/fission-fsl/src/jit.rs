@@ -132,11 +132,7 @@ impl JitDecoder {
 
             for (index, instruction) in package.instructions.iter().enumerate() {
                 let matched = builder.create_block();
-                let next = if index + 1 == package.instructions.len() {
-                    builder.create_block()
-                } else {
-                    builder.create_block()
-                };
+                let next = builder.create_block();
 
                 let is_match =
                     builder
