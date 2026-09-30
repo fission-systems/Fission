@@ -422,9 +422,11 @@ impl JitCompiler {
             .unwrap();
 
         let mut sig_count = self.module.make_signature();
-        sig_count
-            .params
-            .extend([AbiParam::new(types::I64), AbiParam::new(types::I64)]);
+        sig_count.params.extend([
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I32),
+        ]);
         let count_fn = self
             .module
             .declare_function("jit_count_insn", Linkage::Import, &sig_count)
@@ -649,9 +651,9 @@ impl JitCompiler {
         // one of the two silently disappeared: `jit_count_insn` fired once for
         // the pair, so `inst_count` under-reported every p-code-less
         // instruction in the run, and `max_inst` budgets counted low with it.
-        let mut insn_starts_at: Vec<Vec<u64>> = vec![Vec::new(); n_ops + 1];
-        for (i, pc, _) in &insn_starts {
-            insn_starts_at[(*i).min(n_ops)].push(*pc);
+        let mut insn_starts_at: Vec<Vec<(u64, u32)>> = vec![Vec::new(); n_ops + 1];
+        for (i, pc, len) in &insn_starts {
+            insn_starts_at[(*i).min(n_ops)].push((*pc, *len));
         }
 
         macro_rules! ensure_var {
@@ -1007,7 +1009,8 @@ impl JitCompiler {
             // Still count guest insns and exit.
             for insn in insns {
                 let pc = builder.ins().iconst(types::I64, insn.pc as i64);
-                builder.ins().call(count_ref, &[emu_ptr, pc]);
+                let len = builder.ins().iconst(types::I32, i64::from(insn.len));
+                builder.ins().call(count_ref, &[emu_ptr, pc, len]);
             }
             let arg = BlockArg::from(default_next);
             builder.ins().jump(exit_block, &[arg]);
@@ -1037,9 +1040,10 @@ impl JitCompiler {
 
             // Guest-insn boundary accounting: one per instruction starting
             // here, in order, so a zero-op instruction still counts.
-            for start_pc in &insn_starts_at[idx] {
+            for (start_pc, start_len) in &insn_starts_at[idx] {
                 let pc = builder.ins().iconst(types::I64, *start_pc as i64);
-                builder.ins().call(count_ref, &[emu_ptr, pc]);
+                let len = builder.ins().iconst(types::I32, i64::from(*start_len));
+                builder.ins().call(count_ref, &[emu_ptr, pc, len]);
                 if observe.insn {
                     builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
                 }
@@ -2235,9 +2239,10 @@ impl JitCompiler {
                     // run only if the block is left by falling out of it --
                     // an early branch skips them -- so this is the one edge
                     // they belong on.
-                    for start_pc in &insn_starts_at[n_ops] {
+                    for (start_pc, start_len) in &insn_starts_at[n_ops] {
                         let pc = builder.ins().iconst(types::I64, *start_pc as i64);
-                        builder.ins().call(count_ref, &[emu_ptr, pc]);
+                        let len = builder.ins().iconst(types::I32, i64::from(*start_len));
+                        builder.ins().call(count_ref, &[emu_ptr, pc, len]);
                         if observe.insn {
                             builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
                         }

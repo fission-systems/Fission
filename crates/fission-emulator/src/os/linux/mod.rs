@@ -7,6 +7,7 @@ pub mod signal;
 pub mod syscall;
 pub mod syscall_abi;
 pub mod syscall_conv;
+pub mod task;
 
 pub use dynlink::{DynlinkInfo, DynlinkMode};
 pub use image_info::{ImageInfo, ProcessArgs};
@@ -32,6 +33,8 @@ pub struct LinuxEnv {
     pub simos: SimOS,
     /// Deferred PLT/GOT binding table (when `FISSION_LAZY_BIND=1`).
     pub plt_lazy: std::sync::Mutex<Option<dynlink::PltLazyTable>>,
+    /// Cooperative Linux guest tasks; guest execution still uses one host thread.
+    task_scheduler: std::sync::Mutex<task::LinuxTaskScheduler>,
 }
 
 impl LinuxEnv {
@@ -115,12 +118,37 @@ impl LinuxEnv {
         Self {
             simos,
             plt_lazy: std::sync::Mutex::new(None),
+            task_scheduler: std::sync::Mutex::new(task::LinuxTaskScheduler::default()),
         }
     }
 
     /// Install a lazy PLT table (called after shared-lib load when lazy bind is on).
     pub fn set_plt_lazy(&self, table: dynlink::PltLazyTable) {
         *self.plt_lazy.lock().unwrap_or_else(|e| e.into_inner()) = Some(table);
+    }
+
+    fn dispatch_guest_task_syscall(
+        &self,
+        emu: &mut Emulator,
+        syscall: u64,
+    ) -> Option<Result<HleResult>> {
+        if !matches!(syscall, 24 | 56 | 60 | 186 | 200 | 202 | 218) {
+            return None;
+        }
+        let mut scheduler = self
+            .task_scheduler
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Some(match syscall {
+            24 => scheduler.sched_yield(emu),
+            56 => scheduler.clone_thread(emu),
+            60 => scheduler.exit_thread(emu),
+            186 => scheduler.gettid(emu),
+            200 => scheduler.tkill(emu),
+            202 => scheduler.futex(emu),
+            218 => scheduler.set_tid_address(emu),
+            _ => unreachable!("task syscall was filtered above"),
+        })
     }
 }
 
@@ -303,6 +331,13 @@ impl OsEnvironment for LinuxEnv {
             // what the tainted value is about to be used for.
             if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
                 check_syscall_taint(emu, sys_num);
+            }
+            if let Some(result) = self.dispatch_guest_task_syscall(emu, sys_num) {
+                let result = result?;
+                if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+                    taint_syscall_output(emu, sys_num);
+                }
+                return Ok(result);
             }
             if let Some(proc) = self.simos.syscalls.get(&sys_num) {
                 let result = proc.run(emu);

@@ -7,6 +7,12 @@ use fission_loader::loader::LoadedBinary;
 pub enum HleResult {
     /// Execution should continue normally (return address has been restored).
     Continue,
+    /// A guest task switch has restored the next task's registers and stored
+    /// its resume PC in `Emulator::pc_override`.
+    Schedule,
+    /// No guest task can make progress; stop with an explicit deadlock reason
+    /// instead of inventing a syscall result for a blocked task.
+    Deadlock,
     /// The emulated program has requested termination with the given exit code.
     Halt(u32),
     /// Jump to `pc` without popping a return address (e.g. `__libc_start_main` → main).
@@ -54,8 +60,10 @@ pub trait OsEnvironment: Send + Sync {
     /// 1. Parse arguments via `emu.arch.cc.read_arg(emu, n)`.
     /// 2. Write a return value via `emu.arch.cc.write_return(emu, val)`.
     /// 3. Return `HleResult::Continue` (the emulator will call
-    ///    `emu.arch.cc.simulate_return(emu)` afterward to restore PC).
-    /// 4. Return `HleResult::Halt(code)` for termination requests.
+    ///    `emu.arch.cc.simulate_return(emu)` afterward to restore PC), or
+    ///    `Schedule` after restoring a different guest task's context.
+    /// 4. Return `HleResult::Halt(code)` for termination requests or `Deadlock`
+    ///    when modeled guest tasks cannot make progress.
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult>;
 
     /// Dispatch a Sleigh USEROP (`CallOther`) operation.

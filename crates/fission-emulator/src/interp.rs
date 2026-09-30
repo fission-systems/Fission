@@ -79,13 +79,13 @@ impl Emulator {
         // (x86 `nop dword ptr [rax]`), and then it shares its start index with
         // the next one. Taking just the first, or just the last, loses a real
         // instruction from the count and from anything watching.
-        let mut starts_at: Vec<Vec<u64>> = Vec::new();
+        let mut starts_at: Vec<Vec<(u64, u32)>> = Vec::new();
         for insn in insns {
             let base = flat.len();
             while starts_at.len() <= base {
                 starts_at.push(Vec::new());
             }
-            starts_at[base].push(insn.pc);
+            starts_at[base].push((insn.pc, insn.len));
             for (local_i, op) in insn.ops.iter().enumerate() {
                 let mut op = op.clone();
                 remap_relative_branches(&mut op, base, local_i, insn.ops.len());
@@ -110,9 +110,9 @@ impl Emulator {
             .unwrap_or(u64::MAX);
 
         while idx < flat.len() {
-            for pc in starts_at[idx].clone() {
+            for (pc, len) in starts_at[idx].clone() {
                 self.pc = pc;
-                self.note_guest_instruction(pc);
+                self.note_guest_instruction(pc, len);
                 self.inst_count = self.inst_count.saturating_add(1);
                 if let Some(limit) = self.max_inst {
                     if self.inst_count >= limit {
@@ -301,6 +301,7 @@ impl Emulator {
                         return Ok(InterpExit::Halt);
                     }
                     if let Some(pc) = self.pc_override.take() {
+                        self.task_switch_requested = false;
                         return Ok(InterpExit::Branch(pc));
                     }
                     idx += 1;
@@ -310,9 +311,9 @@ impl Emulator {
 
         // Trailing instructions that lifted to nothing: reached only by
         // falling out of the block, same as in the compiled path.
-        for pc in starts_at[flat.len()].clone() {
+        for (pc, len) in starts_at[flat.len()].clone() {
             self.pc = pc;
-            self.note_guest_instruction(pc);
+            self.note_guest_instruction(pc, len);
             self.inst_count = self.inst_count.saturating_add(1);
             if self.observe.insn {
                 self.notify_insn(pc);

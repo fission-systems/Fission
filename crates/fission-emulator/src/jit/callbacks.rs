@@ -236,9 +236,9 @@ pub extern "C" fn jit_int_flag(kind: u32, size: u32, a: u64, b: u64) -> u64 {
 
 /// Count one guest instruction inside a multi-instruction TB.
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator, pc: u64) {
+pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator, pc: u64, len: u32) {
     let emu = unsafe { &mut *emu_ptr };
-    emu.note_guest_instruction(pc);
+    emu.note_guest_instruction(pc, len);
     emu.inst_count = emu.inst_count.saturating_add(1);
     if let Some(m) = emu.max_inst {
         if emu.inst_count >= m && emu.metrics.exit_reason.is_none() {
@@ -361,6 +361,9 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     } else {
         next_pc
     };
+    if std::mem::take(&mut emu.task_switch_requested) {
+        return next_pc;
+    }
     if next_pc >= 0xFFFFFFF0_00000000 {
         return next_pc;
     }
@@ -978,6 +981,15 @@ pub extern "C" fn jit_call_other(
     };
 
     match result {
+        HleResult::Schedule => {
+            emu.task_switch_requested = true;
+            1
+        }
+        HleResult::Deadlock => {
+            emu.metrics.exit_reason = Some("guest_deadlock".into());
+            emu.halt_requested = true;
+            1
+        }
         HleResult::Halt(code) => {
             // The interpreter's own HLE-trap branch in `run_inner` (used for
             // a *magic-trampoline* Halt, e.g. `libc::Exit`/`_exit`) has always
@@ -1032,6 +1044,15 @@ pub extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> u64 {
     };
 
     match result {
+        HleResult::Schedule => {
+            emu.task_switch_requested = true;
+            1
+        }
+        HleResult::Deadlock => {
+            emu.metrics.exit_reason = Some("guest_deadlock".into());
+            emu.halt_requested = true;
+            1
+        }
         HleResult::Halt(code) => {
             // Same gap as `jit_call_other`'s `HleResult::Halt` arm: a
             // magic-trampoline call (e.g. an imported `exit`) reached from

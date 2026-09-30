@@ -83,6 +83,12 @@ impl SyscallAbi {
         if !self.generic_numbers {
             return Some(number);
         }
+        // AArch64 uses the asm-generic clone number. The 32-bit ARM EABI
+        // syscall table is architecture-specific, so this number must not be
+        // added to the shared generic translation table.
+        if self.number == AARCH64.number && number == 220 {
+            return Some(56);
+        }
         generic_to_x86_64(number)
     }
 }
@@ -151,6 +157,7 @@ mod tests {
         assert_eq!(abi.canonical_number(64), Some(1));
         assert_eq!(abi.canonical_number(93), Some(60)); // exit
         assert_eq!(abi.canonical_number(94), Some(231)); // exit_group
+        assert_eq!(abi.canonical_number(220), Some(56)); // clone
     }
 
     #[test]
@@ -159,6 +166,12 @@ mod tests {
         // 999 is not a syscall. Inventing an x86-64 number for it would turn
         // an honest "unknown" into a call to something unrelated.
         assert_eq!(abi.canonical_number(999), None);
+        // This is the AArch64 generic-table value. Do not reinterpret it in
+        // the distinct 32-bit ARM EABI numbering.
+        assert_eq!(
+            SyscallAbi::for_arch(&ArchInfo::arm32()).canonical_number(220),
+            None
+        );
     }
 
     #[test]
