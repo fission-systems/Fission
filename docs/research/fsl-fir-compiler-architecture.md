@@ -1,8 +1,8 @@
 # FSL/FIR Compiler Architecture
 
-**Status:** research RFC, initial proposal
-**Scope:** language and compiler direction; not a claim that the current
-`iadd` proof implements this design
+**Status:** research RFC with an initial compiler prototype
+**Scope:** language, compiler, and eventual SLEIGH replacement direction; the
+current JVM `iadd` slice implements only a small part of this design
 
 ## Summary
 
@@ -19,20 +19,74 @@ FIR programs. These are separate uses and should not be conflated.
 
 ## Current prototype boundary
 
-The current `.fsl` sample is TOML syntax, and `fslc_probe.py` turns it into a
-JSON pattern package. This is useful for validating schema fields and proving
-one JVM opcode against the existing Fission `.sla` path. It is not the proposed
-FSL source grammar or final compiled artifact format. Keep JSON as an optional
-debug/export/interchange view, not as the authored language or hot-path runtime
-representation.
+The earlier parity probe began with a TOML-like sample and `fslc_probe.py`
+emitted a JSON pattern package. That remains a schema/provenance experiment for
+checking one JVM opcode against the existing Fission `.sla` path; it is not the
+FSL compiler or its runtime format. The `fission-fsl` crate now has a separate
+text grammar and binary `.fslc` package. JSON can remain an optional
+debug/export/interchange view, but it is not the authored language or hot-path
+runtime representation.
 
 Fission already has more than one execution mode: the SLEIGH runtime selects
 compiled templates and evaluates them to emit P-code, while the emulator has
 an existing [Cranelift P-code-to-host JIT](../../crates/fission-emulator/src/jit/compiler.rs).
 FSL/FIR should be able to bypass template evaluation when producing semantic
 output, without requiring the first research slice to replace the existing
-path. The current [template evaluator](../../crates/fission-sleigh/src/runtime/spine/compiled_table/template_eval.rs)
-is the relevant baseline for that comparison.
+path. The new [`fission-fsl` crate](../../crates/fission-fsl/) is an
+independent compiler slice: its small `.fsl` frontend produces a typed FIR
+package and a versioned binary `.fslc`; a Cranelift JIT decoder/lifter emits
+native FIR records. It has no dependency on `fission-sleigh`, `.sla`, JSON, or
+P-code. This proves an implementation boundary, not broad parity or a speedup.
+The current [template evaluator](../../crates/fission-sleigh/src/runtime/spine/compiled_table/template_eval.rs)
+remains a comparison baseline while migration proceeds.
+
+## End state: Fission-owned specifications and runtime
+
+The research goal is to remove SLEIGH as a Fission runtime and build-time
+requirement. FSL source, its compiler, FIR semantics, compiled packages, and
+the adapters used by Fission consumers should all be owned and maintained in
+the Fission ecosystem. `.sla` files and the SLEIGH implementation may be used
+as temporary comparison oracles during migration; they are not the target
+source language, an `.fslc` dependency, or a required runtime component.
+
+This is a staged replacement, not a one-time format conversion:
+
+1. **Inventory and baseline.** Record every supported language profile,
+   context field, register/address-space model, decode/display behavior,
+   semantic effect, calling-convention source, and Fission consumer that
+   currently depends on SLEIGH. Pin reproducible binaries and expected decode,
+   lift, control-flow, and analysis outputs.
+2. **Own the compiler core.** Grow the independent `fission-fsl` frontend,
+   typed FIR, portable artifact validation, reference evaluator, and code
+   generators. Add real architecture examples before freezing abstractions.
+   Keep generated Rust and Cranelift JIT/AOT as competing backends until
+   equivalent-output measurements establish where each fits.
+3. **Build owned target definitions.** Author FSL definitions from
+   architecture manuals and other recorded primary sources. Store source
+   identity, revision, claims, and applicable license/provenance information
+   with each definition. Any importer used to bootstrap existing definitions
+   is a migration aid; generated output must become reviewable FSL source and
+   must not make `.sla` a build input for the final pipeline.
+4. **Prove parity by profile.** Compare old and new paths over the same
+   instruction and binary corpora: decode boundaries and modes, display,
+   typed effects, control flow, register and memory spaces, exceptions, and
+   downstream Fission results. Promote a profile only after its explicit
+   coverage gates pass; a single opcode or synthetic corpus is not sufficient.
+5. **Migrate consumers.** Move disassembly, static and dynamic analysis,
+   decompilation, and emulation consumers onto FSL/FIR-native APIs. Where a
+   legacy consumer still needs P-code, use a compatibility adapter and report
+   effects FIR cannot represent instead of silently discarding them.
+6. **Remove SLEIGH from the product path.** Once every shipped profile and
+   consumer has an owned definition and passes its gates, remove the
+   `fission-sleigh` runtime dependency, `.sla` packaging/loading, and SLEIGH
+   build tools from normal Fission builds. Keep only stable differential
+   fixtures and provenance needed to reproduce migration evidence.
+
+CPU, GPU, and VM targets need not share one flat semantic vocabulary. The
+owned model must preserve such effects as GPU execution masks/barriers, CPU
+flags and address spaces, and VM stack/frame/verifier behavior. Scope is open,
+but each target still needs a source-backed semantic contract and observable
+parity criteria before it is called supported.
 
 ## Design goals
 

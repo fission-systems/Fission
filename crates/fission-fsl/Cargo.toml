@@ -1,0 +1,24 @@
+[package]
+name = "fission-fsl"
+version = "0.1.0"
+edition = "2021"
+authors = ["Fission Dev Team"]
+description = "Fission-owned instruction specification compiler and FIR"
+repository = "https://github.com/fission-systems/Fission"
+license = "Apache-2.0"
+keywords = ["isa", "compiler", "decompiler", "fir"]
+categories = ["development-tools"]
+
+[lib]
+name = "fission_fsl"
+
+[dependencies]
+cranelift-codegen = "0.133.1"
+cranelift-frontend = "0.133.1"
+cranelift-jit = "0.133.1"
+cranelift-module = "0.133.1"
+cranelift-native = "0.133.1"
+
+[[bin]]
+name = "fslc"
+path = "src/main.rs"
