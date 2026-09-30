@@ -9,7 +9,8 @@ use cranelift_codegen::settings::{self, Configurable};
 use cranelift_codegen::CodegenError;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{default_libcall_names, Linkage, Module, ModuleError};
+use cranelift_module::{default_libcall_names, FuncId, Linkage, Module, ModuleError};
+use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::{CompiledInstruction, FirOp, FslError, FslcPackage, ValueDef, ValueId};
 
@@ -77,126 +78,7 @@ impl JitDecoder {
             .map_err(|error| FslError::at(1, 1, format!("configure Cranelift ISA: {error}")))?;
         let jit_builder = JITBuilder::with_isa(isa, default_libcall_names());
         let mut module = JITModule::new(jit_builder);
-
-        let mut signature = module.make_signature();
-        signature.params.extend([
-            AbiParam::new(types::I64), // input pointer
-            AbiParam::new(types::I64), // input length
-            AbiParam::new(types::I64), // output pointer
-            AbiParam::new(types::I64), // output capacity in FIR records
-        ]);
-        signature.returns.push(AbiParam::new(types::I64));
-        let function_id = module
-            .declare_function("fsl_decode_lift", Linkage::Export, &signature)
-            .map_err(|error| FslError::at(1, 1, format!("declare JIT function: {error}")))?;
-
-        let mut context = module.make_context();
-        context.func.signature = signature;
-        let mut builder_context = FunctionBuilderContext::new();
-        let mut max_ops = 0usize;
-        {
-            let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
-            let entry = builder.create_block();
-            builder.append_block_params_for_function_params(entry);
-            builder.switch_to_block(entry);
-            let params = builder.block_params(entry).to_vec();
-            let input_ptr = params[0];
-            let input_len = params[1];
-            let output_ptr = params[2];
-            let output_capacity = params[3];
-
-            let dispatch = builder.create_block();
-            let truncated = builder.create_block();
-            let has_opcode =
-                builder
-                    .ins()
-                    .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, input_len, 1);
-            builder
-                .ins()
-                .brif(has_opcode, dispatch, &[], truncated, &[]);
-            builder.seal_block(entry);
-
-            builder.switch_to_block(truncated);
-            let truncated_status = builder.ins().iconst(types::I64, -1);
-            builder.ins().return_(&[truncated_status]);
-            builder.seal_block(truncated);
-
-            builder.switch_to_block(dispatch);
-            let opcode_byte = builder
-                .ins()
-                .load(types::I8, MemFlagsData::trusted(), input_ptr, 0);
-            let opcode = builder.ins().uextend(types::I64, opcode_byte);
-
-            let capacity_error = builder.create_block();
-            let mut current = dispatch;
-
-            for (index, instruction) in package.instructions.iter().enumerate() {
-                let matched = builder.create_block();
-                let next = builder.create_block();
-
-                let is_match =
-                    builder
-                        .ins()
-                        .icmp_imm(IntCC::Equal, opcode, i64::from(instruction.opcode));
-                builder.ins().brif(is_match, matched, &[], next, &[]);
-                builder.seal_block(current);
-
-                builder.switch_to_block(matched);
-                let enough_space = builder.ins().icmp_imm(
-                    IntCC::UnsignedGreaterThanOrEqual,
-                    output_capacity,
-                    instruction.ops.len() as i64,
-                );
-                let emit = builder.create_block();
-                builder
-                    .ins()
-                    .brif(enough_space, emit, &[], capacity_error, &[]);
-                builder.seal_block(matched);
-
-                builder.switch_to_block(emit);
-                for (op_index, op) in instruction.ops.iter().enumerate() {
-                    let record = native_record(instruction, op)?;
-                    let byte_offset = i32::try_from(op_index * std::mem::size_of::<NativeFirOp>())
-                        .map_err(|_| FslError::at(1, 1, "FIR output offset exceeds i32"))?;
-                    emit_u32(&mut builder, output_ptr, byte_offset, record.kind);
-                    emit_u32(&mut builder, output_ptr, byte_offset + 4, record.output);
-                    emit_u32(&mut builder, output_ptr, byte_offset + 8, record.input0);
-                    emit_u32(&mut builder, output_ptr, byte_offset + 12, record.input1);
-                    emit_u32(&mut builder, output_ptr, byte_offset + 16, record.bits);
-                    emit_u32(&mut builder, output_ptr, byte_offset + 20, record.signed);
-                }
-                let instruction_result = builder.ins().iconst(types::I64, (index + 1) as i64);
-                builder.ins().return_(&[instruction_result]);
-                builder.seal_block(emit);
-                max_ops = max_ops.max(instruction.ops.len());
-                current = next;
-                builder.switch_to_block(current);
-            }
-
-            let no_match_status = builder.ins().iconst(types::I64, 0);
-            builder.ins().return_(&[no_match_status]);
-            builder.seal_block(current);
-            builder.switch_to_block(capacity_error);
-            let capacity_status = builder.ins().iconst(types::I64, -2);
-            builder.ins().return_(&[capacity_status]);
-            builder.seal_block(capacity_error);
-            builder.seal_all_blocks();
-            builder.finalize();
-        }
-
-        module
-            .define_function(function_id, &mut context)
-            .map_err(|error| {
-                FslError::at(
-                    1,
-                    1,
-                    format!(
-                        "compile FSL JIT function: {}",
-                        describe_compile_error(&error)
-                    ),
-                )
-            })?;
-        module.clear_context(&mut context);
+        let (function_id, max_ops) = define_decode_lift_function(&mut module, package)?;
         module
             .finalize_definitions()
             .map_err(|error| FslError::at(1, 1, format!("finalize FSL JIT code: {error}")))?;
@@ -260,6 +142,158 @@ impl JitDecoder {
             ops: output,
         }))
     }
+}
+
+/// Compile a portable FSL package to a host-native relocatable object file.
+/// The object exports `fsl_decode_lift` with the same ABI as the JIT path.
+pub fn emit_aot_object(package: &FslcPackage) -> Result<Vec<u8>, FslError> {
+    let mut settings_builder = settings::builder();
+    settings_builder
+        .set("opt_level", "speed")
+        .map_err(|error| FslError::at(1, 1, format!("set Cranelift opt level: {error}")))?;
+    let isa_builder = cranelift_native::builder()
+        .map_err(|error| FslError::at(1, 1, format!("host ISA unavailable: {error}")))?;
+    let isa = isa_builder
+        .finish(settings::Flags::new(settings_builder))
+        .map_err(|error| FslError::at(1, 1, format!("configure Cranelift ISA: {error}")))?;
+    let object_builder =
+        ObjectBuilder::new(isa, "fsl_decode_lift".to_string(), default_libcall_names())
+            .map_err(|error| FslError::at(1, 1, format!("create FSL AOT object: {error}")))?;
+    let mut module = ObjectModule::new(object_builder);
+    define_decode_lift_function(&mut module, package)?;
+    module
+        .finish()
+        .emit()
+        .map_err(|error| FslError::at(1, 1, format!("emit FSL AOT object: {error}")))
+}
+
+fn define_decode_lift_function<M: Module>(
+    module: &mut M,
+    package: &FslcPackage,
+) -> Result<(FuncId, usize), FslError> {
+    if package.instructions.is_empty() {
+        return Err(FslError::at(1, 1, "cannot compile an empty FSL package"));
+    }
+
+    let mut signature = module.make_signature();
+    signature.params.extend([
+        AbiParam::new(types::I64), // input pointer
+        AbiParam::new(types::I64), // input length
+        AbiParam::new(types::I64), // output pointer
+        AbiParam::new(types::I64), // output capacity in FIR records
+    ]);
+    signature.returns.push(AbiParam::new(types::I64));
+    let function_id = module
+        .declare_function("fsl_decode_lift", Linkage::Export, &signature)
+        .map_err(|error| FslError::at(1, 1, format!("declare FSL decoder/lifter: {error}")))?;
+
+    let mut context = module.make_context();
+    context.func.signature = signature;
+    let mut builder_context = FunctionBuilderContext::new();
+    let mut max_ops = 0usize;
+    {
+        let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
+        let entry = builder.create_block();
+        builder.append_block_params_for_function_params(entry);
+        builder.switch_to_block(entry);
+        let params = builder.block_params(entry).to_vec();
+        let input_ptr = params[0];
+        let input_len = params[1];
+        let output_ptr = params[2];
+        let output_capacity = params[3];
+
+        let dispatch = builder.create_block();
+        let truncated = builder.create_block();
+        let has_opcode = builder
+            .ins()
+            .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, input_len, 1);
+        builder
+            .ins()
+            .brif(has_opcode, dispatch, &[], truncated, &[]);
+        builder.seal_block(entry);
+
+        builder.switch_to_block(truncated);
+        let truncated_status = builder.ins().iconst(types::I64, -1);
+        builder.ins().return_(&[truncated_status]);
+        builder.seal_block(truncated);
+
+        builder.switch_to_block(dispatch);
+        let opcode_byte = builder
+            .ins()
+            .load(types::I8, MemFlagsData::trusted(), input_ptr, 0);
+        let opcode = builder.ins().uextend(types::I64, opcode_byte);
+
+        let capacity_error = builder.create_block();
+        let mut current = dispatch;
+
+        for (index, instruction) in package.instructions.iter().enumerate() {
+            let matched = builder.create_block();
+            let next = builder.create_block();
+
+            let is_match =
+                builder
+                    .ins()
+                    .icmp_imm(IntCC::Equal, opcode, i64::from(instruction.opcode));
+            builder.ins().brif(is_match, matched, &[], next, &[]);
+            builder.seal_block(current);
+
+            builder.switch_to_block(matched);
+            let enough_space = builder.ins().icmp_imm(
+                IntCC::UnsignedGreaterThanOrEqual,
+                output_capacity,
+                instruction.ops.len() as i64,
+            );
+            let emit = builder.create_block();
+            builder
+                .ins()
+                .brif(enough_space, emit, &[], capacity_error, &[]);
+            builder.seal_block(matched);
+
+            builder.switch_to_block(emit);
+            for (op_index, op) in instruction.ops.iter().enumerate() {
+                let record = native_record(instruction, op)?;
+                let byte_offset = i32::try_from(op_index * std::mem::size_of::<NativeFirOp>())
+                    .map_err(|_| FslError::at(1, 1, "FIR output offset exceeds i32"))?;
+                emit_u32(&mut builder, output_ptr, byte_offset, record.kind);
+                emit_u32(&mut builder, output_ptr, byte_offset + 4, record.output);
+                emit_u32(&mut builder, output_ptr, byte_offset + 8, record.input0);
+                emit_u32(&mut builder, output_ptr, byte_offset + 12, record.input1);
+                emit_u32(&mut builder, output_ptr, byte_offset + 16, record.bits);
+                emit_u32(&mut builder, output_ptr, byte_offset + 20, record.signed);
+            }
+            let instruction_result = builder.ins().iconst(types::I64, (index + 1) as i64);
+            builder.ins().return_(&[instruction_result]);
+            builder.seal_block(emit);
+            max_ops = max_ops.max(instruction.ops.len());
+            current = next;
+            builder.switch_to_block(current);
+        }
+
+        let no_match_status = builder.ins().iconst(types::I64, 0);
+        builder.ins().return_(&[no_match_status]);
+        builder.seal_block(current);
+        builder.switch_to_block(capacity_error);
+        let capacity_status = builder.ins().iconst(types::I64, -2);
+        builder.ins().return_(&[capacity_status]);
+        builder.seal_block(capacity_error);
+        builder.seal_all_blocks();
+        builder.finalize();
+    }
+
+    module
+        .define_function(function_id, &mut context)
+        .map_err(|error| {
+            FslError::at(
+                1,
+                1,
+                format!(
+                    "compile FSL decoder/lifter: {}",
+                    describe_compile_error(&error)
+                ),
+            )
+        })?;
+    module.clear_context(&mut context);
+    Ok((function_id, max_ops))
 }
 
 fn describe_compile_error(error: &ModuleError) -> String {

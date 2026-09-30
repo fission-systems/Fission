@@ -12,13 +12,14 @@ frontend.
 - Typed integer values and a small VM-stack/wrapping-add FIR dialect.
 - Versioned portable binary `.fslc` output. JSON is not used by the compiler,
   package loader, or native path.
-- Cranelift JIT for the host-native decode-and-lift path. It emits compact FIR
-  records; it does not execute guest instructions.
+- Cranelift JIT and host-native relocatable object output for the same
+  decode-and-lift function. Both emit compact FIR records; neither executes
+  guest instructions.
 
 The JVM `iadd` fixture is the first end-to-end example. CPU register and memory
 semantics, GPU masks and synchronization, JVM method/class behavior, variable
-length encodings, multi-byte patterns, reference evaluation, AOT, and Fission
-consumer adapters are future work.
+length encodings, multi-byte patterns, reference evaluation, cross-target AOT
+selection, and Fission consumer adapters are future work.
 
 ## Try it
 
@@ -30,11 +31,13 @@ cargo run -p fission-fsl -- compile \
   crates/fission-fsl/specs/jvm-se26-iadd.fsl /tmp/jvm-se26-iadd.fslc
 cargo run -p fission-fsl -- decode /tmp/jvm-se26-iadd.fslc 0x60
 cargo run -p fission-fsl -- jit-decode /tmp/jvm-se26-iadd.fslc 0x60
+cargo run -p fission-fsl -- aot-object /tmp/jvm-se26-iadd.fslc /tmp/jvm-iadd.o
 ```
 
 The JIT command compiles a host-native decoder/lifter and prints the FIR
-records produced for opcode `0x60`. This is a correctness foothold, not a
-performance claim.
+records produced for opcode `0x60`. The AOT command emits a host-native object
+exporting the same decoder/lifter ABI. These are correctness footholds, not
+performance claims.
 
 ## Migration goal
 

@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::process::ExitCode;
 
-use fission_fsl::{compile_source, FirOp, FslcPackage, JitDecoder};
+use fission_fsl::{compile_source, emit_aot_object, FirOp, FslcPackage, JitDecoder};
 
 fn main() -> ExitCode {
     match run() {
@@ -123,6 +123,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        "aot-object" => {
+            let package_path = required_arg(&mut args, "compiled .fslc path")?;
+            let output_path = required_arg(&mut args, "output object path")?;
+            reject_extra_args(args)?;
+            let package = load_package(&package_path)?;
+            let object = emit_aot_object(&package)?;
+            fs::write(&output_path, &object)?;
+            println!(
+                "emitted host-native object for {} to {} ({} bytes)",
+                package.language,
+                output_path,
+                object.len()
+            );
+        }
         _ => {
             print_usage();
             return Err(format!("unknown command {command:?}").into());
@@ -184,4 +198,5 @@ fn print_usage() {
     eprintln!("  fslc inspect <package.fslc>");
     eprintln!("  fslc decode <package.fslc> <opcode-hex>");
     eprintln!("  fslc jit-decode <package.fslc> <opcode-hex>");
+    eprintln!("  fslc aot-object <package.fslc> <output.o>");
 }

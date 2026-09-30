@@ -34,9 +34,10 @@ FSL/FIR should be able to bypass template evaluation when producing semantic
 output, without requiring the first research slice to replace the existing
 path. The new [`fission-fsl` crate](../../crates/fission-fsl/) is an
 independent compiler slice: its small `.fsl` frontend produces a typed FIR
-package and a versioned binary `.fslc`; a Cranelift JIT decoder/lifter emits
-native FIR records. It has no dependency on `fission-sleigh`, `.sla`, JSON, or
-P-code. This proves an implementation boundary, not broad parity or a speedup.
+package and a versioned binary `.fslc`; Cranelift JIT and AOT paths compile the
+same decoder/lifter to emit native FIR records or a host relocatable object. It
+has no dependency on `fission-sleigh`, `.sla`, JSON, or P-code. This proves an
+implementation boundary, not broad parity or a speedup.
 The current [template evaluator](../../crates/fission-sleigh/src/runtime/spine/compiled_table/template_eval.rs)
 remains a comparison baseline while migration proceeds.
 

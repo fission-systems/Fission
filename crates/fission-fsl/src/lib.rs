@@ -8,7 +8,7 @@ pub mod jit;
 pub mod package;
 mod parser;
 
-pub use jit::{JitDecoder, NativeFirOp, NativeLift};
+pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
 pub use package::{
     AddressUnit, ByteOrder, CompiledInstruction, Evidence, FirOp, FslcPackage, IntegerSign,
     ValueDef, ValueId, ValueType, FSL_PACKAGE_VERSION,
