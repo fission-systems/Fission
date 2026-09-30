@@ -7,6 +7,16 @@ zig cc -target x86_64-linux-musl -Os -dynamic -s \
   -o testdata/x64_dyn_printf_malloc.elf testdata/src/printf_malloc.c
 ```
 
+The AArch64 dynamic fixture is a safe shared-object image that calls the HLE
+`puts` procedure and exits. It is only executed by Fission's emulator test; it
+is not intended to run on the host.
+
+```bash
+zig cc -target aarch64-linux-musl -nostdlib -fPIC -shared \
+  -Wl,-e,_start -Wl,--build-id=none \
+  -o testdata/aarch64_dyn_import.elf testdata/src/aarch64_dyn_import.S
+```
+
 ## Static musl (opt-in CI via FISSION_SMOKE_STATIC_PRINTF=1)
 
 ```bash
