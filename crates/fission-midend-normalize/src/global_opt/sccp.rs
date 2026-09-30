@@ -11,6 +11,7 @@ use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::is_large_hir_function;
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
+use std::collections::VecDeque;
 
 type ConstEnv = HashMap<String, (i64, NirType)>;
 
@@ -292,6 +293,57 @@ fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
 /// the real argument shape, not a folded stand-in.
 type AddressAliases = HashMap<String, HashSet<String>>;
 
+#[derive(Default)]
+struct AddressAliasSummary {
+    dependencies: HashSet<String>,
+    local_addresses: HashSet<String>,
+}
+
+fn collect_address_alias_expr(
+    expr: &PreHirExpr,
+    dependencies: &mut HashSet<String>,
+    local_addresses: &mut HashSet<String>,
+) {
+    let mut pending = vec![expr];
+    while let Some(expr) = pending.pop() {
+        match expr {
+            PreHirExpr::AddressOfLocal(name) => {
+                local_addresses.insert(name.clone());
+            }
+            PreHirExpr::Var(name) => {
+                dependencies.insert(name.clone());
+            }
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => pending.push(expr),
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                pending.push(lhs);
+                pending.push(rhs);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                pending.push(cond);
+                pending.push(then_expr);
+                pending.push(else_expr);
+            }
+            PreHirExpr::Index { base, index, .. } => {
+                pending.push(base);
+                pending.push(index);
+            }
+            PreHirExpr::Load { .. }
+            | PreHirExpr::Call { .. }
+            | PreHirExpr::AggregateCopy { .. }
+            | PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::Const(_, _) => {}
+        }
+    }
+}
+
 /// Collect pointer-like variable assignments so an address passed through a
 /// temporary is still recognized as an escaping local.  The builder commonly
 /// materializes `p = &local; call(p)` rather than keeping the address
@@ -304,18 +356,22 @@ type AddressAliases = HashMap<String, HashSet<String>>;
 /// constant that would otherwise be propagated; dropping a possible address
 /// could substitute a stale value after a call and change semantics.
 fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
-    let mut definitions = HashMap::<String, Vec<PreHirExpr>>::default();
+    let mut definitions = HashMap::<String, AddressAliasSummary>::default();
 
-    fn visit(stmts: &[PreHirStmt], definitions: &mut HashMap<String, Vec<PreHirExpr>>) {
+    fn visit(stmts: &[PreHirStmt], definitions: &mut HashMap<String, AddressAliasSummary>) {
         for stmt in stmts {
             match stmt {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var(name),
                     rhs,
-                } => definitions
-                    .entry(name.clone())
-                    .or_default()
-                    .push(rhs.clone()),
+                } => {
+                    let summary = definitions.entry(name.clone()).or_default();
+                    collect_address_alias_expr(
+                        rhs,
+                        &mut summary.dependencies,
+                        &mut summary.local_addresses,
+                    );
+                }
                 PreHirStmt::Block(body)
                 | PreHirStmt::While { body, .. }
                 | PreHirStmt::DoWhile { body, .. } => visit(body, definitions),
@@ -349,72 +405,53 @@ fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
         }
     }
 
-    fn resolve_expr(
-        expr: &PreHirExpr,
-        definitions: &HashMap<String, Vec<PreHirExpr>>,
-        visiting: &mut HashSet<String>,
-        out: &mut HashSet<String>,
-    ) {
-        match expr {
-            PreHirExpr::AddressOfLocal(name) => {
-                out.insert(name.clone());
-            }
-            PreHirExpr::Var(name) => {
-                if visiting.insert(name.clone()) {
-                    if let Some(defs) = definitions.get(name) {
-                        for def in defs {
-                            resolve_expr(def, definitions, visiting, out);
-                        }
-                    }
-                    visiting.remove(name);
-                }
-            }
-            PreHirExpr::Cast { expr, .. }
-            | PreHirExpr::Unary { expr, .. }
-            | PreHirExpr::PtrOffset { base: expr, .. }
-            | PreHirExpr::FieldAccess { base: expr, .. } => {
-                resolve_expr(expr, definitions, visiting, out);
-            }
-            PreHirExpr::Binary { lhs, rhs, .. } => {
-                resolve_expr(lhs, definitions, visiting, out);
-                resolve_expr(rhs, definitions, visiting, out);
-            }
-            PreHirExpr::Select {
-                cond,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                resolve_expr(cond, definitions, visiting, out);
-                resolve_expr(then_expr, definitions, visiting, out);
-                resolve_expr(else_expr, definitions, visiting, out);
-            }
-            PreHirExpr::Index { base, index, .. } => {
-                resolve_expr(base, definitions, visiting, out);
-                resolve_expr(index, definitions, visiting, out);
-            }
-            PreHirExpr::Load { .. }
-            | PreHirExpr::Call { .. }
-            | PreHirExpr::AggregateCopy { .. }
-            | PreHirExpr::AddressOfGlobal(_)
-            | PreHirExpr::Const(_, _) => {}
+    visit(stmts, &mut definitions);
+
+    // `aliases[name]` is the least fixed point of the local addresses in that
+    // variable's definitions plus the aliases of every referenced variable.
+    // The reverse dependency map propagates only when a set grows, including
+    // through cycles, without recursively re-expanding shared definitions.
+    let mut dependents = HashMap::<String, Vec<String>>::default();
+    let mut aliases = HashMap::<String, HashSet<String>>::default();
+    for (name, summary) in &definitions {
+        aliases.insert(name.clone(), summary.local_addresses.clone());
+        for dependency in &summary.dependencies {
+            dependents
+                .entry(dependency.clone())
+                .or_default()
+                .push(name.clone());
         }
     }
 
-    visit(stmts, &mut definitions);
-    let mut aliases = AddressAliases::default();
-    for name in definitions.keys() {
-        let mut targets = HashSet::default();
-        resolve_expr(
-            &PreHirExpr::Var(name.clone()),
-            &definitions,
-            &mut HashSet::default(),
-            &mut targets,
-        );
-        if !targets.is_empty() {
-            aliases.insert(name.clone(), targets);
+    let mut pending = VecDeque::new();
+    let mut queued = HashSet::default();
+    for (name, targets) in &aliases {
+        if !targets.is_empty() && queued.insert(name.clone()) {
+            pending.push_back(name.clone());
         }
     }
+
+    while let Some(name) = pending.pop_front() {
+        queued.remove(&name);
+        let Some(inherited) = aliases.get(&name).cloned() else {
+            continue;
+        };
+        let Some(users) = dependents.get(&name) else {
+            continue;
+        };
+        for user in users {
+            let Some(targets) = aliases.get_mut(user) else {
+                continue;
+            };
+            let old_len = targets.len();
+            targets.extend(inherited.iter().cloned());
+            if targets.len() != old_len && queued.insert(user.clone()) {
+                pending.push_back(user.clone());
+            }
+        }
+    }
+
+    aliases.retain(|_, targets| !targets.is_empty());
     aliases
 }
 
@@ -527,6 +564,65 @@ mod tests {
 
     fn var(name: &str) -> PreHirExpr {
         PreHirExpr::Var(name.to_string())
+    }
+
+    #[test]
+    fn sccp_address_alias_worklist_resolves_deep_variable_chains() {
+        const DEPTH: usize = 4_096;
+        let mut body = Vec::with_capacity(DEPTH + 1);
+        body.push(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("alias_0".to_string()),
+            rhs: PreHirExpr::AddressOfLocal("escaped".to_string()),
+        });
+        for index in 1..=DEPTH {
+            body.push(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(format!("alias_{index}")),
+                rhs: var(&format!("alias_{}", index - 1)),
+            });
+        }
+
+        let aliases = collect_address_aliases(&body);
+        assert!(
+            aliases
+                .get(&format!("alias_{DEPTH}"))
+                .is_some_and(|targets| targets.contains("escaped")),
+            "the final variable must retain the local address at the start of the chain"
+        );
+    }
+
+    #[test]
+    fn sccp_address_alias_worklist_closes_cycles_and_unions_definitions() {
+        let body = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("p".to_string()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(var("q")),
+                    rhs: Box::new(PreHirExpr::AddressOfLocal("first".to_string())),
+                    ty: int(64),
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("q".to_string()),
+                rhs: var("p"),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("q".to_string()),
+                rhs: PreHirExpr::Cast {
+                    ty: int(64),
+                    expr: Box::new(PreHirExpr::AddressOfLocal("second".to_string())),
+                },
+            },
+        ];
+
+        let aliases = collect_address_aliases(&body);
+        for name in ["p", "q"] {
+            let targets = aliases
+                .get(name)
+                .expect("cyclic aliases should be retained");
+            assert!(targets.contains("first"));
+            assert!(targets.contains("second"));
+        }
     }
 
     #[test]

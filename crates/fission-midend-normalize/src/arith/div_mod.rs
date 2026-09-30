@@ -777,7 +777,7 @@ pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> 
         };
 
         if let Some(bits) = int_type_bits(mul_ty) {
-            let mask = if bits == 64 {
+            let mask = if bits >= 64 {
                 u64::MAX
             } else {
                 (1u64 << bits) - 1
@@ -911,6 +911,39 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn magic_number_division_handles_multiplication_width_above_u64() {
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 128,
+                    signed: false,
+                },
+                expr: Box::new(PreHirExpr::Cast {
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    expr: Box::new(var("value")),
+                }),
+            }),
+            rhs: Box::new(PreHirExpr::Const(
+                3,
+                NirType::Int {
+                    bits: 128,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 128,
+                signed: false,
+            },
+        };
+
+        assert!(recognize_magic_number_division(&expr).is_none());
     }
 }
 
