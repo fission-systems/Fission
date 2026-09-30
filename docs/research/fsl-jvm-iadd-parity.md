@@ -4,6 +4,9 @@ This experiment checks whether one instruction described by the experimental
 FSL pattern package agrees with Fission's existing JVM SLEIGH runtime. It does
 not add an FSL decoder or execution path to Fission.
 
+For the broader source-language, FIR, and compiler-backend direction, see the
+[FSL/FIR compiler architecture RFC](fsl-fir-compiler-architecture.md).
+
 The fixture at
 `crates/fission-sleigh/examples/fixtures/jvm-se26-iadd.patterns.json` was
 generated from `specs/vm/jvm-se26-iadd.fsl` in the companion
