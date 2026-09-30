@@ -435,7 +435,7 @@ impl SimProcedure for SysGetpid {
 pub struct SysGettid;
 impl SimProcedure for SysGettid {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.set_syscall_return(1000)?;
+        emu.set_syscall_return(emu.current_tid)?;
         Ok(HleResult::Continue)
     }
 }
@@ -696,13 +696,8 @@ impl SimProcedure for SysKill {
 pub struct SysTkill;
 impl SimProcedure for SysTkill {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        let _tid = emu.syscall_arg(0);
-        let sig = emu.syscall_arg(1) as i32;
-        tracing::info!("sys_tkill(sig={})", sig);
-        if sig != 0 {
-            emu.raise_signal(sig);
-        }
-        emu.set_syscall_return(0)?;
+        tracing::warn!("sys_tkill bypassed the Linux guest-task scheduler");
+        emu.set_syscall_return((-38i64) as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -740,23 +735,8 @@ impl SimProcedure for SysIoctl {
 pub struct SysFutex;
 impl SimProcedure for SysFutex {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        // Single-threaded: WAIT always succeeds immediately; WAKE reports 0 waiters.
-        // op: 0=WAIT, 1=WAKE (low nibble); higher bits are flags.
-        let uaddr = emu.syscall_arg(0);
-        let op = emu.syscall_arg(1) & 0x7f;
-        let val = emu.syscall_arg(2);
-        if op == 0 && uaddr != 0 {
-            // FUTEX_WAIT: if *uaddr != val, return -EAGAIN (would not sleep).
-            if let Ok(bytes) = emu.state.read_space(emu.state.ram_space(), uaddr, 4) {
-                let cur = u32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]));
-                if cur as u64 != (val & 0xffff_ffff) {
-                    emu.set_syscall_return((-11i64) as u64)?; // EAGAIN
-                    return Ok(HleResult::Continue);
-                }
-            }
-        }
-        tracing::debug!("sys_futex op={} uaddr=0x{:X} -> 0", op, uaddr);
-        emu.set_syscall_return(0)?;
+        tracing::warn!("sys_futex bypassed the Linux guest-task scheduler");
+        emu.set_syscall_return((-38i64) as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -780,7 +760,8 @@ impl SimProcedure for SysGetrandom {
 pub struct SysSchedYield;
 impl SimProcedure for SysSchedYield {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        emu.set_syscall_return(0)?;
+        tracing::warn!("sys_sched_yield bypassed the Linux guest-task scheduler");
+        emu.set_syscall_return((-38i64) as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -791,8 +772,12 @@ impl SimProcedure for SysSetTidAddress {
         // set_tid_address(tidptr) — store clear_child_tid; return tid.
         let tidptr = emu.syscall_arg(0);
         emu.clear_child_tid = tidptr;
-        tracing::info!("sys_set_tid_address(0x{:X}) -> tid=1000", tidptr);
-        emu.set_syscall_return(1000)?;
+        tracing::info!(
+            "sys_set_tid_address(0x{:X}) -> tid={}",
+            tidptr,
+            emu.current_tid
+        );
+        emu.set_syscall_return(emu.current_tid)?;
         Ok(HleResult::Continue)
     }
 }

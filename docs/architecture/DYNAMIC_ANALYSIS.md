@@ -72,6 +72,9 @@ The emulator uses High-Level Emulation (HLE) rather than emulating an actual OS 
 
 HLE handlers can intercept function calls by name (via PLT/IAT hooks) or by recognized calling patterns.
 
+Linux guest thread and futex behavior is documented in
+[`LINUX_GUEST_TASKS.md`](LINUX_GUEST_TASKS.md).
+
 ### Calling Convention Support
 
 The `arch/` subsystem provides architecture-agnostic calling convention helpers:

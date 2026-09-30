@@ -150,6 +150,9 @@ pub struct Emulator {
     /// taint sink needs its address. A watchpoint asks for provenance, while
     /// taint reporting needs the syscall's exact guest instruction.
     current_insn_pc: u64,
+    /// Length of `current_insn_pc`, used to save task contexts at syscall
+    /// fallthrough without decoding guest bytes a second time.
+    current_insn_len: u32,
 
     /// Addresses the run loop stops at, for a debugger front end.
     ///
@@ -162,6 +165,10 @@ pub struct Emulator {
 
     /// Set by HLE/CallOther when guest requests process exit.
     pub halt_requested: bool,
+    /// A Linux HLE requested a task switch. The JIT consumes this at its
+    /// translation-block boundary so it cannot chain with the outgoing
+    /// task's register values.
+    pub(crate) task_switch_requested: bool,
     /// The trampoline region, cached from the OS environment at construction.
     /// The run loop compares every PC against it, so it is a field and not a
     /// virtual call.
@@ -214,6 +221,8 @@ pub struct Emulator {
     pub gs_base: u64,
     /// `set_tid_address` clear_child_tid pointer (0 = none).
     pub clear_child_tid: u64,
+    /// Linux guest thread id for the currently executing task.
+    pub current_tid: u64,
     /// Last CallOther/userop data result (consumed by JIT after `jit_call_other`).
     pub callother_result: u64,
     /// First memory fault raised by a compiled JIT block, if any.
@@ -432,9 +441,11 @@ impl Emulator {
             watchpoints: Vec::new(),
             watch_hit: None,
             current_insn_pc: 0,
+            current_insn_len: 0,
             breakpoints: std::collections::BTreeSet::new(),
             control_reconvergence_cache: std::collections::HashMap::new(),
             halt_requested: false,
+            task_switch_requested: false,
             magic_range,
             decode_context,
             cortex_m: crate::arch::cortex_m::CortexMState::at_reset(),
@@ -449,6 +460,7 @@ impl Emulator {
             fs_base: 0,
             gs_base: 0,
             clear_child_tid: 0,
+            current_tid: 1000,
             callother_result: 0,
             memory_fault: None,
         };
@@ -831,8 +843,9 @@ impl Emulator {
         (0..u64::from(size).min(8)).find_map(|i| self.state.get_shadow_memory(space_id, offset + i))
     }
 
-    pub(crate) fn note_guest_instruction(&mut self, pc: u64) {
+    pub(crate) fn note_guest_instruction(&mut self, pc: u64, len: u32) {
         self.current_insn_pc = pc;
+        self.current_insn_len = len;
         if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
             return;
         }
@@ -858,6 +871,11 @@ impl Emulator {
 
     pub(crate) fn current_instruction_pc(&self) -> u64 {
         self.current_insn_pc
+    }
+
+    pub(crate) fn current_instruction_fallthrough(&self) -> u64 {
+        self.current_insn_pc
+            .wrapping_add(u64::from(self.current_insn_len))
     }
 
     pub(crate) fn snapshot_taint_op(
@@ -1643,6 +1661,15 @@ impl Emulator {
         state
     }
 
+    /// Capture all CPU registers with an explicit resume PC. Linux guest
+    /// tasks share RAM, so the scheduler saves this CPU-local context while
+    /// each task is runnable or waiting on a futex.
+    pub(crate) fn register_state_at(&mut self, pc: u64) -> RegisterState {
+        let mut state = self.register_state();
+        state.pc = pc;
+        state
+    }
+
     /// The registers a debugger's register view shows.
     ///
     /// [`Self::register_state`] records every register the language defines,
@@ -1679,6 +1706,18 @@ impl Emulator {
         let mut bytes = value.to_bytes();
         bytes.resize(size as usize, 0);
         self.state.write_space(space, offset, &bytes)
+    }
+
+    /// Restore a context captured by [`Self::register_state_at`].
+    pub(crate) fn restore_thread_register_state(
+        &mut self,
+        registers: &RegisterState,
+    ) -> Result<()> {
+        for (name, value) in registers.iter_all() {
+            self.restore_register(name, value)?;
+        }
+        self.pc = registers.pc;
+        Ok(())
     }
 
     /// Seek the TTD timeline to a given instruction step index.
@@ -2293,6 +2332,15 @@ impl Emulator {
                 };
 
                 match result {
+                    HleResult::Deadlock => {
+                        self.metrics.exit_reason = Some("guest_deadlock".into());
+                        self.halt_requested = true;
+                        break RunOutcome::Halted;
+                    }
+                    HleResult::Schedule => {
+                        self.pc = self.pc_override.take().unwrap_or(self.pc);
+                        self.task_switch_requested = false;
+                    }
                     HleResult::Halt(code) => {
                         // The OS layer has always reported the guest's exit
                         // code here and this dropped it on the floor, so
