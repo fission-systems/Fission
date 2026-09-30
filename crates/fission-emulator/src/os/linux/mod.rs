@@ -99,6 +99,7 @@ impl LinuxEnv {
         simos.register_syscall(60, Box::new(syscall::SysExit));
         simos.register_syscall(63, Box::new(syscall::SysUname));
         simos.register_syscall(96, Box::new(syscall::SysGettimeofday));
+        simos.register_syscall(267, Box::new(syscall::SysReadlinkat));
         simos.register_syscall(102, Box::new(syscall::SysGetuid));
         simos.register_syscall(104, Box::new(syscall::SysGetgid));
         simos.register_syscall(107, Box::new(syscall::SysGeteuid));
@@ -302,6 +303,7 @@ impl OsEnvironment for LinuxEnv {
             // counterpart stays raw and is reported unknown -- see
             // `syscall_conv` for why inventing one would be worse.
             let raw_num = emu.raw_syscall_number();
+            emu.metrics.note_guest_syscall(raw_num);
             let sys_num = match emu.syscall_number() {
                 Some(n) => n,
                 None => {

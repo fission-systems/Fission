@@ -526,7 +526,21 @@ impl Emulator {
         let host_path = self.binary.inner().path.clone();
         let bytes = self.binary.inner().data.as_slice().to_vec();
         self.vfs.seed_path(&guest_name, bytes.clone());
-        self.vfs.seed_path(&host_path, bytes);
+        self.vfs.seed_path(&host_path, bytes.clone());
+        let execfn_path = std::path::Path::new(&info.execfn);
+        let is_host_binary_path = execfn_path == std::path::Path::new(&host_path);
+        let exe_link_target = if execfn_path.is_absolute() && !is_host_binary_path {
+            info.execfn.clone()
+        } else {
+            let basename = execfn_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .unwrap_or("guest");
+            format!("/fission-guest/{basename}")
+        };
+        self.vfs.seed_path(&exe_link_target, bytes);
+        self.vfs.seed_symlink("/proc/self/exe", exe_link_target);
         if !host_path.is_empty() {
             self.vfs
                 .alias_host(&guest_name, std::path::PathBuf::from(&host_path));

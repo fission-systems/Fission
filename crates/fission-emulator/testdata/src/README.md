@@ -44,3 +44,17 @@ zig cc -target x86_64-linux-musl -static -nostdlib -fno-pie -no-pie \
 
 The test runs the checked-in ELF only inside Fission; it does not execute the
 fixture on the host.
+
+## AArch64 generic `readlinkat` fixture
+
+`linux_aarch64_readlinkat.S` checks the `/proc/self/exe` guest symlink and
+stores the returned byte count and path in exported data for the smoke test.
+Build the checked-in static guest with:
+
+```sh
+zig cc -target aarch64-linux-musl -nostdlib -static -fno-pie -no-pie \
+  -Wl,-e,_start -Wl,--build-id=none -o ../linux_aarch64_readlinkat.elf \
+  linux_aarch64_readlinkat.S
+```
+
+Execute it only in Fission's emulator.

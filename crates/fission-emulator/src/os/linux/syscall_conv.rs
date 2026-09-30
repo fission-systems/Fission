@@ -86,8 +86,12 @@ impl SyscallAbi {
         // AArch64 uses the asm-generic clone number. The 32-bit ARM EABI
         // syscall table is architecture-specific, so this number must not be
         // added to the shared generic translation table.
-        if self.number == AARCH64.number && number == 220 {
-            return Some(56);
+        if self.number == AARCH64.number {
+            match number {
+                78 => return Some(267), // readlinkat
+                220 => return Some(56), // clone
+                _ => {}
+            }
         }
         generic_to_x86_64(number)
     }
@@ -128,6 +132,7 @@ fn generic_to_x86_64(number: u64) -> Option<u64> {
         176 => 104, // getgid
         177 => 108, // getegid
         178 => 186, // gettid
+        179 => 99,  // sysinfo
         214 => 12,  // brk
         215 => 11,  // munmap
         222 => 9,   // mmap
@@ -158,6 +163,9 @@ mod tests {
         assert_eq!(abi.canonical_number(93), Some(60)); // exit
         assert_eq!(abi.canonical_number(94), Some(231)); // exit_group
         assert_eq!(abi.canonical_number(220), Some(56)); // clone
+        assert_eq!(abi.canonical_number(78), Some(267)); // readlinkat
+        assert_eq!(abi.canonical_number(99), None); // set_robust_list stays ABI-specific
+        assert_eq!(abi.canonical_number(293), None); // rseq stays ABI-specific
     }
 
     #[test]

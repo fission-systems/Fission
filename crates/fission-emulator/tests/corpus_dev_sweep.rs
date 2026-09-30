@@ -19,6 +19,9 @@
 //! and which OS calls the rest are still waiting on. The misses are the work
 //! queue -- that is how every stub in the Windows layer got written.
 
+#[path = "common/hle_coverage.rs"]
+mod hle_coverage;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -57,30 +60,23 @@ fn corpus() -> Option<PathBuf> {
 
 /// What one binary did.
 struct Outcome {
-    halted: bool,
-    exit_reason: Option<String>,
-    inst: u64,
-    misses: Vec<String>,
-    /// Opcodes an engine met and lowered to nothing. A run with any of these
-    /// produced a wrong answer somewhere, silently.
+    report: hle_coverage::HleCoverageRecord,
+    /// Opcodes the JIT encountered and lowered to nothing.
     unimplemented: Vec<(String, u64)>,
-    /// `CALLOTHER` names nothing answered. A no-op that returns zero.
+    /// CALLOTHER names no environment answered.
     unhandled_userops: Vec<(String, u64)>,
-    /// Syscall numbers with no handler. Answered with zero, like the rest.
-    unknown_syscalls: Vec<(u64, u64)>,
-    error: Option<String>,
 }
 
-fn run_one(path: &Path) -> Outcome {
+fn run_one(path: &Path, root: &Path) -> Outcome {
+    let name = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
     let fail = |e: String| Outcome {
-        halted: false,
-        exit_reason: None,
-        inst: 0,
-        misses: Vec::new(),
+        report: hle_coverage::failed_record(&name, e),
         unimplemented: Vec::new(),
         unhandled_userops: Vec::new(),
-        unknown_syscalls: Vec::new(),
-        error: Some(e),
     };
 
     let binary = match LoadedBinary::from_file(path) {
@@ -104,12 +100,12 @@ fn run_one(path: &Path) -> Outcome {
 
     let mut state = MachineState::new();
     let is_pe = path.extension().is_some_and(|e| e == "exe");
+    let guest_os = if is_pe { "windows" } else { "linux" };
     let env: Box<dyn OsEnvironment> = if is_pe {
         Box::new(WindowsEnv::new())
     } else {
         Box::new(LinuxEnv::new())
     };
-
     let image = if is_pe {
         fission_emulator::os::windows::loader::load_pe(&mut state, &binary).map(Ok)
     } else {
@@ -131,58 +127,30 @@ fn run_one(path: &Path) -> Outcome {
     if let Err(e) = applied {
         return fail(format!("apply: {e}"));
     }
-
-    match emu.run() {
-        Ok(()) => Outcome {
-            halted: emu.halt_requested,
-            exit_reason: emu.metrics.exit_reason.clone(),
-            inst: emu.inst_count,
-            misses: emu.metrics.hle_misses.keys().cloned().collect(),
-            unimplemented: emu
-                .metrics
-                .unimplemented_opcodes
-                .iter()
-                .map(|(k, v)| (k.clone(), *v))
-                .collect(),
-            unhandled_userops: emu
-                .metrics
-                .unhandled_userops
-                .iter()
-                .map(|(k, v)| (k.clone(), *v))
-                .collect(),
-            unknown_syscalls: emu
-                .metrics
-                .unknown_syscalls
-                .iter()
-                .map(|(k, v)| (*k, *v))
-                .collect(),
-            error: None,
-        },
-        Err(e) => Outcome {
-            halted: emu.halt_requested,
-            exit_reason: emu.metrics.exit_reason.clone(),
-            inst: emu.inst_count,
-            misses: emu.metrics.hle_misses.keys().cloned().collect(),
-            unimplemented: emu
-                .metrics
-                .unimplemented_opcodes
-                .iter()
-                .map(|(k, v)| (k.clone(), *v))
-                .collect(),
-            unhandled_userops: emu
-                .metrics
-                .unhandled_userops
-                .iter()
-                .map(|(k, v)| (k.clone(), *v))
-                .collect(),
-            unknown_syscalls: emu
-                .metrics
-                .unknown_syscalls
-                .iter()
-                .map(|(k, v)| (*k, *v))
-                .collect(),
-            error: Some(format!("run: {e}")),
-        },
+    let error = emu.run().err().map(|e| format!("run: {e}"));
+    emu.metrics.instructions = emu.inst_count;
+    Outcome {
+        report: hle_coverage::record_from_run(
+            &name,
+            guest_os,
+            &emu.arch,
+            emu.halt_requested,
+            emu.exit_code,
+            error,
+            &emu.metrics,
+        ),
+        unimplemented: emu
+            .metrics
+            .unimplemented_opcodes
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect(),
+        unhandled_userops: emu
+            .metrics
+            .unhandled_userops
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect(),
     }
 }
 
@@ -195,7 +163,7 @@ fn how_much_of_the_dev_corpus_runs() {
     };
 
     let mut binaries: Vec<PathBuf> = Vec::new();
-    let mut stack = vec![root];
+    let mut stack = vec![root.clone()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -211,22 +179,28 @@ fn how_much_of_the_dev_corpus_runs() {
     }
     binaries.sort();
 
-    let mut halted = 0usize;
+    let mut exited = 0usize;
     let mut clean = 0usize;
-    let mut wanted: BTreeMap<String, usize> = BTreeMap::new();
+    let mut wanted: BTreeMap<String, u64> = BTreeMap::new();
     let mut unimplemented: BTreeMap<String, u64> = BTreeMap::new();
     let mut unhandled: BTreeMap<String, u64> = BTreeMap::new();
-    let mut unknown_syscalls: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut unknown_syscalls: BTreeMap<(String, u64), u64> = BTreeMap::new();
+    let mut report_rows = Vec::new();
     for path in &binaries {
-        let outcome = run_one(path);
-        if outcome.halted {
-            halted += 1;
-            if outcome.misses.is_empty() {
+        let outcome = run_one(path, &root);
+        let row = outcome.report;
+        if row.process_status == "process_exit" {
+            exited += 1;
+            let has_unknown = row
+                .syscalls
+                .iter()
+                .any(|syscall| syscall.unhandled_count > 0);
+            if row.api_misses.is_empty() && !has_unknown {
                 clean += 1;
             }
         }
-        for miss in &outcome.misses {
-            *wanted.entry(miss.clone()).or_default() += 1;
+        for miss in &row.api_misses {
+            *wanted.entry(miss.name.clone()).or_default() += miss.count;
         }
         for (op, n) in &outcome.unimplemented {
             *unimplemented.entry(op.clone()).or_default() += n;
@@ -234,23 +208,30 @@ fn how_much_of_the_dev_corpus_runs() {
         for (op, n) in &outcome.unhandled_userops {
             *unhandled.entry(op.clone()).or_default() += n;
         }
-        for (num, n) in &outcome.unknown_syscalls {
-            *unknown_syscalls.entry(*num).or_default() += n;
+        for syscall in &row.syscalls {
+            if syscall.unhandled_count > 0 {
+                *unknown_syscalls
+                    .entry((syscall.name.clone(), syscall.guest_number))
+                    .or_default() += syscall.unhandled_count;
+            }
         }
-        let name = path.file_name().unwrap().to_string_lossy();
-        let status = match (&outcome.error, outcome.halted) {
-            (Some(e), _) => e.clone(),
-            (None, true) => format!("halted ({})", outcome.exit_reason.as_deref().unwrap_or("-")),
-            (None, false) => format!(
-                "did not exit ({})",
-                outcome.exit_reason.as_deref().unwrap_or("-")
-            ),
-        };
-        eprintln!("  {name:<48} inst={:<9} {status}", outcome.inst);
+        eprintln!(
+            "  {:<56} {:<34} inst={:<9} {} (exit={:?}, unknown={})",
+            row.binary,
+            row.guest_abi,
+            row.instructions,
+            row.process_status,
+            row.exit_code,
+            row.syscalls
+                .iter()
+                .map(|syscall| syscall.unhandled_count)
+                .sum::<u64>()
+        );
+        report_rows.push(row);
     }
 
     eprintln!(
-        "\n{halted} of {} halted, {clean} of those with no unimplemented API",
+        "\n{exited} of {} exited, {clean} of those with no unimplemented syscall or API",
         binaries.len()
     );
     if unimplemented.is_empty() {
@@ -278,9 +259,9 @@ fn how_much_of_the_dev_corpus_runs() {
     } else {
         eprintln!("syscalls with no handler:");
         let mut ranked: Vec<_> = unknown_syscalls.into_iter().collect();
-        ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-        for (num, n) in ranked.iter().take(15) {
-            eprintln!("  {n:>6}  #{num}");
+        ranked.sort_by(|(a, count_a), (b, count_b)| count_b.cmp(count_a).then_with(|| a.cmp(b)));
+        for ((name, num), n) in ranked.iter().take(15) {
+            eprintln!("  {n:>6}  {name} (guest #{num})");
         }
     }
     eprintln!("APIs the rest are waiting on, most wanted first:");
@@ -288,6 +269,19 @@ fn how_much_of_the_dev_corpus_runs() {
     ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     for (api, n) in ranked.iter().take(25) {
         eprintln!("  {n:>3}  {api}");
+    }
+
+    let report = hle_coverage::HleCoverageReport {
+        schema_version: 1,
+        binaries: report_rows,
+    };
+    if let Some(path) = std::env::var_os("FISSION_HLE_REPORT_PATH") {
+        let json = serde_json::to_vec_pretty(&report).expect("serialize HLE coverage report");
+        std::fs::write(&path, json).expect("write requested HLE coverage report");
+        eprintln!(
+            "wrote deterministic HLE coverage report to {}",
+            Path::new(&path).display()
+        );
     }
 }
 
