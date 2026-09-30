@@ -9,9 +9,11 @@ fn metrics_tracks_unimplemented() {
     m.note_unimplemented(PcodeOpcode::New);
     m.note_syscall(1);
     m.note_syscall(60);
+    m.note_guest_syscall(64);
     m.note_userop("syscall");
     assert_eq!(m.unimplemented_opcodes.get("CPoolRef"), Some(&2));
     assert_eq!(m.syscalls.get(&1), Some(&1));
+    assert_eq!(m.guest_syscalls.get(&64), Some(&1));
     let top = m.top_unimplemented(1);
     assert_eq!(top[0].0, "CPoolRef");
     assert!(m.summary_line().contains("CPoolRef=2"));

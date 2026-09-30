@@ -4,7 +4,7 @@
 //! `ld.so` can open the main binary and libraries without a real host FS tree.
 
 use anyhow::{Result, bail};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Represents a single file inside the Virtual File System.
@@ -70,6 +70,8 @@ pub struct SimVFS {
     pub path_seeds: HashMap<String, Vec<u8>>,
     /// Guest path → host path for lazy open.
     pub host_aliases: HashMap<String, PathBuf>,
+    /// Explicit guest symlinks available to `readlinkat`.
+    symlinks: BTreeMap<String, String>,
 }
 
 impl SimVFS {
@@ -83,6 +85,7 @@ impl SimVFS {
             next_fd: 3,
             path_seeds: HashMap::new(),
             host_aliases: HashMap::new(),
+            symlinks: BTreeMap::new(),
         }
     }
 
@@ -94,6 +97,16 @@ impl SimVFS {
         if let Some(base) = Path::new(&g).file_name().and_then(|s| s.to_str()) {
             self.path_seeds.entry(base.to_string()).or_insert(content);
         }
+    }
+
+    /// Seed a guest symlink target without consulting the host filesystem.
+    pub fn seed_symlink(&mut self, guest_path: impl Into<String>, target: impl Into<String>) {
+        self.symlinks.insert(guest_path.into(), target.into());
+    }
+
+    /// Read the target of an explicitly seeded guest symlink.
+    pub fn readlink(&self, guest_path: &str) -> Option<String> {
+        self.symlinks.get(guest_path).cloned()
     }
 
     /// Map a guest path to a host filesystem file (read on open).

@@ -21,6 +21,10 @@ pub struct EmulatorMetrics {
     pub userops: BTreeMap<String, u64>,
     /// Linux syscalls by number.
     pub syscalls: BTreeMap<u64, u64>,
+    /// Linux syscalls by the number used by the guest ABI, before translation.
+    /// `syscalls` remains keyed by the emulator's canonical x86-64 table.
+    #[serde(default)]
+    pub guest_syscalls: BTreeMap<u64, u64>,
     /// Unimplemented P-Code opcodes observed at compile time (no-op lowered).
     pub unimplemented_opcodes: BTreeMap<String, u64>,
     /// Missing libc / Win32 HLE procedures (name → count). Fake-success returns 0.
@@ -68,6 +72,10 @@ impl EmulatorMetrics {
 
     pub fn note_syscall(&mut self, num: u64) {
         *self.syscalls.entry(num).or_insert(0) += 1;
+    }
+
+    pub fn note_guest_syscall(&mut self, num: u64) {
+        *self.guest_syscalls.entry(num).or_insert(0) += 1;
     }
 
     pub fn note_unhandled_userop(&mut self, name: &str) {

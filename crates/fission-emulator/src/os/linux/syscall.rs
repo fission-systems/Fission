@@ -135,6 +135,35 @@ impl SimProcedure for SysOpenat {
     }
 }
 
+/// Read only symlinks explicitly present in the guest VFS; never follow a host path.
+pub struct SysReadlinkat;
+impl SimProcedure for SysReadlinkat {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let _dirfd = emu.syscall_arg(0) as i64;
+        let path_ptr = emu.syscall_arg(1);
+        let buf = emu.syscall_arg(2);
+        let bufsiz = emu.syscall_arg(3) as usize;
+        let path = match read_string(emu, path_ptr) {
+            Ok(path) => path,
+            Err(_) => {
+                emu.set_syscall_return((-14i64) as u64)?; // EFAULT
+                return Ok(HleResult::Continue);
+            }
+        };
+        let Some(target) = emu.vfs.readlink(&path) else {
+            emu.set_syscall_return((-2i64) as u64)?; // ENOENT
+            return Ok(HleResult::Continue);
+        };
+        let bytes = target.as_bytes();
+        let count = bytes.len().min(bufsiz);
+        if count > 0 {
+            ram_write(emu, buf, &bytes[..count])?;
+        }
+        emu.set_syscall_return(count as u64)?;
+        Ok(HleResult::Continue)
+    }
+}
+
 pub struct SysClose;
 impl SimProcedure for SysClose {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {

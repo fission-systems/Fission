@@ -220,6 +220,10 @@ pub fn spec(number: u64) -> Option<&'static SyscallSpec> {
             name: "uname",
             args: &[Ptr],
         },
+        78 => &SyscallSpec {
+            name: "getdents",
+            args: &[Fd, Ptr, Hex],
+        },
         72 => &SyscallSpec {
             name: "fcntl",
             args: &[Fd, Int, Hex],
@@ -255,6 +259,10 @@ pub fn spec(number: u64) -> Option<&'static SyscallSpec> {
         96 => &SyscallSpec {
             name: "gettimeofday",
             args: &[Ptr, Ptr],
+        },
+        99 => &SyscallSpec {
+            name: "sysinfo",
+            args: &[Ptr],
         },
         101 => &SyscallSpec {
             name: "ptrace",
@@ -328,6 +336,10 @@ pub fn spec(number: u64) -> Option<&'static SyscallSpec> {
             name: "unlinkat",
             args: &[Fd, Str, Hex],
         },
+        267 => &SyscallSpec {
+            name: "readlinkat",
+            args: &[Fd, Str, Ptr, Hex],
+        },
         302 => &SyscallSpec {
             name: "prlimit64",
             args: &[Int, Int, Ptr, Ptr],
@@ -336,6 +348,25 @@ pub fn spec(number: u64) -> Option<&'static SyscallSpec> {
             name: "getrandom",
             args: &[Ptr, Hex, Hex],
         },
+        293 => &SyscallSpec {
+            name: "pipe2",
+            args: &[Ptr, Hex],
+        },
+        _ => return None,
+    })
+}
+
+/// Names for common asm-generic calls that are not translated to an existing
+/// handler. This lets coverage reports identify an unsupported guest behavior
+/// without pretending it has x86-64 numbering.
+pub fn generic_syscall_name(number: u64) -> Option<&'static str> {
+    Some(match number {
+        59 => "pipe2",
+        61 => "getdents64",
+        78 => "readlinkat",
+        99 => "set_robust_list",
+        293 => "rseq",
+        179 => "sysinfo",
         _ => return None,
     })
 }
@@ -481,6 +512,15 @@ mod tests {
     fn a_number_the_table_does_not_know_stays_a_number() {
         assert!(spec(0xDEAD).is_none());
         assert_eq!(spec(158).unwrap().name, "arch_prctl");
+        assert_eq!(spec(78).unwrap().name, "getdents");
+        assert_eq!(spec(99).unwrap().name, "sysinfo");
+        assert_eq!(spec(293).unwrap().name, "pipe2");
+        assert_eq!(spec(267).unwrap().name, "readlinkat");
+        assert_eq!(generic_syscall_name(78), Some("readlinkat"));
+        assert_eq!(generic_syscall_name(99), Some("set_robust_list"));
+        assert_eq!(generic_syscall_name(293), Some("rseq"));
+        assert_eq!(generic_syscall_name(61), Some("getdents64"));
+        assert_eq!(generic_syscall_name(179), Some("sysinfo"));
     }
 
     #[test]
