@@ -69,4 +69,5 @@ pub(crate) use printer::{
     print_expr, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_stmt, print_type,
 };
+pub(crate) use variables::recovered_variables_with_instruction_addresses;
 pub use variables::{RecoveredVariable, recovered_variables};
