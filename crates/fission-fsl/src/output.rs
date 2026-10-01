@@ -25,11 +25,12 @@ pub fn emit_instruction(
     instruction.validate()?;
     if layer == OutputLayer::Fir {
         let mut text = format!(
-            "instruction {} opcode=0x{:02x}\n",
-            instruction.name, instruction.opcode
+            "instruction {} encoding={:?}\n",
+            instruction.name, instruction.encoding
         );
         for op in &instruction.ops {
             match *op {
+                FirOp::Unsupported => text.push_str("  unsupported semantics\n"),
                 FirOp::VmStackPop { output } => {
                     writeln!(
                         text,
@@ -176,6 +177,7 @@ pub fn emit_instruction(
                 writeln!(text, "    stack[sp] = _v{};\n    sp += 1;", value.0).unwrap();
             }
             (_, OutputLayer::Fir) => unreachable!(),
+            (FirOp::Unsupported, _) => unreachable!("unsupported execution rejected"),
         }
     }
     text.push_str(if layer == OutputLayer::C {

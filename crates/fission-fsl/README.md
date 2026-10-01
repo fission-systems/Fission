@@ -11,7 +11,8 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 
 ## Current slice
 
-- Dedicated `.fsl` text input with one-byte opcode patterns.
+- Dedicated `.fsl` text input with exact byte opcodes and fixed-width
+  8/32/64/128-bit mask/value encodings, raw bitfields, and excluded selectors.
 - Required per-instruction evidence fields.
 - Typed integer values and a small VM-stack/wrapping-add FIR dialect.
 - Versioned portable binary `.fslc` output. JSON is not used by the compiler,
@@ -24,10 +25,15 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
   gate builds and runs both languages at optimization levels 0 and 2.
 - Shared SSA/type validation at source, package, native-lifting, and output
   boundaries. Unsupported execution widths/effects produce errors.
+- Four GFX900 encoding rules, explicit profile selection, raw-field extraction,
+  and lossless re-encoding with validated field edits. GPU semantic bodies
+  remain explicitly unsupported rather than becoming executable no-ops.
+- Binary package v2 stores encoding plans; existing v1 byte-opcode packages
+  remain readable and retain their version when serialized.
 
 The JVM `iadd` fixture is the first end-to-end example. CPU register and memory
 semantics, GPU masks and synchronization, JVM method/class behavior, variable
-length encodings, multi-byte patterns, cross-target AOT
+length encodings, split fields, selector-to-register resolution, cross-target AOT
 selection, and Fission consumer adapters are future work.
 
 ## Try it
@@ -67,6 +73,39 @@ test requires `cc` and `rustc` (override executables with `CC` and `RUSTC`),
 and compares C/Rust builds at two optimization levels against the evaluator
 over 1,920 cases, with an independent modulo-arithmetic check. This is
 synthetic instruction coverage, not measured real-binary decompiler quality.
+
+## GFX900 encoding slice
+
+```sh
+cargo run -p fission-fsl -- compile crates/fission-fsl/specs/amdgcn-gfx900.fsl /tmp/gfx900.fslc
+cargo run -p fission-fsl -- decode-bytes /tmp/gfx900.fslc amdgcn.gfx900 01050068
+cargo run -p fission-fsl -- reencode /tmp/gfx900.fslc amdgcn.gfx900 01050068 /tmp/gfx900.bin destination=3
+```
+
+The encoding declaration is part of the same grammar:
+
+```text
+encoding 32 mask 0xfe000000 value 0x68000000 {
+    field source0 offset 0 bits 9 exclude 249, 250, 255;
+    field source1 offset 9 bits 8;
+    field destination offset 17 bits 8;
+}
+semantics unsupported;
+```
+
+The example extracts raw source selectors 257 and 2 and destination 0, then
+changes bytes `01 05 00 68` to `01 05 06 68`. The caller supplies the exact
+profile identity; this does not automatically identify the hardware generation
+of arbitrary bytes. Unsupported selectors and unknown instructions return no
+match, so callers must stop rather than infer the next instruction boundary.
+
+The compiler rejects overlapping masks, overlapping/out-of-range fields,
+unreachable exclusions, mixed widths within one profile, and invalid mask/value
+pairs. Each field is contiguous and at most 64 bits wide. The current native
+JIT/AOT decoder remains restricted to exact byte opcodes with supported FIR;
+GPU decoding currently uses the portable encoding plan. Re-encoding preserves
+the original unedited bits; it is not executable GPU recompilation. See the
+[slice report](../../docs/research/fsl-gfx900-encoding-slice.md).
 
 ## Migration goal
 

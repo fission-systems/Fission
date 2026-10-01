@@ -8,6 +8,7 @@ impl CompiledInstruction {
     /// Validate SSA definitions, operand order, widths, and arithmetic types.
     /// This also applies to packages loaded from disk and edited by API users.
     pub fn validate(&self) -> Result<(), FslError> {
+        self.encoding.validate()?;
         if self.ops.is_empty() || self.ops.len() > u16::MAX as usize {
             return Err(FslError::at(1, 1, "invalid FIR operation count"));
         }
@@ -30,6 +31,16 @@ impl CompiledInstruction {
                 return Err(FslError::at(1, 1, "invalid FIR integer width"));
             }
         }
+        if self.ops.contains(&FirOp::Unsupported) {
+            if self.ops != [FirOp::Unsupported] || !self.values.is_empty() {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "unsupported semantics must be the entire instruction body",
+                ));
+            }
+            return Ok(());
+        }
         let mut defined = vec![false; self.values.len()];
         let read = |id: ValueId, defined: &[bool]| -> Result<(), FslError> {
             if !defined.get(usize::from(id.0)).copied().unwrap_or(false) {
@@ -43,6 +54,7 @@ impl CompiledInstruction {
         };
         for op in &self.ops {
             let output = match *op {
+                FirOp::Unsupported => unreachable!("unsupported body handled above"),
                 FirOp::VmStackPop { output } => Some(output),
                 FirOp::IntAddWrap {
                     output,
@@ -101,6 +113,9 @@ impl StackContract {
     /// Admit the current exact execution domain: bit vectors of 1..=64 bits.
     pub fn for_instruction(instruction: &CompiledInstruction) -> Result<Self, FslError> {
         instruction.validate()?;
+        if instruction.ops.contains(&FirOp::Unsupported) {
+            return Err(FslError::at(1, 1, "instruction has unsupported semantics"));
+        }
         if instruction.values.iter().any(|value| value.ty.bits > 64) {
             return Err(FslError::at(1, 1, "execution output supports integer widths 1..=64; wider FIR is preserved but unsupported here"));
         }
@@ -112,6 +127,7 @@ impl StackContract {
                 FirOp::VmStackPop { .. } => delta -= 1,
                 FirOp::VmStackPush { .. } => delta += 1,
                 FirOp::IntAddWrap { .. } => {}
+                FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             }
             low = low.min(delta);
             high = high.max(delta);
@@ -156,6 +172,7 @@ pub fn execute_instruction(
     let mut values = vec![0u64; instruction.values.len()];
     for op in &instruction.ops {
         match *op {
+            FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             FirOp::VmStackPop { output } => {
                 values[usize::from(output.0)] = stack.pop().expect("validated stack contract")
                     & width_mask(instruction.values[usize::from(output.0)].ty.bits);

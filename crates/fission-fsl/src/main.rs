@@ -72,6 +72,63 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 emit_instruction(instruction, OutputLayer::Fir, "fsl_execute")?
             );
         }
+        "decode-bytes" => {
+            let path = required_arg(&mut args, "compiled .fslc path")?;
+            let language = required_arg(&mut args, "exact input profile")?;
+            let bytes = parse_bytes(&required_arg(&mut args, "instruction bytes in hex")?)?;
+            reject_extra_args(args)?;
+            let package = load_package(&path)?;
+            let decoded = package
+                .decode_bytes(&language, &bytes)?
+                .ok_or("unknown encoding or unsupported selector; stop decoding")?;
+            println!(
+                "profile={} consumed={} raw={:02x?}",
+                decoded.language,
+                decoded.raw.len(),
+                decoded.raw
+            );
+            for (field, value) in &decoded.fields {
+                println!("  {field}={value} (0x{value:x})");
+            }
+            print!(
+                "{}",
+                emit_instruction(
+                    &package.instructions[decoded.instruction_index],
+                    OutputLayer::Fir,
+                    "fsl_execute"
+                )?
+            );
+        }
+        "reencode" => {
+            let path = required_arg(&mut args, "compiled .fslc path")?;
+            let language = required_arg(&mut args, "exact input profile")?;
+            let bytes = parse_bytes(&required_arg(&mut args, "instruction bytes in hex")?)?;
+            let output = required_arg(&mut args, "output binary path")?;
+            let edits = args
+                .map(|edit| {
+                    let (name, value) = edit
+                        .split_once('=')
+                        .ok_or("field edit requires name=value")?;
+                    let value = if let Some(hex) = value.strip_prefix("0x") {
+                        u64::from_str_radix(hex, 16)
+                    } else {
+                        value.parse::<u64>()
+                    }?;
+                    Ok::<_, Box<dyn std::error::Error>>((name.to_owned(), value))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let package = load_package(&path)?;
+            let decoded = package
+                .decode_bytes(&language, &bytes)?
+                .ok_or("no supported encoding")?;
+            let edits = edits
+                .iter()
+                .map(|(name, value)| (name.as_str(), *value))
+                .collect::<Vec<_>>();
+            let encoded = package.reencode(&decoded, &edits)?;
+            fs::write(output, &encoded)?;
+            println!("reencoded raw={encoded:02x?}");
+        }
         "jit-decode" => {
             let package_path = required_arg(&mut args, "compiled .fslc path")?;
             let byte = required_arg(&mut args, "opcode-hex")?;
@@ -173,8 +230,8 @@ fn print_package(package: &FslcPackage) {
     println!("FSL package v{}: {}", package.version, package.language);
     for instruction in &package.instructions {
         println!(
-            "  {}  opcode=0x{:02x}  mnemonic={}",
-            instruction.name, instruction.opcode, instruction.mnemonic
+            "  {}  encoding={:?}  mnemonic={}",
+            instruction.name, instruction.encoding, instruction.mnemonic
         );
         println!(
             "    FIR values: {}, operations: {}",
@@ -191,6 +248,17 @@ fn parse_byte(value: &str) -> Result<u8, Box<dyn std::error::Error>> {
         .unwrap_or(value);
     let byte = u8::from_str_radix(digits, 16)?;
     Ok(byte)
+}
+
+fn parse_bytes(value: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let value = value.strip_prefix("0x").unwrap_or(value);
+    if value.is_empty() || !value.len().is_multiple_of(2) || !value.is_ascii() {
+        return Err("bytes must be a nonempty even-length ASCII hex string".into());
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| Ok(u8::from_str_radix(&value[index..index + 2], 16)?))
+        .collect()
 }
 
 fn required_arg(
@@ -216,6 +284,8 @@ fn print_usage() {
     eprintln!("  fslc compile <source.fsl> <output.fslc>");
     eprintln!("  fslc inspect <package.fslc>");
     eprintln!("  fslc decode <package.fslc> <opcode-hex>");
+    eprintln!("  fslc decode-bytes <package.fslc> <profile> <bytes-hex>");
+    eprintln!("  fslc reencode <package.fslc> <profile> <bytes-hex> <output.bin> [field=value...]");
     eprintln!("  fslc jit-decode <package.fslc> <opcode-hex>");
     eprintln!("  fslc aot-object <package.fslc> <output.o>");
     eprintln!("  fslc emit <package.fslc> <opcode-hex> <fir|c|rust> <output>");

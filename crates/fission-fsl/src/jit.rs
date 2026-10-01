@@ -172,6 +172,17 @@ fn define_decode_lift_function<M: Module>(
     package: &FslcPackage,
 ) -> Result<(FuncId, usize), FslError> {
     package.validate()?;
+    if package
+        .instructions
+        .iter()
+        .any(|i| i.encoding.opcode().is_none() || i.ops.contains(&FirOp::Unsupported))
+    {
+        return Err(FslError::at(
+            1,
+            1,
+            "native decoder currently requires exact byte opcodes and supported FIR semantics",
+        ));
+    }
     if package.instructions.is_empty() {
         return Err(FslError::at(1, 1, "cannot compile an empty FSL package"));
     }
@@ -231,10 +242,16 @@ fn define_decode_lift_function<M: Module>(
             let matched = builder.create_block();
             let next = builder.create_block();
 
-            let is_match =
-                builder
-                    .ins()
-                    .icmp_imm(IntCC::Equal, opcode, i64::from(instruction.opcode));
+            let is_match = builder.ins().icmp_imm(
+                IntCC::Equal,
+                opcode,
+                i64::from(
+                    instruction
+                        .encoding
+                        .opcode()
+                        .expect("byte encoding admitted"),
+                ),
+            );
             builder.ins().brif(is_match, matched, &[], next, &[]);
             builder.seal_block(current);
 
@@ -328,6 +345,7 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         ..NativeFirOp::default()
     };
     Ok(match op {
+        FirOp::Unsupported => return Err(FslError::at(1, 1, "unsupported native FIR semantics")),
         FirOp::VmStackPop { output } => {
             let mut record = encode_type(get_value(*output)?);
             record.kind = OP_VM_STACK_POP;

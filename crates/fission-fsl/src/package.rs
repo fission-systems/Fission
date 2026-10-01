@@ -1,7 +1,7 @@
-use crate::FslError;
+use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 1;
+pub const FSL_PACKAGE_VERSION: u16 = 2;
 const MAGIC: &[u8; 8] = b"FSLCPKG\0";
 const MAX_PACKAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STRING_BYTES: usize = 65_535;
@@ -68,6 +68,8 @@ pub struct Evidence {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirOp {
+    /// Semantic support is absent; this is never an executable no-op.
+    Unsupported,
     VmStackPop {
         output: ValueId,
     },
@@ -85,7 +87,7 @@ pub enum FirOp {
 pub struct CompiledInstruction {
     pub name: String,
     pub mnemonic: String,
-    pub opcode: u8,
+    pub encoding: Encoding,
     pub evidence: Vec<Evidence>,
     pub values: Vec<ValueDef>,
     pub ops: Vec<FirOp>,
@@ -104,7 +106,7 @@ pub struct FslcPackage {
 impl FslcPackage {
     /// Validate the package and canonical FIR at every consumer boundary.
     pub fn validate(&self) -> Result<(), FslError> {
-        if self.version != FSL_PACKAGE_VERSION {
+        if !matches!(self.version, 1 | FSL_PACKAGE_VERSION) {
             return Err(FslError::at(1, 1, "unsupported FSL package version"));
         }
         if self.instructions.is_empty() || self.instructions.len() > MAX_INSTRUCTIONS {
@@ -126,7 +128,7 @@ impl FslcPackage {
         for (index, instruction) in self.instructions.iter().enumerate() {
             check_string(&instruction.name)?;
             check_string(&instruction.mnemonic)?;
-            if !names.insert(&instruction.name) || dispatch[instruction.opcode as usize].is_some() {
+            if !names.insert(&instruction.name) {
                 return Err(FslError::at(1, 1, "duplicate instruction name or opcode"));
             }
             if instruction.evidence.is_empty()
@@ -144,11 +146,41 @@ impl FslcPackage {
                     check_string(field)?;
                 }
             }
+            instruction.encoding.validate()?;
+            if instruction.encoding.bits != self.instructions[0].encoding.bits {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "fixed-width profiles cannot mix encoding widths",
+                ));
+            }
+            if self.version == 1
+                && (instruction.encoding.opcode().is_none()
+                    || instruction.ops.contains(&FirOp::Unsupported))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "version 1 cannot represent encoding plans or unsupported semantics",
+                ));
+            }
+            for previous in &self.instructions[..index] {
+                let shared = previous.encoding.mask & instruction.encoding.mask;
+                if (previous.encoding.value ^ instruction.encoding.value) & shared == 0 {
+                    return Err(FslError::at(
+                        1,
+                        1,
+                        "encoding patterns overlap; explicit disjoint masks are required",
+                    ));
+                }
+            }
             instruction.validate()?;
             for value in &instruction.values {
                 check_string(&value.name)?;
             }
-            dispatch[instruction.opcode as usize] = Some(index as u16);
+            if let Some(opcode) = instruction.encoding.opcode() {
+                dispatch[opcode as usize] = Some(index as u16);
+            }
         }
         if self.dispatch != dispatch {
             return Err(FslError::at(
@@ -187,7 +219,29 @@ impl FslcPackage {
         for instruction in &self.instructions {
             writer.string(&instruction.name)?;
             writer.string(&instruction.mnemonic)?;
-            writer.u8(instruction.opcode);
+            if self.version == 1 {
+                writer.u8(instruction
+                    .encoding
+                    .opcode()
+                    .ok_or_else(|| FslError::at(1, 1, "invalid version 1 encoding"))?);
+            } else {
+                writer.u16(instruction.encoding.bits);
+                writer.u128(instruction.encoding.mask);
+                writer.u128(instruction.encoding.value);
+                writer.u16(count_u16(
+                    instruction.encoding.fields.len(),
+                    "encoding fields",
+                )?);
+                for field in &instruction.encoding.fields {
+                    writer.string(&field.name)?;
+                    writer.u16(field.offset);
+                    writer.u16(field.bits);
+                    writer.u16(count_u16(field.excluded.len(), "excluded field values")?);
+                    for value in &field.excluded {
+                        writer.u64(*value);
+                    }
+                }
+            }
             writer.u16(count_u16(instruction.evidence.len(), "evidence entries")?);
             for evidence in &instruction.evidence {
                 writer.string(&evidence.source_id)?;
@@ -208,6 +262,7 @@ impl FslcPackage {
             writer.u16(count_u16(instruction.ops.len(), "FIR operations")?);
             for op in &instruction.ops {
                 match op {
+                    FirOp::Unsupported => writer.u8(3),
                     FirOp::VmStackPop { output } => {
                         writer.u8(0);
                         writer.u16(output.0);
@@ -244,7 +299,7 @@ impl FslcPackage {
             return Err(FslError::at(1, 1, "invalid FSL package magic"));
         }
         let version = reader.u16()?;
-        if version != FSL_PACKAGE_VERSION {
+        if !matches!(version, 1 | FSL_PACKAGE_VERSION) {
             return Err(FslError::at(
                 1,
                 1,
@@ -286,14 +341,44 @@ impl FslcPackage {
         for index in 0..instruction_count {
             let name = reader.string()?;
             let mnemonic = reader.string()?;
-            let opcode = reader.u8()?;
-            if dispatch[opcode as usize].is_some() {
-                return Err(FslError::at(
-                    1,
-                    1,
-                    format!("duplicate opcode 0x{opcode:02x}"),
-                ));
-            }
+            let encoding = if version == 1 {
+                Encoding::byte_opcode(reader.u8()?)
+            } else {
+                let bits = reader.u16()?;
+                let mask = reader.u128()?;
+                let value = reader.u128()?;
+                let field_count = usize::from(reader.u16()?);
+                if field_count > 256 {
+                    return Err(FslError::at(1, 1, "too many encoding fields"));
+                }
+                let mut fields = Vec::with_capacity(field_count);
+                for _ in 0..field_count {
+                    let name = reader.string()?;
+                    let offset = reader.u16()?;
+                    let bits = reader.u16()?;
+                    let count = usize::from(reader.u16()?);
+                    if count > 256 {
+                        return Err(FslError::at(1, 1, "too many excluded field values"));
+                    }
+                    let mut excluded = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        excluded.push(reader.u64()?);
+                    }
+                    fields.push(BitField {
+                        name,
+                        offset,
+                        bits,
+                        excluded,
+                    });
+                }
+                Encoding {
+                    bits,
+                    mask,
+                    value,
+                    fields,
+                }
+            };
+            encoding.validate()?;
             let evidence_count = reader.u16()? as usize;
             if evidence_count == 0 || evidence_count > MAX_EVIDENCE_PER_INSTRUCTION {
                 return Err(FslError::at(1, 1, "invalid evidence count in FSL package"));
@@ -344,6 +429,7 @@ impl FslcPackage {
             let mut ops = Vec::with_capacity(op_count);
             for _ in 0..op_count {
                 let op = match reader.u8()? {
+                    3 if version >= 2 => FirOp::Unsupported,
                     0 => FirOp::VmStackPop {
                         output: reader.value_id(value_count)?,
                     },
@@ -359,11 +445,13 @@ impl FslcPackage {
                 };
                 ops.push(op);
             }
-            dispatch[opcode as usize] = Some(index as u16);
+            if let Some(opcode) = encoding.opcode() {
+                dispatch[opcode as usize] = Some(index as u16);
+            }
             instructions.push(CompiledInstruction {
                 name,
                 mnemonic,
-                opcode,
+                encoding,
                 evidence,
                 values,
                 ops,
@@ -401,6 +489,14 @@ impl Writer {
     }
 
     fn u16(&mut self, value: u16) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u128(&mut self, value: u128) {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
@@ -442,6 +538,14 @@ impl<'a> Reader<'a> {
     fn u16(&mut self) -> Result<u16, FslError> {
         let bytes = self.take(2)?;
         Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn u64(&mut self) -> Result<u64, FslError> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+
+    fn u128(&mut self) -> Result<u128, FslError> {
+        Ok(u128::from_le_bytes(self.take(16)?.try_into().unwrap()))
     }
 
     fn string(&mut self) -> Result<String, FslError> {

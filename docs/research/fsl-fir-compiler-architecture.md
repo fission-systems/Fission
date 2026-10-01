@@ -34,6 +34,13 @@ text grammar and binary `.fslc` package. JSON can remain an optional
 debug/export/interchange view, but it is not the authored language or hot-path
 runtime representation.
 
+The text grammar now also compiles fixed-width 8/32/64/128-bit encoding plans
+and raw fields into `.fslc` v2, retaining v1 byte-opcode package reads. A narrow
+[GFX900 slice](fsl-gfx900-encoding-slice.md) supports portable decode and
+field-aware re-encoding. Its GPU semantic bodies are explicitly unsupported.
+The native decoder/lifter remains limited to the earlier exact-byte-opcode scope;
+variable instruction lengths and GPU execution are not implemented by this step.
+
 Fission already has more than one execution mode: the SLEIGH runtime selects
 compiled templates and evaluates them to emit P-code, while the emulator has
 an existing [Cranelift P-code-to-host JIT](../../crates/fission-emulator/src/jit/compiler.rs).

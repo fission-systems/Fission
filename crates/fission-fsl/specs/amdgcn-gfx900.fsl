@@ -1,0 +1,73 @@
+# Fixed-width encoding slice. Fields retain raw selector values, not resolved
+# register operands. GPU state effects are explicitly unsupported in this slice.
+language amdgcn.gfx900 {
+    byte_order little;
+    address_unit byte;
+
+    instruction s_mov_b32 {
+        encoding 32 mask 0xff80ff00 value 0xbe800000 {
+            field source offset 0 bits 8 exclude 255;
+            field destination offset 16 bits 7;
+        }
+        mnemonic "s_mov_b32";
+        evidence "amd-vega-isa"
+            "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-shader-instruction-set-architecture.pdf"
+            "Vega ISA document 70656, 2020-01-27; existing research GFX900 slice"
+            "SOP1 S_MOV_B32 field layout; literal selector 255 is outside this fixed-width slice.";
+        evidence "llvm-gfx900-probe"
+            "https://github.com/fission-systems/fission-research"
+            "probe.text.bin SHA256 bf545049f82875a073eb48c2e2bd5f0e58ae4af81b156ed10c3bdac618b17a18; LLVM 22.1.8"
+            "Local s_mov_b32 s0, 1 bytes are 81 00 80 be; source selector 129, destination 0.";
+        semantics unsupported;
+    }
+
+    instruction v_add_u32 {
+        encoding 32 mask 0xfe000000 value 0x68000000 {
+            field source0 offset 0 bits 9 exclude 249, 250, 255;
+            field source1 offset 9 bits 8;
+            field destination offset 17 bits 8;
+        }
+        mnemonic "v_add_u32_e32";
+        evidence "llvm-22-vop2-layout"
+            "https://github.com/llvm/llvm-project/blob/llvmorg-22.1.0/llvm/lib/Target/AMDGPU/VOP2Instructions.td"
+            "LLVM llvmorg-22.1.0, VOP2e, VOP2_SDWA9Ae and VOP2_DPP encoding definitions"
+            "VOP2 fields occupy bits 0..8, 9..16 and 17..24; extension selectors 0xf9 and 0xfa are excluded.";
+        evidence "llvm-22-literal-selector"
+            "https://github.com/llvm/llvm-project/blob/llvmorg-22.1.0/llvm/lib/Target/AMDGPU/SIDefines.h"
+            "LLVM llvmorg-22.1.0, AMDGPU::EncValues"
+            "The literal constant selector is 255; this decoder does not consume literal extension words.";
+        evidence "amd-vega-isa"
+            "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-shader-instruction-set-architecture.pdf"
+            "Vega ISA document 70656, 2020-01-27; existing research GFX900 slice"
+            "VOP2 opcode 52 field layout. SDWA, DPP and literal selectors need extension handling and are excluded.";
+        evidence "llvm-gfx900-probe"
+            "https://github.com/fission-systems/fission-research"
+            "probe.text.bin SHA256 bf545049f82875a073eb48c2e2bd5f0e58ae4af81b156ed10c3bdac618b17a18; LLVM 22.1.8"
+            "Local v_add_u32_e32 v0, v1, v2 bytes are 01 05 00 68; raw source0=257, source1=2, destination=0.";
+        semantics unsupported;
+    }
+
+    instruction s_barrier {
+        encoding 32 mask 0xffffffff value 0xbf8a0000 {
+            field raw_imm16 offset 0 bits 16;
+        }
+        mnemonic "s_barrier";
+        evidence "amd-vega-isa"
+            "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-shader-instruction-set-architecture.pdf"
+            "Vega ISA document 70656, 2020-01-27; existing research GFX900 slice"
+            "SOPP opcode 10; only zero immediate is admitted. Workgroup synchronization semantics are not implemented.";
+        semantics unsupported;
+    }
+
+    instruction s_endpgm {
+        encoding 32 mask 0xffffffff value 0xbf810000 {
+            field raw_imm16 offset 0 bits 16;
+        }
+        mnemonic "s_endpgm";
+        evidence "amd-vega-isa"
+            "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-shader-instruction-set-architecture.pdf"
+            "Vega ISA document 70656, 2020-01-27; existing research GFX900 slice"
+            "SOPP opcode 1; only zero immediate is admitted. Wave termination semantics are not implemented.";
+        semantics unsupported;
+    }
+}

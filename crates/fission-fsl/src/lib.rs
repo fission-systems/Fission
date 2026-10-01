@@ -1,15 +1,18 @@
 //! Fission-owned FSL source compiler and typed FIR package.
 //!
 //! This crate intentionally has no dependency on `fission-sleigh`, `.sla`,
-//! JSON, or P-code. Its first vertical slice supports exact one-byte opcodes
-//! and a small typed VM-stack/arithmetic FIR dialect.
+//! JSON, or P-code. Fixed-width encoding plans support 8/32/64/128-bit words.
+//! Executable FIR currently supports a small typed VM-stack/arithmetic dialect;
+//! the GPU encoding slice retains explicitly unsupported semantic bodies.
 
+pub mod encoding;
 pub mod jit;
 pub mod output;
 pub mod package;
 mod parser;
 pub mod semantics;
 
+pub use encoding::{BitField, DecodedInstruction, Encoding};
 pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
 pub use output::{emit_instruction, OutputLayer};
 pub use package::{
@@ -60,23 +63,21 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         return Err(FslError::at(
             1,
             1,
-            "the initial byte-opcode decoder supports at most 256 instructions",
+            "the initial package supports at most 256 instructions",
         ));
     }
 
     let mut dispatch: [Option<u16>; 256] = [None; 256];
     let mut instructions: Vec<CompiledInstruction> = Vec::with_capacity(parsed.instructions.len());
     for (instruction_index, instruction) in parsed.instructions.into_iter().enumerate() {
-        if let Some(previous) = dispatch[instruction.opcode as usize] {
-            let previous = &instructions[previous as usize];
-            return Err(FslError::at(
-                instruction.line,
-                instruction.column,
-                format!(
-                    "opcode 0x{:02x} overlaps instruction {:?}",
-                    instruction.opcode, previous.name
-                ),
-            ));
+        if let Some(opcode) = instruction.encoding.opcode() {
+            if dispatch[opcode as usize].is_some() {
+                return Err(FslError::at(
+                    instruction.line,
+                    instruction.column,
+                    "duplicate byte opcode",
+                ));
+            }
         }
 
         let mut values = Vec::<ValueDef>::new();
@@ -84,6 +85,7 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         let mut ops = Vec::<FirOp>::new();
         for statement in instruction.statements {
             match statement {
+                parser::Statement::Unsupported => ops.push(FirOp::Unsupported),
                 parser::Statement::StackPop {
                     name,
                     ty,
@@ -139,11 +141,13 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
             ));
         }
 
-        dispatch[instruction.opcode as usize] = Some(instruction_index as u16);
+        if let Some(opcode) = instruction.encoding.opcode() {
+            dispatch[opcode as usize] = Some(instruction_index as u16);
+        }
         instructions.push(CompiledInstruction {
             name: instruction.name,
             mnemonic: instruction.mnemonic,
-            opcode: instruction.opcode,
+            encoding: instruction.encoding,
             evidence: instruction.evidence,
             values,
             ops,

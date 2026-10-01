@@ -1,4 +1,4 @@
-use crate::{AddressUnit, ByteOrder, Evidence, FslError, ValueType};
+use crate::{AddressUnit, BitField, ByteOrder, Encoding, Evidence, FslError, ValueType};
 
 #[derive(Debug)]
 pub(super) struct ParsedProfile {
@@ -12,7 +12,7 @@ pub(super) struct ParsedProfile {
 pub(super) struct ParsedInstruction {
     pub name: String,
     pub mnemonic: String,
-    pub opcode: u8,
+    pub encoding: Encoding,
     pub evidence: Vec<Evidence>,
     pub statements: Vec<Statement>,
     pub line: usize,
@@ -21,6 +21,7 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    Unsupported,
     StackPop {
         name: String,
         ty: ValueType,
@@ -45,7 +46,7 @@ pub(super) enum Statement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TokenKind {
     Ident(String),
-    Integer(u64),
+    Integer(u128),
     String(String),
     Symbol(char),
     End,
@@ -149,7 +150,7 @@ impl<'a> Lexer<'a> {
         output
     }
 
-    fn integer(&mut self) -> Result<u64, FslError> {
+    fn integer(&mut self) -> Result<u128, FslError> {
         let line = self.line;
         let column = self.column;
         if self.peek() == Some('0') && matches!(self.peek_n(1), Some('x' | 'X')) {
@@ -160,14 +161,14 @@ impl<'a> Lexer<'a> {
             if digits.is_empty() {
                 return Err(FslError::at(line, column, "hex integer has no digits"));
             }
-            u64::from_str_radix(&digits, 16)
-                .map_err(|_| FslError::at(line, column, "hex integer does not fit in u64"))
+            u128::from_str_radix(&digits, 16)
+                .map_err(|_| FslError::at(line, column, "hex integer does not fit in u128"))
         } else {
             let digits = self.consume_while(|ch| ch.is_ascii_digit() || ch == '_');
             digits
                 .replace('_', "")
-                .parse::<u64>()
-                .map_err(|_| FslError::at(line, column, "integer does not fit in u64"))
+                .parse::<u128>()
+                .map_err(|_| FslError::at(line, column, "integer does not fit in u128"))
         }
     }
 
@@ -287,6 +288,9 @@ impl Parser {
         let mut instructions = Vec::new();
         while !self.at_symbol('}') {
             if self.at_ident("byte_order") {
+                if byte_order.is_some() {
+                    return Err(self.error_here("duplicate byte_order declaration"));
+                }
                 self.advance();
                 let token = self.current().clone();
                 byte_order = Some(match self.expect_name()?.as_str() {
@@ -302,6 +306,9 @@ impl Parser {
                 });
                 self.expect_symbol(';')?;
             } else if self.at_ident("address_unit") {
+                if address_unit.is_some() {
+                    return Err(self.error_here("duplicate address_unit declaration"));
+                }
                 self.advance();
                 let token = self.current().clone();
                 let unit = self.expect_name()?;
@@ -341,7 +348,7 @@ impl Parser {
         let name_token = self.current().clone();
         let name = self.expect_name()?;
         self.expect_symbol('{')?;
-        let mut opcode = None;
+        let mut encoding = None;
         let mut mnemonic = None;
         let mut evidence = Vec::new();
         let mut statements = None;
@@ -350,11 +357,22 @@ impl Parser {
                 self.advance();
                 let token = self.current().clone();
                 let value = self.expect_integer()?;
-                opcode = Some(u8::try_from(value).map_err(|_| {
+                let opcode = u8::try_from(value).map_err(|_| {
                     FslError::at(token.line, token.column, "opcode must fit in one byte")
-                })?);
+                })?;
+                if encoding.replace(Encoding::byte_opcode(opcode)).is_some() {
+                    return Err(self.error_here("duplicate encoding declaration"));
+                }
                 self.expect_symbol(';')?;
+            } else if self.at_ident("encoding") {
+                let parsed = self.parse_encoding()?;
+                if encoding.replace(parsed).is_some() {
+                    return Err(self.error_here("duplicate encoding declaration"));
+                }
             } else if self.at_ident("mnemonic") {
+                if mnemonic.is_some() {
+                    return Err(self.error_here("duplicate mnemonic declaration"));
+                }
                 self.advance();
                 mnemonic = Some(self.expect_string()?);
                 self.expect_symbol(';')?;
@@ -362,6 +380,14 @@ impl Parser {
                 evidence.push(self.parse_evidence()?);
             } else if self.at_ident("semantics") {
                 self.advance();
+                if self.at_ident("unsupported") {
+                    self.advance();
+                    self.expect_symbol(';')?;
+                    if statements.replace(vec![Statement::Unsupported]).is_some() {
+                        return Err(self.error_here("duplicate semantics declaration"));
+                    }
+                    continue;
+                }
                 self.expect_symbol('{')?;
                 let mut parsed = Vec::new();
                 while !self.at_symbol('}') {
@@ -372,15 +398,17 @@ impl Parser {
                     return Err(self.error_here("instruction has more than one semantics block"));
                 }
             } else {
-                return Err(self.error_here("expected opcode, mnemonic, evidence, or semantics"));
+                return Err(
+                    self.error_here("expected opcode, encoding, mnemonic, evidence, or semantics")
+                );
             }
         }
         self.expect_symbol('}')?;
-        let opcode = opcode.ok_or_else(|| {
+        let encoding = encoding.ok_or_else(|| {
             FslError::at(
                 name_token.line,
                 name_token.column,
-                "instruction has no opcode",
+                "instruction has no encoding",
             )
         })?;
         let mnemonic = mnemonic.ok_or_else(|| {
@@ -407,12 +435,59 @@ impl Parser {
         Ok(ParsedInstruction {
             name,
             mnemonic,
-            opcode,
+            encoding,
             evidence,
             statements,
             line: name_token.line,
             column: name_token.column,
         })
+    }
+
+    fn parse_encoding(&mut self) -> Result<Encoding, FslError> {
+        self.expect_ident("encoding")?;
+        let bits = u16::try_from(self.expect_integer()?)
+            .map_err(|_| self.error_here("encoding width exceeds u16"))?;
+        self.expect_ident("mask")?;
+        let mask = self.expect_wide_integer()?;
+        self.expect_ident("value")?;
+        let value = self.expect_wide_integer()?;
+        self.expect_symbol('{')?;
+        let mut fields = Vec::new();
+        while !self.at_symbol('}') {
+            self.expect_ident("field")?;
+            let name = self.expect_name()?;
+            self.expect_ident("offset")?;
+            let offset = u16::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("field offset exceeds u16"))?;
+            self.expect_ident("bits")?;
+            let bits = u16::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("field width exceeds u16"))?;
+            let mut excluded = Vec::new();
+            if self.at_ident("exclude") {
+                self.advance();
+                excluded.push(self.expect_integer()?);
+                while self.at_symbol(',') {
+                    self.advance();
+                    excluded.push(self.expect_integer()?);
+                }
+            }
+            self.expect_symbol(';')?;
+            fields.push(BitField {
+                name,
+                offset,
+                bits,
+                excluded,
+            });
+        }
+        self.expect_symbol('}')?;
+        let encoding = Encoding {
+            bits,
+            mask,
+            value,
+            fields,
+        };
+        encoding.validate()?;
+        Ok(encoding)
     }
 
     fn parse_evidence(&mut self) -> Result<Evidence, FslError> {
@@ -515,6 +590,11 @@ impl Parser {
     }
 
     fn expect_integer(&mut self) -> Result<u64, FslError> {
+        let value = self.expect_wide_integer()?;
+        u64::try_from(value).map_err(|_| self.error_here("integer exceeds u64"))
+    }
+
+    fn expect_wide_integer(&mut self) -> Result<u128, FslError> {
         match self.current().kind {
             TokenKind::Integer(value) => {
                 self.advance();
