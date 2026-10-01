@@ -11,6 +11,8 @@ use fission_fsl::{
 
 const SOURCE: &str = include_str!("../specs/amdgcn-gfx900-sadd-u32.fsl");
 const PROFILE: &str = "amdgcn.gfx900.sadd_u32";
+const CARRY_SOURCE: &str = include_str!("../specs/amdgcn-gfx900-saddc-u32.fsl");
+const CARRY_PROFILE: &str = "amdgcn.gfx900.saddc_u32";
 
 fn package() -> FslcPackage {
     let package = compile_source(SOURCE).unwrap();
@@ -106,6 +108,150 @@ fn refusal_preserves_all_state_and_cli_runs_decoded_fir() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[test]
+fn carry_input_rejects_bad_types_versions_and_preserves_state() {
+    let mut package = compile_source(CARRY_SOURCE).unwrap();
+    assert_eq!(package.version, 4);
+    for version in [2, 3] {
+        package.version = version;
+        assert!(package.encode_binary().is_err());
+        let mut raw = compile_source(CARRY_SOURCE)
+            .unwrap()
+            .encode_binary()
+            .unwrap();
+        raw[8..10].copy_from_slice(&version.to_le_bytes());
+        assert!(FslcPackage::decode_binary(&raw).is_err());
+    }
+    for malformed in [
+        CARRY_SOURCE.replace("%carry_in: u1", "%carry_in: u32"),
+        CARRY_SOURCE.replace("%carry: u1", "%carry: u32"),
+        CARRY_SOURCE.replace("%rhs, %carry_in", "%rhs, %lhs"),
+    ] {
+        assert!(compile_source(&malformed).is_err());
+    }
+    let package = compile_source(CARRY_SOURCE).unwrap();
+    let decoded = package
+        .decode_bytes(CARRY_PROFILE, &[0, 1, 2, 0x82])
+        .unwrap()
+        .unwrap();
+    for flags in [vec![], vec![2]] {
+        let mut state = MachineState {
+            registers: vec![1, 2, 3],
+            flags,
+        };
+        let before = state.clone();
+        assert_eq!(
+            execute_decoded(&package, &decoded, &mut state).unwrap(),
+            ExecutionStatus::InvalidState
+        );
+        assert_eq!(state, before);
+    }
+    // Read-only flag effects must also be checked before any register mutation.
+    let read_only = CARRY_SOURCE
+        .replace("flag.write 0, %carry;", "")
+        .replace("flag.read 0", "flag.read 7");
+    let package = compile_source(&read_only).unwrap();
+    let decoded = package
+        .decode_bytes(CARRY_PROFILE, &[0, 1, 2, 0x82])
+        .unwrap()
+        .unwrap();
+    let mut state = MachineState {
+        registers: vec![1, 2, 3],
+        flags: vec![0],
+    };
+    let before = state.clone();
+    assert_eq!(
+        execute_decoded(&package, &decoded, &mut state).unwrap(),
+        ExecutionStatus::InvalidState
+    );
+    assert_eq!(state, before);
+    let directory = temporary();
+    let path = directory.join("saddc.fslc");
+    fs::write(
+        &path,
+        compile_source(CARRY_SOURCE)
+            .unwrap()
+            .encode_binary()
+            .unwrap(),
+    )
+    .unwrap();
+    let output = checked(Command::new(env!("CARGO_BIN_EXE_fslc")).args([
+        "execute-state",
+        path.to_str().unwrap(),
+        CARRY_PROFILE,
+        "00010282",
+        "0xffffffff,0,123",
+        "1",
+    ]));
+    assert!(output.contains("status=Success registers=[4294967295, 0, 0] flags=[1]"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn scalar_add_then_carry_input_matches_u64_addition() {
+    let low = package();
+    let high = compile_source(CARRY_SOURCE).unwrap();
+    let lo_decoded = low.decode_bytes(PROFILE, &bytes(0, 2, 4)).unwrap().unwrap();
+    let hi_decoded = high
+        .decode_bytes(CARRY_PROFILE, &[1, 3, 5, 0x82])
+        .unwrap()
+        .unwrap();
+    let boundary = [
+        0,
+        1,
+        u32::MAX as u64,
+        1u64 << 32,
+        u64::MAX,
+        0x7fff_ffff_ffff_ffff,
+    ];
+    let mut count = 0;
+    let mut seed = 0x42a9_5678_1234_9012u64;
+    let mut pairs = Vec::new();
+    for left in boundary {
+        for right in boundary {
+            pairs.push((left, right));
+        }
+    }
+    for _ in 0..1024 {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        let left = seed;
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        pairs.push((left, seed));
+    }
+    for (left, right) in pairs {
+        let mut state = MachineState {
+            registers: vec![
+                left & 0xffff_ffff,
+                left >> 32,
+                right & 0xffff_ffff,
+                right >> 32,
+                99,
+                99,
+                77,
+            ],
+            flags: vec![1, 1],
+        };
+        assert_eq!(
+            execute_decoded(&low, &lo_decoded, &mut state).unwrap(),
+            ExecutionStatus::Success
+        );
+        assert_eq!(
+            execute_decoded(&high, &hi_decoded, &mut state).unwrap(),
+            ExecutionStatus::Success
+        );
+        let full = u128::from(left) + u128::from(right);
+        assert_eq!(state.registers[4] | state.registers[5] << 32, full as u64);
+        assert_eq!(state.flags, vec![(full >> 64) as u64, 1]);
+        assert_eq!(state.registers[6], 77);
+        count += 1;
+    }
+    println!("scalar add/carry chain cases={count}");
+}
+
 fn temporary() -> std::path::PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -142,8 +288,23 @@ fn observation(status: u32, state: &MachineState) -> String {
 
 #[test]
 fn decoded_scalar_add_matches_independent_oracle_and_c_rust_recompilation() {
+    verify_projection(SOURCE, PROFILE, 0x80, 32, false);
+}
+
+#[test]
+fn carry_input_matches_oracle_and_recompilation_across_widths() {
+    for bits in [1, 8, 16, 32, 64] {
+        let source = CARRY_SOURCE.replace("u32", &format!("u{bits}"));
+        let profile = CARRY_PROFILE.replace("u32", &format!("u{bits}"));
+        verify_projection(&source, &profile, 0x82, bits, true);
+    }
+}
+
+fn verify_projection(source: &str, profile: &str, high: u8, bits: u16, carry_input: bool) {
     let directory = temporary();
-    let package = package();
+    let compiled = compile_source(source).unwrap();
+    assert_eq!(compiled.version, if carry_input { 4 } else { 3 });
+    let package = FslcPackage::decode_binary(&compiled.encode_binary().unwrap()).unwrap();
     let instruction = &package.instructions[0];
     let original = instruction.clone();
     let mut c = emit_instruction(instruction, OutputLayer::C, "fsl_scalar").unwrap();
@@ -156,12 +317,14 @@ fn decoded_scalar_add_matches_independent_oracle_and_c_rust_recompilation() {
     let mut input = fs::File::create(directory.join("input.txt")).unwrap();
     let mut expected = String::new();
     let mut count = 0;
+    let modulus = 1u128 << bits;
+    let mask = (modulus - 1) as u64;
     let pairs = [
         (0, 0),
-        (u32::MAX as u64, 1),
-        (0x7fff_ffff, 1),
-        (0x8000_0000, 0x8000_0000),
-        (u32::MAX as u64, u32::MAX as u64),
+        (mask, 1),
+        (mask >> 1, 1),
+        (1u64 << (bits - 1), 1u64 << (bits - 1)),
+        (mask, mask),
         (u64::MAX, u64::MAX),
         (123456789, 987654321),
         (0x1_0000_0000, 0x1_0000_0001),
@@ -170,7 +333,7 @@ fn decoded_scalar_add_matches_independent_oracle_and_c_rust_recompilation() {
         for source1 in [0u8, 1, 2, 95] {
             for destination in [0u8, 1, 2, 95] {
                 let decoded = package
-                    .decode_bytes(PROFILE, &bytes(source0, source1, destination))
+                    .decode_bytes(profile, &[source0, source1, destination, high])
                     .unwrap()
                     .unwrap();
                 for (left, right) in pairs {
@@ -194,10 +357,15 @@ fn decoded_scalar_add_matches_independent_oracle_and_c_rust_recompilation() {
                         let mut oracle = state.clone();
                         // Independent full-state oracle: widened integer addition and division,
                         // not the FIR evaluator or carry emission formula.
-                        let full = u128::from(state.registers[usize::from(source0)] as u32)
-                            + u128::from(state.registers[usize::from(source1)] as u32);
-                        oracle.registers[usize::from(destination)] = (full % (1u128 << 32)) as u64;
-                        oracle.flags[0] = (full / (1u128 << 32)) as u64;
+                        let full = u128::from(state.registers[usize::from(source0)]) % modulus
+                            + u128::from(state.registers[usize::from(source1)]) % modulus
+                            + if carry_input {
+                                u128::from(initial_carry)
+                            } else {
+                                0
+                            };
+                        oracle.registers[usize::from(destination)] = (full % modulus) as u64;
+                        oracle.flags[0] = (full / modulus) as u64;
                         assert_eq!(
                             execute_decoded(&package, &decoded, &mut state).unwrap(),
                             ExecutionStatus::Success
@@ -267,7 +435,7 @@ fn decoded_scalar_add_matches_independent_oracle_and_c_rust_recompilation() {
         );
     }
     println!(
-        "state cases={count}; C/Rust O0/O2 comparisons={}",
+        "profile={profile}; bits={bits}; state cases={count}; C/Rust O0/O2 comparisons={}",
         count * 4
     );
     fs::remove_dir_all(directory).unwrap();

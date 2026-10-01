@@ -61,6 +61,17 @@ impl CompiledInstruction {
                     }
                     Some(output)
                 }
+                FirOp::FlagRead { output, .. } => {
+                    let output_ty = self
+                        .values
+                        .get(usize::from(output.0))
+                        .map(|v| v.ty)
+                        .ok_or_else(|| FslError::at(1, 1, "FIR output id out of range"))?;
+                    if output_ty.bits != 1 || output_ty.sign != IntegerSign::Unsigned {
+                        return Err(FslError::at(1, 1, "flag reads require u1"));
+                    }
+                    Some(output)
+                }
                 FirOp::RegisterWrite { field, value } => {
                     read(value, &defined)?;
                     if usize::from(field) >= self.encoding.fields.len() {
@@ -102,6 +113,37 @@ impl CompiledInstruction {
                     }
                     Some(output)
                 }
+                FirOp::IntAddCarryIn {
+                    output,
+                    left,
+                    right,
+                    carry,
+                } => {
+                    read(left, &defined)?;
+                    read(right, &defined)?;
+                    read(carry, &defined)?;
+                    let ty = self.values[usize::from(left.0)].ty;
+                    let output_ty = self
+                        .values
+                        .get(usize::from(output.0))
+                        .map(|v| v.ty)
+                        .ok_or_else(|| FslError::at(1, 1, "FIR output id out of range"))?;
+                    let carry_ty = self.values[usize::from(carry.0)].ty;
+                    if ty != self.values[usize::from(right.0)].ty
+                        || ty.sign != IntegerSign::Unsigned
+                        || carry_ty.bits != 1
+                        || carry_ty.sign != IntegerSign::Unsigned
+                        || output_ty.bits != 1
+                        || output_ty.sign != IntegerSign::Unsigned
+                    {
+                        return Err(FslError::at(
+                            1,
+                            1,
+                            "carry-in output requires matching unsigned inputs, u1 carry, and u1 result",
+                        ));
+                    }
+                    Some(output)
+                }
                 FirOp::VmStackPop { output } => Some(output),
                 FirOp::IntAddWrap {
                     output,
@@ -122,6 +164,35 @@ impl CompiledInstruction {
                             1,
                             1,
                             "FIR wrapping add operand and result types differ",
+                        ));
+                    }
+                    Some(output)
+                }
+                FirOp::IntAddWrapCarry {
+                    output,
+                    left,
+                    right,
+                    carry,
+                } => {
+                    read(left, &defined)?;
+                    read(right, &defined)?;
+                    read(carry, &defined)?;
+                    let output_type = self
+                        .values
+                        .get(usize::from(output.0))
+                        .map(|v| v.ty)
+                        .ok_or_else(|| FslError::at(1, 1, "FIR output id is out of range"))?;
+                    let carry_type = self.values[usize::from(carry.0)].ty;
+                    if self.values[usize::from(left.0)].ty != output_type
+                        || self.values[usize::from(right.0)].ty != output_type
+                        || output_type.sign != IntegerSign::Unsigned
+                        || carry_type.bits != 1
+                        || carry_type.sign != IntegerSign::Unsigned
+                    {
+                        return Err(FslError::at(
+                            1,
+                            1,
+                            "carry-in wrapping add requires matching unsigned operands and u1 carry",
                         ));
                     }
                     Some(output)
@@ -182,9 +253,12 @@ impl StackContract {
                 FirOp::VmStackPush { .. } => delta += 1,
                 FirOp::IntAddWrap { .. } => {}
                 FirOp::RegisterRead { .. }
+                | FirOp::FlagRead { .. }
                 | FirOp::RegisterWrite { .. }
                 | FirOp::FlagWrite { .. }
-                | FirOp::IntAddCarry { .. } => unreachable!("state execution rejected"),
+                | FirOp::IntAddCarry { .. }
+                | FirOp::IntAddCarryIn { .. }
+                | FirOp::IntAddWrapCarry { .. } => unreachable!("state execution rejected"),
                 FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             }
             low = low.min(delta);
@@ -231,9 +305,12 @@ pub fn execute_instruction(
     for op in &instruction.ops {
         match *op {
             FirOp::RegisterRead { .. }
+            | FirOp::FlagRead { .. }
             | FirOp::RegisterWrite { .. }
             | FirOp::FlagWrite { .. }
-            | FirOp::IntAddCarry { .. } => unreachable!("state execution rejected"),
+            | FirOp::IntAddCarry { .. }
+            | FirOp::IntAddCarryIn { .. }
+            | FirOp::IntAddWrapCarry { .. } => unreachable!("state execution rejected"),
             FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             FirOp::VmStackPop { output } => {
                 values[usize::from(output.0)] = stack.pop().expect("validated stack contract")

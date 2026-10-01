@@ -6,6 +6,7 @@
 //! and a narrow register/flag state dialect; other GPU semantic bodies remain
 //! explicitly unsupported.
 
+pub mod abi;
 pub mod encoding;
 pub mod jit;
 pub mod output;
@@ -116,6 +117,16 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
                         field: field_id(&field)?,
                     });
                 }
+                parser::Statement::FlagRead {
+                    name,
+                    ty,
+                    slot,
+                    line,
+                    column,
+                } => {
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::FlagRead { output, slot });
+                }
                 parser::Statement::RegisterWrite {
                     field,
                     value,
@@ -152,6 +163,26 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
                         output,
                         left,
                         right,
+                    });
+                }
+                parser::Statement::AddCarryIn {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    carry,
+                    line,
+                    column,
+                } => {
+                    let left = require_value(&values, &value_ids, &left, line, column)?;
+                    let right = require_value(&values, &value_ids, &right, line, column)?;
+                    let carry = require_value(&values, &value_ids, &carry, line, column)?;
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::IntAddCarryIn {
+                        output,
+                        left,
+                        right,
+                        carry,
                     });
                 }
                 parser::Statement::Unsupported => ops.push(FirOp::Unsupported),
@@ -192,6 +223,37 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
                         right: right_id,
                     });
                 }
+                parser::Statement::AddWrapCarry {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    carry,
+                    line,
+                    column,
+                } => {
+                    let left_id = require_value(&values, &value_ids, &left, line, column)?;
+                    let right_id = require_value(&values, &value_ids, &right, line, column)?;
+                    let carry_id = require_value(&values, &value_ids, &carry, line, column)?;
+                    let left_ty = &values[left_id.0 as usize].ty;
+                    let right_ty = &values[right_id.0 as usize].ty;
+                    if left_ty != &ty || right_ty != &ty {
+                        return Err(FslError::at(
+                            line,
+                            column,
+                            format!(
+                                "carry-in add has type {ty}, but operands are {left_ty} and {right_ty}"
+                            ),
+                        ));
+                    }
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::IntAddWrapCarry {
+                        output,
+                        left: left_id,
+                        right: right_id,
+                        carry: carry_id,
+                    });
+                }
                 parser::Statement::StackPush {
                     value,
                     line,
@@ -227,9 +289,15 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         version: if instructions
             .iter()
             .flat_map(|i| &i.ops)
-            .any(FirOp::requires_state_version)
+            .any(FirOp::requires_carry_in_version)
         {
             FSL_PACKAGE_VERSION
+        } else if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(FirOp::requires_state_version)
+        {
+            3
         } else {
             2
         },

@@ -30,7 +30,10 @@ fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
     if !instruction.ops.iter().any(|op| {
         matches!(
             op,
-            FirOp::RegisterRead { .. } | FirOp::RegisterWrite { .. } | FirOp::FlagWrite { .. }
+            FirOp::RegisterRead { .. }
+                | FirOp::FlagRead { .. }
+                | FirOp::RegisterWrite { .. }
+                | FirOp::FlagWrite { .. }
         )
     }) {
         return Err(FslError::at(
@@ -65,7 +68,9 @@ pub fn execute_decoded(
             {
                 return Ok(ExecutionStatus::InvalidState)
             }
-            FirOp::FlagWrite { slot, .. } if usize::from(slot) >= state.flags.len() => {
+            FirOp::FlagRead { slot, .. } | FirOp::FlagWrite { slot, .. }
+                if usize::from(slot) >= state.flags.len() =>
+            {
                 return Ok(ExecutionStatus::InvalidState)
             }
             _ => {}
@@ -76,6 +81,10 @@ pub fn execute_decoded(
         match *op {
             FirOp::RegisterRead { output, field } => {
                 values[usize::from(output.0)] = state.registers[index(field) as usize]
+                    & width_mask(instruction.values[usize::from(output.0)].ty.bits)
+            }
+            FirOp::FlagRead { output, slot } => {
+                values[usize::from(output.0)] = state.flags[usize::from(slot)]
                     & width_mask(instruction.values[usize::from(output.0)].ty.bits)
             }
             FirOp::RegisterWrite { field, value } => {
@@ -102,6 +111,31 @@ pub fn execute_decoded(
                 values[usize::from(output.0)] = ((u128::from(values[usize::from(left.0)])
                     + u128::from(values[usize::from(right.0)]))
                     >> bits) as u64;
+            }
+            FirOp::IntAddCarryIn {
+                output,
+                left,
+                right,
+                carry,
+            } => {
+                let bits = instruction.values[usize::from(left.0)].ty.bits;
+                let sum = u128::from(values[usize::from(left.0)])
+                    + u128::from(values[usize::from(right.0)])
+                    + u128::from(values[usize::from(carry.0)]);
+                values[usize::from(output.0)] = (sum >> bits) as u64;
+            }
+            FirOp::IntAddWrapCarry {
+                output,
+                left,
+                right,
+                carry,
+            } => {
+                let bits = instruction.values[usize::from(output.0)].ty.bits;
+                let mask = width_mask(bits);
+                let sum = u128::from(values[usize::from(left.0)])
+                    + u128::from(values[usize::from(right.0)])
+                    + u128::from(values[usize::from(carry.0)]);
+                values[usize::from(output.0)] = (sum & u128::from(mask)) as u64;
             }
             _ => unreachable!("state contract checked before effects"),
         }
@@ -172,7 +206,7 @@ pub(crate) fn emit_state_instruction(
                     }
                 ))
             }
-            FirOp::FlagWrite { slot, .. } => guard(format!(
+            FirOp::FlagRead { slot, .. } | FirOp::FlagWrite { slot, .. } => guard(format!(
                 "{} <= {slot}",
                 if c { "flag_count" } else { "flags.len()" }
             )),
@@ -203,6 +237,14 @@ pub(crate) fn emit_state_instruction(
                 };
                 Some((output, expression))
             }
+            FirOp::FlagRead { output, slot } => Some((
+                output,
+                if c {
+                    format!("flags[{slot}] & UINT64_C(0x1)")
+                } else {
+                    format!("flags[{slot}] & 0x1u64")
+                },
+            )),
             FirOp::IntAddWrap {
                 output,
                 left,
@@ -241,6 +283,60 @@ pub(crate) fn emit_state_instruction(
                             "u64::from({} > 0x{mask:x}u64 - {})",
                             value(left),
                             value(right)
+                        )
+                    },
+                ))
+            }
+            FirOp::IntAddCarryIn {
+                output,
+                left,
+                right,
+                carry,
+            } => {
+                let mask = width_mask(instruction.values[usize::from(left.0)].ty.bits);
+                let expression = if c {
+                    format!(
+                        "({} > UINT64_C(0x{mask:x}) - {} || ({} != 0 && {} == UINT64_C(0x{mask:x}) - {}))",
+                        value(left),
+                        value(right),
+                        value(carry),
+                        value(left),
+                        value(right)
+                    )
+                } else {
+                    format!(
+                        "u64::from({} > 0x{mask:x}u64 - {} || ({} != 0 && {} == 0x{mask:x}u64 - {}))",
+                        value(left),
+                        value(right),
+                        value(carry),
+                        value(left),
+                        value(right)
+                    )
+                };
+                Some((output, expression))
+            }
+            FirOp::IntAddWrapCarry {
+                output,
+                left,
+                right,
+                carry,
+            } => {
+                let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
+                Some((
+                    output,
+                    if c {
+                        format!(
+                            "({} + {} + {}) & UINT64_C(0x{mask:x})",
+                            value(left),
+                            value(right),
+                            value(carry)
+                        )
+                    } else {
+                        format!(
+                            "{}.wrapping_add({}).wrapping_add({}) & 0x{mask:x}u64",
+                            value(left),
+                            value(right),
+                            value(carry)
                         )
                     },
                 ))

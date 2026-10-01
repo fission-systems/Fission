@@ -33,7 +33,7 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 - Four GFX900 encoding rules, explicit profile selection, raw-field extraction,
   and lossless re-encoding with validated field edits. GPU semantic bodies
   remain explicitly unsupported rather than becoming executable no-ops.
-- Binary package v3 stores register-state FIR operations. Package v2 stores
+- Binary package v4 adds flag reads and carry-input arithmetic; v3 stores register-state FIR operations. Package v2 stores
   encoding plans and existing v1 byte-opcode packages remain readable; packages
   retain their version when serialized.
 
@@ -151,7 +151,44 @@ invalid flag values, and invalid encoded observations preserve the entire state.
 The same test checks v3 package serialization and the `fslc execute-state` CLI.
 
 This is an execution-semantic vertical slice, not GPU hardware evidence. The
-next state work is carry-in (`s_addc_u32`) and a separate EXEC/lane model.
+carry-in (`s_addc_u32`) is now implemented; EXEC/lane state remains the next model.
+
+## Carry input and specification migration
+
+`specs/amdgcn-gfx900-saddc-u32.fsl` reads SCC into an SSA value before
+register/flag writes, adds the sources and carry modulo 32 bits, and writes the
+new SCC. Generic `flag.read`, `uN.add.carry`, and `int.add.carry.in` operations
+also support the admitted 1..64-bit domain. V1/V2/V3 packages remain readable;
+carry-input operations require V4. Existing scalar-add profiles still emit V3.
+
+Local validation covers 1,030 states per width at 1, 8, 16, 32, and 64 bits,
+including six invalid cases per width. C/Rust O0/O2 agree with an independent
+widened-integer oracle in 20,600 comparisons. Only the 32-bit profile is GFX900
+evidence; other widths exercise generic FIR. A separate reference test chains
+`s_add_u32` and `s_addc_u32` for 1,060 64-bit additions.
+
+`specs/ebpf-add64-register.fsl` is the first migrated SLEIGH leaf. It owns the
+little-endian register ADD64 encoding and semantics without loading `.sla`.
+484 synthetic register states and 1,936 C/Rust O0/O2 comparisons passed. The
+SLA reference example separately checks 121 decode/binding/effect shapes:
+
+```sh
+cargo run -p fission-sleigh --example ebpf_add_leaf_oracle
+cargo run -p fission-fsl -- check-abi crates/fission-fsl/specs/ebpf.fslabi
+```
+
+`abi::compile_abi_source` reads FSL-owned ABI metadata: byte sizes, size
+alignments, global spaces, stack pointer, ordered input/output register entries,
+cleanup (including explicit `unknown`), and preserved/clobbered effects.
+The BPF/eBPF `.fslabi` sources preserve all admitted source metadata. Unknown
+properties are rejected. Symbolic registers are not linked yet; parameter
+allocation, ABI execution and binary metadata packaging remain unsupported.
+
+The offline converter and source inventory live in `fission-research/tools/fsl_migrate.py`.
+It currently admits two of 110 cspec files. This is an explicit narrow migration
+subset, with per-file refusals. Full SLEIGH preprocessing, decisions/context,
+macros, dynamic templates and direct SLA-to-FIR lowering remain future work.
+See [state and migration contract](../../docs/research/fsl-state-and-migration.md).
 
 ## Migration goal
 

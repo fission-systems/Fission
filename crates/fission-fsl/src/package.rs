@@ -1,7 +1,9 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 3;
+pub const FSL_PACKAGE_VERSION: u16 = 4;
+const STATE_PACKAGE_VERSION: u16 = 3;
+const CARRY_IN_PACKAGE_VERSION: u16 = 4;
 const MAGIC: &[u8; 8] = b"FSLCPKG\0";
 const MAX_PACKAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STRING_BYTES: usize = 65_535;
@@ -74,6 +76,10 @@ pub enum FirOp {
         output: ValueId,
         field: u16,
     },
+    FlagRead {
+        output: ValueId,
+        slot: u16,
+    },
     RegisterWrite {
         field: u16,
         value: ValueId,
@@ -86,6 +92,18 @@ pub enum FirOp {
         output: ValueId,
         left: ValueId,
         right: ValueId,
+    },
+    IntAddCarryIn {
+        output: ValueId,
+        left: ValueId,
+        right: ValueId,
+        carry: ValueId,
+    },
+    IntAddWrapCarry {
+        output: ValueId,
+        left: ValueId,
+        right: ValueId,
+        carry: ValueId,
     },
     VmStackPop {
         output: ValueId,
@@ -105,9 +123,19 @@ impl FirOp {
         matches!(
             self,
             Self::RegisterRead { .. }
+                | Self::FlagRead { .. }
                 | Self::RegisterWrite { .. }
                 | Self::FlagWrite { .. }
                 | Self::IntAddCarry { .. }
+                | Self::IntAddCarryIn { .. }
+                | Self::IntAddWrapCarry { .. }
+        )
+    }
+
+    pub(crate) fn requires_carry_in_version(&self) -> bool {
+        matches!(
+            self,
+            Self::FlagRead { .. } | Self::IntAddCarryIn { .. } | Self::IntAddWrapCarry { .. }
         )
     }
 }
@@ -135,7 +163,10 @@ pub struct FslcPackage {
 impl FslcPackage {
     /// Validate the package and canonical FIR at every consumer boundary.
     pub fn validate(&self) -> Result<(), FslError> {
-        if !matches!(self.version, 1 | 2 | FSL_PACKAGE_VERSION) {
+        if !matches!(
+            self.version,
+            1 | 2 | STATE_PACKAGE_VERSION | FSL_PACKAGE_VERSION
+        ) {
             return Err(FslError::at(1, 1, "unsupported FSL package version"));
         }
         if self.instructions.is_empty() || self.instructions.len() > MAX_INSTRUCTIONS {
@@ -193,8 +224,22 @@ impl FslcPackage {
                     "version 1 cannot represent encoding plans or unsupported semantics",
                 ));
             }
-            if self.version < 3 && instruction.ops.iter().any(|op| op.requires_state_version()) {
+            if self.version < STATE_PACKAGE_VERSION
+                && instruction.ops.iter().any(|op| op.requires_state_version())
+            {
                 return Err(FslError::at(1, 1, "state FIR requires package version 3"));
+            }
+            if self.version < CARRY_IN_PACKAGE_VERSION
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| op.requires_carry_in_version())
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "carry-input FIR requires package version 4",
+                ));
             }
             for previous in &self.instructions[..index] {
                 let shared = previous.encoding.mask & instruction.encoding.mask;
@@ -299,6 +344,11 @@ impl FslcPackage {
                         writer.u16(output.0);
                         writer.u16(*field);
                     }
+                    FirOp::FlagRead { output, slot } => {
+                        writer.u8(8);
+                        writer.u16(output.0);
+                        writer.u16(*slot);
+                    }
                     FirOp::RegisterWrite { field, value } => {
                         writer.u8(5);
                         writer.u16(*field);
@@ -318,6 +368,30 @@ impl FslcPackage {
                         writer.u16(output.0);
                         writer.u16(left.0);
                         writer.u16(right.0);
+                    }
+                    FirOp::IntAddCarryIn {
+                        output,
+                        left,
+                        right,
+                        carry,
+                    } => {
+                        writer.u8(9);
+                        writer.u16(output.0);
+                        writer.u16(left.0);
+                        writer.u16(right.0);
+                        writer.u16(carry.0);
+                    }
+                    FirOp::IntAddWrapCarry {
+                        output,
+                        left,
+                        right,
+                        carry,
+                    } => {
+                        writer.u8(10);
+                        writer.u16(output.0);
+                        writer.u16(left.0);
+                        writer.u16(right.0);
+                        writer.u16(carry.0);
                     }
                     FirOp::Unsupported => writer.u8(3),
                     FirOp::VmStackPop { output } => {
@@ -356,7 +430,7 @@ impl FslcPackage {
             return Err(FslError::at(1, 1, "invalid FSL package magic"));
         }
         let version = reader.u16()?;
-        if !matches!(version, 1 | 2 | FSL_PACKAGE_VERSION) {
+        if !matches!(version, 1 | 2 | STATE_PACKAGE_VERSION | FSL_PACKAGE_VERSION) {
             return Err(FslError::at(
                 1,
                 1,
@@ -490,6 +564,10 @@ impl FslcPackage {
                         output: reader.value_id(value_count)?,
                         field: reader.u16()?,
                     },
+                    8 if version >= 4 => FirOp::FlagRead {
+                        output: reader.value_id(value_count)?,
+                        slot: reader.u16()?,
+                    },
                     5 if version >= 3 => FirOp::RegisterWrite {
                         field: reader.u16()?,
                         value: reader.value_id(value_count)?,
@@ -502,6 +580,18 @@ impl FslcPackage {
                         output: reader.value_id(value_count)?,
                         left: reader.value_id(value_count)?,
                         right: reader.value_id(value_count)?,
+                    },
+                    9 if version >= 4 => FirOp::IntAddCarryIn {
+                        output: reader.value_id(value_count)?,
+                        left: reader.value_id(value_count)?,
+                        right: reader.value_id(value_count)?,
+                        carry: reader.value_id(value_count)?,
+                    },
+                    10 if version >= 4 => FirOp::IntAddWrapCarry {
+                        output: reader.value_id(value_count)?,
+                        left: reader.value_id(value_count)?,
+                        right: reader.value_id(value_count)?,
+                        carry: reader.value_id(value_count)?,
                     },
                     3 if version >= 2 => FirOp::Unsupported,
                     0 => FirOp::VmStackPop {

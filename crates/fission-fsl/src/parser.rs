@@ -28,6 +28,13 @@ pub(super) enum Statement {
         line: usize,
         column: usize,
     },
+    FlagRead {
+        name: String,
+        ty: ValueType,
+        slot: u16,
+        line: usize,
+        column: usize,
+    },
     RegisterWrite {
         field: String,
         value: String,
@@ -48,6 +55,15 @@ pub(super) enum Statement {
         line: usize,
         column: usize,
     },
+    AddCarryIn {
+        name: String,
+        ty: ValueType,
+        left: String,
+        right: String,
+        carry: String,
+        line: usize,
+        column: usize,
+    },
     Unsupported,
     StackPop {
         name: String,
@@ -60,6 +76,15 @@ pub(super) enum Statement {
         ty: ValueType,
         left: String,
         right: String,
+        line: usize,
+        column: usize,
+    },
+    AddWrapCarry {
+        name: String,
+        ty: ValueType,
+        left: String,
+        right: String,
+        carry: String,
         line: usize,
         column: usize,
     },
@@ -89,6 +114,11 @@ struct Token {
 pub(super) fn parse(source: &str) -> Result<ParsedProfile, FslError> {
     let tokens = Lexer::new(source).tokenize()?;
     Parser { tokens, cursor: 0 }.parse_profile()
+}
+
+pub(super) fn parse_abi(source: &str) -> Result<crate::abi::AbiProfile, FslError> {
+    let tokens = Lexer::new(source).tokenize()?;
+    Parser { tokens, cursor: 0 }.parse_abi_profile()
 }
 
 struct Lexer<'a> {
@@ -305,6 +335,185 @@ struct Parser {
 }
 
 impl Parser {
+    fn abi_integer(&mut self) -> Result<u64, FslError> {
+        self.expect_integer()
+    }
+
+    fn abi_boolean(&mut self) -> Result<bool, FslError> {
+        match self.expect_name()?.as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(self.error_here("expected true or false")),
+        }
+    }
+
+    fn parse_abi_profile(mut self) -> Result<crate::abi::AbiProfile, FslError> {
+        use crate::abi::{AbiConvention, AbiMemoryEffect, AbiProfile, AbiRegisterEntry};
+        use std::collections::BTreeMap;
+        self.expect_ident("abi")?;
+        let name = self.expect_name()?;
+        self.expect_symbol('{')?;
+        let mut evidence = Vec::new();
+        let mut data = BTreeMap::new();
+        let mut size_alignments = BTreeMap::new();
+        let mut global_spaces = Vec::new();
+        let mut stack = None;
+        let mut default_convention = None;
+        let mut conventions = Vec::new();
+        while !self.at_symbol('}') {
+            if self.at_ident("evidence") {
+                evidence.push(self.parse_evidence()?);
+                continue;
+            }
+            let keyword = self.expect_name()?;
+            match keyword.as_str() {
+                "data" => {
+                    let key = self.expect_name()?;
+                    // No opaque properties: these are the admitted data organization primitives.
+                    if !matches!(
+                        key.as_str(),
+                        "absolute_max_alignment"
+                            | "machine_alignment"
+                            | "default_alignment"
+                            | "default_pointer_alignment"
+                            | "pointer_size"
+                            | "wchar_size"
+                            | "short_size"
+                            | "integer_size"
+                            | "long_size"
+                            | "long_long_size"
+                            | "float_size"
+                            | "double_size"
+                            | "long_double_size"
+                    ) {
+                        return Err(self.error_here("unsupported ABI data property"));
+                    }
+                    if data.insert(key, self.abi_integer()?).is_some() {
+                        return Err(self.error_here("duplicate ABI data property"));
+                    }
+                }
+                "alignment" => {
+                    let size = self.abi_integer()?;
+                    let alignment = self.abi_integer()?;
+                    if size_alignments.insert(size, alignment).is_some() {
+                        return Err(self.error_here("duplicate ABI size alignment"));
+                    }
+                }
+                "global_space" => global_spaces.push(self.expect_string()?),
+                "stack_pointer" => {
+                    let register = self.expect_string()?;
+                    let space = self.expect_string()?;
+                    if stack.replace((register, space)).is_some() {
+                        return Err(self.error_here("duplicate ABI stack pointer"));
+                    }
+                }
+                "default_convention" => {
+                    if default_convention.replace(self.expect_string()?).is_some() {
+                        return Err(self.error_here("duplicate ABI default convention"));
+                    }
+                }
+                "convention" => {
+                    let name = self.expect_string()?;
+                    self.expect_symbol('{')?;
+                    let mut extrapop = None;
+                    let mut stackshift = None;
+                    let mut convention = AbiConvention {
+                        name,
+                        extrapop: None,
+                        stackshift: 0,
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
+                        output_killed_by_call: false,
+                        preserved_registers: Vec::new(),
+                        clobbered_registers: Vec::new(),
+                        preserved_memory: Vec::new(),
+                    };
+                    let mut output_killed = None;
+                    while !self.at_symbol('}') {
+                        match self.expect_name()?.as_str() {
+                            "extrapop" => {
+                                let value = if self.at_ident("unknown") {
+                                    self.advance();
+                                    None
+                                } else {
+                                    Some(self.abi_integer()?)
+                                };
+                                if extrapop.replace(value).is_some() {
+                                    return Err(self.error_here("duplicate extrapop"));
+                                }
+                            }
+                            "stackshift" => {
+                                if stackshift.replace(self.abi_integer()?).is_some() {
+                                    return Err(self.error_here("duplicate stackshift"));
+                                }
+                            }
+                            "input_register" => convention.inputs.push(AbiRegisterEntry {
+                                register: self.expect_string()?,
+                                min_bytes: self.abi_integer()?,
+                                max_bytes: self.abi_integer()?,
+                            }),
+                            "output_register" => convention.outputs.push(AbiRegisterEntry {
+                                register: self.expect_string()?,
+                                min_bytes: self.abi_integer()?,
+                                max_bytes: self.abi_integer()?,
+                            }),
+                            "output_killed_by_call" => {
+                                if output_killed.replace(self.abi_boolean()?).is_some() {
+                                    return Err(self.error_here("duplicate output_killed_by_call"));
+                                }
+                            }
+                            "preserved_register" => {
+                                convention.preserved_registers.push(self.expect_string()?)
+                            }
+                            "clobbered_register" => {
+                                convention.clobbered_registers.push(self.expect_string()?)
+                            }
+                            "preserved_memory" => {
+                                convention.preserved_memory.push(AbiMemoryEffect {
+                                    space: self.expect_string()?,
+                                    offset: self.abi_integer()?,
+                                    size_bytes: self.abi_integer()?,
+                                })
+                            }
+                            _ => {
+                                return Err(self.error_here("unsupported ABI convention operation"))
+                            }
+                        }
+                        self.expect_symbol(';')?;
+                    }
+                    self.expect_symbol('}')?;
+                    convention.extrapop =
+                        extrapop.ok_or_else(|| self.error_here("missing extrapop"))?;
+                    convention.stackshift =
+                        stackshift.ok_or_else(|| self.error_here("missing stackshift"))?;
+                    convention.output_killed_by_call = output_killed.unwrap_or(false);
+                    conventions.push(convention);
+                    continue;
+                }
+                _ => return Err(self.error_here("unsupported ABI declaration")),
+            }
+            self.expect_symbol(';')?;
+        }
+        self.expect_symbol('}')?;
+        if self.current().kind != TokenKind::End {
+            return Err(self.error_here("trailing ABI source"));
+        }
+        let (stack_register, stack_space) =
+            stack.ok_or_else(|| self.error_here("missing stack_pointer"))?;
+        Ok(AbiProfile {
+            name,
+            evidence,
+            data,
+            size_alignments,
+            global_spaces,
+            stack_register,
+            stack_space,
+            default_convention: default_convention
+                .ok_or_else(|| self.error_here("missing default_convention"))?,
+            conventions,
+        })
+    }
+
     fn parse_profile(mut self) -> Result<ParsedProfile, FslError> {
         self.expect_ident("language")?;
         let language = self.expect_name()?;
@@ -566,6 +775,16 @@ impl Parser {
                     line: token.line,
                     column: token.column,
                 }
+            } else if operation == "flag.read" {
+                let slot = u16::try_from(self.expect_integer()?)
+                    .map_err(|_| self.error_here("flag slot exceeds u16"))?;
+                Statement::FlagRead {
+                    name,
+                    ty,
+                    slot,
+                    line: token.line,
+                    column: token.column,
+                }
             } else if operation == "int.add.carry" {
                 self.expect_symbol('%')?;
                 let left = self.expect_name()?;
@@ -580,6 +799,24 @@ impl Parser {
                     line: token.line,
                     column: token.column,
                 }
+            } else if operation == "int.add.carry.in" {
+                self.expect_symbol('%')?;
+                let left = self.expect_name()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let right = self.expect_name()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let carry = self.expect_name()?;
+                Statement::AddCarryIn {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    carry,
+                    line: token.line,
+                    column: token.column,
+                }
             } else if operation == format!("{ty_name}.add.wrap") {
                 self.expect_symbol('%')?;
                 let left = self.expect_name()?;
@@ -591,6 +828,24 @@ impl Parser {
                     ty,
                     left,
                     right,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if operation == format!("{ty_name}.add.carry") {
+                self.expect_symbol('%')?;
+                let left = self.expect_name()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let right = self.expect_name()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let carry = self.expect_name()?;
+                Statement::AddWrapCarry {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    carry,
                     line: token.line,
                     column: token.column,
                 }

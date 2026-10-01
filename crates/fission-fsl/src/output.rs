@@ -40,6 +40,16 @@ pub fn emit_instruction(
                     )
                     .unwrap();
                 }
+                FirOp::FlagRead { output, slot } => {
+                    writeln!(
+                        text,
+                        "  %v{}: {} = flag.read {}",
+                        output.0,
+                        instruction.values[usize::from(output.0)].ty,
+                        slot
+                    )
+                    .unwrap();
+                }
                 FirOp::RegisterWrite { field, value } => {
                     writeln!(
                         text,
@@ -61,6 +71,19 @@ pub fn emit_instruction(
                         text,
                         "  %v{}: u1 = int.add.carry %v{}, %v{}",
                         output.0, left.0, right.0
+                    )
+                    .unwrap();
+                }
+                FirOp::IntAddCarryIn {
+                    output,
+                    left,
+                    right,
+                    carry,
+                } => {
+                    writeln!(
+                        text,
+                        "  %v{}: u1 = int.add.carry.in %v{}, %v{}, %v{}",
+                        output.0, left.0, right.0, carry.0
                     )
                     .unwrap();
                 }
@@ -86,6 +109,24 @@ pub fn emit_instruction(
                         instruction.values[usize::from(output.0)].ty,
                         left.0,
                         right.0
+                    )
+                    .unwrap();
+                }
+                FirOp::IntAddWrapCarry {
+                    output,
+                    left,
+                    right,
+                    carry,
+                } => {
+                    writeln!(
+                        text,
+                        "  %v{}: {} = {}.add.carry %v{}, %v{}, %v{}",
+                        output.0,
+                        instruction.values[usize::from(output.0)].ty,
+                        instruction.values[usize::from(output.0)].ty,
+                        left.0,
+                        right.0,
+                        carry.0
                     )
                     .unwrap();
                 }
@@ -216,9 +257,12 @@ pub fn emit_instruction(
             (_, OutputLayer::Fir) => unreachable!(),
             (
                 FirOp::RegisterRead { .. }
+                | FirOp::FlagRead { .. }
                 | FirOp::RegisterWrite { .. }
                 | FirOp::FlagWrite { .. }
-                | FirOp::IntAddCarry { .. },
+                | FirOp::IntAddCarry { .. }
+                | FirOp::IntAddCarryIn { .. }
+                | FirOp::IntAddWrapCarry { .. },
                 _,
             ) => unreachable!("state projection handled above"),
             (FirOp::Unsupported, _) => unreachable!("unsupported execution rejected"),

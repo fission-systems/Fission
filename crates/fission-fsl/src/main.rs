@@ -21,6 +21,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_default();
     match command.as_str() {
+        "check-abi" => {
+            let source_path = required_arg(&mut args, "ABI FSL source path")?;
+            reject_extra_args(args)?;
+            let profile = fission_fsl::abi::compile_abi_source(&fs::read_to_string(source_path)?)?;
+            println!("{profile:#?}");
+        }
         "check" => {
             let source_path = required_arg(&mut args, "source path")?;
             reject_extra_args(args)?;
@@ -325,6 +331,7 @@ fn print_usage() {
     eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust> <output>");
     eprintln!("usage:");
     eprintln!("  fslc check <source.fsl>");
+    eprintln!("  fslc check-abi <source.fslabi>");
     eprintln!("  fslc compile <source.fsl> <output.fslc>");
     eprintln!("  fslc inspect <package.fslc>");
     eprintln!("  fslc decode <package.fslc> <opcode-hex>");
