@@ -2,8 +2,9 @@
 //!
 //! This crate intentionally has no dependency on `fission-sleigh`, `.sla`,
 //! JSON, or P-code. Fixed-width encoding plans support 8/32/64/128-bit words.
-//! Executable FIR currently supports a small typed VM-stack/arithmetic dialect;
-//! the GPU encoding slice retains explicitly unsupported semantic bodies.
+//! Executable FIR currently supports a small typed VM-stack/arithmetic dialect
+//! and a narrow register/flag state dialect; other GPU semantic bodies remain
+//! explicitly unsupported.
 
 pub mod encoding;
 pub mod jit;
