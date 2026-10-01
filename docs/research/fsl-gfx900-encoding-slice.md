@@ -18,7 +18,8 @@ make a pattern unreachable. Overlap checks are deliberately conservative:
 exclusions do not establish disjointness between otherwise overlapping masks.
 One profile still contains at most 256 instructions.
 
-`.fslc` v2 stores these plans in the binary format. V1 packages retain byte-opcode
+`.fslc` v2 stores these plans in the binary format. V3 adds register-state FIR
+operations while retaining the same encoding plan. V1 packages retain byte-opcode
 compatibility and remain readable. All new mask/value integers are 128-bit
 little-endian package fields, independent of the guest instruction byte order.
 This is an experimental format change and Rust API change: `encoding` replaces
@@ -51,6 +52,23 @@ All four semantic bodies are `semantics unsupported;`. This becomes an explicit
 operations; reference execution and executable C/Rust output refuse the body.
 Diagnostic FIR still displays the missing semantic support.
 
+## First executable state slice
+
+[`amdgcn-gfx900-sadd-u32.fsl`](../../crates/fission-fsl/specs/amdgcn-gfx900-sadd-u32.fsl)
+adds one separately scoped GFX900 profile. Its fixed SOP2 encoding admits SGPR
+selectors 0..95 for both sources and the destination, and rejects inline
+constants, special selectors, and literal extensions. The canonical FIR reads
+two `u32` register slots, produces both a low-32-bit wrapped sum and a `u1`
+carry, writes the destination slot, and writes flag slot 0. Profile evidence
+maps that flag slot to SCC from the Vega ISA description; the generic FIR does
+not hard-code the mnemonic or a GPU-specific executor.
+
+The package format is v3 for this body. Native Cranelift lifting remains
+intentionally unsupported for register-state effects; the reference state
+executor and C/Rust projections are the checked execution path. All preconditions
+are checked before state mutation, and invalid state preserves registers and
+flags.
+
 ## Observed local behavior
 
 The compiler built and the following CLI operations completed:
@@ -62,17 +80,21 @@ The compiler built and the following CLI operations completed:
 - Executed the JVM integer contract for `0x7fffffff + 1`, yielding `0x80000000`.
 - Read the previously created v1 JVM package successfully.
 
-These are focused CLI observations, not a complete new regression run, an ISA
-coverage measurement, or GPU hardware execution evidence. Existing instruction
-recompilation tests predate this encoding extension. No GPU equivalence result
-is claimed. The 64/128-bit infrastructure has not yet been exercised against a
-NVIDIA or Intel corpus.
+The register-state regression runs 1,030 inputs through the reference evaluator
+and compares generated C/Rust at O0/O2 for 4,120 process executions. The
+independent oracle uses widened unsigned addition and quotient/remainder to
+derive the result and carry. The test also covers v3 package round-trip, CLI
+execution, aliasing, invalid selectors, short state banks, invalid flags, and
+state preservation on failure. This remains synthetic instruction coverage,
+not GPU hardware or whole-kernel equivalence evidence.
 
 ## Next implementation boundary
 
-Resolve architecture-scoped operand selectors, then add canonical FIR
-register/state effects and an explicit GPU reference-state contract. Start with
-scalar move and integer vector addition under EXEC, preserving inactive lanes.
+Resolve more architecture-scoped operand selectors, then add carry-in
+arithmetic (`s_addc_u32`) and an explicit GPU EXEC/lane reference-state contract.
+Start scalar move and integer vector addition under EXEC only after preserving
+inactive lanes is represented in FIR. The current state executor has no wave or
+lane model.
 Wave termination and workgroup synchronization need distinct contracts; a
 barrier cannot be implemented as ordinary sequential host arithmetic. Conditional
 extension lengths and split fields are still required before broad ISA decoding.

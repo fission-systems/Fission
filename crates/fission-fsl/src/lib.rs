@@ -11,6 +11,8 @@ pub mod output;
 pub mod package;
 mod parser;
 pub mod semantics;
+mod state;
+pub use state::{execute_decoded, MachineState};
 
 pub use encoding::{BitField, DecodedInstruction, Encoding};
 pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
@@ -83,8 +85,74 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         let mut values = Vec::<ValueDef>::new();
         let mut value_ids = HashMap::<String, ValueId>::new();
         let mut ops = Vec::<FirOp>::new();
+        let field_id = |name: &str| -> Result<u16, FslError> {
+            instruction
+                .encoding
+                .fields
+                .iter()
+                .position(|f| f.name == name)
+                .map(|i| i as u16)
+                .ok_or_else(|| {
+                    FslError::at(
+                        instruction.line,
+                        instruction.column,
+                        format!("unknown register index field {name}"),
+                    )
+                })
+        };
         for statement in instruction.statements {
             match statement {
+                parser::Statement::RegisterRead {
+                    name,
+                    ty,
+                    field,
+                    line,
+                    column,
+                } => {
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::RegisterRead {
+                        output,
+                        field: field_id(&field)?,
+                    });
+                }
+                parser::Statement::RegisterWrite {
+                    field,
+                    value,
+                    line,
+                    column,
+                } => {
+                    let value = require_value(&values, &value_ids, &value, line, column)?;
+                    ops.push(FirOp::RegisterWrite {
+                        field: field_id(&field)?,
+                        value,
+                    });
+                }
+                parser::Statement::FlagWrite {
+                    slot,
+                    value,
+                    line,
+                    column,
+                } => {
+                    let value = require_value(&values, &value_ids, &value, line, column)?;
+                    ops.push(FirOp::FlagWrite { slot, value });
+                }
+                parser::Statement::AddCarry {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    line,
+                    column,
+                } => {
+                    let left = require_value(&values, &value_ids, &left, line, column)?;
+                    let right = require_value(&values, &value_ids, &right, line, column)?;
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::IntAddCarry {
+                        output,
+                        left,
+                        right,
+                    });
+                }
                 parser::Statement::Unsupported => ops.push(FirOp::Unsupported),
                 parser::Statement::StackPop {
                     name,
@@ -155,7 +223,15 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
     }
 
     let package = FslcPackage {
-        version: FSL_PACKAGE_VERSION,
+        version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(FirOp::requires_state_version)
+        {
+            FSL_PACKAGE_VERSION
+        } else {
+            2
+        },
         language: parsed.language,
         byte_order: parsed.byte_order,
         address_unit: parsed.address_unit,

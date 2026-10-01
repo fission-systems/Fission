@@ -3,8 +3,8 @@ use std::fs;
 use std::process::ExitCode;
 
 use fission_fsl::{
-    compile_source, emit_aot_object, emit_instruction, execute_instruction, FslcPackage,
-    JitDecoder, OutputLayer,
+    compile_source, emit_aot_object, emit_instruction, execute_decoded, execute_instruction,
+    FslcPackage, JitDecoder, MachineState, OutputLayer,
 };
 
 fn main() -> ExitCode {
@@ -71,6 +71,49 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "{}",
                 emit_instruction(instruction, OutputLayer::Fir, "fsl_execute")?
             );
+        }
+        "execute-state" | "emit-bytes" => {
+            let path = required_arg(&mut args, "compiled .fslc path")?;
+            let language = required_arg(&mut args, "exact input profile")?;
+            let bytes = parse_bytes(&required_arg(&mut args, "instruction bytes in hex")?)?;
+            let package = load_package(&path)?;
+            let decoded = package
+                .decode_bytes(&language, &bytes)?
+                .ok_or("unsupported encoding")?;
+            if bytes.len() != decoded.raw.len() {
+                return Err("one instruction required; trailing bytes rejected".into());
+            }
+            if command == "execute-state" {
+                let registers = parse_words(&required_arg(
+                    &mut args,
+                    "comma-separated register bit vectors",
+                )?)?;
+                let flags = parse_words(&required_arg(&mut args, "comma-separated flag values")?)?;
+                reject_extra_args(args)?;
+                let mut state = MachineState { registers, flags };
+                let status = execute_decoded(&package, &decoded, &mut state)?;
+                println!(
+                    "status={status:?} registers={:?} flags={:?}",
+                    state.registers, state.flags
+                );
+            } else {
+                let layer = match required_arg(&mut args, "output layer")?.as_str() {
+                    "fir" => OutputLayer::Fir,
+                    "c" => OutputLayer::C,
+                    "rust" => OutputLayer::Rust,
+                    _ => return Err("expected fir, c or rust".into()),
+                };
+                let output = required_arg(&mut args, "output path")?;
+                reject_extra_args(args)?;
+                fs::write(
+                    output,
+                    emit_instruction(
+                        &package.instructions[decoded.instruction_index],
+                        layer,
+                        "fsl_execute",
+                    )?,
+                )?;
+            }
         }
         "decode-bytes" => {
             let path = required_arg(&mut args, "compiled .fslc path")?;
@@ -279,6 +322,7 @@ fn reject_extra_args(
 }
 
 fn print_usage() {
+    eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust> <output>");
     eprintln!("usage:");
     eprintln!("  fslc check <source.fsl>");
     eprintln!("  fslc compile <source.fsl> <output.fslc>");
@@ -290,4 +334,19 @@ fn print_usage() {
     eprintln!("  fslc aot-object <package.fslc> <output.o>");
     eprintln!("  fslc emit <package.fslc> <opcode-hex> <fir|c|rust> <output>");
     eprintln!("  fslc execute <package.fslc> <opcode-hex> <capacity> [stack bits...]");
+}
+
+fn parse_words(text: &str) -> Result<Vec<u64>, Box<dyn std::error::Error>> {
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    text.split(',')
+        .map(|value| {
+            Ok(if let Some(hex) = value.strip_prefix("0x") {
+                u64::from_str_radix(hex, 16)?
+            } else {
+                value.parse()?
+            })
+        })
+        .collect()
 }

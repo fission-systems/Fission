@@ -23,13 +23,19 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 - A reference instruction evaluator and compilable C11/Rust execution outputs
   directly from that FIR. These update guest stack state, and the recompilation
   gate builds and runs both languages at optimization levels 0 and 2.
+- Generic register-state FIR effects: register reads/writes, one-bit flag
+  writes, and unsigned add-carry. The first executable GPU slice maps GFX900
+  SGPR selector fields to register slots and flag slot 0 to SCC. Its reference
+  evaluator and C/Rust projections are covered by an independent widened-sum
+  oracle; native Cranelift lifting still rejects state effects.
 - Shared SSA/type validation at source, package, native-lifting, and output
   boundaries. Unsupported execution widths/effects produce errors.
 - Four GFX900 encoding rules, explicit profile selection, raw-field extraction,
   and lossless re-encoding with validated field edits. GPU semantic bodies
   remain explicitly unsupported rather than becoming executable no-ops.
-- Binary package v2 stores encoding plans; existing v1 byte-opcode packages
-  remain readable and retain their version when serialized.
+- Binary package v3 stores register-state FIR operations. Package v2 stores
+  encoding plans and existing v1 byte-opcode packages remain readable; packages
+  retain their version when serialized.
 
 The JVM `iadd` fixture is the first end-to-end example. CPU register and memory
 semantics, GPU masks and synchronization, JVM method/class behavior, variable
@@ -53,6 +59,25 @@ cargo run -p fission-fsl -- execute /tmp/jvm-se26-iadd.fslc 0x60 4 0x7fffffff 1
 cc -std=c11 -O2 -c /tmp/fsl_iadd.c -o /tmp/fsl_iadd_c.o
 rustc --edition=2021 --crate-type lib -C opt-level=2 --emit=obj /tmp/fsl_iadd.rs -o /tmp/fsl_iadd_rust.o
 ```
+
+The first register-state path can be exercised directly:
+
+```sh
+cargo run -p fission-fsl -- compile \
+  crates/fission-fsl/specs/amdgcn-gfx900-sadd-u32.fsl /tmp/gfx900-sadd-u32.fslc
+cargo run -p fission-fsl -- decode-bytes /tmp/gfx900-sadd-u32.fslc \
+  amdgcn.gfx900.sadd_u32 00010280
+cargo run -p fission-fsl -- execute-state /tmp/gfx900-sadd-u32.fslc \
+  amdgcn.gfx900.sadd_u32 00010280 0xffffffff,1,123 0
+cargo run -p fission-fsl -- emit-bytes /tmp/gfx900-sadd-u32.fslc \
+  amdgcn.gfx900.sadd_u32 00010280 c /tmp/fsl_sadd.c
+```
+
+The execution writes `0` to SGPR2 and `1` to SCC. The state executor validates
+the decoded observation and all array/flag preconditions before any mutation.
+This is one fixed-width GFX900 instruction with SGPR 0..95 only; it does not
+model inline constants, special registers, literals, wave execution, or a
+kernel.
 
 The JIT command compiles a host-native decoder/lifter and prints the FIR
 records produced for opcode `0x60`. The AOT command emits a host-native object
@@ -106,6 +131,27 @@ JIT/AOT decoder remains restricted to exact byte opcodes with supported FIR;
 GPU decoding currently uses the portable encoding plan. Re-encoding preserves
 the original unedited bits; it is not executable GPU recompilation. See the
 [slice report](../../docs/research/fsl-gfx900-encoding-slice.md).
+
+## GFX900 `s_add_u32` state slice
+
+[`amdgcn-gfx900-sadd-u32.fsl`](specs/amdgcn-gfx900-sadd-u32.fsl) is the first
+GPU instruction with executable FIR state effects. It uses one canonical body:
+
+```text
+register.read source0/source1 → u32.add.wrap + u1 int.add.carry
+register.write destination      flag.write 0 (SCC)
+```
+
+`cargo nextest run -p fission-fsl` covers 1,030 state inputs, including SGPR
+aliasing and carry boundaries, then compares the reference evaluator with C and
+Rust output at O0 and O2 (4,120 process comparisons). The expected state comes
+from widened unsigned addition and quotient/remainder arithmetic, independent
+of the FIR carry operation. Invalid selectors, short register/flag banks,
+invalid flag values, and invalid encoded observations preserve the entire state.
+The same test checks v3 package serialization and the `fslc execute-state` CLI.
+
+This is an execution-semantic vertical slice, not GPU hardware evidence. The
+next state work is carry-in (`s_addc_u32`) and a separate EXEC/lane model.
 
 ## Migration goal
 

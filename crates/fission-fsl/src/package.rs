@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 2;
+pub const FSL_PACKAGE_VERSION: u16 = 3;
 const MAGIC: &[u8; 8] = b"FSLCPKG\0";
 const MAX_PACKAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STRING_BYTES: usize = 65_535;
@@ -70,6 +70,23 @@ pub struct Evidence {
 pub enum FirOp {
     /// Semantic support is absent; this is never an executable no-op.
     Unsupported,
+    RegisterRead {
+        output: ValueId,
+        field: u16,
+    },
+    RegisterWrite {
+        field: u16,
+        value: ValueId,
+    },
+    FlagWrite {
+        slot: u16,
+        value: ValueId,
+    },
+    IntAddCarry {
+        output: ValueId,
+        left: ValueId,
+        right: ValueId,
+    },
     VmStackPop {
         output: ValueId,
     },
@@ -81,6 +98,18 @@ pub enum FirOp {
     VmStackPush {
         value: ValueId,
     },
+}
+
+impl FirOp {
+    pub(crate) fn requires_state_version(&self) -> bool {
+        matches!(
+            self,
+            Self::RegisterRead { .. }
+                | Self::RegisterWrite { .. }
+                | Self::FlagWrite { .. }
+                | Self::IntAddCarry { .. }
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +135,7 @@ pub struct FslcPackage {
 impl FslcPackage {
     /// Validate the package and canonical FIR at every consumer boundary.
     pub fn validate(&self) -> Result<(), FslError> {
-        if !matches!(self.version, 1 | FSL_PACKAGE_VERSION) {
+        if !matches!(self.version, 1 | 2 | FSL_PACKAGE_VERSION) {
             return Err(FslError::at(1, 1, "unsupported FSL package version"));
         }
         if self.instructions.is_empty() || self.instructions.len() > MAX_INSTRUCTIONS {
@@ -163,6 +192,9 @@ impl FslcPackage {
                     1,
                     "version 1 cannot represent encoding plans or unsupported semantics",
                 ));
+            }
+            if self.version < 3 && instruction.ops.iter().any(|op| op.requires_state_version()) {
+                return Err(FslError::at(1, 1, "state FIR requires package version 3"));
             }
             for previous in &self.instructions[..index] {
                 let shared = previous.encoding.mask & instruction.encoding.mask;
@@ -262,6 +294,31 @@ impl FslcPackage {
             writer.u16(count_u16(instruction.ops.len(), "FIR operations")?);
             for op in &instruction.ops {
                 match op {
+                    FirOp::RegisterRead { output, field } => {
+                        writer.u8(4);
+                        writer.u16(output.0);
+                        writer.u16(*field);
+                    }
+                    FirOp::RegisterWrite { field, value } => {
+                        writer.u8(5);
+                        writer.u16(*field);
+                        writer.u16(value.0);
+                    }
+                    FirOp::FlagWrite { slot, value } => {
+                        writer.u8(6);
+                        writer.u16(*slot);
+                        writer.u16(value.0);
+                    }
+                    FirOp::IntAddCarry {
+                        output,
+                        left,
+                        right,
+                    } => {
+                        writer.u8(7);
+                        writer.u16(output.0);
+                        writer.u16(left.0);
+                        writer.u16(right.0);
+                    }
                     FirOp::Unsupported => writer.u8(3),
                     FirOp::VmStackPop { output } => {
                         writer.u8(0);
@@ -299,7 +356,7 @@ impl FslcPackage {
             return Err(FslError::at(1, 1, "invalid FSL package magic"));
         }
         let version = reader.u16()?;
-        if !matches!(version, 1 | FSL_PACKAGE_VERSION) {
+        if !matches!(version, 1 | 2 | FSL_PACKAGE_VERSION) {
             return Err(FslError::at(
                 1,
                 1,
@@ -429,6 +486,23 @@ impl FslcPackage {
             let mut ops = Vec::with_capacity(op_count);
             for _ in 0..op_count {
                 let op = match reader.u8()? {
+                    4 if version >= 3 => FirOp::RegisterRead {
+                        output: reader.value_id(value_count)?,
+                        field: reader.u16()?,
+                    },
+                    5 if version >= 3 => FirOp::RegisterWrite {
+                        field: reader.u16()?,
+                        value: reader.value_id(value_count)?,
+                    },
+                    6 if version >= 3 => FirOp::FlagWrite {
+                        slot: reader.u16()?,
+                        value: reader.value_id(value_count)?,
+                    },
+                    7 if version >= 3 => FirOp::IntAddCarry {
+                        output: reader.value_id(value_count)?,
+                        left: reader.value_id(value_count)?,
+                        right: reader.value_id(value_count)?,
+                    },
                     3 if version >= 2 => FirOp::Unsupported,
                     0 => FirOp::VmStackPop {
                         output: reader.value_id(value_count)?,

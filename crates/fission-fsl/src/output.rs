@@ -30,6 +30,40 @@ pub fn emit_instruction(
         );
         for op in &instruction.ops {
             match *op {
+                FirOp::RegisterRead { output, field } => {
+                    writeln!(
+                        text,
+                        "  %v{}: {} = register.read {}",
+                        output.0,
+                        instruction.values[usize::from(output.0)].ty,
+                        instruction.encoding.fields[usize::from(field)].name
+                    )
+                    .unwrap();
+                }
+                FirOp::RegisterWrite { field, value } => {
+                    writeln!(
+                        text,
+                        "  register.write {}, %v{}",
+                        instruction.encoding.fields[usize::from(field)].name,
+                        value.0
+                    )
+                    .unwrap();
+                }
+                FirOp::FlagWrite { slot, value } => {
+                    writeln!(text, "  flag.write {slot}, %v{}", value.0).unwrap();
+                }
+                FirOp::IntAddCarry {
+                    output,
+                    left,
+                    right,
+                } => {
+                    writeln!(
+                        text,
+                        "  %v{}: u1 = int.add.carry %v{}, %v{}",
+                        output.0, left.0, right.0
+                    )
+                    .unwrap();
+                }
                 FirOp::Unsupported => text.push_str("  unsupported semantics\n"),
                 FirOp::VmStackPop { output } => {
                     writeln!(
@@ -72,6 +106,9 @@ pub fn emit_instruction(
             1,
             "output symbol must be an ASCII identifier starting with fsl_",
         ));
+    }
+    if instruction.ops.iter().any(FirOp::requires_state_version) {
+        return crate::state::emit_state_instruction(instruction, layer, symbol);
     }
     let contract = StackContract::for_instruction(instruction)?;
     let mut text = match layer {
@@ -177,6 +214,13 @@ pub fn emit_instruction(
                 writeln!(text, "    stack[sp] = _v{};\n    sp += 1;", value.0).unwrap();
             }
             (_, OutputLayer::Fir) => unreachable!(),
+            (
+                FirOp::RegisterRead { .. }
+                | FirOp::RegisterWrite { .. }
+                | FirOp::FlagWrite { .. }
+                | FirOp::IntAddCarry { .. },
+                _,
+            ) => unreachable!("state projection handled above"),
             (FirOp::Unsupported, _) => unreachable!("unsupported execution rejected"),
         }
     }

@@ -21,6 +21,33 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    RegisterRead {
+        name: String,
+        ty: ValueType,
+        field: String,
+        line: usize,
+        column: usize,
+    },
+    RegisterWrite {
+        field: String,
+        value: String,
+        line: usize,
+        column: usize,
+    },
+    FlagWrite {
+        slot: u16,
+        value: String,
+        line: usize,
+        column: usize,
+    },
+    AddCarry {
+        name: String,
+        ty: ValueType,
+        left: String,
+        right: String,
+        line: usize,
+        column: usize,
+    },
     Unsupported,
     StackPop {
         name: String,
@@ -531,6 +558,28 @@ impl Parser {
                     line: token.line,
                     column: token.column,
                 }
+            } else if operation == "register.read" {
+                Statement::RegisterRead {
+                    name,
+                    ty,
+                    field: self.expect_name()?,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if operation == "int.add.carry" {
+                self.expect_symbol('%')?;
+                let left = self.expect_name()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let right = self.expect_name()?;
+                Statement::AddCarry {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    line: token.line,
+                    column: token.column,
+                }
             } else if operation == format!("{ty_name}.add.wrap") {
                 self.expect_symbol('%')?;
                 let left = self.expect_name()?;
@@ -554,6 +603,33 @@ impl Parser {
             };
             self.expect_symbol(';')?;
             Ok(statement)
+        } else if self.at_ident("register.write") {
+            self.advance();
+            let field = self.expect_name()?;
+            self.expect_symbol(',')?;
+            self.expect_symbol('%')?;
+            let value = self.expect_name()?;
+            self.expect_symbol(';')?;
+            Ok(Statement::RegisterWrite {
+                field,
+                value,
+                line: token.line,
+                column: token.column,
+            })
+        } else if self.at_ident("flag.write") {
+            self.advance();
+            let slot = u16::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("flag slot exceeds u16"))?;
+            self.expect_symbol(',')?;
+            self.expect_symbol('%')?;
+            let value = self.expect_name()?;
+            self.expect_symbol(';')?;
+            Ok(Statement::FlagWrite {
+                slot,
+                value,
+                line: token.line,
+                column: token.column,
+            })
         } else if self.at_ident("stack.push") {
             self.advance();
             self.expect_symbol('%')?;

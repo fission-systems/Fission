@@ -345,6 +345,16 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         ..NativeFirOp::default()
     };
     Ok(match op {
+        FirOp::RegisterRead { .. }
+        | FirOp::RegisterWrite { .. }
+        | FirOp::FlagWrite { .. }
+        | FirOp::IntAddCarry { .. } => {
+            return Err(FslError::at(
+                1,
+                1,
+                "state FIR is unsupported by native lift records",
+            ))
+        }
         FirOp::Unsupported => return Err(FslError::at(1, 1, "unsupported native FIR semantics")),
         FirOp::VmStackPop { output } => {
             let mut record = encode_type(get_value(*output)?);

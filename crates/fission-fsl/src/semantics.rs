@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::{CompiledInstruction, FirOp, FslError, ValueId};
+use crate::{CompiledInstruction, FirOp, FslError, IntegerSign, ValueId};
 
 impl CompiledInstruction {
     /// Validate SSA definitions, operand order, widths, and arithmetic types.
@@ -55,6 +55,53 @@ impl CompiledInstruction {
         for op in &self.ops {
             let output = match *op {
                 FirOp::Unsupported => unreachable!("unsupported body handled above"),
+                FirOp::RegisterRead { output, field } => {
+                    if usize::from(field) >= self.encoding.fields.len() {
+                        return Err(FslError::at(1, 1, "register index field out of range"));
+                    }
+                    Some(output)
+                }
+                FirOp::RegisterWrite { field, value } => {
+                    read(value, &defined)?;
+                    if usize::from(field) >= self.encoding.fields.len() {
+                        return Err(FslError::at(1, 1, "register index field out of range"));
+                    }
+                    None
+                }
+                FirOp::FlagWrite { value, .. } => {
+                    read(value, &defined)?;
+                    let ty = self.values[usize::from(value.0)].ty;
+                    if ty.bits != 1 || ty.sign != IntegerSign::Unsigned {
+                        return Err(FslError::at(1, 1, "flag writes require u1"));
+                    }
+                    None
+                }
+                FirOp::IntAddCarry {
+                    output,
+                    left,
+                    right,
+                } => {
+                    read(left, &defined)?;
+                    read(right, &defined)?;
+                    let ty = self.values[usize::from(left.0)].ty;
+                    let output_ty = self
+                        .values
+                        .get(usize::from(output.0))
+                        .map(|v| v.ty)
+                        .ok_or_else(|| FslError::at(1, 1, "FIR output id out of range"))?;
+                    if ty != self.values[usize::from(right.0)].ty
+                        || ty.sign != IntegerSign::Unsigned
+                        || output_ty.bits != 1
+                        || output_ty.sign != IntegerSign::Unsigned
+                    {
+                        return Err(FslError::at(
+                            1,
+                            1,
+                            "unsigned carry requires matching unsigned inputs and u1 result",
+                        ));
+                    }
+                    Some(output)
+                }
                 FirOp::VmStackPop { output } => Some(output),
                 FirOp::IntAddWrap {
                     output,
@@ -119,6 +166,13 @@ impl StackContract {
         if instruction.values.iter().any(|value| value.ty.bits > 64) {
             return Err(FslError::at(1, 1, "execution output supports integer widths 1..=64; wider FIR is preserved but unsupported here"));
         }
+        if instruction.ops.iter().any(FirOp::requires_state_version) {
+            return Err(FslError::at(
+                1,
+                1,
+                "state effects require the register-state executor",
+            ));
+        }
         let mut delta = 0i64;
         let mut low = 0i64;
         let mut high = 0i64;
@@ -127,6 +181,10 @@ impl StackContract {
                 FirOp::VmStackPop { .. } => delta -= 1,
                 FirOp::VmStackPush { .. } => delta += 1,
                 FirOp::IntAddWrap { .. } => {}
+                FirOp::RegisterRead { .. }
+                | FirOp::RegisterWrite { .. }
+                | FirOp::FlagWrite { .. }
+                | FirOp::IntAddCarry { .. } => unreachable!("state execution rejected"),
                 FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             }
             low = low.min(delta);
@@ -172,6 +230,10 @@ pub fn execute_instruction(
     let mut values = vec![0u64; instruction.values.len()];
     for op in &instruction.ops {
         match *op {
+            FirOp::RegisterRead { .. }
+            | FirOp::RegisterWrite { .. }
+            | FirOp::FlagWrite { .. }
+            | FirOp::IntAddCarry { .. } => unreachable!("state execution rejected"),
             FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             FirOp::VmStackPop { output } => {
                 values[usize::from(output.0)] = stack.pop().expect("validated stack contract")
