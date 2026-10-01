@@ -6,6 +6,13 @@ current JVM `iadd` slice implements only a small part of this design
 
 ## Summary
 
+The accepted experimental direction uses **one canonical FIR**, with no
+separate NIR/HIR semantic models. Correctness and behavioral recompilation are
+the primary objectives. Multiple output layers consume the same FIR and its
+evidence-backed analysis facts. Existing decompiler architecture may be replaced
+as the corresponding FIR-native behavior passes its coverage gates. See
+[ADR 0015](../adr/0015-fsl-single-fir-recompilation.md).
+
 FSL should be a human-authored, typed language for instruction encodings,
 decode constraints, display, and semantic effects. FIR should be the typed
 semantic model produced from those specifications. Neither the source language
@@ -38,6 +45,15 @@ package and a versioned binary `.fslc`; Cranelift JIT and AOT paths compile the
 same decoder/lifter to emit native FIR records or a host relocatable object. It
 has no dependency on `fission-sleigh`, `.sla`, JSON, or P-code. This proves an
 implementation boundary, not broad parity or a speedup.
+
+The same instruction FIR now also has a reference evaluator and compilable C
+and Rust execution outputs. The recompilation gate compiles those outputs at
+two optimization levels and compares active stack/state behavior and failures.
+This differs from the native decoder/lifter path: generated execution code
+updates guest stack state, while the decoder/lifter emits FIR records. Current
+execution support is limited to bit-vector stack operations and wrapping
+integer addition of widths 1..=64. Wider FIR is preserved but rejected by these
+execution outputs. No instruction-contract test is a whole-program quality claim.
 The current [template evaluator](../../crates/fission-sleigh/src/runtime/spine/compiled_table/template_eval.rs)
 remains a comparison baseline while migration proceeds.
 

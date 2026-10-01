@@ -66,7 +66,7 @@ pub struct Evidence {
     pub claim: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirOp {
     VmStackPop {
         output: ValueId,
@@ -102,11 +102,70 @@ pub struct FslcPackage {
 }
 
 impl FslcPackage {
+    /// Validate the package and canonical FIR at every consumer boundary.
+    pub fn validate(&self) -> Result<(), FslError> {
+        if self.version != FSL_PACKAGE_VERSION {
+            return Err(FslError::at(1, 1, "unsupported FSL package version"));
+        }
+        if self.instructions.is_empty() || self.instructions.len() > MAX_INSTRUCTIONS {
+            return Err(FslError::at(1, 1, "invalid instruction count"));
+        }
+        let check_string = |value: &str| -> Result<(), FslError> {
+            if value.is_empty() || value.len() > MAX_STRING_BYTES {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "package metadata must be nonempty and fit the string format",
+                ));
+            }
+            Ok(())
+        };
+        check_string(&self.language)?;
+        let mut dispatch = [None; 256];
+        let mut names = std::collections::HashSet::new();
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            check_string(&instruction.name)?;
+            check_string(&instruction.mnemonic)?;
+            if !names.insert(&instruction.name) || dispatch[instruction.opcode as usize].is_some() {
+                return Err(FslError::at(1, 1, "duplicate instruction name or opcode"));
+            }
+            if instruction.evidence.is_empty()
+                || instruction.evidence.len() > MAX_EVIDENCE_PER_INSTRUCTION
+            {
+                return Err(FslError::at(1, 1, "invalid evidence count"));
+            }
+            for evidence in &instruction.evidence {
+                for field in [
+                    &evidence.source_id,
+                    &evidence.url,
+                    &evidence.revision,
+                    &evidence.claim,
+                ] {
+                    check_string(field)?;
+                }
+            }
+            instruction.validate()?;
+            for value in &instruction.values {
+                check_string(&value.name)?;
+            }
+            dispatch[instruction.opcode as usize] = Some(index as u16);
+        }
+        if self.dispatch != dispatch {
+            return Err(FslError::at(
+                1,
+                1,
+                "FSL dispatch does not match instruction definitions",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn instruction_for_opcode(&self, opcode: u8) -> Option<&CompiledInstruction> {
         self.dispatch[opcode as usize].and_then(|index| self.instructions.get(index as usize))
     }
 
     pub fn encode_binary(&self) -> Result<Vec<u8>, FslError> {
+        self.validate()?;
         let mut writer = Writer::default();
         writer.bytes.extend_from_slice(MAGIC);
         writer.u16(self.version);
@@ -313,14 +372,16 @@ impl FslcPackage {
         if reader.cursor != bytes.len() {
             return Err(FslError::at(1, 1, "trailing bytes after FSL package"));
         }
-        Ok(Self {
+        let package = Self {
             version,
             language,
             byte_order,
             address_unit,
             instructions,
             dispatch,
-        })
+        };
+        package.validate()?;
+        Ok(package)
     }
 }
 

@@ -2,7 +2,10 @@ use std::env;
 use std::fs;
 use std::process::ExitCode;
 
-use fission_fsl::{compile_source, emit_aot_object, FirOp, FslcPackage, JitDecoder};
+use fission_fsl::{
+    compile_source, emit_aot_object, emit_instruction, execute_instruction, FslcPackage,
+    JitDecoder, OutputLayer,
+};
 
 fn main() -> ExitCode {
     match run() {
@@ -64,35 +67,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let instruction = package
                 .instruction_for_opcode(opcode)
                 .ok_or_else(|| format!("no instruction for opcode 0x{opcode:02x}"))?;
-            println!(
-                "{}  opcode=0x{:02x}  mnemonic={}",
-                instruction.name, opcode, instruction.mnemonic
+            print!(
+                "{}",
+                emit_instruction(instruction, OutputLayer::Fir, "fsl_execute")?
             );
-            for op in &instruction.ops {
-                match op {
-                    FirOp::VmStackPop { output } => {
-                        let value = &instruction.values[output.0 as usize];
-                        println!("  %{:<8} : {} = vm.stack.pop", value.name, value.ty);
-                    }
-                    FirOp::IntAddWrap {
-                        output,
-                        left,
-                        right,
-                    } => {
-                        let output = &instruction.values[output.0 as usize];
-                        let left = &instruction.values[left.0 as usize];
-                        let right = &instruction.values[right.0 as usize];
-                        println!(
-                            "  %{:<8} : {} = int.add.wrap %{}, %{}",
-                            output.name, output.ty, left.name, right.name
-                        );
-                    }
-                    FirOp::VmStackPush { value } => {
-                        let value = &instruction.values[value.0 as usize];
-                        println!("  vm.stack.push %{}", value.name);
-                    }
-                }
-            }
         }
         "jit-decode" => {
             let package_path = required_arg(&mut args, "compiled .fslc path")?;
@@ -122,6 +100,47 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     op.bits
                 );
             }
+        }
+        "emit" => {
+            let package_path = required_arg(&mut args, "compiled .fslc path")?;
+            let byte = required_arg(&mut args, "opcode byte")?;
+            let layer = match required_arg(&mut args, "output layer (fir, c, rust)")?.as_str() {
+                "fir" => OutputLayer::Fir,
+                "c" => OutputLayer::C,
+                "rust" => OutputLayer::Rust,
+                layer => return Err(format!("unsupported output layer {layer:?}").into()),
+            };
+            let output_path = required_arg(&mut args, "output path")?;
+            reject_extra_args(args)?;
+            let package = load_package(&package_path)?;
+            let opcode = parse_byte(&byte)?;
+            let instruction = package
+                .instruction_for_opcode(opcode)
+                .ok_or_else(|| format!("no instruction for opcode 0x{opcode:02x}"))?;
+            fs::write(
+                output_path,
+                emit_instruction(instruction, layer, "fsl_execute")?,
+            )?;
+        }
+        "execute" => {
+            let package_path = required_arg(&mut args, "compiled .fslc path")?;
+            let opcode = parse_byte(&required_arg(&mut args, "opcode byte")?)?;
+            let capacity = required_arg(&mut args, "stack capacity")?.parse::<usize>()?;
+            let mut stack = args
+                .map(|value| {
+                    if let Some(value) = value.strip_prefix("0x") {
+                        u64::from_str_radix(value, 16)
+                    } else {
+                        value.parse::<u64>()
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let package = load_package(&package_path)?;
+            let instruction = package
+                .instruction_for_opcode(opcode)
+                .ok_or_else(|| format!("no instruction for opcode 0x{opcode:02x}"))?;
+            let status = execute_instruction(instruction, &mut stack, capacity)?;
+            println!("status={status:?} stack={stack:?}");
         }
         "aot-object" => {
             let package_path = required_arg(&mut args, "compiled .fslc path")?;
@@ -199,4 +218,6 @@ fn print_usage() {
     eprintln!("  fslc decode <package.fslc> <opcode-hex>");
     eprintln!("  fslc jit-decode <package.fslc> <opcode-hex>");
     eprintln!("  fslc aot-object <package.fslc> <output.o>");
+    eprintln!("  fslc emit <package.fslc> <opcode-hex> <fir|c|rust> <output>");
+    eprintln!("  fslc execute <package.fslc> <opcode-hex> <capacity> [stack bits...]");
 }

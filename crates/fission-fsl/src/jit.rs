@@ -171,6 +171,7 @@ fn define_decode_lift_function<M: Module>(
     module: &mut M,
     package: &FslcPackage,
 ) -> Result<(FuncId, usize), FslError> {
+    package.validate()?;
     if package.instructions.is_empty() {
         return Err(FslError::at(1, 1, "cannot compile an empty FSL package"));
     }

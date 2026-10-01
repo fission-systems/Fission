@@ -5,14 +5,18 @@
 //! and a small typed VM-stack/arithmetic FIR dialect.
 
 pub mod jit;
+pub mod output;
 pub mod package;
 mod parser;
+pub mod semantics;
 
 pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
+pub use output::{emit_instruction, OutputLayer};
 pub use package::{
     AddressUnit, ByteOrder, CompiledInstruction, Evidence, FirOp, FslcPackage, IntegerSign,
     ValueDef, ValueId, ValueType, FSL_PACKAGE_VERSION,
 };
+pub use semantics::{execute_instruction, ExecutionStatus, StackContract};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -146,14 +150,16 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         });
     }
 
-    Ok(FslcPackage {
+    let package = FslcPackage {
         version: FSL_PACKAGE_VERSION,
         language: parsed.language,
         byte_order: parsed.byte_order,
         address_unit: parsed.address_unit,
         instructions,
         dispatch,
-    })
+    };
+    package.validate()?;
+    Ok(package)
 }
 
 fn define_value(
