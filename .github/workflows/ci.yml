@@ -350,28 +350,30 @@ jobs:
           echo "Changed paths relative to fetched base $BASE_SHA:"
           printf '%s\n' "$CHANGED"
 
+          # Consume the complete input: grep -q can close the pipe early and
+          # make git diff fail with SIGPIPE under pipefail despite a match.
           NIR_RENDER_MIDEND_CHANGED=false
           HAS_TARGETED_TEST=false
           SLEIGH_CHANGED=false
 
-          if printf '%s\n' "$CHANGED" | grep -q -e "^crates/fission-pcode/src/midend/" \
+          if printf '%s\n' "$CHANGED" | grep -e "^crates/fission-pcode/src/midend/" \
               -e "^crates/fission-pcode/src/render/" \
               -e "^crates/fission-midend-structuring/" \
               -e "^crates/fission-midend-normalize/" \
-              -e "^crates/fission-midend-core/"; then
+              -e "^crates/fission-midend-core/" >/dev/null; then
             NIR_RENDER_MIDEND_CHANGED=true
-            if printf '%s\n' "$CHANGED" | grep -q -e "tests/" -e ".*test" -e ".*_tests\.rs"; then
+            if printf '%s\n' "$CHANGED" | grep -e "tests/" -e ".*test" -e ".*_tests\.rs" >/dev/null; then
               HAS_TARGETED_TEST=true
             elif git diff "$BASE_SHA" HEAD -- \
                 crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
                 crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
                 crates/fission-midend-core/ \
-                | grep -q "+.*#\[test\]"; then
+                | grep "+.*#\[test\]" >/dev/null; then
               HAS_TARGETED_TEST=true
             fi
           fi
 
-          if printf '%s\n' "$CHANGED" | grep -q -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/"; then
+          if printf '%s\n' "$CHANGED" | grep -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/" >/dev/null; then
             SLEIGH_CHANGED=true
           fi
 
