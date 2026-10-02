@@ -40,6 +40,12 @@ enum TypeFlowEdge {
         lhs: String,
         rhs: String,
     },
+    /// A typed operation immediately defines the input of this COPY. Unlike
+    /// a binding-wide COPY, this fact belongs to that value of a reused name.
+    CopyValue {
+        output: String,
+        ty: NirType,
+    },
     Load {
         pointer: String,
         value: String,
@@ -82,7 +88,7 @@ impl TypeFlowEdge {
                 vec![pointer, value]
             }
             Self::PointerAccess { pointer, .. } => vec![pointer],
-            Self::Cast { output, .. } => vec![output],
+            Self::Cast { output, .. } | Self::CopyValue { output, .. } => vec![output],
             Self::Arithmetic {
                 output, lhs, rhs, ..
             } => {
@@ -109,6 +115,7 @@ struct TypeFlowSolver {
     address_nodes: HashSet<String>,
     definition_counts: HashMap<String, usize>,
     self_referential: HashSet<String>,
+    stable_locals: HashSet<String>,
 }
 
 impl TypeFlowSolver {
@@ -139,6 +146,7 @@ impl TypeFlowSolver {
             address_nodes: HashSet::default(),
             definition_counts: HashMap::default(),
             self_referential: HashSet::default(),
+            stable_locals: HashSet::default(),
         };
         let metatype_seeded = operand_metatype_names();
         for binding in func.params.iter().chain(func.locals.iter()) {
@@ -162,6 +170,20 @@ impl TypeFlowSolver {
         collect_edges(&func.body, &mut solver.edges);
         collect_definition_counts(&func.body, &mut solver.definition_counts);
         collect_self_referential_bindings(&func.body, &mut solver.self_referential);
+        let address_taken =
+            super::super::analysis::defuse::collect_address_taken_locals(&func.body);
+        solver.stable_locals = func
+            .locals
+            .iter()
+            .filter(|binding| {
+                binding.initializer.is_none()
+                    && !address_taken.contains(&binding.name)
+                    && !func.params.iter().any(|param| param.name == binding.name)
+                    && solver.definition_counts.get(&binding.name).copied() == Some(1)
+                    && solver.safe_for_backward_refine(&binding.name)
+            })
+            .map(|binding| binding.name.clone())
+            .collect();
         for (edge_index, edge) in solver.edges.iter().enumerate() {
             match edge {
                 TypeFlowEdge::Load { pointer, .. }
@@ -237,43 +259,25 @@ impl TypeFlowSolver {
             TypeFlowEdge::Copy { lhs, rhs } => {
                 let lhs_fact = self.fact(lhs);
                 let rhs_fact = self.fact(rhs);
-                // PreHIR bindings are not SSA varnodes. A name with multiple
-                // definitions cannot model Ghidra's per-varnode COPY equality:
-                // propagating a later scalar result backward through an earlier
-                // pointer copy would corrupt the source parameter. Single-def
-                // names retain the bidirectional equality used for spill and
-                // alias chains.
-                if self.safe_for_backward_refine(lhs) {
+                // A binding-wide COPY equality requires one value lifetime on
+                // both sides. A later pointer definition of a reused source
+                // must not refine an earlier scalar copy destination, just as
+                // a later destination value must not refine the source.
+                if self.safe_for_backward_refine(lhs) && self.safe_for_backward_refine(rhs) {
                     self.refine(
                         lhs,
                         TypeFact {
                             locked: false,
-                            ..rhs_fact.clone()
+                            ..rhs_fact
                         },
                     );
-                    // The backward direction (informing `rhs`'s fact from
-                    // `lhs`'s) is the actually-dangerous half: it treats
-                    // every one of `rhs`'s OWN definitions as sharing
-                    // `lhs`'s single-use-site type. Requiring `rhs` to also
-                    // be single-def guards this specifically -- gating the
-                    // whole block on `lhs` alone (as before) still let a
-                    // multi-def `rhs` (e.g. a hardware register name reused
-                    // across several unrelated pointer-returning calls, all
-                    // coalesced into one PreHIR binding) feed a downstream
-                    // alias's type back onto itself every solver pass,
-                    // wrapping one more `Ptr(...)` layer around it each
-                    // time and never converging (see the Store-edge comment
-                    // below for the same failure mode from the other
-                    // direction).
-                    if self.safe_for_backward_refine(rhs) {
-                        self.refine(
-                            rhs,
-                            TypeFact {
-                                locked: false,
-                                ..lhs_fact
-                            },
-                        );
-                    }
+                    self.refine(
+                        rhs,
+                        TypeFact {
+                            locked: false,
+                            ..lhs_fact
+                        },
+                    );
                 }
             }
             TypeFlowEdge::Load {
@@ -340,6 +344,18 @@ impl TypeFlowSolver {
                         locked: false,
                     },
                 );
+            }
+            TypeFlowEdge::CopyValue { output, ty } => {
+                if self.stable_locals.contains(output) {
+                    self.refine(
+                        output,
+                        TypeFact {
+                            ty: ty.clone(),
+                            strength: EvidenceStrength::Semantic,
+                            locked: false,
+                        },
+                    );
+                }
             }
             TypeFlowEdge::Cast { output, ty } => {
                 self.refine(
@@ -611,6 +627,26 @@ fn collect_assignment_edges(lhs: &PreHirLValue, rhs: &PreHirExpr, edges: &mut Ve
 }
 
 fn collect_edges(stmts: &[PreHirStmt], edges: &mut Vec<TypeFlowEdge>) {
+    for pair in stmts.windows(2) {
+        if let (
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(carrier),
+                rhs: PreHirExpr::Call { ty, .. },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(output),
+                rhs: PreHirExpr::Var(source),
+            },
+        ) = (&pair[0], &pair[1])
+        {
+            if carrier == source && matches!(ty, NirType::Ptr(_)) {
+                edges.push(TypeFlowEdge::CopyValue {
+                    output: output.clone(),
+                    ty: ty.clone(),
+                });
+            }
+        }
+    }
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign { lhs, rhs } => collect_assignment_edges(lhs, rhs, edges),
@@ -823,6 +859,26 @@ pub(super) fn apply_type_flow_pass(func: &mut PreHirFunction) -> bool {
     changed
 }
 
+/// Definition-role evidence for consumers of TypeFlow's operation-local COPY
+/// proof. Keep lifetime, escape, width and lock admission in this owner.
+pub(super) fn pointer_copy_value_definitions(func: &PreHirFunction) -> HashSet<String> {
+    let solver = TypeFlowSolver::from_function(func);
+    solver
+        .edges
+        .iter()
+        .filter_map(|edge| {
+            let TypeFlowEdge::CopyValue { output, ty } = edge else {
+                return None;
+            };
+            let fact = solver.fact(output);
+            (solver.stable_locals.contains(output)
+                && !fact.locked
+                && compatible_width(&fact.ty, ty, solver.pointer_bits))
+            .then(|| output.clone())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -850,6 +906,276 @@ mod tests {
             is_64bit: true,
             ..Default::default()
         }
+    }
+
+    fn copy_lifetime_fixture(source_update: PreHirStmt) -> PreHirFunction {
+        let word = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let scalar = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        function(
+            vec![],
+            vec![
+                binding("carrier", word.clone(), NirBindingOrigin::Temp),
+                binding("saved", scalar, NirBindingOrigin::Temp),
+            ],
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Const(0, word),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".into()),
+                    rhs: PreHirExpr::Var("carrier".into()),
+                },
+                source_update,
+            ],
+        )
+    }
+
+    fn operation_copy_fixture() -> PreHirFunction {
+        let word = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        function(
+            vec![],
+            vec![
+                binding("carrier", word.clone(), NirBindingOrigin::Temp),
+                binding("saved", word.clone(), NirBindingOrigin::Temp),
+            ],
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Call {
+                        target: "produce_pointer".into(),
+                        args: vec![],
+                        ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".into()),
+                    rhs: PreHirExpr::Var("carrier".into()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Const(1, word),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn operation_copy_preserves_pointer_value_before_carrier_reuse() {
+        let mut func = operation_copy_fixture();
+        for _ in 0..4 {
+            apply_type_flow_pass(&mut func);
+        }
+        assert_eq!(func.locals[1].ty, NirType::Ptr(Box::new(NirType::Unknown)));
+        // Also inside a nested statement list, with no cross-boundary proof.
+        let mut nested = operation_copy_fixture();
+        nested.body = vec![PreHirStmt::Block(std::mem::take(&mut nested.body).into())];
+        apply_type_flow_pass(&mut nested);
+        assert_eq!(nested.locals[1].ty, func.locals[1].ty);
+    }
+
+    #[test]
+    fn operation_copy_does_not_cross_statement_or_control_boundaries() {
+        let barriers = vec![
+            PreHirStmt::Label("join".into()),
+            PreHirStmt::Expr(PreHirExpr::Call {
+                target: "unknown_effect".into(),
+                args: vec![],
+                ty: NirType::Unknown,
+            }),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("condition".into()),
+                then_body: vec![].into(),
+                else_body: vec![].into(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("carrier".into()),
+                rhs: PreHirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                ),
+            },
+        ];
+        for barrier in barriers {
+            let mut func = operation_copy_fixture();
+            func.body.insert(1, barrier);
+            apply_type_flow_pass(&mut func);
+            assert!(!matches!(func.locals[1].ty, NirType::Ptr(_)));
+        }
+    }
+
+    #[test]
+    fn operation_copy_requires_stable_unexposed_local() {
+        for case in 0..7 {
+            let mut func = operation_copy_fixture();
+            match case {
+                0 => func.body.push(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".into()),
+                    rhs: PreHirExpr::Const(1, func.locals[1].ty.clone()),
+                }),
+                1 => func
+                    .body
+                    .push(PreHirStmt::Expr(PreHirExpr::AddressOfLocal("saved".into()))),
+                2 => {
+                    func.locals[1].initializer =
+                        Some(PreHirExpr::Const(1, func.locals[1].ty.clone()))
+                }
+                3 => {
+                    let saved = func.locals.remove(1);
+                    func.params.push(saved);
+                }
+                4 => func.locals[1].surface_type_name = Some("size_t".into()),
+                5 => {
+                    func.locals[1].ty = NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    }
+                }
+                6 => {
+                    func.body[1] = PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("carrier".into()),
+                        rhs: PreHirExpr::Var("carrier".into()),
+                    }
+                }
+                _ => unreachable!(),
+            }
+            apply_type_flow_pass(&mut func);
+            let saved = func
+                .locals
+                .iter()
+                .chain(func.params.iter())
+                .find(|b| b.name == "saved")
+                .unwrap();
+            assert!(!matches!(saved.ty, NirType::Ptr(_)), "case {case}");
+        }
+    }
+
+    #[test]
+    fn operation_copy_does_not_treat_scalar_call_width_as_pointer_evidence() {
+        let mut func = operation_copy_fixture();
+        let PreHirStmt::Assign {
+            rhs: PreHirExpr::Call { ty, .. },
+            ..
+        } = &mut func.body[0]
+        else {
+            unreachable!()
+        };
+        *ty = NirType::Unknown;
+        apply_type_flow_pass(&mut func);
+        assert!(!matches!(func.locals[1].ty, NirType::Ptr(_)));
+    }
+
+    #[test]
+    fn copy_lifetime_does_not_forward_later_pointer_result() {
+        let mut func = copy_lifetime_fixture(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("carrier".into()),
+            rhs: PreHirExpr::Call {
+                target: "produce_pointer".into(),
+                args: vec![],
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            },
+        });
+        for _ in 0..4 {
+            apply_type_flow_pass(&mut func);
+        }
+        assert_eq!(
+            func.locals[1].ty,
+            NirType::Int {
+                bits: 32,
+                signed: true
+            }
+        );
+    }
+
+    #[test]
+    fn copy_lifetime_counts_nested_source_redefinition() {
+        let mut func = copy_lifetime_fixture(PreHirStmt::If {
+            cond: PreHirExpr::Var("condition".into()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("carrier".into()),
+                rhs: PreHirExpr::AddressOfGlobal("object".into()),
+            }]
+            .into(),
+            else_body: vec![].into(),
+        });
+        apply_type_flow_pass(&mut func);
+        assert!(!matches!(func.locals[1].ty, NirType::Ptr(_)));
+    }
+
+    #[test]
+    fn copy_lifetime_keeps_explicit_pointer_cast_evidence() {
+        let mut func = copy_lifetime_fixture(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("carrier".into()),
+            rhs: PreHirExpr::Call {
+                target: "produce_pointer".into(),
+                args: vec![],
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            },
+        });
+        let pointer = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        // The explicit pointer cast has machine-word storage width.
+        func.locals[1].ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        func.body[1] = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("saved".into()),
+            rhs: PreHirExpr::Cast {
+                ty: pointer.clone(),
+                expr: Box::new(PreHirExpr::Var("carrier".into())),
+            },
+        };
+        apply_type_flow_pass(&mut func);
+        assert_eq!(func.locals[1].ty, pointer);
+    }
+
+    #[test]
+    fn copy_lifetime_does_not_forward_self_referential_source() {
+        let pointer = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: false,
+        }));
+        let scalar = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = function(
+            vec![],
+            vec![
+                binding("carrier", pointer.clone(), NirBindingOrigin::Temp),
+                binding("saved", scalar.clone(), NirBindingOrigin::Temp),
+            ],
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".into()),
+                    rhs: PreHirExpr::Var("carrier".into()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("carrier".into())),
+                        ty: pointer,
+                    },
+                },
+            ],
+        );
+        apply_type_flow_pass(&mut func);
+        assert_eq!(func.locals[1].ty, scalar);
     }
 
     #[test]
