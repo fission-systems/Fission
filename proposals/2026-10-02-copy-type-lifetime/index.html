@@ -1,0 +1,1693 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-10-02-copy-type-lifetime/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Decompiler Change Proposal: COPY type lifetime - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#decompiler-change-proposal-copy-type-lifetime" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Decompiler Change Proposal: COPY type lifetime
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.2.3/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-measured-baseline-anchors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Measured baseline anchors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-owner-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Owner proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-invariant-and-shared-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Invariant and shared ownership
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-coverage-and-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Coverage and risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-validation-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Validation matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-ai-firewall-and-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. AI firewall and acceptance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-first-candidate-measurement-and-operation-local-follow-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. First candidate measurement and operation-local follow-up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-follow-up-owner-correction-before-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Follow-up owner correction before implementation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-acceptance-evidence-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Acceptance evidence and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="decompiler-change-proposal-copy-type-lifetime">Decompiler Change Proposal: COPY type lifetime<a class="headerlink" href="#decompiler-change-proposal-copy-type-lifetime" title="Permanent link">&para;</a></h1>
+<h2 id="1-measured-baseline-anchors">1. Measured baseline anchors<a class="headerlink" href="#1-measured-baseline-anchors" title="Permanent link">&para;</a></h2>
+<p>Base main <code>8945427766d51dcdfd58ecebc53dca3e91c7705d</code>; production-identical
+immutable baseline CLI SHA256
+<code>00549ea9563b2ee4b67dcda30db6545e3febd7f715fd6b50abbd289d15443b43</code>.
+Accepted fresh standalone DecBench baseline: Union 73/250, GED 65/240,
+types 16/228, byte 1/158, compiles 124/158. Local results only.</p>
+<table>
+<thead>
+<tr>
+<th>Program / optimization / function</th>
+<th>Binary / address</th>
+<th style="text-align: right;">GED</th>
+<th style="text-align: right;">Types</th>
+<th style="text-align: right;">Byte</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>iproute2 rtmon / O0 / main</td>
+<td>bin_050.elf / 0x6de7</td>
+<td style="text-align: right;">17</td>
+<td style="text-align: right;">.5</td>
+<td style="text-align: right;">.181189</td>
+</tr>
+<tr>
+<td>openssh ssh-add / O2-noinline / revoked_certs_generate</td>
+<td>bin_187.elf / 0x3dd20</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">1/9</td>
+<td style="text-align: right;">.254174</td>
+</tr>
+<tr>
+<td>mirai / O2 / ensure_single_instance</td>
+<td>bin_013.elf / 0x8e30</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">.237805</td>
+</tr>
+</tbody>
+</table>
+<p>These are static decompilations; no benchmark binaries are executed and no
+executable semantic oracle/case count is available. Pass-level diagnostic
+snapshots capture before/after binding types and actual definitions. The
+instrumentation is temporary and removed from production.</p>
+<p>The main anchor's two 32-bit flag locals become Ptr(Unknown) after copying an
+entry scalar from a carrier later reused for a pointer-returning call. Each flag
+also has a typed integer-one definition. The second anchor's 32-bit status local
+has ten definitions, including the scalar error value 4294967294, but acquires
+Ptr(Unknown) through a carrier with 43 definitions. The third anchor's 16-bit
+family field is explicitly assigned integer two and copied from a reused carrier,
+yet is promoted to a pointer. The shape repeats across three programs at O0,
+O2 and O2-noinline. Broader diagnostic scan is investigation, not a score claim.</p>
+<h2 id="2-owner-proof">2. Owner proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
+<p>First observed type corruption: existing use-driven type inference, specifically
+<code>collect_assignment_copy_constraints</code>' forward pointer constraint for plain
+<code>dst = src</code>, and operation-edge <code>TypeFlowSolver</code>'s forward COPY transfer.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>entry: carrier = scalar; flag = carrier; ... flag = Int32(1);
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>later: carrier = pointer-returning call;
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>use-driven pass: flag Int32 -&gt; Ptr(Unknown)
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>status = scalar-return carrier; ... status = Int32(-2);
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>carrier is reused for unrelated pointer/scalar results;
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>use-driven pass: status Int32 -&gt; Ptr(Unknown)
+</span></code></pre></div>
+<p>The legacy collector comments already assign pointer COPY equality to TypeFlow,
+but its forward branch still appends a Ptr constraint from the global source
+binding. TypeFlow guards the destination against multiple/self definitions for
+forward transfer, and guards both endpoints only for reverse transfer. Its
+source fact can therefore describe a later value instead of this copy's input.
+Ghidra's TypeOpCopy/ActionInferTypes propagate between operation Varnodes (value
+identities), not the lifetime-wide hardware/storage name. No reference code is
+copied or linked.</p>
+<h2 id="3-invariant-and-shared-ownership">3. Invariant and shared ownership<a class="headerlink" href="#3-invariant-and-shared-ownership" title="Permanent link">&para;</a></h2>
+<p>A plain COPY alone cannot establish equality of types for names representing
+several different values. Bidirectional binding-wide COPY transfer requires
+single, non-self-referential definition evidence for both endpoints. Explicit
+casts and memory access constraints remain operation-local evidence. Extend
+existing TypeFlow's definition/self-reference proof and make the legacy collector
+delegate pointer COPY propagation to that owner, as its existing contract says.
+No new pass/helper/dependency, ISA/register/compiler/row guard or telemetry.</p>
+<p>This preserves scalar flags/status/fields from unrelated later pointer results;
+that justification does not refer to the metric. A full versioned reaching-value
+solver is outside this narrow correction. Conservative skipped copies may leave
+unknown types or fewer inferred pointers; explicit access and cast facts still
+operate. Do not suppress correct values or tune to the fixed regression pool.</p>
+<h2 id="4-coverage-and-risks">4. Coverage and risks<a class="headerlink" href="#4-coverage-and-risks" title="Permanent link">&para;</a></h2>
+<p>Synthetic arbitrary-name invariants: source redefinition, destination branch
+redefinition, self-referential source, stable single-definition pointer alias,
+explicit pointer cast, locked pointer input. Existing alias-chain/pointer-chase
+and backward-refinement cases must continue passing. Snapshot order/output
+must remain deterministic. Scalar legacy constraints are unchanged.</p>
+<h2 id="5-validation-matrix">5. Validation matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Targeted TypeFlow/use-driven tests, full normalize+pcode nextest, cargo checks
+   normalize/pcode/decompiler, workspace cargo fmt, native release CLI.</li>
+<li>Fresh standalone DecBench output for all 250 identities, no DB/cache/resume;
+   native-variable metadata through existing standalone adapter; fresh GED,
+   type matching and Linux GNU recompilation/byte matching. Compare perfect row
+   sets and partial scores, inspect all changed output units.</li>
+<li>Mandatory external local Docker using the locally built Linux CLI: same frozen
+   unscored 32-row pool (regression-only), dev smoke and static Linux anchors.
+   Existing pool lacks behavior oracle and has a known 7900-character truncation
+   heuristic; disclose its effects, not a blanket semantic pass.</li>
+<li>No official latest/Pages publication. Rank comparison uses a frozen rival
+   snapshot and is an explicitly local projection.</li>
+</ol>
+<h2 id="6-ai-firewall-and-acceptance">6. AI firewall and acceptance<a class="headerlink" href="#6-ai-firewall-and-acceptance" title="Permanent link">&para;</a></h2>
+<p>No external/cross-model proposal advice. Pass inspection is local; implementation
+is generic value-lifetime evidence. Real row identities occur only in this
+proposal/evidence, never production guards. Synthetic invariants provide an
+independent signal; unscored validation pool is go/stop evidence only.
+Actual score improvement remains unproven until fresh remeasurement. Do not
+claim completion of the Kuna target unless Union exceeds 88/250.</p>
+<h2 id="7-first-candidate-measurement-and-operation-local-follow-up">7. First candidate measurement and operation-local follow-up<a class="headerlink" href="#7-first-candidate-measurement-and-operation-local-follow-up" title="Permanent link">&para;</a></h2>
+<p>The first candidate measured Union 73/250 (no perfect gains/losses), GED 65/240,
+types 16/228, byte 1/158. Type mean .26007486 -&gt; .26184993; byte mean
+.20499280 -&gt; .20633632; compiles 124 -&gt; 125/158. Six partial type gains and two
+partial losses require disclosure. The mirai intermediate corruption is observed,
+but its final output does not change; it is not a measured final repair.
+External paired dev: six identical existing compile errors. Frozen unscored
+32-row pool: seven changed outputs, identical status sets and four existing
+adapter errors. These are limited regression checks, not semantic correctness.</p>
+<p>Before the follow-up implementation, an operation-level diagnostic scan found
+this repeated loss of typed values:</p>
+<table>
+<thead>
+<tr>
+<th>Program / optimization / function</th>
+<th>Anchor</th>
+<th>Saved value / current final type</th>
+<th>GED / type / byte baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>iproute2 / O0 / rtmon main</td>
+<td>bin_050.elf / 0x6de7</td>
+<td>fopen64 Ptr(Unknown) -&gt; local_48 / long long</td>
+<td>17 / .8 / .181189</td>
+</tr>
+<tr>
+<td>tar / O2 / print_stats</td>
+<td>bin_045.elf / 0xbf60</td>
+<td>dcgettext Ptr(Int8) -&gt; xVar75 / unsigned long long</td>
+<td>29 / .2 / .213793</td>
+</tr>
+<tr>
+<td>findutils / O2 / process_all_startpoints</td>
+<td>bin_027.elf / 0x8070</td>
+<td>dcgettext Ptr(Int8) -&gt; xVar329 / unsigned long long</td>
+<td>212 / .133333 / .257778</td>
+</tr>
+</tbody>
+</table>
+<p>Each destination has exactly one definition; each call-result carrier is reused
+elsewhere. Each COPY is immediately after the pointer-typed call assignment in
+the same statement list, with no intervening statement or label. The final
+saved binding remains scalar despite the pointer type already present on the
+operation. TypeFlow currently sees only global source-name facts and rejects
+such copies with the necessary multiple-definition guard. Callsite typing owns
+call contracts already, but its transitive copy helper also requires stable
+names and cannot express this operation-local relation. Extend existing
+TypeFlow COPY-edge collection; do not add a callsite/printer repair or pass.</p>
+<p>Invariant: a COPY immediately following assignment of a semantically typed
+pointer call result receives that operation's pointer type, independent of
+other values represented by the carrier name. Apply only to a local with one
+non-self-referential definition, no declaration initializer and no address
+escape; exclude entry parameters. Preserve locked types and width compatibility
+via the existing solver. The saved pointer then has the type of its actual
+value, rather than the type of an unrelated carrier lifetime. No metric is
+needed to justify this correction.</p>
+<p>A new operation-local COPY edge is needed because a name-wide COPY cannot
+represent this evidence, while the existing unrestricted CAST edge would miss
+the destination lifetime proof. Restrict evidence to already pointer-typed Call
+expressions: integer call types can be storage placeholders. No lookahead across
+labels, branches, blocks, loops, intervening writes/calls or joins. Inner
+statement lists are considered independently. Copy chains without a local
+operation proof remain conservative; full reaching-definition SSA is deferred.</p>
+<p>Focused coverage: pointer result followed by scalar carrier overwrite; earlier
+scalar value followed by pointer call; label/branch/unknown/intervening-call
+barriers; multiple destination definitions; self-copy; parameter, initialized,
+address-taken, wrong-width and locked destinations. Full crate and all-250
+fresh scores plus external paired regression checks must be repeated for this
+combined candidate. Frozen unscored pool remains go/stop only, never tuning.</p>
+<h2 id="8-follow-up-owner-correction-before-implementation">8. Follow-up owner correction before implementation<a class="headerlink" href="#8-follow-up-owner-correction-before-implementation" title="Permanent link">&para;</a></h2>
+<p>Combined candidate <code>7eb262d2d44542243a206bf8f3d9a7cf0cc400ead2ba48a9782611d9a18cd4d0</code>
+(native CLI <code>87bfdb94ded048fc78aa21a4c4fc4cbf0bb01aab283849ac14dd15e7c5e66715</code>)
+regenerated 250/250 functions. Actual rtmon NIR still declares the saved FILE
+value as unsigned long long, while HIR declares void*. A both-layer pass-level
+snapshot proves one unexposed, uninitialized local definition immediately after
+the typed fopen64 call in both modes. Width is compatible and the carrier is
+reused. So the adjacency proof is present; loss is downstream in the same owner.</p>
+<p><code>restore_scalar_only_pointer_locals</code> correctly tries to undo guessed pointers,
+but <code>collect_binding_use_roles_stmt</code> treats every plain COPY as a non-pointer
+value definition because <code>expr_type(Var)</code> is Unknown. A null check (<code>!saved</code>),
+or a scalar legacy alias constraint, then qualifies this proven pointer value
+for restoration to a machine-width integer. The same already measured typed
+pointer-result COPY shape repeats in the three anchors in section 7; the final
+scalar type is not authoritative evidence that its COPY produced a scalar.</p>
+<p>The shared operation-local definition proof must also inform existing use-role
+classification. Expose the existing TypeFlow COPY-value proof as a transient
+set of eligible local names; do not reconstruct a second adjacency/lifetime
+policy, add a pass, or change rendering/oracle. Use only names whose destination
+width is compatible and whose binding is unlocked. Because every admitted local
+has exactly one non-self definition, classify its definition as pointer-valued,
+so null checks and global carrier scalar constraints cannot erase it. Scalar
+restoration stays active for names without this value proof. Add use-driven
+coverage for null checks on saved pointers and multiple-definition negatives.
+Repeat complete fresh metrics and external gates after this owner correction.</p>
+<p>Final review also found the legacy pointer-base fallback still accepts a plain
+COPY when its source binding is Unknown. Being Unknown is not a lifetime proof;
+a multiply defined unknown carrier is just as unsafe to refine backward. Close
+that remaining bypass for plain Var RHS and let TypeFlow supply both directions
+of pointer equality. Pointer arithmetic/casts/address expressions retain their
+existing evidence path. This completes the COPY ownership invariant in section
+3, with an arbitrary-name multi-definition unknown-source regression test;
+no additional quality claim is based on that synthetic case.</p>
+<p>Focused type correspondence after section 8 confirms the rtmon anchor remains
+.8: the FILE value is now void* (concrete API surface is not yet propagated),
+and a separate stack aggregate is unmatched. Null-check correctness is repaired
+but this row is not type-perfect. Do not infer perfect status from declarations
+or from the intermediate use-driven pass. Full scores decide acceptance.</p>
+<h2 id="9-acceptance-evidence-and-limits">9. Acceptance evidence and limits<a class="headerlink" href="#9-acceptance-evidence-and-limits" title="Permanent link">&para;</a></h2>
+<p>Final production patch SHA256:
+<code>a28db1a7c8e824154b1e5dd5d56f61e1721491ef5690e5b49525b9e17bcb3641</code>.
+Native CLI SHA256:
+<code>ac5da815906c7bf64852480bc38c91cd9fc6e6a6c8e48bb0aa2742128f86b669</code>.
+Linux local bundle fingerprint:
+<code>1d83729301dc83a5edf6e0a9c0fb3a6813bedbaa96f0d0bd55517e5bdc1b2ad2</code>.
+The final fresh generation covered 223 binaries / 250 functions, with no errors.
+All 250 NIR + native-variable metric input payloads are identical to the fully
+remeasured section-8 candidate; an additional complete cache-disabled metric
+run is retained in the final evidence. No official result was published.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Accepted baseline</th>
+<th style="text-align: right;">Candidate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Union</td>
+<td style="text-align: right;">73/250</td>
+<td style="text-align: right;">73/250</td>
+</tr>
+<tr>
+<td>GED perfect</td>
+<td style="text-align: right;">65/240</td>
+<td style="text-align: right;">65/240</td>
+</tr>
+<tr>
+<td>Type perfect</td>
+<td style="text-align: right;">16/228</td>
+<td style="text-align: right;">16/228</td>
+</tr>
+<tr>
+<td>Byte perfect</td>
+<td style="text-align: right;">1/158</td>
+<td style="text-align: right;">1/158</td>
+</tr>
+<tr>
+<td>Compiles</td>
+<td style="text-align: right;">124/158</td>
+<td style="text-align: right;">124/158</td>
+</tr>
+<tr>
+<td>Mean type score</td>
+<td style="text-align: right;">.260074861</td>
+<td style="text-align: right;">.261849930</td>
+</tr>
+<tr>
+<td>Mean byte score</td>
+<td style="text-align: right;">.204992801</td>
+<td style="text-align: right;">.204733461</td>
+</tr>
+</tbody>
+</table>
+<p>Six partial type gains and two losses; no perfect gains/losses. The two partial
+losses are copy_reg (.147059 -&gt; .117647) and describe_change (.545455 -&gt; .454545).
+Removing lifetime-unsafe propagation can lose a coincidentally correct global
+binding type; the admitted local typed-value rule does not yet reconstruct all
+reaching values. Explicit tradeoff: modest type mean gain and restored pointer
+null-check typing, with a small byte mean decrease and no Union improvement.
+Do not call this a ranking win or a whole-program semantic-equivalence result.
+Kuna remains 88/250 in the frozen rival snapshot, so 16 additional perfect
+functions are still needed to exceed it. Local projected rank remains 8.</p>
+<p>Focused tests: 12 passed. Full normalize+pcode: 1623 passed, one existing skip.
+Normalize/pcode/decompiler checks, workspace fmt/diff checks and native/Linux
+release builds passed. The initial earlier-candidate full suite reported one
+leaky process; a detailed rerun and subsequent full runs did not reproduce it.</p>
+<p>Final external candidate versus fresh immutable baseline: dev six unchanged
+wrapper compile errors (bare compile 4/6 on both); fixed unscored pool 32 rows,
+six changed outputs, unchanged four adapter errors and 28 no-wrapper statuses
+(bare compile 8/32 on both). Zero checkpoint rows recovered, caches disabled.
+Pool hash <code>ab3dbf2aba55f39bf0b436d1c531d2126ee4749d4e494626985de5f9a7f3b725</code>,
+eight programs, zero scored-sample overlap, all O0. These limited regression
+checks supply no executable semantic pass. Pool results were not tuning input.
+The baseline bundle keeps its original 7080acbf6-dirty build label; its pinned
+production patch is the accepted PR #179 code now in main, not a clean build of
+that old HEAD. Final candidate keeps its own 894542776-dirty build label.</p>
+<p>Evidence is local under <code>benchmark/artifacts/decbench/2026-10-02-copy-type-lifetime/</code>
+(in the primary checkout): all fresh scores/overlays, input identity proof,
+compressed pass-level snapshots, proposal, source patch, test/build logs,
+external before/after checks, native package, static Linux anchor diffs and
+GitHub delivery status. Fission-only repository submission; no DecBench public
+submission, Pages/latest promotion, runtime vendor dependency, or oracle swap.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
