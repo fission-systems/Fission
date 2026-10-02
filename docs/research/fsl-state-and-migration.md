@@ -58,14 +58,15 @@ these refusal boundaries apply equally to the evaluator and C/Rust outputs.
 | Input | First admitted output | Current limit |
 |---|---|---|
 | `eBPF_le.slaspec` + `eBPF.sinc` | One executable FSL ADD64 register leaf | Explicit source shape; no general preprocessor |
-| BPF/eBPF `cspec` | Typed FSL ABI metadata | Symbolic names; no allocator/register-layout linker |
+| BPF/eBPF `cspec` | Typed FSL ABI metadata and strict layout linker | eBPF links; BPF stack-width gate refuses; no allocator |
+| BPF/eBPF space/register declarations | Own `.fslregs` views and shared byte storage | Three explicit endian entries; declaration prefix only |
 | `eBPF_le.sla` | Structural evidence + live legacy oracle | Direct decision/template-to-FIR conversion unsupported |
 
 The offline importer belongs to the research repository; the FSL parser,
 validated FIR, source output and typed ABI model belong to `fission-fsl`.
 Imported data retains source snapshot/path/hash and Ghidra attribution. Runtime
 execution of the migrated instruction does not depend on SLEIGH or a vendor
-implementation. ABI metadata currently has a source parser but no binary package
+implementation. ABI metadata has a source parser and register linker but no binary package
 or call-effect integration; this must not be called whole-ABI migration.
 
 The eBPF state test checks 484 synthetic states and 1,936 C/Rust O0/O2
@@ -83,8 +84,8 @@ alignment entries, argument order and effects are checked by the native parser.
 
 ## Next migration gates
 
-1. Model FSL register layout and overlapping slices from SLEIGH/SLA; link ABI
-   names to identities and widths. Preserve byte order and address-space units.
+1. Extend the initial byte-addressed register layout/linker to GPU lane banks
+   and direct SLA register metadata; preserve unsupported units as refusals.
 2. Add grouped ABI slots, stack storage, join storage and datatype allocation
    rules from the recorded cspec refusal inventory. Preserve rule ordering.
 3. Lower SLA decision trees/context updates and bound ConstructTpl effects into
@@ -97,3 +98,44 @@ alignment entries, argument order and effects are checked by the native parser.
 Replacing imported grammar does not remove the evidence/source obligations.
 Full replacement requires measured coverage for decoding, instruction effects,
 register layout, ABI, context, control flow and recompiled behavior.
+
+## Register layout and ABI linking slice
+
+`registers` owns a text `.fslregs` parser, address-space metadata and register
+views. All admitted offsets/widths are bytes; non-byte address units are rejected.
+Each space has explicit address width and byte order. The memory default is
+preserved, but memory spaces are not allocated/emulated. Register names resolve
+to identities in a particular layout, never process-global IDs.
+
+`RegisterFile` stores bytes once per register space. Overlapping views share
+storage, and a partial write preserves every byte outside that view. It does
+not infer architectural zero extension or read-only register rules. The owned
+layout and storage are private; invalid writes leave the file unchanged.
+Metadata accepts 1..512-byte views; integer access is limited to 64 bits, and
+the reference storage allocator refuses totals above 16 MiB.
+
+`link_abi` retains original ordered metadata and resolves inputs, outputs,
+preserved/clobbered registers and the stack register. It verifies entry widths,
+memory references/ranges, duplicate identities and preserved/clobbered overlap.
+The strict first stack gate requires register width = ABI pointer size. eBPF
+links R1..R5, R0 and preserved R6..R10; R10 occupies register bytes 80..87.
+The unchanged BPF source has a 4-byte RS and `pointer_size=8`, so linking refuses
+with a diagnostic. This is a conservative supported-contract refusal, not a
+claim that every ABI requires stack register width = default pointer size.
+
+`execute_bound` projects byte storage into the existing canonical FIR evaluator,
+using an explicit logical register/flag slot binding. It requires disjoint
+bound views and exact integer widths. Same instruction operand selectors may
+alias the same slot. Register-file view aliases are supported, but *inter-slot*
+aliases are refused until ordered direct-storage FIR effects exist. Candidate
+storage commits only after successful evaluation; PC/unbound bytes survive.
+No second semantic IR, architecture dispatch, or package version was added.
+
+The importer admits BPF LE (15 views, 15 overlapping pairs) and eBPF LE/BE
+(12 views each). No BPF BE entry exists in the pinned corpus; its BE alias test
+is synthetic. Native tests compare 968 bound leaf states against a byte-storage
+oracle (484 per storage byte order), using the existing LE instruction profile
+in both cases. They do not establish BE eBPF decoding. Existing C/Rust leaf
+recompilation tests are rerun separately; the new storage adapter is reference
+execution only. GPU register/lane layout, kernel ABI, allocation rules, calls
+and direct SLA semantic lowering remain subsequent gates.

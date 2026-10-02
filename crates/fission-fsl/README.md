@@ -184,8 +184,8 @@ cargo run -p fission-fsl -- check-abi crates/fission-fsl/specs/ebpf.fslabi
 alignments, global spaces, stack pointer, ordered input/output register entries,
 cleanup (including explicit `unknown`), and preserved/clobbered effects.
 The BPF/eBPF `.fslabi` sources preserve all admitted source metadata. Unknown
-properties are rejected. Symbolic registers are not linked yet; parameter
-allocation, ABI execution and binary metadata packaging remain unsupported.
+properties are rejected. The layout linker resolves admitted register names;
+parameter allocation, ABI call execution and binary metadata packaging remain unsupported.
 
 The offline converter and source inventory live in `fission-research/tools/fsl_migrate.py`.
 It currently admits two of 110 cspec files. This is an explicit narrow migration
@@ -244,6 +244,54 @@ equivalence. Wave execution currently admits wrapping addition and lane/scalar/
 flag reads and writes. Carry operations in mixed wave bodies, EXEC updates,
 VCC operations, divergence, barriers, memory, traps and Cranelift wave JIT/AOT
 remain unsupported. Historical scalar/stack package versions stay unchanged.
+
+## Register layout and ABI linking
+
+`.fslregs` is an FSL text companion to instruction and ABI source. Its grammar
+records a default memory space, spaces with explicit byte-address width/unit
+and byte order, and named register views with byte offsets and widths:
+
+```text
+layout example.registers {
+    evidence "example" "local" "1" "Byte-storage example";
+    default_space "ram";
+    space "ram" memory 8 byte little;
+    space "register" register 4 byte little;
+    register "R0" "register" 0 8;
+    register "R0.low" "register" 0 4;
+}
+```
+
+`RegisterFile` shares bytes across overlapping views; partial writes preserve
+other bytes. `link_abi` resolves ordered register entries, verifies widths and
+memory ranges, and refuses conflicting preserved/clobbered aliases. Imported
+eBPF LE/BE layouts link successfully. BPF LE imports 15 views, but its unchanged
+4-byte RS conflicts with `pointer_size=8` under the first strict stack gate.
+That diagnostic is retained; no replacement size is inferred.
+
+```sh
+cargo run -p fission-fsl -- check-layout crates/fission-fsl/specs/bpf.le.registers.fslregs
+cargo run -p fission-fsl -- link-abi crates/fission-fsl/specs/ebpf.fslabi \
+  crates/fission-fsl/specs/ebpf.le.registers.fslregs
+cargo run -p fission-fsl -- execute-layout \
+  crates/fission-fsl/specs/ebpf.le.registers.fslregs crates/fission-fsl/specs/ebpf.fslabi \
+  /tmp/ebpf-add.fslc ebpf.le.add64.register 0f12000000000000 \
+  R0,R1,R2 0,1,0xffffffffffffffff
+```
+
+The execution command validates the ABI link then uses explicit FIR register
+slots; it does not execute a call convention. `execute_bound` admits disjoint
+bound views with exact widths and commits storage only after success. It uses
+the existing canonical FIR evaluator. Inter-slot aliases and lane banks are
+refused; storage-view aliases remain available through byte access.
+
+Seven new native tests cover metadata refusal, shared views, endian/width
+behavior, linking, slot/flag adapters and the CLI. The byte-storage oracle checks
+968 states (484 per storage byte order), both with the existing LE instruction
+profile. This does not add BE eBPF decoding or storage C/Rust projection.
+All 29 crate tests, including earlier recompilation gates, were rerun. No
+package version or historical package hashes changed. Layout/ABI binary
+packaging, GPU layout/kernel ABI and direct SLA semantic conversion are pending.
 
 ## Migration goal
 

@@ -21,6 +21,86 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_default();
     match command.as_str() {
+        "check-layout" => {
+            let path = required_arg(&mut args, "layout FSL source path")?;
+            reject_extra_args(args)?;
+            let layout = fission_fsl::registers::compile_layout_source(&fs::read_to_string(path)?)?;
+            println!(
+                "valid layout: {} ({} spaces, {} register views)",
+                layout.name,
+                layout.spaces.len(),
+                layout.registers.len()
+            );
+        }
+        "link-abi" => {
+            let abi_path = required_arg(&mut args, "ABI source path")?;
+            let layout_path = required_arg(&mut args, "layout source path")?;
+            reject_extra_args(args)?;
+            let abi = fission_fsl::abi::compile_abi_source(&fs::read_to_string(abi_path)?)?;
+            let layout =
+                fission_fsl::registers::compile_layout_source(&fs::read_to_string(layout_path)?)?;
+            let linked = fission_fsl::registers::link_abi(&abi, &layout)?;
+            let stack = layout.view(linked.stack_register)?;
+            println!(
+                "linked ABI {} layout={} stack={}@{}:{}+{} conventions={}",
+                abi.name,
+                layout.name,
+                stack.name,
+                stack.space,
+                stack.offset,
+                stack.size_bytes,
+                linked.conventions.len()
+            );
+            for convention in &linked.conventions {
+                println!(
+                    "convention {} inputs={:?} outputs={:?} preserved={:?} clobbered={:?}",
+                    convention.name,
+                    convention.inputs,
+                    convention.outputs,
+                    convention.preserved_registers,
+                    convention.clobbered_registers
+                );
+            }
+        }
+        "execute-layout" => {
+            use fission_fsl::registers::{
+                compile_layout_source, execute_bound, link_abi, RegisterBinding, RegisterFile,
+            };
+            let layout_path = required_arg(&mut args, "layout source path")?;
+            let abi_path = required_arg(&mut args, "ABI source path")?;
+            let package_path = required_arg(&mut args, "package path")?;
+            let profile = required_arg(&mut args, "profile")?;
+            let hex = required_arg(&mut args, "instruction hex")?;
+            let names = required_arg(&mut args, "register names CSV")?;
+            let values = required_arg(&mut args, "register values CSV")?;
+            reject_extra_args(args)?;
+            let layout = compile_layout_source(&fs::read_to_string(layout_path)?)?;
+            let abi = fission_fsl::abi::compile_abi_source(&fs::read_to_string(abi_path)?)?;
+            link_abi(&abi, &layout)?;
+            let binding = RegisterBinding {
+                registers: names.split(',').map(str::to_owned).collect(),
+                flags: Vec::new(),
+            };
+            let values = parse_words(&values)?;
+            if values.len() != binding.registers.len() {
+                return Err("register names/value counts differ".into());
+            }
+            let mut file = RegisterFile::new(layout)?;
+            for (name, &value) in binding.registers.iter().zip(&values) {
+                file.write_u64(name, value)?;
+            }
+            let package = load_package(&package_path)?;
+            let decoded = package
+                .decode_bytes(&profile, &parse_bytes(&hex)?)?
+                .ok_or("no matching instruction")?;
+            let status = execute_bound(&package, &decoded, &binding, &mut file)?;
+            let registers = binding
+                .registers
+                .iter()
+                .map(|name| file.read_u64(name))
+                .collect::<Result<Vec<_>, _>>()?;
+            println!("status={status:?} registers={registers:?}");
+        }
         "check-abi" => {
             let source_path = required_arg(&mut args, "ABI FSL source path")?;
             reject_extra_args(args)?;
@@ -363,6 +443,7 @@ fn print_usage() {
     eprintln!("usage:");
     eprintln!("  fslc check <source.fsl>");
     eprintln!("  fslc check-abi <source.fslabi>");
+    eprintln!("  check-layout <source.fslregs>\n  link-abi <source.fslabi> <source.fslregs>\n  execute-layout <layout> <abi> <package> <profile> <hex> <register-names-csv> <register-values-csv>");
     eprintln!("  fslc compile <source.fsl> <output.fslc>");
     eprintln!("  fslc inspect <package.fslc>");
     eprintln!("  fslc decode <package.fslc> <opcode-hex>");

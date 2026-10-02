@@ -12,6 +12,7 @@ pub mod jit;
 pub mod output;
 pub mod package;
 mod parser;
+pub mod registers;
 pub mod semantics;
 mod state;
 mod wave;

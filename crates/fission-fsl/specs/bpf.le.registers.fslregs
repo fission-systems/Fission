@@ -1,0 +1,24 @@
+layout bpf.le.registers {
+    evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/languages/BPF/BPF.sinc" "sha256:7ca890d08a11d3f7ae3c1e3ce003a43886d4d645fa7f78e4d9ca88d4e8d47d75" "Unconditional space/register declaration prefix; byte offsets, holes and overlapping views retained. No instruction or subregister extension semantics inferred.";
+    evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/languages/BPF/BPF_le.slaspec" "sha256:41759fe9c680679b39fd28817edeb6ceb85ebaeafd6fbfd9122a097c46228032" "Entry fixes byte order for the admitted declaration prefix.";
+    default_space "ram";
+    space "ram" memory 4 byte little;
+    space "packet" memory 4 byte little;
+    space "mem" memory 4 byte little;
+    space "register" register 4 byte little;
+    register "A" "register" 0 4;
+    register "X" "register" 4 4;
+    register "RS" "register" 8 4;
+    register "R" "register" 12 4;
+    register "PC" "register" 16 4;
+    register "AH" "register" 0 2;
+    register "XH" "register" 4 2;
+    register "RSH" "register" 8 2;
+    register "RH" "register" 12 2;
+    register "PCH" "register" 16 2;
+    register "AB" "register" 0 1;
+    register "XB" "register" 4 1;
+    register "RSB" "register" 8 1;
+    register "RB" "register" 12 1;
+    register "PCB" "register" 16 1;
+}

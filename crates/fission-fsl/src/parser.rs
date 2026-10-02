@@ -144,6 +144,11 @@ pub(super) fn parse_abi(source: &str) -> Result<crate::abi::AbiProfile, FslError
     Parser { tokens, cursor: 0 }.parse_abi_profile()
 }
 
+pub(super) fn parse_layout(source: &str) -> Result<crate::registers::RegisterLayout, FslError> {
+    let tokens = Lexer::new(source).tokenize()?;
+    Parser { tokens, cursor: 0 }.parse_register_layout()
+}
+
 struct Lexer<'a> {
     chars: Vec<char>,
     _source: &'a str,
@@ -368,6 +373,76 @@ impl Parser {
             "false" => Ok(false),
             _ => Err(self.error_here("expected true or false")),
         }
+    }
+
+    fn parse_register_layout(mut self) -> Result<crate::registers::RegisterLayout, FslError> {
+        use crate::registers::{RegisterLayout, RegisterView, Space, SpaceKind};
+        self.expect_ident("layout")?;
+        let name = self.expect_name()?;
+        self.expect_symbol('{')?;
+        let mut layout = RegisterLayout {
+            name,
+            default_space: String::new(),
+            evidence: Vec::new(),
+            spaces: Vec::new(),
+            registers: Vec::new(),
+        };
+        let mut default_space_seen = false;
+        while !self.at_symbol('}') {
+            if self.at_ident("evidence") {
+                layout.evidence.push(self.parse_evidence()?);
+            } else if self.at_ident("default_space") {
+                self.advance();
+                if default_space_seen {
+                    return Err(self.error_here("duplicate default space"));
+                }
+                default_space_seen = true;
+                layout.default_space = self.expect_string()?;
+                self.expect_symbol(';')?;
+            } else if self.at_ident("space") {
+                self.advance();
+                let name = self.expect_string()?;
+                let kind = match self.expect_name()?.as_str() {
+                    "register" => SpaceKind::Register,
+                    "memory" => SpaceKind::Memory,
+                    _ => return Err(self.error_here("expected register or memory space")),
+                };
+                let address_bytes = self.expect_integer()?;
+                self.expect_ident("byte")?;
+                let byte_order = match self.expect_name()?.as_str() {
+                    "little" => ByteOrder::Little,
+                    "big" => ByteOrder::Big,
+                    _ => return Err(self.error_here("expected little or big byte order")),
+                };
+                self.expect_symbol(';')?;
+                layout.spaces.push(Space {
+                    name,
+                    kind,
+                    address_bytes,
+                    byte_order,
+                });
+            } else if self.at_ident("register") {
+                self.advance();
+                let name = self.expect_string()?;
+                let space = self.expect_string()?;
+                let offset = self.expect_integer()?;
+                let size_bytes = self.expect_integer()?;
+                self.expect_symbol(';')?;
+                layout.registers.push(RegisterView {
+                    name,
+                    space,
+                    offset,
+                    size_bytes,
+                });
+            } else {
+                return Err(self.error_here("expected layout evidence, space or register"));
+            }
+        }
+        self.expect_symbol('}')?;
+        if !matches!(self.current().kind, TokenKind::End) {
+            return Err(self.error_here("unexpected trailing layout tokens"));
+        }
+        Ok(layout)
     }
 
     fn parse_abi_profile(mut self) -> Result<crate::abi::AbiProfile, FslError> {
