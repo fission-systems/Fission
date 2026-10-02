@@ -190,7 +190,8 @@ parameter allocation, ABI call execution and binary metadata packaging remain un
 The offline converter and source inventory live in `fission-research/tools/fsl_migrate.py`.
 It currently admits two of 110 cspec files. This is an explicit narrow migration
 subset, with per-file refusals. Full SLEIGH preprocessing, decisions/context,
-macros, dynamic templates and direct SLA-to-FIR lowering remain future work.
+macros and dynamic templates remain future work. A bounded direct SLA leaf
+converter now supplies an additional owned FSL fixture (see below).
 See [state and migration contract](../../docs/research/fsl-state-and-migration.md).
 
 ## Wave64 EXEC and `v_add_u32`
@@ -291,7 +292,30 @@ behavior, linking, slot/flag adapters and the CLI. The byte-storage oracle check
 profile. This does not add BE eBPF decoding or storage C/Rust projection.
 All 29 crate tests, including earlier recompilation gates, were rerun. No
 package version or historical package hashes changed. Layout/ABI binary
-packaging, GPU layout/kernel ABI and direct SLA semantic conversion are pending.
+packaging, GPU layout/kernel ABI and general SLA semantic conversion are pending.
+
+## Direct SLA symbol/template slice
+
+The research importer reads SLA v4 symbols, instruction decision constraints,
+selector tables and ordered ConstructTpl atoms. One BUILD/pure-register-export/
+INT_ADD path emits `ebpf-sla-add64-register.fsl` plus an SLA-derived register
+layout. This uses existing canonical FIR primitives and package v3. There is
+no Sleigh source or runtime dependency when compiling/executing these fixtures.
+Unknown effects and dynamic/context/constant-export paths remain refused.
+
+```sh
+cargo run -p fission-fsl -- compile crates/fission-fsl/specs/ebpf-sla-add64-register.fsl /tmp/ebpf-sla.fslc
+cargo run -p fission-fsl -- execute-layout \
+  crates/fission-fsl/specs/ebpf.le.sla.registers.fslregs crates/fission-fsl/specs/ebpf.fslabi \
+  /tmp/ebpf-sla.fslc ebpf.le.sla.add64.register 0f12000000000000 \
+  R0,R1,R2 0,1,0xffffffffffffffff
+```
+
+The source- and SLA-derived layout/encoding/FIR agree on 65,536 prefixes and
+admit the same 121 combinations. The SLA candidate separately passes 484
+synthetic states / 1,936 C/Rust O0/O2 comparisons and 484 bound-storage states.
+All 32 native tests, including earlier gates, are rerun. These are instruction
+contract checks, not full SLA replacement, eBPF verifier legality or VM execution.
 
 ## Migration goal
 

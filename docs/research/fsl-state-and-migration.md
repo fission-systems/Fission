@@ -60,7 +60,7 @@ these refusal boundaries apply equally to the evaluator and C/Rust outputs.
 | `eBPF_le.slaspec` + `eBPF.sinc` | One executable FSL ADD64 register leaf | Explicit source shape; no general preprocessor |
 | BPF/eBPF `cspec` | Typed FSL ABI metadata and strict layout linker | eBPF links; BPF stack-width gate refuses; no allocator |
 | BPF/eBPF space/register declarations | Own `.fslregs` views and shared byte storage | Three explicit endian entries; declaration prefix only |
-| `eBPF_le.sla` | Structural evidence + live legacy oracle | Direct decision/template-to-FIR conversion unsupported |
+| `eBPF_le.sla` | Named registers + one direct bound ADD64 template → FSL/FIR | Bounded instruction decisions/BUILD/export/add; context/other effects refuse |
 
 The offline importer belongs to the research repository; the FSL parser,
 validated FIR, source output and typed ABI model belong to `fission-fsl`.
@@ -88,7 +88,7 @@ alignment entries, argument order and effects are checked by the native parser.
    and direct SLA register metadata; preserve unsupported units as refusals.
 2. Add grouped ABI slots, stack storage, join storage and datatype allocation
    rules from the recorded cspec refusal inventory. Preserve rule ordering.
-3. Lower SLA decision trees/context updates and bound ConstructTpl effects into
+3. Expand bounded SLA decision/template lowering to context and further effects in
    FSL/FIR with an explicit supported-operation registry. Unknown effects must
    retain their source IDs and stop executable conversion.
 4. Compare source-derived and SLA-derived candidates on the same byte corpus,
@@ -138,4 +138,40 @@ oracle (484 per storage byte order), using the existing LE instruction profile
 in both cases. They do not establish BE eBPF decoding. Existing C/Rust leaf
 recompilation tests are rerun separately; the new storage adapter is reference
 execution only. GPU register/lane layout, kernel ABI, allocation rules, calls
-and direct SLA semantic lowering remain subsequent gates.
+and further SLA semantic lowering remain subsequent gates.
+
+## Direct SLA symbol/template migration slice
+
+The offline `sla_migrate.py` reads packed SLA v4 directly. It does not read
+Sleigh source grammar or invoke the legacy decoder. Format identifier facts
+and ordered template fields are referenced to hashed Ghidra 12.0.4 files.
+The generated instruction and layout are ordinary owned FSL text; their native
+compiler/evaluator/recompiler has no SLA runtime dependency.
+
+The first registry admits ConstructTpl BUILD of a pure register export followed
+by handle-based INT_ADD. BUILD opcode 60 here is a compiler directive, not an
+executable phi. Constructor/operand IDs resolve through the symbol table;
+selectors, widths, holes and byte constraints are derived from the SLA. No
+mnemonic, constructor number, source line or known opcode byte selects the
+semantic body. The final first-slice gate requires one admitted root variant.
+
+Decision constraints include ancestor instruction bits. Pair order is retained:
+an earlier overlapping root pair refuses conversion, and later overlaps are
+recorded. In this input, the ADD root pair precedes a broader conditional-jump
+pair. Subtable register export resolves into the existing FIR reads/wrapping
+addition/write. Constant export, unknown opcodes/atoms, dynamic offsets, context
+effects, sections, delay slots, memory and control flow do not become executable.
+
+eBPF LE has 12 named register symbols and 129 constructors (98 root). One root
+register variant and its pure export dependency are consumed; other constructors
+and the immediate branch have IDs, source metadata/opcodes and refusal records.
+This is not general decoding or support for 129 instruction semantics.
+
+The SLA-derived layout, encoding and canonical FIR match the earlier source
+candidate. All 65,536 opcode/selector prefixes agree; both admit 121. The same
+SLA-derived FIR passes 484 synthetic states / 1,936 C/Rust O0/O2 comparisons
+and 484 bound-byte-storage states. A separate live legacy SLA oracle checks
+121 bindings/lengths/IntAdd effects; the two paths share source lineage.
+Eight mutated semantic/selector/priority cases refuse. Native crate tests total
+32, with the previous execution and recompilation gates rerun. Whole-VM,
+whole-function and GPU/kernel execution remain unsupported.

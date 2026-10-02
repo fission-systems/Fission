@@ -70,7 +70,16 @@ fn checked(command: &mut Command) {
 
 #[test]
 fn migrated_sleigh_leaf_executes_and_recompiles_without_sla_dependency() {
-    let package = compile_source(ADD).unwrap();
+    check_leaf(ADD);
+}
+
+#[test]
+fn migrated_sla_template_executes_and_recompiles_without_sla_dependency() {
+    check_leaf(include_str!("../specs/ebpf-sla-add64-register.fsl"));
+}
+
+fn check_leaf(source: &str) {
+    let package = compile_source(source).unwrap();
     let instruction = &package.instructions[0];
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -103,7 +112,7 @@ fn migrated_sleigh_leaf_executes_and_recompiles_without_sla_dependency() {
                     0x12,
                 ];
                 let decoded = package
-                    .decode_bytes("ebpf.le.add64.register", &raw)
+                    .decode_bytes(&package.language, &raw)
                     .unwrap()
                     .unwrap();
                 assert_eq!(package.reencode(&decoded, &[]).unwrap(), raw);
@@ -183,16 +192,17 @@ fn migrated_sleigh_leaf_executes_and_recompiles_without_sla_dependency() {
     }
     for invalid in [0x0e, 0x0f, 0x0b] {
         assert!(package
-            .decode_bytes("ebpf.le.add64.register", &[0x0f, invalid, 0, 0, 0, 0, 0, 0])
+            .decode_bytes(&package.language, &[0x0f, invalid, 0, 0, 0, 0, 0, 0])
             .unwrap()
             .is_none());
     }
     assert!(package
-        .decode_bytes("ebpf.le.add64.register", &[0x07, 0x12, 0, 0, 0, 0, 0, 0])
+        .decode_bytes(&package.language, &[0x07, 0x12, 0, 0, 0, 0, 0, 0])
         .unwrap()
         .is_none());
     println!(
-        "migrated eBPF leaf states={count}; C/Rust O0/O2 comparisons={}",
+        "profile={} migrated eBPF leaf states={count}; C/Rust O0/O2 comparisons={}",
+        package.language,
         count * 4
     );
     fs::remove_dir_all(directory).unwrap();
