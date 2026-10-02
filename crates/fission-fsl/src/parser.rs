@@ -21,6 +21,29 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    LaneMaskRead {
+        name: String,
+        ty: ValueType,
+        lanes: u16,
+        line: usize,
+        column: usize,
+    },
+    LaneRead {
+        name: String,
+        ty: ValueType,
+        field: String,
+        bias: u64,
+        mask: String,
+        line: usize,
+        column: usize,
+    },
+    LaneWrite {
+        field: String,
+        value: String,
+        mask: String,
+        line: usize,
+        column: usize,
+    },
     RegisterRead {
         name: String,
         ty: ValueType,
@@ -760,7 +783,33 @@ impl Parser {
             })?;
             self.expect_symbol('=')?;
             let operation = self.expect_name()?;
-            let statement = if operation == "stack.pop" {
+            let statement = if operation == "lane.mask.read" {
+                let lanes = u16::try_from(self.expect_integer()?)
+                    .map_err(|_| self.error_here("lane extent exceeds u16"))?;
+                Statement::LaneMaskRead {
+                    name,
+                    ty,
+                    lanes,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if operation == "lane.register.read" {
+                let field = self.expect_name()?;
+                self.expect_symbol(',')?;
+                let bias = self.expect_integer()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let mask = self.expect_name()?;
+                Statement::LaneRead {
+                    name,
+                    ty,
+                    field,
+                    bias,
+                    mask,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if operation == "stack.pop" {
                 Statement::StackPop {
                     name,
                     ty,
@@ -858,6 +907,23 @@ impl Parser {
             };
             self.expect_symbol(';')?;
             Ok(statement)
+        } else if self.at_ident("lane.register.write") {
+            self.advance();
+            let field = self.expect_name()?;
+            self.expect_symbol(',')?;
+            self.expect_symbol('%')?;
+            let value = self.expect_name()?;
+            self.expect_symbol(',')?;
+            self.expect_symbol('%')?;
+            let mask = self.expect_name()?;
+            self.expect_symbol(';')?;
+            Ok(Statement::LaneWrite {
+                field,
+                value,
+                mask,
+                line: token.line,
+                column: token.column,
+            })
         } else if self.at_ident("register.write") {
             self.advance();
             let field = self.expect_name()?;

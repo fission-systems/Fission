@@ -21,7 +21,12 @@ fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
         || instruction.ops.iter().any(|op| {
             matches!(
                 op,
-                FirOp::Unsupported | FirOp::VmStackPop { .. } | FirOp::VmStackPush { .. }
+                FirOp::Unsupported
+                    | FirOp::VmStackPop { .. }
+                    | FirOp::VmStackPush { .. }
+                    | FirOp::LaneMaskRead { .. }
+                    | FirOp::LaneRead { .. }
+                    | FirOp::LaneWrite { .. }
             )
         })
     {

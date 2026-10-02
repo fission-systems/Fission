@@ -33,12 +33,15 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 - Four GFX900 encoding rules, explicit profile selection, raw-field extraction,
   and lossless re-encoding with validated field edits. GPU semantic bodies
   remain explicitly unsupported rather than becoming executable no-ops.
-- Binary package v4 adds flag reads and carry-input arithmetic; v3 stores register-state FIR operations. Package v2 stores
+- Generic lane-mask snapshots, lane reads/writes and uniform-to-lane arithmetic
+  broadcast. A separate executable GFX900 `v_add_u32` wave64 profile covers VGPR
+  and SGPR sources; the four-rule encoding-only profile stays unsupported.
+- Binary package v5 adds lane effects; v4 adds flag reads and carry-input arithmetic; v3 stores register-state FIR operations. Package v2 stores
   encoding plans and existing v1 byte-opcode packages remain readable; packages
   retain their version when serialized.
 
 The JVM `iadd` fixture is the first end-to-end example. CPU register and memory
-semantics, GPU masks and synchronization, JVM method/class behavior, variable
+semantics, GPU synchronization and general divergence, JVM method/class behavior, variable
 length encodings, split fields, selector-to-register resolution, cross-target AOT
 selection, and Fission consumer adapters are future work.
 
@@ -151,7 +154,7 @@ invalid flag values, and invalid encoded observations preserve the entire state.
 The same test checks v3 package serialization and the `fslc execute-state` CLI.
 
 This is an execution-semantic vertical slice, not GPU hardware evidence. The
-carry-in (`s_addc_u32`) is now implemented; EXEC/lane state remains the next model.
+carry-in (`s_addc_u32`) and a masked vector-add state slice are now implemented.
 
 ## Carry input and specification migration
 
@@ -189,6 +192,58 @@ It currently admits two of 110 cspec files. This is an explicit narrow migration
 subset, with per-file refusals. Full SLEIGH preprocessing, decisions/context,
 macros, dynamic templates and direct SLA-to-FIR lowering remain future work.
 See [state and migration contract](../../docs/research/fsl-state-and-migration.md).
+
+## Wave64 EXEC and `v_add_u32`
+
+`specs/amdgcn-gfx900-vadd-u32-wave64.fsl` owns two VOP2 e32 patterns:
+VGPR/VGPR sources, and SGPR0..95 broadcast with a VGPR second source. VGPR
+selectors span 0..255. This profile requires exactly 64 lanes. It does not
+infer wave32 support, inline constants, special registers or extension words.
+
+```text
+%exec: u64 = lane.mask.read 64;
+%lhs: u32 = lane.register.read source0, 256, %exec;
+%rhs: u32 = lane.register.read source1, 0, %exec;
+%sum: u32 = u32.add.wrap %lhs, %rhs;
+lane.register.write destination, %sum, %exec;
+```
+
+Element types remain in FIR. `WaveContract` derives uniform, mask and lane
+domains from the typed producer operations. Masks cannot enter integer
+arithmetic; lane values cannot enter uniform register/flag/stack effects.
+Uniform arithmetic inputs broadcast. No second semantic IR is introduced.
+Lane reads capture all slots at their declared effect point; masked writes
+update active slots only, preserving inactive bits, including high bits of
+untouched u64 storage. Ordered scalar effects execute once, even at EXEC=0.
+
+`WaveState` uses register-major lane slots (`register * lanes + lane`) plus the
+existing scalar bank, flags, lane extent and EXEC. All state and fields are
+validated before effects, including inactive bank entries. The C/Rust output
+ABI mirrors these inputs; C arrays must be valid disjoint storage. The mask
+is supplied by value and remains unchanged. No EXEC-write operation is admitted.
+
+```sh
+cargo run -p fission-fsl -- compile \
+  crates/fission-fsl/specs/amdgcn-gfx900-vadd-u32-wave64.fsl /tmp/wave.fslc
+cargo run -p fission-fsl -- decode-bytes /tmp/wave.fslc \
+  amdgcn.gfx900.vadd_u32.wave64 01050068
+cargo run -p fission-fsl -- emit-bytes /tmp/wave.fslc \
+  amdgcn.gfx900.vadd_u32.wave64 01050068 c /tmp/fsl_wave.c
+```
+
+The `execute-wave` CLI accepts lane count, EXEC, scalar registers, flags and
+flat lane slots. Tests check 1,984 valid states and 19 invalid emitter inputs
+(2,003 rows / 8,012 C/Rust O0/O2 comparisons), plus a synthetic four-lane
+scalar/mask contract (4 rows / 16 comparisons). Register aliasing, zero/full/
+sparse/highest-lane masks, scalar broadcast, untouched state and rejection
+before any mutation are included. Maximum VGPR/SGPR boundaries are additionally
+checked in the reference evaluator. All 22 crate tests passed locally.
+
+These are synthetic state/recompilation results, not GPU hardware or kernel
+equivalence. Wave execution currently admits wrapping addition and lane/scalar/
+flag reads and writes. Carry operations in mixed wave bodies, EXEC updates,
+VCC operations, divergence, barriers, memory, traps and Cranelift wave JIT/AOT
+remain unsupported. Historical scalar/stack package versions stay unchanged.
 
 ## Migration goal
 

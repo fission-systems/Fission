@@ -1,6 +1,6 @@
 # FIR state expansion and migration contracts
 
-Date: 2026-10-01. Experimental branch `codex/fsl-jvm-iadd-parity`.
+Date: 2026-10-02. Experimental branch `codex/fsl-jvm-iadd-parity`.
 
 ## Executable carry-input contract
 
@@ -24,24 +24,34 @@ other than 32 are synthetic generic-FIR contracts. This does not establish GPU
 hardware, whole-function or kernel equivalence. JIT/AOT state lifting remains
 unsupported.
 
-## Next EXEC/lane contract
+## Executable EXEC/lane contract
 
-This remains design work. There is one semantic FIR; uniform and per-lane state
-are effect domains in that FIR, not additional NIR/HIR layers.
+The wave64 `v_add_u32` slice now implements this contract. There is one semantic
+FIR; uniform and per-lane state are effect domains in that FIR, not additional
+NIR/HIR layers. V5 adds lane mask/read/write operations and retains V1..V4 reads.
 
-The next state schema must identify a wave size, scalar bank, lane register
-bank, EXEC bit vector and special flags. A lane-scoped read produces explicitly
-lane-indexed values; a masked write updates exactly the lanes selected by an
+The state schema identifies a wave size, scalar bank, register-major lane
+bank, EXEC bit vector and u1 flags. A lane-scoped read captures all lane-indexed
+values at its ordered effect point; a masked write updates exactly the lanes selected by an
 EXEC snapshot at the declared effect point. Inactive lanes preserve their
 registers. Scalar effects run once per instruction, including when EXEC is
 zero. Lane widths/mask bounds and all affected bank sizes must be validated
 before mutation. Source/destination aliasing must preserve operand capture.
 
-The first vector acceptance gate should be GFX900 `v_add_u32` with all-zero,
-all-active, sparse and highest-lane masks, scalar broadcast and lane sources,
-aliased operands, and invalid masks/banks. The model must state wave64 explicitly;
-wave32 support belongs to another architectural profile. Do not infer barriers,
-memory ordering, VCC behavior or divergence from a masked integer-add test.
+The first vector gate covers GFX900 `v_add_u32` with all-zero, all-active,
+sparse and highest-lane masks, SGPR broadcast and VGPR sources, aliased operands,
+and invalid banks/extents. There are 1,984 valid and 19 invalid output rows,
+8,012 C/Rust O0/O2 comparisons. A separate synthetic four-lane gate checks
+out-of-range masks and scalar effects with EXEC=0 in 16 output comparisons.
+Wave32 support belongs to another architectural profile. Masked add does not
+establish barriers, memory ordering, VCC behavior, EXEC updates or divergence.
+
+`WaveContract` derives each SSA value's `Uniform`, `Mask(n)` or `Lanes(n)` domain.
+Element widths/sign remain canonical FIR types. Masks are not arithmetic
+integers; uniform effects cannot consume lane values. Generic addition combines
+equal lane extents and broadcasts uniform operands. All mask reads in one body
+must agree on extent. Current wave execution refuses mixed carry/stack bodies;
+these refusal boundaries apply equally to the evaluator and C/Rust outputs.
 
 ## Migration owners and first artifacts
 

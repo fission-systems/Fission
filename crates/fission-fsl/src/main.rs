@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use fission_fsl::{
     compile_source, emit_aot_object, emit_instruction, execute_decoded, execute_instruction,
-    FslcPackage, JitDecoder, MachineState, OutputLayer,
+    execute_wave, FslcPackage, JitDecoder, MachineState, OutputLayer, WaveState,
 };
 
 fn main() -> ExitCode {
@@ -77,6 +77,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "{}",
                 emit_instruction(instruction, OutputLayer::Fir, "fsl_execute")?
             );
+        }
+        "execute-wave" => {
+            let path = required_arg(&mut args, "compiled .fslc path")?;
+            let language = required_arg(&mut args, "exact input profile")?;
+            let bytes = parse_bytes(&required_arg(&mut args, "instruction hex")?)?;
+            let lanes = required_arg(&mut args, "lane count")?.parse::<u16>()?;
+            let exec = parse_words(&required_arg(&mut args, "EXEC mask")?)?;
+            if exec.len() != 1 {
+                return Err("one EXEC mask required".into());
+            }
+            let registers = parse_words(&required_arg(&mut args, "scalar registers CSV")?)?;
+            let flags = parse_words(&required_arg(&mut args, "flags CSV")?)?;
+            let lane_registers =
+                parse_words(&required_arg(&mut args, "register-major lane slots CSV")?)?;
+            reject_extra_args(args)?;
+            let package = load_package(&path)?;
+            let decoded = package
+                .decode_bytes(&language, &bytes)?
+                .ok_or("unsupported encoding")?;
+            if decoded.raw.len() != bytes.len() {
+                return Err("one instruction required".into());
+            }
+            let mut state = WaveState {
+                scalar: MachineState { registers, flags },
+                lanes,
+                exec: exec[0],
+                lane_registers,
+            };
+            let status = execute_wave(&package, &decoded, &mut state)?;
+            println!("status={status:?} lanes={} exec=0x{:x} registers={:?} flags={:?} lane_registers={:?}", state.lanes, state.exec, state.scalar.registers, state.scalar.flags, state.lane_registers);
         }
         "execute-state" | "emit-bytes" => {
             let path = required_arg(&mut args, "compiled .fslc path")?;
@@ -328,6 +358,7 @@ fn reject_extra_args(
 }
 
 fn print_usage() {
+    eprintln!("  execute-wave <package> <profile> <hex> <lanes> <exec> <scalar-csv> <flags-csv> <lane-slots-csv>");
     eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust> <output>");
     eprintln!("usage:");
     eprintln!("  fslc check <source.fsl>");

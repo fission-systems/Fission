@@ -346,6 +346,9 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
     };
     Ok(match op {
         FirOp::RegisterRead { .. }
+        | FirOp::LaneMaskRead { .. }
+        | FirOp::LaneRead { .. }
+        | FirOp::LaneWrite { .. }
         | FirOp::FlagRead { .. }
         | FirOp::RegisterWrite { .. }
         | FirOp::FlagWrite { .. }

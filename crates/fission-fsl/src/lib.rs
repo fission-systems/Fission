@@ -3,7 +3,7 @@
 //! This crate intentionally has no dependency on `fission-sleigh`, `.sla`,
 //! JSON, or P-code. Fixed-width encoding plans support 8/32/64/128-bit words.
 //! Executable FIR currently supports a small typed VM-stack/arithmetic dialect
-//! and a narrow register/flag state dialect; other GPU semantic bodies remain
+//! and narrow register/flag and masked-lane state dialects; other GPU semantic bodies remain
 //! explicitly unsupported.
 
 pub mod abi;
@@ -14,7 +14,9 @@ pub mod package;
 mod parser;
 pub mod semantics;
 mod state;
+mod wave;
 pub use state::{execute_decoded, MachineState};
+pub use wave::{execute_wave, ValueDomain, WaveContract, WaveState};
 
 pub use encoding::{BitField, DecodedInstruction, Encoding};
 pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
@@ -104,6 +106,49 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         };
         for statement in instruction.statements {
             match statement {
+                parser::Statement::LaneMaskRead {
+                    name,
+                    ty,
+                    lanes,
+                    line,
+                    column,
+                } => {
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::LaneMaskRead { output, lanes });
+                }
+                parser::Statement::LaneRead {
+                    name,
+                    ty,
+                    field,
+                    bias,
+                    mask,
+                    line,
+                    column,
+                } => {
+                    let mask = require_value(&values, &value_ids, &mask, line, column)?;
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::LaneRead {
+                        output,
+                        field: field_id(&field)?,
+                        bias,
+                        mask,
+                    });
+                }
+                parser::Statement::LaneWrite {
+                    field,
+                    value,
+                    mask,
+                    line,
+                    column,
+                } => {
+                    let value = require_value(&values, &value_ids, &value, line, column)?;
+                    let mask = require_value(&values, &value_ids, &mask, line, column)?;
+                    ops.push(FirOp::LaneWrite {
+                        field: field_id(&field)?,
+                        value,
+                        mask,
+                    });
+                }
                 parser::Statement::RegisterRead {
                     name,
                     ty,
@@ -289,9 +334,15 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         version: if instructions
             .iter()
             .flat_map(|i| &i.ops)
-            .any(FirOp::requires_carry_in_version)
+            .any(FirOp::requires_lane_version)
         {
             FSL_PACKAGE_VERSION
+        } else if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(FirOp::requires_carry_in_version)
+        {
+            4
         } else if instructions
             .iter()
             .flat_map(|i| &i.ops)

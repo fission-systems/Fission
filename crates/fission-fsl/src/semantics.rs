@@ -54,6 +54,42 @@ impl CompiledInstruction {
         };
         for op in &self.ops {
             let output = match *op {
+                FirOp::LaneMaskRead { output, lanes } => {
+                    let ty = self
+                        .values
+                        .get(usize::from(output.0))
+                        .map(|v| v.ty)
+                        .ok_or_else(|| FslError::at(1, 1, "FIR output id out of range"))?;
+                    if lanes == 0 || lanes > 64 || ty.bits != 64 || ty.sign != IntegerSign::Unsigned
+                    {
+                        return Err(FslError::at(
+                            1,
+                            1,
+                            "lane mask requires u64 and extent 1..64",
+                        ));
+                    }
+                    Some(output)
+                }
+                FirOp::LaneRead {
+                    output,
+                    field,
+                    mask,
+                    ..
+                } => {
+                    read(mask, &defined)?;
+                    if usize::from(field) >= self.encoding.fields.len() {
+                        return Err(FslError::at(1, 1, "lane register field out of range"));
+                    }
+                    Some(output)
+                }
+                FirOp::LaneWrite { field, value, mask } => {
+                    read(value, &defined)?;
+                    read(mask, &defined)?;
+                    if usize::from(field) >= self.encoding.fields.len() {
+                        return Err(FslError::at(1, 1, "lane register field out of range"));
+                    }
+                    None
+                }
                 FirOp::Unsupported => unreachable!("unsupported body handled above"),
                 FirOp::RegisterRead { output, field } => {
                     if usize::from(field) >= self.encoding.fields.len() {
@@ -215,6 +251,7 @@ impl CompiledInstruction {
         if defined.iter().any(|defined| !defined) {
             return Err(FslError::at(1, 1, "declared FIR value has no definition"));
         }
+        crate::wave::validate_domains(self)?;
         Ok(())
     }
 }
@@ -253,6 +290,9 @@ impl StackContract {
                 FirOp::VmStackPush { .. } => delta += 1,
                 FirOp::IntAddWrap { .. } => {}
                 FirOp::RegisterRead { .. }
+                | FirOp::LaneMaskRead { .. }
+                | FirOp::LaneRead { .. }
+                | FirOp::LaneWrite { .. }
                 | FirOp::FlagRead { .. }
                 | FirOp::RegisterWrite { .. }
                 | FirOp::FlagWrite { .. }
@@ -305,6 +345,9 @@ pub fn execute_instruction(
     for op in &instruction.ops {
         match *op {
             FirOp::RegisterRead { .. }
+            | FirOp::LaneMaskRead { .. }
+            | FirOp::LaneRead { .. }
+            | FirOp::LaneWrite { .. }
             | FirOp::FlagRead { .. }
             | FirOp::RegisterWrite { .. }
             | FirOp::FlagWrite { .. }

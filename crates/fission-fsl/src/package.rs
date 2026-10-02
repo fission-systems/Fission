@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 4;
+pub const FSL_PACKAGE_VERSION: u16 = 5;
 const STATE_PACKAGE_VERSION: u16 = 3;
 const CARRY_IN_PACKAGE_VERSION: u16 = 4;
 const MAGIC: &[u8; 8] = b"FSLCPKG\0";
@@ -72,6 +72,24 @@ pub struct Evidence {
 pub enum FirOp {
     /// Semantic support is absent; this is never an executable no-op.
     Unsupported,
+    /// Snapshot of the lane activation mask; extent is explicit and <=64.
+    LaneMaskRead {
+        output: ValueId,
+        lanes: u16,
+    },
+    /// Per-lane read. Raw selector minus bias indexes the lane register bank.
+    LaneRead {
+        output: ValueId,
+        field: u16,
+        bias: u64,
+        mask: ValueId,
+    },
+    /// Ordered write under the specified mask snapshot. Uniform values broadcast.
+    LaneWrite {
+        field: u16,
+        value: ValueId,
+        mask: ValueId,
+    },
     RegisterRead {
         output: ValueId,
         field: u16,
@@ -119,17 +137,24 @@ pub enum FirOp {
 }
 
 impl FirOp {
-    pub(crate) fn requires_state_version(&self) -> bool {
+    pub(crate) fn requires_lane_version(&self) -> bool {
         matches!(
             self,
-            Self::RegisterRead { .. }
-                | Self::FlagRead { .. }
-                | Self::RegisterWrite { .. }
-                | Self::FlagWrite { .. }
-                | Self::IntAddCarry { .. }
-                | Self::IntAddCarryIn { .. }
-                | Self::IntAddWrapCarry { .. }
+            Self::LaneMaskRead { .. } | Self::LaneRead { .. } | Self::LaneWrite { .. }
         )
+    }
+    pub(crate) fn requires_state_version(&self) -> bool {
+        self.requires_lane_version()
+            || matches!(
+                self,
+                Self::RegisterRead { .. }
+                    | Self::FlagRead { .. }
+                    | Self::RegisterWrite { .. }
+                    | Self::FlagWrite { .. }
+                    | Self::IntAddCarry { .. }
+                    | Self::IntAddCarryIn { .. }
+                    | Self::IntAddWrapCarry { .. }
+            )
     }
 
     pub(crate) fn requires_carry_in_version(&self) -> bool {
@@ -165,7 +190,7 @@ impl FslcPackage {
     pub fn validate(&self) -> Result<(), FslError> {
         if !matches!(
             self.version,
-            1 | 2 | STATE_PACKAGE_VERSION | FSL_PACKAGE_VERSION
+            1 | 2 | STATE_PACKAGE_VERSION | CARRY_IN_PACKAGE_VERSION | FSL_PACKAGE_VERSION
         ) {
             return Err(FslError::at(1, 1, "unsupported FSL package version"));
         }
@@ -228,6 +253,9 @@ impl FslcPackage {
                 && instruction.ops.iter().any(|op| op.requires_state_version())
             {
                 return Err(FslError::at(1, 1, "state FIR requires package version 3"));
+            }
+            if self.version < 5 && instruction.ops.iter().any(FirOp::requires_lane_version) {
+                return Err(FslError::at(1, 1, "lane FIR requires package version 5"));
             }
             if self.version < CARRY_IN_PACKAGE_VERSION
                 && instruction
@@ -339,6 +367,29 @@ impl FslcPackage {
             writer.u16(count_u16(instruction.ops.len(), "FIR operations")?);
             for op in &instruction.ops {
                 match op {
+                    FirOp::LaneMaskRead { output, lanes } => {
+                        writer.u8(11);
+                        writer.u16(output.0);
+                        writer.u16(*lanes);
+                    }
+                    FirOp::LaneRead {
+                        output,
+                        field,
+                        bias,
+                        mask,
+                    } => {
+                        writer.u8(12);
+                        writer.u16(output.0);
+                        writer.u16(*field);
+                        writer.u64(*bias);
+                        writer.u16(mask.0);
+                    }
+                    FirOp::LaneWrite { field, value, mask } => {
+                        writer.u8(13);
+                        writer.u16(*field);
+                        writer.u16(value.0);
+                        writer.u16(mask.0);
+                    }
                     FirOp::RegisterRead { output, field } => {
                         writer.u8(4);
                         writer.u16(output.0);
@@ -430,7 +481,10 @@ impl FslcPackage {
             return Err(FslError::at(1, 1, "invalid FSL package magic"));
         }
         let version = reader.u16()?;
-        if !matches!(version, 1 | 2 | STATE_PACKAGE_VERSION | FSL_PACKAGE_VERSION) {
+        if !matches!(
+            version,
+            1 | 2 | STATE_PACKAGE_VERSION | CARRY_IN_PACKAGE_VERSION | FSL_PACKAGE_VERSION
+        ) {
             return Err(FslError::at(
                 1,
                 1,
@@ -560,6 +614,21 @@ impl FslcPackage {
             let mut ops = Vec::with_capacity(op_count);
             for _ in 0..op_count {
                 let op = match reader.u8()? {
+                    11 if version >= 5 => FirOp::LaneMaskRead {
+                        output: reader.value_id(value_count)?,
+                        lanes: reader.u16()?,
+                    },
+                    12 if version >= 5 => FirOp::LaneRead {
+                        output: reader.value_id(value_count)?,
+                        field: reader.u16()?,
+                        bias: reader.u64()?,
+                        mask: reader.value_id(value_count)?,
+                    },
+                    13 if version >= 5 => FirOp::LaneWrite {
+                        field: reader.u16()?,
+                        value: reader.value_id(value_count)?,
+                        mask: reader.value_id(value_count)?,
+                    },
                     4 if version >= 3 => FirOp::RegisterRead {
                         output: reader.value_id(value_count)?,
                         field: reader.u16()?,

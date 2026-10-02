@@ -30,6 +30,35 @@ pub fn emit_instruction(
         );
         for op in &instruction.ops {
             match *op {
+                FirOp::LaneMaskRead { output, lanes } => {
+                    writeln!(text, "  %v{}: mask<{lanes}> = lane.mask.read", output.0).unwrap();
+                }
+                FirOp::LaneRead {
+                    output,
+                    field,
+                    bias,
+                    mask,
+                } => {
+                    writeln!(
+                        text,
+                        "  %v{}: lanes<{}> = lane.register.read {}, {bias}, %v{}",
+                        output.0,
+                        instruction.values[usize::from(output.0)].ty,
+                        instruction.encoding.fields[usize::from(field)].name,
+                        mask.0
+                    )
+                    .unwrap();
+                }
+                FirOp::LaneWrite { field, value, mask } => {
+                    writeln!(
+                        text,
+                        "  lane.register.write {}, %v{}, %v{}",
+                        instruction.encoding.fields[usize::from(field)].name,
+                        value.0,
+                        mask.0
+                    )
+                    .unwrap();
+                }
                 FirOp::RegisterRead { output, field } => {
                     writeln!(
                         text,
@@ -148,6 +177,9 @@ pub fn emit_instruction(
             "output symbol must be an ASCII identifier starting with fsl_",
         ));
     }
+    if instruction.ops.iter().any(FirOp::requires_lane_version) {
+        return crate::wave::emit_wave_instruction(instruction, layer, symbol);
+    }
     if instruction.ops.iter().any(FirOp::requires_state_version) {
         return crate::state::emit_state_instruction(instruction, layer, symbol);
     }
@@ -257,6 +289,9 @@ pub fn emit_instruction(
             (_, OutputLayer::Fir) => unreachable!(),
             (
                 FirOp::RegisterRead { .. }
+                | FirOp::LaneMaskRead { .. }
+                | FirOp::LaneRead { .. }
+                | FirOp::LaneWrite { .. }
                 | FirOp::FlagRead { .. }
                 | FirOp::RegisterWrite { .. }
                 | FirOp::FlagWrite { .. }
