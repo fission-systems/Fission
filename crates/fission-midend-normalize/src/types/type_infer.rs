@@ -723,6 +723,136 @@ mod tests {
         ));
     }
 
+    fn zero_alias_lifetime_func(body: Vec<PreHirStmt>) -> PreHirFunction {
+        let ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut source = make_binding("source");
+        source.ty = ty.clone();
+        source.initializer = Some(PreHirExpr::Const(0, ty.clone()));
+        let mut result = make_binding("result");
+        result.ty = ty;
+        make_func(vec![source, result], body, NirType::Unknown)
+    }
+
+    #[test]
+    fn scalar_zero_alias_lifetime_preserves_redefined_source_and_self_copy() {
+        let mut func = zero_alias_lifetime_func(vec![
+            make_assign(
+                "source",
+                PreHirExpr::Call {
+                    target: "produce_value".to_string(),
+                    args: vec![],
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                },
+            ),
+            make_assign("source", PreHirExpr::Var("source".to_string())),
+            make_assign("result", PreHirExpr::Var("source".to_string())),
+        ]);
+        let before = func.body.clone();
+        assert!(!super::rewrite_scalar_zero_alias_assignments(&mut func));
+        assert_eq!(func.body, before);
+    }
+
+    #[test]
+    fn scalar_zero_alias_lifetime_preserves_nested_writes() {
+        let write = make_assign(
+            "source",
+            PreHirExpr::Const(
+                7,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            ),
+        );
+        let containers = vec![
+            PreHirStmt::Block(vec![write.clone()].into()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("condition".to_string()),
+                then_body: vec![write.clone()].into(),
+                else_body: vec![].into(),
+            },
+            PreHirStmt::While {
+                cond: PreHirExpr::Var("condition".to_string()),
+                body: vec![write].into(),
+            },
+        ];
+        for container in containers {
+            let mut func = zero_alias_lifetime_func(vec![
+                container,
+                make_assign("result", PreHirExpr::Var("source".to_string())),
+            ]);
+            let before = func.body.clone();
+            assert!(!super::rewrite_scalar_zero_alias_assignments(&mut func));
+            assert_eq!(func.body, before);
+        }
+    }
+
+    #[test]
+    fn scalar_zero_alias_lifetime_preserves_address_taken_source() {
+        let mut func = zero_alias_lifetime_func(vec![
+            PreHirStmt::Expr(PreHirExpr::Call {
+                target: "write_value".to_string(),
+                args: vec![PreHirExpr::AddressOfLocal("source".to_string())],
+                ty: NirType::Unknown,
+            }),
+            make_assign("result", PreHirExpr::Var("source".to_string())),
+        ]);
+        let before = func.body.clone();
+        assert!(!super::rewrite_scalar_zero_alias_assignments(&mut func));
+        assert_eq!(func.body, before);
+    }
+
+    #[test]
+    fn scalar_zero_alias_lifetime_preserves_initializer_escape() {
+        let mut func = zero_alias_lifetime_func(vec![make_assign(
+            "result",
+            PreHirExpr::Var("source".to_string()),
+        )]);
+        let mut alias = make_binding("alias");
+        alias.ty = NirType::Ptr(Box::new(func.locals[0].ty.clone()));
+        alias.initializer = Some(PreHirExpr::AddressOfLocal("source".to_string()));
+        func.locals.push(alias);
+        let before = func.body.clone();
+        assert!(!super::rewrite_scalar_zero_alias_assignments(&mut func));
+        assert_eq!(func.body, before);
+    }
+
+    #[test]
+    fn scalar_zero_alias_lifetime_preserves_runtime_parameter() {
+        let mut func = zero_alias_lifetime_func(vec![make_assign(
+            "result",
+            PreHirExpr::Var("source".to_string()),
+        )]);
+        let mut param = func.locals.remove(0);
+        param.origin = Some(NirBindingOrigin::ParamIndex(0));
+        func.params.push(param);
+        let before = func.body.clone();
+        assert!(!super::rewrite_scalar_zero_alias_assignments(&mut func));
+        assert_eq!(func.body, before);
+    }
+
+    #[test]
+    fn scalar_zero_alias_lifetime_preserves_immutable_scalar_zero_rewrite() {
+        let mut func = zero_alias_lifetime_func(vec![make_assign(
+            "result",
+            PreHirExpr::Var("source".to_string()),
+        )]);
+        assert!(super::rewrite_scalar_zero_alias_assignments(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Const(0, _),
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn pointer_add_offset_param_stays_integer_not_pointer() {
         // An offset parameter must remain integer even when the sum result is

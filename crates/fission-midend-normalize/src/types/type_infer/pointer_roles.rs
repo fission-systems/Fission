@@ -487,9 +487,29 @@ fn collect_pointer_compare_peer_promotions_expr(
 }
 
 fn zero_initializer_aliases(func: &PreHirFunction) -> HashSet<String> {
-    func.locals
+    use crate::analysis::defuse::{DefUseMap, collect_address_taken_locals};
+
+    let definitions = DefUseMap::build(&func.body);
+    let mut address_taken = collect_address_taken_locals(&func.body);
+    let initializers = func
+        .locals
         .iter()
         .chain(func.params.iter())
+        .filter_map(|binding| binding.initializer.clone())
+        .map(PreHirStmt::Expr)
+        .collect::<Vec<_>>();
+    address_taken.extend(collect_address_taken_locals(&initializers));
+
+    // A declaration initializer is an entry value, not a reaching-definition
+    // fact for every use. Restrict this function-wide rewrite to immutable,
+    // unexposed locals; SCCP owns use-specific constant propagation. Runtime
+    // parameters do not acquire a constant value from initializer metadata.
+    func.locals
+        .iter()
+        .filter(|binding| {
+            !definitions.def_count.contains_key(&binding.name)
+                && !address_taken.contains(&binding.name)
+        })
         .filter_map(|binding| match binding.initializer.as_ref() {
             Some(PreHirExpr::Const(0, _)) => Some(binding.name.clone()),
             _ => None,
