@@ -429,7 +429,7 @@ fn collect_assignment_copy_constraints(
                 }
             }
             if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
-                if matches!(lhs_ty, NirType::Ptr(_)) {
+                if matches!(lhs_ty, NirType::Ptr(_)) && !matches!(rhs, PreHirExpr::Var(_)) {
                     collect_pointer_assignment_base_constraints(
                         rhs,
                         lhs_ty,
@@ -441,9 +441,14 @@ fn collect_assignment_copy_constraints(
 
             if let PreHirExpr::Var(rhs_name) = rhs {
                 if let Some(rhs_ty) = known_binding_types.get(rhs_name) {
-                    out.entry(lhs_name.clone())
-                        .or_default()
-                        .push(copy_constraint_from_type(rhs_ty));
+                    // Pointer COPY equality belongs to TypeFlow's value-lifetime
+                    // proof. A global source binding may describe a later value
+                    // after redefinition; legacy constraints must not bypass it.
+                    if !matches!(rhs_ty, NirType::Ptr(_)) {
+                        out.entry(lhs_name.clone())
+                            .or_default()
+                            .push(copy_constraint_from_type(rhs_ty));
+                    }
                 }
             }
 
@@ -1924,6 +1929,14 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
     // copy) turns up to 8 full-body walks per call into 1.
     let mut roles = HashMap::<String, BindingUseRole>::default();
     collect_binding_use_roles(&func.body, &mut roles);
+    // A Var RHS has no expression type, but a proven operation-local COPY
+    // still defines a pointer. Do not erase that value's type merely because
+    // a null check or the reused carrier's scalar fact supplies a scalar use.
+    for name in super::type_flow::pointer_copy_value_definitions(func) {
+        let role = roles.entry(name).or_default();
+        role.pointer_value_definition = true;
+        role.non_pointer_value_definition = false;
+    }
     let scalar_induction = super::type_infer::scalar_induction_evidence(func);
     let mut flow_changed = false;
     // Iterate to convergence (alias chains may require multiple rounds).
@@ -2023,6 +2036,173 @@ mod tests {
             body,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn copy_lifetime_legacy_constraints_preserve_multi_definition_scalar_flag() {
+        let scalar = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let word = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = make_func(
+            vec![
+                make_typed_binding("carrier", word.clone(), NirBindingOrigin::Temp),
+                make_typed_binding("flag", scalar.clone(), NirBindingOrigin::Temp),
+            ],
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Const(0, word),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("flag".into()),
+                    rhs: PreHirExpr::Var("carrier".into()),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("condition".into()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("flag".into()),
+                        rhs: PreHirExpr::Const(1, scalar.clone()),
+                    }]
+                    .into(),
+                    else_body: vec![].into(),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Call {
+                        target: "produce_pointer".into(),
+                        args: vec![],
+                        ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                    },
+                },
+            ],
+            NirType::Unknown,
+        );
+        for _ in 0..4 {
+            super::apply_use_driven_type_infer_pass(&mut func);
+        }
+        assert_eq!(func.locals[1].ty, scalar);
+    }
+
+    #[test]
+    fn copy_lifetime_legacy_constraints_delegate_stable_pointer_alias() {
+        let pointer = NirType::Ptr(Box::new(NirType::Float { bits: 32 }));
+        let mut func = make_func(
+            vec![
+                make_typed_binding("source", pointer.clone(), NirBindingOrigin::Temp),
+                make_binding("alias"),
+            ],
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("alias".into()),
+                rhs: PreHirExpr::Var("source".into()),
+            }],
+            NirType::Unknown,
+        );
+        super::apply_use_driven_type_infer_pass(&mut func);
+        assert_eq!(func.locals[1].ty, pointer);
+    }
+
+    #[test]
+    fn operation_copy_pointer_definition_survives_null_check_and_carrier_reuse() {
+        let word = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let pointer = NirType::Ptr(Box::new(NirType::Unknown));
+        let mut func = make_func(
+            vec![
+                make_typed_binding("carrier", word.clone(), NirBindingOrigin::Temp),
+                make_typed_binding("saved", word.clone(), NirBindingOrigin::StackOffset(-8)),
+            ],
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Call {
+                        target: "pointer_result".into(),
+                        args: vec![],
+                        ty: pointer.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".into()),
+                    rhs: PreHirExpr::Var("carrier".into()),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Unary {
+                        op: PreHirUnaryOp::Not,
+                        expr: Box::new(PreHirExpr::Var("saved".into())),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![].into(),
+                    else_body: vec![].into(),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Const(1, word.clone()),
+                },
+            ],
+            NirType::Unknown,
+        );
+        func.is_64bit = true;
+        for _ in 0..4 {
+            super::apply_use_driven_type_infer_pass(&mut func);
+        }
+        assert_eq!(func.locals[1].ty, pointer);
+
+        // Another destination value invalidates the pointer-only definition
+        // proof even when the first assignment is an adjacent typed COPY.
+        func.body.push(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("saved".into()),
+            rhs: PreHirExpr::Const(1, word.clone()),
+        });
+        func.locals[1].ty = word;
+        super::apply_use_driven_type_infer_pass(&mut func);
+        assert!(!matches!(func.locals[1].ty, NirType::Ptr(_)));
+    }
+
+    #[test]
+    fn copy_lifetime_does_not_reverse_pointer_into_redefined_unknown_source() {
+        let mut func = make_func(
+            vec![
+                make_binding("carrier"),
+                make_typed_binding(
+                    "saved",
+                    NirType::Ptr(Box::new(NirType::Unknown)),
+                    NirBindingOrigin::Temp,
+                ),
+            ],
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Call {
+                        target: "unknown_result_a".into(),
+                        args: vec![],
+                        ty: NirType::Unknown,
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".into()),
+                    rhs: PreHirExpr::Var("carrier".into()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Call {
+                        target: "unknown_result_b".into(),
+                        args: vec![],
+                        ty: NirType::Unknown,
+                    },
+                },
+            ],
+            NirType::Unknown,
+        );
+        for _ in 0..4 {
+            super::apply_use_driven_type_infer_pass(&mut func);
+        }
+        assert_eq!(func.locals[0].ty, NirType::Unknown);
     }
 
     #[test]
