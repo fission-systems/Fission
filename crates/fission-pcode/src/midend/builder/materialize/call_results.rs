@@ -380,6 +380,111 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Prove the byte prefix actually observed before this call's carrier is
+    /// replaced. A low-width first read alone is insufficient: another CFG
+    /// successor can still consume the whole value or return it to our caller.
+    pub(super) fn observed_call_result_use_width(
+        &self,
+        site: LoweringSite,
+        carrier: &Varnode,
+    ) -> u32 {
+        if self.register_namer().is_float_return_register(carrier) {
+            return carrier.size;
+        }
+        // Structuring dominance cannot prove a semantic lifetime after edges
+        // have been pruned. Preserve the full carrier without that proof.
+        if !self.irreducible_edges.is_empty() {
+            return carrier.size;
+        }
+        let mut pending = vec![(site.block_idx, site.op_idx + 1)];
+        let mut visited = std::collections::BTreeSet::new();
+        let mut width = 0;
+        while let Some((block_idx, start)) = pending.pop() {
+            if !visited.insert((block_idx, start)) {
+                continue;
+            }
+            if visited.len() > 1024 {
+                return carrier.size;
+            }
+            let Some(block) = self.pcode.blocks.get(block_idx) else {
+                return carrier.size;
+            };
+            // A separate call-site binding cannot represent a join with an
+            // alternate carrier definition. Preserve the shared carrier until
+            // explicit merge recovery can account for every predecessor.
+            if block_idx != site.block_idx && !self.dom_tree.dominates(site.block_idx, block_idx) {
+                return carrier.size;
+            }
+            let mut replaced = false;
+            for (op_idx, op) in block.ops.iter().enumerate().skip(start) {
+                for input in &op.inputs {
+                    if !self.varnode_aliases_value(carrier, input) {
+                        continue;
+                    }
+                    if input.offset != carrier.offset || input.size >= carrier.size {
+                        return carrier.size;
+                    }
+                    // Admit an explicit projection into independent storage.
+                    // A copy to another hardware register can participate in
+                    // ABI argument recovery or a carrier merge; that needs the
+                    // existing carrier binding and width-conversion policy.
+                    if width == 0 {
+                        if op.opcode != PcodeOpcode::Copy
+                            || op.output.as_ref().is_none_or(|output| {
+                                !is_unique_space_id(output.space_id) || output.size != input.size
+                            })
+                        {
+                            return carrier.size;
+                        }
+                    }
+                    width = width.max(input.size);
+                }
+                if matches!(
+                    op.opcode,
+                    PcodeOpcode::Return | PcodeOpcode::BranchInd | PcodeOpcode::CallOther
+                ) {
+                    return carrier.size;
+                }
+                if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd) {
+                    // CALL operands omit implicit argument-carrier reads.
+                    // Reuse the existing owner fact for CALL/RETURN pairs;
+                    // those leave this function instead of clobbering a value.
+                    if crate::midend::builder::init::op_is_lifted_return(block, op_idx)
+                        || self
+                            .register_namer()
+                            .int_param_offsets
+                            .contains(&carrier.offset)
+                    {
+                        return carrier.size;
+                    }
+                    replaced = true;
+                    break;
+                }
+                if let Some(output) = &op.output
+                    && self.varnode_aliases_value(carrier, output)
+                {
+                    // A partial write can preserve upper bytes from the call.
+                    // Do not rely on ISA-specific zero-extension conventions.
+                    if output.offset != carrier.offset || output.size < carrier.size {
+                        return carrier.size;
+                    }
+                    replaced = true;
+                    break;
+                }
+            }
+            if !replaced {
+                let Some(successors) = self.heritage_successors.get(block_idx) else {
+                    return carrier.size;
+                };
+                if successors.is_empty() {
+                    return carrier.size;
+                }
+                pending.extend(successors.iter().map(|successor| (*successor, 0)));
+            }
+        }
+        if width == 0 { carrier.size } else { width }
+    }
+
     pub(super) fn ensure_call_result_binding(
         &mut self,
         site: LoweringSite,
@@ -407,16 +512,23 @@ impl<'a> PreviewBuilder<'a> {
                 )
                 .name;
         };
+        let carrier_size = ret_reg.size;
+        let observed_size = self.observed_call_result_use_width(site, &ret_reg);
         let result_ty = if self.register_namer().is_float_return_register(&ret_reg) {
-            float_type_from_size(ret_reg.size)
+            float_type_from_size(observed_size)
         } else {
-            type_from_size(ret_reg.size, false)
+            type_from_size(observed_size, false)
         };
         self.call_result_types.insert(site, result_ty.clone());
         // Prefer the ABI return surface (rax / r3 / …) so epilogue recovery and
         // CallInd result share one name. Temps (`xVarN`) break `return` join and
         // force undeclared-symbol noise when the call is a function pointer.
-        if let Some(name) = self.sla_hw_name(ret_reg.offset, ret_reg.size) {
+        // Hardware names intentionally unify subregister views. A proven
+        // narrow call value is a separate value, not that entire carrier;
+        // keep its type independent of a later pointer carried by the register.
+        if observed_size == carrier_size
+            && let Some(name) = self.sla_hw_name(ret_reg.offset, ret_reg.size)
+        {
             self.ensure_live_register_binding(&name, ret_reg.size);
             self.set_call_result_binding_type(&name, &result_ty);
             self.call_result_bindings.insert(site, name.clone());

@@ -3235,6 +3235,318 @@ fn partial_return_register_reads_resolve_to_live_call_result_binding() {
 }
 
 #[test]
+fn call_result_width_uses_all_reachable_reads_before_full_overwrite() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let low = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let copied = register(UNIQUE_SPACE_ID, 0x100, 4);
+    for (later_read, expected) in [(low.clone(), 4), (wide.clone(), 8)] {
+        let pcode = pcode_function(vec![block(vec![
+            op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(copied.clone()),
+                vec![low.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::Store,
+                None,
+                vec![constant(0), constant(0x3000), later_read],
+            ),
+            op(3, PcodeOpcode::Copy, Some(wide.clone()), vec![constant(0)]),
+        ])]);
+        let options = crate::midend::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        let site = LoweringSite {
+            block_idx: 0,
+            op_idx: 0,
+        };
+        assert_eq!(
+            builder.observed_call_result_use_width(site, &wide),
+            expected
+        );
+        let name = builder.ensure_call_result_binding(site, &pcode.blocks[0].ops[0]);
+        assert_eq!(builder.temps[&name].ty, type_from_size(expected, false));
+        if expected == 4 {
+            builder.irreducible_edges.insert((0, 0));
+            assert_eq!(builder.observed_call_result_use_width(site, &wide), 8);
+        }
+    }
+}
+
+#[test]
+fn call_result_width_preserves_register_argument_projection() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let low = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let argument = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x88, 4);
+    let pcode = pcode_function(vec![block(vec![
+        op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+        op(1, PcodeOpcode::Copy, Some(argument), vec![low]),
+        op(2, PcodeOpcode::Call, None, vec![constant(0x3000)]),
+    ])]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    assert_eq!(
+        builder.observed_call_result_use_width(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 0
+            },
+            &wide,
+        ),
+        8,
+    );
+}
+
+#[test]
+fn call_result_width_preserves_nondominated_carrier_join() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let low = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![op(
+            0,
+            PcodeOpcode::CBranch,
+            None,
+            vec![constant(0x1200), register(UNIQUE_SPACE_ID, 0x200, 1)],
+        )],
+    );
+    entry.successors = vec![1, 2];
+    let mut call_block = block_at(
+        0x1100,
+        1,
+        vec![
+            op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(register(UNIQUE_SPACE_ID, 0x100, 4)),
+                vec![low.clone()],
+            ),
+            op(2, PcodeOpcode::Branch, None, vec![constant(0x1300)]),
+        ],
+    );
+    call_block.successors = vec![3];
+    let mut other = block_at(
+        0x1200,
+        2,
+        vec![op(
+            0,
+            PcodeOpcode::Copy,
+            Some(wide.clone()),
+            vec![constant(42)],
+        )],
+    );
+    other.successors = vec![3];
+    let join = block_at(
+        0x1300,
+        3,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(register(UNIQUE_SPACE_ID, 0x104, 4)),
+                vec![low],
+            ),
+            op(1, PcodeOpcode::Copy, Some(wide.clone()), vec![constant(0)]),
+        ],
+    );
+    let pcode = pcode_function(vec![entry, call_block, other, join]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    assert_eq!(
+        builder.observed_call_result_use_width(
+            LoweringSite {
+                block_idx: 1,
+                op_idx: 0
+            },
+            &wide,
+        ),
+        8,
+    );
+}
+
+#[test]
+fn call_result_width_preserves_partial_overwrites_and_live_returns() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let low = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    for last in [
+        op(2, PcodeOpcode::Copy, Some(low.clone()), vec![constant(0)]),
+        op(2, PcodeOpcode::Return, None, vec![constant(0)]),
+        op(2, PcodeOpcode::Call, None, vec![constant(0x3000)]),
+        op(2, PcodeOpcode::CallInd, None, vec![constant(0x3000)]),
+    ] {
+        let pcode = pcode_function(vec![block(vec![
+            op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(register(UNIQUE_SPACE_ID, 0x100, 4)),
+                vec![low.clone()],
+            ),
+            last,
+            op(3, PcodeOpcode::Return, None, vec![constant(0)]),
+        ])]);
+        let options = crate::midend::builder::materialize::test_support::test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        assert_eq!(
+            builder.observed_call_result_use_width(
+                LoweringSite {
+                    block_idx: 0,
+                    op_idx: 0
+                },
+                &wide
+            ),
+            8
+        );
+    }
+}
+
+#[test]
+fn call_result_width_does_not_ignore_a_wider_successor() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let low = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(register(UNIQUE_SPACE_ID, 0x100, 4)),
+                vec![low.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x1200), register(UNIQUE_SPACE_ID, 0x200, 1)],
+            ),
+        ],
+    );
+    entry.successors = vec![1, 2];
+    let successors = [low, wide.clone()]
+        .into_iter()
+        .enumerate()
+        .map(|(index, read)| {
+            block_at(
+                0x1100 + index as u64 * 0x100,
+                index as u32 + 1,
+                vec![
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(register(UNIQUE_SPACE_ID, 0x108, read.size)),
+                        vec![read],
+                    ),
+                    op(2, PcodeOpcode::Copy, Some(wide.clone()), vec![constant(0)]),
+                ],
+            )
+        });
+    let pcode = pcode_function(std::iter::once(entry).chain(successors).collect());
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    assert_eq!(
+        builder.observed_call_result_use_width(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 0
+            },
+            &wide
+        ),
+        8
+    );
+}
+
+#[test]
+fn call_result_width_preserves_implicit_argument_reads_on_shared_abi_carriers() {
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+    crate::midend::cspec::test_maps::apply_preview_cspec(&mut options);
+    let empty = pcode_function(vec![block(Vec::new())]);
+    let model = PreviewBuilder::new(&empty, &options, None);
+    let carrier = model
+        .call_result_registers()
+        .into_iter()
+        .find(|reg| !model.register_namer().is_float_return_register(reg))
+        .expect("integer return carrier");
+    assert!(
+        model
+            .register_namer()
+            .int_param_offsets
+            .contains(&carrier.offset)
+    );
+    let mut low = carrier.clone();
+    low.size = 4;
+    let pcode = pcode_function(vec![block(vec![
+        op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+        op(
+            1,
+            PcodeOpcode::Copy,
+            Some(register(UNIQUE_SPACE_ID, 0x100, 4)),
+            vec![low],
+        ),
+        op(2, PcodeOpcode::Call, None, vec![constant(0x4000)]),
+    ])]);
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    assert_eq!(
+        builder.observed_call_result_use_width(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 0
+            },
+            &carrier
+        ),
+        carrier.size
+    );
+}
+
+#[test]
+fn call_result_width_preserves_float_carrier_policy() {
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let empty = pcode_function(vec![block(Vec::new())]);
+    let model = PreviewBuilder::new(&empty, &options, None);
+    let carrier = model
+        .call_result_registers()
+        .into_iter()
+        .find(|reg| model.register_namer().is_float_return_register(reg))
+        .expect("floating return carrier");
+    let mut low = carrier.clone();
+    low.size = 4;
+    let pcode = pcode_function(vec![block(vec![
+        op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+        op(
+            1,
+            PcodeOpcode::Store,
+            None,
+            vec![constant(0), constant(0x3000), low],
+        ),
+        op(
+            2,
+            PcodeOpcode::Copy,
+            Some(carrier.clone()),
+            vec![constant(0)],
+        ),
+    ])]);
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    assert_eq!(
+        builder.observed_call_result_use_width(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 0
+            },
+            &carrier
+        ),
+        carrier.size
+    );
+}
+
+#[test]
 fn cross_block_return_register_reads_resolve_to_live_call_result_binding() {
     let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
     let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
