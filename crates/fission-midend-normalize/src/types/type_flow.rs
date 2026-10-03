@@ -9,6 +9,8 @@ use crate::prelude::*;
 use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 
+mod entry_value_types;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EvidenceStrength {
     StorageWidth,
@@ -170,6 +172,14 @@ impl TypeFlowSolver {
         collect_edges(&func.body, &mut solver.edges);
         collect_definition_counts(&func.body, &mut solver.definition_counts);
         collect_self_referential_bindings(&func.body, &mut solver.self_referential);
+        // These facts belong to the entry value at its use, before a COPY
+        // destination is overwritten. Never substitute a reused local's
+        // binding-wide declaration for that operation-local proof.
+        for (input, ty) in
+            entry_value_types::pointer_input_uses(func, &solver.definition_counts, &metatype_seeded)
+        {
+            solver.edges.push(TypeFlowEdge::Cast { output: input, ty });
+        }
         let address_taken =
             super::super::analysis::defuse::collect_address_taken_locals(&func.body);
         solver.stable_locals = func
@@ -967,6 +977,249 @@ mod tests {
                 },
             ],
         )
+    }
+
+    fn entry_use_fixture(bits: u32) -> PreHirFunction {
+        let word = NirType::Int {
+            bits,
+            signed: false,
+        };
+        let byte_pointer = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let mut func = function(
+            vec![
+                binding("input", word.clone(), NirBindingOrigin::ParamIndex(0)),
+                binding("bound", byte_pointer, NirBindingOrigin::ParamIndex(1)),
+            ],
+            vec![
+                binding("carrier", word.clone(), NirBindingOrigin::Temp),
+                binding("peer", word.clone(), NirBindingOrigin::Temp),
+            ],
+            vec![
+                entry_copy("carrier", "input"),
+                entry_copy("peer", "bound"),
+                PreHirStmt::If {
+                    cond: entry_relation("carrier", "peer"),
+                    then_body: vec![].into(),
+                    else_body: vec![].into(),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("carrier".into()),
+                    rhs: PreHirExpr::Const(7, word),
+                },
+            ],
+        );
+        func.is_64bit = bits == 64;
+        func
+    }
+
+    fn entry_copy(lhs: &str, rhs: &str) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs.into()),
+            rhs: PreHirExpr::Var(rhs.into()),
+        }
+    }
+
+    fn entry_relation(lhs: &str, rhs: &str) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(PreHirExpr::Var(lhs.into())),
+            rhs: Box::new(PreHirExpr::Var(rhs.into())),
+            ty: NirType::Bool,
+        }
+    }
+
+    #[test]
+    fn entry_use_comparison_preserves_value_before_carrier_reuse_and_converges() {
+        for bits in [32, 64] {
+            let mut func = entry_use_fixture(bits);
+            let body = func.body.clone();
+            assert!(apply_type_flow_pass(&mut func));
+            assert_eq!(func.params[0].ty, func.params[1].ty);
+            assert_eq!(func.body, body);
+            assert!(!apply_type_flow_pass(&mut func));
+            let mut nested = entry_use_fixture(bits);
+            nested.body = vec![PreHirStmt::Block(nested.body.into())];
+            apply_type_flow_pass(&mut nested);
+            assert_eq!(nested.params[0].ty, func.params[0].ty);
+        }
+    }
+
+    #[test]
+    fn entry_use_address_is_not_the_loaded_value() {
+        let mut func = entry_use_fixture(64);
+        let word = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let byte = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        func.body = vec![
+            entry_copy("carrier", "input"),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("carrier".into())),
+                    ty: byte.clone(),
+                },
+                rhs: PreHirExpr::Const(0, byte.clone()),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("carrier".into()),
+                rhs: PreHirExpr::Const(0, word.clone()),
+            },
+        ];
+        apply_type_flow_pass(&mut func);
+        assert_eq!(func.params[0].ty, NirType::Ptr(Box::new(byte.clone())));
+        // A load returns a new word. A later dereference of that loaded word
+        // must not add a second pointee to the original address.
+        let mut loaded = entry_use_fixture(64);
+        loaded.body = vec![
+            entry_copy("carrier", "input"),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("carrier".into()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("carrier".into())),
+                    ty: word.clone(),
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("carrier".into())),
+                    ty: byte,
+                },
+                rhs: PreHirExpr::Const(0, word.clone()),
+            },
+        ];
+        apply_type_flow_pass(&mut loaded);
+        assert_eq!(loaded.params[0].ty, NirType::Ptr(Box::new(word)));
+    }
+
+    #[test]
+    fn entry_use_declines_kills_and_region_boundaries() {
+        let barriers = vec![
+            PreHirStmt::Label("join".into()),
+            PreHirStmt::Goto("target".into()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("condition".into()),
+                then_body: vec![].into(),
+                else_body: vec![].into(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("carrier".into()),
+                rhs: PreHirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                ),
+            },
+        ];
+        for barrier in barriers {
+            let mut func = entry_use_fixture(64);
+            let original = func.params[0].ty.clone();
+            func.body.insert(2, barrier);
+            apply_type_flow_pass(&mut func);
+            assert_eq!(func.params[0].ty, original);
+        }
+        let mut looped = entry_use_fixture(64);
+        let condition = entry_relation("carrier", "peer");
+        looped.body = vec![
+            entry_copy("carrier", "input"),
+            entry_copy("peer", "bound"),
+            PreHirStmt::While {
+                cond: condition,
+                body: vec![].into(),
+            },
+        ];
+        let original = looped.params[0].ty.clone();
+        apply_type_flow_pass(&mut looped);
+        assert_eq!(looped.params[0].ty, original);
+    }
+
+    #[test]
+    fn entry_use_declines_locks_width_metatypes_writes_and_escape() {
+        for mode in 0..6 {
+            let mut func = entry_use_fixture(64);
+            let mut metatypes = HashSet::default();
+            match mode {
+                0 => func.params[0].surface_type_name = Some("uintptr_t".into()),
+                1 => {
+                    func.params[0].ty = NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    }
+                }
+                2 => {
+                    metatypes.insert("input".into());
+                }
+                3 => func.body.push(entry_copy("input", "carrier")),
+                4 => func
+                    .body
+                    .push(PreHirStmt::Expr(PreHirExpr::AddressOfLocal("input".into()))),
+                _ => func.body.insert(
+                    1,
+                    PreHirStmt::Expr(PreHirExpr::AddressOfLocal("carrier".into())),
+                ),
+            }
+            let mut definitions = HashMap::default();
+            collect_definition_counts(&func.body, &mut definitions);
+            assert!(
+                entry_value_types::pointer_input_uses(&func, &definitions, &metatypes).is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn entry_use_declines_scalar_operations_and_conflicting_pointees() {
+        for expr in [
+            PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+                expr: Box::new(PreHirExpr::Var("input".into())),
+            },
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
+                lhs: Box::new(PreHirExpr::Var("input".into())),
+                rhs: Box::new(PreHirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            },
+        ] {
+            let mut func = entry_use_fixture(64);
+            let original = func.params[0].ty.clone();
+            func.body.push(PreHirStmt::Expr(expr));
+            apply_type_flow_pass(&mut func);
+            assert_eq!(func.params[0].ty, original);
+        }
+        let mut conflicting = entry_use_fixture(64);
+        conflicting.body.push(PreHirStmt::Expr(PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Var("input".into())),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }));
+        let mut definitions = HashMap::default();
+        collect_definition_counts(&conflicting.body, &mut definitions);
+        assert!(
+            entry_value_types::pointer_input_uses(&conflicting, &definitions, &HashSet::default())
+                .is_empty()
+        );
     }
 
     #[test]
