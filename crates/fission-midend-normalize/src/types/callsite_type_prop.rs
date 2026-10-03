@@ -1818,7 +1818,7 @@ mod tests {
     }
 
     #[test]
-    fn callsite_type_prop_keeps_generic_void_pointer_at_immediate_argument() {
+    fn callsite_type_prop_generic_pointer_parameter_preserves_argument_pointee() {
         let specific_pointer = NirType::Ptr(Box::new(NirType::Int {
             bits: 64,
             signed: false,
@@ -1834,7 +1834,7 @@ mod tests {
             }],
             locals: vec![PreHirBinding {
                 name: "alias".to_string(),
-                ty: specific_pointer,
+                ty: specific_pointer.clone(),
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::Temp),
                 initializer: None,
@@ -1854,9 +1854,11 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(apply_callsite_type_prop_pass(&mut func));
-        assert!(func.locals[0].surface_type_name.is_some());
+        assert!(!apply_callsite_type_prop_pass(&mut func));
+        assert!(func.locals[0].surface_type_name.is_none());
         assert!(func.params[0].surface_type_name.is_none());
+        assert_eq!(func.locals[0].ty, specific_pointer);
+        assert_eq!(func.params[0].ty, specific_pointer);
     }
 
     #[test]
