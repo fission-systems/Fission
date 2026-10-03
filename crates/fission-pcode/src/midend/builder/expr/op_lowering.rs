@@ -94,7 +94,11 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<PreHirExpr, MlilPreviewError> {
         match op.opcode {
-            PcodeOpcode::Copy => self.lower_varnode(&op.inputs[0], visiting),
+            PcodeOpcode::Copy => {
+                let input = &op.inputs[0];
+                let expr = self.lower_varnode(input, visiting)?;
+                Ok(self.coerce_varnode_storage_view(expr, input, false))
+            }
             PcodeOpcode::IntZExt => {
                 // Zero-extend from a narrower source must first keep only the source
                 // width. Classic x86 `movzx r32/r64, r8` after a wider ADD (e.g. RC4
@@ -832,8 +836,31 @@ impl<'a> PreviewBuilder<'a> {
         let (lhs, rhs) = if matches!(op.opcode, PcodeOpcode::IntLess | PcodeOpcode::IntLessEqual) {
             let bits = op.inputs[0].size.saturating_mul(8);
             (
-                self.coerce_unsigned_compare_operand(lhs, bits),
-                self.coerce_unsigned_compare_operand(rhs, bits),
+                self.coerce_unsigned_compare_operand(
+                    self.coerce_varnode_storage_view(lhs, &op.inputs[0], false),
+                    bits,
+                ),
+                self.coerce_unsigned_compare_operand(
+                    self.coerce_varnode_storage_view(rhs, &op.inputs[1], false),
+                    bits,
+                ),
+            )
+        } else if is_comparison(op.opcode)
+            && !matches!(
+                op.opcode,
+                PcodeOpcode::FloatEqual
+                    | PcodeOpcode::FloatNotEqual
+                    | PcodeOpcode::FloatLess
+                    | PcodeOpcode::FloatLessEqual
+            )
+        {
+            let signed = matches!(
+                op.opcode,
+                PcodeOpcode::IntSLess | PcodeOpcode::IntSLessEqual
+            );
+            (
+                self.coerce_varnode_storage_view(lhs, &op.inputs[0], signed),
+                self.coerce_varnode_storage_view(rhs, &op.inputs[1], signed),
             )
         } else {
             (lhs, rhs)
@@ -863,6 +890,96 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    /// Hardware carrier names can be widened by later definitions during
+    /// building. Preserve a low storage read even when its current binding
+    /// type still happens to match the low lane. Register identity comes from
+    /// the shared register model, not an ISA-specific name table.
+    pub(in crate::midend) fn coerce_varnode_storage_view(
+        &self,
+        expr: PreHirExpr,
+        vn: &Varnode,
+        signed: bool,
+    ) -> PreHirExpr {
+        let expr = self.coerce_integer_storage_view(expr, vn.size * 8, signed);
+        let mut storage = vn.clone();
+        // Flag producers often stage the register through a same-width COPY
+        // temporary. Peel only those identity views; extending/truncating
+        // operations have a different bit-vector domain.
+        for _ in 0..6 {
+            if is_register_varnode(&storage) {
+                break;
+            }
+            let Some((_, def)) = self.lookup_def_site(&storage) else {
+                break;
+            };
+            if def.opcode != PcodeOpcode::Copy
+                || def.inputs.len() != 1
+                || def.inputs[0].size != vn.size
+            {
+                break;
+            }
+            storage = def.inputs[0].clone();
+        }
+        if vn.size < self.options.pointer_size
+            && is_register_varnode(&storage)
+            && let PreHirExpr::Var(name) = &expr
+            && self
+                .sla_hw_name(storage.offset, self.options.pointer_size)
+                .as_ref()
+                == Some(name)
+        {
+            return PreHirExpr::Cast {
+                ty: type_from_size(vn.size, signed),
+                expr: Box::new(expr),
+            };
+        }
+        expr
+    }
+
+    /// A comparison reads a storage view, not the whole carrier binding.
+    /// Keep the declaration wide for other uses and encode truncation/sign
+    /// interpretation on this read only. Unknown types provide no evidence.
+    pub(in crate::midend) fn coerce_integer_storage_view(
+        &self,
+        expr: PreHirExpr,
+        bits: u32,
+        signed: bool,
+    ) -> PreHirExpr {
+        let source_type = if let PreHirExpr::Var(name) = &expr {
+            self.temps
+                .get(name)
+                .or_else(|| self.params.values().find(|binding| binding.name == *name))
+                .map(|binding| binding.ty.clone())
+                .or_else(|| {
+                    self.locals
+                        .values()
+                        .find(|binding| binding.name == *name)
+                        .map(|binding| binding.ty.clone())
+                })
+                .unwrap_or(NirType::Unknown)
+        } else {
+            expr_type(&expr)
+        };
+        let needs_view = match source_type {
+            NirType::Int {
+                bits: source_bits,
+                signed: source_signed,
+            } => source_bits > bits || (signed && source_bits == bits && !source_signed),
+            NirType::Ptr(_) => {
+                bits < self.options.pointer_size.saturating_mul(8)
+                    || (signed && bits == self.options.pointer_size.saturating_mul(8))
+            }
+            _ => false,
+        };
+        if bits == 0 || !needs_view {
+            return expr;
+        }
+        PreHirExpr::Cast {
+            ty: NirType::Int { bits, signed },
+            expr: Box::new(expr),
+        }
+    }
+
     /// Preserve the bit-vector interpretation of a compound signed value when
     /// an x86 flag recovery path reconstructs an unsigned comparison.  Leave
     /// unknown/atomic operands untouched; their eventual ABI/type recovery is
@@ -873,6 +990,7 @@ impl<'a> PreviewBuilder<'a> {
         expr: PreHirExpr,
         bits: u32,
     ) -> PreHirExpr {
+        let expr = self.coerce_integer_storage_view(expr, bits, false);
         if matches!(expr, PreHirExpr::Var(_)) {
             return expr;
         }
