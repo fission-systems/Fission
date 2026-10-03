@@ -2566,39 +2566,43 @@ impl<'a> PreviewBuilder<'a> {
         let mut visiting = HashSet::default();
         // Tested values (EqZero/NeZero/…) freeze Copy sources; compare operands
         // still use ordinary lowering so both sides stay live-SSA consistent.
-        let lower_tested = |this: &mut Self, vn: &Varnode, visiting: &mut HashSet<VarnodeKey>| {
-            this.lower_flag_tested_value(vn, visiting)
+        let lower_tested = |this: &mut Self,
+                            vn: &Varnode,
+                            signed: bool,
+                            visiting: &mut HashSet<VarnodeKey>| {
+            let expr = this.lower_flag_tested_value(vn, visiting)?;
+            Ok::<_, MlilPreviewError>(this.coerce_integer_storage_view(expr, vn.size * 8, signed))
         };
         let lower = |this: &mut Self, vn: &Varnode, visiting: &mut HashSet<VarnodeKey>| {
             this.lower_wrapped_varnode(vn, visiting)
         };
         Ok(match predicate {
             X86BranchPredicate::EqZero(value) => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, false, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Eq, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::NeZero(value) => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, false, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Ne, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLtZero(value) => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLt, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLeZero(value) => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLe, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SGtZero(value) => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLt, zero_like(&value), value)
             }
             X86BranchPredicate::SGeZero(value) => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLe, zero_like(&value), value)
             }
             X86BranchPredicate::MaskEqZero { value, mask } => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, false, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
                 let masked = PreHirExpr::Binary {
                     op: PreHirBinaryOp::And,
@@ -2609,7 +2613,7 @@ impl<'a> PreviewBuilder<'a> {
                 bool_binary(PreHirBinaryOp::Eq, masked.clone(), zero_like(&masked))
             }
             X86BranchPredicate::MaskNeZero { value, mask } => {
-                let value = lower_tested(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, false, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
                 let masked = PreHirExpr::Binary {
                     op: PreHirBinaryOp::And,
@@ -2620,11 +2624,11 @@ impl<'a> PreviewBuilder<'a> {
                 bool_binary(PreHirBinaryOp::Ne, masked.clone(), zero_like(&masked))
             }
             X86BranchPredicate::Eq(operands) => {
-                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, false, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Eq, lhs, rhs)
             }
             X86BranchPredicate::Ne(operands) => {
-                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, false, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Ne, lhs, rhs)
             }
             X86BranchPredicate::ULt(operands) => {
@@ -2644,19 +2648,19 @@ impl<'a> PreviewBuilder<'a> {
                 bool_binary(PreHirBinaryOp::Le, rhs, lhs)
             }
             X86BranchPredicate::SLt(operands) => {
-                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLt, lhs, rhs)
             }
             X86BranchPredicate::SLe(operands) => {
-                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLe, lhs, rhs)
             }
             X86BranchPredicate::SGt(operands) => {
-                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLt, rhs, lhs)
             }
             X86BranchPredicate::SGe(operands) => {
-                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
+                let (lhs, rhs) = self.lower_compare_operands(&operands, true, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLe, rhs, lhs)
             }
         })
@@ -2670,12 +2674,16 @@ impl<'a> PreviewBuilder<'a> {
     fn lower_compare_operands(
         &mut self,
         operands: &X86CompareOperands,
+        signed: bool,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<(PreHirExpr, PreHirExpr), MlilPreviewError> {
         self.with_lowering_site(operands.site, |this| {
             let lhs = this.lower_wrapped_varnode(&operands.lhs, visiting)?;
             let rhs = this.lower_wrapped_varnode(&operands.rhs, visiting)?;
-            Ok((lhs, rhs))
+            Ok((
+                this.coerce_varnode_storage_view(lhs, &operands.lhs, signed),
+                this.coerce_varnode_storage_view(rhs, &operands.rhs, signed),
+            ))
         })
     }
 
@@ -2684,7 +2692,7 @@ impl<'a> PreviewBuilder<'a> {
         operands: &X86CompareOperands,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<(PreHirExpr, PreHirExpr), MlilPreviewError> {
-        let (lhs, rhs) = self.lower_compare_operands(operands, visiting)?;
+        let (lhs, rhs) = self.lower_compare_operands(operands, false, visiting)?;
         let bits = operands.lhs.size.saturating_mul(8);
         Ok((
             self.coerce_unsigned_compare_operand(lhs, bits),

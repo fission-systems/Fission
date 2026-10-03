@@ -3155,3 +3155,122 @@ fn float_unary_opcodes_all_lower_without_falling_back_to_unsupported() {
         "FLOAT_TRUNC is a float-to-int conversion, not a call to trunc():\n{code}"
     );
 }
+
+#[test]
+fn comparison_storage_view_preserves_read_width_without_narrowing_carrier() {
+    let pcode = pcode_function(vec![]);
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    for (name, ty) in [
+        (
+            "carrier",
+            NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        ),
+        ("address_carrier", NirType::Ptr(Box::new(NirType::Unknown))),
+        (
+            "narrow",
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        ),
+    ] {
+        builder.temps.insert(
+            name.into(),
+            PreHirBinding {
+                name: name.into(),
+                ty,
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        );
+    }
+    for name in ["carrier", "address_carrier"] {
+        for signed in [false, true] {
+            let expr =
+                builder.coerce_integer_storage_view(PreHirExpr::Var(name.into()), 32, signed);
+            assert!(
+                matches!(expr, PreHirExpr::Cast { ty: NirType::Int { bits: 32, signed: s }, .. } if s == signed)
+            );
+        }
+    }
+    assert!(matches!(
+        builder.temps["carrier"].ty,
+        NirType::Int { bits: 64, .. }
+    ));
+    assert!(matches!(
+        builder.temps["address_carrier"].ty,
+        NirType::Ptr(_)
+    ));
+    for name in ["carrier", "address_carrier", "unknown"] {
+        let input = PreHirExpr::Var(name.into());
+        assert_eq!(
+            builder.coerce_integer_storage_view(input.clone(), 64, false),
+            input
+        );
+    }
+    let input = PreHirExpr::Var("narrow".into());
+    assert_eq!(
+        builder.coerce_integer_storage_view(input.clone(), 32, false),
+        input
+    );
+    assert!(matches!(
+        builder.coerce_integer_storage_view(input, 32, true),
+        PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: 32,
+                signed: true
+            },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn comparison_storage_view_survives_future_carrier_widening() {
+    let pcode = pcode_function(vec![]);
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let low = register(0, 4);
+    let wide = register(0, 8);
+    let name = builder
+        .sla_hw_name(wide.offset, wide.size)
+        .expect("carrier model");
+    builder.temps.insert(
+        name.clone(),
+        PreHirBinding {
+            name: name.clone(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        },
+    );
+    let input = PreHirExpr::Var(name.clone());
+    let read = builder.coerce_varnode_storage_view(input.clone(), &low, false);
+    builder.temps.get_mut(&name).unwrap().ty = NirType::Int {
+        bits: 64,
+        signed: false,
+    };
+    assert!(matches!(
+        read,
+        PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: 32,
+                signed: false
+            },
+            ..
+        }
+    ));
+    assert_eq!(
+        builder.coerce_varnode_storage_view(input.clone(), &wide, false),
+        input
+    );
+}

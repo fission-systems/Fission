@@ -111,7 +111,7 @@ fn strip_redundant_casts_in_expr(
 fn strip_redundant_casts_in_expr_with_context(
     expr: &mut PreHirExpr,
     type_map: &HashMap<String, NirType>,
-    is_unsigned_compare_operand: bool,
+    is_integer_compare_operand: bool,
 ) -> bool {
     let mut changed = false;
     match expr {
@@ -128,7 +128,16 @@ fn strip_redundant_casts_in_expr_with_context(
         PreHirExpr::Binary { op, lhs, rhs, .. } => {
             let preserve_operands = matches!(
                 op,
-                PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge
+                PreHirBinaryOp::Eq
+                    | PreHirBinaryOp::Ne
+                    | PreHirBinaryOp::Lt
+                    | PreHirBinaryOp::Le
+                    | PreHirBinaryOp::Gt
+                    | PreHirBinaryOp::Ge
+                    | PreHirBinaryOp::SLt
+                    | PreHirBinaryOp::SLe
+                    | PreHirBinaryOp::SGt
+                    | PreHirBinaryOp::SGe
             );
             changed |= strip_redundant_casts_in_expr_with_context(lhs, type_map, preserve_operands);
             changed |= strip_redundant_casts_in_expr_with_context(rhs, type_map, preserve_operands);
@@ -160,9 +169,11 @@ fn strip_redundant_casts_in_expr_with_context(
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         if let PreHirExpr::Var(name) = inner.as_ref() {
             if let Some(var_ty) = type_map.get(name) {
-                let is_unsigned_compare_boundary =
-                    is_unsigned_compare_operand && matches!(ty, NirType::Int { signed: false, .. });
-                if var_ty == ty && !is_unsigned_compare_boundary {
+                // Comparison views survive intermediate binding types: a
+                // subsequent alias or type refinement may widen the carrier.
+                let is_integer_compare_boundary =
+                    is_integer_compare_operand && matches!(ty, NirType::Int { .. });
+                if var_ty == ty && !is_integer_compare_boundary {
                     *expr = (**inner).clone();
                     changed = true;
                 }
@@ -452,7 +463,8 @@ fn elide_casts_in_stmt(
                 if redundant_self_cast_assignment(name, rhs, binding_ty) {
                     *rhs = PreHirExpr::Var(name.clone());
                     *changed = true;
-                } else if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty) {
+                } else if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty, binding_types)
+                {
                     *rhs = stripped;
                     *changed = true;
                 }
@@ -813,7 +825,11 @@ fn unsigned_compare_binding_operand(
     }
 }
 
-fn try_strip_outer_cast(expr: &PreHirExpr, binding_ty: &NirType) -> Option<PreHirExpr> {
+fn try_strip_outer_cast(
+    expr: &PreHirExpr,
+    binding_ty: &NirType,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<PreHirExpr> {
     let PreHirExpr::Cast {
         ty: cast_ty,
         expr: inner,
@@ -822,7 +838,11 @@ fn try_strip_outer_cast(expr: &PreHirExpr, binding_ty: &NirType) -> Option<PreHi
         return None;
     };
     if cast_ty == binding_ty {
-        let inner_ty = expr_type(inner);
+        let inner_ty = if let PreHirExpr::Var(name) = inner.as_ref() {
+            binding_types.get(name).cloned().unwrap_or(NirType::Unknown)
+        } else {
+            expr_type(inner)
+        };
         let compatible = match (&inner_ty, binding_ty) {
             (NirType::Unknown, _) => true,
             (a, b) if a == b => true,
@@ -963,5 +983,91 @@ mod tests {
                 if *ty == int(32, false)
                     && matches!(expr.as_ref(), PreHirExpr::Var(name) if name == "iVar18"))
         ));
+    }
+}
+
+#[cfg(test)]
+mod comparison_view_tests {
+    use super::*;
+
+    #[test]
+    fn assignment_cast_elision_resolves_variable_width_before_removing_conversion() {
+        let narrow = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let wide = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let expr = PreHirExpr::Cast {
+            ty: narrow.clone(),
+            expr: Box::new(PreHirExpr::Var("carrier".into())),
+        };
+        let mut types = HashMap::from_iter([("carrier".to_string(), wide)]);
+        assert!(try_strip_outer_cast(&expr, &narrow, &types).is_none());
+        types.insert("carrier".into(), NirType::Ptr(Box::new(NirType::Unknown)));
+        assert!(try_strip_outer_cast(&expr, &narrow, &types).is_none());
+        types.insert("carrier".into(), narrow.clone());
+        assert_eq!(
+            try_strip_outer_cast(&expr, &narrow, &types),
+            Some(PreHirExpr::Var("carrier".into()))
+        );
+        let widening = PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+            expr: Box::new(PreHirExpr::Var("carrier".into())),
+        };
+        assert!(
+            try_strip_outer_cast(
+                &widening,
+                &NirType::Int {
+                    bits: 64,
+                    signed: false
+                },
+                &types
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn redundant_cast_cleanup_preserves_integer_comparison_views() {
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let type_map = HashMap::from_iter([("carrier".to_string(), ty.clone())]);
+        for op in [
+            PreHirBinaryOp::Eq,
+            PreHirBinaryOp::Ne,
+            PreHirBinaryOp::SLt,
+            PreHirBinaryOp::SLe,
+            PreHirBinaryOp::SGt,
+            PreHirBinaryOp::SGe,
+            PreHirBinaryOp::Lt,
+            PreHirBinaryOp::Le,
+        ] {
+            let mut comparison = PreHirExpr::Binary {
+                op,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: ty.clone(),
+                    expr: Box::new(PreHirExpr::Var("carrier".into())),
+                }),
+                rhs: Box::new(PreHirExpr::Const(-1, ty.clone())),
+                ty: NirType::Bool,
+            };
+            let original = comparison.clone();
+            assert!(!strip_redundant_casts_in_expr(&mut comparison, &type_map));
+            assert_eq!(comparison, original);
+        }
+        let mut plain = PreHirExpr::Cast {
+            ty,
+            expr: Box::new(PreHirExpr::Var("carrier".into())),
+        };
+        assert!(strip_redundant_casts_in_expr(&mut plain, &type_map));
+        assert!(matches!(plain, PreHirExpr::Var(_)));
     }
 }
