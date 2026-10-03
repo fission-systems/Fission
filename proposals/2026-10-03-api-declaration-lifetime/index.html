@@ -1,0 +1,1708 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-10-03-api-declaration-lifetime/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>API declarations belong to a stable argument value - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-declarations-belong-to-a-stable-argument-value" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API declarations belong to a stable argument value
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.2.3/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-measured-baseline-anchors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Measured baseline anchors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-owner-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Owner proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-general-invariant-and-non-metric-justification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. General invariant and non-metric justification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-scope-and-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Scope and risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-validation-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Validation matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-ai-firewall-and-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. AI firewall and review
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-rejected-first-experiment-and-revised-scope-before-revision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Rejected first experiment and revised scope (before revision)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-entry-snapshot-proof-before-third-experiment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Entry snapshot proof (before third experiment)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-third-experiment-measured-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Third experiment measured outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-rejected-before-merge-width-loss-in-a-reused-carrier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Rejected before merge: width loss in a reused carrier
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-next-implementation-direction-from-owner-evidence-and-kuna-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Next implementation direction from owner evidence and Kuna history
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="api-declarations-belong-to-a-stable-argument-value">API declarations belong to a stable argument value<a class="headerlink" href="#api-declarations-belong-to-a-stable-argument-value" title="Permanent link">&para;</a></h1>
+<p>Recorded before production edits. Base main 2726ddd753, 2026-10-03.</p>
+<h2 id="1-measured-baseline-anchors">1. Measured baseline anchors<a class="headerlink" href="#1-measured-baseline-anchors" title="Permanent link">&para;</a></h2>
+<p>Fresh accepted stripped-input outputs and uncached standalone DecBench scores:
+<code>benchmark/artifacts/decbench/2026-10-03-generic-api-pointer</code> (primary checkout).
+This cycle records baseline-anchors.json and full anchored output in
+<code>benchmark/artifacts/decbench/2026-10-03-api-declaration-lifetime</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Program / source / optimization</th>
+<th>Function / binary / address</th>
+<th>Type / GED / byte</th>
+<th>NIR lines / gotos</th>
+<th>Defect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>findutils / find.c / O2</td>
+<td>process_all_startpoints / bin_027.elf / 0x8070</td>
+<td>.133333333 / 212 / .262806236</td>
+<td>244 / 10</td>
+<td>argc input param_1 declared FILE*, later assigned 1 and stream values</td>
+</tr>
+<tr>
+<td>sysvinit / wall.c / O2-noinline</td>
+<td>wall / bin_012.elf / 0x2d50</td>
+<td>.105263158 / 89 / 0</td>
+<td>360 / 19</td>
+<td>text input param_1 declared FILE*, eight subsequent assignments include descriptor and stream values</td>
+</tr>
+<tr>
+<td>gzip / gzip.c / O0</td>
+<td>get_method / bin_219.elf / 0x72f1</td>
+<td>.076923077 / 45 / .129527991</td>
+<td>730 / 16</td>
+<td>reused rax declared FILE*, includes byte/scalar/string values and spreads declaration to copies</td>
+</tr>
+</tbody>
+</table>
+<p>Three functions, three programs, mixed optimization. HF ground truth source
+bodies are evaluation-only, verified at revision
+7af6c5e19289b6a357404708e5373bc7bf6fcacd. Entry arg correspondence in the
+first two anchors uses arg_index, not type. No executable semantic cases are
+available for this static slice. Union baseline 74/250; byte baseline uses the
+fresh paired GNU-tools 166-function lane, not earlier compiler environments.</p>
+<h2 id="2-owner-proof">2. Owner proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
+<p>Existing normalize/type owner: call_target_surface::apply_api_surface_type_transitively.
+It writes surface_type_name on the immediate argument before checking
+binding_is_safe_for_backward_refine. That check protects only further copies.
+The declaration locks unrelated definitions of a reused binding. Parameters
+also have an implicit entry definition: even one body assignment means a later
+call need not constrain the entry value. Raw lifting and printer do not own
+these callsite-derived facts.</p>
+<h2 id="3-general-invariant-and-non-metric-justification">3. General invariant and non-metric justification<a class="headerlink" href="#3-general-invariant-and-non-metric-justification" title="Permanent link">&para;</a></h2>
+<p>An exact API argument declaration can refine a whole binding only when its
+value is stable: no multiple definitions or self-referential updates, and an
+entry parameter must have no body assignment. Check this before each binding
+update, including the first argument and backwards copy sources. Untouched
+parameters and unique-definition local copies retain specific API declarations.</p>
+<p>Why better: using a register for a file stream later must not declare the
+earlier input integer or text pointer as a stream. No function, address, ISA,
+compiler or dataset identity enters the condition. No vendor implementation is
+copied and no runtime ground truth is available.</p>
+<h2 id="4-scope-and-risks">4. Scope and risks<a class="headerlink" href="#4-scope-and-risks" title="Permanent link">&para;</a></h2>
+<p>Extend the existing helper with the existing shared definition/self-reference
+facts; no new pass/helper/metric/dependency/telemetry. The entry-parameter check
+adds the implicit definition to this owner's existing proof without changing
+the shared solver contract. This cycle concerns exact surface declarations;
+full SSA lifetime splitting and alias-aware memory modeling are separate work.
+Some legitimate homogeneous reassignments may lose a useful surface name;
+inspect complete output and recompilation changes. Do not change effects,
+evaluation order, call targets, arity, or existing explicit surfaces.</p>
+<p>Kuna's recent changes motivate investigating value lifetime and ABI evidence:
+<a href="https://github.com/Noelo-Lab/kuna/pull/832">alias preservation #832</a>,
+<a href="https://github.com/Noelo-Lab/kuna/pull/882">load guards #882</a>, and
+<a href="https://github.com/Noelo-Lab/kuna/pull/875">forwarded call arguments #875</a>.
+These are reference directions; their upstream impact figures are not Fission
+measurements and the fixes are not transplanted.</p>
+<h2 id="5-validation-matrix">5. Validation matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Synthetic boundary coverage: reused direct local, self-referential local,
+  overwritten parameter with one body definition, stable local copy and
+  untouched parameter. Existing callsite tests must remain green.</li>
+<li>Targeted nextest, then full normalize+pcode suites; checks including
+  decompiler, fmt --all/check and scoped Clippy.</li>
+<li>Immutable native release CLI; all250 fresh stripped outputs, native
+  provenance, cache-disabled GED/type/byte with unchanged metric sources.
+  Inspect anchored NIR/HIR and complete changed outputs; preserve perfect rows.</li>
+<li>Linux release CLI, mandatory external local Docker dev6 plus existing fixed
+  unscored32 pool against accepted baseline with caches/resume disabled.
+  Existing wrapper/adapter/no-wrapper failures are limitations, not passes.</li>
+<li>Report partial regressions, compile deltas and local rank projection against
+  the frozen rival snapshot. Never publish local results as official latest.</li>
+</ul>
+<h2 id="6-ai-firewall-and-review">6. AI firewall and review<a class="headerlink" href="#6-ai-firewall-and-review" title="Permanent link">&para;</a></h2>
+<p>No external model or subagent implementation advice. Local investigation only.
+Synthetic tests plus the unchanged unscored patch pool guard generality; pool
+is not a tuning target. No benchmark metric or source-oracle changes. Production
+guards remain owner-native definition/use facts. Quality is claimed only after
+before/after real measurement; test green alone is insufficient.</p>
+<h2 id="7-rejected-first-experiment-and-revised-scope-before-revision">7. Rejected first experiment and revised scope (before revision)<a class="headerlink" href="#7-rejected-first-experiment-and-revised-scope-before-revision" title="Permanent link">&para;</a></h2>
+<p>Blanket direct-binding guards were measured and rejected: Union 74-&gt;73,
+type perfect 17-&gt;16, mean type .264112288-&gt;.258498962, and restore's GED
+27-&gt;36. Preserve that experiment under 2026-10-03-api-declaration-lifetime;
+nothing was committed. Typed nullable locals in close_files and restore have
+an initial zero plus their meaningful pointer definition; a simple count is
+insufficient to classify these as heterogeneous local values. Removing scalar
+typedef surfaces also changed a downstream conditional. Do not ship those
+changes or weaken the guard through a row/type-name exception.</p>
+<p>Revised scope: protect the implicit incoming value of an entry parameter.
+Any body assignment to that parameter means a later API use cannot establish
+its entry declaration. Apply this before updating the parameter, whether it
+is the immediate argument or reached through a stable local copy. Keep the
+existing local refinement behavior and copy guards. Local lifetime splitting
+or proof across all reaching definitions remains future work; do not claim
+the reused-local part of the defect is fixed.</p>
+<p>Three focused entry-value anchors before revision: process_all_startpoints
+(findutils O2), wall (sysvinit O2-noinline), and getpasswd (sysvinit
+O2-noinline, sources/sulogin.c, bin_209.elf 0x3b40). The third source argument
+is console<em>, but its input is declared FILE</em>: record-field reads use the input
+and three later param_1 assignments load stderr for calls. Current type .05,
+GED49, byte0, NIR219 lines/9 gotos. These are three distinct functions across
+two programs and mixed optimization, not duplicate copies of wall.</p>
+<p>The revised guard uses the existing body-definition counts and parameter list;
+no new traversal, pass, helper or dependency. Tests cover unchanged parameters,
+one body assignment (including zero), and stable local aliases that must not
+carry a later declaration into an overwritten input. Remeasure all250 from
+the accepted 74/250 baseline with unchanged metric sources and fresh output,
+plus another external Docker pair. Preserve first-experiment evidence.</p>
+<h2 id="8-entry-snapshot-proof-before-third-experiment">8. Entry snapshot proof (before third experiment)<a class="headerlink" href="#8-entry-snapshot-proof-before-third-experiment" title="Permanent link">&para;</a></h2>
+<p>The entry-write-count-only experiment retains Union74 but decreases mean type
+.264112288-&gt;.262297144. It is also rejected and uncommitted. Evidence lives in
+2026-10-03-api-entry-value. Two gains (find argc and psktool input) are offset by
+losses in ssh-keysign/log_verbose_add (O2, .5-&gt;0) and sshd/ssh_agent_sign
+(O2-noinline, .5-&gt;.428571429). They save incoming values in rbp, r12 and xVar14
+before using their ABI carriers for other calls. The saved local still holds
+the input; later API evidence on that immutable local legitimately constrains
+the input declaration. wall similarly saves its input in local_248 before
+reuse. These shapes span openssh/sysvinit and mixed optimization; the three
+original overwritten-entry anchors remain the motivating defect.</p>
+<p>Refine the existing API owner with an immutable entry-copy certificate:
+traverse the unconditional structured spine from entry, track entry origins
+through plain or machine-word integer copies, and record local copies only
+when they have one definition, no initializer and no address escape. On
+structured branches/loops/switches, invalidate every potentially written name
+using existing shared definition counts, then continue along the spine; do
+not invent proofs from inside conditional/loop bodies. Stop creating proofs
+at labels or explicit transfers. Previously recorded immutable copies remain
+valid. A surviving original value can be saved after an unrelated branch.</p>
+<p>When the API argument is such a certified immutable copy, carry its exact
+declaration to the certified entry parameter even if that parameter's ABI
+carrier was later overwritten. Other overwritten parameters keep the guard.
+This preserves a value, not a name or a chosen typedef, and uses no row/ISA
+identities. Do not remove all local declaration propagation. No change to
+scalar/return lattice inference, call arity, effects, or metrics.</p>
+<p>The flat callsite tuple and whole-function copy_sources cannot distinguish
+an incoming value from a later reuse of the same binding name. Format literal
+tracking is a different fact and does not supply entry provenance. A small
+owner-local certificate helper is justified; reuse the existing bit-preserving
+copy recognizer, definition-count traversal and address-taken facts. No new
+pass, telemetry or cross-owner dependency. Synthetic tests must reject copies
+after overwrite, overwritten/address-escaped locals, narrowing casts, loop
+assignments and label crossings, and preserve the saved input despite later
+carrier writes. Rerun all250 and external Docker against accepted baseline74;
+the unscored pool remains a go/stop signal, never a tuning source.</p>
+<h2 id="9-third-experiment-measured-outcome">9. Third experiment measured outcome<a class="headerlink" href="#9-third-experiment-measured-outcome" title="Permanent link">&para;</a></h2>
+<p>Evidence: 2026-10-03-api-entry-snapshots in the primary checkout's ignored
+benchmark/artifacts/decbench tree. Final immutable native CLI SHA256
+29834d4450bd08f7f2f053f6d9edd60ae9881a1f21d14c35813c3f8ff17de612.
+The exact production patch fingerprint is recorded in run.json.
+No metric, adapter, oracle or input-dataset changes.</p>
+<ul>
+<li>Fresh250 outputs across223 stripped binaries; zero generation/ingest errors.</li>
+<li>Type mean .264112288-&gt;.264490127; perfect17/228 unchanged. Two gains:
+  find/process_all_startpoints .133333-&gt;.2; psktool/process_options
+  .090909-&gt;.181818. One partial loss remains: ssh_agent_sign .5-&gt;.428571.
+  Its alg char<em> declaration is still lost; key's old char</em> was also incorrect
+  (ground truth sshkey*). The certificate preserves saved values, not every
+  interprocedural pointee inference. Do not claim all recovered types correct.</li>
+<li>All250 GED values/source hashes unchanged; perfect65/240, mean33.629167.</li>
+<li>Byte perfect1/166 and compilation132/166 unchanged. Mean
+  .203560186-&gt;.203552053: find decreases .262806-&gt;.26, psktool increases
+  .197561-&gt;.199017. This small byte decrease is a measured tradeoff, not a win.</li>
+<li>Union74/250 unchanged, zero perfect rows lost. Rank8 local projection
+  against frozen rivals, not a live official rerun. Kuna88 requires89:15 more
+  perfect functions remain. A type-mean increase is not a ranking increase.</li>
+<li>46 targeted tests, full normalize+pcode1629 passes/one skip; checks, scoped
+  Clippy, fmt and boundary audit passed. Native/Linux release builds passed.</li>
+<li>External Docker dev6 and fixed unscored32: identical outputs/statuses,
+  bare compilation4/6 and8/32 unchanged; existing wrapper and adapter/no-wrapper
+  limitations remain. No executable semantic equivalence claim. Linux anchors
+  agree after bijective temporary renaming; two host-specific names differ.</li>
+</ul>
+<p>The static type average rose, but this third experiment is rejected too.
+The execution probe below proves a value-preservation regression. This result
+does not qualify as a decompiler quality improvement. Full SSA/ABI carrier splitting is the next owner-level work:
+an input and the later call-preparation value should not share a C binding.
+Kuna's call/return and alias-preservation history supports prioritizing value
+lifetimes and ABI evidence ahead of additional output formatting.</p>
+<h2 id="10-rejected-before-merge-width-loss-in-a-reused-carrier">10. Rejected before merge: width loss in a reused carrier<a class="headerlink" href="#10-rejected-before-merge-width-loss-in-a-reused-carrier" title="Permanent link">&para;</a></h2>
+<p>No production change from any of these three experiments is shipped. The
+third experiment passed all static gates above but failed the additional
+value-preservation check. Accepted production remains main2726ddd753:
+Union74/250, type17/228 with mean .264112288, GED65/240, byte1/166,
+compilation132/166. The candidate .264490127 type mean is not the accepted
+baseline. No ranking gain was achieved.</p>
+<p>Measured anchor: gnutls/O2-noinline/psktool/process_options, bin_008.elf,
+0x2ed0. Its incoming argc is later reused to carry a pager filename pointer.
+The immutable copy certificate recovers the incoming scalar declaration but
+does not separate storage for the later pointer. Baseline declares param_1
+char*, candidate declares it uint. Both emit the same real tail:</p>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">param_1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">!</span><span class="n">zf</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">rax</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">"more"</span><span class="p">;</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">__argv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">16</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">rsp</span><span class="p">;</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">execvp</span><span class="p">((</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="kt">long</span><span class="p">)</span><span class="n">param_1</span><span class="p">,</span><span class="w"> </span><span class="n">__argv</span><span class="p">);</span>
+</span></code></pre></div>
+<p>Executed an extracted output slice with rax set to the 64-bit sentinel
+0x123456789abcdef0, zf=false, and execvp replaced by a capture stub. Only the
+parameter declaration differs between baseline/candidate slices. Compiled
+with native clang -O2, then with the benchmark GNU musl GCC14.2.0 and
+-std=gnu17 -Wno-error=int-conversion -Wno-error=incompatible-pointer-types.
+The statically linked x86-64 probes were executed in a network-disabled
+linux/amd64 Docker container; both compiler/platform pairs produced the same
+respective preserved/truncated results. No executable corpus binary or real execvp was
+run. This is an anchored slice check, not whole-function equivalence.</p>
+<table>
+<thead>
+<tr>
+<th>Slice</th>
+<th>Declaration</th>
+<th>Captured call value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Accepted baseline</td>
+<td>char* param_1</td>
+<td>123456789abcdef0</td>
+</tr>
+<tr>
+<td>Rejected candidate</td>
+<td>uint param_1</td>
+<td>000000009abcdef0</td>
+</tr>
+</tbody>
+</table>
+<p>The candidate drops the high 32 bits. Recompilation success cannot detect this
+loss: the benchmark fixup accepts pointer/integer conversions. Byte distance
+can improve despite incorrect values. Mean type recovery cannot override the
+NIR/effect-value preservation contract.</p>
+<p>Reproduction sources, compile logs, LLVM IR, exact extracted tail and output
+hashes are retained under the third experiment's width-probe directory.
+The real output SHA256s are:</p>
+<ul>
+<li>Baseline: 930c03c8f2c5a39c8c2f439bf161ace5f972ee732b2217ab37e62d95f9ec90a2</li>
+<li>Candidate: 55dadc74715c39355f884ff57ad025fece5e75a4c67a656b9f40c3e22d991269</li>
+</ul>
+<p>The intended production diff is archived as source.patch before restoring
+both modified type-owner files to their exact accepted Git contents. Preserve
+all failed measurements; do not keep a known truncation change for a score.</p>
+<h2 id="11-next-implementation-direction-from-owner-evidence-and-kuna-history">11. Next implementation direction from owner evidence and Kuna history<a class="headerlink" href="#11-next-implementation-direction-from-owner-evidence-and-kuna-history" title="Permanent link">&para;</a></h2>
+<p>Tracked as <a href="https://github.com/fission-systems/Fission/issues/182">Fission issue182</a>.</p>
+<p>First priority: represent the immutable incoming ABI value separately from
+mutable register/merge carriers. The width and effect order of each later
+value must be preserved before incoming type declarations can narrow.</p>
+<p>Existing owner hotspots, requiring raw-p-code/SSA trace confirmation:</p>
+<ul>
+<li>Builder ensure_explicit_merge_binding_for_block chooses a parameter name
+  from ABI slot identity for a merge carrier. Slot identity alone does not
+  prove that later definitions are the incoming source value.</li>
+<li>Builder same_block_cmov_entry_register_binding_name_at checks prior writes
+  within the block. Incoming-value reuse additionally needs reaching-definition
+  evidence across predecessors; a predecessor's write is not an entry value.</li>
+<li>Normalize entry_param_promotion renames an entry-spill local throughout the
+  whole body. A mutable spill requires incoming-value evidence and separate
+  storage, rather than global source-parameter identity.</li>
+<li>Callsite declarations constrain argument values. A whole-name surface
+  declaration cannot repair heterogeneous definitions.</li>
+</ul>
+<p>Do not add another callsite guard or printer substitution. Reuse the existing
+scalar SSA, storage-piece, CFG dominance and out-of-SSA copy owners to prove
+which value reaches each read. A split must keep the skip/default arm, joins,
+loop-carried values, saved entry copies, pointer width, partial-register
+extensions and address escapes. ABI differences belong in provider models.
+Require a new pre-implementation proposal with three real repeated anchors
+across two programs and mixed optimization, focused executable width/effect
+checks, crate gates, all250 uncached metrics and the external unscored pool.
+Do not tune on that pool or publish local scores as official rankings.</p>
+<p>Kuna priorities supported by inspected primary changes:</p>
+<ol>
+<li>Call/return value lifetimes and forwarded incoming arguments (#875, #877,
+   #879, #889): distinguish value provenance from physical register identity.</li>
+<li>Alias-aware memory effects (#832, #882, #893): preserve stores before
+   pointer reads and address-passed storage; avoid stale constant replacement.</li>
+<li>Aggregate/field and ABI split-width recovery (#863, #828, #864): preserve
+   width/extension rules before refining source-facing types.</li>
+</ol>
+<p>Kuna's #875 explicitly relies on declared parameter/return evidence and admits
+ambiguities. Fission's scored stripped lane has no runtime source/DWARF, so
+those declarations are not an available production oracle. Transfer the
+invariants, not the implementation or its reported upstream measurements.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
