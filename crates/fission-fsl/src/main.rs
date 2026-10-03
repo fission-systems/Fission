@@ -217,7 +217,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "fir" => OutputLayer::Fir,
                     "c" => OutputLayer::C,
                     "rust" => OutputLayer::Rust,
-                    _ => return Err("expected fir, c or rust".into()),
+                    "cuda" => OutputLayer::CudaCpp,
+                    "ptx" => OutputLayer::Ptx,
+                    _ => return Err("expected fir, c, rust, cuda or ptx".into()),
                 };
                 let output = required_arg(&mut args, "output path")?;
                 reject_extra_args(args)?;
@@ -320,12 +322,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "emit" => {
             let package_path = required_arg(&mut args, "compiled .fslc path")?;
             let byte = required_arg(&mut args, "opcode byte")?;
-            let layer = match required_arg(&mut args, "output layer (fir, c, rust)")?.as_str() {
-                "fir" => OutputLayer::Fir,
-                "c" => OutputLayer::C,
-                "rust" => OutputLayer::Rust,
-                layer => return Err(format!("unsupported output layer {layer:?}").into()),
-            };
+            let layer =
+                match required_arg(&mut args, "output layer (fir, c, rust, cuda, ptx)")?.as_str() {
+                    "fir" => OutputLayer::Fir,
+                    "c" => OutputLayer::C,
+                    "rust" => OutputLayer::Rust,
+                    "cuda" => OutputLayer::CudaCpp,
+                    "ptx" => OutputLayer::Ptx,
+                    layer => return Err(format!("unsupported output layer {layer:?}").into()),
+                };
             let output_path = required_arg(&mut args, "output path")?;
             reject_extra_args(args)?;
             let package = load_package(&package_path)?;
@@ -439,7 +444,7 @@ fn reject_extra_args(
 
 fn print_usage() {
     eprintln!("  execute-wave <package> <profile> <hex> <lanes> <exec> <scalar-csv> <flags-csv> <lane-slots-csv>");
-    eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust> <output>");
+    eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust|cuda|ptx> <output>");
     eprintln!("usage:");
     eprintln!("  fslc check <source.fsl>");
     eprintln!("  fslc check-abi <source.fslabi>");
@@ -451,7 +456,7 @@ fn print_usage() {
     eprintln!("  fslc reencode <package.fslc> <profile> <bytes-hex> <output.bin> [field=value...]");
     eprintln!("  fslc jit-decode <package.fslc> <opcode-hex>");
     eprintln!("  fslc aot-object <package.fslc> <output.o>");
-    eprintln!("  fslc emit <package.fslc> <opcode-hex> <fir|c|rust> <output>");
+    eprintln!("  fslc emit <package.fslc> <opcode-hex> <fir|c|rust|cuda|ptx> <output>");
     eprintln!("  fslc execute <package.fslc> <opcode-hex> <capacity> [stack bits...]");
 }
 

@@ -10,6 +10,10 @@ pub enum OutputLayer {
     Fir,
     C,
     Rust,
+    /// Single-owner CUDA reference kernel over the existing stack FIR.
+    CudaCpp,
+    /// PTX 7.0 / sm_70 single-owner reference kernel over the same FIR.
+    Ptx,
 }
 
 /// Project one FIR instruction into diagnostic FIR or compilable source.
@@ -177,6 +181,9 @@ pub fn emit_instruction(
             "output symbol must be an ASCII identifier starting with fsl_",
         ));
     }
+    if matches!(layer, OutputLayer::CudaCpp | OutputLayer::Ptx) {
+        return crate::gpu_output::emit_gpu_instruction(instruction, layer, symbol);
+    }
     if instruction.ops.iter().any(FirOp::requires_lane_version) {
         return crate::wave::emit_wave_instruction(instruction, layer, symbol);
     }
@@ -187,7 +194,7 @@ pub fn emit_instruction(
     let mut text = match layer {
         OutputLayer::C => format!("#include <stdint.h>\n#include <stddef.h>\n\n/* Bit-vector slots; depth storage must be disjoint from stack storage.\n * Status: 0 success, 1 underflow, 2 capacity, 3 invalid state. */\nuint32_t {symbol}(uint64_t *stack, size_t *depth, size_t capacity) {{\n    if (stack == NULL || depth == NULL || *depth > capacity) return 3;\n"),
         OutputLayer::Rust => format!("pub fn {symbol}(stack: &mut [u64], depth: &mut usize) -> u32 {{\n    let capacity = stack.len();\n    if *depth > capacity {{ return 3; }}\n"),
-        OutputLayer::Fir => unreachable!(),
+        OutputLayer::Fir | OutputLayer::CudaCpp | OutputLayer::Ptx => unreachable!(),
     };
     if contract.required_input > 0 {
         match layer {
@@ -287,6 +294,9 @@ pub fn emit_instruction(
                 writeln!(text, "    stack[sp] = _v{};\n    sp += 1;", value.0).unwrap();
             }
             (_, OutputLayer::Fir) => unreachable!(),
+            (_, OutputLayer::CudaCpp | OutputLayer::Ptx) => {
+                unreachable!("GPU output handled above")
+            }
             (
                 FirOp::RegisterRead { .. }
                 | FirOp::LaneMaskRead { .. }

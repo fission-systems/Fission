@@ -8,6 +8,7 @@
 
 pub mod abi;
 pub mod encoding;
+mod gpu_output;
 pub mod jit;
 pub mod output;
 pub mod package;

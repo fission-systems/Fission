@@ -102,6 +102,49 @@ and compares C/Rust builds at two optimization levels against the evaluator
 over 1,920 cases, with an independent modulo-arithmetic check. This is
 synthetic instruction coverage, not measured real-binary decompiler quality.
 
+## CUDA C++ and PTX output slice
+
+`emit <package> <opcode> cuda <output.cu>` and `ptx <output.ptx>` consume the
+same canonical stack FIR as C/Rust. The admitted operations are stack pop/push
+and wrapping addition with 1..64-bit signed or unsigned bit-vector types.
+Register/flag/lane effects, unsupported bodies, wider values and malformed SSA
+refuse before output. No new FIR dialect or package version is introduced.
+
+```sh
+target/debug/fslc emit /tmp/jvm-se26-iadd.fslc 60 cuda /tmp/fsl_iadd.cu
+target/debug/fslc emit /tmp/jvm-se26-iadd.fslc 60 ptx /tmp/fsl_iadd.ptx
+clang --target=x86_64-linux-gnu -x cuda --cuda-device-only --cuda-gpu-arch=sm_70 \
+  -nocudainc -nocudalib -Xclang -target-feature -Xclang +ptx70 \
+  -O2 -S /tmp/fsl_iadd.cu -o /tmp/fsl_iadd_clang.ptx
+ptxas -arch=sm_70 /tmp/fsl_iadd.ptx -o /tmp/fsl_iadd.cubin
+```
+
+Both targets export `fsl_execute(stack_ptr, depth_ptr, capacity, status_ptr)`.
+The stack uses 8-byte bit-vector slots; depth/capacity are unsigned 64-bit;
+status is unsigned 32-bit (0/1/2/3 as above). Only block and thread coordinates
+all equal to zero own the state. Other invocations return without global
+memory accesses. A null status returns without touching state; a null stack
+or depth reports 3 when status is valid. Depth/capacity/underflow/peak-capacity
+checks happen before stack/depth writes. Popped backing slots are preserved
+unless a later ordered push overwrites them.
+
+Caller contract: all non-null buffers are valid, global, naturally aligned and
+mutually disjoint; the stack allocation covers `capacity` slots with no address
+overflow. One invocation owns that state, including across concurrent launches.
+The caller waits for kernel completion before inspecting status/depth/stack.
+This is a reference-kernel ABI defined here, not an ABI recovered from a GPU
+binary. CUDA coordinates use inline PTX, so device compilation needs no runtime
+headers. Direct PTX is pinned to PTX 7.0, sm_70, 64-bit addressing.
+
+Research validation compiles 41 profiles to CUDA device PTX at O0/O2 and checks
+3,444 emitted-PTX scalar reference states. The scalar interpreter assumes flat
+global addresses and does not model NVIDIA scheduling or memory consistency.
+Linux research CI additionally assembles direct and Clang-produced PTX with
+hash-locked NVIDIA ptxas. Compilation/assembly is not hardware execution or
+whole-kernel behavioral equivalence. C/Rust recompilation regressions are
+separate gates. GPU guest decode, SIMT/divergence, memory/barriers/atomics and
+kernel ABI recovery remain unsupported by this projection slice.
+
 ## GFX900 encoding slice
 
 ```sh
