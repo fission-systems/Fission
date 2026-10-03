@@ -215,6 +215,70 @@ pub(super) fn rewrite_call_targets_stmts(
     changed
 }
 
+#[cfg(test)]
+mod pointer_contract_tests {
+    use super::*;
+
+    #[test]
+    fn generic_pointer_parameter_does_not_lock_a_specific_copy_or_source() {
+        for surface in [
+            "void *",
+            "const void*",
+            "LPVOID",
+            "PVOID",
+            "LPCVOID",
+            "PCVOID",
+        ] {
+            let pointer = NirType::Ptr(Box::new(NirType::Int {
+                bits: 8,
+                signed: true,
+            }));
+            let mut func = PreHirFunction {
+                locals: ["source", "saved"]
+                    .into_iter()
+                    .map(|name| PreHirBinding {
+                        name: name.into(),
+                        ty: pointer.clone(),
+                        surface_type_name: None,
+                        origin: Some(NirBindingOrigin::Temp),
+                        initializer: None,
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            let copies = HashMap::from_iter([("saved".into(), "source".into())]);
+            let definitions = HashMap::from_iter([("source".into(), 1), ("saved".into(), 1)]);
+            assert!(!apply_api_surface_type_transitively(
+                &mut func,
+                &copies,
+                &definitions,
+                &HashSet::default(),
+                "saved",
+                surface,
+            ));
+            assert!(
+                func.locals.iter().all(|binding| {
+                    binding.ty == pointer && binding.surface_type_name.is_none()
+                }),
+                "{surface}"
+            );
+            assert!(apply_api_surface_type_transitively(
+                &mut func,
+                &copies,
+                &definitions,
+                &HashSet::default(),
+                "saved",
+                "char*",
+            ));
+            assert!(
+                func.locals
+                    .iter()
+                    .all(|binding| { binding.surface_type_name.as_deref() == Some("char*") })
+            );
+        }
+    }
+}
+
 fn rewrite_call_targets_expr(expr: &mut PreHirExpr, rewrites: &HashMap<String, String>) -> bool {
     let mut changed = false;
     match expr {
@@ -262,10 +326,10 @@ fn rewrite_call_targets_expr(expr: &mut PreHirExpr, rewrites: &HashMap<String, S
 }
 
 /// Carry an exact API parameter declaration back through stable plain-copy
-/// aliases.  The call argument itself keeps the historical behavior of
-/// receiving the surface declaration even when its PreHIR name is reused;
-/// propagation beyond that name requires the same single-definition and
-/// non-self-referential proof as operation-edge type flow.
+/// aliases. Generic object-pointer parameters accept existing pointer types
+/// without declaring those variables as void pointers. Propagation of specific
+/// declarations requires the same single-definition and non-self-referential
+/// proof as operation-edge type flow.
 pub(super) fn apply_api_surface_type_transitively(
     func: &mut PreHirFunction,
     copy_sources: &HashMap<String, String>,
@@ -282,7 +346,13 @@ pub(super) fn apply_api_surface_type_transitively(
         .filter(|c| !c.is_whitespace())
         .flat_map(char::to_uppercase)
         .collect::<String>();
-    let generic_void_pointer = matches!(compact_surface.as_str(), "VOID*" | "LPVOID" | "PVOID");
+    let generic_void_pointer = matches!(
+        compact_surface.as_str(),
+        "VOID*" | "CONSTVOID*" | "LPVOID" | "PVOID" | "LPCVOID" | "PCVOID"
+    );
+    if generic_void_pointer {
+        return false;
+    }
     while visited.insert(current.clone()) {
         if let Some(binding) = binding_by_name_mut(&mut func.locals, &current)
             .or_else(|| binding_by_name_mut(&mut func.params, &current))
@@ -290,13 +360,6 @@ pub(super) fn apply_api_surface_type_transitively(
         {
             binding.surface_type_name = Some(surface_type_name.to_string());
             changed = true;
-        }
-        // `free(void *)` proves the call accepts this value, not that the
-        // source declaration itself was `void *`: any object pointer may be
-        // converted for that call. Keep the surface on the immediate argument
-        // but do not erase a more specific source pointee across its copy.
-        if generic_void_pointer {
-            break;
         }
         if !super::super::type_flow::binding_is_safe_for_backward_refine(
             &current,
