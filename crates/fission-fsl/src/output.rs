@@ -27,6 +27,21 @@ pub fn emit_instruction(
     symbol: &str,
 ) -> Result<String, FslError> {
     instruction.validate()?;
+    if crate::control::has_control(instruction) {
+        if layer != OutputLayer::Fir
+            && (!symbol.starts_with("fsl_")
+                || !symbol
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_'))
+        {
+            return Err(FslError::at(
+                1,
+                1,
+                "output symbol must be an ASCII identifier starting with fsl_",
+            ));
+        }
+        return crate::control::emit(instruction, layer, symbol);
+    }
     if layer == OutputLayer::Fir {
         let mut text = format!(
             "instruction {} encoding={:?}\n",
@@ -34,6 +49,9 @@ pub fn emit_instruction(
         );
         for op in &instruction.ops {
             match *op {
+                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } => {
+                    unreachable!("control output handled separately")
+                }
                 FirOp::LaneMaskRead { output, lanes } => {
                     writeln!(text, "  %v{}: mask<{lanes}> = lane.mask.read", output.0).unwrap();
                 }
@@ -237,6 +255,9 @@ pub fn emit_instruction(
     });
     for op in &instruction.ops {
         match (*op, layer) {
+            (FirOp::IntConstant { .. } | FirOp::IntCompare { .. }, _) => {
+                unreachable!("control output handled separately")
+            }
             (FirOp::VmStackPop { output }, OutputLayer::C) => {
                 let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
                 writeln!(

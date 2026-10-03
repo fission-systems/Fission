@@ -17,6 +17,13 @@ pub struct MachineState {
 
 fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
     instruction.validate()?;
+    if crate::control::has_control(instruction) {
+        return Err(FslError::at(
+            1,
+            1,
+            "control FIR is unsupported by the register-state backend",
+        ));
+    }
     if instruction.values.iter().any(|v| v.ty.bits > 64)
         || instruction.ops.iter().any(|op| {
             matches!(

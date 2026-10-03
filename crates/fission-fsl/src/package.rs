@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 5;
+pub const FSL_PACKAGE_VERSION: u16 = 6;
 const STATE_PACKAGE_VERSION: u16 = 3;
 const CARRY_IN_PACKAGE_VERSION: u16 = 4;
 const MAGIC: &[u8; 8] = b"FSLCPKG\0";
@@ -69,7 +69,51 @@ pub struct Evidence {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntPredicate {
+    Equal,
+    UnsignedLess,
+    SignedLess,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirEdge {
+    pub target: u16,
+    pub arguments: Vec<ValueId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FirTerminator {
+    Return,
+    Branch(FirEdge),
+    CondBranch {
+        condition: ValueId,
+        on_true: FirEdge,
+        on_false: FirEdge,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirBlock {
+    pub name: String,
+    pub parameters: Vec<ValueId>,
+    /// This block owns this contiguous range in the instruction's sole op table.
+    pub start: u16,
+    pub end: u16,
+    pub terminator: FirTerminator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirOp {
+    IntConstant {
+        output: ValueId,
+        value: u64,
+    },
+    IntCompare {
+        output: ValueId,
+        left: ValueId,
+        right: ValueId,
+        predicate: IntPredicate,
+    },
     /// Semantic support is absent; this is never an executable no-op.
     Unsupported,
     /// Snapshot of the lane activation mask; extent is explicit and <=64.
@@ -137,6 +181,9 @@ pub enum FirOp {
 }
 
 impl FirOp {
+    pub(crate) fn requires_control_version(&self) -> bool {
+        matches!(self, Self::IntConstant { .. } | Self::IntCompare { .. })
+    }
     pub(crate) fn requires_lane_version(&self) -> bool {
         matches!(
             self,
@@ -173,6 +220,8 @@ pub struct CompiledInstruction {
     pub evidence: Vec<Evidence>,
     pub values: Vec<ValueDef>,
     pub ops: Vec<FirOp>,
+    /// Empty for legacy linear bodies; consumers treat those as entry + return.
+    pub blocks: Vec<FirBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,10 +237,7 @@ pub struct FslcPackage {
 impl FslcPackage {
     /// Validate the package and canonical FIR at every consumer boundary.
     pub fn validate(&self) -> Result<(), FslError> {
-        if !matches!(
-            self.version,
-            1 | 2 | STATE_PACKAGE_VERSION | CARRY_IN_PACKAGE_VERSION | FSL_PACKAGE_VERSION
-        ) {
+        if !matches!(self.version, 1..=FSL_PACKAGE_VERSION) {
             return Err(FslError::at(1, 1, "unsupported FSL package version"));
         }
         if self.instructions.is_empty() || self.instructions.len() > MAX_INSTRUCTIONS {
@@ -232,6 +278,16 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 6
+                && (!instruction.blocks.is_empty()
+                    || instruction.ops.iter().any(FirOp::requires_control_version))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "block/constant/comparison FIR requires package version 6",
+                ));
+            }
             if instruction.encoding.bits != self.instructions[0].encoding.bits {
                 return Err(FslError::at(
                     1,
@@ -367,6 +423,27 @@ impl FslcPackage {
             writer.u16(count_u16(instruction.ops.len(), "FIR operations")?);
             for op in &instruction.ops {
                 match op {
+                    FirOp::IntConstant { output, value } => {
+                        writer.u8(14);
+                        writer.u16(output.0);
+                        writer.u64(*value);
+                    }
+                    FirOp::IntCompare {
+                        output,
+                        left,
+                        right,
+                        predicate,
+                    } => {
+                        writer.u8(15);
+                        writer.u16(output.0);
+                        writer.u16(left.0);
+                        writer.u16(right.0);
+                        writer.u8(match predicate {
+                            IntPredicate::Equal => 0,
+                            IntPredicate::UnsignedLess => 1,
+                            IntPredicate::SignedLess => 2,
+                        });
+                    }
                     FirOp::LaneMaskRead { output, lanes } => {
                         writer.u8(11);
                         writer.u16(output.0);
@@ -465,6 +542,35 @@ impl FslcPackage {
                     }
                 }
             }
+            if self.version >= 6 {
+                writer.u16(count_u16(instruction.blocks.len(), "FIR blocks")?);
+                for block in &instruction.blocks {
+                    writer.string(&block.name)?;
+                    writer.u16(count_u16(block.parameters.len(), "block parameters")?);
+                    for p in &block.parameters {
+                        writer.u16(p.0);
+                    }
+                    writer.u16(block.start);
+                    writer.u16(block.end);
+                    match &block.terminator {
+                        FirTerminator::Return => writer.u8(0),
+                        FirTerminator::Branch(edge) => {
+                            writer.u8(1);
+                            writer.edge(edge)?;
+                        }
+                        FirTerminator::CondBranch {
+                            condition,
+                            on_true,
+                            on_false,
+                        } => {
+                            writer.u8(2);
+                            writer.u16(condition.0);
+                            writer.edge(on_true)?;
+                            writer.edge(on_false)?;
+                        }
+                    }
+                }
+            }
         }
         if writer.bytes.len() > MAX_PACKAGE_BYTES {
             return Err(FslError::at(1, 1, "compiled FSL package exceeds 64 MiB"));
@@ -481,10 +587,7 @@ impl FslcPackage {
             return Err(FslError::at(1, 1, "invalid FSL package magic"));
         }
         let version = reader.u16()?;
-        if !matches!(
-            version,
-            1 | 2 | STATE_PACKAGE_VERSION | CARRY_IN_PACKAGE_VERSION | FSL_PACKAGE_VERSION
-        ) {
+        if !matches!(version, 1..=FSL_PACKAGE_VERSION) {
             return Err(FslError::at(
                 1,
                 1,
@@ -604,7 +707,7 @@ impl FslcPackage {
                 });
             }
             let op_count = reader.u16()? as usize;
-            if op_count == 0 || op_count > MAX_OPS_PER_INSTRUCTION {
+            if (op_count == 0 && version < 6) || op_count > MAX_OPS_PER_INSTRUCTION {
                 return Err(FslError::at(
                     1,
                     1,
@@ -614,6 +717,23 @@ impl FslcPackage {
             let mut ops = Vec::with_capacity(op_count);
             for _ in 0..op_count {
                 let op = match reader.u8()? {
+                    14 if version >= 6 => FirOp::IntConstant {
+                        output: reader.value_id(value_count)?,
+                        value: reader.u64()?,
+                    },
+                    15 if version >= 6 => FirOp::IntCompare {
+                        output: reader.value_id(value_count)?,
+                        left: reader.value_id(value_count)?,
+                        right: reader.value_id(value_count)?,
+                        predicate: match reader.u8()? {
+                            0 => IntPredicate::Equal,
+                            1 => IntPredicate::UnsignedLess,
+                            2 => IntPredicate::SignedLess,
+                            _ => {
+                                return Err(FslError::at(1, 1, "unknown FIR comparison predicate"))
+                            }
+                        },
+                    },
                     11 if version >= 5 => FirOp::LaneMaskRead {
                         output: reader.value_id(value_count)?,
                         lanes: reader.u16()?,
@@ -678,6 +798,43 @@ impl FslcPackage {
                 };
                 ops.push(op);
             }
+            let mut blocks = Vec::new();
+            if version >= 6 {
+                let count = usize::from(reader.u16()?);
+                if count > 256 {
+                    return Err(FslError::at(1, 1, "too many FIR blocks"));
+                }
+                for _ in 0..count {
+                    let name = reader.string()?;
+                    let parameters_count = usize::from(reader.u16()?);
+                    if parameters_count > value_count {
+                        return Err(FslError::at(1, 1, "invalid block parameter count"));
+                    }
+                    let mut parameters = Vec::with_capacity(parameters_count);
+                    for _ in 0..parameters_count {
+                        parameters.push(reader.value_id(value_count)?);
+                    }
+                    let start = reader.u16()?;
+                    let end = reader.u16()?;
+                    let terminator = match reader.u8()? {
+                        0 => FirTerminator::Return,
+                        1 => FirTerminator::Branch(reader.edge(value_count)?),
+                        2 => FirTerminator::CondBranch {
+                            condition: reader.value_id(value_count)?,
+                            on_true: reader.edge(value_count)?,
+                            on_false: reader.edge(value_count)?,
+                        },
+                        _ => return Err(FslError::at(1, 1, "unknown FIR terminator")),
+                    };
+                    blocks.push(FirBlock {
+                        name,
+                        parameters,
+                        start,
+                        end,
+                        terminator,
+                    });
+                }
+            }
             if let Some(opcode) = encoding.opcode() {
                 dispatch[opcode as usize] = Some(index as u16);
             }
@@ -688,6 +845,7 @@ impl FslcPackage {
                 evidence,
                 values,
                 ops,
+                blocks,
             });
         }
         if reader.cursor != bytes.len() {
@@ -717,6 +875,14 @@ struct Writer {
 }
 
 impl Writer {
+    fn edge(&mut self, edge: &FirEdge) -> Result<(), FslError> {
+        self.u16(edge.target);
+        self.u16(count_u16(edge.arguments.len(), "branch arguments")?);
+        for arg in &edge.arguments {
+            self.u16(arg.0);
+        }
+        Ok(())
+    }
     fn u8(&mut self, value: u8) {
         self.bytes.push(value);
     }
@@ -753,6 +919,18 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    fn edge(&mut self, value_count: usize) -> Result<FirEdge, FslError> {
+        let target = self.u16()?;
+        let count = usize::from(self.u16()?);
+        if count > value_count {
+            return Err(FslError::at(1, 1, "invalid branch argument count"));
+        }
+        let mut arguments = Vec::with_capacity(count);
+        for _ in 0..count {
+            arguments.push(self.value_id(value_count)?);
+        }
+        Ok(FirEdge { target, arguments })
+    }
     fn take(&mut self, length: usize) -> Result<&'a [u8], FslError> {
         let end = self
             .cursor

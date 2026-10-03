@@ -172,11 +172,11 @@ fn define_decode_lift_function<M: Module>(
     package: &FslcPackage,
 ) -> Result<(FuncId, usize), FslError> {
     package.validate()?;
-    if package
-        .instructions
-        .iter()
-        .any(|i| i.encoding.opcode().is_none() || i.ops.contains(&FirOp::Unsupported))
-    {
+    if package.instructions.iter().any(|i| {
+        i.encoding.opcode().is_none()
+            || i.ops.contains(&FirOp::Unsupported)
+            || crate::control::has_control(i)
+    }) {
         return Err(FslError::at(
             1,
             1,
@@ -345,6 +345,13 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         ..NativeFirOp::default()
     };
     Ok(match op {
+        FirOp::IntConstant { .. } | FirOp::IntCompare { .. } => {
+            return Err(FslError::at(
+                1,
+                1,
+                "control FIR is unsupported by native lift records",
+            ))
+        }
         FirOp::RegisterRead { .. }
         | FirOp::LaneMaskRead { .. }
         | FirOp::LaneRead { .. }

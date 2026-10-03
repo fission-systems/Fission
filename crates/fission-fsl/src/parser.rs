@@ -21,6 +21,27 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    BlockStart {
+        name: String,
+        parameters: Vec<(String, ValueType)>,
+    },
+    BlockEnd(ParsedTerminator),
+    Constant {
+        name: String,
+        ty: ValueType,
+        value: u64,
+        line: usize,
+        column: usize,
+    },
+    Compare {
+        name: String,
+        ty: ValueType,
+        left: String,
+        right: String,
+        predicate: crate::IntPredicate,
+        line: usize,
+        column: usize,
+    },
     LaneMaskRead {
         name: String,
         ty: ValueType,
@@ -118,6 +139,23 @@ pub(super) enum Statement {
     },
 }
 
+#[derive(Debug)]
+pub(super) struct ParsedEdge {
+    pub target: String,
+    pub arguments: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(super) enum ParsedTerminator {
+    Return,
+    Branch(ParsedEdge),
+    CondBranch {
+        condition: String,
+        on_true: ParsedEdge,
+        on_false: ParsedEdge,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TokenKind {
     Ident(String),
@@ -199,7 +237,7 @@ impl<'a> Lexer<'a> {
                     line,
                     column,
                 });
-            } else if "{}:;=,%".contains(ch) {
+            } else if "{}():;=,%".contains(ch) {
                 self.advance();
                 tokens.push(Token {
                     kind: TokenKind::Symbol(ch),
@@ -725,7 +763,59 @@ impl Parser {
                 self.expect_symbol('{')?;
                 let mut parsed = Vec::new();
                 while !self.at_symbol('}') {
-                    parsed.push(self.parse_statement()?);
+                    if self.at_ident("block") {
+                        self.advance();
+                        let name = self.expect_name()?;
+                        self.expect_symbol('(')?;
+                        let mut parameters = Vec::new();
+                        while !self.at_symbol(')') {
+                            self.expect_symbol('%')?;
+                            let name = self.expect_name()?;
+                            self.expect_symbol(':')?;
+                            let ty_name = self.expect_name()?;
+                            let ty = parse_value_type(&ty_name)
+                                .ok_or_else(|| self.error_here("invalid block parameter type"))?;
+                            parameters.push((name, ty));
+                            if !self.at_symbol(',') {
+                                break;
+                            }
+                            self.advance();
+                        }
+                        self.expect_symbol(')')?;
+                        self.expect_symbol('{')?;
+                        parsed.push(Statement::BlockStart { name, parameters });
+                        while !self.at_ident("return")
+                            && !self.at_ident("branch")
+                            && !self.at_ident("branch.if")
+                        {
+                            parsed.push(self.parse_statement()?);
+                        }
+                        let terminator = if self.at_ident("return") {
+                            self.advance();
+                            ParsedTerminator::Return
+                        } else if self.at_ident("branch") {
+                            self.advance();
+                            ParsedTerminator::Branch(self.parse_edge()?)
+                        } else {
+                            self.advance();
+                            self.expect_symbol('%')?;
+                            let condition = self.expect_name()?;
+                            self.expect_symbol(',')?;
+                            let on_true = self.parse_edge()?;
+                            self.expect_symbol(',')?;
+                            let on_false = self.parse_edge()?;
+                            ParsedTerminator::CondBranch {
+                                condition,
+                                on_true,
+                                on_false,
+                            }
+                        };
+                        self.expect_symbol(';')?;
+                        self.expect_symbol('}')?;
+                        parsed.push(Statement::BlockEnd(terminator));
+                    } else {
+                        parsed.push(self.parse_statement()?);
+                    }
                 }
                 self.expect_symbol('}')?;
                 if statements.replace(parsed).is_some() {
@@ -842,6 +932,22 @@ impl Parser {
         })
     }
 
+    fn parse_edge(&mut self) -> Result<ParsedEdge, FslError> {
+        let target = self.expect_name()?;
+        self.expect_symbol('(')?;
+        let mut arguments = Vec::new();
+        while !self.at_symbol(')') {
+            self.expect_symbol('%')?;
+            arguments.push(self.expect_name()?);
+            if !self.at_symbol(',') {
+                break;
+            }
+            self.advance();
+        }
+        self.expect_symbol(')')?;
+        Ok(ParsedEdge { target, arguments })
+    }
+
     fn parse_statement(&mut self) -> Result<Statement, FslError> {
         let token = self.current().clone();
         if self.at_symbol('%') {
@@ -858,7 +964,36 @@ impl Parser {
             })?;
             self.expect_symbol('=')?;
             let operation = self.expect_name()?;
-            let statement = if operation == "lane.mask.read" {
+            let statement = if operation == "int.const" {
+                let value = self.expect_integer()?;
+                Statement::Constant {
+                    name,
+                    ty,
+                    value,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if matches!(operation.as_str(), "int.eq" | "int.ult" | "int.slt") {
+                self.expect_symbol('%')?;
+                let left = self.expect_name()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let right = self.expect_name()?;
+                let predicate = match operation.as_str() {
+                    "int.eq" => crate::IntPredicate::Equal,
+                    "int.ult" => crate::IntPredicate::UnsignedLess,
+                    _ => crate::IntPredicate::SignedLess,
+                };
+                Statement::Compare {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    predicate,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if operation == "lane.mask.read" {
                 let lanes = u16::try_from(self.expect_integer()?)
                     .map_err(|_| self.error_here("lane extent exceeds u16"))?;
                 Statement::LaneMaskRead {

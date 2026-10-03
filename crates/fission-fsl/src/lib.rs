@@ -7,6 +7,7 @@
 //! explicitly unsupported.
 
 pub mod abi;
+pub mod control;
 pub mod encoding;
 mod gpu_output;
 pub mod jit;
@@ -25,8 +26,8 @@ pub use encoding::{BitField, DecodedInstruction, Encoding};
 pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
 pub use output::{emit_instruction, OutputLayer};
 pub use package::{
-    AddressUnit, ByteOrder, CompiledInstruction, Evidence, FirOp, FslcPackage, IntegerSign,
-    ValueDef, ValueId, ValueType, FSL_PACKAGE_VERSION,
+    AddressUnit, ByteOrder, CompiledInstruction, Evidence, FirBlock, FirEdge, FirOp, FirTerminator,
+    FslcPackage, IntPredicate, IntegerSign, ValueDef, ValueId, ValueType, FSL_PACKAGE_VERSION,
 };
 pub use semantics::{execute_instruction, ExecutionStatus, StackContract};
 
@@ -92,6 +93,8 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         let mut values = Vec::<ValueDef>::new();
         let mut value_ids = HashMap::<String, ValueId>::new();
         let mut ops = Vec::<FirOp>::new();
+        let mut blocks = Vec::<FirBlock>::new();
+        let mut pending = Vec::new();
         let field_id = |name: &str| -> Result<u16, FslError> {
             instruction
                 .encoding
@@ -109,6 +112,82 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         };
         for statement in instruction.statements {
             match statement {
+                parser::Statement::BlockStart { name, parameters } => {
+                    if blocks.len() >= 256 {
+                        return Err(FslError::at(1, 1, "too many FIR blocks"));
+                    }
+                    let mut ids = Vec::new();
+                    for (name, ty) in parameters {
+                        ids.push(define_value(&mut values, &mut value_ids, name, ty, 1, 1)?);
+                    }
+                    blocks.push(FirBlock {
+                        name,
+                        parameters: ids,
+                        start: u16::try_from(ops.len())
+                            .map_err(|_| FslError::at(1, 1, "too many FIR ops"))?,
+                        end: 0,
+                        terminator: FirTerminator::Return,
+                    });
+                }
+                parser::Statement::BlockEnd(terminator) => {
+                    let block = blocks
+                        .last_mut()
+                        .ok_or_else(|| FslError::at(1, 1, "block end outside block"))?;
+                    block.end = u16::try_from(ops.len())
+                        .map_err(|_| FslError::at(1, 1, "too many FIR ops"))?;
+                    let edge = |e: parser::ParsedEdge| -> Result<(String, Vec<ValueId>), FslError> {
+                        Ok((
+                            e.target,
+                            e.arguments
+                                .iter()
+                                .map(|v| require_value(&values, &value_ids, v, 1, 1))
+                                .collect::<Result<_, _>>()?,
+                        ))
+                    };
+                    let item = match terminator {
+                        parser::ParsedTerminator::Return => (None, None, None),
+                        parser::ParsedTerminator::Branch(e) => (None, Some(edge(e)?), None),
+                        parser::ParsedTerminator::CondBranch {
+                            condition,
+                            on_true,
+                            on_false,
+                        } => (
+                            Some(require_value(&values, &value_ids, &condition, 1, 1)?),
+                            Some(edge(on_true)?),
+                            Some(edge(on_false)?),
+                        ),
+                    };
+                    pending.push(item);
+                }
+                parser::Statement::Constant {
+                    name,
+                    ty,
+                    value,
+                    line,
+                    column,
+                } => {
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::IntConstant { output, value });
+                }
+                parser::Statement::Compare {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    predicate,
+                    line,
+                    column,
+                } => {
+                    let left = require_value(&values, &value_ids, &left, line, column)?;
+                    let right = require_value(&values, &value_ids, &right, line, column)?;
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::IntCompare {
+                        output,
+                        left,
+                        right,
+                        predicate,
+                    });
+                }
                 parser::Statement::LaneMaskRead {
                     name,
                     ty,
@@ -312,7 +391,32 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
                 }
             }
         }
-        if ops.is_empty() {
+        let block_ids: HashMap<_, _> = blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.name.clone(), i as u16))
+            .collect();
+        let resolve = |e: (String, Vec<ValueId>)| -> Result<FirEdge, FslError> {
+            Ok(FirEdge {
+                target: *block_ids
+                    .get(&e.0)
+                    .ok_or_else(|| FslError::at(1, 1, "unknown branch target"))?,
+                arguments: e.1,
+            })
+        };
+        for (block, (condition, on_true, on_false)) in blocks.iter_mut().zip(pending) {
+            block.terminator = match (condition, on_true, on_false) {
+                (None, None, None) => FirTerminator::Return,
+                (None, Some(edge), None) => FirTerminator::Branch(resolve(edge)?),
+                (Some(condition), Some(a), Some(b)) => FirTerminator::CondBranch {
+                    condition,
+                    on_true: resolve(a)?,
+                    on_false: resolve(b)?,
+                },
+                _ => return Err(FslError::at(1, 1, "invalid internal terminator")),
+            };
+        }
+        if ops.is_empty() && blocks.is_empty() {
             return Err(FslError::at(
                 instruction.line,
                 instruction.column,
@@ -330,16 +434,22 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
             evidence: instruction.evidence,
             values,
             ops,
+            blocks,
         });
     }
 
     let package = FslcPackage {
         version: if instructions
             .iter()
+            .any(|i| !i.blocks.is_empty() || i.ops.iter().any(FirOp::requires_control_version))
+        {
+            6
+        } else if instructions
+            .iter()
             .flat_map(|i| &i.ops)
             .any(FirOp::requires_lane_version)
         {
-            FSL_PACKAGE_VERSION
+            5
         } else if instructions
             .iter()
             .flat_map(|i| &i.ops)

@@ -17,6 +17,13 @@ pub(crate) fn emit_gpu_instruction(
 ) -> Result<String, FslError> {
     // Derived from ordered canonical FIR; unknown/state/lane effects and widths
     // above 64 refuse before a target string is returned.
+    if crate::control::has_control(instruction) {
+        return Err(FslError::at(
+            1,
+            1,
+            "control FIR is unsupported by GPU outputs",
+        ));
+    }
     let contract = StackContract::for_instruction(instruction)?;
     match layer {
         OutputLayer::CudaCpp => Ok(cuda(instruction, contract, symbol)),

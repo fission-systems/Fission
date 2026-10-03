@@ -11,6 +11,13 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 
 ## Current slice
 
+- `.fslc` v6 preserves typed block parameters, explicit branch/conditional branch
+  and return terminators. `int.const` and `int.eq`/`int.ult`/`int.slt` are shared
+  FIR operations. Reference/C/Rust execute acyclic integer/stack control bodies
+  with equal stack deltas at joins/returns. Cycles are representable but this
+  backend refuses them. Other backends refuse control bodies. See the
+  [structured control contract](../../docs/research/fir-structured-control.md).
+
 - Owned `.fsldb` v1 prototype-candidate catalog reader and exact symbol query,
   independent of FPK. Type spellings remain unresolved; missing variadic
   evidence is unknown. This does not replace the product signature loader or

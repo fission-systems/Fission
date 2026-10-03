@@ -43,6 +43,18 @@ pub(crate) fn validate_domains(
     for op in &instruction.ops {
         let at = |id: ValueId| domains[usize::from(id.0)];
         let result = match *op {
+            FirOp::IntConstant { output, .. } => Some((output, ValueDomain::Uniform)),
+            FirOp::IntCompare {
+                output,
+                left,
+                right,
+                ..
+            } => {
+                if at(left) != ValueDomain::Uniform || at(right) != ValueDomain::Uniform {
+                    return Err(error());
+                }
+                Some((output, ValueDomain::Uniform))
+            }
             FirOp::LaneMaskRead { output, lanes } => {
                 if extent.is_some_and(|n| n != lanes) {
                     return Err(error());
@@ -136,6 +148,13 @@ pub(crate) fn validate_domains(
 impl WaveContract {
     pub fn for_instruction(instruction: &CompiledInstruction) -> Result<Self, FslError> {
         instruction.validate()?;
+        if crate::control::has_control(instruction) {
+            return Err(FslError::at(
+                1,
+                1,
+                "control FIR is unsupported by the wave backend",
+            ));
+        }
         if instruction.values.iter().any(|v| v.ty.bits > 64)
             || instruction.ops.iter().any(|op| {
                 !matches!(
