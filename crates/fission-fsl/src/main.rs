@@ -21,6 +21,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_default();
     match command.as_str() {
+        "library-inspect" => {
+            let path = required_arg(&mut args, "library .fsldb path")?;
+            reject_extra_args(args)?;
+            let catalog = fission_fsl::library::LibraryCatalog::decode_binary(&fs::read(path)?)?;
+            println!(
+                "prototype-candidates={} type-resolution=unresolved source={} sha256={} commit={}",
+                catalog.candidates.len(),
+                catalog.source.path,
+                catalog.source.sha256,
+                catalog.source.commit
+            );
+        }
+        "library-query" => {
+            let path = required_arg(&mut args, "library .fsldb path")?;
+            let symbol = required_arg(&mut args, "exact symbol")?;
+            reject_extra_args(args)?;
+            let catalog = fission_fsl::library::LibraryCatalog::decode_binary(&fs::read(path)?)?;
+            let candidate = catalog
+                .lookup(&symbol)
+                .ok_or("no prototype candidate for symbol")?;
+            println!("type-resolution=unresolved candidate={candidate:#?}");
+        }
         "check-layout" => {
             let path = required_arg(&mut args, "layout FSL source path")?;
             reject_extra_args(args)?;
@@ -446,6 +468,8 @@ fn print_usage() {
     eprintln!("  execute-wave <package> <profile> <hex> <lanes> <exec> <scalar-csv> <flags-csv> <lane-slots-csv>");
     eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust|cuda|ptx> <output>");
     eprintln!("usage:");
+    eprintln!("  fslc library-inspect <library.fsldb>");
+    eprintln!("  fslc library-query <library.fsldb> <exact-symbol>");
     eprintln!("  fslc check <source.fsl>");
     eprintln!("  fslc check-abi <source.fslabi>");
     eprintln!("  check-layout <source.fslregs>\n  link-abi <source.fslabi> <source.fslregs>\n  execute-layout <layout> <abi> <package> <profile> <hex> <register-names-csv> <register-values-csv>");

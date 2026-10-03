@@ -10,6 +10,7 @@ pub mod abi;
 pub mod encoding;
 mod gpu_output;
 pub mod jit;
+pub mod library;
 pub mod output;
 pub mod package;
 mod parser;

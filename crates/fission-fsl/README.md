@@ -11,6 +11,13 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 
 ## Current slice
 
+- Owned `.fsldb` v1 prototype-candidate catalog reader and exact symbol query,
+  independent of FPK. Type spellings remain unresolved; missing variadic
+  evidence is unknown. This does not replace the product signature loader or
+  supply callable ABI semantics. The offline `.fslib` TOML compiler/importer
+  lives in `fission-research/tools/fsl_library_migrate.py`. The three-row fixture
+  is self-authored (all-zero provenance commit denotes a synthetic fixture).
+
 - Dedicated `.fsl` text input with exact byte opcodes and fixed-width
   8/32/64/128-bit mask/value encodings, raw bitfields, and excluded selectors.
 - Required per-instruction evidence fields.
@@ -51,6 +58,8 @@ From the Fission workspace root:
 
 ```sh
 cargo run -p fission-fsl -- check crates/fission-fsl/specs/jvm-se26-iadd.fsl
+cargo run -p fission-fsl -- library-inspect crates/fission-fsl/specs/library-candidates.fsldb
+cargo run -p fission-fsl -- library-query crates/fission-fsl/specs/library-candidates.fsldb beta
 cargo run -p fission-fsl -- compile \
   crates/fission-fsl/specs/jvm-se26-iadd.fsl /tmp/jvm-se26-iadd.fslc
 cargo run -p fission-fsl -- decode /tmp/jvm-se26-iadd.fslc 0x60
