@@ -90,3 +90,7 @@ cargo run -p fission-fsl -- emit-bytes /tmp/register-cfg.fslc \
 ```
 
 The result is `registers=[128, 4294967168, 128] flags=[1, 1, 1]`.
+
+The subsequent [sequence state/origin slice](fir-sequence-state-origin.md)
+composes bounded sequential instances of these same bodies. It does not add
+inter-instruction branch recovery or a binary function loader.

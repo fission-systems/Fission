@@ -21,6 +21,68 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_default();
     match command.as_str() {
+        "compose-sequence" => {
+            let package = load_package(&required_arg(&mut args, "compiled .fslc path")?)?;
+            let profile = required_arg(&mut args, "exact profile")?;
+            let base = required_arg(&mut args, "base address")?;
+            let base = if let Some(hex) = base.strip_prefix("0x") {
+                u64::from_str_radix(hex, 16)?
+            } else {
+                base.parse()?
+            };
+            let register_count = required_arg(&mut args, "register bank size")?.parse()?;
+            let flag_count = required_arg(&mut args, "flag bank size")?.parse()?;
+            let input = parse_bytes(&required_arg(&mut args, "exact instruction window in hex")?)?;
+            let output = required_arg(&mut args, "output .fslseq path")?;
+            reject_extra_args(args)?;
+            let sequence = fission_fsl::sequence::FirSequence::compose(
+                &package,
+                &profile,
+                base,
+                &input,
+                fission_fsl::sequence::SequenceStateContract {
+                    register_count,
+                    flag_count,
+                },
+            )?;
+            fs::write(&output, sequence.encode_binary()?)?;
+            println!(
+                "composed {} instruction instances into {output}",
+                sequence.instances().len()
+            );
+        }
+        "inspect-sequence" | "execute-sequence" | "emit-sequence" => {
+            let path = required_arg(&mut args, "compiled .fslseq path")?;
+            let sequence = fission_fsl::sequence::FirSequence::decode_binary(&fs::read(path)?)?;
+            match command.as_str() {
+                "inspect-sequence" => {
+                    reject_extra_args(args)?;
+                    print!("{}", sequence.emit(OutputLayer::Fir, "ignored")?);
+                }
+                "execute-sequence" => {
+                    let registers = parse_words(&required_arg(&mut args, "register values csv")?)?;
+                    let flags = parse_words(&required_arg(&mut args, "flag values csv")?)?;
+                    reject_extra_args(args)?;
+                    let mut state = MachineState { registers, flags };
+                    let status = sequence.execute(&mut state)?;
+                    println!(
+                        "status={status:?} registers={:?} flags={:?}",
+                        state.registers, state.flags
+                    );
+                }
+                _ => {
+                    let layer = match required_arg(&mut args, "fir|c|rust")?.as_str() {
+                        "fir" => OutputLayer::Fir,
+                        "c" => OutputLayer::C,
+                        "rust" => OutputLayer::Rust,
+                        _ => return Err("sequence output supports fir|c|rust only".into()),
+                    };
+                    let output = required_arg(&mut args, "source output path")?;
+                    reject_extra_args(args)?;
+                    fs::write(output, sequence.emit(layer, "fsl_sequence")?)?;
+                }
+            }
+        }
         "library-inspect" => {
             let path = required_arg(&mut args, "library .fsldb path")?;
             reject_extra_args(args)?;
@@ -465,6 +527,7 @@ fn reject_extra_args(
 }
 
 fn print_usage() {
+    eprintln!("  compose-sequence <package> <profile> <base-address> <register-count> <flag-count> <hex> <output.fslseq>\n  inspect-sequence <sequence.fslseq>\n  execute-sequence <sequence.fslseq> <registers-csv> <flags-csv>\n  emit-sequence <sequence.fslseq> <fir|c|rust> <output>");
     eprintln!("  execute-wave <package> <profile> <hex> <lanes> <exec> <scalar-csv> <flags-csv> <lane-slots-csv>");
     eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust|cuda|ptx> <output>");
     eprintln!("usage:");

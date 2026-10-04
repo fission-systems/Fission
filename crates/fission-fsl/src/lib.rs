@@ -17,6 +17,7 @@ pub mod package;
 mod parser;
 pub mod registers;
 pub mod semantics;
+pub mod sequence;
 mod state;
 mod wave;
 pub use state::{execute_decoded, MachineState};

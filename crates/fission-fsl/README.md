@@ -11,6 +11,13 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 
 ## Current slice
 
+- Bounded `.fslseq` execution plans reference the same canonical FIR bodies.
+  Sequential instances hand off logical register/flag state, with byte addresses,
+  exact spans/raw bytes, input/package hashes and referenced spec evidence.
+  Reference/C/Rust wrappers commit only after all instances succeed. This is an
+  explicit fixed-width window, not recovered binary functions or GPU CFGs.
+  See [state/origin contract](../../docs/research/fir-sequence-state-origin.md).
+
 - `.fslc` v7 adds strict `int.zext`/`int.sext`/`int.trunc` at widths 1..64.
   Acyclic register/flag CFGs preserve selected-path writes and read-after-write
   at joins in reference/C/Rust. Earlier package layouts and fixture hashes

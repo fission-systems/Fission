@@ -15,7 +15,7 @@ pub struct MachineState {
     pub flags: Vec<u64>,
 }
 
-fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
+pub(crate) fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
     instruction.validate()?;
     crate::control::validate_acyclic(instruction)?;
     if instruction.values.iter().any(|v| v.ty.bits > 64)
@@ -51,6 +51,24 @@ fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
     Ok(())
 }
 
+/// Fields must already be validated against the canonical package observation.
+pub(crate) fn bank_indices_fit(
+    instruction: &CompiledInstruction,
+    decoded: &DecodedInstruction,
+    register_count: usize,
+    flag_count: usize,
+) -> bool {
+    instruction.ops.iter().all(|op| match *op {
+        FirOp::RegisterRead { field, .. } | FirOp::RegisterWrite { field, .. } => {
+            decoded.fields[usize::from(field)].1 < register_count as u64
+        }
+        FirOp::FlagRead { slot, .. } | FirOp::FlagWrite { slot, .. } => {
+            usize::from(slot) < flag_count
+        }
+        _ => true,
+    })
+}
+
 /// Validate the decoded observation against its package before execution.
 /// All preconditions are checked before mutations; rejected execution preserves
 /// registers and flags. Aliasing between source/destination SGPRs is supported
@@ -67,20 +85,13 @@ pub fn execute_decoded(
         return Ok(ExecutionStatus::InvalidState);
     }
     let index = |field: u16| decoded.fields[usize::from(field)].1;
-    for op in &instruction.ops {
-        match *op {
-            FirOp::RegisterRead { field, .. } | FirOp::RegisterWrite { field, .. }
-                if index(field) >= state.registers.len() as u64 =>
-            {
-                return Ok(ExecutionStatus::InvalidState)
-            }
-            FirOp::FlagRead { slot, .. } | FirOp::FlagWrite { slot, .. }
-                if usize::from(slot) >= state.flags.len() =>
-            {
-                return Ok(ExecutionStatus::InvalidState)
-            }
-            _ => {}
-        }
+    if !bank_indices_fit(
+        instruction,
+        decoded,
+        state.registers.len(),
+        state.flags.len(),
+    ) {
+        return Ok(ExecutionStatus::InvalidState);
     }
     let mut values = vec![0u64; instruction.values.len()];
     let blocks = crate::control::blocks(instruction);
@@ -199,6 +210,17 @@ pub(crate) fn emit_state_instruction(
             "pub fn {symbol}(registers: &mut [u64], flags: &mut [u64], fields: &[u64]) -> u32 {{\n"
         )
     };
+    if !instruction
+        .ops
+        .iter()
+        .any(|op| matches!(op, FirOp::RegisterRead { .. } | FirOp::RegisterWrite { .. }))
+    {
+        text.push_str(if c {
+            "    (void)register_count;\n"
+        } else {
+            "    let _ = registers;\n"
+        });
+    }
     let mut guard = |condition: String| {
         if c {
             writeln!(text, "    if ({condition}) return 3;").unwrap();
