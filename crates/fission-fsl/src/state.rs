@@ -17,13 +17,7 @@ pub struct MachineState {
 
 fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
     instruction.validate()?;
-    if crate::control::has_control(instruction) {
-        return Err(FslError::at(
-            1,
-            1,
-            "control FIR is unsupported by the register-state backend",
-        ));
-    }
+    crate::control::validate_acyclic(instruction)?;
     if instruction.values.iter().any(|v| v.ty.bits > 64)
         || instruction.ops.iter().any(|op| {
             matches!(
@@ -89,70 +83,104 @@ pub fn execute_decoded(
         }
     }
     let mut values = vec![0u64; instruction.values.len()];
-    for op in &instruction.ops {
-        match *op {
-            FirOp::RegisterRead { output, field } => {
-                values[usize::from(output.0)] = state.registers[index(field) as usize]
-                    & width_mask(instruction.values[usize::from(output.0)].ty.bits)
+    let blocks = crate::control::blocks(instruction);
+    let mut pc = 0;
+    loop {
+        let block = &blocks[pc];
+        for op in &instruction.ops[usize::from(block.start)..usize::from(block.end)] {
+            match *op {
+                FirOp::IntConvert {
+                    output,
+                    input,
+                    kind,
+                } => {
+                    values[usize::from(output.0)] = crate::control::convert(
+                        values[usize::from(input.0)],
+                        instruction.values[usize::from(input.0)].ty.bits,
+                        instruction.values[usize::from(output.0)].ty.bits,
+                        kind,
+                    );
+                }
+                FirOp::IntConstant { output, value } => values[usize::from(output.0)] = value,
+                FirOp::IntCompare {
+                    output,
+                    left,
+                    right,
+                    predicate,
+                } => {
+                    values[usize::from(output.0)] = crate::control::compare(
+                        values[usize::from(left.0)],
+                        values[usize::from(right.0)],
+                        instruction.values[usize::from(left.0)].ty.bits,
+                        predicate,
+                    );
+                }
+                FirOp::RegisterRead { output, field } => {
+                    values[usize::from(output.0)] = state.registers[index(field) as usize]
+                        & width_mask(instruction.values[usize::from(output.0)].ty.bits)
+                }
+                FirOp::FlagRead { output, slot } => {
+                    values[usize::from(output.0)] = state.flags[usize::from(slot)]
+                        & width_mask(instruction.values[usize::from(output.0)].ty.bits)
+                }
+                FirOp::RegisterWrite { field, value } => {
+                    state.registers[index(field) as usize] = values[usize::from(value.0)]
+                }
+                FirOp::FlagWrite { slot, value } => {
+                    state.flags[usize::from(slot)] = values[usize::from(value.0)]
+                }
+                FirOp::IntAddWrap {
+                    output,
+                    left,
+                    right,
+                } => {
+                    values[usize::from(output.0)] = values[usize::from(left.0)]
+                        .wrapping_add(values[usize::from(right.0)])
+                        & width_mask(instruction.values[usize::from(output.0)].ty.bits)
+                }
+                FirOp::IntAddCarry {
+                    output,
+                    left,
+                    right,
+                } => {
+                    let bits = instruction.values[usize::from(left.0)].ty.bits;
+                    values[usize::from(output.0)] = ((u128::from(values[usize::from(left.0)])
+                        + u128::from(values[usize::from(right.0)]))
+                        >> bits) as u64;
+                }
+                FirOp::IntAddCarryIn {
+                    output,
+                    left,
+                    right,
+                    carry,
+                } => {
+                    let bits = instruction.values[usize::from(left.0)].ty.bits;
+                    let sum = u128::from(values[usize::from(left.0)])
+                        + u128::from(values[usize::from(right.0)])
+                        + u128::from(values[usize::from(carry.0)]);
+                    values[usize::from(output.0)] = (sum >> bits) as u64;
+                }
+                FirOp::IntAddWrapCarry {
+                    output,
+                    left,
+                    right,
+                    carry,
+                } => {
+                    let bits = instruction.values[usize::from(output.0)].ty.bits;
+                    let mask = width_mask(bits);
+                    let sum = u128::from(values[usize::from(left.0)])
+                        + u128::from(values[usize::from(right.0)])
+                        + u128::from(values[usize::from(carry.0)]);
+                    values[usize::from(output.0)] = (sum & u128::from(mask)) as u64;
+                }
+                _ => unreachable!("state contract checked before effects"),
             }
-            FirOp::FlagRead { output, slot } => {
-                values[usize::from(output.0)] = state.flags[usize::from(slot)]
-                    & width_mask(instruction.values[usize::from(output.0)].ty.bits)
-            }
-            FirOp::RegisterWrite { field, value } => {
-                state.registers[index(field) as usize] = values[usize::from(value.0)]
-            }
-            FirOp::FlagWrite { slot, value } => {
-                state.flags[usize::from(slot)] = values[usize::from(value.0)]
-            }
-            FirOp::IntAddWrap {
-                output,
-                left,
-                right,
-            } => {
-                values[usize::from(output.0)] = values[usize::from(left.0)]
-                    .wrapping_add(values[usize::from(right.0)])
-                    & width_mask(instruction.values[usize::from(output.0)].ty.bits)
-            }
-            FirOp::IntAddCarry {
-                output,
-                left,
-                right,
-            } => {
-                let bits = instruction.values[usize::from(left.0)].ty.bits;
-                values[usize::from(output.0)] = ((u128::from(values[usize::from(left.0)])
-                    + u128::from(values[usize::from(right.0)]))
-                    >> bits) as u64;
-            }
-            FirOp::IntAddCarryIn {
-                output,
-                left,
-                right,
-                carry,
-            } => {
-                let bits = instruction.values[usize::from(left.0)].ty.bits;
-                let sum = u128::from(values[usize::from(left.0)])
-                    + u128::from(values[usize::from(right.0)])
-                    + u128::from(values[usize::from(carry.0)]);
-                values[usize::from(output.0)] = (sum >> bits) as u64;
-            }
-            FirOp::IntAddWrapCarry {
-                output,
-                left,
-                right,
-                carry,
-            } => {
-                let bits = instruction.values[usize::from(output.0)].ty.bits;
-                let mask = width_mask(bits);
-                let sum = u128::from(values[usize::from(left.0)])
-                    + u128::from(values[usize::from(right.0)])
-                    + u128::from(values[usize::from(carry.0)]);
-                values[usize::from(output.0)] = (sum & u128::from(mask)) as u64;
-            }
-            _ => unreachable!("state contract checked before effects"),
+        }
+        match crate::control::advance(block, &blocks, &mut values) {
+            Some(next) => pc = next,
+            None => return Ok(ExecutionStatus::Success),
         }
     }
-    Ok(ExecutionStatus::Success)
 }
 
 /// C arrays (registers, flags and fields) must be disjoint valid storage for the
@@ -237,77 +265,171 @@ pub(crate) fn emit_state_instruction(
             writeln!(text, "    let _f{i} = fields[{i}] as usize;").unwrap();
         }
     }
-    let value = |id: crate::ValueId| format!("{}v{}", if c { "" } else { "_" }, id.0);
-    for op in &instruction.ops {
-        let definition = match *op {
-            FirOp::RegisterRead { output, field } => {
-                let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
-                let expression = if c {
-                    format!("registers[f{field}] & UINT64_C(0x{mask:x})")
-                } else {
-                    format!("registers[_f{field}] & 0x{mask:x}u64")
-                };
-                Some((output, expression))
-            }
-            FirOp::FlagRead { output, slot } => Some((
-                output,
+    let structured = crate::control::has_control(instruction);
+    let blocks = crate::control::blocks(instruction);
+    if structured {
+        let mutable_pc = blocks
+            .iter()
+            .any(|b| b.terminator != crate::FirTerminator::Return);
+        if c {
+            writeln!(
+                text,
+                "uint64_t v[{}] = {{0}}; (void)v;\nsize_t pc = 0;\nfor (;;) {{ switch (pc) {{",
+                instruction.values.len().max(1)
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                text,
+                "let mut v = [0u64; {}];\nlet {}pc = 0usize;\nloop {{ match pc {{",
+                instruction.values.len().max(1),
+                if mutable_pc { "mut " } else { "" }
+            )
+            .unwrap();
+        }
+    }
+    let value = |id: crate::ValueId| {
+        if structured {
+            format!("v[{}]", id.0)
+        } else {
+            format!("{}v{}", if c { "" } else { "_" }, id.0)
+        }
+    };
+    for (block_index, block) in blocks.iter().enumerate() {
+        if structured {
+            writeln!(
+                text,
+                "{} {{",
                 if c {
-                    format!("flags[{slot}] & UINT64_C(0x1)")
+                    format!("case {block_index}:")
                 } else {
-                    format!("flags[{slot}] & 0x1u64")
-                },
-            )),
-            FirOp::IntAddWrap {
-                output,
-                left,
-                right,
-            } => {
-                let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
-                Some((
+                    format!("{block_index} =>")
+                }
+            )
+            .unwrap();
+        }
+        for op in &instruction.ops[usize::from(block.start)..usize::from(block.end)] {
+            let definition = match *op {
+                FirOp::IntConvert {
+                    output,
+                    input,
+                    kind,
+                } => Some((
+                    output,
+                    crate::control::conversion_expression(
+                        instruction,
+                        output,
+                        input,
+                        kind,
+                        &value(input),
+                        c,
+                    ),
+                )),
+                FirOp::IntConstant { output, value } => Some((
+                    output,
+                    format!("0x{value:x}{}", if c { "ULL" } else { "u64" }),
+                )),
+                FirOp::IntCompare {
+                    output,
+                    left,
+                    right,
+                    predicate,
+                } => {
+                    let expression = match predicate {
+                        crate::IntPredicate::Equal => {
+                            format!("{} == {}", value(left), value(right))
+                        }
+                        crate::IntPredicate::UnsignedLess => {
+                            format!("{} < {}", value(left), value(right))
+                        }
+                        crate::IntPredicate::SignedLess => {
+                            let sign =
+                                1u64 << (instruction.values[usize::from(left.0)].ty.bits - 1);
+                            let suffix = if c { "ULL" } else { "u64" };
+                            format!(
+                                "({} ^ 0x{sign:x}{suffix}) < ({} ^ 0x{sign:x}{suffix})",
+                                value(left),
+                                value(right)
+                            )
+                        }
+                    };
+                    Some((
+                        output,
+                        if c {
+                            format!("({expression})")
+                        } else {
+                            format!("({expression}) as u64")
+                        },
+                    ))
+                }
+                FirOp::RegisterRead { output, field } => {
+                    let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
+                    let expression = if c {
+                        format!("registers[f{field}] & UINT64_C(0x{mask:x})")
+                    } else {
+                        format!("registers[_f{field}] & 0x{mask:x}u64")
+                    };
+                    Some((output, expression))
+                }
+                FirOp::FlagRead { output, slot } => Some((
                     output,
                     if c {
-                        format!(
-                            "({} + {}) & UINT64_C(0x{mask:x})",
-                            value(left),
-                            value(right)
-                        )
+                        format!("flags[{slot}] & UINT64_C(0x1)")
                     } else {
-                        format!(
-                            "{}.wrapping_add({}) & 0x{mask:x}u64",
-                            value(left),
-                            value(right)
-                        )
+                        format!("flags[{slot}] & 0x1u64")
                     },
-                ))
-            }
-            FirOp::IntAddCarry {
-                output,
-                left,
-                right,
-            } => {
-                let mask = width_mask(instruction.values[usize::from(left.0)].ty.bits);
-                Some((
+                )),
+                FirOp::IntAddWrap {
                     output,
-                    if c {
-                        format!("{} > UINT64_C(0x{mask:x}) - {}", value(left), value(right))
-                    } else {
+                    left,
+                    right,
+                } => {
+                    let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
+                    Some((
+                        output,
+                        if c {
+                            format!(
+                                "({} + {}) & UINT64_C(0x{mask:x})",
+                                value(left),
+                                value(right)
+                            )
+                        } else {
+                            format!(
+                                "{}.wrapping_add({}) & 0x{mask:x}u64",
+                                value(left),
+                                value(right)
+                            )
+                        },
+                    ))
+                }
+                FirOp::IntAddCarry {
+                    output,
+                    left,
+                    right,
+                } => {
+                    let mask = width_mask(instruction.values[usize::from(left.0)].ty.bits);
+                    Some((
+                        output,
+                        if c {
+                            format!("{} > UINT64_C(0x{mask:x}) - {}", value(left), value(right))
+                        } else {
+                            format!(
+                                "u64::from({} > 0x{mask:x}u64 - {})",
+                                value(left),
+                                value(right)
+                            )
+                        },
+                    ))
+                }
+                FirOp::IntAddCarryIn {
+                    output,
+                    left,
+                    right,
+                    carry,
+                } => {
+                    let mask = width_mask(instruction.values[usize::from(left.0)].ty.bits);
+                    let expression = if c {
                         format!(
-                            "u64::from({} > 0x{mask:x}u64 - {})",
-                            value(left),
-                            value(right)
-                        )
-                    },
-                ))
-            }
-            FirOp::IntAddCarryIn {
-                output,
-                left,
-                right,
-                carry,
-            } => {
-                let mask = width_mask(instruction.values[usize::from(left.0)].ty.bits);
-                let expression = if c {
-                    format!(
                         "({} > UINT64_C(0x{mask:x}) - {} || ({} != 0 && {} == UINT64_C(0x{mask:x}) - {}))",
                         value(left),
                         value(right),
@@ -315,8 +437,8 @@ pub(crate) fn emit_state_instruction(
                         value(left),
                         value(right)
                     )
-                } else {
-                    format!(
+                    } else {
+                        format!(
                         "u64::from({} > 0x{mask:x}u64 - {} || ({} != 0 && {} == 0x{mask:x}u64 - {}))",
                         value(left),
                         value(right),
@@ -324,67 +446,82 @@ pub(crate) fn emit_state_instruction(
                         value(left),
                         value(right)
                     )
-                };
-                Some((output, expression))
-            }
-            FirOp::IntAddWrapCarry {
-                output,
-                left,
-                right,
-                carry,
-            } => {
-                let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
-                Some((
+                    };
+                    Some((output, expression))
+                }
+                FirOp::IntAddWrapCarry {
                     output,
-                    if c {
-                        format!(
-                            "({} + {} + {}) & UINT64_C(0x{mask:x})",
-                            value(left),
-                            value(right),
-                            value(carry)
-                        )
-                    } else {
-                        format!(
-                            "{}.wrapping_add({}).wrapping_add({}) & 0x{mask:x}u64",
-                            value(left),
-                            value(right),
-                            value(carry)
-                        )
-                    },
-                ))
-            }
-            FirOp::RegisterWrite {
-                field,
-                value: input,
-            } => {
-                writeln!(
-                    text,
-                    "    registers[{}f{field}] = {};",
-                    if c { "" } else { "_" },
-                    value(input)
-                )
-                .unwrap();
-                None
-            }
-            FirOp::FlagWrite { slot, value: input } => {
-                writeln!(text, "    flags[{slot}] = {};", value(input)).unwrap();
-                None
-            }
-            _ => unreachable!("state contract checked"),
-        };
-        if let Some((output, expression)) = definition {
-            if c {
-                writeln!(
-                    text,
-                    "    uint64_t {} = {expression}; (void){};",
-                    value(output),
-                    value(output)
-                )
-                .unwrap();
-            } else {
-                writeln!(text, "    let {} = {expression};", value(output)).unwrap();
+                    left,
+                    right,
+                    carry,
+                } => {
+                    let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
+                    Some((
+                        output,
+                        if c {
+                            format!(
+                                "({} + {} + {}) & UINT64_C(0x{mask:x})",
+                                value(left),
+                                value(right),
+                                value(carry)
+                            )
+                        } else {
+                            format!(
+                                "{}.wrapping_add({}).wrapping_add({}) & 0x{mask:x}u64",
+                                value(left),
+                                value(right),
+                                value(carry)
+                            )
+                        },
+                    ))
+                }
+                FirOp::RegisterWrite {
+                    field,
+                    value: input,
+                } => {
+                    writeln!(
+                        text,
+                        "    registers[{}f{field}] = {};",
+                        if c { "" } else { "_" },
+                        value(input)
+                    )
+                    .unwrap();
+                    None
+                }
+                FirOp::FlagWrite { slot, value: input } => {
+                    writeln!(text, "    flags[{slot}] = {};", value(input)).unwrap();
+                    None
+                }
+                _ => unreachable!("state contract checked"),
+            };
+            if let Some((output, expression)) = definition {
+                if structured {
+                    writeln!(text, "{} = {expression};", value(output)).unwrap();
+                } else if c {
+                    writeln!(
+                        text,
+                        "    uint64_t {} = {expression}; (void){};",
+                        value(output),
+                        value(output)
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(text, "    let {} = {expression};", value(output)).unwrap();
+                }
             }
         }
+        if structured {
+            crate::control::emit_terminator(&mut text, block, &blocks, c, "return 0;\n");
+            text.push_str("}\n");
+        }
+    }
+    if structured {
+        text.push_str(if c {
+            "default: return 3;\n} }\n}\n"
+        } else {
+            "_ => return 3,\n} }\n}\n"
+        });
+        return Ok(text);
     }
     text.push_str(if c {
         "    return 0;\n}\n"

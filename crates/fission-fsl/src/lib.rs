@@ -27,7 +27,8 @@ pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
 pub use output::{emit_instruction, OutputLayer};
 pub use package::{
     AddressUnit, ByteOrder, CompiledInstruction, Evidence, FirBlock, FirEdge, FirOp, FirTerminator,
-    FslcPackage, IntPredicate, IntegerSign, ValueDef, ValueId, ValueType, FSL_PACKAGE_VERSION,
+    FslcPackage, IntConversion, IntPredicate, IntegerSign, ValueDef, ValueId, ValueType,
+    FSL_PACKAGE_VERSION,
 };
 pub use semantics::{execute_instruction, ExecutionStatus, StackContract};
 
@@ -158,6 +159,22 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
                         ),
                     };
                     pending.push(item);
+                }
+                parser::Statement::Convert {
+                    name,
+                    ty,
+                    input,
+                    kind,
+                    line,
+                    column,
+                } => {
+                    let input = require_value(&values, &value_ids, &input, line, column)?;
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::IntConvert {
+                        output,
+                        input,
+                        kind,
+                    });
                 }
                 parser::Statement::Constant {
                     name,
@@ -440,6 +457,12 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
 
     let package = FslcPackage {
         version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(|op| matches!(op, FirOp::IntConvert { .. }))
+        {
+            7
+        } else if instructions
             .iter()
             .any(|i| !i.blocks.is_empty() || i.ops.iter().any(FirOp::requires_control_version))
         {

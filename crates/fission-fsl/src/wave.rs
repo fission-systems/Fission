@@ -43,6 +43,12 @@ pub(crate) fn validate_domains(
     for op in &instruction.ops {
         let at = |id: ValueId| domains[usize::from(id.0)];
         let result = match *op {
+            FirOp::IntConvert { output, input, .. } => {
+                if at(input) != ValueDomain::Uniform {
+                    return Err(error());
+                }
+                Some((output, ValueDomain::Uniform))
+            }
             FirOp::IntConstant { output, .. } => Some((output, ValueDomain::Uniform)),
             FirOp::IntCompare {
                 output,

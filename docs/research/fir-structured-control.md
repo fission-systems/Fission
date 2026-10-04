@@ -61,10 +61,11 @@ C/Rust directly traverse the same block graph and preserve edge argument order.
 They use the existing bit-vector stack/status ABI. Source outputs do not recover
 or claim original high-level if/loop syntax. Cyclic CFGs and unequal-delta joins
 can be represented/serialized/diagnosed, but execution and C/Rust output refuse.
-Native lift records, JIT/AOT decoder generation, register/wave executors and
-CUDA/PTX outputs refuse control bodies instead of executing their op tables
-linearly. Register/lane control, memory, traps, calls and region effects require
-further contracts and execution support.
+Native lift records, JIT/AOT decoder generation, wave executors and CUDA/PTX
+outputs refuse control bodies instead of executing their op tables linearly.
+The subsequent [conversion/register CFG slice](fir-integer-conversion-register-cfg.md)
+adds scalar register/flag control execution in the same FIR. Lane control,
+memory, traps, calls and region effects require further contracts and support.
 
 ## Portable package v6
 

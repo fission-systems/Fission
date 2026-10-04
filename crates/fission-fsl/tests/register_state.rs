@@ -300,10 +300,62 @@ fn carry_input_matches_oracle_and_recompilation_across_widths() {
     }
 }
 
+#[test]
+fn structured_register_carry_preserves_effects_across_branch_and_join() {
+    // Construct a semantic-body graph with the same widened-sum contract.
+    // This is backend regression evidence, not lifting a GPU binary CFG.
+    let semantics = r#"
+        semantics {
+            block entry() {
+                %lhs: u32 = register.read source0;
+                %rhs: u32 = register.read source1;
+                %cin: u1 = flag.read 0;
+                branch.if %cin, with_carry(%lhs, %rhs, %cin), without_carry(%rhs, %lhs, %cin);
+            }
+            block with_carry(%a: u32, %b: u32, %c: u1) {
+                %sum: u32 = u32.add.carry %a, %b, %c;
+                %carry: u1 = int.add.carry.in %a, %b, %c;
+                branch join(%sum, %carry);
+            }
+            block without_carry(%x: u32, %y: u32, %z: u1) {
+                %wrapped: u32 = u32.add.wrap %x, %y;
+                %plain_carry: u1 = int.add.carry %x, %y;
+                branch join(%wrapped, %plain_carry);
+            }
+            block join(%result: u32, %out_carry: u1) {
+                register.write destination, %result;
+                flag.write 0, %out_carry;
+                return;
+            }
+        }
+    }
+"#;
+    let prefix = CARRY_SOURCE.split("        semantics {").next().unwrap();
+    let source = format!("{prefix}{semantics}\n}}");
+    for bits in [32, 64] {
+        verify_projection(
+            &source.replace("u32", &format!("u{bits}")),
+            &CARRY_PROFILE.replace("u32", &format!("u{bits}")),
+            0x82,
+            bits,
+            true,
+        );
+    }
+}
+
 fn verify_projection(source: &str, profile: &str, high: u8, bits: u16, carry_input: bool) {
     let directory = temporary();
     let compiled = compile_source(source).unwrap();
-    assert_eq!(compiled.version, if carry_input { 4 } else { 3 });
+    assert_eq!(
+        compiled.version,
+        if source.contains("block entry") {
+            6
+        } else if carry_input {
+            4
+        } else {
+            3
+        }
+    );
     let package = FslcPackage::decode_binary(&compiled.encode_binary().unwrap()).unwrap();
     let instruction = &package.instructions[0];
     let original = instruction.clone();

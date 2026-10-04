@@ -345,7 +345,7 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         ..NativeFirOp::default()
     };
     Ok(match op {
-        FirOp::IntConstant { .. } | FirOp::IntCompare { .. } => {
+        FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
             return Err(FslError::at(
                 1,
                 1,

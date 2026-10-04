@@ -11,11 +11,18 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 
 ## Current slice
 
+- `.fslc` v7 adds strict `int.zext`/`int.sext`/`int.trunc` at widths 1..64.
+  Acyclic register/flag CFGs preserve selected-path writes and read-after-write
+  at joins in reference/C/Rust. Earlier package layouts and fixture hashes
+  remain unchanged. This is logical-slot state, not binary function lifting,
+  GPU CFG or memory support. See the
+  [conversion/state contract](../../docs/research/fir-integer-conversion-register-cfg.md).
+
 - `.fslc` v6 preserves typed block parameters, explicit branch/conditional branch
   and return terminators. `int.const` and `int.eq`/`int.ult`/`int.slt` are shared
   FIR operations. Reference/C/Rust execute acyclic integer/stack control bodies
   with equal stack deltas at joins/returns. Cycles are representable but this
-  backend refuses them. Other backends refuse control bodies. See the
+  backend refuses them. Wave, native-lift and GPU output backends refuse control bodies. See the
   [structured control contract](../../docs/research/fir-structured-control.md).
 
 - Owned `.fsldb` v1 prototype-candidate catalog reader and exact symbol query,

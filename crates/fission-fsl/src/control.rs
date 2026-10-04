@@ -139,7 +139,8 @@ pub(crate) fn stack_contract(instruction: &CompiledInstruction) -> Result<StackC
         || instruction.ops.iter().any(|op| {
             !matches!(
                 op,
-                FirOp::IntConstant { .. }
+                FirOp::IntConvert { .. }
+                    | FirOp::IntConstant { .. }
                     | FirOp::IntCompare { .. }
                     | FirOp::IntAddWrap { .. }
                     | FirOp::VmStackPop { .. }
@@ -212,6 +213,107 @@ pub(crate) fn stack_contract(instruction: &CompiledInstruction) -> Result<StackC
     })
 }
 
+/// Scalar conversion on unsigned storage: no signed host shifts or overflow.
+pub(crate) fn convert(value: u64, source: u16, target: u16, kind: crate::IntConversion) -> u64 {
+    let extension =
+        if kind == crate::IntConversion::SignExtend && value & (1u64 << (source - 1)) != 0 {
+            !width_mask(source)
+        } else {
+            0
+        };
+    (value | extension) & width_mask(target)
+}
+
+pub(crate) fn conversion_expression(
+    instruction: &CompiledInstruction,
+    output: ValueId,
+    input: ValueId,
+    kind: crate::IntConversion,
+    expression: &str,
+    c: bool,
+) -> String {
+    let source = instruction.values[usize::from(input.0)].ty.bits;
+    let target = instruction.values[usize::from(output.0)].ty.bits;
+    let suffix = if c { "ULL" } else { "u64" };
+    let mask = width_mask(target);
+    if kind == crate::IntConversion::SignExtend {
+        // x ^ sign followed by wrapping subtraction sign extends a bit vector.
+        let sign = 1u64 << (source - 1);
+        if c {
+            format!("((({expression}) ^ 0x{sign:x}ULL) - 0x{sign:x}ULL) & 0x{mask:x}ULL")
+        } else {
+            format!("(({expression}) ^ 0x{sign:x}u64).wrapping_sub(0x{sign:x}u64) & 0x{mask:x}u64")
+        }
+    } else {
+        format!("({expression}) & 0x{mask:x}{suffix}")
+    }
+}
+
+pub(crate) fn validate_acyclic(instruction: &CompiledInstruction) -> Result<(), FslError> {
+    let blocks = blocks(instruction);
+    let mut indegree = vec![0usize; blocks.len()];
+    for block in &blocks {
+        for edge in edges(&block.terminator) {
+            indegree[usize::from(edge.target)] += 1;
+        }
+    }
+    let mut queue: VecDeque<_> = indegree
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &n)| (n == 0).then_some(i))
+        .collect();
+    let mut count = 0;
+    while let Some(i) = queue.pop_front() {
+        count += 1;
+        for edge in edges(&blocks[i].terminator) {
+            let target = usize::from(edge.target);
+            indegree[target] -= 1;
+            if indegree[target] == 0 {
+                queue.push_back(target);
+            }
+        }
+    }
+    if count != blocks.len() {
+        return Err(error(
+            "cyclic FIR is unsupported by the acyclic execution backend",
+        ));
+    }
+    Ok(())
+}
+
+/// Apply an edge with simultaneous argument transfer; state effects stay ordered
+/// in the caller's single runtime context.
+pub(crate) fn advance(block: &FirBlock, blocks: &[FirBlock], values: &mut [u64]) -> Option<usize> {
+    let edge = match &block.terminator {
+        FirTerminator::Return => return None,
+        FirTerminator::Branch(edge) => edge,
+        FirTerminator::CondBranch {
+            condition,
+            on_true,
+            on_false,
+        } => {
+            if values[usize::from(condition.0)] != 0 {
+                on_true
+            } else {
+                on_false
+            }
+        }
+    };
+    let arguments: Vec<_> = edge
+        .arguments
+        .iter()
+        .map(|id| values[usize::from(id.0)])
+        .collect();
+    for (&param, value) in blocks[usize::from(edge.target)]
+        .parameters
+        .iter()
+        .zip(arguments)
+    {
+        values[usize::from(param.0)] = value;
+    }
+    Some(usize::from(edge.target))
+}
+
 pub(crate) fn compare(a: u64, b: u64, bits: u16, predicate: IntPredicate) -> u64 {
     u64::from(match predicate {
         IntPredicate::Equal => a == b,
@@ -242,6 +344,18 @@ pub(crate) fn execute(
         let block = &blocks[pc];
         for op in &instruction.ops[usize::from(block.start)..usize::from(block.end)] {
             match *op {
+                FirOp::IntConvert {
+                    output,
+                    input,
+                    kind,
+                } => {
+                    values[usize::from(output.0)] = convert(
+                        values[usize::from(input.0)],
+                        instruction.values[usize::from(input.0)].ty.bits,
+                        instruction.values[usize::from(output.0)].ty.bits,
+                        kind,
+                    );
+                }
                 FirOp::IntConstant { output, value } => values[usize::from(output.0)] = value,
                 FirOp::IntCompare {
                     output,
@@ -274,35 +388,10 @@ pub(crate) fn execute(
                 _ => unreachable!("unsupported control execution refused"),
             }
         }
-        let edge = match &block.terminator {
-            FirTerminator::Return => return Ok(ExecutionStatus::Success),
-            FirTerminator::Branch(edge) => edge,
-            FirTerminator::CondBranch {
-                condition,
-                on_true,
-                on_false,
-            } => {
-                if values[usize::from(condition.0)] != 0 {
-                    on_true
-                } else {
-                    on_false
-                }
-            }
-        };
-        // Evaluate all arguments before overwriting any target parameter.
-        let arguments: Vec<_> = edge
-            .arguments
-            .iter()
-            .map(|id| values[usize::from(id.0)])
-            .collect();
-        for (&param, value) in blocks[usize::from(edge.target)]
-            .parameters
-            .iter()
-            .zip(arguments)
-        {
-            values[usize::from(param.0)] = value;
+        match advance(block, &blocks, &mut values) {
+            Some(next) => pc = next,
+            None => return Ok(ExecutionStatus::Success),
         }
-        pc = usize::from(edge.target);
     }
 }
 
@@ -335,6 +424,9 @@ pub(crate) fn emit(
         return Err(error(
             "structured/constant/comparison FIR is unsupported by this output backend",
         ));
+    }
+    if instruction.ops.iter().any(FirOp::requires_state_version) {
+        return crate::state::emit_state_instruction(instruction, layer, symbol);
     }
     let contract = StackContract::for_instruction(instruction)?;
     let c = layer == OutputLayer::C;
@@ -400,6 +492,21 @@ pub(crate) fn emit(
         .unwrap();
         for op in &instruction.ops[usize::from(block.start)..usize::from(block.end)] {
             let expression = match *op {
+                FirOp::IntConvert {
+                    output,
+                    input,
+                    kind,
+                } => Some((
+                    output,
+                    conversion_expression(
+                        instruction,
+                        output,
+                        input,
+                        kind,
+                        &format!("v[{}]", input.0),
+                        c,
+                    ),
+                )),
                 FirOp::IntConstant { output, value } => Some((
                     output,
                     format!("0x{value:x}{}", if c { "ULL" } else { "u64" }),
@@ -467,33 +574,7 @@ pub(crate) fn emit(
                 writeln!(text, "v[{}] = {expression};", id.0).unwrap();
             }
         }
-        match &block.terminator {
-            FirTerminator::Return => text.push_str("*depth = sp;\nreturn 0;\n"),
-            FirTerminator::Branch(edge) => emit_edge(&mut text, edge, &blocks, c),
-            FirTerminator::CondBranch {
-                condition,
-                on_true,
-                on_false,
-            } => {
-                writeln!(
-                    text,
-                    "{} {{",
-                    if c {
-                        format!("if (v[{}] != 0)", condition.0)
-                    } else {
-                        format!("if v[{}] != 0", condition.0)
-                    }
-                )
-                .unwrap();
-                emit_edge(&mut text, on_true, &blocks, c);
-                text.push_str("} else {\n");
-                emit_edge(&mut text, on_false, &blocks, c);
-                text.push_str("}\n");
-            }
-        }
-        if c && block.terminator != FirTerminator::Return {
-            text.push_str("break;\n");
-        }
+        emit_terminator(&mut text, block, &blocks, c, "*depth = sp;\nreturn 0;\n");
         text.push_str("}\n");
     }
     text.push_str(if c {
@@ -502,6 +583,42 @@ pub(crate) fn emit(
         "_ => return 3,\n} }\n}\n"
     });
     Ok(text)
+}
+
+pub(crate) fn emit_terminator(
+    text: &mut String,
+    block: &FirBlock,
+    blocks: &[FirBlock],
+    c: bool,
+    on_return: &str,
+) {
+    match &block.terminator {
+        FirTerminator::Return => text.push_str(on_return),
+        FirTerminator::Branch(edge) => emit_edge(text, edge, blocks, c),
+        FirTerminator::CondBranch {
+            condition,
+            on_true,
+            on_false,
+        } => {
+            writeln!(
+                text,
+                "{} {{",
+                if c {
+                    format!("if (v[{}] != 0)", condition.0)
+                } else {
+                    format!("if v[{}] != 0", condition.0)
+                }
+            )
+            .unwrap();
+            emit_edge(text, on_true, blocks, c);
+            text.push_str("} else {\n");
+            emit_edge(text, on_false, blocks, c);
+            text.push_str("}\n");
+        }
+    }
+    if c && block.terminator != FirTerminator::Return {
+        text.push_str("break;\n");
+    }
 }
 
 fn emit_edge(text: &mut String, edge: &FirEdge, blocks: &[FirBlock], c: bool) {

@@ -26,6 +26,14 @@ pub(super) enum Statement {
         parameters: Vec<(String, ValueType)>,
     },
     BlockEnd(ParsedTerminator),
+    Convert {
+        name: String,
+        ty: ValueType,
+        input: String,
+        kind: crate::IntConversion,
+        line: usize,
+        column: usize,
+    },
     Constant {
         name: String,
         ty: ValueType,
@@ -964,7 +972,23 @@ impl Parser {
             })?;
             self.expect_symbol('=')?;
             let operation = self.expect_name()?;
-            let statement = if operation == "int.const" {
+            let statement = if matches!(operation.as_str(), "int.zext" | "int.sext" | "int.trunc") {
+                self.expect_symbol('%')?;
+                let input = self.expect_name()?;
+                let kind = match operation.as_str() {
+                    "int.zext" => crate::IntConversion::ZeroExtend,
+                    "int.sext" => crate::IntConversion::SignExtend,
+                    _ => crate::IntConversion::Truncate,
+                };
+                Statement::Convert {
+                    name,
+                    ty,
+                    input,
+                    kind,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if operation == "int.const" {
                 let value = self.expect_integer()?;
                 Statement::Constant {
                     name,

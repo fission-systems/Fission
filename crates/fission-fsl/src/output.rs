@@ -49,7 +49,7 @@ pub fn emit_instruction(
         );
         for op in &instruction.ops {
             match *op {
-                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } => {
+                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
                     unreachable!("control output handled separately")
                 }
                 FirOp::LaneMaskRead { output, lanes } => {
@@ -255,7 +255,10 @@ pub fn emit_instruction(
     });
     for op in &instruction.ops {
         match (*op, layer) {
-            (FirOp::IntConstant { .. } | FirOp::IntCompare { .. }, _) => {
+            (
+                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. },
+                _,
+            ) => {
                 unreachable!("control output handled separately")
             }
             (FirOp::VmStackPop { output }, OutputLayer::C) => {

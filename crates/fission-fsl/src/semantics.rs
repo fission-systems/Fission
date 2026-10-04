@@ -71,6 +71,36 @@ impl CompiledInstruction {
             }
             for op in &self.ops[usize::from(block.start)..usize::from(block.end)] {
                 let output = match *op {
+                    FirOp::IntConvert {
+                        output,
+                        input,
+                        kind,
+                    } => {
+                        read(input, &defined)?;
+                        let source = self.values[usize::from(input.0)].ty;
+                        let target = self
+                            .values
+                            .get(usize::from(output.0))
+                            .map(|v| v.ty)
+                            .ok_or_else(|| FslError::at(1, 1, "conversion output out of range"))?;
+                        let valid = source.bits <= 64
+                            && target.bits <= 64
+                            && source.sign == target.sign
+                            && match kind {
+                                crate::IntConversion::ZeroExtend => {
+                                    source.bits < target.bits
+                                        && source.sign == IntegerSign::Unsigned
+                                }
+                                crate::IntConversion::SignExtend => {
+                                    source.bits < target.bits && source.sign == IntegerSign::Signed
+                                }
+                                crate::IntConversion::Truncate => source.bits > target.bits,
+                            };
+                        if !valid {
+                            return Err(FslError::at(1, 1, "conversion requires strict 1..64 bit width change and matching signedness (zext unsigned, sext signed)"));
+                        }
+                        Some(output)
+                    }
                     FirOp::IntConstant { output, value } => {
                         let ty = self
                             .values
@@ -356,7 +386,7 @@ impl StackContract {
                 FirOp::VmStackPop { .. } => delta -= 1,
                 FirOp::VmStackPush { .. } => delta += 1,
                 FirOp::IntAddWrap { .. } => {}
-                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } => {
+                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
                     unreachable!("control execution handled separately")
                 }
                 FirOp::RegisterRead { .. }
@@ -417,7 +447,7 @@ pub fn execute_instruction(
     let mut values = vec![0u64; instruction.values.len()];
     for op in &instruction.ops {
         match *op {
-            FirOp::IntConstant { .. } | FirOp::IntCompare { .. } => {
+            FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
                 unreachable!("control execution handled separately")
             }
             FirOp::RegisterRead { .. }

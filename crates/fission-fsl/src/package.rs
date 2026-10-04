@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 6;
+pub const FSL_PACKAGE_VERSION: u16 = 7;
 const STATE_PACKAGE_VERSION: u16 = 3;
 const CARRY_IN_PACKAGE_VERSION: u16 = 4;
 const MAGIC: &[u8; 8] = b"FSLCPKG\0";
@@ -103,7 +103,19 @@ pub struct FirBlock {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntConversion {
+    ZeroExtend,
+    SignExtend,
+    Truncate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirOp {
+    IntConvert {
+        output: ValueId,
+        input: ValueId,
+        kind: IntConversion,
+    },
     IntConstant {
         output: ValueId,
         value: u64,
@@ -182,7 +194,10 @@ pub enum FirOp {
 
 impl FirOp {
     pub(crate) fn requires_control_version(&self) -> bool {
-        matches!(self, Self::IntConstant { .. } | Self::IntCompare { .. })
+        matches!(
+            self,
+            Self::IntConstant { .. } | Self::IntCompare { .. } | Self::IntConvert { .. }
+        )
     }
     pub(crate) fn requires_lane_version(&self) -> bool {
         matches!(
@@ -278,6 +293,18 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 7
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, FirOp::IntConvert { .. }))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "integer conversion requires package version 7",
+                ));
+            }
             if self.version < 6
                 && (!instruction.blocks.is_empty()
                     || instruction.ops.iter().any(FirOp::requires_control_version))
@@ -423,6 +450,20 @@ impl FslcPackage {
             writer.u16(count_u16(instruction.ops.len(), "FIR operations")?);
             for op in &instruction.ops {
                 match op {
+                    FirOp::IntConvert {
+                        output,
+                        input,
+                        kind,
+                    } => {
+                        writer.u8(16);
+                        writer.u16(output.0);
+                        writer.u16(input.0);
+                        writer.u8(match kind {
+                            IntConversion::ZeroExtend => 0,
+                            IntConversion::SignExtend => 1,
+                            IntConversion::Truncate => 2,
+                        });
+                    }
                     FirOp::IntConstant { output, value } => {
                         writer.u8(14);
                         writer.u16(output.0);
@@ -717,6 +758,16 @@ impl FslcPackage {
             let mut ops = Vec::with_capacity(op_count);
             for _ in 0..op_count {
                 let op = match reader.u8()? {
+                    16 if version >= 7 => FirOp::IntConvert {
+                        output: reader.value_id(value_count)?,
+                        input: reader.value_id(value_count)?,
+                        kind: match reader.u8()? {
+                            0 => IntConversion::ZeroExtend,
+                            1 => IntConversion::SignExtend,
+                            2 => IntConversion::Truncate,
+                            _ => return Err(FslError::at(1, 1, "unknown FIR conversion kind")),
+                        },
+                    },
                     14 if version >= 6 => FirOp::IntConstant {
                         output: reader.value_id(value_count)?,
                         value: reader.u64()?,
