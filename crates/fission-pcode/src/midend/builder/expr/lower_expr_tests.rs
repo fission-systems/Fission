@@ -3274,3 +3274,44 @@ fn comparison_storage_view_survives_future_carrier_widening() {
         input
     );
 }
+
+#[test]
+fn narrow_subtraction_reads_integer_view_of_full_register_carrier() {
+    for width in [1, 4] {
+        let input = register(0x98, width);
+        let mut output = varnode(0x600);
+        output.size = width;
+        let subtraction = op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(output),
+            vec![input.clone(), constant_sized(1, width)],
+        );
+        let pcode = pcode_function(vec![block_at(0x1000, 0, vec![subtraction.clone()])]);
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        let name = builder
+            .sla_hw_name(input.offset, options.pointer_size)
+            .expect("hardware carrier");
+        builder.temps.insert(
+            name.clone(),
+            PreHirBinding {
+                name,
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        );
+        let expr = builder
+            .lower_binary_op(&subtraction, &mut HashSet::default())
+            .expect("integer subtraction");
+        let PreHirExpr::Binary { lhs, .. } = expr else {
+            panic!("binary expected")
+        };
+        assert!(
+            matches!(lhs.as_ref(), PreHirExpr::Cast { ty: NirType::Int { bits, signed: false }, .. } if *bits==width*8),
+            "subtraction must consume the narrow integer storage: {lhs:?}"
+        );
+    }
+}
