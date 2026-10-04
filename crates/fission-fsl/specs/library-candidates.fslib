@@ -1,0 +1,30 @@
+schema = 1
+kind = "prototype-candidates"
+type_resolution = "unresolved"
+
+[source]
+path = "self-authored-fixture"
+sha256 = "2371a3be022fae22584a7e81aa1ca74ce957ed368f58b350580ec648d0c2a584"
+commit = "0000000000000000000000000000000000000000"
+grammar = "pipe-signatures-v1"
+
+[[candidates]]
+symbol = "alpha"
+return_spelling = "int"
+parameter_form = "declared-empty"
+variadic = "unknown"
+parameters = []
+
+[[candidates]]
+symbol = "beta"
+return_spelling = "T*"
+parameter_form = "listed"
+variadic = "unknown"
+parameters = [{ name = "p", type_spelling = "T*" }]
+
+[[candidates]]
+symbol = "gamma"
+return_spelling = "int"
+parameter_form = "listed"
+variadic = "explicit"
+parameters = [{ name = "format", type_spelling = "char*" }]

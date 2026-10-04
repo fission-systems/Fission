@@ -1,0 +1,73 @@
+{
+  "architecture": {
+    "endianness": "big",
+    "family": "Java Virtual Machine bytecode",
+    "instruction_word_bits": 8,
+    "processor": "Java SE 26",
+    "scope": "Single one-byte iadd opcode from JVMS Java SE 26; no class-file framing or method decoding.",
+    "target": "jvm-classfile-se26",
+    "vendor": "Oracle / Java Platform"
+  },
+  "compiled_from": {
+    "format": "fission_fsl_experimental",
+    "language_version": "0.0.1",
+    "path": "specs/vm/jvm-se26-iadd.fsl",
+    "sha256": "2d6727abcc5fd7eeb084ca9838aab53bc7dfce487aa582464472d4c26dc91c63"
+  },
+  "compiler": {
+    "name": "fslc_probe",
+    "version": "0.0.1"
+  },
+  "format": "fission_research_isa_pattern_db",
+  "patterns": [
+    {
+      "decode": {
+        "render": "{mnemonic}"
+      },
+      "fields": {},
+      "fir_effect": {
+        "domain": "vm_operand_stack",
+        "input_type": "int32",
+        "operation": "arith.add",
+        "output_type": "int32",
+        "overflow": "wrap_low_32_bits",
+        "pops": [
+          "int32",
+          "int32"
+        ],
+        "pushes": [
+          "int32"
+        ],
+        "runtime_exception": "none"
+      },
+      "match": {
+        "mask": "0xff",
+        "value": "0x60"
+      },
+      "mnemonic": "iadd",
+      "pattern_id": "jvm.se26.iadd",
+      "provenance": [
+        {
+          "claim": "iadd opcode is 0x60; it pops two int values and pushes their sum's low 32 bits, with no runtime exception for this instruction",
+          "source_id": "oracle-jvms-26"
+        }
+      ]
+    }
+  ],
+  "profile_id": "jvm.se26.iadd.first-slice",
+  "register_classes": {},
+  "schema_version": 1,
+  "selector_tables": {},
+  "sources": [
+    {
+      "kind": "primary_specification",
+      "revision": "Java SE 26, JVMS Chapter 6, iadd entry",
+      "source_id": "oracle-jvms-26",
+      "url": "https://docs.oracle.com/javase/specs/jvms/se26/html/jvms-6.html"
+    }
+  ],
+  "unsupported_behavior": [
+    "Only fixed-width 8-bit opcode words are decoded; JVM instructions with operand bytes and variable-length forms are outside this slice.",
+    "The effect is a spec-derived FIR candidate, not a verifier, class-file parser, or executable JVM semantics model."
+  ]
+}

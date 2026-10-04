@@ -1,0 +1,20 @@
+language jvm.se26 {
+    byte_order big;
+    address_unit byte;
+
+    instruction iadd {
+        opcode 0x60;
+        mnemonic "iadd";
+        evidence "oracle-jvms-26"
+            "https://docs.oracle.com/javase/specs/jvms/se26/html/jvms-6.html"
+            "Java SE 26, JVMS Chapter 6, iadd entry"
+            "Opcode 0x60 pops two int values and pushes their sum modulo 2^32.";
+
+        semantics {
+            %rhs: i32 = stack.pop;
+            %lhs: i32 = stack.pop;
+            %sum: i32 = i32.add.wrap %lhs, %rhs;
+            stack.push %sum;
+        }
+    }
+}

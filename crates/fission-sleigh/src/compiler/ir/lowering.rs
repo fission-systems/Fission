@@ -37,7 +37,7 @@ pub fn compile_frontend(
     // Infer default context from .pspec if available
     let default_context_override =
         infer_default_context_from_pspec(entry_spec, processor_spec, &collector.field_info)?;
-    collector.default_context = default_context_override.context_bits();
+    collector.default_context = default_context_override.context_bits_wide();
     if std::env::var_os("FISSION_TRACE_CONTEXT_DEFAULT").is_some() {
         eprintln!(
             "Inferred Default Context for {}: 0x{:016x}",
@@ -68,7 +68,7 @@ pub fn compile_frontend(
     Ok(CompiledFrontend {
         arch: arch.to_string(),
         default_context: collector.default_context,
-        default_context_known_mask: default_context_override.mask_bits(),
+        default_context_known_mask: default_context_override.mask_bits_wide(),
         entry_spec: expanded
             .entry_spec
             .file_name()
@@ -122,8 +122,8 @@ fn infer_default_context_from_pspec(
 
     let content = fs::read_to_string(&pspec_path)
         .with_context(|| format!("read pspec {}", pspec_path.display()))?;
-    let mut default_context = 0u64;
-    let mut default_context_known_mask = 0u64;
+    let mut default_context = 0u128;
+    let mut default_context_known_mask = 0u128;
 
     for line in content.lines() {
         let line = line.trim();
@@ -169,7 +169,7 @@ fn infer_default_context_from_pspec(
             }
         }
     }
-    Ok(PackedContextOverride::new(
+    Ok(PackedContextOverride::new_wide(
         default_context,
         default_context_known_mask,
     ))
@@ -455,7 +455,7 @@ pub(super) struct Collector {
     pub(super) subtable_executables: BTreeMap<String, Vec<CompiledExecutableConstructor>>,
     pub(super) pcode_ops: BTreeSet<String>,
     pub(super) pcode_op_sources: BTreeMap<String, String>,
-    pub(super) default_context: u64,
+    pub(super) default_context: u128,
     pub(super) pattern_nodes: Vec<CompiledPatternNode>,
     pub(super) field_info: BTreeMap<String, FieldBitRange>,
 }

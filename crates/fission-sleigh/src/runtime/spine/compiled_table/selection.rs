@@ -223,15 +223,17 @@ fn shifted_instruction_constraint_byte(byte: u8, index: usize) -> Result<u64> {
         .ok_or_else(|| anyhow!("instruction constraint byte shift {shift} exceeds u64 width"))
 }
 
-fn shifted_context_constraint_value(context_register: u64, offset: u32) -> Result<u64> {
-    context_register
+fn shifted_context_constraint_value(context_register: u128, offset: u32) -> Result<u64> {
+    let shifted = context_register
         .checked_shr(offset)
-        .ok_or_else(|| anyhow!("context constraint shift {offset} exceeds u64 width"))
+        .ok_or_else(|| anyhow!("context constraint shift {offset} exceeds u128 width"))?;
+    let low_word = shifted & u128::from(u64::MAX);
+    u64::try_from(low_word).map_err(|_| anyhow!("context constraint value exceeds u64 width"))
 }
 
 pub(super) fn possible_context_probe_values(
-    context_register: u64,
-    context_known_mask: u64,
+    context_register: u128,
+    context_known_mask: u128,
     start_bit: u32,
     bit_size: u32,
 ) -> Result<Vec<u64>> {
@@ -440,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn bit_constraint_shifts_fail_closed_above_u64_width() {
+    fn bit_constraint_shifts_fail_closed_above_u128_width() {
         assert_eq!(
             shifted_instruction_constraint_byte(0x12, 7).unwrap(),
             0x1200_0000_0000_0000
@@ -451,6 +453,14 @@ mod tests {
             shifted_context_constraint_value(0x8000_0000_0000_0000, 63).unwrap(),
             1
         );
-        assert!(shifted_context_constraint_value(1, 64).is_err());
+        assert_eq!(
+            shifted_context_constraint_value(1u128 << 64, 64).unwrap(),
+            1
+        );
+        assert_eq!(
+            shifted_context_constraint_value(1u128 << 127, 127).unwrap(),
+            1
+        );
+        assert!(shifted_context_constraint_value(1, 128).is_err());
     }
 }

@@ -1,0 +1,43 @@
+# VOP2 e32 only. No inline constants, special registers, literals, SDWA or DPP.
+language amdgcn.gfx900.vadd_u32.wave64 {
+    byte_order little;
+    address_unit byte;
+    instruction vadd_vgpr {
+        encoding 32 mask 0xfe000100 value 0x68000100 {
+            field source0 offset 0 bits 9;
+            field source1 offset 9 bits 8;
+            field destination offset 17 bits 8;
+        }
+        mnemonic "v_add_u32_e32";
+        evidence "amd-vega-vadd-exec"
+            "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-shader-instruction-set-architecture.pdf"
+            "Vega ISA 70656, 2020-01-27; VOP2 opcode 52 and EXEC model"
+            "Wave64 active lanes write modulo-2^32 sum. VGPR selectors 256..511 in SRC0; no carry flag effect. Other instruction formats and source classes are unsupported.";
+        semantics {
+            %exec: u64 = lane.mask.read 64;
+            %lhs: u32 = lane.register.read source0, 256, %exec;
+            %rhs: u32 = lane.register.read source1, 0, %exec;
+            %sum: u32 = u32.add.wrap %lhs, %rhs;
+            lane.register.write destination, %sum, %exec;
+        }
+    }
+    instruction vadd_sgpr {
+        encoding 32 mask 0xfe000180 value 0x68000000 {
+            field source0 offset 0 bits 7 exclude 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127;
+            field source1 offset 9 bits 8;
+            field destination offset 17 bits 8;
+        }
+        mnemonic "v_add_u32_e32";
+        evidence "amd-vega-vadd-broadcast"
+            "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-shader-instruction-set-architecture.pdf"
+            "Vega ISA 70656, 2020-01-27; VOP2 operand classes"
+            "SRC0 SGPR0..95 broadcasts to each lane; SRC1 and destination are VGPRs. Masked writes preserve inactive lanes and scalar/flag state.";
+        semantics {
+            %exec: u64 = lane.mask.read 64;
+            %lhs: u32 = register.read source0;
+            %rhs: u32 = lane.register.read source1, 0, %exec;
+            %sum: u32 = u32.add.wrap %lhs, %rhs;
+            lane.register.write destination, %sum, %exec;
+        }
+    }
+}

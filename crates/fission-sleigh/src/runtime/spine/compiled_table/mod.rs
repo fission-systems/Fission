@@ -55,7 +55,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    static BIND_CACHE: RefCell<HashMap<(u64, u64, u64), Result<RuntimeConstructState, String>>> = RefCell::new(HashMap::new());
+    static BIND_CACHE: RefCell<HashMap<(u64, u128, u128), Result<RuntimeConstructState, String>>> = RefCell::new(HashMap::new());
 }
 
 pub(crate) fn clear_bind_cache() {
@@ -101,7 +101,7 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
     if let Some(context_override) = context_override {
-        context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
+        context_override.apply_to_wide(&mut ctx.context_register, &mut ctx.context_known_mask);
     }
 
     let strategy = RuntimeDecodeStrategy::for_table();
@@ -393,7 +393,7 @@ pub(crate) fn decode_instruction_no_pcode(
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
     if let Some(context_override) = context_override {
-        context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
+        context_override.apply_to_wide(&mut ctx.context_register, &mut ctx.context_known_mask);
     }
 
     let strategy = RuntimeDecodeStrategy::for_table();
@@ -506,8 +506,8 @@ pub(super) fn try_bind_runtime_state_at(
     memory_window: &[u8],
     memory_base: u64,
     target_address: u64,
-    context_register: u64,
-    context_known_mask: u64,
+    context_register: u128,
+    context_known_mask: u128,
 ) -> Result<RuntimeConstructState> {
     let key = (target_address, context_register, context_known_mask);
     if let Some(cached) = BIND_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
@@ -606,7 +606,7 @@ pub(crate) fn apply_context_commits(
     compiled: &CompiledFrontend,
     decoded: &RuntimeConstructState,
     instruction_address: u64,
-    current_context: u64,
+    current_context: u128,
 ) -> Result<Vec<ResolvedContextCommit>> {
     let mut results = Vec::new();
     for commit in &decoded.context_commits {
@@ -659,8 +659,8 @@ pub(crate) fn apply_context_commits(
 /// Applies resolved context commits to a mutable context register.
 /// Called before decoding an instruction at `address` to override context.
 pub(crate) fn apply_pending_commits_to_context(
-    context_register: &mut u64,
-    context_known_mask: &mut u64,
+    context_register: &mut u128,
+    context_known_mask: &mut u128,
     address: u64,
     pending: &[(u64, u32, u32, u32)],
 ) -> Result<()> {
