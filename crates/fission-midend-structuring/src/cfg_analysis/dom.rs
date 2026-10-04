@@ -191,7 +191,7 @@ impl DomTree {
                 continue;
             }
             let local = compute_dominator_sets(&component, predecessors, root);
-            dominators.extend(local);
+            Self::merge_root_dominators(&mut dominators, local);
         }
 
         for idx in 0..node_count {
@@ -205,10 +205,26 @@ impl DomTree {
                 continue;
             }
             let local = compute_dominator_sets(&component, predecessors, idx);
-            dominators.extend(local);
+            Self::merge_root_dominators(&mut dominators, local);
         }
 
         Self { roots, dominators }
+    }
+
+    /// A shared descendant must be dominated along every entry path. Keeping
+    /// only the last root's set admits definitions from paths that need not
+    /// execute. Intersecting the root-local sets is equivalent to connecting
+    /// all discovered entries to a virtual root, then removing that root.
+    fn merge_root_dominators(
+        dominators: &mut HashMap<usize, HashSet<usize>>,
+        local: HashMap<usize, HashSet<usize>>,
+    ) {
+        for (node, incoming) in local {
+            dominators
+                .entry(node)
+                .and_modify(|current| current.retain(|dom| incoming.contains(dom)))
+                .or_insert(incoming);
+        }
     }
 
     pub fn roots(&self) -> &[usize] {
@@ -227,5 +243,103 @@ impl DomTree {
 
     pub fn nearest_common_dominator(&self, nodes: &[usize]) -> Option<usize> {
         nearest_common_from_sets(&self.dominators, nodes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_predecessor_index_map(successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
+        let mut predecessors = vec![Vec::new(); successors.len()];
+        for (from, targets) in successors.iter().enumerate() {
+            for &to in targets {
+                predecessors[to].push(from);
+            }
+        }
+        predecessors
+    }
+
+    #[test]
+    fn dom_tree_shared_tail_intersects_all_entry_paths() {
+        let successors = vec![vec![1], vec![3], vec![3], vec![4], vec![]];
+        let predecessors = build_predecessor_index_map(&successors);
+        let dom = DomTree::analyze(&successors, &predecessors);
+
+        assert_eq!(dom.roots(), &[0, 2]);
+        assert!(dom.dominates(0, 1));
+        for entry_path_node in [0, 1, 2] {
+            assert!(!dom.dominates(entry_path_node, 3));
+            assert!(!dom.dominates(entry_path_node, 4));
+        }
+        assert!(dom.dominates(3, 4));
+        assert_eq!(dom.nearest_common_dominator(&[1, 2]), None);
+        assert_eq!(dom.nearest_common_dominator(&[3, 4]), Some(3));
+    }
+
+    #[test]
+    fn dom_tree_secondary_entry_into_loop_does_not_claim_primary_path() {
+        let successors = vec![vec![1], vec![2, 3], vec![1], vec![], vec![2]];
+        let predecessors = build_predecessor_index_map(&successors);
+        let dom = DomTree::analyze(&successors, &predecessors);
+
+        assert!(!dom.dominates(0, 1));
+        assert!(!dom.dominates(4, 1));
+        assert!(!dom.dominates(1, 2));
+        assert!(!dom.dominates(2, 1));
+        assert!(dom.dominates(1, 3));
+    }
+
+    #[test]
+    fn dom_tree_keeps_disconnected_closed_component_root() {
+        let successors = vec![vec![1], vec![], vec![3], vec![2]];
+        let predecessors = build_predecessor_index_map(&successors);
+        let dom = DomTree::analyze(&successors, &predecessors);
+
+        assert_eq!(dom.roots(), &[0, 2]);
+        assert!(dom.dominates(0, 1));
+        assert!(dom.dominates(2, 3));
+        assert!(!dom.dominates(3, 2));
+        assert!(!dom.dominates(0, 3));
+    }
+
+    #[test]
+    fn dom_tree_matches_path_exclusion_on_all_four_node_graphs() {
+        const NODES: usize = 4;
+        let edges: Vec<_> = (0..NODES)
+            .flat_map(|from| {
+                (0..NODES)
+                    .filter(move |to| *to != from)
+                    .map(move |to| (from, to))
+            })
+            .collect();
+        for edge_mask in 0usize..(1 << edges.len()) {
+            let mut successors = vec![Vec::new(); NODES];
+            for (bit, &(from, to)) in edges.iter().enumerate() {
+                if edge_mask & (1 << bit) != 0 {
+                    successors[from].push(to);
+                }
+            }
+            let predecessors = build_predecessor_index_map(&successors);
+            let dom = DomTree::analyze(&successors, &predecessors);
+            for excluded in 0..NODES {
+                let mut reachable = [false; NODES];
+                let mut pending = dom.roots().to_vec();
+                while let Some(node) = pending.pop() {
+                    if node == excluded || std::mem::replace(&mut reachable[node], true) {
+                        continue;
+                    }
+                    pending.extend(successors[node].iter().copied());
+                }
+                for (node, &can_bypass) in reachable.iter().enumerate() {
+                    assert_eq!(
+                        dom.dominates(excluded, node),
+                        node == excluded || !can_bypass,
+                        "graph={successors:?} roots={:?} dominator={excluded} node={node}",
+                        dom.roots(),
+                    );
+                }
+            }
+        }
     }
 }
