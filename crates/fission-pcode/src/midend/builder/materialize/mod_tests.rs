@@ -5287,3 +5287,231 @@ fn a_varnode_merged_in_two_blocks_keeps_one_name() {
         first.name, second.name
     );
 }
+
+fn redefined_abi_merge_fixture(
+    incoming_size: Option<u32>,
+    guarded: bool,
+    call_after_write: bool,
+) -> (crate::PcodeFunction, MlilPreviewOptions, Varnode) {
+    let carrier = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let entry_view = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 4);
+    let condition = register(UNIQUE_SPACE_ID, 0x108, 1);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntEqual,
+                Some(condition.clone()),
+                vec![entry_view, Varnode::constant(0, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x1020), condition.clone()],
+            ),
+        ],
+    );
+    entry.successors = vec![1, 2];
+    let mut first = block_at(
+        0x1010,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(0x123456789abcdef0)],
+            ),
+            op(7, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+        ],
+    );
+    first.successors = vec![3];
+    let mut second_ops = Vec::new();
+    if guarded {
+        second_ops.push(op(
+            3,
+            PcodeOpcode::CBranch,
+            None,
+            vec![
+                Varnode {
+                    space_id: 3,
+                    offset: 0x1022,
+                    size: 8,
+                    is_constant: false,
+                    constant_val: 0,
+                },
+                condition,
+            ],
+        ));
+    }
+    if let Some(size) = incoming_size {
+        second_ops.push(op(
+            4,
+            PcodeOpcode::Copy,
+            Some(register(carrier.space_id, carrier.offset, size)),
+            vec![Varnode::constant(0x76543210, size)],
+        ));
+    }
+    if call_after_write {
+        second_ops.push(op(5, PcodeOpcode::Call, None, vec![constant(0x2000)]));
+    }
+    second_ops.push(op(8, PcodeOpcode::Branch, None, vec![constant(0x1030)]));
+    let mut second = block_at(0x1020, 2, second_ops);
+    second.successors = vec![3];
+    let join = block_at(
+        0x1030,
+        3,
+        vec![op(
+            6,
+            PcodeOpcode::Return,
+            None,
+            vec![constant(0), carrier.clone()],
+        )],
+    );
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut blocks = vec![entry, first, second, join];
+    for block in &mut blocks {
+        for (index, op) in block.ops.iter_mut().enumerate() {
+            op.address = block.start_address + index as u64;
+        }
+    }
+    (pcode_function(blocks), options, carrier)
+}
+
+#[test]
+fn redefined_abi_merge_separates_fully_initialized_value_from_formal() {
+    let (pcode, options, carrier) = redefined_abi_merge_fixture(Some(8), false, false);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let formal = builder
+        .register_param(&register(carrier.space_id, carrier.offset, 4))
+        .unwrap();
+    assert!(builder.merge_has_independent_incoming_definitions(3, &carrier));
+    let merge = builder.ensure_explicit_merge_binding_for_block(3, &carrier);
+    assert_ne!(merge.name, formal);
+    assert_eq!(
+        merge.ty,
+        type_from_size(8, false),
+        "later pointer bits need full storage width"
+    );
+    assert_eq!(
+        builder.params[&0].ty,
+        type_from_size(4, false),
+        "entry scalar remains narrow"
+    );
+    assert_eq!(
+        builder
+            .ensure_explicit_merge_binding_for_block(3, &carrier)
+            .name,
+        merge.name
+    );
+}
+
+#[test]
+fn redefined_abi_merge_retains_entry_state_without_complete_edge_proof() {
+    for (size, guarded, call) in [
+        (None, false, false),
+        (Some(4), false, false),
+        (Some(8), true, false),
+        (Some(8), false, true),
+    ] {
+        let (pcode, options, carrier) = redefined_abi_merge_fixture(size, guarded, call);
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        assert!(
+            !builder.merge_has_independent_incoming_definitions(3, &carrier),
+            "size={size:?} guarded={guarded} call={call}"
+        );
+        let formal = builder.register_param(&carrier).unwrap();
+        assert_eq!(
+            builder
+                .ensure_explicit_merge_binding_for_block(3, &carrier)
+                .name,
+            formal
+        );
+    }
+}
+
+#[test]
+fn redefined_abi_merge_does_not_borrow_formal_merge_from_another_block() {
+    let (pcode, options, carrier) = redefined_abi_merge_fixture(Some(8), false, false);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let entry_carrier = builder.ensure_explicit_merge_binding_for_block(0, &carrier);
+    let later = builder.ensure_explicit_merge_binding_for_block(3, &carrier);
+    assert_ne!(entry_carrier.name, later.name);
+    assert_eq!(
+        builder.existing_merge_binding_name_for_varnode(&carrier, true),
+        Some(later.name),
+        "an earlier formal must not hide the available independent carrier"
+    );
+}
+
+#[test]
+fn redefined_abi_merge_existing_carrier_selection_is_deterministic() {
+    let (pcode, options, carrier) = redefined_abi_merge_fixture(Some(8), false, false);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let first = builder.ensure_explicit_merge_binding_for_block(3, &carrier);
+    let mut second = first.clone();
+    second.name = "independent_other".to_string();
+    builder.temps.insert(second.name.clone(), second.clone());
+    builder
+        .explicit_merge_bindings
+        .insert((4, VarnodeKey::from(&carrier)), second.name);
+    for _ in 0..16 {
+        assert_eq!(
+            builder.existing_merge_binding_name_for_varnode(&carrier, true),
+            Some(first.name.clone())
+        );
+    }
+}
+
+#[test]
+fn redefined_abi_merge_checks_entry_path_even_if_structuring_pruned_it() {
+    let (pcode, options, carrier) = redefined_abi_merge_fixture(Some(8), false, false);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    // Model an original incoming edge removed only by structuring.
+    builder.heritage_predecessors[3].push(0);
+    builder.predecessors[3].push(0);
+    builder.predecessors[3].retain(|&pred| pred != 0);
+    assert!(!builder.merge_has_independent_incoming_definitions(3, &carrier));
+    let formal = builder.register_param(&carrier).unwrap();
+    assert_eq!(
+        builder
+            .ensure_explicit_merge_binding_for_block(3, &carrier)
+            .name,
+        formal
+    );
+}
+
+#[test]
+fn redefined_abi_merge_follows_forwarded_values_on_every_original_path() {
+    let (pcode, options, carrier) = redefined_abi_merge_fixture(Some(8), false, false);
+    let mut blocks = pcode.blocks;
+    blocks[2].ops.last_mut().unwrap().inputs[0] = constant(0x1040);
+    blocks[2].successors = vec![4];
+    let mut forwarded = block_at(
+        0x1040,
+        4,
+        vec![op(9, PcodeOpcode::Branch, None, vec![constant(0x1030)])],
+    );
+    forwarded.ops[0].address = 0x1040;
+    forwarded.successors = vec![3];
+    blocks.push(forwarded);
+    let pcode = pcode_function(blocks);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    assert!(builder.merge_has_independent_incoming_definitions(3, &carrier));
+    let formal = builder.register_param(&carrier).unwrap();
+    assert_ne!(
+        builder
+            .ensure_explicit_merge_binding_for_block(3, &carrier)
+            .name,
+        formal
+    );
+
+    // The forwarding block additionally receives an unchanged entry value.
+    // One seeded predecessor is not enough to initialize every path.
+    builder.heritage_predecessors[4].push(0);
+    assert!(!builder.merge_has_independent_incoming_definitions(3, &carrier));
+}

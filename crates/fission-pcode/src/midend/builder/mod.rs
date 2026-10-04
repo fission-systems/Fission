@@ -1172,16 +1172,29 @@ impl<'a> PreviewBuilder<'a> {
         binding
     }
 
-    /// A name already chosen for this varnode's merge in some other block.
-    ///
-    /// Merge bindings are keyed by `(block, varnode)`, but the *value* they
-    /// stand for is the varnode. Two blocks merging the same storage must not
-    /// disagree about what to call it.
-    fn existing_merge_binding_name_for_varnode(&self, output: &Varnode) -> Option<String> {
+    /// Reuse a compatible sequential storage carrier chosen at an earlier
+    /// merge. Incoming formals are excluded when this join has its own seed.
+    /// Choose deterministically when both entry and later carriers exist.
+    fn existing_merge_binding_name_for_varnode(
+        &self,
+        output: &Varnode,
+        separates_entry_value: bool,
+    ) -> Option<String> {
         let want = VarnodeKey::from(output);
         self.explicit_merge_bindings
             .iter()
-            .find(|((_, vn), name)| *vn == want && self.temps.contains_key(*name))
+            .filter(|((_, vn), name)| {
+                *vn == want
+                    && self.temps.contains_key(*name)
+                    && (!separates_entry_value || !self.used_param_local_names.contains(*name))
+            })
+            .min_by(
+                |((left_block, _), left_name), ((right_block, _), right_name)| {
+                    left_block
+                        .cmp(right_block)
+                        .then_with(|| left_name.cmp(right_name))
+                },
+            )
             .map(|(_, name)| name.clone())
     }
 
@@ -1198,6 +1211,11 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let ty = type_from_size(output.size, false);
+        // An ABI slot identifies the incoming value, not every later value
+        // stored in that register. A completely initialized join can use its
+        // own carrier without borrowing or narrowing the formal parameter.
+        let separates_entry_value =
+            self.merge_has_independent_incoming_definitions(block_idx, output);
         // For x86-64 loop headers: prefer the hardware register name over a fresh
         // temp for GPR-family varnodes. This prevents a RAX=ZExt(EAX) passthrough
         // in the loop body from being given an opaque temp name (e.g. xVar1) that
@@ -1207,6 +1225,7 @@ impl<'a> PreviewBuilder<'a> {
             .abi_state()
             .param_slot_for_varnode(output)
             .filter(|&index| index < self.named_entry_param_arity())
+            .filter(|_| !separates_entry_value)
             .and_then(|_| self.register_param(output));
         let hw_name: Option<String> = if param_name.is_none()
             && !output.is_constant
@@ -1239,7 +1258,9 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 hw
             }
-        } else if let Some(existing) = self.existing_merge_binding_name_for_varnode(output) {
+        } else if let Some(existing) =
+            self.existing_merge_binding_name_for_varnode(output, separates_entry_value)
+        {
             // The hardware-name promotion above only fires on a loop head, so the
             // *same* varnode merged again at a join block would otherwise mint a
             // second, different name for it. Return recovery lowers the primary
