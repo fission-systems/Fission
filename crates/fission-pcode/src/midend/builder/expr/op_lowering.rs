@@ -845,6 +845,18 @@ impl<'a> PreviewBuilder<'a> {
                     bits,
                 ),
             )
+        } else if op.opcode == PcodeOpcode::IntSub
+            && op
+                .output
+                .as_ref()
+                .is_some_and(|output| output.size < self.options.pointer_size)
+        {
+            // Narrow word subtraction consumes storage views, even if a
+            // shared full-width carrier later acquires a pointer type.
+            (
+                self.coerce_integer_storage_view(lhs, op.inputs[0].size * 8, false),
+                self.coerce_integer_storage_view(rhs, op.inputs[1].size * 8, false),
+            )
         } else if is_comparison(op.opcode)
             && !matches!(
                 op.opcode,
