@@ -16,7 +16,33 @@ pub struct MachineState {
 }
 
 pub(crate) fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
+    admit_with(instruction, false)
+}
+
+/// Like `admit`, but also admits guest PC effects. Only a sequence that supplies
+/// an origin address and consumes the next-PC result may use this.
+pub(crate) fn admit_guest(instruction: &CompiledInstruction) -> Result<(), FslError> {
+    admit_with(instruction, true)
+}
+
+pub(crate) fn uses_guest_pc(instruction: &CompiledInstruction) -> bool {
+    instruction.ops.iter().any(|op| {
+        matches!(
+            op,
+            FirOp::GuestPcRead { .. } | FirOp::GuestNextPcWrite { .. }
+        )
+    })
+}
+
+fn admit_with(instruction: &CompiledInstruction, guest_pc: bool) -> Result<(), FslError> {
     instruction.validate()?;
+    if !guest_pc && uses_guest_pc(instruction) {
+        return Err(FslError::at(
+            1,
+            1,
+            "guest PC effects require a sequence origin and cannot execute standalone",
+        ));
+    }
     crate::control::validate_acyclic(instruction)?;
     if instruction.values.iter().any(|v| v.ty.bits > 64)
         || instruction.ops.iter().any(|op| {
@@ -40,12 +66,13 @@ pub(crate) fn admit(instruction: &CompiledInstruction) -> Result<(), FslError> {
                 | FirOp::FlagRead { .. }
                 | FirOp::RegisterWrite { .. }
                 | FirOp::FlagWrite { .. }
+                | FirOp::GuestNextPcWrite { .. }
         )
     }) {
         return Err(FslError::at(
             1,
             1,
-            "no register or flag effects in instruction",
+            "no register, flag or guest next-pc effects in instruction",
         ));
     }
     Ok(())
@@ -78,11 +105,28 @@ pub fn execute_decoded(
     decoded: &DecodedInstruction,
     state: &mut MachineState,
 ) -> Result<ExecutionStatus, FslError> {
+    execute_decoded_at(package, decoded, state, None).map(|(status, _)| status)
+}
+
+/// `guest_pc` is the origin address when executed inside a sequence; only then
+/// are guest PC ops admitted. Returns the optional next-PC written by the body
+/// (`None` means fallthrough). A second next-PC write is `InvalidState`.
+pub(crate) fn execute_decoded_at(
+    package: &FslcPackage,
+    decoded: &DecodedInstruction,
+    state: &mut MachineState,
+    guest_pc: Option<u64>,
+) -> Result<(ExecutionStatus, Option<u64>), FslError> {
     package.reencode(decoded, &[])?;
     let instruction = &package.instructions[decoded.instruction_index];
-    admit(instruction)?;
+    if guest_pc.is_some() {
+        admit_guest(instruction)?;
+    } else {
+        admit(instruction)?;
+    }
+    let mut next_pc: Option<u64> = None;
     if state.flags.iter().any(|&v| v > 1) {
-        return Ok(ExecutionStatus::InvalidState);
+        return Ok((ExecutionStatus::InvalidState, None));
     }
     let index = |field: u16| decoded.fields[usize::from(field)].1;
     if !bank_indices_fit(
@@ -91,7 +135,7 @@ pub fn execute_decoded(
         state.registers.len(),
         state.flags.len(),
     ) {
-        return Ok(ExecutionStatus::InvalidState);
+        return Ok((ExecutionStatus::InvalidState, None));
     }
     let mut values = vec![0u64; instruction.values.len()];
     let blocks = crate::control::blocks(instruction);
@@ -184,12 +228,22 @@ pub fn execute_decoded(
                         + u128::from(values[usize::from(carry.0)]);
                     values[usize::from(output.0)] = (sum & u128::from(mask)) as u64;
                 }
+                FirOp::FieldRead { output, field } => values[usize::from(output.0)] = index(field),
+                FirOp::GuestPcRead { output } => {
+                    values[usize::from(output.0)] = guest_pc.expect("guest pc admitted with origin")
+                }
+                FirOp::GuestNextPcWrite { value } => {
+                    if next_pc.is_some() {
+                        return Ok((ExecutionStatus::InvalidState, None));
+                    }
+                    next_pc = Some(values[usize::from(value.0)]);
+                }
                 _ => unreachable!("state contract checked before effects"),
             }
         }
         match crate::control::advance(block, &blocks, &mut values) {
             Some(next) => pc = next,
-            None => return Ok(ExecutionStatus::Success),
+            None => return Ok((ExecutionStatus::Success, next_pc)),
         }
     }
 }
@@ -201,13 +255,36 @@ pub(crate) fn emit_state_instruction(
     layer: OutputLayer,
     symbol: &str,
 ) -> Result<String, FslError> {
-    admit(instruction)?;
+    emit_state_impl(instruction, layer, symbol, false)
+}
+
+/// Sequence-only projection. Bodies using guest PC ops gain the extra parameters
+/// `guest_pc`, `next_pc`, `next_pc_set`; all other bodies keep the standalone ABI.
+pub(crate) fn emit_state_instruction_guest(
+    instruction: &CompiledInstruction,
+    layer: OutputLayer,
+    symbol: &str,
+) -> Result<String, FslError> {
+    emit_state_impl(instruction, layer, symbol, true)
+}
+
+fn emit_state_impl(
+    instruction: &CompiledInstruction,
+    layer: OutputLayer,
+    symbol: &str,
+    guest: bool,
+) -> Result<String, FslError> {
+    admit_with(instruction, guest)?;
+    let pc_abi = guest && uses_guest_pc(instruction);
     let c = layer == OutputLayer::C;
     let mut text = if c {
-        format!("#include <stdint.h>\n#include <stddef.h>\n/* Disjoint arrays; status 0 success, 3 invalid state. */\nuint32_t {symbol}(uint64_t *registers, size_t register_count, uint64_t *flags, size_t flag_count, const uint64_t *fields, size_t field_count) {{\n    if (!registers || !flags || !fields) return 3;\n")
+        format!("#include <stdint.h>\n#include <stddef.h>\n/* Disjoint arrays; status 0 success, 3 invalid state. */\nuint32_t {symbol}(uint64_t *registers, size_t register_count, uint64_t *flags, size_t flag_count, const uint64_t *fields, size_t field_count{}) {{\n    if (!registers || !flags || !fields{}) return 3;\n",
+            if pc_abi { ", uint64_t guest_pc, uint64_t *next_pc, uint32_t *next_pc_set" } else { "" },
+            if pc_abi { " || !next_pc || !next_pc_set" } else { "" })
     } else {
         format!(
-            "pub fn {symbol}(registers: &mut [u64], flags: &mut [u64], fields: &[u64]) -> u32 {{\n"
+            "pub fn {symbol}(registers: &mut [u64], flags: &mut [u64], fields: &[u64]{}) -> u32 {{\n",
+            if pc_abi { ", guest_pc: u64, next_pc: &mut u64, next_pc_set: &mut bool" } else { "" }
         )
     };
     if !instruction
@@ -512,6 +589,16 @@ pub(crate) fn emit_state_instruction(
                 }
                 FirOp::FlagWrite { slot, value: input } => {
                     writeln!(text, "    flags[{slot}] = {};", value(input)).unwrap();
+                    None
+                }
+                FirOp::FieldRead { output, field } => Some((output, format!("fields[{field}]"))),
+                FirOp::GuestPcRead { output } => Some((output, "guest_pc".to_string())),
+                FirOp::GuestNextPcWrite { value: input } => {
+                    if c {
+                        writeln!(text, "    if (*next_pc_set) return 3;\n    *next_pc = {};\n    *next_pc_set = 1;", value(input)).unwrap();
+                    } else {
+                        writeln!(text, "    if *next_pc_set {{ return 3; }}\n    *next_pc = {};\n    *next_pc_set = true;", value(input)).unwrap();
+                    }
                     None
                 }
                 _ => unreachable!("state contract checked"),

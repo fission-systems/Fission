@@ -113,6 +113,22 @@ pub fn emit_instruction(
                 FirOp::FlagWrite { slot, value } => {
                     writeln!(text, "  flag.write {slot}, %v{}", value.0).unwrap();
                 }
+                FirOp::FieldRead { output, field } => {
+                    writeln!(
+                        text,
+                        "  %v{}: {} = field.read {}",
+                        output.0,
+                        instruction.values[usize::from(output.0)].ty,
+                        instruction.encoding.fields[usize::from(field)].name
+                    )
+                    .unwrap();
+                }
+                FirOp::GuestPcRead { output } => {
+                    writeln!(text, "  %v{}: u64 = guest.pc.read", output.0).unwrap();
+                }
+                FirOp::GuestNextPcWrite { value } => {
+                    writeln!(text, "  guest.next_pc.write %v{}", value.0).unwrap();
+                }
                 FirOp::IntAddCarry {
                     output,
                     left,
@@ -331,7 +347,10 @@ pub fn emit_instruction(
                 | FirOp::FlagWrite { .. }
                 | FirOp::IntAddCarry { .. }
                 | FirOp::IntAddCarryIn { .. }
-                | FirOp::IntAddWrapCarry { .. },
+                | FirOp::IntAddWrapCarry { .. }
+                | FirOp::FieldRead { .. }
+                | FirOp::GuestPcRead { .. }
+                | FirOp::GuestNextPcWrite { .. },
                 _,
             ) => unreachable!("state projection handled above"),
             (FirOp::Unsupported, _) => unreachable!("unsupported execution rejected"),

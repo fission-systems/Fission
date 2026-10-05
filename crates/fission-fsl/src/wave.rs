@@ -101,8 +101,12 @@ pub(crate) fn validate_domains(
                 };
                 Some((output, domain))
             }
+            FirOp::FieldRead { output, .. } | FirOp::GuestPcRead { output } => {
+                Some((output, ValueDomain::Uniform))
+            }
             FirOp::RegisterWrite { value, .. }
             | FirOp::FlagWrite { value, .. }
+            | FirOp::GuestNextPcWrite { value }
             | FirOp::VmStackPush { value } => {
                 if at(value) != ValueDomain::Uniform {
                     return Err(error());

@@ -361,6 +361,9 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         | FirOp::FlagWrite { .. }
         | FirOp::IntAddCarry { .. }
         | FirOp::IntAddCarryIn { .. }
+        | FirOp::FieldRead { .. }
+        | FirOp::GuestPcRead { .. }
+        | FirOp::GuestNextPcWrite { .. }
         | FirOp::IntAddWrapCarry { .. } => {
             return Err(FslError::at(
                 1,

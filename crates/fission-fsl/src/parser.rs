@@ -87,6 +87,24 @@ pub(super) enum Statement {
         line: usize,
         column: usize,
     },
+    FieldRead {
+        name: String,
+        ty: ValueType,
+        field: String,
+        line: usize,
+        column: usize,
+    },
+    GuestPcRead {
+        name: String,
+        ty: ValueType,
+        line: usize,
+        column: usize,
+    },
+    GuestNextPcWrite {
+        value: String,
+        line: usize,
+        column: usize,
+    },
     RegisterWrite {
         field: String,
         value: String,
@@ -1058,6 +1076,21 @@ impl Parser {
                     line: token.line,
                     column: token.column,
                 }
+            } else if operation == "field.read" {
+                Statement::FieldRead {
+                    name,
+                    ty,
+                    field: self.expect_name()?,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if operation == "guest.pc.read" {
+                Statement::GuestPcRead {
+                    name,
+                    ty,
+                    line: token.line,
+                    column: token.column,
+                }
             } else if operation == "flag.read" {
                 let slot = u16::try_from(self.expect_integer()?)
                     .map_err(|_| self.error_here("flag slot exceeds u16"))?;
@@ -1167,6 +1200,16 @@ impl Parser {
             self.expect_symbol(';')?;
             Ok(Statement::RegisterWrite {
                 field,
+                value,
+                line: token.line,
+                column: token.column,
+            })
+        } else if self.at_ident("guest.next_pc.write") {
+            self.advance();
+            self.expect_symbol('%')?;
+            let value = self.expect_name()?;
+            self.expect_symbol(';')?;
+            Ok(Statement::GuestNextPcWrite {
                 value,
                 line: token.line,
                 column: token.column,

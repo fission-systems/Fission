@@ -1,7 +1,8 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 7;
+pub const FSL_PACKAGE_VERSION: u16 = 8;
+const GUEST_PC_PACKAGE_VERSION: u16 = 8;
 const STATE_PACKAGE_VERSION: u16 = 3;
 const CARRY_IN_PACKAGE_VERSION: u16 = 4;
 const MAGIC: &[u8; 8] = b"FSLCPKG\0";
@@ -190,6 +191,22 @@ pub enum FirOp {
     VmStackPush {
         value: ValueId,
     },
+    /// Zero-extended raw decoded field value. The output must be at least as wide
+    /// as the field, so no bits are dropped.
+    FieldRead {
+        output: ValueId,
+        field: u16,
+    },
+    /// Address of the guest instruction being executed (u64). Only meaningful
+    /// inside a sequence that supplies an origin; standalone execution refuses it.
+    GuestPcRead {
+        output: ValueId,
+    },
+    /// Sets the guest address executed next (u64). At most one write per
+    /// invocation; absence means fallthrough. Not an intra-body block edge.
+    GuestNextPcWrite {
+        value: ValueId,
+    },
 }
 
 impl FirOp {
@@ -216,7 +233,17 @@ impl FirOp {
                     | Self::IntAddCarry { .. }
                     | Self::IntAddCarryIn { .. }
                     | Self::IntAddWrapCarry { .. }
+                    | Self::FieldRead { .. }
+                    | Self::GuestPcRead { .. }
+                    | Self::GuestNextPcWrite { .. }
             )
+    }
+
+    pub(crate) fn requires_guest_pc_version(&self) -> bool {
+        matches!(
+            self,
+            Self::FieldRead { .. } | Self::GuestPcRead { .. } | Self::GuestNextPcWrite { .. }
+        )
     }
 
     pub(crate) fn requires_carry_in_version(&self) -> bool {
@@ -303,6 +330,15 @@ impl FslcPackage {
                     1,
                     1,
                     "integer conversion requires package version 7",
+                ));
+            }
+            if self.version < GUEST_PC_PACKAGE_VERSION
+                && instruction.ops.iter().any(FirOp::requires_guest_pc_version)
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "guest PC FIR requires package version 8",
                 ));
             }
             if self.version < 6
@@ -581,6 +617,19 @@ impl FslcPackage {
                         writer.u8(2);
                         writer.u16(value.0);
                     }
+                    FirOp::FieldRead { output, field } => {
+                        writer.u8(19);
+                        writer.u16(output.0);
+                        writer.u16(*field);
+                    }
+                    FirOp::GuestPcRead { output } => {
+                        writer.u8(17);
+                        writer.u16(output.0);
+                    }
+                    FirOp::GuestNextPcWrite { value } => {
+                        writer.u8(18);
+                        writer.u16(value.0);
+                    }
                 }
             }
             if self.version >= 6 {
@@ -843,6 +892,16 @@ impl FslcPackage {
                         right: reader.value_id(value_count)?,
                     },
                     2 => FirOp::VmStackPush {
+                        value: reader.value_id(value_count)?,
+                    },
+                    19 if version >= GUEST_PC_PACKAGE_VERSION => FirOp::FieldRead {
+                        output: reader.value_id(value_count)?,
+                        field: reader.u16()?,
+                    },
+                    17 if version >= GUEST_PC_PACKAGE_VERSION => FirOp::GuestPcRead {
+                        output: reader.value_id(value_count)?,
+                    },
+                    18 if version >= GUEST_PC_PACKAGE_VERSION => FirOp::GuestNextPcWrite {
                         value: reader.value_id(value_count)?,
                     },
                     value => return Err(FslError::at(1, 1, format!("invalid FIR op tag {value}"))),

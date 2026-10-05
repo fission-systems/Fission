@@ -214,6 +214,47 @@ impl CompiledInstruction {
                         }
                         None
                     }
+                    FirOp::FieldRead { output, field } => {
+                        let ty = self
+                            .values
+                            .get(usize::from(output.0))
+                            .map(|v| v.ty)
+                            .ok_or_else(|| FslError::at(1, 1, "field read output out of range"))?;
+                        let field_bits = self
+                            .encoding
+                            .fields
+                            .get(usize::from(field))
+                            .map(|f| f.bits)
+                            .ok_or_else(|| FslError::at(1, 1, "field read index out of range"))?;
+                        if ty.bits > 64 || ty.sign != IntegerSign::Unsigned || ty.bits < field_bits
+                        {
+                            return Err(FslError::at(
+                                1,
+                                1,
+                                "field reads require an unsigned output at least as wide as the field",
+                            ));
+                        }
+                        Some(output)
+                    }
+                    FirOp::GuestPcRead { output } => {
+                        let ty = self
+                            .values
+                            .get(usize::from(output.0))
+                            .map(|v| v.ty)
+                            .ok_or_else(|| FslError::at(1, 1, "guest pc output out of range"))?;
+                        if ty.bits != 64 || ty.sign != IntegerSign::Unsigned {
+                            return Err(FslError::at(1, 1, "guest pc reads require u64"));
+                        }
+                        Some(output)
+                    }
+                    FirOp::GuestNextPcWrite { value } => {
+                        read(value, &defined)?;
+                        let ty = self.values[usize::from(value.0)].ty;
+                        if ty.bits != 64 || ty.sign != IntegerSign::Unsigned {
+                            return Err(FslError::at(1, 1, "guest next-pc writes require u64"));
+                        }
+                        None
+                    }
                     FirOp::IntAddCarry {
                         output,
                         left,
@@ -398,7 +439,10 @@ impl StackContract {
                 | FirOp::FlagWrite { .. }
                 | FirOp::IntAddCarry { .. }
                 | FirOp::IntAddCarryIn { .. }
-                | FirOp::IntAddWrapCarry { .. } => unreachable!("state execution rejected"),
+                | FirOp::IntAddWrapCarry { .. }
+                | FirOp::FieldRead { .. }
+                | FirOp::GuestPcRead { .. }
+                | FirOp::GuestNextPcWrite { .. } => unreachable!("state execution rejected"),
                 FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             }
             low = low.min(delta);
@@ -420,6 +464,8 @@ pub enum ExecutionStatus {
     StackUnderflow = 1,
     CapacityExceeded = 2,
     InvalidState = 3,
+    /// A guest branch target left the window, moved backward, or was misaligned.
+    BadBranchTarget = 4,
 }
 
 /// Execute ordered FIR effects over untagged VM bit-vector stack slots.
@@ -459,7 +505,10 @@ pub fn execute_instruction(
             | FirOp::FlagWrite { .. }
             | FirOp::IntAddCarry { .. }
             | FirOp::IntAddCarryIn { .. }
-            | FirOp::IntAddWrapCarry { .. } => unreachable!("state execution rejected"),
+            | FirOp::IntAddWrapCarry { .. }
+            | FirOp::FieldRead { .. }
+            | FirOp::GuestPcRead { .. }
+            | FirOp::GuestNextPcWrite { .. } => unreachable!("state execution rejected"),
             FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             FirOp::VmStackPop { output } => {
                 values[usize::from(output.0)] = stack.pop().expect("validated stack contract")

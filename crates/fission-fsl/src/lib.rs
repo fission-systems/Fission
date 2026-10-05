@@ -272,6 +272,36 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
                     let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
                     ops.push(FirOp::FlagRead { output, slot });
                 }
+                parser::Statement::FieldRead {
+                    name,
+                    ty,
+                    field,
+                    line,
+                    column,
+                } => {
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::FieldRead {
+                        output,
+                        field: field_id(&field)?,
+                    });
+                }
+                parser::Statement::GuestPcRead {
+                    name,
+                    ty,
+                    line,
+                    column,
+                } => {
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::GuestPcRead { output });
+                }
+                parser::Statement::GuestNextPcWrite {
+                    value,
+                    line,
+                    column,
+                } => {
+                    let value = require_value(&values, &value_ids, &value, line, column)?;
+                    ops.push(FirOp::GuestNextPcWrite { value });
+                }
                 parser::Statement::RegisterWrite {
                     field,
                     value,
@@ -458,6 +488,12 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
 
     let package = FslcPackage {
         version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(FirOp::requires_guest_pc_version)
+        {
+            8
+        } else if instructions
             .iter()
             .flat_map(|i| &i.ops)
             .any(|op| matches!(op, FirOp::IntConvert { .. }))
