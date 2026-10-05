@@ -5515,3 +5515,855 @@ fn redefined_abi_merge_follows_forwarded_values_on_every_original_path() {
     builder.heritage_predecessors[4].push(0);
     assert!(!builder.merge_has_independent_incoming_definitions(3, &carrier));
 }
+
+#[test]
+fn ssa_phi_emission_initializes_entry_and_backedge_with_proven_coalescing() {
+    let carrier = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x38, 8);
+    let condition = crate::midend::builder::materialize::test_support::varnode(0x900);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(0)],
+            ),
+            op(5, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    entry.successors = vec![1];
+    let mut head = block_at(
+        0x2000,
+        1,
+        vec![
+            op(
+                1,
+                PcodeOpcode::IntLess,
+                Some(condition.clone()),
+                vec![carrier.clone(), constant(4)],
+            ),
+            op(
+                2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x4000), condition],
+            ),
+        ],
+    );
+    head.successors = vec![2, 3];
+    let mut latch = block_at(
+        0x3000,
+        2,
+        vec![
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(carrier.clone()),
+                vec![carrier.clone(), constant(1)],
+            ),
+            op(6, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    latch.successors = vec![1];
+    let exit = block_at(
+        0x4000,
+        3,
+        vec![op(4, PcodeOpcode::Return, None, vec![carrier.clone()])],
+    );
+    let pcode = pcode_function(vec![entry, head, latch, exit]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    let phi = builder.scalar_ssa.phis[&1]
+        .iter()
+        .find(|p| p.storage.offset == carrier.offset)
+        .unwrap()
+        .clone();
+    let name = builder.ssa_emission.bindings[&phi.output].clone();
+    let entry_name = builder.ssa_emission.bindings[&phi
+        .operands
+        .iter()
+        .find(|p| p.predecessor == 0)
+        .unwrap()
+        .value]
+        .clone();
+    let latch_name = builder.ssa_emission.bindings[&phi
+        .operands
+        .iter()
+        .find(|p| p.predecessor == 2)
+        .unwrap()
+        .value]
+        .clone();
+    assert!(!name.starts_with("param_"));
+    let entry_body = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    assert!(entry_body.iter().any(|stmt| matches!(stmt, PreHirStmt::Assign { lhs: PreHirLValue::Var(lhs), .. } if *lhs == name)));
+    if name != entry_name {
+        assert!(
+            matches!(entry_body.last(), Some(PreHirStmt::Assign { lhs: PreHirLValue::Var(lhs), rhs: PreHirExpr::Var(rhs) }) if *lhs == name && *rhs == entry_name)
+        );
+    }
+    let latch_body = builder.lower_block_stmts(&pcode.blocks[2]).unwrap();
+    assert!(latch_body.iter().any(|stmt| matches!(stmt, PreHirStmt::Assign { lhs: PreHirLValue::Var(lhs), .. } if *lhs == name)));
+    if name != latch_name {
+        assert!(
+            matches!(latch_body.last(), Some(PreHirStmt::Assign { lhs: PreHirLValue::Var(lhs), rhs: PreHirExpr::Var(rhs) }) if *lhs == name && *rhs == latch_name)
+        );
+    }
+    let read = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 1,
+                op_idx: 0,
+            },
+            |b| b.lower_varnode(&carrier, &mut HashSet::default()),
+        )
+        .unwrap();
+    assert_eq!(read, PreHirExpr::Var(name));
+}
+
+fn ssa_fixture_eval(expr: &PreHirExpr, values: &std::collections::BTreeMap<String, u64>) -> u64 {
+    match expr {
+        PreHirExpr::Var(name) => values[name],
+        PreHirExpr::Const(value, _) => *value as u64,
+        PreHirExpr::Cast {
+            ty: NirType::Int { bits, .. },
+            expr,
+        } => {
+            let value = ssa_fixture_eval(expr, values);
+            if *bits == 64 {
+                value
+            } else {
+                value & ((1u64 << bits) - 1)
+            }
+        }
+        PreHirExpr::Binary { op, lhs, rhs, .. } => {
+            let (left, right) = (ssa_fixture_eval(lhs, values), ssa_fixture_eval(rhs, values));
+            match op {
+                PreHirBinaryOp::And => left & right,
+                PreHirBinaryOp::Or => left | right,
+                PreHirBinaryOp::Shl => left << right,
+                PreHirBinaryOp::Shr => left >> right,
+                PreHirBinaryOp::Add => left.wrapping_add(right),
+                PreHirBinaryOp::Eq => u64::from(left == right),
+                PreHirBinaryOp::Lt => u64::from(left < right),
+                _ => panic!("unexpected fixture operation {op:?}"),
+            }
+        }
+        _ => panic!("unexpected fixture expression {expr:?}"),
+    }
+}
+
+fn ssa_fixture_execute(body: &[PreHirStmt], values: &mut std::collections::BTreeMap<String, u64>) {
+    for stmt in body {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(lhs),
+                rhs,
+            } => {
+                let value = ssa_fixture_eval(rhs, values);
+                values.insert(lhs.clone(), value);
+            }
+            PreHirStmt::Block(body) => ssa_fixture_execute(body, values),
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                let taken = ssa_fixture_eval(cond, values) != 0;
+                ssa_fixture_execute(if taken { then_body } else { else_body }, values);
+            }
+            _ => panic!("unexpected fixture statement {stmt:?}"),
+        }
+    }
+}
+
+#[test]
+fn ssa_conditional_edge_initializes_skipped_redefinition_from_immutable_formal() {
+    let carrier = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let returned = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let condition = crate::midend::builder::materialize::test_support::varnode(0x900);
+    let result = crate::midend::builder::materialize::test_support::varnode(0x908);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntEqual,
+                Some(condition.clone()),
+                vec![carrier.clone(), constant(0)],
+            ),
+            op(
+                1,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x3000), condition],
+            ),
+        ],
+    );
+    entry.successors = vec![1, 2];
+    let mut redefine = block_at(
+        0x2000,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(0x1234_5678_1111_2222)],
+            ),
+            op(3, PcodeOpcode::Branch, None, vec![constant(0x3000)]),
+        ],
+    );
+    redefine.successors = vec![2];
+    let join = block_at(
+        0x3000,
+        2,
+        vec![
+            op(
+                4,
+                PcodeOpcode::IntAdd,
+                Some(result.clone()),
+                vec![carrier.clone(), constant(1)],
+            ),
+            // Real RETURN recovery reads the ABI return slot implicitly.
+            // Writing only a unique result leaves that slot indeterminate.
+            op(5, PcodeOpcode::Copy, Some(returned.clone()), vec![result]),
+            op(6, PcodeOpcode::Return, None, vec![returned]),
+        ],
+    );
+    let pcode = pcode_function(vec![entry, redefine, join]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    let phi = builder.scalar_ssa.phis[&2]
+        .iter()
+        .find(|phi| phi.storage.offset == carrier.offset)
+        .unwrap();
+    let carrier_name = builder.ssa_emission.bindings[&phi.output].clone();
+    let input = builder.scalar_ssa.inputs[&phi.storage];
+    let formal = builder.ssa_emission.bindings[&input].clone();
+    assert_ne!(carrier_name, formal);
+    let entry_body = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    let redefine_body = builder.lower_block_stmts(&pcode.blocks[1]).unwrap();
+    let LoweredTerminator::Cond { cond, .. } = builder.lower_block_terminator(0).unwrap() else {
+        panic!("condition");
+    };
+    let PreHirExpr::Var(snapshot) = cond else {
+        panic!("captured decision");
+    };
+    for seed in [0, 1, 0xfeed_abcd_0000_0001] {
+        let mut values = std::collections::BTreeMap::from([(formal.clone(), seed)]);
+        ssa_fixture_execute(&entry_body, &mut values);
+        if values[&snapshot] == 0 {
+            ssa_fixture_execute(&redefine_body, &mut values);
+        }
+        assert_eq!(values[&formal], seed, "entry identity is immutable");
+        assert_eq!(
+            values[&carrier_name],
+            if seed == 0 {
+                seed
+            } else {
+                0x1234_5678_1111_2222
+            }
+        );
+    }
+    // A named aggregate's field provenance currently belongs to the ABI
+    // binding. Do not apply a partial identity plan that loses that layout.
+    let mut context = PreviewTypeContext::default();
+    let mut hints = crate::midend::ir::NirFunctionHints::default();
+    hints.param_type_names.insert(0, "Node*".into());
+    context.function_hints = Some(hints);
+    context.struct_types.insert(
+        "Node".into(),
+        crate::midend::ir::NirStructTypeHint {
+            name: "Node".into(),
+            size: 16,
+            fields: Vec::new(),
+        },
+    );
+    let mut declined = PreviewBuilder::new(&pcode, &options, Some(&context));
+    declined.prepare_ssa_emission();
+    assert!(declined.ssa_emission.bindings.is_empty());
+}
+
+#[test]
+fn ssa_linear_input_redefinition_keeps_scalar_formal_and_wide_value_distinct() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let narrow = Varnode {
+        size: 4,
+        ..wide.clone()
+    };
+    let saved = crate::midend::builder::materialize::test_support::varnode(0x900);
+    let combined = crate::midend::builder::materialize::test_support::varnode(0x908);
+    let seed = 0xfeed_abcd_1111_2222u64;
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::IntZExt, Some(saved.clone()), vec![narrow]),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(wide.clone()),
+                vec![constant(seed as i64)],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(combined.clone()),
+                vec![wide.clone(), saved],
+            ),
+            op(3, PcodeOpcode::Return, None, vec![combined]),
+        ],
+    )]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(builder.scalar_ssa.phis.is_empty());
+    assert_eq!(builder.ssa_emission.storages.len(), 2);
+    let formal = builder.params[&0].name.clone();
+    assert!(matches!(
+        builder.params[&0].ty,
+        NirType::Int { bits: 32, .. }
+    ));
+    let body = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    let mut values = std::collections::BTreeMap::from([(formal.clone(), 7)]);
+    ssa_fixture_execute(&body, &mut values);
+    assert_eq!(values[&formal], 7);
+    let read = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 2,
+            },
+            |builder| builder.lower_varnode(&wide, &mut HashSet::default()),
+        )
+        .unwrap();
+    assert_eq!(
+        ssa_fixture_eval(&read, &values),
+        seed,
+        "wide successor keeps its high bits"
+    );
+}
+
+#[test]
+fn ssa_lowering_probe_does_not_publish_unselected_parameter_bindings() {
+    let selected = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let other = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8);
+    let saved = crate::midend::builder::materialize::test_support::varnode(0x900);
+    let result = crate::midend::builder::materialize::test_support::varnode(0x908);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(saved),
+                vec![selected.clone(), constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(selected.clone()),
+                vec![constant(8)],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(result.clone()),
+                vec![other, selected],
+            ),
+            op(3, PcodeOpcode::Return, None, vec![result]),
+        ],
+    )]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(!builder.ssa_emission.bindings.is_empty());
+    assert!(builder.params.contains_key(&0));
+    assert!(
+        !builder.params.contains_key(&1),
+        "observational preflight may not publish an unrelated binding"
+    );
+    builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    assert!(
+        builder.params.contains_key(&1),
+        "actual lowering still owns the real read"
+    );
+}
+
+#[test]
+fn ssa_edge_decision_reuses_original_site_load_materialization() {
+    let carrier = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x08, 8);
+    let loaded = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let condition = crate::midend::builder::materialize::test_support::varnode(0x900);
+    let result = crate::midend::builder::materialize::test_support::varnode(0x908);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Load,
+                Some(loaded.clone()),
+                vec![constant(0), carrier.clone()],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(condition.clone()),
+                vec![loaded, constant(0)],
+            ),
+            op(
+                2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x3000), condition],
+            ),
+        ],
+    );
+    entry.successors = vec![1, 2];
+    let mut redefine = block_at(
+        0x2000,
+        1,
+        vec![
+            op(
+                3,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(8)],
+            ),
+            op(4, PcodeOpcode::Branch, None, vec![constant(0x3000)]),
+        ],
+    );
+    redefine.successors = vec![2];
+    let join = block_at(
+        0x3000,
+        2,
+        vec![
+            op(
+                5,
+                PcodeOpcode::IntAdd,
+                Some(result.clone()),
+                vec![carrier, constant(1)],
+            ),
+            op(6, PcodeOpcode::Return, None, vec![result]),
+        ],
+    );
+    let pcode = pcode_function(vec![entry, redefine, join]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(!builder.ssa_emission.bindings.is_empty());
+    let body = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    let terminator = builder.lower_block_terminator(0).unwrap();
+    let tree = format!("{body:?} {terminator:?}");
+    assert_eq!(
+        tree.matches("Load {").count(),
+        1,
+        "one original memory read: {tree}"
+    );
+    assert!(matches!(
+        terminator,
+        LoweredTerminator::Cond {
+            cond: PreHirExpr::Var(_),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn ssa_partitioned_carrier_preserves_high_bits_across_zero_and_repeated_updates() {
+    let wide = Varnode {
+        space_id: REGISTER_SPACE_ID,
+        offset: 0x38,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let narrow = Varnode {
+        size: 4,
+        ..wide.clone()
+    };
+    let seed = 0x1234_5678_1122_3344u64;
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(wide.clone()),
+                vec![constant(seed as i64)],
+            ),
+            op(1, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    entry.successors = vec![1];
+    let mut head = block_at(
+        0x2000,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(test_support::varnode(0x9000)),
+                vec![wide.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x4000), constant(1)],
+            ),
+        ],
+    );
+    head.successors = vec![2, 3];
+    let mut latch = block_at(
+        0x3000,
+        2,
+        vec![
+            op(
+                4,
+                PcodeOpcode::IntAdd,
+                Some(narrow.clone()),
+                vec![narrow, Varnode::constant(1, 4)],
+            ),
+            op(5, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    latch.successors = vec![1];
+    let exit = block_at(
+        0x4000,
+        3,
+        vec![op(6, PcodeOpcode::Return, None, vec![wide.clone()])],
+    );
+    let pcode = pcode_function(vec![entry, head, latch, exit]);
+    let options = test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert_eq!(builder.ssa_emission.storages.len(), 2);
+    let entry_body = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    let latch_body = builder.lower_block_stmts(&pcode.blocks[2]).unwrap();
+    // Both contained views still denote the initial complete producer. A
+    // later narrow definition must instead keep the ordinary piece join.
+    let whole = builder
+        .ssa_emitted_definition(0, 0)
+        .expect("whole producer binding");
+    for (offset, expected) in [(0, seed & 0xffff_ffff), (4, seed >> 32)] {
+        let view = Varnode {
+            offset: wide.offset + offset,
+            size: 4,
+            ..wide.clone()
+        };
+        let read = builder
+            .with_lowering_site(
+                LoweringSite {
+                    block_idx: 0,
+                    op_idx: 1,
+                },
+                |b| b.ssa_emitted_read(&view),
+            )
+            .expect("contained snapshot view");
+        // Only the original snapshot is available: reading a detached piece
+        // binding would fail instead of silently reassembling another value.
+        let values = std::collections::BTreeMap::from([(whole.clone(), seed)]);
+        assert_eq!(ssa_fixture_eval(&read, &values), expected);
+    }
+    let read = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 1,
+                op_idx: 0,
+            },
+            |builder| builder.ssa_emitted_read(&wide),
+        )
+        .expect("typed wide read");
+    for iterations in [0, 1, 9] {
+        let mut values = std::collections::BTreeMap::new();
+        ssa_fixture_execute(&entry_body, &mut values);
+        for _ in 0..iterations {
+            ssa_fixture_execute(&latch_body, &mut values);
+        }
+        assert_eq!(ssa_fixture_eval(&read, &values), seed + iterations);
+    }
+}
+
+#[test]
+fn ssa_unused_phi_cycle_does_not_create_an_input_or_edge_move() {
+    for offset in [0x38, 0x00] {
+        let wide = register(REGISTER_SPACE_ID, offset, 8);
+        let narrow = Varnode {
+            size: 4,
+            ..wide.clone()
+        };
+        let next = test_support::varnode(0x900);
+        let mut entry = block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(wide.clone()), vec![constant(7)]),
+                op(1, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+            ],
+        );
+        entry.successors = vec![1];
+        let mut header = block_at(
+            0x2000,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(next.clone()),
+                    vec![narrow.clone()],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x4000), constant(1)],
+                ),
+            ],
+        );
+        header.successors = vec![2, 3];
+        let mut latch = block_at(
+            0x3000,
+            2,
+            vec![
+                op(
+                    4,
+                    PcodeOpcode::IntAdd,
+                    Some(narrow.clone()),
+                    vec![narrow, Varnode::constant(1, 4)],
+                ),
+                op(
+                    5,
+                    PcodeOpcode::IntZExt,
+                    Some(wide.clone()),
+                    vec![Varnode {
+                        size: 4,
+                        ..wide.clone()
+                    }],
+                ),
+                op(6, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+            ],
+        );
+        latch.successors = vec![1];
+        let exit = block_at(
+            0x4000,
+            3,
+            vec![op(7, PcodeOpcode::Return, None, vec![next])],
+        );
+        let pcode = pcode_function(vec![entry, header, latch, exit]);
+        let options = test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.prepare_ssa_emission();
+        assert!(!builder.ssa_emission.bindings.is_empty());
+        let unused = builder.scalar_ssa.phis[&1]
+            .iter()
+            .find(|phi| phi.storage.offset == offset + 4)
+            .expect("upper-piece phi");
+        // A complete return register may be consumed implicitly. Its upper
+        // piece is preserved despite the absence of an explicit operand.
+        let implicit_return = builder.register_namer().is_primary_return_register(&wide);
+        assert_eq!(
+            builder.ssa_emission.bindings.contains_key(&unused.output),
+            implicit_return
+        );
+        assert!(
+            builder.params.is_empty(),
+            "unused loop transport is not an ABI input"
+        );
+        assert_eq!(
+            builder
+                .ssa_emission
+                .copies
+                .values()
+                .flatten()
+                .any(|copy| copy.destination == unused.output),
+            implicit_return
+        );
+        builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+        builder.lower_block_stmts(&pcode.blocks[2]).unwrap();
+    }
+}
+
+#[test]
+fn rejected_ssa_emission_keeps_existing_bindings_unchanged() {
+    let carrier = register(REGISTER_SPACE_ID, 0x38, 8);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(7)],
+            ),
+            op(1, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    entry.successors = vec![1];
+    let mut loop_block = block_at(
+        0x2000,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(carrier.clone()),
+                vec![carrier.clone(), constant(1)],
+            ),
+            op(
+                3,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x2000), carrier.clone()],
+            ),
+        ],
+    );
+    loop_block.successors = vec![1, 2];
+    let exit = block_at(
+        0x3000,
+        2,
+        vec![op(4, PcodeOpcode::Return, None, vec![carrier])],
+    );
+    let pcode = pcode_function(vec![entry, loop_block, exit]);
+    let options = test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let invalid = SsaValueId(builder.scalar_ssa.values.len() as u32 + 1);
+    builder.scalar_ssa.out_of_ssa_copies[0].source = invalid;
+    let before_temps = builder.temps.clone();
+    let before_params = builder.params.clone();
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission.bindings.is_empty());
+    assert_eq!(builder.temps, before_temps);
+    assert_eq!(builder.params, before_params);
+}
+
+#[test]
+fn ssa_multiple_backedges_keep_the_final_value_and_decline_unproven_clones() {
+    let value = register(REGISTER_SPACE_ID, 0x38, 8);
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(value.clone()),
+                vec![constant(0x123456789abcdef0)],
+            ),
+            op(1, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    entry.successors = vec![1];
+    let mut header = block_at(
+        0x2000,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(test_support::varnode(0x9000)),
+                vec![value.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x6000), constant(1)],
+            ),
+        ],
+    );
+    header.successors = vec![2, 5];
+    let mut choose = block_at(
+        0x3000,
+        2,
+        vec![op(
+            4,
+            PcodeOpcode::CBranch,
+            None,
+            vec![constant(0x4000), constant(1)],
+        )],
+    );
+    choose.successors = vec![3, 4];
+    let mut first = block_at(
+        0x4000,
+        3,
+        vec![
+            op(
+                5,
+                PcodeOpcode::IntAdd,
+                Some(value.clone()),
+                vec![value.clone(), constant(1)],
+            ),
+            op(6, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    first.successors = vec![1];
+    let mut second = block_at(
+        0x5000,
+        4,
+        vec![
+            op(
+                7,
+                PcodeOpcode::IntAdd,
+                Some(value.clone()),
+                vec![value.clone(), constant(2)],
+            ),
+            op(8, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+        ],
+    );
+    second.successors = vec![1];
+    let exit = block_at(
+        0x6000,
+        5,
+        vec![op(9, PcodeOpcode::Return, None, vec![value.clone()])],
+    );
+    let pcode = pcode_function(vec![entry, header, choose, first, second, exit]);
+    let options = test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let mut cloned = builder.clone();
+    cloned.virtual_block_map.push(1);
+    let previous_temps = cloned.temps.clone();
+    let previous_params = cloned.params.clone();
+    cloned.prepare_ssa_emission();
+    assert!(cloned.ssa_emission.bindings.is_empty());
+    assert_eq!(cloned.temps, previous_temps);
+    assert_eq!(cloned.params, previous_params);
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission.storages.contains(&SsaStorageKey {
+        space_id: value.space_id,
+        offset: value.offset,
+        size: value.size
+    }));
+    let entry = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    let first = builder.lower_block_stmts(&pcode.blocks[3]).unwrap();
+    let second = builder.lower_block_stmts(&pcode.blocks[4]).unwrap();
+    let read = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 5,
+                op_idx: 0,
+            },
+            |b| b.ssa_emitted_read(&value),
+        )
+        .expect("post-loop identity");
+    for steps in [vec![], vec![1], vec![2], vec![1, 2, 2, 1]] {
+        let mut values = std::collections::BTreeMap::new();
+        ssa_fixture_execute(&entry, &mut values);
+        for step in &steps {
+            ssa_fixture_execute(if *step == 1 { &first } else { &second }, &mut values);
+        }
+        assert_eq!(
+            ssa_fixture_eval(&read, &values),
+            0x123456789abcdef0 + steps.iter().sum::<u64>()
+        );
+    }
+}

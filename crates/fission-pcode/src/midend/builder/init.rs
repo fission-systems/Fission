@@ -254,6 +254,7 @@ impl<'a> PreviewBuilder<'a> {
             heritage_successors,
             heritage_predecessors,
             scalar_ssa,
+            ssa_emission: super::ssa_emission::SsaEmissionPlan::default(),
             successors,
             predecessors,
             reachability_cache: std::cell::RefCell::new(BuilderCacheMap::default()),

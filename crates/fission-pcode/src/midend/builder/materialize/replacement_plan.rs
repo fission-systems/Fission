@@ -139,7 +139,7 @@ impl<'a> PreviewBuilder<'a> {
         spans
     }
 
-    pub(super) fn op_is_inside_same_block_forward_cmov_body(
+    pub(in crate::midend::builder) fn op_is_inside_same_block_forward_cmov_body(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,

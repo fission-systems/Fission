@@ -1674,7 +1674,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let pcode_idx = self.pcode_block_idx(idx);
         let block = &self.pcode.blocks[pcode_idx];
-        let lowered = if crate::midend::cfg::block_ends_in_proven_noreturn_call(
+        let mut lowered = if crate::midend::cfg::block_ends_in_proven_noreturn_call(
             block,
             self.options,
             self.type_context,
@@ -2318,6 +2318,13 @@ impl<'a> PreviewBuilder<'a> {
             LoweredTerminator::Fallthrough(self.next_block_address(idx))
         };
 
+        // Cache invalidation does not revoke an emitted edge decision. The
+        // actual plan, rather than a cache entry, owns its snapshot identity.
+        if let LoweredTerminator::Cond { cond, .. } = &mut lowered
+            && let Some(snapshot) = self.ssa_conditional_snapshot(idx)
+        {
+            *cond = PreHirExpr::Var(snapshot.to_owned());
+        }
         self.terminator_cache.insert(idx, lowered.clone());
         Ok(lowered)
     }
