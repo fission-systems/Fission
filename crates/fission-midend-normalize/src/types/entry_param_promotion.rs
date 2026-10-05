@@ -5,6 +5,7 @@
 //! for a parameter slot and the assignment appears in the leading linear prefix of the body.
 
 use crate::HashSet;
+use crate::analysis::defuse::DefUseMap;
 use fission_midend_core::ir::{NirBindingOrigin, NirType};
 use fission_midend_core::{AbiState, CallingConvention, float_param_bits_for_name};
 use fission_midend_prehir::util::rename_vars_in_stmts;
@@ -780,6 +781,7 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
 
     let mut seen_lhs = HashSet::default();
     let mut spill_to_slot: Vec<(String, usize, NirType)> = Vec::new();
+    let definitions = DefUseMap::build(&func.body);
 
     for stmt in &prefix {
         let PreHirStmt::Assign { lhs, rhs } = stmt else {
@@ -789,6 +791,12 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
             continue;
         };
         if lhs_name.starts_with("param_") {
+            continue;
+        }
+        // Whole-body renaming is valid only for a stable entry snapshot.
+        // Later writes belong to another lifetime even if the name still
+        // denotes the same physical spill/register storage.
+        if definitions.def_count.get(lhs_name).copied() != Some(1) {
             continue;
         }
         let Some(rhs_name) = peel_var_name(rhs) else {
@@ -932,5 +940,50 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["param_1", "param_2", "param_3", "param_4"]
         );
+    }
+
+    #[test]
+    fn redefined_entry_snapshot_keeps_its_local_lifetime() {
+        let mut func = register_save_function(None);
+        func.body.push(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("home_28".into()),
+            rhs: PreHirExpr::Const(
+                0x1234_5678_9abc_def0,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            ),
+        });
+        func.body
+            .push(PreHirStmt::Return(Some(PreHirExpr::Var("home_28".into()))));
+        apply_entry_param_promotion_pass(&mut func);
+        assert!(func.locals.iter().any(|binding| binding.name == "home_28"));
+        assert!(
+            matches!(func.body.last(), Some(PreHirStmt::Return(Some(PreHirExpr::Var(name)))) if name == "home_28")
+        );
+        assert!(!func.body.iter().any(|stmt| matches!(stmt, PreHirStmt::Assign { lhs: PreHirLValue::Var(name), rhs: PreHirExpr::Const(_, _) } if name == "param_1")));
+    }
+
+    #[test]
+    fn conditionally_redefined_entry_snapshot_is_not_a_formal() {
+        let mut func = register_save_function(None);
+        func.body.push(PreHirStmt::If {
+            cond: PreHirExpr::Var("condition".into()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("home_28".into()),
+                rhs: PreHirExpr::Const(
+                    17,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                ),
+            }]
+            .into(),
+            else_body: Vec::new().into(),
+        });
+        apply_entry_param_promotion_pass(&mut func);
+        assert!(func.locals.iter().any(|binding| binding.name == "home_28"));
     }
 }

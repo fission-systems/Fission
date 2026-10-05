@@ -75,6 +75,92 @@ fn test_options() -> MlilPreviewOptions {
 }
 
 #[test]
+fn scalar_ssa_read_keeps_the_exact_redefinition_identity() {
+    let carrier = register(0x38, 8);
+    let copy = varnode(0x9000);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(7)],
+            ),
+            op(1, PcodeOpcode::Copy, Some(copy), vec![carrier.clone()]),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(11)],
+            ),
+            op(3, PcodeOpcode::Return, None, vec![carrier.clone()]),
+        ],
+    )]);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    let first = LoweringSite {
+        block_idx: 0,
+        op_idx: 1,
+    };
+    let later = LoweringSite {
+        block_idx: 0,
+        op_idx: 3,
+    };
+    assert_ne!(
+        builder.scalar_ssa_value_at_use(&carrier, first),
+        builder.scalar_ssa_value_at_use(&carrier, later)
+    );
+    assert_eq!(
+        builder.scalar_ssa_definition_at_use(&carrier, first),
+        Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 0
+        })
+    );
+    assert_eq!(
+        builder.scalar_ssa_definition_at_use(&carrier, later),
+        Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 2
+        })
+    );
+}
+
+#[test]
+fn scalar_ssa_read_does_not_extrapolate_a_partial_storage_piece() {
+    let wide = register(0x38, 8);
+    let narrow = register(0x38, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(wide.clone()), vec![constant(7)]),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(narrow),
+                vec![constant_sized(11, 4)],
+            ),
+            op(2, PcodeOpcode::Return, None, vec![wide.clone()]),
+        ],
+    )]);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    assert_eq!(
+        builder.scalar_ssa_value_at_use(
+            &wide,
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 2
+            }
+        ),
+        None
+    );
+}
+
+#[test]
 fn wide_register_subpiece_projects_covering_passthrough_input_lane() {
     let mut source = varnode(0x9000);
     source.size = 8;

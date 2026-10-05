@@ -47,7 +47,7 @@ fn can_upgrade_binding_to_aggregate(
         return false;
     };
     match inner.as_ref() {
-        NirType::Unknown | NirType::Int { bits: 8 | 16, .. } => return true,
+        NirType::Unknown => return true,
         // Keep a populated aggregate's field identities and trusted types.
         // `update_binding` below can still refine its Unknown fields from the
         // observed access widths at matching byte offsets.
@@ -993,49 +993,71 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_fields_keeps_homogeneous_u32_pointer_array_like() {
-        let u32_ty = NirType::Int {
-            bits: 32,
-            signed: false,
-        };
-        let mut func = PreHirFunction {
-            variadic_fixed_arity: None,
-            name: "homogeneous_scalar_offsets".to_string(),
-            int_param_offsets: Vec::new(),
-            float_param_offsets: Vec::new(),
-            float_shares_int_slots: false,
-            params: vec![PreHirBinding {
-                name: "values".to_string(),
-                ty: NirType::Ptr(Box::new(u32_ty.clone())),
-                surface_type_name: None,
-                origin: Some(NirBindingOrigin::ParamIndex(0)),
-                initializer: None,
-            }],
-            locals: Vec::new(),
-            return_type: NirType::Unknown,
-            surface_return_type_name: None,
-            body: vec![
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::Var("values".to_string())),
-                    ty: u32_ty.clone(),
-                }),
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::PtrOffset {
-                        base: Box::new(PreHirExpr::Var("values".to_string())),
-                        offset: 4,
+    fn aggregate_fields_keeps_homogeneous_integer_pointers_array_like() {
+        for bits in [8, 16, 32, 64] {
+            let u32_ty = NirType::Int {
+                bits,
+                signed: false,
+            };
+            let mut func = PreHirFunction {
+                variadic_fixed_arity: None,
+                name: "homogeneous_scalar_offsets".to_string(),
+                int_param_offsets: Vec::new(),
+                float_param_offsets: Vec::new(),
+                float_shares_int_slots: false,
+                params: vec![PreHirBinding {
+                    name: "values".to_string(),
+                    ty: NirType::Ptr(Box::new(u32_ty.clone())),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(0)),
+                    initializer: None,
+                }],
+                locals: Vec::new(),
+                return_type: NirType::Unknown,
+                surface_return_type_name: None,
+                body: vec![
+                    PreHirStmt::Expr(PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("values".to_string())),
+                        ty: u32_ty.clone(),
                     }),
-                    ty: u32_ty.clone(),
-                }),
-            ],
-            calling_convention: Default::default(),
-            is_64bit: true,
-            suppress_entry_register_params: false,
-            callee_observed_max_arity: Default::default(),
-            callee_summaries: Default::default(),
-        };
+                    PreHirStmt::Expr(PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::PtrOffset {
+                            base: Box::new(PreHirExpr::Var("values".to_string())),
+                            offset: i64::from(bits / 8),
+                        }),
+                        ty: u32_ty.clone(),
+                    }),
+                ],
+                calling_convention: Default::default(),
+                is_64bit: true,
+                suppress_entry_register_params: false,
+                callee_observed_max_arity: Default::default(),
+                callee_summaries: Default::default(),
+            };
 
-        assert!(!apply_aggregate_fields_pass(&mut func));
-        assert_eq!(func.params[0].ty, NirType::Ptr(Box::new(u32_ty)));
+            assert!(!apply_aggregate_fields_pass(&mut func));
+            assert_eq!(func.params[0].ty, NirType::Ptr(Box::new(u32_ty.clone())));
+            // Known record fields remain authoritative even when homogeneous.
+            let known = NirType::Ptr(Box::new(NirType::Aggregate {
+                size: bits / 4,
+                fields: vec![
+                    StructField {
+                        offset: 0,
+                        ty: u32_ty.clone(),
+                        name: "first".into(),
+                    },
+                    StructField {
+                        offset: bits / 8,
+                        ty: u32_ty,
+                        name: "second".into(),
+                    },
+                ],
+            }));
+            func.params[0].ty = known.clone();
+            func.params[0].surface_type_name = Some("KnownRecord *".into());
+            assert!(!apply_aggregate_fields_pass(&mut func));
+            assert_eq!(func.params[0].ty, known);
+        }
     }
 
     #[test]

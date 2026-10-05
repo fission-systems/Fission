@@ -1020,6 +1020,13 @@ impl<'a> PreviewBuilder<'a> {
                 let Some(output) = &op.output else {
                     continue;
                 };
+                if self.ssa_emission.storages.contains(&SsaStorageKey {
+                    space_id: output.space_id,
+                    offset: output.offset,
+                    size: output.size,
+                }) {
+                    continue;
+                }
                 if !matches!(
                     Self::classify_merge_binding_candidate_incoming_kind(op),
                     MergeBindingCandidateIncomingKind::VarOrConst
@@ -1119,6 +1126,9 @@ impl<'a> PreviewBuilder<'a> {
         // site).
         if let Some(phis) = self.scalar_ssa.phis.get(&(block_idx as u32)).cloned() {
             for phi in &phis {
+                if self.ssa_emission.storages.contains(&phi.storage) {
+                    continue;
+                }
                 if !self.phi_output_is_consumed_in_block(block_idx, phi.output) {
                     continue;
                 }

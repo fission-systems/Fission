@@ -138,6 +138,10 @@ fn strip_redundant_casts_in_expr_with_context(
                     | PreHirBinaryOp::SLe
                     | PreHirBinaryOp::SGt
                     | PreHirBinaryOp::SGe
+                    | PreHirBinaryOp::Div
+                    | PreHirBinaryOp::Mod
+                    | PreHirBinaryOp::Shr
+                    | PreHirBinaryOp::Sar
             );
             changed |= strip_redundant_casts_in_expr_with_context(lhs, type_map, preserve_operands);
             changed |= strip_redundant_casts_in_expr_with_context(rhs, type_map, preserve_operands);
@@ -169,8 +173,9 @@ fn strip_redundant_casts_in_expr_with_context(
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         if let PreHirExpr::Var(name) = inner.as_ref() {
             if let Some(var_ty) = type_map.get(name) {
-                // Comparison views survive intermediate binding types: a
-                // subsequent alias or type refinement may widen the carrier.
+                // Comparison and division/shift views survive intermediate
+                // binding types. Later signedness or width refinement must
+                // not change unsigned storage extraction into signed division.
                 let is_integer_compare_boundary =
                     is_integer_compare_operand && matches!(ty, NirType::Int { .. });
                 if var_ty == ty && !is_integer_compare_boundary {
@@ -989,6 +994,43 @@ mod tests {
 #[cfg(test)]
 mod comparison_view_tests {
     use super::*;
+
+    #[test]
+    fn redundant_cast_cleanup_preserves_division_and_shift_views_before_type_refinement() {
+        let unsigned = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let signed = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        for op in [
+            PreHirBinaryOp::Div,
+            PreHirBinaryOp::Mod,
+            PreHirBinaryOp::Shr,
+            PreHirBinaryOp::Sar,
+        ] {
+            for binding_ty in [unsigned.clone(), signed.clone()] {
+                let types = HashMap::from_iter([("carrier".into(), binding_ty)]);
+                let mut expr = PreHirExpr::Binary {
+                    op,
+                    lhs: Box::new(PreHirExpr::Cast {
+                        ty: unsigned.clone(),
+                        expr: Box::new(PreHirExpr::Var("carrier".into())),
+                    }),
+                    rhs: Box::new(PreHirExpr::Const(8, unsigned.clone())),
+                    ty: unsigned.clone(),
+                };
+                let original = expr.clone();
+                assert!(!strip_redundant_casts_in_expr(&mut expr, &types));
+                assert_eq!(
+                    expr, original,
+                    "the storage view must survive a later signed binding"
+                );
+            }
+        }
+    }
 
     #[test]
     fn assignment_cast_elision_resolves_variable_width_before_removing_conversion() {

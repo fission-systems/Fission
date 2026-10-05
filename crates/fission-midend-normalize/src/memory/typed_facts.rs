@@ -551,6 +551,56 @@ mod tests {
     }
 
     #[test]
+    fn typed_fact_inventory_does_not_rebase_a_redefined_cursor_onto_its_formal() {
+        let byte = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let binding = |name: &str, origin| PreHirBinding {
+            name: name.into(),
+            ty: NirType::Ptr(Box::new(byte.clone())),
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        };
+        let copy = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("cursor".into()),
+            rhs: PreHirExpr::Var("formal".into()),
+        };
+        let access = PreHirStmt::Expr(PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("cursor".into())),
+                offset: 1,
+            }),
+            ty: byte.clone(),
+        });
+        let mut func = PreHirFunction {
+            params: vec![binding("formal", NirBindingOrigin::ParamIndex(0))],
+            locals: vec![binding("cursor", NirBindingOrigin::Temp)],
+            body: vec![copy, access],
+            ..Default::default()
+        };
+        assert!(
+            collect_typed_fact_inventory(&func, false)
+                .objects
+                .contains_key("formal")
+        );
+        func.body.insert(
+            1,
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cursor".into()),
+                rhs: PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("cursor".into())),
+                    offset: 1,
+                },
+            },
+        );
+        let inventory = collect_typed_fact_inventory(&func, false);
+        assert!(!inventory.objects.contains_key("formal"));
+        assert!(inventory.objects["cursor"].accesses.contains_key(&1));
+    }
+
+    #[test]
     fn typed_fact_inventory_prefers_explicit_surface_type() {
         let func = PreHirFunction {
             name: "rect".to_string(),

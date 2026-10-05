@@ -32,7 +32,10 @@ impl<'a> PreviewBuilder<'a> {
                 .all(|(use_idx, _)| use_idx == term_idx)
     }
 
-    pub(super) fn output_is_stack_pointer_register(&self, output: &Varnode) -> bool {
+    pub(in crate::midend::builder) fn output_is_stack_pointer_register(
+        &self,
+        output: &Varnode,
+    ) -> bool {
         self.stack_pointer_register_name(output)
             .is_some_and(|name| matches!(name.as_str(), "rsp" | "esp" | "sp"))
     }

@@ -21,6 +21,7 @@ mod materialize;
 mod memory;
 mod pointee_layout;
 mod scalar_ssa;
+mod ssa_emission;
 pub(in crate::midend) use scalar_ssa::resolve_lifted_direct_call_target;
 mod stats;
 pub(super) mod switch_table;
@@ -598,6 +599,7 @@ impl<'a> PreviewBuilder<'a> {
 
         self.run_incremental_heritage()?;
         self.prime_call_result_bindings();
+        self.prepare_ssa_emission();
 
         let mut body = Vec::new();
         if self.pcode.blocks.len() == 1 {
