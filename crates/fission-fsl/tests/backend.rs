@@ -138,9 +138,10 @@ fn registry_extension_is_open_and_duplicate_or_invalid_ids_refuse() {
     let mut r = BackendRegistry::with_builtin_sources();
     assert_eq!(
         r.descriptors().iter().map(|d| d.id).collect::<Vec<_>>(),
-        ["c", "rust"]
+        ["c", "go", "rust"]
     );
-    assert!(r.get("go").is_none());
+    assert!(r.get("go").is_some());
+    assert!(r.get("python").is_none());
     let d = BackendDescriptor {
         id: "test-provider",
         dialect: "test1",

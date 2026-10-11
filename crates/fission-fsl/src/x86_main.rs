@@ -40,8 +40,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
         "decompile-binary PACKAGE BINARY ADDRESS SIZE fir|c|rust OUTPUT | ",
         "recover-binary PACKAGE BINARY ADDRESS SIZE OUTPUT | ",
-        "plan-binary PACKAGE BINARY ADDRESS SIZE c|rust | ",
-        "bundle-binary PACKAGE BINARY ADDRESS SIZE c|rust NEW_DIRECTORY | ",
+        "plan-binary PACKAGE BINARY ADDRESS SIZE c|rust|go | ",
+        "bundle-binary PACKAGE BINARY ADDRESS SIZE c|rust|go NEW_DIRECTORY | ",
         "execute-memory-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET | ",
         "execute PACKAGE MODE BASE HEX REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET | ",
         "execute-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET"
@@ -77,7 +77,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let registry = BackendRegistry::with_builtin_sources();
             let backend = registry
                 .get(&a[5])
-                .ok_or("unregistered source backend; available: c, rust")?;
+                .ok_or("unregistered source backend; available: c, rust, go")?;
             let package = X86Package::decode_binary(&fs::read(&a[1])?)?;
             let program =
                 X86Program::from_binary(&package, Path::new(&a[2]), number(&a[3])?, a[4].parse()?)?;

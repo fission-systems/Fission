@@ -445,3 +445,21 @@ certify compilation or execution equivalence.
 See [the API and CLI contract](../../docs/research/fsl-output-backend-contract.md).
 `fsl-x86 plan-binary` and `bundle-binary` accept the same selected binary window
 as `decompile-binary`. Go and managed language backends are not implemented.
+
+## Go source backend
+
+The registry now also provides `go` (`go1.25`). The same canonical FIR and
+checked execution contracts produce fixed-width arithmetic, stack/scalar CFG,
+masked wave state and bounded x86 window source. Generated code imports no
+external packages. See [the Go ABI, CLI and limits](../../docs/research/fsl-go-backend.md).
+
+```sh
+fslc emit-backend PACKAGE INSTRUCTION go output.go
+fsl-x86 bundle-binary PACKAGE BINARY ADDRESS SIZE go NEW_DIRECTORY
+go build -o output.a output.go
+```
+
+Previous source-backend sections are historical first-slice scope; C/Rust output
+bytes remain locked. Go uses internal transaction snapshots and explicitly
+refuses overlapping output banks. General source signatures and host resource
+failures are outside this execution contract.

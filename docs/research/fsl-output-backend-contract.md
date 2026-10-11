@@ -1,5 +1,9 @@
 # Output backend contract, first slice
 
+Historical C/Rust scope at `cc02f3be7`. The registry now also supports
+[Go instruction/window projections](fsl-go-backend.md); the earlier limits and
+counts below describe this first slice.
+
 C and Rust source emission now share `backend::OutputBackend`: `descriptor`,
 `plan`, and `emit`. The input is a borrow of canonical `CompiledInstruction` or
 an owned-frontend `X86Program` window. This does not introduce another semantic

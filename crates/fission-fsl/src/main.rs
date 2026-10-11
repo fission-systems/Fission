@@ -272,6 +272,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let status = execute_wave(&package, &decoded, &mut state)?;
             println!("status={status:?} lanes={} exec=0x{:x} registers={:?} flags={:?} lane_registers={:?}", state.lanes, state.exec, state.scalar.registers, state.scalar.flags, state.lane_registers);
         }
+        "emit-backend" => {
+            use fission_fsl::backend::{BackendRegistry, ProjectionInput, TargetProfile};
+            let package = load_package(&required_arg(&mut args, "compiled .fslc path")?)?;
+            let name = required_arg(&mut args, "instruction name")?;
+            let backend_id = required_arg(&mut args, "registered backend id")?;
+            let output = required_arg(&mut args, "output path")?;
+            reject_extra_args(args)?;
+            let registry = BackendRegistry::with_builtin_sources();
+            let backend = registry
+                .get(&backend_id)
+                .ok_or("unregistered source backend")?;
+            let body = package
+                .instructions
+                .iter()
+                .find(|b| b.name == name)
+                .ok_or("instruction not found")?;
+            let plan = backend.plan(
+                ProjectionInput::Instruction {
+                    body,
+                    symbol: "fsl_execute",
+                },
+                &TargetProfile::for_backend(backend),
+            )?;
+            let bundle = backend.emit(&plan)?;
+            fs::write(output, &bundle.sources[0].source)?;
+        }
         "execute-state" | "emit-bytes" => {
             let path = required_arg(&mut args, "compiled .fslc path")?;
             let language = required_arg(&mut args, "exact input profile")?;
@@ -531,6 +557,7 @@ fn print_usage() {
     eprintln!("  execute-wave <package> <profile> <hex> <lanes> <exec> <scalar-csv> <flags-csv> <lane-slots-csv>");
     eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust|cuda|ptx> <output>");
     eprintln!("usage:");
+    eprintln!("  fslc emit-backend PACKAGE INSTRUCTION c|rust|go OUTPUT");
     eprintln!("  fslc library-inspect <library.fsldb>");
     eprintln!("  fslc library-query <library.fsldb> <exact-symbol>");
     eprintln!("  fslc check <source.fsl>");

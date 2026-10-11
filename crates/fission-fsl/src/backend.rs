@@ -480,6 +480,102 @@ impl OutputBackend for SourceBackend {
     }
 }
 
+/// Go 1.25 source provider over the same canonical admission contexts.
+#[derive(Clone, Copy, Debug)]
+pub struct GoBackend;
+impl OutputBackend for GoBackend {
+    fn descriptor(&self) -> BackendDescriptor {
+        BackendDescriptor {
+            id: "go",
+            revision: 1,
+            dialect: "go1.25",
+            extension: "go",
+            contexts: SOURCE_CONTEXTS,
+        }
+    }
+    fn plan<'a>(
+        &self,
+        input: ProjectionInput<'a>,
+        target: &TargetProfile,
+    ) -> Result<ProjectionPlan<'a>, UnsupportedReport> {
+        let plan = ProjectionPlan::checked(self.descriptor(), input, target)?;
+        match input {
+            ProjectionInput::Instruction { symbol, .. } if symbol.starts_with("fsl_runtime_") => {
+                return Err(UnsupportedReport {
+                    backend: "go",
+                    code: RejectionCode::InvalidSymbol,
+                    body: None,
+                    operation: None,
+                    message: "fsl_runtime_ namespace is reserved by Go helpers".into(),
+                });
+            }
+            _ => {}
+        }
+        Ok(plan)
+    }
+    fn emit(&self, plan: &ProjectionPlan<'_>) -> Result<ArtifactBundle, UnsupportedReport> {
+        if self.descriptor() != plan.descriptor {
+            return Err(UnsupportedReport {
+                backend: "go",
+                code: RejectionCode::BackendMismatch,
+                body: None,
+                operation: None,
+                message: "plan belongs to a different backend/revision".into(),
+            });
+        }
+        // Recheck provider-specific constraints even for a directly checked plan.
+        self.plan(plan.input, &plan.target)?;
+        let (source, origins) = match plan.input {
+            ProjectionInput::Instruction { body, symbol } => (
+                crate::go_output::instruction(body, symbol)
+                    .map_err(|e| body_rejection(self.descriptor(), body, e))?,
+                vec![OriginAssociation {
+                    body: body.name.clone(),
+                    source_symbol: symbol.into(),
+                    guest_address: None,
+                    raw_hex: None,
+                    input_offset: None,
+                    byte_length: None,
+                }],
+            ),
+            #[cfg(feature = "x86")]
+            ProjectionInput::X86Window(program) => (
+                program.emit_go().map_err(|e| UnsupportedReport {
+                    backend: "go",
+                    code: RejectionCode::UnsupportedSemantics,
+                    body: None,
+                    operation: None,
+                    message: e.to_string(),
+                })?,
+                program.projection_origins(),
+            ),
+        };
+        let mut report = plan.describe();
+        report.push_str("origin-mapping=symbol-level; statement positions unavailable\n");
+        for origin in &origins {
+            report.push_str(&format!("origin body={:?} source-symbol={:?} guest-address={:?} raw={:?} input-offset={:?} byte-length={:?}\n",origin.body,origin.source_symbol,origin.guest_address,origin.raw_hex,origin.input_offset,origin.byte_length));
+        }
+        Ok(ArtifactBundle {
+            descriptor: self.descriptor(),
+            sources: vec![SourceArtifact {
+                name: "output.go".into(),
+                source,
+            }],
+            build: BuildRecipe {
+                tool: "go",
+                arguments: vec![
+                    "build".into(),
+                    "-o".into(),
+                    "output.a".into(),
+                    "output.go".into(),
+                ],
+            },
+            origins,
+            report,
+        })
+    }
+}
+
 /// In-process extension point. No dynamic libraries or external dependencies are
 /// loaded. Duplicate IDs refuse instead of replacing a registered provider.
 #[derive(Default)]
@@ -495,6 +591,9 @@ impl BackendRegistry {
         value
             .register(Box::new(SourceBackend::Rust))
             .expect("valid Rust descriptor");
+        value
+            .register(Box::new(GoBackend))
+            .expect("valid Go descriptor");
         value
     }
     pub fn register(&mut self, provider: Box<dyn OutputBackend>) -> Result<(), UnsupportedReport> {

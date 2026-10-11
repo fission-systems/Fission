@@ -622,6 +622,74 @@ impl X86Program {
             self.emit_implementation(layer)
         }
     }
+    pub(crate) fn emit_go(&self) -> Result<String, FslError> {
+        let mut out = crate::go_output::PRELUDE.to_string();
+        writeln!(
+            out,
+            "// x86 mode={} input-sha256={} package-sha256={} decoder={}",
+            self.mode,
+            hash(&self.input),
+            hash(&self.package.encode_binary()?),
+            self.package.decoder()
+        )
+        .unwrap();
+        if let Some(b) = &self.binary {
+            writeln!(
+                out,
+                "// binary file-sha256={} file-offset={}",
+                b.file_sha256, b.file_offset
+            )
+            .unwrap();
+        }
+        for id in self
+            .instances
+            .iter()
+            .map(|i| i.observation.instruction_index)
+            .collect::<BTreeSet<_>>()
+        {
+            out += &crate::go_output::state_body(
+                &self.package.bodies.instructions[id],
+                &format!("x86_body_{id}"),
+            )?;
+        }
+        out+="// Explicit banks: GPR[17], flags[12], bounded byte memory. Concurrent access is unsupported.\n// Status 0 commits state/exit. Status 3 preserves caller state/memory/exit.\nfunc fsl_x86(registers, flags []uint64, memory []byte, memory_base uint64, budget int, exit_pc *uint64) uint32 {\nif len(registers)!=17 || len(flags)!=12 || registers[16]!=0 || budget<=0 || budget>1000000 || exit_pc==nil || memory_base>^uint64(0)-uint64(len(memory)) || !fsl_runtime_disjoint(registers,flags) { return 3 }\nfor i, flag:=range flags { if flag>1 || (i>=6 && flag!=1) { return 3 }; if &flags[i]==exit_pc { return 3 } }\nfor i:=range registers { if &registers[i]==exit_pc { return 3 } }\nr:=append([]uint64(nil),registers...); f:=append([]uint64(nil),flags...)\n";
+        if self.writes_memory() {
+            writeln!(out,"if len(memory)>{} {{ return 3 }}\ndestination_memory:=memory; memory=append([]byte(nil),memory...)",state::MAX_TRANSACTION_BYTES).unwrap();
+        }
+        writeln!(
+            out,
+            "pc:=uint64(0x{:x})\nfor step:=0;step<budget;step++ {{ switch pc {{",
+            self.base
+        )
+        .unwrap();
+        for i in &self.instances {
+            let id = i.observation.instruction_index;
+            let fields = i
+                .observation
+                .fields
+                .iter()
+                .map(|(_, v)| format!("0x{v:x}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(out,"case 0x{:x}: // raw={}\nfields:=[]uint64{{{fields}}}\nstatus,next,changed:=x86_body_{id}(r,f,fields,pc,memory,memory_base)\nif status!=0 {{ return status }}",i.origin.address,hex(&i.raw)).unwrap();
+            if i.returns {
+                out += "if !changed { return 3 }; copy(registers,r); copy(flags,f); ";
+                if self.writes_memory() {
+                    out += "copy(destination_memory,memory); ";
+                }
+                out += "*exit_pc=next; return 0\n";
+            } else {
+                writeln!(
+                    out,
+                    "if changed {{ pc=next }} else {{ pc=0x{:x} }}",
+                    i.origin.address + u64::from(i.origin.byte_length)
+                )
+                .unwrap();
+            }
+        }
+        out += "default: return 3\n} }\nreturn 3\n}\n";
+        Ok(out)
+    }
     pub(crate) fn emit_implementation(&self, layer: OutputLayer) -> Result<String, FslError> {
         if layer == OutputLayer::Fir {
             let mut out=format!("x86 program mode={} base=0x{:x} bytes={} decoder={} input-sha256={} package-sha256={}\n",self.mode,self.base,self.input.len(),self.package.decoder(),hash(&self.input),hash(&self.package.encode_binary()?));

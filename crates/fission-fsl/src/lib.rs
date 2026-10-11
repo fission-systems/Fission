@@ -10,6 +10,7 @@ pub mod abi;
 pub mod backend;
 pub mod control;
 pub mod encoding;
+mod go_output;
 mod gpu_output;
 pub mod jit;
 pub mod library;
