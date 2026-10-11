@@ -15,7 +15,7 @@ use serde_json::json;
 
 use crate::cli::args::{DbArgs, DbCommand};
 use fission_loader::loader::LoadedBinary;
-use fission_project::Project;
+use fission_project::{Project, ProjectLock};
 
 pub fn run(args: DbArgs) -> Result<()> {
     let mut binary = LoadedBinary::from_file(&args.binary)
@@ -29,6 +29,15 @@ pub fn run(args: DbArgs) -> Result<()> {
     );
     let path = Project::default_path(&args.binary);
 
+    let read_only = matches!(
+        &args.command,
+        DbCommand::Show | DbCommand::History | DbCommand::Diff { .. }
+    );
+    let lock = if read_only {
+        None
+    } else {
+        Some(ProjectLock::acquire(&path)?)
+    };
     let mut project = match Project::read(&path).map_err(|e| anyhow::anyhow!("{e}"))? {
         Some(existing) => {
             if !existing.matches(&binary) {
@@ -43,14 +52,62 @@ pub fn run(args: DbArgs) -> Result<()> {
         None => Project::for_binary(&binary),
     };
 
+    let before = project.clone();
+    let history_move = matches!(&args.command, DbCommand::Undo | DbCommand::Redo);
+    let mut reports = Vec::new();
     match args.command {
         DbCommand::Show => return show(&project, &path, args.json),
+        DbCommand::History => {
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&project.history)?);
+            } else {
+                for (index, revision) in project.history.revisions().iter().enumerate() {
+                    let status = if index < project.history.cursor() {
+                        "applied"
+                    } else {
+                        "undone"
+                    };
+                    println!(
+                        "revision {} ({status}): {} change(s)",
+                        revision.id,
+                        revision.changes.len()
+                    );
+                    println!("{}", serde_json::to_string_pretty(&revision.changes)?);
+                }
+                if project.history.is_empty() {
+                    println!("(no recorded edits)");
+                }
+            }
+            return Ok(());
+        }
+        DbCommand::Diff { other } => {
+            let other_project = Project::read(&other)?
+                .with_context(|| format!("no project at {}", other.display()))?;
+            let changes = project.diff(&other_project)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({ "changes": changes }))?
+            );
+            return Ok(());
+        }
+        command @ (DbCommand::Undo | DbCommand::Redo) => {
+            let (action, revision) = if matches!(command, DbCommand::Undo) {
+                ("undo", project.undo()?)
+            } else {
+                ("redo", project.redo()?)
+            };
+            report(
+                &mut reports,
+                json!({ "action": action, "revision": revision }),
+                || format!("{action} revision {revision}"),
+            );
+        }
 
         DbCommand::Name { addr, name } => {
             require_function(&binary, addr)?;
             let previous = project.set_name(addr, &name);
             report(
-                args.json,
+                &mut reports,
                 json!({
                     "action": "name",
                     "address": format!("0x{addr:x}"),
@@ -69,7 +126,7 @@ pub fn run(args: DbArgs) -> Result<()> {
                 bail!("no name recorded at 0x{addr:x}");
             };
             report(
-                args.json,
+                &mut reports,
                 json!({
                     "action": "rm-name",
                     "address": format!("0x{addr:x}"),
@@ -86,7 +143,7 @@ pub fn run(args: DbArgs) -> Result<()> {
             let rendered = fission_project::signature_syntax::render(&parsed);
             let previous = project.set_signature(addr, parsed);
             report(
-                args.json,
+                &mut reports,
                 json!({
                     "action": "sig",
                     "address": format!("0x{addr:x}"),
@@ -104,7 +161,7 @@ pub fn run(args: DbArgs) -> Result<()> {
                 bail!("no signature recorded at 0x{addr:x}");
             }
             report(
-                args.json,
+                &mut reports,
                 json!({ "action": "rm-sig", "address": format!("0x{addr:x}") }),
                 || format!("0x{addr:012x}  signature removed"),
             );
@@ -113,7 +170,7 @@ pub fn run(args: DbArgs) -> Result<()> {
         DbCommand::Note { addr, text } => {
             project.set_comment(addr, &text);
             report(
-                args.json,
+                &mut reports,
                 json!({
                     "action": "note",
                     "address": format!("0x{addr:x}"),
@@ -128,7 +185,7 @@ pub fn run(args: DbArgs) -> Result<()> {
                 bail!("no note recorded at 0x{addr:x}");
             }
             report(
-                args.json,
+                &mut reports,
                 json!({ "action": "rm-note", "address": format!("0x{addr:x}") }),
                 || format!("0x{addr:012x}  note removed"),
             );
@@ -137,7 +194,7 @@ pub fn run(args: DbArgs) -> Result<()> {
         DbCommand::Bp { addr } => {
             let added = project.add_breakpoint(addr);
             report(
-                args.json,
+                &mut reports,
                 json!({
                     "action": "bp",
                     "address": format!("0x{addr:x}"),
@@ -158,17 +215,33 @@ pub fn run(args: DbArgs) -> Result<()> {
                 bail!("no breakpoint recorded at 0x{addr:x}");
             }
             report(
-                args.json,
+                &mut reports,
                 json!({ "action": "rm-bp", "address": format!("0x{addr:x}") }),
                 || format!("0x{addr:012x}  breakpoint removed"),
             );
         }
     }
 
-    project
-        .write(&path)
-        .map_err(|e| anyhow::anyhow!("{e}"))
+    let revision = if history_move {
+        None
+    } else {
+        project.record_edit(&before)?
+    };
+    lock.as_ref()
+        .expect("mutating command owns its project lock")
+        .write(&project)
         .with_context(|| format!("failed to save {}", path.display()))?;
+    // A success payload describes committed bytes, never a pending edit.
+    for (mut value, text) in reports {
+        if !history_move {
+            value["revision"] = json!(revision);
+        }
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        } else {
+            println!("{text}");
+        }
+    }
     Ok(())
 }
 
@@ -231,13 +304,10 @@ fn show(project: &Project, path: &std::path::Path, json_out: bool) -> Result<()>
     Ok(())
 }
 
-fn report(json_out: bool, value: serde_json::Value, text: impl FnOnce() -> String) {
-    if json_out {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
-        );
-    } else {
-        println!("{}", text());
-    }
+fn report(
+    reports: &mut Vec<(serde_json::Value, String)>,
+    value: serde_json::Value,
+    text: impl FnOnce() -> String,
+) {
+    reports.push((value, text()));
 }
