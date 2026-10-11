@@ -433,3 +433,15 @@ cargo run -p fission-fsl --features x86 --bin fsl-x86 -- compile \
   crates/fission-fsl/specs/x86/scalar-immediate.fslx \
   crates/fission-fsl/specs/x86/scalar-immediate-bodies.fsl /tmp/immediate.fslxc
 ```
+
+## Source backend interface
+
+C/Rust projections now use checked `OutputBackend` plans over borrowed canonical
+FIR. `BackendRegistry` supports in-process providers; builtin IDs are `c` and
+`rust`. Plans record requirements and refuse incompatible contracts. Bundles
+include sources, build recipes and symbol-level origins; generation does not
+certify compilation or execution equivalence.
+
+See [the API and CLI contract](../../docs/research/fsl-output-backend-contract.md).
+`fsl-x86 plan-binary` and `bundle-binary` accept the same selected binary window
+as `decompile-binary`. Go and managed language backends are not implemented.

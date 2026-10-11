@@ -16,12 +16,43 @@ pub enum OutputLayer {
     Ptx,
 }
 
+/// Compatibility entry point; C/Rust use the checked backend contract.
+pub fn emit_instruction(
+    instruction: &CompiledInstruction,
+    layer: OutputLayer,
+    symbol: &str,
+) -> Result<String, FslError> {
+    use crate::backend::{OutputBackend, ProjectionInput, SourceBackend, TargetProfile};
+    if let Some(backend) = SourceBackend::from_layer(layer) {
+        let plan = backend
+            .plan(
+                ProjectionInput::Instruction {
+                    body: instruction,
+                    symbol,
+                },
+                &TargetProfile::for_backend(&backend),
+            )
+            .map_err(|e| FslError::at(1, 1, e.to_string()))?;
+        let bundle = backend
+            .emit(&plan)
+            .map_err(|e| FslError::at(1, 1, e.to_string()))?;
+        Ok(bundle
+            .sources
+            .into_iter()
+            .next()
+            .expect("source backend emits one file")
+            .source)
+    } else {
+        emit_instruction_implementation(instruction, layer, symbol)
+    }
+}
+
 /// Project one FIR instruction into diagnostic FIR or compilable source.
 /// Executable output uses unsigned bit-vector slots even for signed FIR types,
 /// preserving wrapping arithmetic without signed-overflow undefined behavior.
 /// Symbols must start with `fsl_` and contain ASCII identifier characters.
 /// C callers must provide a depth pointer disjoint from the stack storage.
-pub fn emit_instruction(
+pub(crate) fn emit_instruction_implementation(
     instruction: &CompiledInstruction,
     layer: OutputLayer,
     symbol: &str,

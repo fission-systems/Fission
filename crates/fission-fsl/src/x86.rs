@@ -578,7 +578,51 @@ impl X86Program {
         out += "limits=flat-memory; no ABI selection, source prototype, argument count, signedness, pointer type or completeness proof; unknown control analysis refuses\n";
         Ok(out)
     }
+    pub(crate) fn projection_bodies(&self) -> Vec<&crate::CompiledInstruction> {
+        self.instances
+            .iter()
+            .map(|i| i.observation.instruction_index)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|id| &self.package.bodies.instructions[id])
+            .collect()
+    }
+    pub(crate) fn projection_origins(&self) -> Vec<crate::backend::OriginAssociation> {
+        self.instances
+            .iter()
+            .map(|i| crate::backend::OriginAssociation {
+                body: self.package.bodies.instructions[i.observation.instruction_index]
+                    .name
+                    .clone(),
+                source_symbol: format!("x86_body_{}", i.observation.instruction_index),
+                guest_address: Some(i.origin.address),
+                raw_hex: Some(hex(&i.raw)),
+                input_offset: Some(i.origin.input_offset),
+                byte_length: Some(i.origin.byte_length),
+            })
+            .collect()
+    }
     pub fn emit(&self, layer: OutputLayer) -> Result<String, FslError> {
+        use crate::backend::{OutputBackend, ProjectionInput, SourceBackend, TargetProfile};
+        if let Some(backend) = SourceBackend::from_layer(layer) {
+            let plan = backend
+                .plan(
+                    ProjectionInput::X86Window(self),
+                    &TargetProfile::for_backend(&backend),
+                )
+                .map_err(|e| error(e.to_string()))?;
+            let bundle = backend.emit(&plan).map_err(|e| error(e.to_string()))?;
+            Ok(bundle
+                .sources
+                .into_iter()
+                .next()
+                .expect("source backend emits one file")
+                .source)
+        } else {
+            self.emit_implementation(layer)
+        }
+    }
+    pub(crate) fn emit_implementation(&self, layer: OutputLayer) -> Result<String, FslError> {
         if layer == OutputLayer::Fir {
             let mut out=format!("x86 program mode={} base=0x{:x} bytes={} decoder={} input-sha256={} package-sha256={}\n",self.mode,self.base,self.input.len(),self.package.decoder(),hash(&self.input),hash(&self.package.encode_binary()?));
             if let Some(b) = &self.binary {

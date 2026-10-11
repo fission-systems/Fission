@@ -1,5 +1,6 @@
 //! Experimental FIR decompilation entry point, separate from product routing.
 use fission_fsl::{
+    backend::{BackendRegistry, ProjectionInput, TargetProfile},
     x86::{X86Package, X86Program},
     MachineState, OutputLayer,
 };
@@ -39,6 +40,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
         "decompile-binary PACKAGE BINARY ADDRESS SIZE fir|c|rust OUTPUT | ",
         "recover-binary PACKAGE BINARY ADDRESS SIZE OUTPUT | ",
+        "plan-binary PACKAGE BINARY ADDRESS SIZE c|rust | ",
+        "bundle-binary PACKAGE BINARY ADDRESS SIZE c|rust NEW_DIRECTORY | ",
         "execute-memory-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET | ",
         "execute PACKAGE MODE BASE HEX REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET | ",
         "execute-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET"
@@ -67,6 +70,41 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 X86Program::from_binary(&p, Path::new(&a[2]), number(&a[3])?, a[4].parse()?)?;
             fs::write(&a[6], program.emit(layer(&a[5])?)?)?;
             println!("emitted loader-backed FIR projection into {}", a[6]);
+        }
+        Some("plan-binary" | "bundle-binary")
+            if a.len() == if a[0] == "plan-binary" { 6 } else { 7 } =>
+        {
+            let registry = BackendRegistry::with_builtin_sources();
+            let backend = registry
+                .get(&a[5])
+                .ok_or("unregistered source backend; available: c, rust")?;
+            let package = X86Package::decode_binary(&fs::read(&a[1])?)?;
+            let program =
+                X86Program::from_binary(&package, Path::new(&a[2]), number(&a[3])?, a[4].parse()?)?;
+            let plan = backend.plan(
+                ProjectionInput::X86Window(&program),
+                &TargetProfile::for_backend(backend),
+            )?;
+            if a[0] == "plan-binary" {
+                print!("{}", plan.describe());
+            } else {
+                let bundle = backend.emit(&plan)?;
+                // A new directory avoids overwriting existing user artifacts.
+                let folder = Path::new(&a[6]);
+                fs::create_dir(folder)?;
+                for source in bundle.sources {
+                    fs::write(folder.join(source.name), source.source)?;
+                }
+                fs::write(folder.join("projection.txt"), bundle.report)?;
+                fs::write(
+                    folder.join("build.txt"),
+                    format!(
+                        "tool={}\narguments={:?}\nexecution=not-performed\n",
+                        bundle.build.tool, bundle.build.arguments
+                    ),
+                )?;
+                println!("emitted checked source bundle into {}", folder.display());
+            }
         }
         Some("recover-binary") if a.len() == 6 => {
             let p = X86Package::decode_binary(&fs::read(&a[1])?)?;

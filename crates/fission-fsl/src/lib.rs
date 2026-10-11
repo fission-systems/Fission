@@ -7,6 +7,7 @@
 //! explicitly unsupported.
 
 pub mod abi;
+pub mod backend;
 pub mod control;
 pub mod encoding;
 mod gpu_output;
