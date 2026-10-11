@@ -1019,6 +1019,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "cranelift-object",
+ "fission-loader",
  "sha2",
 ]
 

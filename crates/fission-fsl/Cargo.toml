@@ -20,7 +20,16 @@ cranelift-module = "0.133.1"
 cranelift-native = "0.133.1"
 cranelift-object = "0.133.1"
 sha2 = "0.10.9"
+fission-loader = { path = "../fission-loader", optional = true }
+
+[features]
+x86 = ["dep:fission-loader"]
 
 [[bin]]
 name = "fslc"
 path = "src/main.rs"
+
+[[bin]]
+name = "fsl-x86"
+path = "src/x86_main.rs"
+required-features = ["x86"]

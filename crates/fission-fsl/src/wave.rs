@@ -50,6 +50,17 @@ pub(crate) fn validate_domains(
                 Some((output, ValueDomain::Uniform))
             }
             FirOp::IntConstant { output, .. } => Some((output, ValueDomain::Uniform)),
+            FirOp::IntBinary {
+                output,
+                left,
+                right,
+                ..
+            } => {
+                if at(left) != ValueDomain::Uniform || at(right) != ValueDomain::Uniform {
+                    return Err(error());
+                }
+                Some((output, ValueDomain::Uniform))
+            }
             FirOp::IntCompare {
                 output,
                 left,
@@ -100,6 +111,12 @@ pub(crate) fn validate_domains(
                     _ => return Err(error()),
                 };
                 Some((output, domain))
+            }
+            FirOp::MemoryLoadLittle { output, address } => {
+                if at(address) != ValueDomain::Uniform {
+                    return Err(error());
+                }
+                Some((output, ValueDomain::Uniform))
             }
             FirOp::FieldRead { output, .. } | FirOp::GuestPcRead { output } => {
                 Some((output, ValueDomain::Uniform))

@@ -21,6 +21,13 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    MemoryLoadLittle {
+        name: String,
+        ty: ValueType,
+        address: String,
+        line: usize,
+        column: usize,
+    },
     BlockStart {
         name: String,
         parameters: Vec<(String, ValueType)>,
@@ -146,6 +153,15 @@ pub(super) enum Statement {
         ty: ValueType,
         left: String,
         right: String,
+        line: usize,
+        column: usize,
+    },
+    IntBinary {
+        name: String,
+        ty: ValueType,
+        left: String,
+        right: String,
+        op: crate::IntBinaryOp,
         line: usize,
         column: usize,
     },
@@ -1006,6 +1022,16 @@ impl Parser {
                     line: token.line,
                     column: token.column,
                 }
+            } else if operation == "memory.load.le" {
+                self.expect_symbol('%')?;
+                let address = self.expect_name()?;
+                Statement::MemoryLoadLittle {
+                    name,
+                    ty,
+                    address,
+                    line: token.line,
+                    column: token.column,
+                }
             } else if operation == "int.const" {
                 let value = self.expect_integer()?;
                 Statement::Constant {
@@ -1130,6 +1156,29 @@ impl Parser {
                     left,
                     right,
                     carry,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if let Some(op) = [
+                crate::IntBinaryOp::Sub,
+                crate::IntBinaryOp::And,
+                crate::IntBinaryOp::Or,
+                crate::IntBinaryOp::Xor,
+            ]
+            .into_iter()
+            .find(|op| operation == format!("{ty_name}.{}", op.name()))
+            {
+                self.expect_symbol('%')?;
+                let left = self.expect_name()?;
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                let right = self.expect_name()?;
+                Statement::IntBinary {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    op,
                     line: token.line,
                     column: token.column,
                 }

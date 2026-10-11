@@ -20,6 +20,10 @@ pub mod semantics;
 pub mod sequence;
 mod state;
 mod wave;
+#[cfg(feature = "x86")]
+pub mod x86;
+#[cfg(feature = "x86")]
+mod x86_decode;
 pub use state::{execute_decoded, MachineState};
 pub use wave::{execute_wave, ValueDomain, WaveContract, WaveState};
 
@@ -28,8 +32,8 @@ pub use jit::{emit_aot_object, JitDecoder, NativeFirOp, NativeLift};
 pub use output::{emit_instruction, OutputLayer};
 pub use package::{
     AddressUnit, ByteOrder, CompiledInstruction, Evidence, FirBlock, FirEdge, FirOp, FirTerminator,
-    FslcPackage, IntConversion, IntPredicate, IntegerSign, ValueDef, ValueId, ValueType,
-    FSL_PACKAGE_VERSION,
+    FslcPackage, IntBinaryOp, IntConversion, IntPredicate, IntegerSign, ValueDef, ValueId,
+    ValueType, FSL_PACKAGE_VERSION,
 };
 pub use semantics::{execute_instruction, ExecutionStatus, StackContract};
 
@@ -114,6 +118,17 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         };
         for statement in instruction.statements {
             match statement {
+                parser::Statement::MemoryLoadLittle {
+                    name,
+                    ty,
+                    address,
+                    line,
+                    column,
+                } => {
+                    let address = require_value(&values, &value_ids, &address, line, column)?;
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::MemoryLoadLittle { output, address });
+                }
                 parser::Statement::BlockStart { name, parameters } => {
                     if blocks.len() >= 256 {
                         return Err(FslError::at(1, 1, "too many FIR blocks"));
@@ -398,6 +413,37 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
                         right: right_id,
                     });
                 }
+                parser::Statement::IntBinary {
+                    name,
+                    ty,
+                    left,
+                    right,
+                    op,
+                    line,
+                    column,
+                } => {
+                    let left_id = require_value(&values, &value_ids, &left, line, column)?;
+                    let right_id = require_value(&values, &value_ids, &right, line, column)?;
+                    let left_ty = &values[left_id.0 as usize].ty;
+                    let right_ty = &values[right_id.0 as usize].ty;
+                    if left_ty != &ty || right_ty != &ty {
+                        return Err(FslError::at(
+                            line,
+                            column,
+                            format!(
+                                "integer {} has type {ty}, but operands are {left_ty} and {right_ty}",
+                                op.name()
+                            ),
+                        ));
+                    }
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::IntBinary {
+                        output,
+                        left: left_id,
+                        right: right_id,
+                        op,
+                    });
+                }
                 parser::Statement::AddWrapCarry {
                     name,
                     ty,
@@ -488,6 +534,18 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
 
     let package = FslcPackage {
         version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(|op| matches!(op, FirOp::MemoryLoadLittle { .. }))
+        {
+            10
+        } else if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(|op| matches!(op, FirOp::IntBinary { .. }))
+        {
+            9
+        } else if instructions
             .iter()
             .flat_map(|i| &i.ops)
             .any(FirOp::requires_guest_pc_version)

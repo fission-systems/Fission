@@ -101,6 +101,34 @@ impl CompiledInstruction {
                         }
                         Some(output)
                     }
+                    FirOp::IntBinary {
+                        output,
+                        left,
+                        right,
+                        op,
+                    } => {
+                        read(left, &defined)?;
+                        read(right, &defined)?;
+                        let ty = self
+                            .values
+                            .get(usize::from(output.0))
+                            .map(|v| v.ty)
+                            .ok_or_else(|| FslError::at(1, 1, "binary output out of range"))?;
+                        if ty.bits > 64
+                            || self.values[usize::from(left.0)].ty != ty
+                            || self.values[usize::from(right.0)].ty != ty
+                        {
+                            return Err(FslError::at(
+                                1,
+                                1,
+                                format!(
+                                    "integer {} requires equal 1..64 bit operand and result types",
+                                    op.name()
+                                ),
+                            ));
+                        }
+                        Some(output)
+                    }
                     FirOp::IntConstant { output, value } => {
                         let ty = self
                             .values
@@ -232,6 +260,28 @@ impl CompiledInstruction {
                                 1,
                                 1,
                                 "field reads require an unsigned output at least as wide as the field",
+                            ));
+                        }
+                        Some(output)
+                    }
+                    FirOp::MemoryLoadLittle { output, address } => {
+                        read(address, &defined)?;
+                        let a = self.values[usize::from(address.0)].ty;
+                        let out = self
+                            .values
+                            .get(usize::from(output.0))
+                            .ok_or_else(|| FslError::at(1, 1, "memory output out of range"))?
+                            .ty;
+                        if a != (crate::ValueType {
+                            bits: 64,
+                            sign: IntegerSign::Unsigned,
+                        }) || !matches!(out.bits, 8 | 16 | 32 | 64)
+                            || out.sign != IntegerSign::Unsigned
+                        {
+                            return Err(FslError::at(
+                                1,
+                                1,
+                                "memory load requires u64 address and u8/u16/u32/u64 result",
                             ));
                         }
                         Some(output)
@@ -427,7 +477,10 @@ impl StackContract {
                 FirOp::VmStackPop { .. } => delta -= 1,
                 FirOp::VmStackPush { .. } => delta += 1,
                 FirOp::IntAddWrap { .. } => {}
-                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
+                FirOp::IntConstant { .. }
+                | FirOp::IntCompare { .. }
+                | FirOp::IntConvert { .. }
+                | FirOp::IntBinary { .. } => {
                     unreachable!("control execution handled separately")
                 }
                 FirOp::RegisterRead { .. }
@@ -440,6 +493,7 @@ impl StackContract {
                 | FirOp::IntAddCarry { .. }
                 | FirOp::IntAddCarryIn { .. }
                 | FirOp::IntAddWrapCarry { .. }
+                | FirOp::MemoryLoadLittle { .. }
                 | FirOp::FieldRead { .. }
                 | FirOp::GuestPcRead { .. }
                 | FirOp::GuestNextPcWrite { .. } => unreachable!("state execution rejected"),
@@ -493,7 +547,10 @@ pub fn execute_instruction(
     let mut values = vec![0u64; instruction.values.len()];
     for op in &instruction.ops {
         match *op {
-            FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
+            FirOp::IntConstant { .. }
+            | FirOp::IntCompare { .. }
+            | FirOp::IntConvert { .. }
+            | FirOp::IntBinary { .. } => {
                 unreachable!("control execution handled separately")
             }
             FirOp::RegisterRead { .. }
@@ -506,6 +563,7 @@ pub fn execute_instruction(
             | FirOp::IntAddCarry { .. }
             | FirOp::IntAddCarryIn { .. }
             | FirOp::IntAddWrapCarry { .. }
+            | FirOp::MemoryLoadLittle { .. }
             | FirOp::FieldRead { .. }
             | FirOp::GuestPcRead { .. }
             | FirOp::GuestNextPcWrite { .. } => unreachable!("state execution rejected"),

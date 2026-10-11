@@ -345,7 +345,10 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         ..NativeFirOp::default()
     };
     Ok(match op {
-        FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
+        FirOp::IntConstant { .. }
+        | FirOp::IntCompare { .. }
+        | FirOp::IntConvert { .. }
+        | FirOp::IntBinary { .. } => {
             return Err(FslError::at(
                 1,
                 1,
@@ -361,6 +364,7 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         | FirOp::FlagWrite { .. }
         | FirOp::IntAddCarry { .. }
         | FirOp::IntAddCarryIn { .. }
+        | FirOp::MemoryLoadLittle { .. }
         | FirOp::FieldRead { .. }
         | FirOp::GuestPcRead { .. }
         | FirOp::GuestNextPcWrite { .. }

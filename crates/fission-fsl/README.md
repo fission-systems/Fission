@@ -11,6 +11,15 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 
 ## Current slice
 
+- Owned x86 scalar decoding behind `--features x86`: 46 `.fslx` rules and
+  63 canonical FIR bodies compiled into binary `.fslxc`. Prefix/opcode/ModRM/
+  SIB/immediate reading uses no external decoder library. Selected 16/32/64
+  windows and loader-backed executable spans emit FIR/C/Rust explicit-state
+  functions. Generic subtraction/bitwise operations and a bounded little-endian
+  memory read express flags, LEA and near RET in the same FIR. Full x86 assets,
+  ordinary memory operands, calls/ABI and source-level function recovery remain
+  unsupported. See the [owned x86 contract](../../docs/research/fsl-x86-owned-decompilation.md).
+
 - Bounded `.fslseq` execution plans reference the same canonical FIR bodies.
   Sequential instances hand off logical register/flag state, with byte addresses,
   exact spans/raw bytes, input/package hashes and referenced spec evidence.
@@ -68,10 +77,11 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
   encoding plans and existing v1 byte-opcode packages remain readable; packages
   retain their version when serialized.
 
-The JVM `iadd` fixture is the first end-to-end example. CPU register and memory
-semantics, GPU synchronization and general divergence, JVM method/class behavior, variable
-length encodings, split fields, selector-to-register resolution, cross-target AOT
-selection, and Fission consumer adapters are future work.
+The JVM `iadd` fixture is the first end-to-end example. Full CPU memory/call/ABI
+semantics, GPU synchronization and general divergence, JVM method/class behavior,
+general encoding descriptions beyond the bounded x86 forms, split fields,
+selector-to-register resolution, cross-target AOT selection, and product
+Fission routing remain future work.
 
 ## Try it
 

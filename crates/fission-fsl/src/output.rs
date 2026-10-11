@@ -49,7 +49,10 @@ pub fn emit_instruction(
         );
         for op in &instruction.ops {
             match *op {
-                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. } => {
+                FirOp::IntConstant { .. }
+                | FirOp::IntCompare { .. }
+                | FirOp::IntConvert { .. }
+                | FirOp::IntBinary { .. } => {
                     unreachable!("control output handled separately")
                 }
                 FirOp::LaneMaskRead { output, lanes } => {
@@ -112,6 +115,9 @@ pub fn emit_instruction(
                 }
                 FirOp::FlagWrite { slot, value } => {
                     writeln!(text, "  flag.write {slot}, %v{}", value.0).unwrap();
+                }
+                FirOp::MemoryLoadLittle { output, address } => {
+                    writeln!(text, "  %v{} = memory.load.le %v{}", output.0, address.0).unwrap();
                 }
                 FirOp::FieldRead { output, field } => {
                     writeln!(
@@ -272,7 +278,10 @@ pub fn emit_instruction(
     for op in &instruction.ops {
         match (*op, layer) {
             (
-                FirOp::IntConstant { .. } | FirOp::IntCompare { .. } | FirOp::IntConvert { .. },
+                FirOp::IntConstant { .. }
+                | FirOp::IntCompare { .. }
+                | FirOp::IntConvert { .. }
+                | FirOp::IntBinary { .. },
                 _,
             ) => {
                 unreachable!("control output handled separately")
@@ -348,6 +357,7 @@ pub fn emit_instruction(
                 | FirOp::IntAddCarry { .. }
                 | FirOp::IntAddCarryIn { .. }
                 | FirOp::IntAddWrapCarry { .. }
+                | FirOp::MemoryLoadLittle { .. }
                 | FirOp::FieldRead { .. }
                 | FirOp::GuestPcRead { .. }
                 | FirOp::GuestNextPcWrite { .. },

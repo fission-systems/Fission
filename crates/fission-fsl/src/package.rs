@@ -1,7 +1,8 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 8;
+pub const FSL_PACKAGE_VERSION: u16 = 10;
+const INT_BINARY_PACKAGE_VERSION: u16 = 9;
 const GUEST_PC_PACKAGE_VERSION: u16 = 8;
 const STATE_PACKAGE_VERSION: u16 = 3;
 const CARRY_IN_PACKAGE_VERSION: u16 = 4;
@@ -110,8 +111,59 @@ pub enum IntConversion {
     Truncate,
 }
 
+/// Same-width integer binary operations. Results are masked to the output width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntBinaryOp {
+    Sub,
+    And,
+    Or,
+    Xor,
+}
+
+impl IntBinaryOp {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Sub => "sub",
+            Self::And => "and",
+            Self::Or => "or",
+            Self::Xor => "xor",
+        }
+    }
+    pub(crate) fn tag(self) -> u8 {
+        match self {
+            Self::Sub => 0,
+            Self::And => 1,
+            Self::Or => 2,
+            Self::Xor => 3,
+        }
+    }
+    pub(crate) fn from_tag(tag: u8) -> Option<Self> {
+        Some(match tag {
+            0 => Self::Sub,
+            1 => Self::And,
+            2 => Self::Or,
+            3 => Self::Xor,
+            _ => return None,
+        })
+    }
+    pub(crate) fn apply(self, left: u64, right: u64) -> u64 {
+        match self {
+            Self::Sub => left.wrapping_sub(right),
+            Self::And => left & right,
+            Self::Or => left | right,
+            Self::Xor => left ^ right,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirOp {
+    /// Read a byte-addressed little-endian scalar from an explicitly supplied
+    /// memory window. Bounds failure rejects execution; no host pointer dereference.
+    MemoryLoadLittle {
+        output: ValueId,
+        address: ValueId,
+    },
     IntConvert {
         output: ValueId,
         input: ValueId,
@@ -191,6 +243,12 @@ pub enum FirOp {
     VmStackPush {
         value: ValueId,
     },
+    IntBinary {
+        output: ValueId,
+        left: ValueId,
+        right: ValueId,
+        op: IntBinaryOp,
+    },
     /// Zero-extended raw decoded field value. The output must be at least as wide
     /// as the field, so no bits are dropped.
     FieldRead {
@@ -213,7 +271,10 @@ impl FirOp {
     pub(crate) fn requires_control_version(&self) -> bool {
         matches!(
             self,
-            Self::IntConstant { .. } | Self::IntCompare { .. } | Self::IntConvert { .. }
+            Self::IntConstant { .. }
+                | Self::IntCompare { .. }
+                | Self::IntConvert { .. }
+                | Self::IntBinary { .. }
         )
     }
     pub(crate) fn requires_lane_version(&self) -> bool {
@@ -236,6 +297,7 @@ impl FirOp {
                     | Self::FieldRead { .. }
                     | Self::GuestPcRead { .. }
                     | Self::GuestNextPcWrite { .. }
+                    | Self::MemoryLoadLittle { .. }
             )
     }
 
@@ -320,6 +382,18 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 10
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, FirOp::MemoryLoadLittle { .. }))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "memory load FIR requires package version 10",
+                ));
+            }
             if self.version < 7
                 && instruction
                     .ops
@@ -330,6 +404,18 @@ impl FslcPackage {
                     1,
                     1,
                     "integer conversion requires package version 7",
+                ));
+            }
+            if self.version < INT_BINARY_PACKAGE_VERSION
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, FirOp::IntBinary { .. }))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "integer binary FIR requires package version 9",
                 ));
             }
             if self.version < GUEST_PC_PACKAGE_VERSION
@@ -617,6 +703,18 @@ impl FslcPackage {
                         writer.u8(2);
                         writer.u16(value.0);
                     }
+                    FirOp::IntBinary {
+                        output,
+                        left,
+                        right,
+                        op,
+                    } => {
+                        writer.u8(20);
+                        writer.u16(output.0);
+                        writer.u16(left.0);
+                        writer.u16(right.0);
+                        writer.u8(op.tag());
+                    }
                     FirOp::FieldRead { output, field } => {
                         writer.u8(19);
                         writer.u16(output.0);
@@ -629,6 +727,11 @@ impl FslcPackage {
                     FirOp::GuestNextPcWrite { value } => {
                         writer.u8(18);
                         writer.u16(value.0);
+                    }
+                    FirOp::MemoryLoadLittle { output, address } => {
+                        writer.u8(21);
+                        writer.u16(output.0);
+                        writer.u16(address.0);
                     }
                 }
             }
@@ -894,6 +997,17 @@ impl FslcPackage {
                     2 => FirOp::VmStackPush {
                         value: reader.value_id(value_count)?,
                     },
+                    20 if version >= INT_BINARY_PACKAGE_VERSION => FirOp::IntBinary {
+                        output: reader.value_id(value_count)?,
+                        left: reader.value_id(value_count)?,
+                        right: reader.value_id(value_count)?,
+                        op: {
+                            let tag = reader.u8()?;
+                            IntBinaryOp::from_tag(tag).ok_or_else(|| {
+                                FslError::at(1, 1, format!("invalid integer binary op {tag}"))
+                            })?
+                        },
+                    },
                     19 if version >= GUEST_PC_PACKAGE_VERSION => FirOp::FieldRead {
                         output: reader.value_id(value_count)?,
                         field: reader.u16()?,
@@ -903,6 +1017,10 @@ impl FslcPackage {
                     },
                     18 if version >= GUEST_PC_PACKAGE_VERSION => FirOp::GuestNextPcWrite {
                         value: reader.value_id(value_count)?,
+                    },
+                    21 if version >= 10 => FirOp::MemoryLoadLittle {
+                        output: reader.value_id(value_count)?,
+                        address: reader.value_id(value_count)?,
                     },
                     value => return Err(FslError::at(1, 1, format!("invalid FIR op tag {value}"))),
                 };
