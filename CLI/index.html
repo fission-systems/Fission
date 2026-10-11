@@ -1213,6 +1213,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#string-leads-and-call-relationships" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        String Leads and Call Relationships
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#analysis-project-db" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2912,6 +2923,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#string-leads-and-call-relationships" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        String Leads and Call Relationships
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#analysis-project-db" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3712,20 +3734,68 @@ as structured JSON diagnostics.</p>
 <h3 id="default-threshold">Default threshold<a class="headerlink" href="#default-threshold" title="Permanent link">&para;</a></h3>
 <p>If <code>--min-len</code> is not provided, the current default is <code>4</code>.</p>
 <hr />
+<h2 id="string-leads-and-call-relationships">String Leads and Call Relationships<a class="headerlink" href="#string-leads-and-call-relationships" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>sample.elf<span class="w"> </span>--contains<span class="w"> </span><span class="s1">'error'</span><span class="w"> </span>--context<span class="w"> </span>--json
+</span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>fission_cli<span class="w"> </span>callgraph<span class="w"> </span>sample.elf<span class="w"> </span>--function<span class="w"> </span>0x1002000<span class="w"> </span>--json
+</span><span id="__span-40-3"><a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>fission_cli<span class="w"> </span>xrefs<span class="w"> </span>sample.elf<span class="w"> </span>--to<span class="w"> </span>0x1000190<span class="w"> </span>--json
+</span><span id="__span-40-4"><a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>sample.elf<span class="w"> </span>--addr<span class="w"> </span>0x1002000<span class="w"> </span>--function
+</span></code></pre></div>
+<p><code>strings --contains TEXT</code> filters by a case-sensitive literal substring. Add
+<code>--section NAME</code> (repeatable) and <code>--min-len N</code> to narrow the listing further.
+<code>--context</code> runs conservative function discovery by default and builds one
+canonical reference index for string uses and one-hop call relationships.
+<code>--function-discovery-profile</code> can select conservative, balanced or aggressive
+explicitly; use the same profile in subsequent <code>callgraph</code>, <code>list</code> or <code>xrefs</code>
+queries to keep discovered entries aligned.</p>
+<p>The explicit <code>--context --json</code> envelope contains:</p>
+<ul>
+<li><code>analysis</code>: the existing per-layer xref coverage report, including scope,
+  omissions, unsupported reasons and layers that were not requested.</li>
+<li><code>strings</code>: matching printable ASCII runs with <code>file_offset</code>, mapped <code>address</code>
+  (or <code>null</code>), <code>section</code>, and <code>context</code>.</li>
+<li><code>context.references</code>: original indexed records whose data read/write or
+  relocation target lands in the run, including suffix pointers and a NUL byte
+  only when actually present. Instruction and pointer-data sources remain
+  distinguishable; loader string anchors and control-flow targets are excluded.</li>
+<li><code>context.functions</code>: discovered entries explicitly attributed by those
+  records, their names, <code>reference_ids</code>, and immediate <code>callers</code>/<code>callees</code> with
+  address, optional name and indexed count. Unknown owners remain reference
+  records and do not become invented function entries.</li>
+</ul>
+<p>Raw reference records retain the <code>xrefs --json</code> schema (numeric addresses and
+record IDs); navigation rows use hex address strings. IDs index the canonical
+reference output for the same binary, analyst decisions and analysis options, not cross-build
+persistent identifiers. Analyst names saved by <code>db</code> appear in the result;
+<code>--no-db</code> ignores them.</p>
+<p>Unmapped file bytes and printable runs in executable storage have <code>context: null</code> with <code>context_note</code>. An empty reference/function list means no matching
+<strong>indexed</strong> evidence; it is not proof that the binary has no uses or callers.
+This lane uses loader/disassembly evidence, not p-code or runtime execution;
+coverage remains bounded by the reported extraction and discovery scope.</p>
+<p>Without <code>--context</code>, existing string JSON stays an array and <code>--xrefs</code> retains
+its legacy <code>referrers</code> field. That field can fall back to an instruction address
+when no function owner is known; use <code>context.references</code> for explicit ownership.</p>
+<p><code>callgraph --function</code> accepts a discovered function <strong>entry</strong> and returns one
+node with its immediate relationships; a missing entry fails rather than
+silently returning an empty successful graph. Existing graph fields are retained;
+<code>analysis</code>, <code>node_count</code>, and <code>selected_function</code> are additive. <code>function_count</code>
+and <code>total_call_sites</code> describe the whole indexed graph even when node output is
+filtered. Edges are derived from the same canonical index as <code>xrefs</code>; unresolved
+indirect calls and jump-only tail calls are not asserted as complete call edges.</p>
+<hr />
 <h2 id="analysis-project-db">Analysis Project (<code>db</code>)<a class="headerlink" href="#analysis-project-db" title="Permanent link">&para;</a></h2>
 <p>Analyst decisions live beside the input binary in <code>&lt;binary&gt;.fission.json</code>, bound
 by its content hash. Names and function signatures are applied automatically on
 subsequent analysis commands; notes and debugger stops are also retained.
 <code>--no-db</code> requests analysis without these decisions. Saving a project does not
 modify the input binary.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>name<span class="w"> </span>0x140001000<span class="w"> </span>parse_header<span class="w"> </span>--json
-</span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>sig<span class="w"> </span>0x140001000<span class="w"> </span><span class="s1">'int (const char *buf, int len)'</span><span class="w"> </span>--json
-</span><span id="__span-40-3"><a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>note<span class="w"> </span>0x140001008<span class="w"> </span><span class="s1">'check length before reading'</span><span class="w"> </span>--json
-</span><span id="__span-40-4"><a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>bp<span class="w"> </span>0x140001008<span class="w"> </span>--json
-</span><span id="__span-40-5"><a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>show<span class="w"> </span>--json
-</span><span id="__span-40-6"><a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span><span class="nb">history</span><span class="w"> </span>--json
-</span><span id="__span-40-7"><a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>undo<span class="w"> </span>--json
-</span><span id="__span-40-8"><a id="__codelineno-40-8" name="__codelineno-40-8" href="#__codelineno-40-8"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>redo<span class="w"> </span>--json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-41-1"><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>name<span class="w"> </span>0x140001000<span class="w"> </span>parse_header<span class="w"> </span>--json
+</span><span id="__span-41-2"><a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>sig<span class="w"> </span>0x140001000<span class="w"> </span><span class="s1">'int (const char *buf, int len)'</span><span class="w"> </span>--json
+</span><span id="__span-41-3"><a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>note<span class="w"> </span>0x140001008<span class="w"> </span><span class="s1">'check length before reading'</span><span class="w"> </span>--json
+</span><span id="__span-41-4"><a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>bp<span class="w"> </span>0x140001008<span class="w"> </span>--json
+</span><span id="__span-41-5"><a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>show<span class="w"> </span>--json
+</span><span id="__span-41-6"><a id="__codelineno-41-6" name="__codelineno-41-6" href="#__codelineno-41-6"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span><span class="nb">history</span><span class="w"> </span>--json
+</span><span id="__span-41-7"><a id="__codelineno-41-7" name="__codelineno-41-7" href="#__codelineno-41-7"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>undo<span class="w"> </span>--json
+</span><span id="__span-41-8"><a id="__codelineno-41-8" name="__codelineno-41-8" href="#__codelineno-41-8"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>redo<span class="w"> </span>--json
 </span></code></pre></div>
 <p>Removal commands are <code>rm-name</code>, <code>rm-sig</code>, <code>rm-note</code>, and <code>rm-bp</code>, each taking an
 address. Each changed <code>db</code> edit records one revision with typed before/after
@@ -3738,9 +3808,9 @@ monotonically. A changed edit after undo discards that redo branch; a no-op
 preserves it. History survives process restarts. It records decisions, not
 binary patches, regenerated analysis, wall-clock times, or analyst identity.</p>
 <p>To compare a saved snapshot of the <strong>same binary</strong>:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-41-1"><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>cp<span class="w"> </span>sample.exe.fission.json<span class="w"> </span>before.fission.json
-</span><span id="__span-41-2"><a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>note<span class="w"> </span>0x140001008<span class="w"> </span><span class="s1">'confirmed length check'</span>
-</span><span id="__span-41-3"><a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>diff<span class="w"> </span>before.fission.json<span class="w"> </span>--json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-42-1"><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>cp<span class="w"> </span>sample.exe.fission.json<span class="w"> </span>before.fission.json
+</span><span id="__span-42-2"><a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>note<span class="w"> </span>0x140001008<span class="w"> </span><span class="s1">'confirmed length check'</span>
+</span><span id="__span-42-3"><a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a>fission_cli<span class="w"> </span>db<span class="w"> </span>sample.exe<span class="w"> </span>diff<span class="w"> </span>before.fission.json<span class="w"> </span>--json
 </span></code></pre></div>
 <p><code>diff</code> returns <code>{"changes": [...]}</code> in deterministic decision/address order,
 from current project (<code>before</code>) to the supplied project (<code>after</code>). It ignores
@@ -3775,9 +3845,9 @@ apply changes. <code>show</code>, <code>history</code>, and <code>diff</code> ne
 <p><code>patch</code> changes bytes at an address and writes the result to a <strong>new file</strong>.
 The input binary is never modified.</p>
 <h3 id="examples_2">Examples<a class="headerlink" href="#examples_2" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-42-1"><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>fission_cli<span class="w"> </span>patch<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001760<span class="w"> </span>--nop<span class="w"> </span><span class="m">5</span>
-</span><span id="__span-42-2"><a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a>fission_cli<span class="w"> </span>patch<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001760<span class="w"> </span>--nop<span class="w"> </span><span class="m">5</span><span class="w"> </span>--output<span class="w"> </span>patched.exe
-</span><span id="__span-42-3"><a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a>fission_cli<span class="w"> </span>patch<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001760<span class="w"> </span>--bytes<span class="w"> </span><span class="s2">"31 c0 c3"</span><span class="w"> </span>--output<span class="w"> </span>patched.exe<span class="w"> </span>--json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-43-1"><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>fission_cli<span class="w"> </span>patch<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001760<span class="w"> </span>--nop<span class="w"> </span><span class="m">5</span>
+</span><span id="__span-43-2"><a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>fission_cli<span class="w"> </span>patch<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001760<span class="w"> </span>--nop<span class="w"> </span><span class="m">5</span><span class="w"> </span>--output<span class="w"> </span>patched.exe
+</span><span id="__span-43-3"><a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a>fission_cli<span class="w"> </span>patch<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001760<span class="w"> </span>--bytes<span class="w"> </span><span class="s2">"31 c0 c3"</span><span class="w"> </span>--output<span class="w"> </span>patched.exe<span class="w"> </span>--json
 </span></code></pre></div>
 <h3 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
 <table>
@@ -3841,23 +3911,23 @@ carried; <code>patch</code> does not recompute either.</p>
 <h2 id="inventory-function-facts">Inventory Function Facts<a class="headerlink" href="#inventory-function-facts" title="Permanent link">&para;</a></h2>
 <p>This subcommand emits whole-binary function facts as JSONL plus an optional summary JSON.</p>
 <h3 id="basic-example">Basic example<a class="headerlink" href="#basic-example" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-43-1"><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-43-2"><a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-43-3"><a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-44-1"><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-44-2"><a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-44-3"><a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>
 <p>By default, whole-binary inventory selection also filters imported functions and the zero-size
 <code>register_frame_ctor</code> runtime wrapper. Use <code>--include-nonuser-functions</code> when you intentionally
 want full compatibility/forensics coverage.</p>
 <h3 id="restrict-to-one-address">Restrict to one address<a class="headerlink" href="#restrict-to-one-address" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-44-1"><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-44-2"><a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="w">  </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-44-3"><a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-45-1"><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-45-2"><a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a><span class="w">  </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-45-3"><a id="__codelineno-45-3" name="__codelineno-45-3" href="#__codelineno-45-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>
 <h3 id="address-file-input">Address file input<a class="headerlink" href="#address-file-input" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-45-1"><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-45-2"><a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a><span class="w">  </span>--addresses-file<span class="w"> </span>addrs.txt<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-45-3"><a id="__codelineno-45-3" name="__codelineno-45-3" href="#__codelineno-45-3"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-45-4"><a id="__codelineno-45-4" name="__codelineno-45-4" href="#__codelineno-45-4"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-46-1"><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-46-2"><a id="__codelineno-46-2" name="__codelineno-46-2" href="#__codelineno-46-2"></a><span class="w">  </span>--addresses-file<span class="w"> </span>addrs.txt<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-46-3"><a id="__codelineno-46-3" name="__codelineno-46-3" href="#__codelineno-46-3"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-46-4"><a id="__codelineno-46-4" name="__codelineno-46-4" href="#__codelineno-46-4"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>
 <h3 id="batch-shaping-options">Batch shaping options<a class="headerlink" href="#batch-shaping-options" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3879,13 +3949,13 @@ want full compatibility/forensics coverage.</p>
 <h2 id="inventory-preview-candidates">Inventory Preview Candidates<a class="headerlink" href="#inventory-preview-candidates" title="Permanent link">&para;</a></h2>
 <p>This subcommand emits preview candidate inventory rows or performs preview candidate batch scans.</p>
 <h3 id="inventory-view">Inventory view<a class="headerlink" href="#inventory-view" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-46-1"><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>preview-candidates<span class="w"> </span>app.exe<span class="w"> </span>--inventory
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-47-1"><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>preview-candidates<span class="w"> </span>app.exe<span class="w"> </span>--inventory
 </span></code></pre></div>
 <h3 id="batch-view">Batch view<a class="headerlink" href="#batch-view" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-47-1"><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>preview-candidates<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-47-2"><a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a><span class="w">  </span>--batch<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-47-3"><a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-47-4"><a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-48-1"><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>preview-candidates<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-48-2"><a id="__codelineno-48-2" name="__codelineno-48-2" href="#__codelineno-48-2"></a><span class="w">  </span>--batch<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-48-3"><a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-48-4"><a id="__codelineno-48-4" name="__codelineno-48-4" href="#__codelineno-48-4"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>
 <h3 id="common-selectors">Common selectors<a class="headerlink" href="#common-selectors" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3909,7 +3979,7 @@ want full compatibility/forensics coverage.</p>
 <hr />
 <h2 id="json-and-automation-notes">JSON And Automation Notes<a class="headerlink" href="#json-and-automation-notes" title="Permanent link">&para;</a></h2>
 <h3 id="sandbox-taint-completeness">Sandbox taint completeness<a class="headerlink" href="#sandbox-taint-completeness" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-48-1"><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>fission_cli<span class="w"> </span>sandbox<span class="w"> </span>app.elf<span class="w"> </span>--stdin-mock<span class="w"> </span>A<span class="w"> </span>--taint<span class="w"> </span>--json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-49-1"><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>fission_cli<span class="w"> </span>sandbox<span class="w"> </span>app.elf<span class="w"> </span>--stdin-mock<span class="w"> </span>A<span class="w"> </span>--taint<span class="w"> </span>--json
 </span></code></pre></div>
 <p>Control-taint tracking retains at most 128 simultaneously active scopes. The
 taint object reports <code>control_tracking_complete: false</code> and increments
@@ -3940,38 +4010,38 @@ unknown.</p>
 <h2 id="legacy-compatibility">Legacy Compatibility<a class="headerlink" href="#legacy-compatibility" title="Permanent link">&para;</a></h2>
 <p>Legacy flat syntax is still accepted for one transition period.</p>
 <p>Examples of deprecated forms:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-49-1"><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--info
-</span><span id="__span-49-2"><a id="__codelineno-49-2" name="__codelineno-49-2" href="#__codelineno-49-2"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--funcs
-</span><span id="__span-49-3"><a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--asm<span class="w"> </span>0x140001000
-</span><span id="__span-49-4"><a id="__codelineno-49-4" name="__codelineno-49-4" href="#__codelineno-49-4"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--decomp<span class="w"> </span>0x140001000
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-50-1"><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--info
+</span><span id="__span-50-2"><a id="__codelineno-50-2" name="__codelineno-50-2" href="#__codelineno-50-2"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--funcs
+</span><span id="__span-50-3"><a id="__codelineno-50-3" name="__codelineno-50-3" href="#__codelineno-50-3"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--asm<span class="w"> </span>0x140001000
+</span><span id="__span-50-4"><a id="__codelineno-50-4" name="__codelineno-50-4" href="#__codelineno-50-4"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--decomp<span class="w"> </span>0x140001000
 </span></code></pre></div>
 <p>When used, the CLI emits a deprecation warning and internally normalizes into the canonical subcommand execution path.</p>
 <p>Canonical replacements:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-50-1"><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
-</span><span id="__span-50-2"><a id="__codelineno-50-2" name="__codelineno-50-2" href="#__codelineno-50-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe
-</span><span id="__span-50-3"><a id="__codelineno-50-3" name="__codelineno-50-3" href="#__codelineno-50-3"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
-</span><span id="__span-50-4"><a id="__codelineno-50-4" name="__codelineno-50-4" href="#__codelineno-50-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-51-1"><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
+</span><span id="__span-51-2"><a id="__codelineno-51-2" name="__codelineno-51-2" href="#__codelineno-51-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe
+</span><span id="__span-51-3"><a id="__codelineno-51-3" name="__codelineno-51-3" href="#__codelineno-51-3"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span><span id="__span-51-4"><a id="__codelineno-51-4" name="__codelineno-51-4" href="#__codelineno-51-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
 </span></code></pre></div>
 <p>New scripts, docs, and operator workflows should not introduce new uses of the flat syntax.</p>
 <hr />
 <h2 id="recommended-workflows">Recommended Workflows<a class="headerlink" href="#recommended-workflows" title="Permanent link">&para;</a></h2>
 <h3 id="human-inspection-workflow">Human inspection workflow<a class="headerlink" href="#human-inspection-workflow" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-51-1"><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
-</span><span id="__span-51-2"><a id="__codelineno-51-2" name="__codelineno-51-2" href="#__codelineno-51-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
-</span><span id="__span-51-3"><a id="__codelineno-51-3" name="__codelineno-51-3" href="#__codelineno-51-3"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
-</span><span id="__span-51-4"><a id="__codelineno-51-4" name="__codelineno-51-4" href="#__codelineno-51-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--ghidra-compat
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-52-1"><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
+</span><span id="__span-52-2"><a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
+</span><span id="__span-52-3"><a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span><span id="__span-52-4"><a id="__codelineno-52-4" name="__codelineno-52-4" href="#__codelineno-52-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--ghidra-compat
 </span></code></pre></div>
 <h3 id="small-local-batch-workflow">Small local batch workflow<a class="headerlink" href="#small-local-batch-workflow" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-52-1"><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">10</span><span class="w"> </span>--json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-53-1"><a id="__codelineno-53-1" name="__codelineno-53-1" href="#__codelineno-53-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">10</span><span class="w"> </span>--json
 </span></code></pre></div>
 <h3 id="operator-inventory-workflow">Operator inventory workflow<a class="headerlink" href="#operator-inventory-workflow" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-53-1"><a id="__codelineno-53-1" name="__codelineno-53-1" href="#__codelineno-53-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-53-2"><a id="__codelineno-53-2" name="__codelineno-53-2" href="#__codelineno-53-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-53-3"><a id="__codelineno-53-3" name="__codelineno-53-3" href="#__codelineno-53-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-54-1"><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-54-2"><a id="__codelineno-54-2" name="__codelineno-54-2" href="#__codelineno-54-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-54-3"><a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>
 <h3 id="benchmark-adjacent-decomp-workflow">Benchmark-adjacent decomp workflow<a class="headerlink" href="#benchmark-adjacent-decomp-workflow" title="Permanent link">&para;</a></h3>
 <p>For full corpus benchmark and comparative reporting, use the canonical benchmark runner:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-54-1"><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a>python3<span class="w"> </span>benchmark/full_benchmark/full_decomp_benchmark.py<span class="w"> </span>--help
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-55-1"><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>python3<span class="w"> </span>benchmark/full_benchmark/full_decomp_benchmark.py<span class="w"> </span>--help
 </span></code></pre></div>
 <p><code>fission_cli --benchmark</code> is a decomp-output timing flag. It is not the benchmark suite driver.</p>
 <hr />
@@ -3986,18 +4056,18 @@ unknown.</p>
 <hr />
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <p>Minimum validation for CLI surface changes:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-55-1"><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>-p<span class="w"> </span>fission-cli
-</span><span id="__span-55-2"><a id="__codelineno-55-2" name="__codelineno-55-2" href="#__codelineno-55-2"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-cli
-</span><span id="__span-55-3"><a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-56-1"><a id="__codelineno-56-1" name="__codelineno-56-1" href="#__codelineno-56-1"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>-p<span class="w"> </span>fission-cli
+</span><span id="__span-56-2"><a id="__codelineno-56-2" name="__codelineno-56-2" href="#__codelineno-56-2"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-cli
+</span><span id="__span-56-3"><a id="__codelineno-56-3" name="__codelineno-56-3" href="#__codelineno-56-3"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli
 </span></code></pre></div>
 <p>Useful manual checks:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-56-1"><a id="__codelineno-56-1" name="__codelineno-56-1" href="#__codelineno-56-1"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>--help
-</span><span id="__span-56-2"><a id="__codelineno-56-2" name="__codelineno-56-2" href="#__codelineno-56-2"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>info<span class="w"> </span>--help
-</span><span id="__span-56-3"><a id="__codelineno-56-3" name="__codelineno-56-3" href="#__codelineno-56-3"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>list<span class="w"> </span>--help
-</span><span id="__span-56-4"><a id="__codelineno-56-4" name="__codelineno-56-4" href="#__codelineno-56-4"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>disasm<span class="w"> </span>--help
-</span><span id="__span-56-5"><a id="__codelineno-56-5" name="__codelineno-56-5" href="#__codelineno-56-5"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>decomp<span class="w"> </span>--help
-</span><span id="__span-56-6"><a id="__codelineno-56-6" name="__codelineno-56-6" href="#__codelineno-56-6"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>strings<span class="w"> </span>--help
-</span><span id="__span-56-7"><a id="__codelineno-56-7" name="__codelineno-56-7" href="#__codelineno-56-7"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>inventory<span class="w"> </span>--help
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-57-1"><a id="__codelineno-57-1" name="__codelineno-57-1" href="#__codelineno-57-1"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>--help
+</span><span id="__span-57-2"><a id="__codelineno-57-2" name="__codelineno-57-2" href="#__codelineno-57-2"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>info<span class="w"> </span>--help
+</span><span id="__span-57-3"><a id="__codelineno-57-3" name="__codelineno-57-3" href="#__codelineno-57-3"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>list<span class="w"> </span>--help
+</span><span id="__span-57-4"><a id="__codelineno-57-4" name="__codelineno-57-4" href="#__codelineno-57-4"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>disasm<span class="w"> </span>--help
+</span><span id="__span-57-5"><a id="__codelineno-57-5" name="__codelineno-57-5" href="#__codelineno-57-5"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>decomp<span class="w"> </span>--help
+</span><span id="__span-57-6"><a id="__codelineno-57-6" name="__codelineno-57-6" href="#__codelineno-57-6"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>strings<span class="w"> </span>--help
+</span><span id="__span-57-7"><a id="__codelineno-57-7" name="__codelineno-57-7" href="#__codelineno-57-7"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>inventory<span class="w"> </span>--help
 </span></code></pre></div>
 <p>If you change compatibility behavior, also verify at least one legacy flat invocation still routes correctly and emits a deprecation warning.</p>
 
