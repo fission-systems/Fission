@@ -27,6 +27,7 @@ The CLI is intentionally split into explicit subcommands:
 - `resources` (resolved signature / detector bundle diagnostics)
 - `script` (Rhai)
 - `debug` (headless emulation and platform-native debugger commands)
+- `db` (saved analyst decisions, history, undo/redo, and comparison)
 
 Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.
 
@@ -602,6 +603,76 @@ fission_cli strings app.exe --min-len 8 --json
 ### Default threshold
 
 If `--min-len` is not provided, the current default is `4`.
+
+---
+
+## Analysis Project (`db`)
+
+Analyst decisions live beside the input binary in `<binary>.fission.json`, bound
+by its content hash. Names and function signatures are applied automatically on
+subsequent analysis commands; notes and debugger stops are also retained.
+`--no-db` requests analysis without these decisions. Saving a project does not
+modify the input binary.
+
+```bash
+fission_cli db sample.exe name 0x140001000 parse_header --json
+fission_cli db sample.exe sig 0x140001000 'int (const char *buf, int len)' --json
+fission_cli db sample.exe note 0x140001008 'check length before reading' --json
+fission_cli db sample.exe bp 0x140001008 --json
+fission_cli db sample.exe show --json
+fission_cli db sample.exe history --json
+fission_cli db sample.exe undo --json
+fission_cli db sample.exe redo --json
+```
+
+Removal commands are `rm-name`, `rm-sig`, `rm-note`, and `rm-bp`, each taking an
+address. Each changed `db` edit records one revision with typed before/after
+values. Its success JSON retains the existing fields and adds `revision` (an
+integer, or `null` for an unchanged decision). Success is emitted after saving.
+Undo/redo return the ID of the revision they moved.
+
+`history --json` returns `revisions`, `cursor`, and `next_id`. The first `cursor`
+records are applied; remaining records are available for redo. IDs increase
+monotonically. A changed edit after undo discards that redo branch; a no-op
+preserves it. History survives process restarts. It records decisions, not
+binary patches, regenerated analysis, wall-clock times, or analyst identity.
+
+To compare a saved snapshot of the **same binary**:
+
+```bash
+cp sample.exe.fission.json before.fission.json
+fission_cli db sample.exe note 0x140001008 'confirmed length check'
+fission_cli db sample.exe diff before.fission.json --json
+```
+
+`diff` returns `{"changes": [...]}` in deterministic decision/address order,
+from current project (`before`) to the supplied project (`after`). It ignores
+paths and revision history, and refuses different binary hashes. It does not
+apply changes. `show`, `history`, and `diff` never create or rewrite a project.
+
+### Storage and compatibility
+
+- Schema 1 projects remain readable, including their decimal addresses. The
+  first recorded edit upgrades to schema 2. Historical decisions start as the
+  baseline; edits made before migration cannot be undone. Older Fission
+  readers reject schema 2. Keep a snapshot before using an older release.
+- Writers hold `<project>.lock` throughout read/edit/save. Another cooperating
+  writer fails rather than overwriting a concurrent edit. A process crash can
+  leave a lock: stop or confirm the writer has exited before removing that
+  lock. External editors do not participate in this lock protocol.
+- Saving syncs a temporary file beside the destination, then renames it over
+  the project. A failed save preserves the committed project; a symlink
+  destination is refused. Existing permissions are retained. This is atomic
+  file replacement, not a guarantee against every power-loss scenario or
+  filesystem/network failure.
+- Undo/redo checks that touched decisions still match the recorded revision.
+  A conflicting manual edit refuses the entire operation without partial
+  changes. Malformed revision cursors/IDs are rejected on read and save.
+- Library callers use `ProjectLock` across read/edit/`record_edit`/write to
+  record a transaction. Low-level setters remain usable for constructing a
+  project; setters alone do not create revisions. Watchpoint changes are
+  supported in the project journal; this milestone adds no watchpoint `db`
+  subcommand.
 
 ---
 

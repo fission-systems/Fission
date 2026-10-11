@@ -219,7 +219,7 @@ pub enum VerifyTierArg {
 /// a name set here shows up in `list`, `disasm` and `decomp` from then on.
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
 #[command(
-    after_help = "Examples:\n  fission_cli db sample.exe name 0x401230 parse_header\n  fission_cli db sample.exe note 0x401244 'bounds check is off by one'\n  fission_cli db sample.exe show --json"
+    after_help = "Examples:\n  fission_cli db sample.exe name 0x401230 parse_header\n  fission_cli db sample.exe note 0x401244 'bounds check is off by one'\n  fission_cli db sample.exe show --json\n  fission_cli db sample.exe history --json\n  fission_cli db sample.exe undo --json"
 )]
 pub struct DbArgs {
     /// Binary the decisions are about
@@ -286,6 +286,14 @@ pub enum DbCommand {
     },
     /// Show everything recorded
     Show,
+    /// Show reversible edits, including the redo branch
+    History,
+    /// Undo the most recent applied edit
+    Undo,
+    /// Reapply the next undone edit
+    Redo,
+    /// Compare current decisions to another project for the same binary
+    Diff { other: PathBuf },
 }
 
 #[derive(Args, Debug, Clone, PartialEq, Eq)]

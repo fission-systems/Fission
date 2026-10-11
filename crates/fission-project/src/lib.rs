@@ -20,6 +20,16 @@
 //! worse than having no project at all, so [`Project::apply`] refuses rather
 //! than guesses. The path is recorded too, but only as a hint for a human --
 //! files get moved and renamed, and the hash is what decides.
+//!
+//! # Editing and history
+//!
+//! Hold [`ProjectLock`] across read, mutation, [`Project::record_edit`], and
+//! [`ProjectLock::write`] for a recorded edit. Low-level setters do not record
+//! revisions automatically. [`Project::undo`] and [`Project::redo`] preflight
+//! all touched decisions before applying a revision. Schema 1 files are read
+//! as a baseline with empty history and upgraded on the first recorded edit.
+//! [`Project::write`] locks and atomically replaces a file, but callers doing
+//! a read/edit/write cycle should acquire the lock before reading.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -27,9 +37,14 @@ use std::path::{Path, PathBuf};
 use fission_loader::loader::LoadedBinary;
 use serde::{Deserialize, Serialize};
 
+mod history;
+mod storage;
+pub use history::{DecisionChange, EditHistory, Revision};
+pub use storage::ProjectLock;
+
 /// The schema this crate writes. Bumped when a change would make an older
 /// reader misunderstand a file rather than merely miss a field.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// The extension appended to a binary's path to find its project.
 pub const PROJECT_SUFFIX: &str = ".fission.json";
@@ -136,6 +151,12 @@ mod hex_scalar {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
+    #[error("invalid project history: {0}")]
+    History(String),
+    #[error(
+        "project is being edited (lock {0}); if its writer has stopped, remove this stale lock"
+    )]
+    Locked(PathBuf),
     #[error("could not read project at {path}: {source}")]
     Read {
         path: PathBuf,
@@ -247,6 +268,9 @@ pub struct Project {
     /// Memory a debug session should watch.
     #[serde(default)]
     pub watchpoints: Vec<Watch>,
+    /// Reversible edits made through the project transaction API.
+    #[serde(default, skip_serializing_if = "EditHistory::is_empty")]
+    pub history: EditHistory,
 }
 
 impl Project {
@@ -261,6 +285,7 @@ impl Project {
             signatures: BTreeMap::new(),
             breakpoints: Vec::new(),
             watchpoints: Vec::new(),
+            history: EditHistory::default(),
         }
     }
 
@@ -301,6 +326,7 @@ impl Project {
                 known: SCHEMA_VERSION,
             });
         }
+        project.history.validate()?;
         Ok(Some(project))
     }
 
@@ -309,24 +335,7 @@ impl Project {
     /// Pretty-printed on purpose: this file is meant to be read by people and
     /// to produce a legible diff when a name changes.
     pub fn write(&self, path: &Path) -> Result<(), ProjectError> {
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent).map_err(|source| ProjectError::Write {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        }
-        let mut text =
-            serde_json::to_string_pretty(self).map_err(|source| ProjectError::Parse {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        text.push('\n');
-        std::fs::write(path, text).map_err(|source| ProjectError::Write {
-            path: path.to_path_buf(),
-            source,
-        })
+        ProjectLock::acquire(path)?.write(self)
     }
 
     /// Whether this project describes `binary`.
