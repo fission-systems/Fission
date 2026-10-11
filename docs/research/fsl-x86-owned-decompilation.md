@@ -2,6 +2,11 @@
 
 Status: experimental, 2026-10-11. Work stays on `codex/fsl-jvm-iadd-parity`.
 
+The initial stage below remains reproducible with the 63-body pool. The
+[memory-source and input-evidence follow-up](fsl-x86-memory-input-evidence.md)
+adds an optional 126-body pool and actual C/Rust runtime comparisons on three
+compiled ELF spans. Its additional support does not imply general ABI recovery.
+
 `fsl-x86` is a separate experimental entry point behind the `x86` feature. It
 reuses the canonical Fission loader for selected binary spans and the existing
 FIR semantic validator, evaluator and C/Rust emitter. No external instruction

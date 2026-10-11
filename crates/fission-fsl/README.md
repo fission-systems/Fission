@@ -17,8 +17,13 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
   windows and loader-backed executable spans emit FIR/C/Rust explicit-state
   functions. Generic subtraction/bitwise operations and a bounded little-endian
   memory read express flags, LEA and near RET in the same FIR. Full x86 assets,
-  ordinary memory operands, calls/ABI and source-level function recovery remain
-  unsupported. See the [owned x86 contract](../../docs/research/fsl-x86-owned-decompilation.md).
+  the optional 126-body `scalar-memory-bodies.fsl` pool additionally admits
+  readonly MOV/ADD/SUB/CMP/AND/OR/XOR memory sources through those generic
+  address forms. FIR-derived entry-register and memory-read dependencies are
+  input candidates with raw instruction origins; ABI convention and source
+  types remain unknown. Stores, calls and general function recovery remain
+  unsupported. See the [owned x86 contract](../../docs/research/fsl-x86-owned-decompilation.md)
+  and [memory/input evidence experiment](../../docs/research/fsl-x86-memory-input-evidence.md).
 
 - Bounded `.fslseq` execution plans reference the same canonical FIR bodies.
   Sequential instances hand off logical register/flag state, with byte addresses,

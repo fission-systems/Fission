@@ -38,6 +38,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "usage: fsl-x86 compile RULES.fslx BODIES.fsl OUTPUT.fslxc | ",
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
         "decompile-binary PACKAGE BINARY ADDRESS SIZE fir|c|rust OUTPUT | ",
+        "recover-binary PACKAGE BINARY ADDRESS SIZE OUTPUT | ",
         "execute PACKAGE MODE BASE HEX REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET | ",
         "execute-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET"
     );
@@ -65,6 +66,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 X86Program::from_binary(&p, Path::new(&a[2]), number(&a[3])?, a[4].parse()?)?;
             fs::write(&a[6], program.emit(layer(&a[5])?)?)?;
             println!("emitted loader-backed FIR projection into {}", a[6]);
+        }
+        Some("recover-binary") if a.len() == 6 => {
+            let p = X86Package::decode_binary(&fs::read(&a[1])?)?;
+            let program =
+                X86Program::from_binary(&p, Path::new(&a[2]), number(&a[3])?, a[4].parse()?)?;
+            fs::write(&a[5], program.recover_input_evidence()?)?;
+            println!("emitted bounded input evidence into {}", a[5]);
         }
         Some("execute" | "execute-binary") if a.len() == 10 => {
             let p = X86Package::decode_binary(&fs::read(&a[1])?)?;

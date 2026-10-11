@@ -15,6 +15,7 @@ pub mod library;
 pub mod output;
 pub mod package;
 mod parser;
+pub mod recovery;
 pub mod registers;
 pub mod semantics;
 pub mod sequence;

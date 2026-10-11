@@ -135,6 +135,8 @@ struct Instance {
     code: String,
     observation: DecodedInstruction,
     returns: bool,
+    memory_source: bool,
+    address_bits: u32,
 }
 #[derive(Clone, Debug)]
 pub struct BinaryOrigin {
@@ -187,6 +189,11 @@ impl X86Program {
             let mut body = rule.body.replace("{width}", &i.width.to_string());
             if rule.form == Form::Lea {
                 body = format!("{body}_a{}", i.address_bits);
+            } else if i.memory_source {
+                let stem = body
+                    .strip_suffix("_reg")
+                    .ok_or_else(|| error("memory source requires a generic register-body stem"))?;
+                body = format!("{stem}_load_a{}", i.address_bits);
             }
             let index = package
                 .bodies
@@ -194,6 +201,7 @@ impl X86Program {
                 .iter()
                 .position(|b| b.name == body)
                 .ok_or_else(|| error("missing FIR body"))?;
+            state::admit_context(&package.bodies.instructions[index], true, true)?;
             let encoding = &package.bodies.instructions[index].encoding;
             let mut token = encoding.value;
             for (field, value) in encoding.fields.iter().zip(i.fields) {
@@ -223,6 +231,8 @@ impl X86Program {
                 code: rule.name.clone(),
                 observation,
                 returns: rule.form == Form::Ret,
+                memory_source: i.memory_source,
+                address_bits: i.address_bits,
             });
             offset += i.length;
         }
@@ -365,6 +375,71 @@ impl X86Program {
         }
         Ok((ExecutionStatus::InvalidState, None))
     }
+    /// Candidate entry dependencies derived from FIR, with no automatic ABI selection.
+    /// This bounded analysis refuses unknown control paths rather than merging guesses.
+    pub fn recover_input_evidence(&self) -> Result<String, FslError> {
+        use crate::recovery::{EntryDependency, RecoveredSuccessor, RecoveryState};
+        let mut analysis = RecoveryState::new(17, 12, 16)?;
+        let mut reached_return = false;
+        for instance in &self.instances {
+            let instruction =
+                &self.package.bodies.instructions[instance.observation.instruction_index];
+            let successor = analysis.instruction(
+                instruction,
+                &instance.observation,
+                instance.origin.address,
+            )?;
+            if instance.returns {
+                reached_return = true;
+                break;
+            }
+            if successor != RecoveredSuccessor::Fallthrough
+                && successor
+                    != RecoveredSuccessor::Constant(
+                        instance.origin.address + u64::from(instance.origin.byte_length),
+                    )
+            {
+                return Err(error("input recovery requires a straight guest path; control alternatives are not inferred"));
+            }
+        }
+        if !reached_return {
+            return Err(error("input recovery did not reach an admitted return"));
+        }
+        let dependencies = analysis.dependencies(0)?;
+        let mut out = format!("input evidence mode={} decoder={} input-sha256={} package-sha256={}\nstatus=bounded-candidates convention=unselected return-register=0 source-types=unknown\n", self.mode, DECODER, hash(&self.input), hash(&self.package.encode_binary()?));
+        if let Some(binary) = &self.binary {
+            writeln!(
+                out,
+                "binary file-sha256={} file-offset={} section={:?}",
+                binary.file_sha256, binary.file_offset, binary.section
+            )
+            .unwrap();
+        }
+        for dependency in &dependencies {
+            if let EntryDependency::Register(slot) = dependency {
+                writeln!(
+                    out,
+                    "entry-register slot={slot} role={} confidence=dependency-only",
+                    if *slot == 4 {
+                        "address/stack-context"
+                    } else {
+                        "return-data-candidate"
+                    }
+                )
+                .unwrap();
+            }
+        }
+        for (id, read) in analysis.reads.iter().enumerate() {
+            let origin = self
+                .instances
+                .iter()
+                .find(|i| i.origin.address == read.instruction_address)
+                .ok_or_else(|| error("missing recovery origin"))?;
+            writeln!(out, "memory-read id={id} instruction=0x{:x} raw={} fir-op={} value-bits={} role={} address={:?}", read.instruction_address, hex(&origin.raw), read.operation_index, read.value_bits, if dependencies.contains(&EntryDependency::MemoryRead(id)) {"return-data-candidate"} else {"control-or-other"}, read.address).unwrap();
+        }
+        out += "limits=flat-memory; no ABI selection, source prototype, argument count, signedness, pointer type or completeness proof; unknown control analysis refuses\n";
+        Ok(out)
+    }
     pub fn emit(&self, layer: OutputLayer) -> Result<String, FslError> {
         if layer == OutputLayer::Fir {
             let mut out=format!("x86 program mode={} base=0x{:x} bytes={} decoder={} input-sha256={} package-sha256={}\n",self.mode,self.base,self.input.len(),DECODER,hash(&self.input),hash(&self.package.encode_binary()?));
@@ -378,6 +453,9 @@ impl X86Program {
             }
             for i in &self.instances {
                 writeln!(out,"instance address=0x{:x} offset={} length={} raw={} code={:?} body={} fields={:?}",i.origin.address,i.origin.input_offset,i.origin.byte_length,hex(&i.raw),i.code,self.package.bodies.instructions[i.observation.instruction_index].name,i.observation.fields).unwrap();
+                if i.memory_source {
+                    writeln!(out, "  operand memory-source address-bits={} domain=flat-byte-window segment-bases=0", i.address_bits).unwrap();
+                }
             }
             for id in self
                 .instances

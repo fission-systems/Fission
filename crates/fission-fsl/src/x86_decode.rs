@@ -269,6 +269,7 @@ pub(crate) struct Decoded {
     pub width: u32,
     pub address_bits: u32,
     pub length: usize,
+    pub memory_source: bool,
 }
 struct Cursor<'a> {
     input: &'a [u8],
@@ -404,6 +405,7 @@ pub(crate) fn decode(
     };
     let mut fields = [0u64; 6];
     let mut rip_relative = false;
+    let mut memory_source = false;
     let reg_extension = u64::from((rex >> 2) & 1) * 8;
     let rm_extension = u64::from(rex & 1) * 8;
     if let Some(m) = modrm {
@@ -421,10 +423,7 @@ pub(crate) fn decode(
                 fields[0] = rm;
                 fields[1] = reg;
             }
-            Form::RegRm => {
-                if mod_ != 3 {
-                    return Err(error("memory source not migrated"));
-                }
+            Form::RegRm if mod_ == 3 => {
                 fields[0] = reg;
                 fields[1] = rm;
             }
@@ -434,7 +433,8 @@ pub(crate) fn decode(
                 }
                 fields[0] = rm;
             }
-            Form::Lea => {
+            Form::Lea | Form::RegRm => {
+                memory_source = r.form == Form::RegRm;
                 if mod_ == 3 {
                     return Err(error("LEA requires an effective address"));
                 }
@@ -548,5 +548,6 @@ pub(crate) fn decode(
         width: if r.form == Form::Ret { mode } else { width },
         address_bits,
         length: c.pos - offset,
+        memory_source,
     })
 }
