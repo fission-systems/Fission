@@ -818,7 +818,7 @@ struct HexArgs {
 #[derive(Args, Debug)]
 #[command(
     long_about = "Extract printable strings from the binary image.",
-    after_help = "Examples:\n  fission_cli strings app.exe\n  fission_cli strings app.exe --min-len 8 --json"
+    after_help = "Examples:\n  fission_cli strings app.exe\n  fission_cli strings app.exe --min-len 8 --json\n  fission_cli strings app.exe --contains error --context --json"
 )]
 struct StringsArgs {
     /// Path to the binary file to analyze
@@ -831,6 +831,18 @@ struct StringsArgs {
     /// Also report which functions reference each string (runs disassembly)
     #[arg(long)]
     xrefs: bool,
+
+    /// Include reference evidence and one-hop callers/callees; JSON is an envelope
+    #[arg(long)]
+    context: bool,
+
+    /// Keep strings containing this literal text (case-sensitive)
+    #[arg(long, value_name = "TEXT")]
+    contains: Option<String>,
+
+    /// Function discovery for navigation (context defaults to conservative)
+    #[arg(long, value_enum)]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Keep only strings in these sections (repeatable, e.g. --section .rdata)
     #[arg(long = "section", value_name = "NAME")]
@@ -884,7 +896,7 @@ struct XrefsArgs {
 #[derive(Args, Debug)]
 #[command(
     long_about = "Build a call graph from cross-reference analysis.\n\nEdges are aggregated from call-type xrefs discovered in the binary. Output includes callers and callees per function.",
-    after_help = "Examples:\n  fission_cli callgraph app.exe\n  fission_cli callgraph app.exe --json"
+    after_help = "Examples:\n  fission_cli callgraph app.exe\n  fission_cli callgraph app.exe --json\n  fission_cli callgraph app.exe --function 0x140001000 --json"
 )]
 struct CallgraphArgs {
     /// Path to the binary file to analyze
@@ -897,6 +909,10 @@ struct CallgraphArgs {
         default_value = "conservative"
     )]
     function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
+    /// Only this discovered function entry and its immediate relationships
+    #[arg(long, value_parser = parse_hex_address)]
+    function: Option<u64>,
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
@@ -1304,6 +1320,14 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     let mut args = OneShotArgs::with_binary(strings.binary);
                     args.strings = Some(strings.min_len);
                     args.strings_xrefs = strings.xrefs;
+                    args.strings_context = strings.context;
+                    args.strings_contains = strings.contains;
+                    args.function_discovery_profile =
+                        strings.function_discovery_profile.or_else(|| {
+                            strings
+                                .context
+                                .then_some(FunctionDiscoveryProfileArg::Conservative)
+                        });
                     args.strings_sections = strings.sections;
                     args.json = strings.common.json;
                     args.verbose = strings.common.verbose;
@@ -1324,6 +1348,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Callgraph(callgraph) => {
                     let mut args = OneShotArgs::with_binary(callgraph.binary);
                     args.callgraph_cmd = true;
+                    args.callgraph_function = callgraph.function;
                     args.function_discovery_profile = callgraph.function_discovery_profile;
                     args.json = callgraph.common.json;
                     args.verbose = callgraph.common.verbose;
@@ -2125,5 +2150,46 @@ mod tests {
         ])
         .expect_err("expected inventory-only flag rejection");
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+    #[test]
+    fn string_context_parsing_is_explicit_and_defaults_discovery() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "strings",
+            "bin.exe",
+            "--context",
+            "--contains",
+            "hello",
+            "--json",
+        ]);
+        assert!(parsed.args.strings_context);
+        assert_eq!(parsed.args.strings_contains.as_deref(), Some("hello"));
+        assert_eq!(
+            parsed.args.function_discovery_profile,
+            Some(FunctionDiscoveryProfileArg::Conservative)
+        );
+        let plain = parse_canonical(&["fission_cli", "strings", "bin.exe"]);
+        assert!(!plain.args.strings_context);
+        assert_eq!(plain.args.function_discovery_profile, None);
+        let custom = parse_canonical(&[
+            "fission_cli",
+            "strings",
+            "bin.exe",
+            "--context",
+            "--function-discovery-profile",
+            "aggressive",
+        ]);
+        assert_eq!(
+            custom.args.function_discovery_profile,
+            Some(FunctionDiscoveryProfileArg::Aggressive)
+        );
+        let graph = parse_canonical(&[
+            "fission_cli",
+            "callgraph",
+            "bin.exe",
+            "--function",
+            "0x1234",
+        ]);
+        assert_eq!(graph.args.callgraph_function, Some(0x1234));
     }
 }

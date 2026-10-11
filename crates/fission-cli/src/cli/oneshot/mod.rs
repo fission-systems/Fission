@@ -884,6 +884,8 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             min_len.max(4),
             &strings::StringsView {
                 with_xrefs: cli.strings_xrefs,
+                context: cli.strings_context,
+                contains: cli.strings_contains.clone(),
                 sections: cli.strings_sections.clone(),
             },
             cli.json,
