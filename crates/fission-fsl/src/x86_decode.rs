@@ -76,7 +76,7 @@ pub(crate) struct Rule {
     pub form: Form,
     pub body: String,
 }
-pub(crate) fn parse(source: &str) -> Result<Vec<Rule>, FslError> {
+pub(crate) fn parse(source: &str) -> Result<(u8, Vec<Rule>), FslError> {
     let lines: Vec<_> = source
         .lines()
         .map(str::trim)
@@ -85,7 +85,7 @@ pub(crate) fn parse(source: &str) -> Result<Vec<Rule>, FslError> {
     if lines.len() < 4
         || lines.first() != Some(&"frontend x86.scalar {")
         || lines.last() != Some(&"}")
-        || lines[1] != "decoder owned-x86-v1;"
+        || !matches!(lines[1], "decoder owned-x86-v1;" | "decoder owned-x86-v2;")
     {
         return Err(error("expected Fission-owned x86 frontend grammar"));
     }
@@ -120,7 +120,14 @@ pub(crate) fn parse(source: &str) -> Result<Vec<Rule>, FslError> {
         });
     }
     validate(&rules)?;
-    Ok(rules)
+    Ok((
+        if lines[1] == "decoder owned-x86-v2;" {
+            2
+        } else {
+            1
+        },
+        rules,
+    ))
 }
 pub(crate) fn validate(rules: &[Rule]) -> Result<(), FslError> {
     if rules.is_empty() || rules.len() > 256 {
@@ -273,7 +280,7 @@ pub(crate) fn decode_rules(raw: &[u8]) -> Result<Vec<Rule>, FslError> {
 
 pub(crate) struct Decoded {
     pub rule: usize,
-    pub fields: [u64; 6],
+    pub fields: [u64; 7],
     pub width: u32,
     pub address_bits: u32,
     pub length: usize,
@@ -323,6 +330,7 @@ pub(crate) fn decode(
     offset: usize,
     base: u64,
     mode: u32,
+    version: u8,
 ) -> Result<Decoded, FslError> {
     let mut c = Cursor {
         input,
@@ -412,7 +420,7 @@ pub(crate) fn decode(
     } else {
         mode
     };
-    let mut fields = [0u64; 6];
+    let mut fields = [0u64; 7];
     let mut rip_relative = false;
     let mut memory_source = false;
     let mut memory_destination = false;
@@ -434,22 +442,20 @@ pub(crate) fn decode(
                 fields[0] = reg;
                 fields[1] = rm;
             }
-            Form::RmImm | Form::RmSimm8 => {
-                if mod_ != 3 {
-                    return Err(error(
-                        "memory immediate operands need separate displacement/literal binding",
-                    ));
-                }
+            Form::RmImm | Form::RmSimm8 if mod_ == 3 => {
                 fields[0] = rm;
             }
-            Form::Lea | Form::RegRm | Form::RmReg => {
+            Form::Lea | Form::RegRm | Form::RmReg | Form::RmImm | Form::RmSimm8 => {
+                if matches!(r.form, Form::RmImm | Form::RmSimm8) && version < 2 {
+                    return Err(error("memory immediate operands require owned-x86-v2"));
+                }
                 memory_source = r.form == Form::RegRm;
-                memory_destination = r.form == Form::RmReg;
+                memory_destination = matches!(r.form, Form::RmReg | Form::RmImm | Form::RmSimm8);
                 if mod_ == 3 {
                     return Err(error("LEA requires an effective address"));
                 }
                 fields[0] = if memory_destination { 16 } else { reg };
-                fields[1] = if memory_destination { reg } else { 0 };
+                fields[1] = if r.form == Form::RmReg { reg } else { 0 };
                 fields[2] = 16;
                 fields[3] = 16;
                 if address_bits == 16 {
@@ -509,15 +515,20 @@ pub(crate) fn decode(
             _ => return Err(error("unexpected ModRM operand form")),
         }
     }
+    let literal_slot = if memory_destination && matches!(r.form, Form::RmImm | Form::RmSimm8) {
+        6
+    } else {
+        4
+    };
     match r.form {
         Form::RmImm | Form::AccImm => {
-            fields[4] = if width == 64 {
+            fields[literal_slot] = if width == 64 {
                 c.signed(32)?
             } else {
                 c.unsigned(width)?
             };
         }
-        Form::RmSimm8 => fields[4] = c.signed(8)?,
+        Form::RmSimm8 => fields[literal_slot] = c.signed(8)?,
         Form::OpregImm => {
             fields[0] = u64::from(opcode[opcode.len() - 1] & 7) + rm_extension;
             fields[4] = c.unsigned(width)?;
@@ -555,6 +566,9 @@ pub(crate) fn decode(
             fields[4] = base + c.pos as u64;
         }
         _ => {}
+    }
+    if literal_slot == 6 {
+        fields[6] &= 0xffff_ffff;
     }
     if rip_relative {
         fields[4] = base.wrapping_add(c.pos as u64).wrapping_add(fields[4]) & mask(address_bits);

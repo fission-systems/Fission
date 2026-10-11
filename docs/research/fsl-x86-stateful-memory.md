@@ -28,8 +28,8 @@ Stack-address width equals selected mode and SS base is zero; descriptor B flag
 is not recovered. The PUSH/POP bodies carry an additional Intel SDM Volume 2B
 source URL and PDF hash (observed 2026-10-11), separately from the legacy source.
 
-Memory immediate operands need separate displacement/literal bindings and remain
-unsupported. Memory ALU destinations without an authored body also refuse.
+This v1 pool refuses memory immediates. The later optional
+[v2 split-binding pool](fsl-x86-immediate-memory.md) adds MOV C7 stores. Memory ALU destinations without an authored body also refuse.
 CALL/LEAVE, recovered CFG joins, full cspec allocation, source prototypes and
 complete x86 migration remain future work. No external decoder/dependency change.
 

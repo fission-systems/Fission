@@ -7,8 +7,8 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fmt::Write};
-const DECODER: &str = "owned-x86-v1";
-const MAGIC: &[u8; 8] = b"FSLXPKG1";
+const MAGIC_V1: &[u8; 8] = b"FSLXPKG1";
+const MAGIC_V2: &[u8; 8] = b"FSLXPKG2";
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_INSTRUCTIONS: usize = 4096;
 fn error(s: impl Into<String>) -> FslError {
@@ -22,6 +22,7 @@ fn hash(bytes: &[u8]) -> String {
 /// fields are normalized operand tokens; original bytes remain in origins.
 #[derive(Clone, Debug)]
 pub struct X86Package {
+    version: u8,
     rules: Vec<Rule>,
     bodies: FslcPackage,
 }
@@ -30,8 +31,10 @@ impl X86Package {
         if manifest.len() > MAX_BYTES || source.len() > MAX_BYTES {
             return Err(error("x86 sources too large"));
         }
+        let (version, rules) = crate::x86_decode::parse(manifest)?;
         let value = Self {
-            rules: crate::x86_decode::parse(manifest)?,
+            version,
+            rules,
             bodies: crate::compile_source(source)?,
         };
         value.validate()?;
@@ -59,27 +62,54 @@ impl X86Package {
                         .find(|b| b.name == target)
                         .ok_or_else(|| error(format!("missing body {target}")))?;
                     state::admit_context(b, true, true)?;
-                    if b.encoding.bits != 128
-                        || b.encoding
-                            .fields
-                            .iter()
-                            .map(|f| (f.name.as_str(), f.offset, f.bits))
-                            .collect::<Vec<_>>()
-                            != [
-                                ("destination", 0, 5),
-                                ("source", 5, 5),
-                                ("base", 10, 5),
-                                ("index", 15, 5),
-                                ("immediate", 20, 64),
-                                ("scale", 84, 2),
-                            ]
-                    {
-                        return Err(error("normalized token schema mismatch"));
-                    }
                 }
             }
         }
+        for b in &self.bodies.instructions {
+            state::admit_context(b, true, true)?;
+            let fields = b
+                .encoding
+                .fields
+                .iter()
+                .map(|f| (f.name.as_str(), f.offset, f.bits))
+                .collect::<Vec<_>>();
+            let legacy = fields
+                == [
+                    ("destination", 0, 5),
+                    ("source", 5, 5),
+                    ("base", 10, 5),
+                    ("index", 15, 5),
+                    ("immediate", 20, 64),
+                    ("scale", 84, 2),
+                ];
+            let split = fields
+                == [
+                    ("destination", 0, 5),
+                    ("source", 5, 5),
+                    ("base", 10, 5),
+                    ("index", 15, 5),
+                    ("displacement", 20, 64),
+                    ("scale", 84, 2),
+                    ("literal", 86, 32),
+                ];
+            if b.encoding.bits != 128
+                || !(legacy || self.version == 2 && split)
+                || b.encoding.fields.iter().any(|f| {
+                    let bits = ((1u128 << f.bits) - 1) << f.offset;
+                    b.encoding.mask & bits != 0
+                })
+            {
+                return Err(error("normalized token schema mismatch"));
+            }
+        }
         Ok(())
+    }
+    fn decoder(&self) -> &'static str {
+        if self.version == 2 {
+            "owned-x86-v2"
+        } else {
+            "owned-x86-v1"
+        }
     }
     pub fn rule_count(&self) -> usize {
         self.rules.len()
@@ -91,7 +121,12 @@ impl X86Package {
         self.validate()?;
         let rules = crate::x86_decode::encode(&self.rules)?;
         let bodies = self.bodies.encode_binary()?;
-        let mut out = MAGIC.to_vec();
+        let mut out = if self.version == 2 {
+            MAGIC_V2
+        } else {
+            MAGIC_V1
+        }
+        .to_vec();
         out.extend((rules.len() as u32).to_le_bytes());
         out.extend((bodies.len() as u32).to_le_bytes());
         out.extend(Sha256::digest(&rules));
@@ -104,7 +139,10 @@ impl X86Package {
         Ok(out)
     }
     pub fn decode_binary(raw: &[u8]) -> Result<Self, FslError> {
-        if raw.len() < 80 || raw.len() > MAX_BYTES || raw.get(..8) != Some(MAGIC) {
+        if raw.len() < 80
+            || raw.len() > MAX_BYTES
+            || !matches!(raw.get(..8), Some(m) if m == MAGIC_V1 || m == MAGIC_V2)
+        {
             return Err(error("bad owned x86 package header"));
         }
         let n = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
@@ -120,6 +158,7 @@ impl X86Package {
             return Err(error("x86 package hash mismatch"));
         }
         let result = Self {
+            version: if raw.get(..8) == Some(MAGIC_V2) { 2 } else { 1 },
             rules: crate::x86_decode::decode_rules(rule_bytes)?,
             bodies: FslcPackage::decode_binary(body_bytes)?,
         };
@@ -177,23 +216,32 @@ impl X86Program {
             if instances.len() >= MAX_INSTRUCTIONS {
                 return Err(error("window exceeds 4096 instructions"));
             }
-            let i = crate::x86_decode::decode(&package.rules, input, offset, base, mode).map_err(
-                |e| {
-                    error(format!(
-                        "x86 address=0x{:x} offset={offset}: {}",
-                        base + offset as u64,
-                        e.message
-                    ))
-                },
-            )?;
+            let i = crate::x86_decode::decode(
+                &package.rules,
+                input,
+                offset,
+                base,
+                mode,
+                package.version,
+            )
+            .map_err(|e| {
+                error(format!(
+                    "x86 address=0x{:x} offset={offset}: {}",
+                    base + offset as u64,
+                    e.message
+                ))
+            })?;
             let rule = &package.rules[i.rule];
             let mut body = rule.body.replace("{width}", &i.width.to_string());
             if rule.form == Form::Lea {
                 body = format!("{body}_a{}", i.address_bits);
             } else if i.memory_destination {
-                let stem = body
-                    .strip_suffix("_reg")
-                    .ok_or_else(|| error("memory destination requires register-body stem"))?;
+                let stem = if matches!(rule.form, Form::RmImm | Form::RmSimm8) {
+                    body.as_str()
+                } else {
+                    body.strip_suffix("_reg")
+                        .ok_or_else(|| error("memory destination requires register-body stem"))?
+                };
                 body = format!("{stem}_store_a{}", i.address_bits);
             } else if i.memory_source {
                 let stem = body
@@ -209,6 +257,14 @@ impl X86Program {
                 .ok_or_else(|| error("missing FIR body"))?;
             state::admit_context(&package.bodies.instructions[index], true, true)?;
             let encoding = &package.bodies.instructions[index].encoding;
+            let split = encoding.fields.last().is_some_and(|f| f.name == "literal");
+            let memory_literal =
+                i.memory_destination && matches!(rule.form, Form::RmImm | Form::RmSimm8);
+            if split != memory_literal {
+                return Err(error(
+                    "operand form and displacement/literal schema disagree",
+                ));
+            }
             let mut token = encoding.value;
             for (field, value) in encoding.fields.iter().zip(i.fields) {
                 token |= u128::from(value) << field.offset;
@@ -467,7 +523,7 @@ impl X86Program {
             return Err(error("input recovery did not reach an admitted return"));
         }
         let dependencies = analysis.dependencies(0)?;
-        let mut out = format!("input evidence mode={} decoder={} input-sha256={} package-sha256={}\nstatus=bounded-candidates convention=unselected return-register=0 source-types=unknown\n", self.mode, DECODER, hash(&self.input), hash(&self.package.encode_binary()?));
+        let mut out = format!("input evidence mode={} decoder={} input-sha256={} package-sha256={}\nstatus=bounded-candidates convention=unselected return-register=0 source-types=unknown\n", self.mode, self.package.decoder(), hash(&self.input), hash(&self.package.encode_binary()?));
         if let Some(binary) = &self.binary {
             writeln!(
                 out,
@@ -524,7 +580,7 @@ impl X86Program {
     }
     pub fn emit(&self, layer: OutputLayer) -> Result<String, FslError> {
         if layer == OutputLayer::Fir {
-            let mut out=format!("x86 program mode={} base=0x{:x} bytes={} decoder={} input-sha256={} package-sha256={}\n",self.mode,self.base,self.input.len(),DECODER,hash(&self.input),hash(&self.package.encode_binary()?));
+            let mut out=format!("x86 program mode={} base=0x{:x} bytes={} decoder={} input-sha256={} package-sha256={}\n",self.mode,self.base,self.input.len(),self.package.decoder(),hash(&self.input),hash(&self.package.encode_binary()?));
             if let Some(b) = &self.binary {
                 writeln!(
                     out,
@@ -560,7 +616,7 @@ impl X86Program {
             return Err(error("x86 output supports FIR/C/Rust only"));
         }
         let c = layer == OutputLayer::C;
-        let mut out=format!("/* x86 mode={} input-sha256={} package-sha256={}; owned decoder {}.\n * Explicit state function: GPR[0..16]=RAX,RCX,RDX,RBX,RSP,RBP,RSI,RDI,R8..R15; GPR[16]=0.\n * flags=CF,PF,ZF,SF,OF,AF then six known bits. Unknown AF is not observable.\n * Disjoint valid storage required in C. Bounded byte memory, flat SS.base=0, no MMU/fault model.\n * Status 0 commits state and return PC; status 3 preserves caller storage. */\n",self.mode,hash(&self.input),hash(&self.package.encode_binary()?),DECODER);
+        let mut out=format!("/* x86 mode={} input-sha256={} package-sha256={}; owned decoder {}.\n * Explicit state function: GPR[0..16]=RAX,RCX,RDX,RBX,RSP,RBP,RSI,RDI,R8..R15; GPR[16]=0.\n * flags=CF,PF,ZF,SF,OF,AF then six known bits. Unknown AF is not observable.\n * Disjoint valid storage required in C. Bounded byte memory, flat SS.base=0, no MMU/fault model.\n * Status 0 commits state and return PC; status 3 preserves caller storage. */\n",self.mode,hash(&self.input),hash(&self.package.encode_binary()?),self.package.decoder());
         if let Some(b) = &self.binary {
             writeln!(
                 out,
@@ -616,7 +672,7 @@ impl X86Program {
             )
             .unwrap();
             if c {
-                writeln!(out,"const uint64_t fields[6]={{{fields}}};\nstatus=x86_body_{id}(r,17,f,12,fields,6{}{});\nif (status) return status;",if state::uses_guest_pc(body){",pc,&next,&changed"}else{""},if state::uses_memory(body){",memory,memory_length,memory_base"}else{""}).unwrap();
+                writeln!(out,"const uint64_t fields[{}]={{{fields}}};\nstatus=x86_body_{id}(r,17,f,12,fields,{}{}{});\nif (status) return status;",i.observation.fields.len(),i.observation.fields.len(),if state::uses_guest_pc(body){",pc,&next,&changed"}else{""},if state::uses_memory(body){",memory,memory_length,memory_base"}else{""}).unwrap();
             } else {
                 writeln!(out,"let fields=[{fields}];\nlet status=x86_body_{id}(&mut r,&mut f,&fields{}{});\nif status!=0 {{ return status; }}",if state::uses_guest_pc(body){",pc,&mut next,&mut changed"}else{""},if state::uses_memory(body){",memory,memory_base"}else{""}).unwrap();
             }

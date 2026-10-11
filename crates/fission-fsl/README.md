@@ -419,3 +419,17 @@ serve as temporary differential oracles while coverage is built; the final
 Fission build and runtime should not require them. See
 [`docs/research/fsl-fir-compiler-architecture.md`](../../docs/research/fsl-fir-compiler-architecture.md)
 for the proposed migration stages and parity gates.
+
+## Split x86 memory immediate operands
+
+`scalar-immediate.fslx` / `scalar-immediate-bodies.fsl` opt into `owned-x86-v2`.
+The 48-rule / 150-body pool adds MOV C7 memory immediates with independent address
+addend and literal bindings; arithmetic and stores remain canonical FIR v11.
+Original v1 pools and locked emission remain available. See
+[the format, execution and validation contract](../../docs/research/fsl-x86-immediate-memory.md).
+
+```sh
+cargo run -p fission-fsl --features x86 --bin fsl-x86 -- compile \
+  crates/fission-fsl/specs/x86/scalar-immediate.fslx \
+  crates/fission-fsl/specs/x86/scalar-immediate-bodies.fsl /tmp/immediate.fslxc
+```
