@@ -264,6 +264,25 @@ impl CompiledInstruction {
                         }
                         Some(output)
                     }
+                    FirOp::MemoryStoreLittle { address, value } => {
+                        read(address, &defined)?;
+                        read(value, &defined)?;
+                        let a = self.values[usize::from(address.0)].ty;
+                        let v = self.values[usize::from(value.0)].ty;
+                        if a != (crate::ValueType {
+                            bits: 64,
+                            sign: IntegerSign::Unsigned,
+                        }) || !matches!(v.bits, 8 | 16 | 32 | 64)
+                            || v.sign != IntegerSign::Unsigned
+                        {
+                            return Err(FslError::at(
+                                1,
+                                1,
+                                "memory store requires u64 address and u8/u16/u32/u64 value",
+                            ));
+                        }
+                        None
+                    }
                     FirOp::MemoryLoadLittle { output, address } => {
                         read(address, &defined)?;
                         let a = self.values[usize::from(address.0)].ty;
@@ -494,6 +513,7 @@ impl StackContract {
                 | FirOp::IntAddCarryIn { .. }
                 | FirOp::IntAddWrapCarry { .. }
                 | FirOp::MemoryLoadLittle { .. }
+                | FirOp::MemoryStoreLittle { .. }
                 | FirOp::FieldRead { .. }
                 | FirOp::GuestPcRead { .. }
                 | FirOp::GuestNextPcWrite { .. } => unreachable!("state execution rejected"),
@@ -564,6 +584,7 @@ pub fn execute_instruction(
             | FirOp::IntAddCarryIn { .. }
             | FirOp::IntAddWrapCarry { .. }
             | FirOp::MemoryLoadLittle { .. }
+            | FirOp::MemoryStoreLittle { .. }
             | FirOp::FieldRead { .. }
             | FirOp::GuestPcRead { .. }
             | FirOp::GuestNextPcWrite { .. } => unreachable!("state execution rejected"),

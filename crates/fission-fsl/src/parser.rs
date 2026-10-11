@@ -21,6 +21,12 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    MemoryStoreLittle {
+        address: String,
+        value: String,
+        line: usize,
+        column: usize,
+    },
     MemoryLoadLittle {
         name: String,
         ty: ValueType,
@@ -1223,6 +1229,20 @@ impl Parser {
             };
             self.expect_symbol(';')?;
             Ok(statement)
+        } else if self.at_ident("memory.store.le") {
+            self.advance();
+            self.expect_symbol('%')?;
+            let address = self.expect_name()?;
+            self.expect_symbol(',')?;
+            self.expect_symbol('%')?;
+            let value = self.expect_name()?;
+            self.expect_symbol(';')?;
+            Ok(Statement::MemoryStoreLittle {
+                address,
+                value,
+                line: token.line,
+                column: token.column,
+            })
         } else if self.at_ident("lane.register.write") {
             self.advance();
             let field = self.expect_name()?;

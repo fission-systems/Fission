@@ -39,6 +39,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
         "decompile-binary PACKAGE BINARY ADDRESS SIZE fir|c|rust OUTPUT | ",
         "recover-binary PACKAGE BINARY ADDRESS SIZE OUTPUT | ",
+        "execute-memory-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET | ",
         "execute PACKAGE MODE BASE HEX REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET | ",
         "execute-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET"
     );
@@ -74,9 +75,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             fs::write(&a[5], program.recover_input_evidence()?)?;
             println!("emitted bounded input evidence into {}", a[5]);
         }
-        Some("execute" | "execute-binary") if a.len() == 10 => {
+        Some("execute" | "execute-binary" | "execute-memory-binary") if a.len() == 10 => {
             let p = X86Package::decode_binary(&fs::read(&a[1])?)?;
-            let program = if a[0] == "execute-binary" {
+            let program = if a[0] != "execute" {
                 X86Program::from_binary(&p, Path::new(&a[2]), number(&a[3])?, a[4].parse()?)?
             } else {
                 X86Program::lift(&p, a[2].parse()?, number(&a[3])?, &bytes(&a[4])?)?
@@ -85,12 +86,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 registers: words(&a[5])?,
                 flags: words(&a[6])?,
             };
-            let (status, exit) =
-                program.execute(&mut state, &bytes(&a[8])?, number(&a[7])?, a[9].parse()?)?;
+            let mut memory = bytes(&a[8])?;
+            let (status, exit) = if a[0] == "execute-memory-binary" {
+                program.execute_mut(&mut state, &mut memory, number(&a[7])?, a[9].parse()?)?
+            } else {
+                program.execute(&mut state, &memory, number(&a[7])?, a[9].parse()?)?
+            };
             println!(
                 "status={status:?} exit={exit:?} registers={:?} flags={:?}",
                 state.registers, state.flags
             );
+            if a[0] == "execute-memory-binary" {
+                println!(
+                    "memory={}",
+                    memory
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<String>()
+                );
+            }
             if status != fission_fsl::ExecutionStatus::Success {
                 return Err("execution refused; state preserved".into());
             }

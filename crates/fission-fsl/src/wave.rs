@@ -112,6 +112,12 @@ pub(crate) fn validate_domains(
                 };
                 Some((output, domain))
             }
+            FirOp::MemoryStoreLittle { address, value } => {
+                if at(address) != ValueDomain::Uniform || at(value) != ValueDomain::Uniform {
+                    return Err(error());
+                }
+                None
+            }
             FirOp::MemoryLoadLittle { output, address } => {
                 if at(address) != ValueDomain::Uniform {
                     return Err(error());

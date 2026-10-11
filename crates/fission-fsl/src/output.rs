@@ -116,6 +116,9 @@ pub fn emit_instruction(
                 FirOp::FlagWrite { slot, value } => {
                     writeln!(text, "  flag.write {slot}, %v{}", value.0).unwrap();
                 }
+                FirOp::MemoryStoreLittle { address, value } => {
+                    writeln!(text, "  memory.store.le %v{}, %v{}", address.0, value.0).unwrap();
+                }
                 FirOp::MemoryLoadLittle { output, address } => {
                     writeln!(text, "  %v{} = memory.load.le %v{}", output.0, address.0).unwrap();
                 }
@@ -358,6 +361,7 @@ pub fn emit_instruction(
                 | FirOp::IntAddCarryIn { .. }
                 | FirOp::IntAddWrapCarry { .. }
                 | FirOp::MemoryLoadLittle { .. }
+                | FirOp::MemoryStoreLittle { .. }
                 | FirOp::FieldRead { .. }
                 | FirOp::GuestPcRead { .. }
                 | FirOp::GuestNextPcWrite { .. },

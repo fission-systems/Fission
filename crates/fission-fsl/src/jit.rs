@@ -365,6 +365,7 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
         | FirOp::IntAddCarry { .. }
         | FirOp::IntAddCarryIn { .. }
         | FirOp::MemoryLoadLittle { .. }
+        | FirOp::MemoryStoreLittle { .. }
         | FirOp::FieldRead { .. }
         | FirOp::GuestPcRead { .. }
         | FirOp::GuestNextPcWrite { .. }

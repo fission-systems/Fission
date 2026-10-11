@@ -39,10 +39,43 @@ fn admit_with(instruction: &CompiledInstruction, guest_pc: bool) -> Result<(), F
 }
 
 pub(crate) fn uses_memory(instruction: &CompiledInstruction) -> bool {
+    instruction.ops.iter().any(|op| {
+        matches!(
+            op,
+            FirOp::MemoryLoadLittle { .. } | FirOp::MemoryStoreLittle { .. }
+        )
+    })
+}
+
+pub(crate) fn writes_memory(instruction: &CompiledInstruction) -> bool {
     instruction
         .ops
         .iter()
-        .any(|op| matches!(op, FirOp::MemoryLoadLittle { .. }))
+        .any(|op| matches!(op, FirOp::MemoryStoreLittle { .. }))
+}
+
+/// Explicit window permissions, independent of ISA and host addresses.
+pub(crate) enum MemoryWindow<'a> {
+    ReadOnly(&'a [u8], u64),
+    ReadWrite(&'a mut [u8], u64),
+}
+impl MemoryWindow<'_> {
+    #[cfg(feature = "x86")]
+    pub(crate) fn reborrow(&mut self) -> MemoryWindow<'_> {
+        match self {
+            Self::ReadOnly(bytes, base) => MemoryWindow::ReadOnly(bytes, *base),
+            Self::ReadWrite(bytes, base) => MemoryWindow::ReadWrite(bytes, *base),
+        }
+    }
+    fn read(&self) -> (&[u8], u64) {
+        match self {
+            Self::ReadOnly(b, a) => (b, *a),
+            Self::ReadWrite(b, a) => (b, *a),
+        }
+    }
+    fn writable(&self) -> bool {
+        matches!(self, Self::ReadWrite(..))
+    }
 }
 
 pub(crate) fn admit_context(
@@ -89,6 +122,8 @@ pub(crate) fn admit_context(
                 | FirOp::RegisterWrite { .. }
                 | FirOp::FlagWrite { .. }
                 | FirOp::GuestNextPcWrite { .. }
+                | FirOp::MemoryLoadLittle { .. }
+                | FirOp::MemoryStoreLittle { .. }
         )
     }) {
         return Err(FslError::at(
@@ -149,6 +184,53 @@ pub(crate) fn execute_decoded_context(
     guest_pc: Option<u64>,
     memory: Option<(&[u8], u64)>,
 ) -> Result<(ExecutionStatus, Option<u64>), FslError> {
+    execute_decoded_window(
+        package,
+        decoded,
+        state,
+        guest_pc,
+        memory.map(|(bytes, base)| MemoryWindow::ReadOnly(bytes, base)),
+    )
+}
+
+/// Transactional API over a bounded mutable flat byte window. Failure preserves
+/// caller registers, flags and memory; this is not guest fault ordering.
+pub fn execute_decoded_memory(
+    package: &FslcPackage,
+    decoded: &DecodedInstruction,
+    state: &mut MachineState,
+    memory: &mut [u8],
+    base: u64,
+    guest_pc: Option<u64>,
+) -> Result<(ExecutionStatus, Option<u64>), FslError> {
+    if memory.len() > MAX_TRANSACTION_BYTES {
+        return Ok((ExecutionStatus::InvalidState, None));
+    }
+    let mut trial = state.clone();
+    let mut bytes = memory.to_vec();
+    let result = execute_decoded_window(
+        package,
+        decoded,
+        &mut trial,
+        guest_pc,
+        Some(MemoryWindow::ReadWrite(&mut bytes, base)),
+    )?;
+    if result.0 == ExecutionStatus::Success {
+        *state = trial;
+        memory.copy_from_slice(&bytes);
+    }
+    Ok(result)
+}
+
+pub const MAX_TRANSACTION_BYTES: usize = 1 << 20;
+
+pub(crate) fn execute_decoded_window(
+    package: &FslcPackage,
+    decoded: &DecodedInstruction,
+    state: &mut MachineState,
+    guest_pc: Option<u64>,
+    mut memory: Option<MemoryWindow<'_>>,
+) -> Result<(ExecutionStatus, Option<u64>), FslError> {
     package.reencode(decoded, &[])?;
     let instruction = &package.instructions[decoded.instruction_index];
     if guest_pc.is_none() && memory.is_none() {
@@ -156,7 +238,11 @@ pub(crate) fn execute_decoded_context(
     } else {
         admit_context(instruction, guest_pc.is_some(), memory.is_some())?;
     }
-    if memory.is_some_and(|(bytes, base)| base.checked_add(bytes.len() as u64).is_none()) {
+    if memory.as_ref().is_some_and(|m| {
+        let (bytes, base) = m.read();
+        base.checked_add(bytes.len() as u64).is_none()
+    }) || (writes_memory(instruction) && !memory.as_ref().is_some_and(MemoryWindow::writable))
+    {
         return Ok((ExecutionStatus::InvalidState, None));
     }
     let mut next_pc: Option<u64> = None;
@@ -274,8 +360,25 @@ pub(crate) fn execute_decoded_context(
                         & width_mask(instruction.values[usize::from(output.0)].ty.bits)
                 }
                 FirOp::FieldRead { output, field } => values[usize::from(output.0)] = index(field),
+                FirOp::MemoryStoreLittle { address, value } => {
+                    let MemoryWindow::ReadWrite(bytes, base) =
+                        memory.as_mut().expect("memory context admitted")
+                    else {
+                        return Ok((ExecutionStatus::InvalidState, None));
+                    };
+                    let size = usize::from(instruction.values[usize::from(value.0)].ty.bits / 8);
+                    let offset = values[usize::from(address.0)]
+                        .checked_sub(*base)
+                        .and_then(|n| usize::try_from(n).ok());
+                    let Some(raw) = offset
+                        .and_then(|o| o.checked_add(size).and_then(|end| bytes.get_mut(o..end)))
+                    else {
+                        return Ok((ExecutionStatus::InvalidState, None));
+                    };
+                    raw.copy_from_slice(&values[usize::from(value.0)].to_le_bytes()[..size]);
+                }
                 FirOp::MemoryLoadLittle { output, address } => {
-                    let (bytes, base) = memory.expect("memory context admitted");
+                    let (bytes, base) = memory.as_ref().expect("memory context admitted").read();
                     let size = usize::from(instruction.values[usize::from(output.0)].ty.bits / 8);
                     let offset = values[usize::from(address.0)]
                         .checked_sub(base)
@@ -346,16 +449,17 @@ fn emit_state_impl(
 ) -> Result<String, FslError> {
     admit_context(instruction, guest, memory)?;
     let memory_abi = memory && uses_memory(instruction);
+    let writable = writes_memory(instruction);
     let pc_abi = guest && uses_guest_pc(instruction);
     let c = layer == OutputLayer::C;
     let mut text = if c {
         format!("#include <stdint.h>\n#include <stddef.h>\n/* Disjoint arrays; status 0 success, 3 invalid state. */\nuint32_t {symbol}(uint64_t *registers, size_t register_count, uint64_t *flags, size_t flag_count, const uint64_t *fields, size_t field_count{}) {{\n    if (!registers || !flags || !fields{}) return 3;\n",
-            format_args!("{}{}", if pc_abi { ", uint64_t guest_pc, uint64_t *next_pc, uint32_t *next_pc_set" } else { "" }, if memory_abi { ", const uint8_t *memory, size_t memory_length, uint64_t memory_base" } else { "" }),
+            format_args!("{}{}", if pc_abi { ", uint64_t guest_pc, uint64_t *next_pc, uint32_t *next_pc_set" } else { "" }, if memory_abi { if writable { ", uint8_t *memory, size_t memory_length, uint64_t memory_base" } else { ", const uint8_t *memory, size_t memory_length, uint64_t memory_base" } } else { "" }),
             if pc_abi { " || !next_pc || !next_pc_set" } else { "" })
     } else {
         format!(
             "pub fn {symbol}(registers: &mut [u64], flags: &mut [u64], fields: &[u64]{}) -> u32 {{\n",
-            format_args!("{}{}", if pc_abi { ", guest_pc: u64, next_pc: &mut u64, next_pc_set: &mut bool" } else { "" }, if memory_abi { ", memory: &[u8], memory_base: u64" } else { "" })
+            format_args!("{}{}", if pc_abi { ", guest_pc: u64, next_pc: &mut u64, next_pc_set: &mut bool" } else { "" }, if memory_abi { if writable { ", memory: &mut [u8], memory_base: u64" } else { ", memory: &[u8], memory_base: u64" } } else { "" })
         )
     };
     if pc_abi
@@ -705,6 +809,25 @@ fn emit_state_impl(
                         (crate::IntBinaryOp::Xor, false) => format!("({l} ^ {r}) & 0x{mask:x}u64"),
                     };
                     Some((output, expression))
+                }
+                FirOp::MemoryStoreLittle {
+                    address,
+                    value: input,
+                } => {
+                    let size = instruction.values[usize::from(input.0)].ty.bits / 8;
+                    let a = value(address);
+                    if c {
+                        writeln!(text, "    if (!memory || {a} < memory_base || {a} - memory_base > memory_length || memory_length - ({a} - memory_base) < {size}) return 3;").unwrap();
+                        for j in 0..size {
+                            writeln!(text, "    memory[(size_t)({a} - memory_base) + {j}] = (uint8_t)({} >> {});", value(input),j*8).unwrap();
+                        }
+                    } else {
+                        writeln!(text, "    if {a} < memory_base || {a} - memory_base > memory.len() as u64 || (memory.len() as u64) - ({a} - memory_base) < {size} {{ return 3; }}").unwrap();
+                        for j in 0..size {
+                            writeln!(text, "    memory[({a} - memory_base) as usize + {j}] = ({} >> {}) as u8;", value(input), j*8).unwrap();
+                        }
+                    }
+                    None
                 }
                 FirOp::MemoryLoadLittle { output, address } => {
                     let size = instruction.values[usize::from(output.0)].ty.bits / 8;

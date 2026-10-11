@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 10;
+pub const FSL_PACKAGE_VERSION: u16 = 11;
 const INT_BINARY_PACKAGE_VERSION: u16 = 9;
 const GUEST_PC_PACKAGE_VERSION: u16 = 8;
 const STATE_PACKAGE_VERSION: u16 = 3;
@@ -158,6 +158,11 @@ impl IntBinaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirOp {
+    /// Ordered scalar store into an explicit mutable byte window.
+    MemoryStoreLittle {
+        address: ValueId,
+        value: ValueId,
+    },
     /// Read a byte-addressed little-endian scalar from an explicitly supplied
     /// memory window. Bounds failure rejects execution; no host pointer dereference.
     MemoryLoadLittle {
@@ -298,6 +303,7 @@ impl FirOp {
                     | Self::GuestPcRead { .. }
                     | Self::GuestNextPcWrite { .. }
                     | Self::MemoryLoadLittle { .. }
+                    | Self::MemoryStoreLittle { .. }
             )
     }
 
@@ -382,6 +388,18 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 11
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, FirOp::MemoryStoreLittle { .. }))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "memory store FIR requires package version 11",
+                ));
+            }
             if self.version < 10
                 && instruction
                     .ops
@@ -728,6 +746,11 @@ impl FslcPackage {
                         writer.u8(18);
                         writer.u16(value.0);
                     }
+                    FirOp::MemoryStoreLittle { address, value } => {
+                        writer.u8(22);
+                        writer.u16(address.0);
+                        writer.u16(value.0);
+                    }
                     FirOp::MemoryLoadLittle { output, address } => {
                         writer.u8(21);
                         writer.u16(output.0);
@@ -1016,6 +1039,10 @@ impl FslcPackage {
                         output: reader.value_id(value_count)?,
                     },
                     18 if version >= GUEST_PC_PACKAGE_VERSION => FirOp::GuestNextPcWrite {
+                        value: reader.value_id(value_count)?,
+                    },
+                    22 if version >= 11 => FirOp::MemoryStoreLittle {
+                        address: reader.value_id(value_count)?,
                         value: reader.value_id(value_count)?,
                     },
                     21 if version >= 10 => FirOp::MemoryLoadLittle {

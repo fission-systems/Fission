@@ -19,6 +19,8 @@ pub(crate) enum Form {
     Branch,
     Ret,
     Nop,
+    PushReg,
+    PopReg,
 }
 impl Form {
     fn name(self) -> &'static str {
@@ -34,6 +36,8 @@ impl Form {
             Self::Branch => "branch",
             Self::Ret => "ret",
             Self::Nop => "nop",
+            Self::PushReg => "push_reg",
+            Self::PopReg => "pop_reg",
         }
     }
     fn parse(s: &str) -> Result<Self, FslError> {
@@ -49,6 +53,8 @@ impl Form {
             Self::Branch,
             Self::Ret,
             Self::Nop,
+            Self::PushReg,
+            Self::PopReg,
         ]
         .into_iter()
         .find(|f| f.name() == s)
@@ -146,7 +152,7 @@ pub(crate) fn validate(rules: &[Rule]) -> Result<(), FslError> {
         if r.extension.is_some() != matches!(r.form, Form::RmImm | Form::RmSimm8) {
             return Err(error("group form requires an explicit ModRM extension"));
         }
-        if r.form == Form::OpregImm && r.mask != 0xf8 {
+        if matches!(r.form, Form::OpregImm | Form::PushReg | Form::PopReg) && r.mask != 0xf8 {
             return Err(error("opcode register form requires mask f8"));
         }
     }
@@ -243,6 +249,8 @@ pub(crate) fn decode_rules(raw: &[u8]) -> Result<Vec<Rule>, FslError> {
             Form::Branch,
             Form::Ret,
             Form::Nop,
+            Form::PushReg,
+            Form::PopReg,
         ]
         .get(usize::from(tag))
         .copied()
@@ -270,6 +278,7 @@ pub(crate) struct Decoded {
     pub address_bits: u32,
     pub length: usize,
     pub memory_source: bool,
+    pub memory_destination: bool,
 }
 struct Cursor<'a> {
     input: &'a [u8],
@@ -406,6 +415,7 @@ pub(crate) fn decode(
     let mut fields = [0u64; 6];
     let mut rip_relative = false;
     let mut memory_source = false;
+    let mut memory_destination = false;
     let reg_extension = u64::from((rex >> 2) & 1) * 8;
     let rm_extension = u64::from(rex & 1) * 8;
     if let Some(m) = modrm {
@@ -416,10 +426,7 @@ pub(crate) fn decode(
             return Err(error("REX.R on opcode extension not admitted"));
         }
         match r.form {
-            Form::RmReg => {
-                if mod_ != 3 {
-                    return Err(error("memory destination not migrated"));
-                }
+            Form::RmReg if mod_ == 3 => {
                 fields[0] = rm;
                 fields[1] = reg;
             }
@@ -429,16 +436,20 @@ pub(crate) fn decode(
             }
             Form::RmImm | Form::RmSimm8 => {
                 if mod_ != 3 {
-                    return Err(error("memory ALU/immediate form not migrated"));
+                    return Err(error(
+                        "memory immediate operands need separate displacement/literal binding",
+                    ));
                 }
                 fields[0] = rm;
             }
-            Form::Lea | Form::RegRm => {
+            Form::Lea | Form::RegRm | Form::RmReg => {
                 memory_source = r.form == Form::RegRm;
+                memory_destination = r.form == Form::RmReg;
                 if mod_ == 3 {
                     return Err(error("LEA requires an effective address"));
                 }
-                fields[0] = reg;
+                fields[0] = if memory_destination { 16 } else { reg };
+                fields[1] = if memory_destination { reg } else { 0 };
                 fields[2] = 16;
                 fields[3] = 16;
                 if address_bits == 16 {
@@ -522,6 +533,15 @@ pub(crate) fn decode(
             };
             fields[4] = base.wrapping_add(c.pos as u64).wrapping_add(displacement) & mask(mode);
         }
+        Form::PushReg | Form::PopReg => {
+            if operand || address || rex & 0x0e != 0 {
+                return Err(error(
+                    "prefixed stack operation requires a separate stack contract",
+                ));
+            }
+            fields[0] = u64::from(opcode[opcode.len() - 1] & 7) + rm_extension;
+            fields[2] = 4;
+        }
         Form::Ret => {
             if operand || address || rex != 0 {
                 return Err(error("prefixed RET requires a separate stack contract"));
@@ -545,9 +565,14 @@ pub(crate) fn decode(
     Ok(Decoded {
         rule,
         fields,
-        width: if r.form == Form::Ret { mode } else { width },
+        width: if matches!(r.form, Form::Ret | Form::PushReg | Form::PopReg) {
+            mode
+        } else {
+            width
+        },
         address_bits,
         length: c.pos - offset,
         memory_source,
+        memory_destination,
     })
 }

@@ -23,6 +23,26 @@ pub struct MemoryReadEvidence {
     pub operation_index: usize,
     pub value_bits: u16,
     pub address: Option<AffineAddress>,
+    pub forwarded_store: Option<usize>,
+    pub possible_store_aliases: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryWriteEvidence {
+    pub instruction_address: u64,
+    pub operation_index: usize,
+    pub value_bits: u16,
+    pub address: Option<AffineAddress>,
+    pub dependencies: BTreeSet<EntryDependency>,
+}
+
+fn disjoint(a: &AffineAddress, a_size: u64, b: &AffineAddress, b_size: u64) -> bool {
+    if a.entry_register != b.entry_register || a.bits != b.bits {
+        return false;
+    }
+    let delta = a.offset.wrapping_sub(b.offset) & mask(a.bits);
+    let reverse = b.offset.wrapping_sub(a.offset) & mask(a.bits);
+    delta >= b_size && reverse >= a_size
 }
 
 #[derive(Clone, Debug, Default)]
@@ -84,6 +104,8 @@ pub struct RecoveryState {
     registers: Vec<Value>,
     flags: Vec<Value>,
     pub reads: Vec<MemoryReadEvidence>,
+    pub writes: Vec<MemoryWriteEvidence>,
+    stored_values: Vec<Value>,
 }
 impl RecoveryState {
     pub fn new(registers: usize, flags: usize, zero_register: usize) -> Result<Self, FslError> {
@@ -105,6 +127,8 @@ impl RecoveryState {
             registers: values,
             flags: vec![Value::default(); flags],
             reads: Vec::new(),
+            writes: Vec::new(),
+            stored_values: Vec::new(),
         })
     }
     pub fn dependencies(&self, register: usize) -> Result<BTreeSet<EntryDependency>, FslError> {
@@ -250,23 +274,70 @@ impl RecoveryState {
                         left,
                         right,
                     } => Some((output, Value::combined(&get(left), &get(right)))),
+                    FirOp::MemoryStoreLittle {
+                        address: pointer,
+                        value,
+                    } => {
+                        let pointer_value = get(pointer);
+                        let stored = get(value);
+                        self.writes.push(MemoryWriteEvidence {
+                            instruction_address: address,
+                            operation_index: position,
+                            value_bits: bits(value),
+                            address: pointer_value.affine,
+                            dependencies: stored
+                                .dependencies
+                                .union(&pointer_value.dependencies)
+                                .cloned()
+                                .collect(),
+                        });
+                        self.stored_values.push(stored);
+                        None
+                    }
                     FirOp::MemoryLoadLittle {
                         output,
                         address: pointer,
                     } => {
                         let pointer = get(pointer);
                         let id = self.reads.len();
+                        let mut aliases = Vec::new();
+                        let mut forwarded = None;
+                        let mut v = Value {
+                            affine: None,
+                            dependencies: pointer.dependencies.clone(),
+                        };
+                        for (store_id, store) in self.writes.iter().enumerate().rev() {
+                            if let (Some(a), Some(b)) = (&pointer.affine, &store.address) {
+                                if disjoint(
+                                    a,
+                                    u64::from(bits(output) / 8),
+                                    b,
+                                    u64::from(store.value_bits / 8),
+                                ) {
+                                    continue;
+                                }
+                                if a == b && bits(output) == store.value_bits && aliases.is_empty()
+                                {
+                                    forwarded = Some(store_id);
+                                    v = self.stored_values[store_id].clone();
+                                    v.dependencies.extend(pointer.dependencies.clone());
+                                    break;
+                                }
+                            }
+                            aliases.push(store_id);
+                            v.dependencies.extend(store.dependencies.clone());
+                        }
+                        if forwarded.is_none() {
+                            v.dependencies.insert(EntryDependency::MemoryRead(id));
+                        }
                         self.reads.push(MemoryReadEvidence {
                             instruction_address: address,
                             operation_index: position,
                             value_bits: bits(output),
                             address: pointer.affine,
+                            forwarded_store: forwarded,
+                            possible_store_aliases: aliases,
                         });
-                        let mut v = Value {
-                            affine: None,
-                            dependencies: pointer.dependencies,
-                        };
-                        v.dependencies.insert(EntryDependency::MemoryRead(id));
                         Some((output, v))
                     }
                     FirOp::RegisterWrite { field, value } => {

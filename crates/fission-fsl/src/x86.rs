@@ -136,6 +136,7 @@ struct Instance {
     observation: DecodedInstruction,
     returns: bool,
     memory_source: bool,
+    memory_destination: bool,
     address_bits: u32,
 }
 #[derive(Clone, Debug)]
@@ -189,6 +190,11 @@ impl X86Program {
             let mut body = rule.body.replace("{width}", &i.width.to_string());
             if rule.form == Form::Lea {
                 body = format!("{body}_a{}", i.address_bits);
+            } else if i.memory_destination {
+                let stem = body
+                    .strip_suffix("_reg")
+                    .ok_or_else(|| error("memory destination requires register-body stem"))?;
+                body = format!("{stem}_store_a{}", i.address_bits);
             } else if i.memory_source {
                 let stem = body
                     .strip_suffix("_reg")
@@ -232,6 +238,7 @@ impl X86Program {
                 observation,
                 returns: rule.form == Form::Ret,
                 memory_source: i.memory_source,
+                memory_destination: i.memory_destination,
                 address_bits: i.address_bits,
             });
             offset += i.length;
@@ -331,6 +338,56 @@ impl X86Program {
         });
         Ok(result)
     }
+    fn valid_state(
+        &self,
+        state: &MachineState,
+        memory_length: usize,
+        base: u64,
+        budget: usize,
+    ) -> bool {
+        state.registers.len() == 17
+            && state.flags.len() == 12
+            && state.registers[16] == 0
+            && !state.flags.iter().any(|&f| f > 1)
+            && !state.flags[6..].iter().any(|&f| f != 1)
+            && base.checked_add(memory_length as u64).is_some()
+            && (1..=1_000_000).contains(&budget)
+    }
+    fn writes_memory(&self) -> bool {
+        self.instances.iter().any(|i| {
+            state::writes_memory(&self.package.bodies.instructions[i.observation.instruction_index])
+        })
+    }
+    fn run_window(
+        &self,
+        trial: &mut MachineState,
+        memory: &mut state::MemoryWindow<'_>,
+        budget: usize,
+    ) -> Result<(ExecutionStatus, Option<u64>), FslError> {
+        let mut pc = self.base;
+        for _ in 0..budget {
+            let Some(i) = self.instances.iter().find(|i| i.origin.address == pc) else {
+                return Ok((ExecutionStatus::InvalidState, None));
+            };
+            let (status, next) = state::execute_decoded_window(
+                &self.package.bodies,
+                &i.observation,
+                trial,
+                Some(pc),
+                Some(memory.reborrow()),
+            )?;
+            if status != ExecutionStatus::Success {
+                return Ok((status, None));
+            }
+            if i.returns {
+                return Ok(next.map_or((ExecutionStatus::InvalidState, None), |exit| {
+                    (ExecutionStatus::Success, Some(exit))
+                }));
+            }
+            pc = next.unwrap_or(pc + u64::from(i.origin.byte_length));
+        }
+        Ok((ExecutionStatus::InvalidState, None))
+    }
     pub fn execute(
         &self,
         state: &mut MachineState,
@@ -338,42 +395,46 @@ impl X86Program {
         memory_base: u64,
         budget: usize,
     ) -> Result<(ExecutionStatus, Option<u64>), FslError> {
-        if state.registers.len() != 17
-            || state.flags.len() != 12
-            || state.registers[16] != 0
-            || state.flags.iter().any(|&f| f > 1)
-            || state.flags[6..].iter().any(|&f| f != 1)
-            || memory_base.checked_add(memory.len() as u64).is_none()
-            || !(1..=1_000_000).contains(&budget)
+        if self.writes_memory() || !self.valid_state(state, memory.len(), memory_base, budget) {
+            return Ok((ExecutionStatus::InvalidState, None));
+        }
+        let mut trial = state.clone();
+        let result = self.run_window(
+            &mut trial,
+            &mut state::MemoryWindow::ReadOnly(memory, memory_base),
+            budget,
+        )?;
+        if result.0 == ExecutionStatus::Success {
+            *state = trial;
+        }
+        Ok(result)
+    }
+    /// Commit state, memory and exit only on whole-window success. Bounded API
+    /// transaction; no claim about architectural exception or atomic ordering.
+    pub fn execute_mut(
+        &self,
+        state: &mut MachineState,
+        memory: &mut [u8],
+        memory_base: u64,
+        budget: usize,
+    ) -> Result<(ExecutionStatus, Option<u64>), FslError> {
+        if memory.len() > state::MAX_TRANSACTION_BYTES
+            || !self.valid_state(state, memory.len(), memory_base, budget)
         {
             return Ok((ExecutionStatus::InvalidState, None));
         }
         let mut trial = state.clone();
-        let mut pc = self.base;
-        for _ in 0..budget {
-            let Some(i) = self.instances.iter().find(|i| i.origin.address == pc) else {
-                return Ok((ExecutionStatus::InvalidState, None));
-            };
-            let (status, next) = state::execute_decoded_context(
-                &self.package.bodies,
-                &i.observation,
-                &mut trial,
-                Some(pc),
-                Some((memory, memory_base)),
-            )?;
-            if status != ExecutionStatus::Success {
-                return Ok((status, None));
-            }
-            if i.returns {
-                let Some(exit) = next else {
-                    return Ok((ExecutionStatus::InvalidState, None));
-                };
-                *state = trial;
-                return Ok((ExecutionStatus::Success, Some(exit)));
-            }
-            pc = next.unwrap_or(pc + u64::from(i.origin.byte_length));
+        let mut bytes = memory.to_vec();
+        let result = self.run_window(
+            &mut trial,
+            &mut state::MemoryWindow::ReadWrite(&mut bytes, memory_base),
+            budget,
+        )?;
+        if result.0 == ExecutionStatus::Success {
+            *state = trial;
+            memory.copy_from_slice(&bytes);
         }
-        Ok((ExecutionStatus::InvalidState, None))
+        Ok(result)
     }
     /// Candidate entry dependencies derived from FIR, with no automatic ABI selection.
     /// This bounded analysis refuses unknown control paths rather than merging guesses.
@@ -437,6 +498,27 @@ impl X86Program {
                 .ok_or_else(|| error("missing recovery origin"))?;
             writeln!(out, "memory-read id={id} instruction=0x{:x} raw={} fir-op={} value-bits={} role={} address={:?}", read.instruction_address, hex(&origin.raw), read.operation_index, read.value_bits, if dependencies.contains(&EntryDependency::MemoryRead(id)) {"return-data-candidate"} else {"control-or-other"}, read.address).unwrap();
         }
+        for (id, read) in analysis.reads.iter().enumerate() {
+            if let Some(store) = read.forwarded_store {
+                writeln!(out, "memory-read-forward id={id} exact-store={store}").unwrap();
+            }
+            if !read.possible_store_aliases.is_empty() {
+                writeln!(
+                    out,
+                    "memory-read-alias id={id} possible-stores={:?} confidence=overapproximation",
+                    read.possible_store_aliases
+                )
+                .unwrap();
+            }
+        }
+        for (id, write) in analysis.writes.iter().enumerate() {
+            let origin = self
+                .instances
+                .iter()
+                .find(|i| i.origin.address == write.instruction_address)
+                .ok_or_else(|| error("missing store origin"))?;
+            writeln!(out,"memory-write id={id} instruction=0x{:x} raw={} fir-op={} value-bits={} address={:?} dependencies={:?}", write.instruction_address,hex(&origin.raw),write.operation_index,write.value_bits,write.address,write.dependencies).unwrap();
+        }
         out += "limits=flat-memory; no ABI selection, source prototype, argument count, signedness, pointer type or completeness proof; unknown control analysis refuses\n";
         Ok(out)
     }
@@ -453,6 +535,9 @@ impl X86Program {
             }
             for i in &self.instances {
                 writeln!(out,"instance address=0x{:x} offset={} length={} raw={} code={:?} body={} fields={:?}",i.origin.address,i.origin.input_offset,i.origin.byte_length,hex(&i.raw),i.code,self.package.bodies.instructions[i.observation.instruction_index].name,i.observation.fields).unwrap();
+                if i.memory_destination {
+                    writeln!(out, "  operand memory-destination address-bits={} domain=flat-byte-window segment-bases=0", i.address_bits).unwrap();
+                }
                 if i.memory_source {
                     writeln!(out, "  operand memory-source address-bits={} domain=flat-byte-window segment-bases=0", i.address_bits).unwrap();
                 }
@@ -566,6 +651,27 @@ impl X86Program {
         } else {
             "_ => return 3,\n}\n}\n3\n}\n"
         };
+        if self.writes_memory() {
+            let limit = state::MAX_TRANSACTION_BYTES;
+            // Preserve the readonly ABI/goldens; mutable projections explicitly
+            // require disjoint caller scratch with exact memory length.
+            if c {
+                out=out.replace("const uint8_t *memory, size_t memory_length, uint64_t memory_base, size_t budget, uint64_t *exit_pc", "uint8_t *memory, size_t memory_length, uint64_t memory_base, uint8_t *scratch, size_t scratch_length, size_t budget, uint64_t *exit_pc");
+                out=out.replace("uint64_t r[17], f[12]; memcpy(r, registers, sizeof r); memcpy(f, flags, sizeof f);", &format!("if (!scratch || scratch_length != memory_length || memory_length > {limit}) return 3;\nmemcpy(scratch,memory,memory_length); uint8_t *destination_memory=memory; memory=scratch;\nuint64_t r[17], f[12]; memcpy(r, registers, sizeof r); memcpy(f, flags, sizeof f);"));
+                out = out.replace(
+                    "*exit_pc=next; return 0;",
+                    "memcpy(destination_memory,memory,memory_length); *exit_pc=next; return 0;",
+                );
+            } else {
+                out=out.replace("memory: &[u8], memory_base: u64, budget: usize, exit_pc: &mut u64", "memory: &mut [u8], memory_base: u64, scratch: &mut [u8], budget: usize, exit_pc: &mut u64");
+                out=out.replace("let mut r=[0u64;17]; let mut f=[0u64;12];", &format!("if scratch.len()!=memory.len() || memory.len()>{limit} {{ return 3; }}\nscratch.copy_from_slice(memory); let destination_memory=memory; let memory=scratch;\nlet mut r=[0u64;17]; let mut f=[0u64;12];"));
+                out = out.replace(
+                    "*exit_pc=next; return 0;",
+                    "destination_memory.copy_from_slice(memory); *exit_pc=next; return 0;",
+                );
+            }
+            out.insert_str(0, "/* Mutable window transaction; disjoint scratch has exact memory length. Scratch contents are unspecified on failure. */\n");
+        }
         Ok(out)
     }
 }

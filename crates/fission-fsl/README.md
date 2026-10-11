@@ -11,6 +11,12 @@ and behavioral recompilation. See [ADR 0015](../../docs/adr/0015-fsl-single-fir-
 
 ## Current slice
 
+- Optional x86 stateful pool: 48 rules / 141 bodies, register-to-memory MOV and
+  unprefixed register PUSH/POP in the same FIR. Package v11 adds ordered
+  `memory.store.le`; bounded mutable execution rolls back memory together with
+  registers/flags. Derived read-after-store evidence preserves uncertain aliases.
+  See [stateful memory contract](../../docs/research/fsl-x86-stateful-memory.md).
+
 - Owned x86 scalar decoding behind `--features x86`: 46 `.fslx` rules and
   63 canonical FIR bodies compiled into binary `.fslxc`. Prefix/opcode/ModRM/
   SIB/immediate reading uses no external decoder library. Selected 16/32/64

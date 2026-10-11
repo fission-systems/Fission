@@ -25,7 +25,7 @@ mod wave;
 pub mod x86;
 #[cfg(feature = "x86")]
 mod x86_decode;
-pub use state::{execute_decoded, MachineState};
+pub use state::{execute_decoded, execute_decoded_memory, MachineState, MAX_TRANSACTION_BYTES};
 pub use wave::{execute_wave, ValueDomain, WaveContract, WaveState};
 
 pub use encoding::{BitField, DecodedInstruction, Encoding};
@@ -119,6 +119,16 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         };
         for statement in instruction.statements {
             match statement {
+                parser::Statement::MemoryStoreLittle {
+                    address,
+                    value,
+                    line,
+                    column,
+                } => {
+                    let address = require_value(&values, &value_ids, &address, line, column)?;
+                    let value = require_value(&values, &value_ids, &value, line, column)?;
+                    ops.push(FirOp::MemoryStoreLittle { address, value });
+                }
                 parser::Statement::MemoryLoadLittle {
                     name,
                     ty,
@@ -535,6 +545,12 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
 
     let package = FslcPackage {
         version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(|op| matches!(op, FirOp::MemoryStoreLittle { .. }))
+        {
+            11
+        } else if instructions
             .iter()
             .flat_map(|i| &i.ops)
             .any(|op| matches!(op, FirOp::MemoryLoadLittle { .. }))

@@ -134,13 +134,15 @@ fn main() -> Result<()> {
         for (slot, name) in names.iter().enumerate() {
             output_registers[slot] = read_word(&mut state, &registers[*name])?;
         }
+        let mut output_memory = vec![0u8; memory.len()];
+        state.read_into(spaces.ram, base, &mut output_memory)?;
         let output_flags: Vec<_> = flags
             .iter()
             .map(|name| read_word(&mut state, &registers[*name]))
             .collect::<Result<_>>()?;
         println!(
             "{}",
-            serde_json::json!({"registers":output_registers,"flags":output_flags,"exit":exit,"scope":"actual Fission SLA plus canonical P-code interpreter; not a statement about P-code expressive limits"})
+            serde_json::json!({"registers":output_registers,"flags":output_flags,"exit":exit,"memory_hex":hex::encode(output_memory),"scope":"actual Fission SLA plus canonical P-code interpreter; not a statement about P-code expressive limits"})
         );
     }
     Ok(())
