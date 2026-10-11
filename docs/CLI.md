@@ -606,6 +606,63 @@ If `--min-len` is not provided, the current default is `4`.
 
 ---
 
+## String Leads and Call Relationships
+
+```bash
+fission_cli strings sample.elf --contains 'error' --context --json
+fission_cli callgraph sample.elf --function 0x1002000 --json
+fission_cli xrefs sample.elf --to 0x1000190 --json
+fission_cli disasm sample.elf --addr 0x1002000 --function
+```
+
+`strings --contains TEXT` filters by a case-sensitive literal substring. Add
+`--section NAME` (repeatable) and `--min-len N` to narrow the listing further.
+`--context` runs conservative function discovery by default and builds one
+canonical reference index for string uses and one-hop call relationships.
+`--function-discovery-profile` can select conservative, balanced or aggressive
+explicitly; use the same profile in subsequent `callgraph`, `list` or `xrefs`
+queries to keep discovered entries aligned.
+
+The explicit `--context --json` envelope contains:
+
+- `analysis`: the existing per-layer xref coverage report, including scope,
+  omissions, unsupported reasons and layers that were not requested.
+- `strings`: matching printable ASCII runs with `file_offset`, mapped `address`
+  (or `null`), `section`, and `context`.
+- `context.references`: original indexed records whose data read/write or
+  relocation target lands in the run, including suffix pointers and a NUL byte
+  only when actually present. Instruction and pointer-data sources remain
+  distinguishable; loader string anchors and control-flow targets are excluded.
+- `context.functions`: discovered entries explicitly attributed by those
+  records, their names, `reference_ids`, and immediate `callers`/`callees` with
+  address, optional name and indexed count. Unknown owners remain reference
+  records and do not become invented function entries.
+
+Raw reference records retain the `xrefs --json` schema (numeric addresses and
+record IDs); navigation rows use hex address strings. IDs index the canonical
+reference output for the same binary, analyst decisions and analysis options, not cross-build
+persistent identifiers. Analyst names saved by `db` appear in the result;
+`--no-db` ignores them.
+
+Unmapped file bytes and printable runs in executable storage have `context: null` with `context_note`. An empty reference/function list means no matching
+**indexed** evidence; it is not proof that the binary has no uses or callers.
+This lane uses loader/disassembly evidence, not p-code or runtime execution;
+coverage remains bounded by the reported extraction and discovery scope.
+
+Without `--context`, existing string JSON stays an array and `--xrefs` retains
+its legacy `referrers` field. That field can fall back to an instruction address
+when no function owner is known; use `context.references` for explicit ownership.
+
+`callgraph --function` accepts a discovered function **entry** and returns one
+node with its immediate relationships; a missing entry fails rather than
+silently returning an empty successful graph. Existing graph fields are retained;
+`analysis`, `node_count`, and `selected_function` are additive. `function_count`
+and `total_call_sites` describe the whole indexed graph even when node output is
+filtered. Edges are derived from the same canonical index as `xrefs`; unresolved
+indirect calls and jump-only tail calls are not asserted as complete call edges.
+
+---
+
 ## Analysis Project (`db`)
 
 Analyst decisions live beside the input binary in `<binary>.fission.json`, bound

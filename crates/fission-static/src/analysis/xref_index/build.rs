@@ -4,6 +4,7 @@ use fission_loader::loader::function_view::canonical_exports_sorted;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_sleigh::runtime::DecodedFlowKind;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::BTreeMap;
 
 use super::model::{
     FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndexSummary, XrefKind, XrefRecord, XrefSource,
@@ -35,7 +36,7 @@ pub struct XrefIndex {
     pub refs: Vec<XrefRecord>,
     pub analysis: XrefAnalysisReport,
     by_source: FxHashMap<u64, Vec<XrefId>>,
-    by_target: FxHashMap<u64, Vec<XrefId>>,
+    by_target: BTreeMap<u64, Vec<XrefId>>,
 }
 
 impl XrefIndexBuilder {
@@ -93,7 +94,7 @@ impl XrefIndexBuilder {
         self.analysis.sort_by_key(|coverage| coverage.layer);
         let mut refs = Vec::with_capacity(self.pending.len());
         let mut by_source: FxHashMap<u64, Vec<XrefId>> = FxHashMap::default();
-        let mut by_target: FxHashMap<u64, Vec<XrefId>> = FxHashMap::default();
+        let mut by_target: BTreeMap<u64, Vec<XrefId>> = BTreeMap::new();
 
         for (idx, draft) in self.pending.into_iter().enumerate() {
             let id = idx as XrefId;
@@ -165,6 +166,26 @@ impl XrefIndex {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// References into a byte span, including suffix pointers. Zero length
+    /// matches nothing; a span past the address-space end never wraps. Results
+    /// retain canonical record order and IDs, independently of target order.
+    #[must_use]
+    pub fn refs_to_span(&self, start: u64, byte_len: u64) -> Vec<&XrefRecord> {
+        if byte_len == 0 {
+            return Vec::new();
+        }
+        let end = start.saturating_add(byte_len - 1);
+        let mut ids: Vec<_> = self
+            .by_target
+            .range(start..=end)
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect();
+        ids.sort_unstable();
+        ids.into_iter()
+            .filter_map(|id| self.refs.get(id as usize))
+            .collect()
     }
 
     #[must_use]

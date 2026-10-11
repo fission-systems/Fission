@@ -53,6 +53,8 @@ pub struct OneShotArgs {
     pub decomp_all: bool,
     pub project: bool,
     pub strings_xrefs: bool,
+    pub strings_context: bool,
+    pub strings_contains: Option<String>,
     pub strings_sections: Vec<String>,
     pub hex_addr: Option<u64>,
     pub search: Option<crate::cli::oneshot::SearchQuery>,
@@ -95,6 +97,7 @@ pub struct OneShotArgs {
     pub debug_decomp_bundle: Option<PathBuf>,
     /// Canonical `callgraph` subcommand.
     pub callgraph_cmd: bool,
+    pub callgraph_function: Option<u64>,
     /// Canonical `identify` subcommand (FID signature matching).
     pub identify_cmd: bool,
     /// Optional single function VA to identify (`identify --function`).
@@ -163,6 +166,8 @@ impl Default for OneShotArgs {
             no_header: false,
             project: false,
             strings_xrefs: false,
+            strings_context: false,
+            strings_contains: None,
             strings_sections: Vec::new(),
             hex_addr: None,
             search: None,
@@ -199,6 +204,7 @@ impl Default for OneShotArgs {
             debug_decomp: false,
             debug_decomp_bundle: None,
             callgraph_cmd: false,
+            callgraph_function: None,
             identify_cmd: false,
             identify_function: None,
             similar_cmd: false,
