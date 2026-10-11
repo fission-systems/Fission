@@ -131,10 +131,10 @@ fn merge_context_overrides(
     base: PackedContextOverride,
     pending: PackedContextOverride,
 ) -> PackedContextOverride {
-    let pending_mask = pending.mask_bits();
-    PackedContextOverride::new(
-        (base.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
-        base.mask_bits() | pending_mask,
+    let pending_mask = pending.mask_bits_wide();
+    PackedContextOverride::new_wide(
+        (base.context_bits_wide() & !pending_mask) | (pending.context_bits_wide() & pending_mask),
+        base.mask_bits_wide() | pending_mask,
     )
 }
 

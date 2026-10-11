@@ -1866,8 +1866,7 @@ mod tests {
     // ── JVM ──────────────────────────────────────────────────────────────
     #[test]
     fn jvm_resolves_as_executable_candidate() {
-        // JVM requires specific packed context initialization that is not trivially
-        // exercisable without a full .class file header. Verify registry resolution only.
+        // Keep registry selection covered independently from the focused byte-lift check below.
         let registry = CompiledRuntimeRegistry::discover().expect("registry");
         let selection = registry
             .resolve_from_language_pair("JVM:BE:32:default", None)
@@ -1876,6 +1875,55 @@ mod tests {
             selection.runtime_status,
             RuntimeFrontendStatus::ExecutableCandidate
         );
+    }
+
+    #[test]
+    fn jvm_iadd_lifts_with_128_bit_context_from_checked_in_sla() {
+        use crate::compiler::CompiledTemplateSource;
+
+        let frontend = RuntimeSleighFrontend::new_for_language("JVM").expect("JVM runtime");
+        let (instruction, ops, length, details) = frontend
+            .decode_instruction_and_lift_with_context_override(&[0x60], 0, None)
+            .expect("JVM iadd lift");
+
+        assert_eq!(instruction.mnemonic, "iadd");
+        assert_eq!(instruction.bytes, [0x60]);
+        assert_eq!(length, 1);
+        assert_eq!(
+            details.template_source,
+            Some(CompiledTemplateSource::SpecDerived)
+        );
+
+        let load_outputs = ops
+            .iter()
+            .filter(|op| op.opcode == PcodeOpcode::Load)
+            .filter_map(|op| op.output.as_ref())
+            .filter(|output| output.size == 4)
+            .collect::<Vec<_>>();
+        assert_eq!(load_outputs.len(), 2, "iadd reads two 32-bit stack values");
+
+        let value_adds = ops
+            .iter()
+            .filter(|op| {
+                op.opcode == PcodeOpcode::IntAdd
+                    && op.output.as_ref().is_some_and(|output| output.size == 4)
+                    && op.inputs.len() == 2
+                    && op.inputs.iter().all(|input| {
+                        input.size == 4
+                            && !input.is_constant
+                            && load_outputs.iter().any(|loaded| *loaded == input)
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(value_adds.len(), 1, "iadd combines the two loaded values");
+        let sum = value_adds[0].output.as_ref().expect("iadd result");
+
+        let stores = ops
+            .iter()
+            .filter(|op| op.opcode == PcodeOpcode::Store)
+            .collect::<Vec<_>>();
+        assert_eq!(stores.len(), 1, "iadd pushes one result to the stack");
+        assert_eq!(stores[0].inputs.last(), Some(sum));
     }
 
     // ── MCS96 ────────────────────────────────────────────────────────────

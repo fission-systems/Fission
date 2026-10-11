@@ -21,8 +21,8 @@ pub struct CompiledSubtableDefinition {
 )]
 pub struct CompiledFrontend {
     pub arch: String,
-    pub default_context: u64,
-    pub default_context_known_mask: u64,
+    pub default_context: u128,
+    pub default_context_known_mask: u128,
     pub entry_spec: String,
     pub entry_id: String,
     pub include_manifest: Vec<String>,

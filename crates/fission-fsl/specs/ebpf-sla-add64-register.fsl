@@ -1,0 +1,18 @@
+language ebpf.le.sla.add64.register {
+    byte_order little;
+    address_unit byte;
+    instruction table0_constructor4_register {
+        encoding 64 mask 0xff value 0xf {
+            field destination offset 8 bits 4 exclude 11, 12, 13, 14, 15;
+            field source offset 12 bits 4 exclude 11, 12, 13, 14, 15;
+        }
+        mnemonic "ADD";
+        evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/compiled/eBPF/eBPF_le.sla" "sha256:7af0479005e8b93385783cc78a60b27eaef0afde2f546af6b3bc45ec23eb63dd" "SLA v4 table 0 constructor 4, child table 28 constructor 0: instruction constraints, selector tables and BUILD/export/INT_ADD atoms lowered. Source line is metadata only; no Sleigh source is read.";
+        semantics {
+            %lhs: u64 = register.read destination;
+            %rhs: u64 = register.read source;
+            %sum: u64 = u64.add.wrap %lhs, %rhs;
+            register.write destination, %sum;
+        }
+    }
+}

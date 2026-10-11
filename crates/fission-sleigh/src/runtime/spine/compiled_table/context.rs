@@ -7,8 +7,8 @@ pub(super) use crate::packed_context::{
 pub(super) struct CompiledInstructionContext<'a> {
     pub(super) inner: RuntimeInstructionContext<'a>,
     pub(super) instruction_cursor: usize,
-    pub(super) context_register: u64,
-    pub(super) context_known_mask: u64,
+    pub(super) context_register: u128,
+    pub(super) context_known_mask: u128,
 }
 
 impl<'a> std::ops::Deref for CompiledInstructionContext<'a> {
@@ -47,7 +47,7 @@ impl<'a> CompiledInstructionContext<'a> {
 }
 
 pub(super) fn packed_context_bytes(
-    context_register: u64,
+    context_register: u128,
     bytestart: u32,
     bytesize: u32,
 ) -> Result<u32> {
@@ -73,7 +73,7 @@ pub(super) fn packed_context_bytes(
 }
 
 pub(super) fn packed_context_bits(
-    context_register: u64,
+    context_register: u128,
     startbit: u32,
     bitsize: u32,
 ) -> Result<u32> {

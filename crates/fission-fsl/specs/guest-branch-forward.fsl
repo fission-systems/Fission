@@ -1,0 +1,65 @@
+# Self-authored guest-control fixture. These encodings are not an ISA.
+# Generic register slots are plain logical u64 slots; flag slots are unused.
+# Branch targets are byte offsets from the end of the branching word and must
+# land strictly forward, word-aligned, inside the window or exactly at its end.
+language fixture.guest.branch {
+    byte_order little;
+    address_unit byte;
+    instruction fx_addi {
+        encoding 32 mask 0xff000000 value 0x01000000 {
+            field rd offset 0 bits 4;
+            field imm offset 8 bits 8;
+        }
+        mnemonic "fixture.addi";
+        evidence "self-authored" "synthetic" "v1" "rd = low 32 bits of rd + zero-extended imm8; no flags; existing wrapping-add semantics.";
+        semantics {
+            %lhs: u32 = register.read rd;
+            %rhs: u32 = field.read imm;
+            %sum: u32 = u32.add.wrap %lhs, %rhs;
+            register.write rd, %sum;
+        }
+    }
+    instruction fx_br {
+        encoding 32 mask 0xff000000 value 0x02000000 {
+            field offset offset 0 bits 8;
+        }
+        mnemonic "fixture.br";
+        evidence "self-authored" "synthetic" "v1" "Unconditional direct forward branch: next = pc + 4 + zero-extended byte offset.";
+        semantics {
+            %pc: u64 = guest.pc.read;
+            %four: u64 = int.const 4;
+            %base: u64 = u64.add.wrap %pc, %four;
+            %delta: u64 = field.read offset;
+            %target: u64 = u64.add.wrap %base, %delta;
+            guest.next_pc.write %target;
+        }
+    }
+    instruction fx_brz {
+        encoding 32 mask 0xff000000 value 0x03000000 {
+            field source offset 0 bits 4;
+            field offset offset 8 bits 8;
+        }
+        mnemonic "fixture.brz";
+        evidence "self-authored" "synthetic" "v1" "Conditional direct forward branch taken when the low 32 bits of source are zero; otherwise falls through. Block returns are body-local, not guest returns.";
+        semantics {
+            block entry() {
+                %value: u32 = register.read source;
+                %zero: u32 = int.const 0;
+                %is_zero: u1 = int.eq %value, %zero;
+                branch.if %is_zero, taken(), fallthrough();
+            }
+            block taken() {
+                %pc: u64 = guest.pc.read;
+                %four: u64 = int.const 4;
+                %base: u64 = u64.add.wrap %pc, %four;
+                %delta: u64 = field.read offset;
+                %target: u64 = u64.add.wrap %base, %delta;
+                guest.next_pc.write %target;
+                return;
+            }
+            block fallthrough() {
+                return;
+            }
+        }
+    }
+}
