@@ -391,6 +391,7 @@ impl SimProcedure for LibcStartMain {
             tracing::warn!("__libc_start_main: null main — halting");
             return Ok(HleResult::Halt(1));
         }
+        initialize_hle_runtime_guards(emu)?;
         // CALL __libc_start_main already pushed a return address; rewrite it to
         // our post-main exit stub so main's ret is a clean process halt.
         const POST_MAIN_EXIT_STUB: u64 = 0xFFFFFFF1000000F8;
@@ -405,6 +406,83 @@ impl SimProcedure for LibcStartMain {
         let _ = emu.write_register_u64("RDI", argc);
         let _ = emu.write_register_u64("RSI", argv);
         Ok(HleResult::JumpTo(main_fn))
+    }
+}
+
+/// Supply the runtime guard state that libc startup would have installed when
+/// the HLE GOT path bypasses it. Static CRTs and real interpreters own their
+/// initialization. An existing guest thread pointer is never overwritten.
+fn initialize_hle_runtime_guards(emu: &mut Emulator) -> Result<()> {
+    use super::abi::RuntimeGuardLayout;
+    use super::dynlink::DynlinkMode;
+    use super::image_info::at;
+    let Some(info) = emu.image_info.as_ref() else {
+        return Ok(());
+    };
+    if info.dynlink.mode != DynlinkMode::HleGot {
+        return Ok(());
+    }
+    let (auxv_address, auxv_len) = (info.auxv, info.auxv_len);
+    let Some(layout) = RuntimeGuardLayout::for_arch(&emu.arch) else {
+        return Ok(());
+    };
+    if emu.fs_base != 0 || emu.read_register_u64(layout.thread_pointer_register)? != 0 {
+        return Ok(());
+    }
+    // Use the bytes actually exposed to this guest, with checked bounds. A
+    // missing/unreadable source is an initialization failure, not a zero guard.
+    anyhow::ensure!(
+        auxv_len > 0 && auxv_len <= 4096 && auxv_len % 16 == 0,
+        "invalid HLE runtime-guard auxiliary vector"
+    );
+    let ram = emu.state.ram_space();
+    let auxv = emu.state.read_space(ram, auxv_address, auxv_len as usize)?;
+    let mut random_address = None;
+    for pair in auxv.chunks_exact(16) {
+        let key = u64::from_le_bytes(pair[..8].try_into()?);
+        if key == at::NULL {
+            break;
+        }
+        if key == at::RANDOM {
+            random_address = Some(u64::from_le_bytes(pair[8..].try_into()?));
+            break;
+        }
+    }
+    let random_address =
+        random_address.ok_or_else(|| anyhow::anyhow!("HLE startup needs AT_RANDOM"))?;
+    let mut random = emu.state.read_space(ram, random_address, 16)?;
+    // The LP64 little-endian glibc stack guard has a zero terminator byte.
+    random[0] = 0;
+    let thread_pointer = emu.heap_alloc(layout.header_size)?;
+    for offset in layout.self_offsets {
+        emu.state
+            .write_space(ram, thread_pointer + offset, &thread_pointer.to_le_bytes())?;
+    }
+    emu.state.write_space(
+        ram,
+        thread_pointer + layout.stack_guard_offset,
+        &random[..8],
+    )?;
+    emu.state.write_space(
+        ram,
+        thread_pointer + layout.pointer_guard_offset,
+        &random[8..],
+    )?;
+    emu.set_fs_base(thread_pointer);
+    tracing::debug!(
+        "Linux HLE runtime guards installed at 0x{thread_pointer:X}; module TLS is not modeled"
+    );
+    Ok(())
+}
+
+/// A stack-protector failure cannot return. Model its process termination using
+/// the conventional SIGABRT shell status; this does not deliver a guest signal
+/// or execute signal handlers.
+pub struct StackChkFail;
+impl SimProcedure for StackChkFail {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        emu.guest_write(2, b"*** stack smashing detected ***: terminated\n")?;
+        Ok(HleResult::Halt(134))
     }
 }
 
@@ -716,6 +794,126 @@ mod tests {
         let lang_id = load_spec.pair.language_id.as_str();
         let arch = ArchInfo::from_language_id(lang_id, Some(&binary)).unwrap();
         Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).unwrap()
+    }
+
+    fn guard_emu() -> Emulator {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_hle_guard.elf");
+        let binary = LoadedBinary::from_file(&path).unwrap();
+        let mut state = MachineState::new();
+        let info = crate::os::linux::loader::load_elf(&mut state, &binary).unwrap();
+        let spec = binary.load_spec().unwrap().clone();
+        let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&spec)
+            .unwrap()
+            .remove(0);
+        let arch =
+            ArchInfo::from_language_id(spec.pair.language_id.as_str(), Some(&binary)).unwrap();
+        let mut emu =
+            Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).unwrap();
+        emu.apply_linux_image(info).unwrap();
+        emu
+    }
+
+    #[test]
+    fn hle_runtime_guards_use_guest_random_and_sync_fs() {
+        let mut emu = guard_emu();
+        let info = emu.image_info.as_ref().unwrap();
+        let ram = emu.state.ram_space();
+        let auxv = emu
+            .state
+            .read_space(ram, info.auxv, info.auxv_len as usize)
+            .unwrap();
+        let pair = auxv
+            .chunks_exact(16)
+            .find(|pair| {
+                u64::from_le_bytes(pair[..8].try_into().unwrap())
+                    == super::super::image_info::at::RANDOM
+            })
+            .unwrap();
+        let address = u64::from_le_bytes(pair[8..].try_into().unwrap());
+        let random: Vec<u8> = (0..16u8)
+            .map(|i| 0xd3u8.wrapping_sub(i.wrapping_mul(7)))
+            .collect();
+        emu.state.write_space(ram, address, &random).unwrap();
+        initialize_hle_runtime_guards(&mut emu).unwrap();
+        let base = emu.fs_base;
+        assert_ne!(base, 0);
+        assert_eq!(emu.read_register_u64("FS_OFFSET").unwrap(), base);
+        let ram = emu.state.ram_space();
+        let data = emu.state.read_space(ram, base, 0x38).unwrap();
+        assert_eq!(&data[..8], &base.to_le_bytes());
+        assert_eq!(&data[16..24], &base.to_le_bytes());
+        assert_eq!(data[0x28], 0);
+        assert_eq!(&data[0x29..0x30], &random[1..8]);
+        assert_eq!(&data[0x30..0x38], &random[8..]);
+        // Repeated entry retains both pointer identity and guest modifications.
+        emu.state.write_space(ram, base + 0x28, &[0x7b; 8]).unwrap();
+        let cursor = emu.heap_cursor;
+        initialize_hle_runtime_guards(&mut emu).unwrap();
+        assert_eq!(emu.fs_base, base);
+        assert_eq!(emu.heap_cursor, cursor);
+        assert_eq!(
+            emu.state.read_space(ram, base + 0x28, 8).unwrap(),
+            [0x7b; 8]
+        );
+    }
+
+    #[test]
+    fn hle_runtime_guards_preserve_guest_pointer_and_non_hle_modes() {
+        use super::super::{abi::RuntimeGuardLayout, dynlink::DynlinkMode};
+        assert!(RuntimeGuardLayout::for_arch(&ArchInfo::x86_32()).is_none());
+        assert!(RuntimeGuardLayout::for_arch(&ArchInfo::aarch64()).is_none());
+        for mode in [
+            DynlinkMode::Static,
+            DynlinkMode::Interpreter,
+            DynlinkMode::SharedLibs,
+        ] {
+            let mut emu = guard_emu();
+            emu.image_info.as_mut().unwrap().dynlink.mode = mode;
+            let cursor = emu.heap_cursor;
+            initialize_hle_runtime_guards(&mut emu).unwrap();
+            assert_eq!(emu.fs_base, 0);
+            assert_eq!(emu.heap_cursor, cursor);
+        }
+        let mut emu = guard_emu();
+        emu.set_fs_base(0x12345000);
+        let cursor = emu.heap_cursor;
+        initialize_hle_runtime_guards(&mut emu).unwrap();
+        assert_eq!(emu.fs_base, 0x12345000);
+        assert_eq!(emu.heap_cursor, cursor);
+        // A register already installed by guest instructions is preserved too.
+        emu.fs_base = 0;
+        initialize_hle_runtime_guards(&mut emu).unwrap();
+        assert_eq!(emu.read_register_u64("FS_OFFSET").unwrap(), 0x12345000);
+    }
+
+    #[test]
+    fn hle_runtime_guards_reject_missing_random_before_allocating() {
+        let mut emu = guard_emu();
+        let info = emu.image_info.as_ref().unwrap();
+        let addr = info.auxv;
+        let len = info.auxv_len as usize;
+        let ram = emu.state.ram_space();
+        emu.state.write_space(ram, addr, &vec![0; len]).unwrap();
+        let cursor = emu.heap_cursor;
+        assert!(initialize_hle_runtime_guards(&mut emu).is_err());
+        assert_eq!(emu.heap_cursor, cursor);
+        assert_eq!(emu.fs_base, 0);
+        emu.image_info.as_mut().unwrap().auxv_len = u64::MAX;
+        assert!(initialize_hle_runtime_guards(&mut emu).is_err());
+    }
+
+    #[test]
+    fn stack_check_failure_is_a_nonreturning_hle() {
+        use crate::os::env::OsEnvironment;
+        let mut emu = tiny_emu();
+        let env = LinuxEnv::new();
+        for name in ["__stack_chk_fail", "__stack_chk_fail_local"] {
+            assert!(matches!(
+                env.dispatch_hle(&mut emu, name).unwrap(),
+                HleResult::Halt(134)
+            ));
+        }
+        assert_eq!(emu.metrics.hle_miss_total(), 0);
     }
 
     #[test]
