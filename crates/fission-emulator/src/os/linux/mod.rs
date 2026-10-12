@@ -66,6 +66,8 @@ impl LinuxEnv {
         simos.register_procedure("_exit", Box::new(libc::Exit));
         // Dynamic CRT without ld.so: start_main → JumpTo(main); GOT already HLE-patched.
         simos.register_procedure("__libc_start_main", Box::new(libc::LibcStartMain));
+        simos.register_procedure("__stack_chk_fail", Box::new(libc::StackChkFail));
+        simos.register_procedure("__stack_chk_fail_local", Box::new(libc::StackChkFail));
         simos.register_procedure("__libc_csu_init", Box::new(libc::NopOk));
         simos.register_procedure("__libc_csu_fini", Box::new(libc::NopOk));
         simos.register_procedure("_init", Box::new(libc::NopOk));

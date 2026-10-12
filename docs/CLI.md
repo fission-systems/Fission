@@ -338,6 +338,30 @@ per-operation conditions and handle runtime errors and partial analysis.
 
 ---
 
+## Sandbox Execution Evidence
+
+```sh
+fission_cli sandbox ./challenge.elf --json --max-inst 10000 \
+  --fail-on-budget --max-hle-misses 0 --max-unknown-syscalls 0 -- candidate
+```
+
+`--json` emits one JSON document on host stdout; guest stdout is captured in
+`guest_output.stdout`, and guest stderr in `guest_output.stderr`. Both are byte
+arrays, preserving non-UTF-8 data. Text mode retains console echo. Metrics files
+include the same capture. An unavailable stream is `null` with a corresponding
+`stdout_error` / `stderr_error`; it must not be treated as empty output.
+The capture is retained VFS descriptor 1/2 content, not a redirection transcript.
+
+A successful CLI process means the sandbox/report command completed. Inspect
+`halt_requested`, the guest `exit_code`, output and quality budgets to determine
+the target's verdict. Some crackmes exit zero on both correct and incorrect
+input. An instruction-bound run without a guest exit is incomplete.
+
+The default x86-64 Linux HLE path supplies bounded runtime guard/header storage
+before main; it does not implement full module TLS. Stack-check failure halts
+with conventional status 134 without simulating guest SIGABRT delivery. See the
+measured [crackme workflow](CRACKME_WORKFLOW.md) for a complete solve and replay.
+
 ## Decomp Command
 
 `decomp` is the canonical human-facing decompilation entrypoint.

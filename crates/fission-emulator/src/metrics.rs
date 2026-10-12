@@ -391,6 +391,18 @@ fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 
+/// Exact captured guest console bytes. Kept separate from host diagnostics and
+/// protocol stdout; byte arrays preserve non-UTF-8 output without coercion.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GuestOutputReport {
+    pub stdout: Option<Vec<u8>>,
+    pub stderr: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_error: Option<String>,
+}
+
 /// Serializable sandbox run summary for CLI `--json` / automation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SandboxMetricsReport {
@@ -414,6 +426,8 @@ pub struct SandboxMetricsReport {
     /// it regardless of `halt_requested` being `true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_output: Option<GuestOutputReport>,
 }
 
 impl SandboxMetricsReport {
@@ -479,6 +493,7 @@ impl SandboxMetricsReport {
             budget,
             behavior: None,
             exit_code: None,
+            guest_output: None,
         }
     }
 
@@ -487,6 +502,31 @@ impl SandboxMetricsReport {
     /// knows it, but nothing was asking.
     pub fn with_exit_code(mut self, exit_code: Option<u32>) -> Self {
         self.exit_code = exit_code;
+        self
+    }
+
+    /// Attach the existing guest VFS console capture, without consuming it.
+    /// Unavailable descriptors are reported as capture failures, never as
+    /// an empty successful result.
+    pub fn with_guest_output(mut self, vfs: &crate::os::vfs::SimVFS) -> Self {
+        let capture = |fd| -> (Option<Vec<u8>>, Option<String>) {
+            let result = vfs
+                .file_size(fd)
+                .ok_or_else(|| anyhow::anyhow!("guest console fd {fd} unavailable"))
+                .and_then(|len| vfs.peek(fd, 0, len));
+            match result {
+                Ok(bytes) => (Some(bytes), None),
+                Err(error) => (None, Some(error.to_string())),
+            }
+        };
+        let (stdout, stdout_error) = capture(1);
+        let (stderr, stderr_error) = capture(2);
+        self.guest_output = Some(GuestOutputReport {
+            stdout,
+            stderr,
+            stdout_error,
+            stderr_error,
+        });
         self
     }
 

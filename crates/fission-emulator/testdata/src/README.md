@@ -58,3 +58,15 @@ zig cc -target aarch64-linux-musl -nostdlib -static -fno-pie -no-pie \
 ```
 
 Execute it only in Fission's emulator.
+
+## HLE runtime-guard fixture
+
+`linux_hle_guard.S` bypasses host libc and imports only HLE startup and
+stack-check failure. Its main saves/checks the FS guard and deliberately corrupts
+the saved value when argv[1] starts with `!`. Execute this shared ELF only in
+Fission. Build it with LLVM:
+
+```sh
+clang --target=x86_64-linux-gnu -c linux_hle_guard.S -o /tmp/linux_hle_guard.o
+ld.lld -shared -e _start --build-id=none -o ../linux_hle_guard.elf /tmp/linux_hle_guard.o
+```
