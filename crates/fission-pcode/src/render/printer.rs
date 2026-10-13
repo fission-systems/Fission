@@ -9,13 +9,42 @@ use super::{
 };
 use fission_midend_core::ir::sanitize_c_identifier;
 use fission_signatures::is_known_variadic_runtime_symbol;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+
+struct LineTrace<'a> {
+    definitions: &'a HashMap<String, u64>,
+    counts: HashMap<&'a str, usize>,
+    state: RefCell<(usize, usize, Vec<super::RecoveredLineMapping>)>,
+}
+
+impl LineTrace<'_> {
+    fn definition(&self, name: &str, out: &str) {
+        if self.counts.get(name) != Some(&1) {
+            return;
+        }
+        let Some(address) = self.definitions.get(name) else {
+            return;
+        };
+        let mut state = self.state.borrow_mut();
+        let delta = out[state.0..].bytes().filter(|byte| *byte == b'\n').count();
+        state.0 = out.len();
+        state.1 += delta;
+        let line_number = state.1 + 1;
+        state.2.push(super::RecoveredLineMapping {
+            line_number,
+            addresses: vec![*address],
+            defined_variables: vec![name.to_string()],
+        });
+    }
+}
 
 const MAX_PRINT_STMT_DEPTH: usize = 512;
 const MAX_PRINT_EXPR_DEPTH: usize = 512;
 
 /// Printing context: maps variable name → NirType for struct-member rendering.
 struct PrintCtx<'a> {
+    line_trace: Option<&'a LineTrace<'a>>,
     /// variable name → declared type
     var_types: HashMap<&'a str, &'a NirType>,
     pointer_decl_names: HashSet<&'a str>,
@@ -44,9 +73,6 @@ struct PrintCtx<'a> {
     goto_targets: HashSet<&'a str>,
 }
 
-/// Collects every label referenced by a `Goto` (excluding the switch
-/// fallthrough sentinel, which is not a real label) anywhere in `stmts`,
-/// recursing into all nested bodies.
 /// Count statement-level assignments to each plain variable.
 fn count_var_assignments<'a>(stmts: &'a [HirStmt], out: &mut HashMap<&'a str, usize>) {
     for_each_stmt(stmts, &mut |stmt| {
@@ -233,6 +259,7 @@ impl<'a> PrintCtx<'a> {
         let mut return_enum_groups = HashMap::new();
         collect_return_enum_groups(func, &mut return_enum_groups);
         Self {
+            line_trace: None,
             var_types,
             pointer_decl_names,
             decl_type_text,
@@ -505,6 +532,33 @@ pub(crate) fn print_hir_function_with_profile(
     print_hir_function_impl(func, ctx)
 }
 
+pub(crate) fn print_hir_function_with_provenance(
+    func: &HirFunction,
+    global_names: Option<&HashMap<u64, String>>,
+    profile: PrintProfile,
+    definitions: &HashMap<String, u64>,
+) -> (String, Vec<super::RecoveredLineMapping>) {
+    let mut counts = HashMap::new();
+    count_var_assignments(&func.body, &mut counts);
+    for binding in &func.locals {
+        if binding.initializer.is_some() {
+            *counts.entry(binding.name.as_str()).or_default() += 1;
+        }
+    }
+    counts.retain(|name, _| func.locals.iter().any(|binding| binding.name == *name));
+    let trace = LineTrace {
+        definitions,
+        counts,
+        state: RefCell::new((0, 0, Vec::new())),
+    };
+    let mut ctx = PrintCtx::build_with_profile(func, profile);
+    ctx.global_names = global_names;
+    ctx.line_trace = Some(&trace);
+    let code = print_hir_function_impl(func, ctx);
+    let (_, _, mappings) = trace.state.into_inner();
+    (code, mappings)
+}
+
 /// Whether C11 can only express this callable as a declaration without a
 /// prototype. A C function definition with an empty parameter list declares
 /// zero parameters, so it cannot stand in for an unknown-arity thunk.
@@ -558,6 +612,9 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
     out.push_str(")\n{\n");
     for local in &func.locals {
         if let Some(initializer) = &local.initializer {
+            if let Some(trace) = ctx.line_trace {
+                trace.definition(&local.name, &out);
+            }
             out.push_str(&format!(
                 "    {} = {};\n",
                 print_binding_declaration(local),
@@ -2246,6 +2303,15 @@ fn print_stmt_with_indent_ctx(
         out.push_str("/* [FISSION] RECURSION TOO DEEP (statement printer guard) */\n");
         return;
     }
+    if let HirStmt::Assign {
+        lhs: HirLValue::Var(name),
+        ..
+    } = stmt
+    {
+        if let Some(trace) = ctx.line_trace {
+            trace.definition(name, out);
+        }
+    }
     match stmt {
         HirStmt::Assign { .. }
         | HirStmt::VaStart { .. }
@@ -2466,6 +2532,87 @@ pub fn render_contracted_wrapper_summary(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn definition_lines_preserve_text_and_do_not_map_rhs_uses() {
+        use super::*;
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut function = HirFunction::default();
+        function.locals.push(NirBinding {
+            name: "value".into(),
+            ty: ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        });
+        function.body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("value".into()),
+                rhs: HirExpr::Const(3, ty),
+            },
+            HirStmt::Return(Some(HirExpr::Var("value".into()))),
+        ];
+        let definitions = HashMap::from([("value".to_string(), 0x1000)]);
+        let (code, mappings) =
+            print_hir_function_with_provenance(&function, None, PrintProfile::Nir, &definitions);
+        assert_eq!(
+            code,
+            print_hir_function_with_profile(&function, None, PrintProfile::Nir)
+        );
+        assert_eq!(mappings.len(), 1);
+        assert!(
+            code.lines()
+                .nth(mappings[0].line_number - 1)
+                .unwrap()
+                .contains("value = 3;")
+        );
+        assert_eq!(mappings[0].defined_variables, vec!["value"]);
+        assert_eq!(mappings[0].addresses, vec![0x1000]);
+        function.body.insert(0, function.body[0].clone());
+        assert!(
+            print_hir_function_with_provenance(&function, None, PrintProfile::Nir, &definitions)
+                .1
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn initialized_definition_is_mapped_but_later_redefinition_abstains() {
+        use super::*;
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut function = HirFunction::default();
+        function.locals.push(NirBinding {
+            name: "value".into(),
+            ty: ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: Some(HirExpr::Const(3, ty.clone())),
+        });
+        let definitions = HashMap::from([("value".to_string(), 0x1000)]);
+        let (code, mappings) =
+            print_hir_function_with_provenance(&function, None, PrintProfile::Nir, &definitions);
+        assert_eq!(mappings.len(), 1);
+        assert!(
+            code.lines()
+                .nth(mappings[0].line_number - 1)
+                .unwrap()
+                .contains("value = 3;")
+        );
+        function.body.push(HirStmt::Assign {
+            lhs: HirLValue::Var("value".into()),
+            rhs: HirExpr::Const(4, ty),
+        });
+        assert!(
+            print_hir_function_with_provenance(&function, None, PrintProfile::Nir, &definitions)
+                .1
+                .is_empty()
+        );
+    }
     use super::*;
     use crate::midend::StructField;
 

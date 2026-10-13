@@ -202,7 +202,13 @@ fn render_mlil_preview_dual_layer_output(
     // through the presentation pass. NIR remains the scored tree's
     // semantic-faithful print, while HIR comes from the jump-minimizing tree
     // and is allowed to optimize for readability.
-    let layered = stitch_dual_layers(&scored_layers, hir);
+    let hir_mappings = output
+        .layered
+        .as_ref()
+        .map(|layers| layers.hir_line_mappings.clone())
+        .unwrap_or_default();
+    let mut layered = stitch_dual_layers(&scored_layers, hir);
+    layered.hir_line_mappings = hir_mappings;
     output.code = scored.code;
     output.layered = Some(layered.clone());
     Ok(output)
@@ -218,6 +224,8 @@ fn stitch_dual_layers(
     // even though `scored.code` still came from NIR.
     LayeredPseudocode {
         nir: scored_layers.nir.clone(),
+        nir_line_mappings: scored_layers.nir_line_mappings.clone(),
+        hir_line_mappings: Vec::new(),
         hir: readable_hir,
     }
 }
@@ -596,7 +604,12 @@ fn render_mlil_preview_with_binary_and_context_output(
     // Always build dual NIR/HIR surfaces from one structured tree. Callers that
     // only need a single string use `LayeredPseudocode::primary` / legacy
     // `render_nir` which returns the NIR-faithful surface for oracle compat.
-    let layered = render_layered_pseudocode(&hir, options);
+    let definitions = builder
+        .recovered_single_definition_addresses()
+        .into_iter()
+        .collect();
+    let layered =
+        crate::render::render_layered_pseudocode_with_provenance(&hir, options, &definitions);
     let rendered = layered.nir.clone();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrintC);
     record_ghidra_clean_room_pipeline_complete(&mut build_stats);
@@ -761,6 +774,7 @@ mod tests {
         let scored = LayeredPseudocode {
             nir: "(unsigned long long)(uint)lane".into(),
             hir: "lane".into(),
+            ..Default::default()
         };
 
         let layered = stitch_dual_layers(&scored, "readable lane".into());

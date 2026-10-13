@@ -48,6 +48,8 @@ struct RustSleighRender {
     /// The variables this decompilation recovered, for a consumer that wants
     /// them as data rather than as printed declarations.
     variables: Vec<fission_decompiler::RecoveredVariable>,
+    nir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
+    hir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
 }
 
 fn render_with_rust_sleigh(
@@ -88,6 +90,16 @@ fn render_with_rust_sleigh(
         .and_then(|output| output.recovered_variables.clone())
         .unwrap_or_default();
 
+    let layers = result
+        .render_output
+        .as_ref()
+        .and_then(|output| output.layered.as_ref());
+    let nir_line_mappings = layers
+        .map(|layers| layers.nir_line_mappings.clone())
+        .unwrap_or_default();
+    let hir_line_mappings = layers
+        .map(|layers| layers.hir_line_mappings.clone())
+        .unwrap_or_default();
     Ok(RustSleighRender {
         code: result.code,
         code_nir: result.code_nir,
@@ -99,6 +111,8 @@ fn render_with_rust_sleigh(
         hint_stats: result.hint_stats,
         evidence: result.evidence,
         variables,
+        nir_line_mappings,
+        hir_line_mappings,
     })
 }
 
@@ -111,6 +125,66 @@ fn apply_output_filters(code: &str, config: RenderConfig) -> String {
         filtered = strip::strip_inferred_structs(&filtered);
     }
     filtered
+}
+
+fn remap_retained_lines(
+    original: &str,
+    filtered: &str,
+    mappings: &[fission_decompiler::RecoveredLineMapping],
+) -> Vec<fission_decompiler::RecoveredLineMapping> {
+    let source = original.lines().collect::<Vec<_>>();
+    let mut cursor = 0;
+    let mut occurrences = std::collections::BTreeMap::new();
+    for line in &source {
+        *occurrences.entry(*line).or_insert(0usize) += 1;
+    }
+    let mut retained = std::collections::BTreeMap::new();
+    for (new_index, line) in filtered.lines().enumerate() {
+        while cursor < source.len() && source[cursor] != line {
+            cursor += 1;
+        }
+        if cursor == source.len() {
+            return Vec::new();
+        }
+        retained.insert(cursor + 1, new_index + 1);
+        cursor += 1;
+    }
+    mappings
+        .iter()
+        .filter_map(|mapping| {
+            let original_line = *source.get(mapping.line_number.checked_sub(1)?)?;
+            if occurrences.get(original_line) != Some(&1) {
+                return None;
+            }
+            let line_number = *retained.get(&mapping.line_number)?;
+            Some(fission_decompiler::RecoveredLineMapping {
+                line_number,
+                ..mapping.clone()
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod line_mapping_tests {
+    use super::*;
+    #[test]
+    fn filters_remap_retained_lines_and_reject_text_rewrites() {
+        let map = fission_decompiler::RecoveredLineMapping {
+            line_number: 3,
+            addresses: vec![0x1000],
+            defined_variables: vec!["value".into()],
+        };
+        let original = "WARNING: detail\n{\nvalue = 3;\n}";
+        let filtered = strip::strip_warnings(original);
+        assert_eq!(
+            remap_retained_lines(original, &filtered, &[map.clone()])[0].line_number,
+            2
+        );
+        assert!(remap_retained_lines(original, "{\nvalue = 4;\n}", &[map.clone()]).is_empty());
+        let repeated = "{\nvalue = 3;\nvalue = 3;\n}";
+        assert!(remap_retained_lines(repeated, "{\nvalue = 3;\n}", &[map]).is_empty());
+    }
 }
 
 fn shared_fact_store(
@@ -218,6 +292,18 @@ pub(crate) fn render_one_function_inner(
     match render_with_rust_sleigh(binary, facts, func, config.timeout_ms, config.prehir) {
         Ok(rendered) => {
             let decomp_sec = start.elapsed().as_secs_f64();
+            let nir_original = rendered.code_nir.as_deref().unwrap_or(&rendered.code);
+            let hir_original = rendered.code_hir.as_deref().unwrap_or(&rendered.code);
+            let nir_line_mappings = remap_retained_lines(
+                nir_original,
+                &apply_output_filters(nir_original, config),
+                &rendered.nir_line_mappings,
+            );
+            let hir_line_mappings = remap_retained_lines(
+                hir_original,
+                &apply_output_filters(hir_original, config),
+                &rendered.hir_line_mappings,
+            );
             let code = apply_output_filters(&rendered.code, config);
             // Dual surfaces from one IR build; fall back so JSON shape stays stable.
             let code_nir =
@@ -243,6 +329,8 @@ pub(crate) fn render_one_function_inner(
                     hint_stats: rendered.hint_stats.clone(),
                     decomp_sec,
                     variables: rendered.variables,
+                    nir_line_mappings,
+                    hir_line_mappings,
                 },
             };
 

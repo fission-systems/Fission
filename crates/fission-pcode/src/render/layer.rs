@@ -11,6 +11,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A proved contributing result definition on an actual output line.
+/// It does not assert provenance for every RHS occurrence on that line.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveredLineMapping {
+    pub line_number: usize,
+    pub addresses: Vec<u64>,
+    pub defined_variables: Vec<String>,
+}
+
 /// Which pseudocode surface to emit (CLI / JSON primary selection).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,6 +78,10 @@ pub struct LayeredPseudocode {
     pub nir: String,
     /// Human-readable presentation.
     pub hir: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nir_line_mappings: Vec<RecoveredLineMapping>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hir_line_mappings: Vec<RecoveredLineMapping>,
 }
 
 impl LayeredPseudocode {
