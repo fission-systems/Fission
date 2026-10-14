@@ -500,11 +500,16 @@ static ENTRY_SPECS_CACHE: OnceLock<Vec<EntrySpec>> = OnceLock::new();
 /// re-parsing on every call. Errors are not cached -- exceptional and
 /// expected to be rare, not hot-loop territory.
 pub fn discover_all_entry_specs() -> Result<Vec<EntrySpec>> {
+    Ok(runtime_entry_specs()?.to_vec())
+}
+
+/// Borrow the same process-lifetime catalog used by the owned discovery API.
+pub(crate) fn runtime_entry_specs() -> Result<&'static [EntrySpec]> {
     if let Some(cached) = ENTRY_SPECS_CACHE.get() {
-        return Ok(cached.clone());
+        return Ok(cached);
     }
     let entries = discover_all_entry_specs_uncached()?;
-    Ok(ENTRY_SPECS_CACHE.get_or_init(|| entries).clone())
+    Ok(ENTRY_SPECS_CACHE.get_or_init(|| entries))
 }
 
 fn discover_all_entry_specs_uncached() -> Result<Vec<EntrySpec>> {
@@ -930,6 +935,24 @@ mod tests {
                 .filter(|entry| entry.arch == "PowerPC")
                 .count(),
             18
+        );
+    }
+
+    #[test]
+    fn runtime_entry_catalog_is_shared_and_owned_discovery_is_independent() {
+        let first = runtime_entry_specs().expect("runtime catalog");
+        let second = runtime_entry_specs().expect("repeat runtime catalog");
+        assert!(std::ptr::eq(first.as_ptr(), second.as_ptr()));
+        let mut owned = discover_all_entry_specs().expect("owned catalog");
+        assert_eq!(owned.as_slice(), first);
+        owned[0].entry_id.push_str("_modified");
+        owned.clear();
+        assert_eq!(runtime_entry_specs().expect("unchanged catalog"), first);
+        assert_eq!(
+            discover_all_entry_specs()
+                .expect("new owned catalog")
+                .as_slice(),
+            first
         );
     }
 
