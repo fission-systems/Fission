@@ -69,9 +69,9 @@ pub struct RuntimeFrontendDescriptor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledRuntimeRegistry {
-    processors: Vec<ProcessorDescriptor>,
-    variants: Vec<RuntimeVariantDescriptor>,
-    frontends: Vec<RuntimeFrontendDescriptor>,
+    processors: &'static [ProcessorDescriptor],
+    variants: &'static [RuntimeVariantDescriptor],
+    frontends: &'static [RuntimeFrontendDescriptor],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,18 +186,18 @@ impl CompiledRuntimeRegistry {
     pub fn discover() -> Result<Self> {
         let data = registry_data();
         Ok(Self {
-            processors: data.processors.clone(),
-            variants: data.variants.clone(),
-            frontends: data.frontends.clone(),
+            processors: &data.processors,
+            variants: &data.variants,
+            frontends: &data.frontends,
         })
     }
 
     pub fn processors(&self) -> &[ProcessorDescriptor] {
-        &self.processors
+        self.processors
     }
 
     pub fn frontends(&self) -> &[RuntimeFrontendDescriptor] {
-        &self.frontends
+        self.frontends
     }
 
     pub fn lookup(&self, language_name: &str) -> Option<&RuntimeFrontendDescriptor> {
@@ -246,7 +246,7 @@ impl CompiledRuntimeRegistry {
 
         let mut entry_ids = Vec::new();
         entry_ids.push(primary.entry_id.clone());
-        for variant in &self.variants {
+        for variant in self.variants.iter() {
             if variant.entry_id == primary.entry_id
                 || variant.support_level != RuntimeSupportLevel::ExecutableCandidate
             {
@@ -489,6 +489,18 @@ pub fn module_name_for_processor(processor: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_discovery_shares_immutable_catalogs() {
+        let first = CompiledRuntimeRegistry::discover().expect("first registry");
+        let second = CompiledRuntimeRegistry::discover().expect("second registry");
+        assert_eq!(first, second);
+        assert!(std::ptr::eq(first.processors, second.processors));
+        assert!(std::ptr::eq(first.variants, second.variants));
+        assert!(std::ptr::eq(first.frontends, second.frontends));
+        let cloned = first.clone();
+        assert!(std::ptr::eq(first.variants, cloned.variants));
+    }
 
     #[test]
     fn resolves_arm_and_aarch64_variants_as_executable_candidates() {

@@ -1,7 +1,38 @@
 //! Emitted identities for complete scalar phi storage. Heritage owns the
 //! values; this plan owns only their names and placement of edge copies.
 use super::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+/// Values reaching an operation input through the existing phi-copy graph.
+fn operand_live_values(ssa: &NirScalarSsa) -> BTreeSet<SsaValueId> {
+    if ssa.phis.values().all(Vec::is_empty) {
+        return BTreeSet::new();
+    }
+    let mut live = ssa
+        .operation_inputs
+        .values()
+        .flatten()
+        .map(|piece| piece.value)
+        .collect::<BTreeSet<_>>();
+    let mut predecessors = BTreeMap::<SsaValueId, Vec<SsaValueId>>::new();
+    for copy in &ssa.out_of_ssa_copies {
+        predecessors
+            .entry(copy.destination)
+            .or_default()
+            .push(copy.source);
+    }
+    let mut pending = live.iter().copied().collect::<VecDeque<_>>();
+    while let Some(value) = pending.pop_front() {
+        if let Some(sources) = predecessors.get(&value) {
+            for &source in sources {
+                if live.insert(source) {
+                    pending.push_back(source);
+                }
+            }
+        }
+    }
+    live
+}
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct SsaEmissionPlan {
@@ -127,14 +158,14 @@ impl<'a> PreviewBuilder<'a> {
         {
             return false;
         }
+        let operand_live = operand_live_values(&self.scalar_ssa);
         self.ssa_emission.transported_phis = self
             .scalar_ssa
             .phis
             .values()
             .flatten()
             .filter(|phi| {
-                self.ssa_phi_has_operand_use(phi.output, &mut BTreeSet::new())
-                    || self.ssa_storage_is_return_piece(phi.storage)
+                operand_live.contains(&phi.output) || self.ssa_storage_is_return_piece(phi.storage)
             })
             .map(|phi| phi.output)
             .collect();
@@ -143,7 +174,7 @@ impl<'a> PreviewBuilder<'a> {
             .phis
             .values()
             .flat_map(|phis| phis.iter())
-            .filter(|phi| self.ssa_phi_has_operand_use(phi.output, &mut BTreeSet::new()))
+            .filter(|phi| operand_live.contains(&phi.output))
             .map(|phi| phi.storage)
             .collect();
         // Entry and later definitions have distinct identities even without
@@ -756,27 +787,6 @@ impl<'a> PreviewBuilder<'a> {
 
     fn ssa_value_has_observable_use(&self, value: SsaValueId) -> bool {
         self.ssa_value_has_observable_use_inner(value, &mut BTreeSet::new())
-    }
-
-    fn ssa_phi_has_operand_use(
-        &self,
-        value: SsaValueId,
-        visiting: &mut BTreeSet<SsaValueId>,
-    ) -> bool {
-        if !visiting.insert(value) {
-            return false;
-        }
-        if self
-            .scalar_ssa
-            .operation_inputs
-            .values()
-            .any(|pieces| pieces.iter().any(|piece| piece.value == value))
-        {
-            return true;
-        }
-        self.scalar_ssa.out_of_ssa_copies.iter().any(|copy| {
-            copy.source == value && self.ssa_phi_has_operand_use(copy.destination, visiting)
-        })
     }
 
     fn ssa_value_has_observable_use_inner(
@@ -1497,6 +1507,99 @@ fn ssa_varnode(storage: SsaStorageKey) -> Varnode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn legacy_operand_use(
+        ssa: &NirScalarSsa,
+        value: SsaValueId,
+        visiting: &mut BTreeSet<SsaValueId>,
+    ) -> bool {
+        if !visiting.insert(value) {
+            return false;
+        }
+        if ssa
+            .operation_inputs
+            .values()
+            .any(|pieces| pieces.iter().any(|piece| piece.value == value))
+        {
+            return true;
+        }
+        ssa.out_of_ssa_copies
+            .iter()
+            .any(|copy| copy.source == value && legacy_operand_use(ssa, copy.destination, visiting))
+    }
+
+    #[test]
+    fn operand_liveness_matches_forward_queries_for_all_three_value_graphs() {
+        let storage = SsaStorageKey {
+            space_id: 1,
+            offset: 0,
+            size: 8,
+        };
+        for graph in 0u16..(1 << 9) {
+            for seeds in 0u8..(1 << 3) {
+                let mut ssa = NirScalarSsa::default();
+                for id in 0..3u32 {
+                    ssa.phis
+                        .entry(0)
+                        .or_default()
+                        .push(fission_midend_core::ir::NirPhiNode {
+                            storage,
+                            output: SsaValueId(id),
+                            operands: Vec::new(),
+                        });
+                    if seeds & (1 << id) != 0 {
+                        ssa.operation_inputs.insert(
+                            SsaUseSite {
+                                block: 0,
+                                op: id,
+                                input: 0,
+                            },
+                            vec![SsaAccessPiece {
+                                byte_offset: 0,
+                                value: SsaValueId(id),
+                            }],
+                        );
+                    }
+                    for destination in 0..3u32 {
+                        if graph & (1 << (id * 3 + destination)) != 0 {
+                            ssa.out_of_ssa_copies.push(SsaOutOfSsaCopy {
+                                successor: 1,
+                                predecessor: 0,
+                                storage,
+                                source: SsaValueId(id),
+                                destination: SsaValueId(destination),
+                            });
+                        }
+                    }
+                }
+                let live = operand_live_values(&ssa);
+                for id in 0..3u32 {
+                    assert_eq!(
+                        live.contains(&SsaValueId(id)),
+                        legacy_operand_use(&ssa, SsaValueId(id), &mut BTreeSet::new()),
+                        "graph={graph} seeds={seeds} value={id}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn operand_liveness_skips_snapshots_without_phi_queries() {
+        let mut ssa = NirScalarSsa::default();
+        ssa.operation_inputs.insert(
+            SsaUseSite {
+                block: 0,
+                op: 0,
+                input: 0,
+            },
+            vec![SsaAccessPiece {
+                byte_offset: 0,
+                value: SsaValueId(0),
+            }],
+        );
+        assert!(operand_live_values(&ssa).is_empty());
+    }
 
     #[test]
     fn unsigned_piece_windows_do_not_depend_on_unused_upper_bits() {
