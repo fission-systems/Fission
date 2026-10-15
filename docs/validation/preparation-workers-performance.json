@@ -1,21 +1,21 @@
 {
   "base": "3daf458fef337a2951e000a17f13fac61d4a2e24",
-  "source_only_tree": "aa154f28d8893c987e9f878fa489cafc9d8ef3bd",
+  "source_only_tree": "1fe9c828925d37fafc21447ff0e54fb56db77abf",
   "production_files_sha256": {
     "crates/fission-sleigh/src/runtime/registry.rs": "f6929732904c6a65cd91476ed1438dbf826292e2e88e8014162149b0f3605ac7",
     "crates/fission-sleigh/src/runtime/lift.rs": "c9faf483892540b7c51c79ed6f159d619bee0d1d813319eb1efa1b1302b1dbbd",
     "crates/fission-static/src/analysis/noreturn/mod.rs": "6e3155d99d9d3f30f2f47a55ef2e827b88b50dd498bbd7c87a59b856f25022dc",
-    "crates/fission-static/src/analysis/noreturn/scoped_decode.rs": "f5975f34e271e35ea8faeef69cea3f812a6ff4616fbbd67230415131806e7c56"
+    "crates/fission-static/src/analysis/noreturn/scoped_decode.rs": "4de163603b58d43f033d272315407d979b3a1df6e8b7b122086fe6ee3599845a"
   },
-  "source_patch_sha256": "468f8f38365d4c2a53b78a3fc88444bd7c2dc0b004f63f752958dcc922914c4d",
-  "candidate_sha256": "c6f8c88a17c804d1388f2b99f8dfb3532b3af731a7576fd1c9445852318b25ae",
+  "source_patch_sha256": "3f0b0100b22662472a221b50644af2a60eb96c371c0f001abec1b606175cc9d0",
+  "candidate_sha256": "5fde8204f59b90a4fba7ca2af4c32c08c41efcb066df8586a9085cf7022f65d7",
   "scope": "Bounded non-stealing no-return preparation helpers and borrowed indexed immutable registry metadata; no quality/ranking claim",
   "dataset_revision": "07dd95dbe6214b8a78fc1e4a55961ab515986489",
   "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
   "population_reference": "decompiler-startup-performance.json (45 cells/250 functions)",
   "binaries": {
     "baseline": "5ec5b83100b10e1d5280ea22a92f6b4fce8b3894c8d50f1e18038b67e0ac1430",
-    "candidate": "c6f8c88a17c804d1388f2b99f8dfb3532b3af731a7576fd1c9445852318b25ae"
+    "candidate": "5fde8204f59b90a4fba7ca2af4c32c08c41efcb066df8586a9085cf7022f65d7"
   },
   "machine": {
     "cpu": "Apple M4 Pro",
@@ -34,48 +34,48 @@
   ],
   "large": {
     "baseline": {
-      "seconds": 27.029890791047364,
-      "cpu_seconds": 118.735447,
-      "max_rss_bytes": 2336391168,
+      "seconds": 27.221605332917534,
+      "cpu_seconds": 122.07675399999997,
+      "max_rss_bytes": 2329264128,
       "rss_range_bytes": [
-        2309685248,
-        2350465024
+        2300313600,
+        2344697856
       ]
     },
     "candidate": {
-      "seconds": 15.651672583073378,
-      "cpu_seconds": 130.47149900000005,
-      "max_rss_bytes": 2399371264,
+      "seconds": 15.425698083010502,
+      "cpu_seconds": 136.219434,
+      "max_rss_bytes": 2416246784,
       "rss_range_bytes": [
-        2367291392,
-        2411544576
+        2407890944,
+        2474508288
       ]
     }
   },
   "paired": [
     {
       "cell": "03",
-      "baseline": 2.0596415830077603,
+      "baseline": 2.0569123750319704,
       "baseline_deterministic": true,
-      "candidate": 1.9773500830633566,
+      "candidate": 1.9712399590061978,
       "candidate_deterministic": true,
-      "speedup": 1.041617061464865
+      "speedup": 1.0434611806819118
     },
     {
       "cell": "27",
-      "baseline": 0.918009833083488,
+      "baseline": 0.9238287500338629,
       "baseline_deterministic": true,
-      "candidate": 0.8683017920702696,
+      "candidate": 0.8618377500679344,
       "candidate_deterministic": true,
-      "speedup": 1.0572474241872758
+      "speedup": 1.0719288519922017
     },
     {
       "cell": "40",
-      "baseline": 1.014426791924052,
+      "baseline": 0.9999555419199169,
       "baseline_deterministic": true,
-      "candidate": 0.987717124982737,
+      "candidate": 0.9836835829773918,
       "candidate_deterministic": true,
-      "speedup": 1.0270418182146854
+      "speedup": 1.0165418628755332
     }
   ],
   "kuna_requested_one": [
@@ -84,7 +84,7 @@
       "platform": "linux",
       "requested": 6,
       "fission": {
-        "median_seconds": 2.0126283750869334,
+        "median_seconds": 1.9073130410397425,
         "deterministic": true,
         "exits": [
           0,
@@ -98,7 +98,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 0.19858091603964567,
+        "median_seconds": 0.18607387505471706,
         "deterministic": true,
         "exits": [
           0,
@@ -111,14 +111,14 @@
           6
         ]
       },
-      "ratio": 10.135054340695671
+      "ratio": 10.250299997669615
     },
     {
       "cell": "22",
       "platform": "windows",
       "requested": 6,
       "fission": {
-        "median_seconds": 16.77015975001268,
+        "median_seconds": 16.36281829199288,
         "deterministic": true,
         "exits": [
           0,
@@ -132,7 +132,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 2.7494518330786377,
+        "median_seconds": 2.74668850004673,
         "deterministic": true,
         "exits": [
           0,
@@ -145,14 +145,14 @@
           6
         ]
       },
-      "ratio": 6.0994557345035085
+      "ratio": 5.957289402025201
     },
     {
       "cell": "27",
       "platform": "windows",
       "requested": 5,
       "fission": {
-        "median_seconds": 0.8831730829551816,
+        "median_seconds": 0.8435830830130726,
         "deterministic": true,
         "exits": [
           0,
@@ -166,7 +166,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 0.11523074994329363,
+        "median_seconds": 0.10975274990778416,
         "deterministic": true,
         "exits": [
           0,
@@ -179,14 +179,14 @@
           5
         ]
       },
-      "ratio": 7.6643871830201675
+      "ratio": 7.686213636759564
     },
     {
       "cell": "40",
       "platform": "macos",
       "requested": 5,
       "fission": {
-        "median_seconds": 0.9912397500593215,
+        "median_seconds": 0.9498961670324206,
         "deterministic": true,
         "exits": [
           0,
@@ -200,7 +200,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 0.3339930409565568,
+        "median_seconds": 0.3219651250401512,
         "deterministic": true,
         "exits": [
           0,
@@ -213,7 +213,7 @@
           5
         ]
       },
-      "ratio": 2.9678455192371933
+      "ratio": 2.9503076363129774
     }
   ],
   "kuna_requested_14": [
@@ -222,7 +222,7 @@
       "platform": "linux",
       "requested": 6,
       "fission": {
-        "median_seconds": 1.3663275829749182,
+        "median_seconds": 1.3463501250371337,
         "deterministic": true,
         "exits": [
           0,
@@ -236,7 +236,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 0.3275016249390319,
+        "median_seconds": 0.32647270790766925,
         "deterministic": true,
         "exits": [
           0,
@@ -249,14 +249,14 @@
           6
         ]
       },
-      "ratio": 4.171971919923376
+      "ratio": 4.12392856256119
     },
     {
       "cell": "22",
       "platform": "windows",
       "requested": 6,
       "fission": {
-        "median_seconds": 15.321396790910512,
+        "median_seconds": 14.835848666029051,
         "deterministic": true,
         "exits": [
           0,
@@ -270,7 +270,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 5.583294790936634,
+        "median_seconds": 5.461583583033644,
         "deterministic": true,
         "exits": [
           0,
@@ -283,14 +283,14 @@
           6
         ]
       },
-      "ratio": 2.7441497117045914
+      "ratio": 2.716400553150275
     },
     {
       "cell": "27",
       "platform": "windows",
       "requested": 5,
       "fission": {
-        "median_seconds": 0.6929955830564722,
+        "median_seconds": 0.6707952909637243,
         "deterministic": true,
         "exits": [
           0,
@@ -304,7 +304,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 0.24872420798055828,
+        "median_seconds": 0.2461085410322994,
         "deterministic": true,
         "exits": [
           0,
@@ -317,14 +317,14 @@
           5
         ]
       },
-      "ratio": 2.786200783120559
+      "ratio": 2.7256075232093986
     },
     {
       "cell": "40",
       "platform": "macos",
       "requested": 5,
       "fission": {
-        "median_seconds": 0.9392013750039041,
+        "median_seconds": 0.911747416947037,
         "deterministic": true,
         "exits": [
           0,
@@ -338,7 +338,7 @@
         ]
       },
       "kuna": {
-        "median_seconds": 0.6996354589937255,
+        "median_seconds": 0.6795270410366356,
         "deterministic": true,
         "exits": [
           0,
@@ -351,57 +351,57 @@
           5
         ]
       },
-      "ratio": 1.3424153434915127
+      "ratio": 1.3417382412863854
     }
   ],
   "best_observed_settings": [
     {
       "cell": "03",
       "fission": {
-        "seconds": 1.3663275829749182,
+        "seconds": 1.3463501250371337,
         "requested_workers": 14
       },
       "kuna": {
-        "seconds": 0.19858091603964567,
+        "seconds": 0.18607387505471706,
         "requested_workers": 1
       },
-      "ratio": 6.880457650332008
+      "ratio": 7.235567726212101
     },
     {
       "cell": "22",
       "fission": {
-        "seconds": 15.321396790910512,
+        "seconds": 14.835848666029051,
         "requested_workers": 14
       },
       "kuna": {
-        "seconds": 2.7494518330786377,
+        "seconds": 2.74668850004673,
         "requested_workers": 1
       },
-      "ratio": 5.572527805935308
+      "ratio": 5.401358277713926
     },
     {
       "cell": "27",
       "fission": {
-        "seconds": 0.6929955830564722,
+        "seconds": 0.6707952909637243,
         "requested_workers": 14
       },
       "kuna": {
-        "seconds": 0.11523074994329363,
+        "seconds": 0.10975274990778416,
         "requested_workers": 1
       },
-      "ratio": 6.013981366931165
+      "ratio": 6.111876846159537
     },
     {
       "cell": "40",
       "fission": {
-        "seconds": 0.9392013750039041,
+        "seconds": 0.911747416947037,
         "requested_workers": 14
       },
       "kuna": {
-        "seconds": 0.3339930409565568,
+        "seconds": 0.3219651250401512,
         "requested_workers": 1
       },
-      "ratio": 2.812038754801685
+      "ratio": 2.831820424132384
     }
   ],
   "kuna_binary_sha256": "46cd0f8109557f8fe1e8bae53e191bd6b92a7d0410ee2b279a37621c5a2c3e05",
@@ -426,7 +426,8 @@
       },
       "profile_sha256": "582857578c6e17dc3c3dc3c99bac49402c4d96a5f7336110843366a32a9431be",
       "profile": "release LTO/one codegen unit; strip=false/debug=1",
-      "diagnostic_only": true
+      "diagnostic_only": true,
+      "source_status": "Prototype A1 before CAS portability fix; not identical to final A2 source. FPK owner unchanged."
     },
     "large_non_time_match": 6,
     "small_non_time_match_each": 6,
@@ -444,8 +445,10 @@
     "Helper width includes caller and follows existing Rayon width; nonblocking process-wide permits bound extra helpers, not all application threads",
     "CPU and RSS medians increase; this is latency improvement, not per-core efficiency or a memory cap",
     "One requested render worker does not serialize FID or preparation; both worker settings and best observed choices are explicit",
-    "14-worker exploratory pilot is retained but primary comparison uses rows-vs-kuna-14-final",
+    "14-worker exploratory pilot is retained but final primary comparison uses rows-vs-kuna-14-ci",
     "Only four native timing batches; no full-corpus timing or cross-tool quality equivalence",
-    "OS caches/scheduling uncontrolled; no own builds/tests/profilers during primary timing controls; separate diagnostics follow"
-  ]
+    "OS caches/scheduling uncontrolled; no own builds/tests/profilers during primary timing controls; retained diagnostics are from prototype A1 before CI portability fix"
+  ],
+  "ci_portability_fix": "Explicit compare_exchange_weak loop preserves fetch_update memory orders/limit and works on local/CI Rust without deprecated/new APIs",
+  "prototype_candidate_sha256": "c6f8c88a17c804d1388f2b99f8dfb3532b3af731a7576fd1c9445852318b25ae"
 }

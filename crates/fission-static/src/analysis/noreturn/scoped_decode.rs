@@ -6,12 +6,19 @@ struct HelperPermit<'a>(&'a HelperBudget);
 
 impl HelperBudget {
     fn try_acquire(&self, limit: usize) -> Option<HelperPermit<'_>> {
-        self.0
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
-                (active < limit).then(|| active + 1)
-            })
-            .ok()
-            .map(|_| HelperPermit(self))
+        let mut active = self.0.load(Ordering::Acquire);
+        while active < limit {
+            match self.0.compare_exchange_weak(
+                active,
+                active + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(HelperPermit(self)),
+                Err(observed) => active = observed,
+            }
+        }
+        None
     }
 }
 impl Drop for HelperPermit<'_> {
