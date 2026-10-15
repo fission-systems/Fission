@@ -1173,6 +1173,10 @@
          <lastmod>2026-10-15</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-10-15-transient-decode-reuse/</loc>
+         <lastmod>2026-10-15</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/reports/2026-10-05-ssa-value-emission/</loc>
          <lastmod>2026-10-15</lastmod>
     </url>
@@ -1206,6 +1210,10 @@
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/validation/instruction-probe-performance/</loc>
+         <lastmod>2026-10-15</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/validation/transient-decode-performance/</loc>
          <lastmod>2026-10-15</lastmod>
     </url>
 </urlset>
