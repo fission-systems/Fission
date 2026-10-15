@@ -1,0 +1,313 @@
+{
+  "source": {
+    "fid_hash_matrix": {
+      "inputs": 512,
+      "eight_instruction_extents": 383,
+      "successful_hashes": 473,
+      "hashes_and_resolver_order_equal": true,
+      "sha256": "a771dbb8a6b4ef303ab310b1e62ca5f5a7d8a596cf45ef7fe53a51ed618bc6fe"
+    },
+    "base": "416f441a1c341bb6ffddec081b2492ddb969f0ac",
+    "source_only_tree": "2fdba3c028583190056ad32006c06275965a67ca",
+    "source_files_sha256": {
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/mod.rs": "3fcd99139d30d3e19e0107a3ab523350097b912cad0b4fb760597edaf1836c96",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/fid_hash.rs": "652f62916e0fe301d52382a398c33bb7c594e7a987cfd87c97e86d9755a6e40a",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/fid_bound_state_tests.rs": "d277c710235c901103a60238c5653219f4a805b939fd6c2b85bea601bce0497e"
+    },
+    "source_patch_sha256": "967b9fc63a7148547832b322e3a925313e2b8a15af89b89a7fa2b449bca64dc6",
+    "candidate_sha256": "6f39d552d6dee077a45272ef89cc9821091eb4b327ca1d984b97472a9d080762",
+    "baseline_sha256": "26dc790eed98282e603e8ee6b3ad91ba40590c9c61b25c51a25d72f38bdb8d0c",
+    "decode_matrix": {
+      "records": 1024,
+      "successes": 746,
+      "errors": 278,
+      "traced_errors": 27,
+      "complete_baseline_candidate_equal": true,
+      "sha256": "5721b8f3f02547208b90aec3889566b5bfb33dab046fcc95a0509c0890bba9b7",
+      "full_raw_states_included": true
+    },
+    "proposal_sha256": "f2c80ef666eda77f06bc0cecf18299f2969fe590fbe12be6b35cbb53edf7b09f"
+  },
+  "large_medians": {
+    "baseline": {
+      "seconds": 14.548253583023325,
+      "cpu_seconds": 121.30594300000003,
+      "max_rss_bytes": 2412118016
+    },
+    "candidate": {
+      "seconds": 13.214830334065482,
+      "cpu_seconds": 106.10360699999998,
+      "max_rss_bytes": 2425798656
+    }
+  },
+  "large_ranges": {
+    "baseline": {
+      "seconds": [
+        14.32590012496803,
+        14.625063417013735
+      ],
+      "cpu_seconds": [
+        119.95337099999999,
+        121.701735
+      ],
+      "max_rss_bytes": [
+        2392899584,
+        2424733696
+      ]
+    },
+    "candidate": {
+      "seconds": [
+        13.136208249954507,
+        13.788345000008121
+      ],
+      "cpu_seconds": [
+        105.23205399999998,
+        106.345802
+      ],
+      "max_rss_bytes": [
+        2407956480,
+        2467364864
+      ]
+    }
+  },
+  "large_change_percent": {
+    "seconds": -9.165521080233596,
+    "cpu_seconds": -12.532226883558407,
+    "max_rss_bytes": 0.5671629625604524
+  },
+  "small_pairs": [
+    {
+      "cell": "03",
+      "baseline": 1.9377740829950199,
+      "baseline_deterministic": true,
+      "candidate": 1.9430873329984024,
+      "candidate_deterministic": true,
+      "speedup": 0.9972655629455504
+    },
+    {
+      "cell": "27",
+      "baseline": 0.8634013329865411,
+      "baseline_deterministic": true,
+      "candidate": 0.8630119160516188,
+      "candidate_deterministic": true,
+      "speedup": 1.0004512300788428
+    },
+    {
+      "cell": "40",
+      "baseline": 0.9731111250584945,
+      "baseline_deterministic": true,
+      "candidate": 0.981957457959652,
+      "candidate_deterministic": true,
+      "speedup": 0.990991124076252
+    }
+  ],
+  "fresh_replay": {
+    "returned": 250,
+    "changed_functions": 0,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "kuna_comparison": [
+    {
+      "cell": "03",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 1.938739666948095,
+        "render_jobs_14_seconds": 1.3625232079066336,
+        "faster_observed_seconds": 1.3625232079066336
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.18833599996287376,
+        "render_jobs_14_seconds": 0.3309625000692904,
+        "faster_observed_seconds": 0.18833599996287376
+      },
+      "faster_observed_ratio": 7.234534067704659
+    },
+    {
+      "cell": "22",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 14.366916458006017,
+        "render_jobs_14_seconds": 13.112216791021638,
+        "faster_observed_seconds": 13.112216791021638
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 2.8606424579629675,
+        "render_jobs_14_seconds": 5.6368036669446155,
+        "faster_observed_seconds": 2.8606424579629675
+      },
+      "faster_observed_ratio": 4.583661531877949
+    },
+    {
+      "cell": "27",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 0.8618520000018179,
+        "render_jobs_14_seconds": 0.6895402079680935,
+        "faster_observed_seconds": 0.6895402079680935
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.11098283308092505,
+        "render_jobs_14_seconds": 0.24861633405089378,
+        "faster_observed_seconds": 0.11098283308092505
+      },
+      "faster_observed_ratio": 6.213034834543315
+    },
+    {
+      "cell": "40",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 0.9689316250151023,
+        "render_jobs_14_seconds": 0.9265203750692308,
+        "faster_observed_seconds": 0.9265203750692308
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.329684125026688,
+        "render_jobs_14_seconds": 0.7030438750516623,
+        "faster_observed_seconds": 0.329684125026688
+      },
+      "faster_observed_ratio": 2.8103275369847696
+    }
+  ],
+  "repeated_full_record_parity": [
+    {
+      "path": "rows-vs-kuna/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    }
+  ],
+  "related_nextest": {
+    "passed": 1956,
+    "skipped": 6
+  },
+  "targeted_nextest": 9,
+  "bounds": [
+    "Mechanical performance only; no quality, recompilation, execution or ranking claim.",
+    "Fresh 250-function replay generated once; focused address sets repeat.",
+    "No own builds/tests/profilers overlap timing; OS caches/scheduling uncontrolled.",
+    "Both tools choose their own faster median among the two measured settings.",
+    "Fission render=1 does not serialize native preparation/FID."
+  ]
+}
