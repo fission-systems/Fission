@@ -160,7 +160,7 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
                 details.pending_context_commits = pending_context_commits;
                 details.userops = compiled.userops.clone();
                 let instruction =
-                    decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded, true)?;
+                    decoded_instruction_from_state(compiled, address, bytes, &ctx, &decoded, true)?;
                 return Ok((instruction, ops, decoded_length, details));
             }
             Err(err) => {
@@ -178,6 +178,46 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
         }
         .into()
     }))
+}
+
+/// Complete a binding from `decode_instruction_raw_state` for the same compiled
+/// frontend, bytes, address and default context. Keep the ordinary lift's commit,
+/// length and display validation: emitting p-code alone is not a successful decode.
+fn lift_existing_bound_instruction_with_details(
+    compiled: &CompiledFrontend,
+    bytes: &[u8],
+    address: u64,
+    state: &RuntimeConstructState,
+) -> Result<(
+    DecodedInstruction,
+    Vec<PcodeOp>,
+    u64,
+    RuntimeExecutionDetails,
+)> {
+    clear_bind_cache();
+    let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
+    ctx.context_register = compiled.default_context;
+    ctx.context_known_mask = compiled.default_context_known_mask;
+    let pending_context_commits =
+        apply_context_commits(compiled, state, address, state.context_register)?;
+    let decoded_length = checked_runtime_length_u64(state.length, "decoded instruction")?;
+    let (ops, mut details) = emit_pcode_for_state_with_bytes(
+        compiled,
+        address,
+        bytes,
+        address,
+        state,
+        FlowEmitOptions {
+            instruction_length: Some(decoded_length),
+            instruction_context_register: ctx.context_register,
+            instruction_context_known_mask: ctx.context_known_mask,
+            ..Default::default()
+        },
+    )?;
+    details.pending_context_commits = pending_context_commits;
+    details.userops = compiled.userops.clone();
+    let instruction = decoded_instruction_from_state(compiled, address, bytes, &ctx, state, true)?;
+    Ok((instruction, ops, decoded_length, details))
 }
 
 /// Decodes a single instruction with optional context register override.
@@ -411,7 +451,7 @@ pub(crate) fn decode_instruction_no_pcode(
         match bind_instruction(compiled, strategy, &ctx, selection) {
             Ok(decoded) => {
                 return decoded_instruction_from_state(
-                    compiled, address, bytes, &ctx, decoded, false,
+                    compiled, address, bytes, &ctx, &decoded, false,
                 );
             }
             Err(err) => {
@@ -678,18 +718,18 @@ fn decoded_instruction_from_state(
     address: u64,
     bytes: &[u8],
     ctx: &CompiledInstructionContext<'_>,
-    decoded: RuntimeConstructState,
+    decoded: &RuntimeConstructState,
     render_operands: bool,
 ) -> Result<DecodedInstruction> {
     let length = decoded.length;
     let (mnemonic, operands_text) = if render_operands {
-        render_instruction_display(&decoded)?
+        render_instruction_display(decoded)?
     } else {
-        (render_mnemonic_only(&decoded)?, String::new())
+        (render_mnemonic_only(decoded)?, String::new())
     };
-    let flow_kind = flow_kind_for_state(&decoded);
+    let flow_kind = flow_kind_for_state(decoded);
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
-    let direct_target = first_flow_target(&decoded, address, length).or_else(|| {
+    let direct_target = first_flow_target(decoded, address, length).or_else(|| {
         references
             .iter()
             .find_map(|reference| match reference.kind {
@@ -700,7 +740,7 @@ fn decoded_instruction_from_state(
             })
     });
     let pending_context_commits =
-        apply_context_commits(compiled, &decoded, address, decoded.context_register)?;
+        apply_context_commits(compiled, decoded, address, decoded.context_register)?;
     let instruction_bytes = bytes.get(..length).ok_or_else(|| {
         anyhow!(
             "decoded instruction length {length} exceeds available byte window {}",
@@ -719,3 +759,6 @@ fn decoded_instruction_from_state(
         pending_context_commits,
     })
 }
+
+#[cfg(test)]
+mod fid_bound_state_tests;
