@@ -17,6 +17,8 @@
 //! no-return in the next round, so this iterates rather than running once
 //! (same shape kuna's own `noreturn_propagate` fixpoint uses).
 
+mod scoped_decode;
+
 use std::collections::BTreeSet;
 use std::collections::hash_map::HashMap as StdHashMap;
 use std::num::NonZeroUsize;
@@ -145,73 +147,71 @@ fn compute_no_return_functions(
         return no_return;
     };
 
-    // Decoded sequentially, and it must stay that way: this runs inside the
-    // `OnceLock` initialiser in `control_flow_facts_for`, and callers reach
-    // that from inside a rayon parallel iterator of their own
-    // (`FactStore::from_program`). A rayon worker that blocks waiting for its
-    // own sub-jobs goes looking for work to steal, so the thread holding the
-    // `Once` open would pick up one of those outer `control_flow_facts_for`
-    // jobs, arrive at the same `Once`, and park -- on itself. Every other
-    // worker then waits on an initialiser that can never finish.
-    //
-    // Observed as a `fission_cli` that never exits: fourteen workers in
-    // `Once::wait`, the main thread in `LockLatch::wait_and_reset`, and no
-    // thread running. It reproduced in roughly 1 run in 20 under load and
-    // never on an idle machine, because whether the holder steals such a job
-    // is up to the scheduler.
-    //
-    // Parallelising this back is not worth the invariant: measured over the
-    // whole decompile it costs 0.7% on `bash` (2,878 functions, 87.3 s ->
-    // 87.9 s) and 2.6% on `ssh`, because this pass is a small share of the
-    // work it sits inside. If it ever does need parallelism, the fix is to
-    // stop calling `control_flow_facts_for` from inside a parallel iterator,
-    // not to make the initialiser block again.
-    let decoded: StdHashMap<u64, NoReturnFlow> = binary
-        .functions
-        .iter()
-        .filter(|f| !f.is_import)
-        .filter_map(|f| {
-            // Thumb-only images decode as Thumb whatever bit 0 of the
-            // address says -- lifting with `None` here read every Cortex-M
-            // function as ARM, so the no-return set was derived from a CFG
-            // that is not the program's.
-            let address_state = frontend.normalize_low_bit_code_address(f.address);
-            let decode_address = address_state.address;
-            let context_override = crate::analysis::decode_context_for_address(
-                binary,
-                &frontend,
-                address_state.context_override,
-            );
-            let max_bytes = no_return_scan_max_bytes(binary, decode_address, 4096);
-            let bytes = binary.view_bytes(decode_address, max_bytes)?;
-            let memory_context = DecodeMemoryContext::default();
-            let contract = DecodeContract::decomp_function(NORETURN_INSTRUCTION_LIMIT);
-            let decoded = if let Some(seeds) = seeds.as_deref_mut() {
-                let (decoded, seed) = frontend
-                    .lift_raw_pcode_function_capturing_seed(
-                        bytes,
-                        decode_address,
-                        contract,
-                        &memory_context,
-                        context_override,
-                    )
-                    .ok()?;
-                seeds.insert(f.address, seed);
-                decoded
-            } else {
-                frontend
-                    .lift_raw_pcode_function_with_context_and_memory_context(
-                        bytes,
-                        decode_address,
-                        contract,
-                        &memory_context,
-                        context_override,
-                    )
-                    .ok()?
-            };
-            Some((f.address, NoReturnFlow::from_function(&decoded.function)))
-        })
-        .collect();
+    // A global Rayon wait under CF OnceLock can steal another CF caller
+    // and block on itself. Only seed-producing FID preparation may use the
+    // scoped OS queue: workers decode immutable inputs and cannot call CF;
+    // neither caller work nor std::thread joins execute unrelated Rayon jobs.
+    // Ordinary no-return callers retain sequential preparation.
+    let capture = seeds.is_some();
+    let decode = |index: usize| {
+        let f = &binary.functions[index];
+        if f.is_import {
+            return None;
+        }
+        let address_state = frontend.normalize_low_bit_code_address(f.address);
+        let decode_address = address_state.address;
+        let context_override = crate::analysis::decode_context_for_address(
+            binary,
+            &frontend,
+            address_state.context_override,
+        );
+        let max_bytes = no_return_scan_max_bytes(binary, decode_address, 4096);
+        let bytes = binary.view_bytes(decode_address, max_bytes)?;
+        let memory_context = DecodeMemoryContext::default();
+        let contract = DecodeContract::decomp_function(NORETURN_INSTRUCTION_LIMIT);
+        let (decoded, seed) = if capture {
+            let (decoded, seed) = frontend
+                .lift_raw_pcode_function_capturing_seed(
+                    bytes,
+                    decode_address,
+                    contract,
+                    &memory_context,
+                    context_override,
+                )
+                .ok()?;
+            (decoded, Some(seed))
+        } else {
+            let decoded = frontend
+                .lift_raw_pcode_function_with_context_and_memory_context(
+                    bytes,
+                    decode_address,
+                    contract,
+                    &memory_context,
+                    context_override,
+                )
+                .ok()?;
+            (decoded, None)
+        };
+        Some((
+            f.address,
+            NoReturnFlow::from_function(&decoded.function),
+            seed,
+        ))
+    };
+    let rows = if capture {
+        scoped_decode::collect_scoped(binary.functions.len(), rayon::current_num_threads(), decode)
+    } else {
+        (0..binary.functions.len()).filter_map(decode).collect()
+    };
+    let mut decoded = StdHashMap::<u64, NoReturnFlow>::new();
+    // Restore original input order before map insertion, including duplicate
+    // address last-writer behavior. Fixed-point iteration remains unchanged.
+    for (address, flow, seed) in rows {
+        decoded.insert(address, flow);
+        if let (Some(seeds), Some(seed)) = (seeds.as_deref_mut(), seed) {
+            seeds.insert(address, seed);
+        }
+    }
 
     loop {
         let mut changed = false;
@@ -411,6 +411,104 @@ mod tests {
             successors,
             ops,
         }
+    }
+
+    #[test]
+    fn scoped_no_return_preparation_matches_serial_facts_and_complete_seeded_decodes() {
+        use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo};
+        let base = 0x401000u64;
+        let abort = base + 0x1000;
+        let mut bytes = vec![0x90; 256];
+        let mut functions = Vec::new();
+        for i in 0..16usize {
+            let offset = i * 16;
+            let address = base + offset as u64;
+            let code = match i % 3 {
+                0 => {
+                    let mut v = vec![0xe8];
+                    v.extend_from_slice(
+                        &((abort as i64 - address as i64 - 5) as i32).to_le_bytes(),
+                    );
+                    v.push(0xc3);
+                    v
+                }
+                1 => vec![0xeb, 0xfe],
+                _ => vec![0xc3],
+            };
+            bytes[offset..offset + code.len()].copy_from_slice(&code);
+            functions.push(FunctionInfo {
+                name: format!("fixture_{i}"),
+                address,
+                size: code.len() as u64,
+                ..Default::default()
+            });
+        }
+        let mut builder =
+            LoadedBinaryBuilder::new("scoped-no-return.bin".into(), DataBuffer::Heap(bytes))
+                .format("ELF")
+                .arch_spec("x86:LE:64:default")
+                .is_64bit(true)
+                .image_base(0x400000)
+                .add_section(SectionInfo {
+                    name: ".text".into(),
+                    virtual_address: base,
+                    virtual_size: 256,
+                    file_offset: 0,
+                    file_size: 256,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                });
+        for function in functions {
+            builder = builder.add_function(function);
+        }
+        let binary = builder
+            .add_function(FunctionInfo {
+                name: "abort".into(),
+                address: abort,
+                is_import: true,
+                ..Default::default()
+            })
+            .build()
+            .unwrap();
+        let serial = compute_no_return_functions(&binary, None);
+        assert!(serial.contains(&abort));
+        let mut seeds = DecodeSeeds::new();
+        assert_eq!(
+            compute_no_return_functions(&binary, Some(&mut seeds)),
+            serial
+        );
+        assert_eq!(seeds.len(), 16);
+        let frontend =
+            RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().unwrap()).unwrap();
+        for function in binary.functions.iter().filter(|f| !f.is_import) {
+            let bytes = binary
+                .view_bytes(function.address, function.size as usize)
+                .unwrap();
+            let context = DecodeMemoryContext::default();
+            let contract = DecodeContract::decomp_function(NORETURN_INSTRUCTION_LIMIT);
+            let expected = frontend
+                .lift_raw_pcode_function_with_context_and_memory_context(
+                    bytes,
+                    function.address,
+                    contract,
+                    &context,
+                    None,
+                )
+                .unwrap();
+            let actual = frontend
+                .lift_raw_pcode_function_with_seed(
+                    bytes,
+                    function.address,
+                    contract,
+                    &context,
+                    None,
+                    seeds.remove(&function.address),
+                )
+                .unwrap();
+            assert_eq!(actual, expected);
+        }
+        assert!(seeds.is_empty());
     }
 
     #[test]

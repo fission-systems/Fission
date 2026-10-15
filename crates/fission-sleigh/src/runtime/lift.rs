@@ -1387,6 +1387,13 @@ impl RuntimeSleighFrontend {
             bail!("instruction_limit must be > 0");
         }
 
+        let little_endian = !matches!(
+            registry::runtime_variant_for_entry_ref(&self.entry)
+                .ok()
+                .map(|variant| variant.endian),
+            Some(RuntimeEndian::Big)
+        );
+
         let mut decoded = BTreeMap::<u64, Vec<PcodeOp>>::new();
         let mut decoded_instruction_records = BTreeMap::<u64, DecodedInstruction>::new();
         let mut decoded_contexts = BTreeMap::<u64, PackedContextOverride>::new();
@@ -1501,12 +1508,6 @@ impl RuntimeSleighFrontend {
 
             let cbranch_exits_to_fallthrough =
                 instruction_cbranch_exits_to_fallthrough(&ins_ops, fallthrough);
-            let little_endian = !matches!(
-                registry::runtime_variant_for_entry(&self.entry)
-                    .ok()
-                    .map(|variant| variant.endian),
-                Some(RuntimeEndian::Big)
-            );
 
             for (target_addr, word_index, mask, value) in &details.pending_context_commits {
                 let entry = context_overrides.entry(*target_addr).or_default();
