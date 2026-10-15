@@ -6,8 +6,10 @@ mod frontend;
 mod function;
 mod lift;
 mod packed_decode;
+mod raw_decode_seed;
 pub use lift::{attach_inferred_indirect_edges, resolve_indirect_branch_targets};
 pub use packed_decode::PackedDecodedPcodeFunction;
+pub use raw_decode_seed::RawDecodeSeed;
 mod registry;
 mod spine;
 

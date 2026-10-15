@@ -27,7 +27,9 @@ use fission_core::core::ghidra_no_return::{
 };
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{PcodeFunction, PcodeOpcode};
-use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{
+    DecodeContract, DecodeMemoryContext, RawDecodeSeed, RuntimeSleighFrontend,
+};
 use lru::LruCache;
 use rayon::prelude::*;
 
@@ -41,7 +43,11 @@ use super::control_flow_facts::ghidra_no_return_compiler_key;
 /// for every function, forever. A plain next-function-in-`binary.functions`
 /// bound is slightly less precise (no `control_flow_facts`-refined
 /// `function_extents`) but is all the structural no-return check needs.
-fn no_return_scan_max_bytes(binary: &LoadedBinary, entry_address: u64, fallback: usize) -> usize {
+pub(super) fn no_return_scan_max_bytes(
+    binary: &LoadedBinary,
+    entry_address: u64,
+    fallback: usize,
+) -> usize {
     let inner = binary.inner();
     if let Some(&idx) = inner.function_addr_index.get(&entry_address) {
         if let Some(info) = inner.functions.get(idx) {
@@ -80,6 +86,15 @@ fn noreturn_cache() -> &'static Mutex<LruCache<String, BTreeSet<u64>>> {
 ///
 /// Cached per `binary.hash`, mirroring `control_flow_facts_for`'s cache.
 pub fn no_return_functions_for(binary: &LoadedBinary) -> BTreeSet<u64> {
+    no_return_functions_with_seeds(binary, None)
+}
+
+pub(crate) type DecodeSeeds = StdHashMap<u64, RawDecodeSeed>;
+
+pub(crate) fn no_return_functions_with_seeds(
+    binary: &LoadedBinary,
+    seeds: Option<&mut DecodeSeeds>,
+) -> BTreeSet<u64> {
     let hash = binary.hash.clone();
     if let Ok(mut cache) = noreturn_cache().lock() {
         if let Some(set) = cache.get(&hash) {
@@ -87,7 +102,7 @@ pub fn no_return_functions_for(binary: &LoadedBinary) -> BTreeSet<u64> {
         }
     }
 
-    let set = compute_no_return_functions(binary);
+    let set = compute_no_return_functions(binary, seeds);
 
     if let Ok(mut cache) = noreturn_cache().lock() {
         cache.put(hash, set.clone());
@@ -95,7 +110,10 @@ pub fn no_return_functions_for(binary: &LoadedBinary) -> BTreeSet<u64> {
     set
 }
 
-fn compute_no_return_functions(binary: &LoadedBinary) -> BTreeSet<u64> {
+fn compute_no_return_functions(
+    binary: &LoadedBinary,
+    mut seeds: Option<&mut DecodeSeeds>,
+) -> BTreeSet<u64> {
     let mut no_return: BTreeSet<u64> = BTreeSet::new();
 
     let Some(ghidra_format) = binary_format_to_ghidra_format(&binary.format) else {
@@ -148,7 +166,7 @@ fn compute_no_return_functions(binary: &LoadedBinary) -> BTreeSet<u64> {
     // work it sits inside. If it ever does need parallelism, the fix is to
     // stop calling `control_flow_facts_for` from inside a parallel iterator,
     // not to make the initialiser block again.
-    let decoded: StdHashMap<u64, PcodeFunction> = binary
+    let decoded: StdHashMap<u64, NoReturnFlow> = binary
         .functions
         .iter()
         .filter(|f| !f.is_import)
@@ -168,16 +186,30 @@ fn compute_no_return_functions(binary: &LoadedBinary) -> BTreeSet<u64> {
             let bytes = binary.view_bytes(decode_address, max_bytes)?;
             let memory_context = DecodeMemoryContext::default();
             let contract = DecodeContract::decomp_function(NORETURN_INSTRUCTION_LIMIT);
-            let decoded = frontend
-                .lift_raw_pcode_function_with_context_and_memory_context(
-                    bytes,
-                    decode_address,
-                    contract,
-                    &memory_context,
-                    context_override,
-                )
-                .ok()?;
-            Some((f.address, decoded.function))
+            let decoded = if let Some(seeds) = seeds.as_deref_mut() {
+                let (decoded, seed) = frontend
+                    .lift_raw_pcode_function_capturing_seed(
+                        bytes,
+                        decode_address,
+                        contract,
+                        &memory_context,
+                        context_override,
+                    )
+                    .ok()?;
+                seeds.insert(f.address, seed);
+                decoded
+            } else {
+                frontend
+                    .lift_raw_pcode_function_with_context_and_memory_context(
+                        bytes,
+                        decode_address,
+                        contract,
+                        &memory_context,
+                        context_override,
+                    )
+                    .ok()?
+            };
+            Some((f.address, NoReturnFlow::from_function(&decoded.function)))
         })
         .collect();
 
@@ -187,7 +219,7 @@ fn compute_no_return_functions(binary: &LoadedBinary) -> BTreeSet<u64> {
             if no_return.contains(&addr) {
                 continue;
             }
-            if function_is_structurally_no_return(pcode, &no_return) {
+            if pcode.is_no_return(&no_return) {
                 no_return.insert(addr);
                 changed = true;
             }
@@ -207,7 +239,88 @@ fn compute_no_return_functions(binary: &LoadedBinary) -> BTreeSet<u64> {
 /// a resolvable constant) or a branch outside this function's own decoded
 /// blocks never counts as no-return evidence, so this can under-detect but
 /// must never mark an actually-returning function as no-return.
+#[derive(Debug)]
+struct NoReturnFlow {
+    blocks: Vec<NoReturnBlock>,
+}
+#[derive(Debug)]
+struct NoReturnBlock {
+    events: Vec<NoReturnEvent>,
+    successors: Vec<u32>,
+}
+#[derive(Debug)]
+enum NoReturnEvent {
+    Return,
+    Target(u64),
+}
+impl NoReturnFlow {
+    fn from_function(function: &PcodeFunction) -> Self {
+        Self {
+            blocks: function
+                .blocks
+                .iter()
+                .map(|block| NoReturnBlock {
+                    events: block
+                        .ops
+                        .iter()
+                        .filter_map(|op| match op.opcode {
+                            PcodeOpcode::Return => Some(NoReturnEvent::Return),
+                            PcodeOpcode::Call | PcodeOpcode::Branch => {
+                                op.inputs.first().map(|v| NoReturnEvent::Target(v.offset))
+                            }
+                            _ => None,
+                        })
+                        .collect(),
+                    successors: block.successors.clone(),
+                })
+                .collect(),
+        }
+    }
+    fn is_no_return(&self, no_return: &BTreeSet<u64>) -> bool {
+        if self.blocks.is_empty() {
+            return false;
+        }
+        let mut visited = vec![false; self.blocks.len()];
+        let mut stack = vec![0u32];
+        while let Some(idx) = stack.pop() {
+            let Some(block) = self.blocks.get(idx as usize) else {
+                continue;
+            };
+            if visited[idx as usize] {
+                continue;
+            }
+            visited[idx as usize] = true;
+            let mut terminated = false;
+            for event in &block.events {
+                match event {
+                    NoReturnEvent::Return => return false,
+                    NoReturnEvent::Target(target) if no_return.contains(target) => {
+                        terminated = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if terminated {
+                continue;
+            }
+            if block.successors.is_empty() {
+                return false;
+            }
+            stack.extend(block.successors.iter().copied());
+        }
+        true
+    }
+}
+
+#[cfg(test)]
 fn function_is_structurally_no_return(pcode: &PcodeFunction, no_return: &BTreeSet<u64>) -> bool {
+    NoReturnFlow::from_function(pcode).is_no_return(no_return)
+}
+
+// Independent pre-change predicate retained only for differential regression checks.
+#[cfg(test)]
+fn original_no_return_predicate(pcode: &PcodeFunction, no_return: &BTreeSet<u64>) -> bool {
     if pcode.blocks.is_empty() {
         return false;
     }
@@ -297,6 +410,50 @@ mod tests {
             start_address,
             successors,
             ops,
+        }
+    }
+
+    #[test]
+    fn compact_no_return_flow_matches_original_across_ordered_paths_and_known_subsets() {
+        let mut rng = 0x1345_abcdu64;
+        for _case in 0..600 {
+            let mut next = || {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                rng >> 32
+            };
+            let count = (next() % 7) as usize;
+            let mut blocks = Vec::new();
+            for i in 0..count {
+                let mut ops = Vec::new();
+                for seq in 0..next() % 9 {
+                    let opcode = [
+                        PcodeOpcode::Return,
+                        PcodeOpcode::Call,
+                        PcodeOpcode::Branch,
+                        PcodeOpcode::CallInd,
+                        PcodeOpcode::BranchInd,
+                        PcodeOpcode::Copy,
+                    ][(next() % 6) as usize];
+                    let mut op = op(seq as u32, opcode);
+                    if next() % 4 != 0 {
+                        let mut target = Varnode::constant((next() % 4) as i64, 8);
+                        target.is_constant = next() % 2 == 0;
+                        op.inputs.push(target);
+                    }
+                    ops.push(op);
+                }
+                let successors = (0..next() % 4).map(|_| (next() % 9) as u32).collect();
+                blocks.push(block(i as u32 + 7, 0x1000 + i as u64 * 16, successors, ops));
+            }
+            let function = PcodeFunction { blocks };
+            let compact = NoReturnFlow::from_function(&function);
+            for bits in 0..16 {
+                let known = (0..4u64).filter(|i| bits & (1 << i) != 0).collect();
+                assert_eq!(
+                    compact.is_no_return(&known),
+                    original_no_return_predicate(&function, &known)
+                );
+            }
         }
     }
 
