@@ -202,11 +202,17 @@ fn fid_bound_state_completion_preserves_memory_context_and_delay_details() {
                 decode_instruction_and_lift_with_context_override(&compiled, &bytes, 0x1000, None);
             let completed =
                 lift_existing_bound_instruction_with_details(&compiled, &bytes, 0x1000, &state);
-            assert_eq!(
-                format!("{original:?}"),
-                format!("{completed:?}"),
-                "{file} {bytes:x?}"
-            );
+            // Anyhow's Debug also contains the host backtrace when enabled.
+            // Compare complete results/error chains, excluding call-site stacks.
+            let original_record = original
+                .as_ref()
+                .map(|value| format!("{value:?}"))
+                .map_err(|err| err.chain().map(ToString::to_string).collect::<Vec<_>>());
+            let completed_record = completed
+                .as_ref()
+                .map(|value| format!("{value:?}"))
+                .map_err(|err| err.chain().map(ToString::to_string).collect::<Vec<_>>());
+            assert_eq!(original_record, completed_record, "{file} {bytes:x?}");
             if file == "ARM8m_le.slaspec" {
                 assert!(!completed
                     .as_ref()

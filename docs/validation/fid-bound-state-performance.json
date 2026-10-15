@@ -309,5 +309,18 @@
     "No own builds/tests/profilers overlap timing; OS caches/scheduling uncontrolled.",
     "Both tools choose their own faster median among the two measured settings.",
     "Fission render=1 does not serialize native preparation/FID."
-  ]
+  ],
+  "post_ci_test_portability": {
+    "failed_run": 38747540801,
+    "failed_head": "e854e881f73c278cd87d1ad3125350a05ba2f8cb",
+    "failure": "New truncated-delay differential assertion compared anyhow Debug host backtraces instead of complete error chains. Reproduced locally with RUST_BACKTRACE=1.",
+    "fix": "Compare complete successful tuples and complete error chains, excluding host stack frames. No skipped assertion or production change.",
+    "test_patch_sha256": "0f97ad1871af5132014ec8b5088b1771d1547755425d4459c10c0929f04c8c20",
+    "test_sha256": "63f8483d369ccf235d7efb2604b79eae46fe9c4745c99e0a5f45bfeef0427743",
+    "measured_production_files_unchanged": true,
+    "backtrace_enabled_targeted_passed": 9,
+    "backtrace_enabled_related_passed": 1956,
+    "skipped": 6,
+    "baseline_matrices_unchanged": true
+  }
 }
