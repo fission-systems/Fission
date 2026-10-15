@@ -1,0 +1,451 @@
+{
+  "base": "3daf458fef337a2951e000a17f13fac61d4a2e24",
+  "source_only_tree": "aa154f28d8893c987e9f878fa489cafc9d8ef3bd",
+  "production_files_sha256": {
+    "crates/fission-sleigh/src/runtime/registry.rs": "f6929732904c6a65cd91476ed1438dbf826292e2e88e8014162149b0f3605ac7",
+    "crates/fission-sleigh/src/runtime/lift.rs": "c9faf483892540b7c51c79ed6f159d619bee0d1d813319eb1efa1b1302b1dbbd",
+    "crates/fission-static/src/analysis/noreturn/mod.rs": "6e3155d99d9d3f30f2f47a55ef2e827b88b50dd498bbd7c87a59b856f25022dc",
+    "crates/fission-static/src/analysis/noreturn/scoped_decode.rs": "f5975f34e271e35ea8faeef69cea3f812a6ff4616fbbd67230415131806e7c56"
+  },
+  "source_patch_sha256": "468f8f38365d4c2a53b78a3fc88444bd7c2dc0b004f63f752958dcc922914c4d",
+  "candidate_sha256": "c6f8c88a17c804d1388f2b99f8dfb3532b3af731a7576fd1c9445852318b25ae",
+  "scope": "Bounded non-stealing no-return preparation helpers and borrowed indexed immutable registry metadata; no quality/ranking claim",
+  "dataset_revision": "07dd95dbe6214b8a78fc1e4a55961ab515986489",
+  "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+  "population_reference": "decompiler-startup-performance.json (45 cells/250 functions)",
+  "binaries": {
+    "baseline": "5ec5b83100b10e1d5280ea22a92f6b4fce8b3894c8d50f1e18038b67e0ac1430",
+    "candidate": "c6f8c88a17c804d1388f2b99f8dfb3532b3af731a7576fd1c9445852318b25ae"
+  },
+  "machine": {
+    "cpu": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "memory_bytes": 25769803776,
+    "release_profile": "lto=true / strip=true / codegen-units=1"
+  },
+  "timing_keys_excluded": [
+    "build_duration_ms",
+    "decomp_sec",
+    "normalize_duration_ms",
+    "postprocess_sec",
+    "render_duration_ms",
+    "structuring_duration_ms",
+    "total_time_ms"
+  ],
+  "large": {
+    "baseline": {
+      "seconds": 27.029890791047364,
+      "cpu_seconds": 118.735447,
+      "max_rss_bytes": 2336391168,
+      "rss_range_bytes": [
+        2309685248,
+        2350465024
+      ]
+    },
+    "candidate": {
+      "seconds": 15.651672583073378,
+      "cpu_seconds": 130.47149900000005,
+      "max_rss_bytes": 2399371264,
+      "rss_range_bytes": [
+        2367291392,
+        2411544576
+      ]
+    }
+  },
+  "paired": [
+    {
+      "cell": "03",
+      "baseline": 2.0596415830077603,
+      "baseline_deterministic": true,
+      "candidate": 1.9773500830633566,
+      "candidate_deterministic": true,
+      "speedup": 1.041617061464865
+    },
+    {
+      "cell": "27",
+      "baseline": 0.918009833083488,
+      "baseline_deterministic": true,
+      "candidate": 0.8683017920702696,
+      "candidate_deterministic": true,
+      "speedup": 1.0572474241872758
+    },
+    {
+      "cell": "40",
+      "baseline": 1.014426791924052,
+      "baseline_deterministic": true,
+      "candidate": 0.987717124982737,
+      "candidate_deterministic": true,
+      "speedup": 1.0270418182146854
+    }
+  ],
+  "kuna_requested_one": [
+    {
+      "cell": "03",
+      "platform": "linux",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 2.0126283750869334,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.19858091603964567,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 10.135054340695671
+    },
+    {
+      "cell": "22",
+      "platform": "windows",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 16.77015975001268,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 2.7494518330786377,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 6.0994557345035085
+    },
+    {
+      "cell": "27",
+      "platform": "windows",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.8831730829551816,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.11523074994329363,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 7.6643871830201675
+    },
+    {
+      "cell": "40",
+      "platform": "macos",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.9912397500593215,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.3339930409565568,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 2.9678455192371933
+    }
+  ],
+  "kuna_requested_14": [
+    {
+      "cell": "03",
+      "platform": "linux",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 1.3663275829749182,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.3275016249390319,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 4.171971919923376
+    },
+    {
+      "cell": "22",
+      "platform": "windows",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 15.321396790910512,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 5.583294790936634,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 2.7441497117045914
+    },
+    {
+      "cell": "27",
+      "platform": "windows",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.6929955830564722,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.24872420798055828,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 2.786200783120559
+    },
+    {
+      "cell": "40",
+      "platform": "macos",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.9392013750039041,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.6996354589937255,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 1.3424153434915127
+    }
+  ],
+  "best_observed_settings": [
+    {
+      "cell": "03",
+      "fission": {
+        "seconds": 1.3663275829749182,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 0.19858091603964567,
+        "requested_workers": 1
+      },
+      "ratio": 6.880457650332008
+    },
+    {
+      "cell": "22",
+      "fission": {
+        "seconds": 15.321396790910512,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 2.7494518330786377,
+        "requested_workers": 1
+      },
+      "ratio": 5.572527805935308
+    },
+    {
+      "cell": "27",
+      "fission": {
+        "seconds": 0.6929955830564722,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 0.11523074994329363,
+        "requested_workers": 1
+      },
+      "ratio": 6.013981366931165
+    },
+    {
+      "cell": "40",
+      "fission": {
+        "seconds": 0.9392013750039041,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 0.3339930409565568,
+        "requested_workers": 1
+      },
+      "ratio": 2.812038754801685
+    }
+  ],
+  "kuna_binary_sha256": "46cd0f8109557f8fe1e8bae53e191bd6b92a7d0410ee2b279a37621c5a2c3e05",
+  "validation": {
+    "targeted_passed": 17,
+    "related_passed": 1855,
+    "related_skipped": 6,
+    "fresh_returned": 250,
+    "non_time_functions_changed": 0,
+    "focused_repeat_functions": 22,
+    "runs_per_worker_lane": 3,
+    "whole_250_repeated": false,
+    "guest_execution_or_rescore": false
+  },
+  "profile": {
+    "source": {
+      "production_files_sha256": {
+        "crates/fission-sleigh/src/runtime/registry.rs": "f6929732904c6a65cd91476ed1438dbf826292e2e88e8014162149b0f3605ac7",
+        "crates/fission-sleigh/src/runtime/lift.rs": "c9faf483892540b7c51c79ed6f159d619bee0d1d813319eb1efa1b1302b1dbbd",
+        "crates/fission-static/src/analysis/noreturn/mod.rs": "6e3155d99d9d3f30f2f47a55ef2e827b88b50dd498bbd7c87a59b856f25022dc",
+        "crates/fission-static/src/analysis/noreturn/scoped_decode.rs": "f5975f34e271e35ea8faeef69cea3f812a6ff4616fbbd67230415131806e7c56"
+      },
+      "profile_sha256": "582857578c6e17dc3c3dc3c99bac49402c4d96a5f7336110843366a32a9431be",
+      "profile": "release LTO/one codegen unit; strip=false/debug=1",
+      "diagnostic_only": true
+    },
+    "large_non_time_match": 6,
+    "small_non_time_match_each": 6,
+    "small_dyld_only_sample_excluded": [
+      "small-profile-0.txt"
+    ],
+    "observations": [
+      "Bounded diagnostic samples only; not whole-run attribution or speed timings",
+      "Later large sample exposes FPK lookup/decompression and repeated candidate parsing; next hypothesis only",
+      "Small samples 1/2 include preparation and NIR building; not a claim that compiler cache loading dominates"
+    ]
+  },
+  "limits": [
+    "Ordinary no-return callers remain sequential; only cold seed-capturing FID preparation uses helpers",
+    "Helper width includes caller and follows existing Rayon width; nonblocking process-wide permits bound extra helpers, not all application threads",
+    "CPU and RSS medians increase; this is latency improvement, not per-core efficiency or a memory cap",
+    "One requested render worker does not serialize FID or preparation; both worker settings and best observed choices are explicit",
+    "14-worker exploratory pilot is retained but primary comparison uses rows-vs-kuna-14-final",
+    "Only four native timing batches; no full-corpus timing or cross-tool quality equivalence",
+    "OS caches/scheduling uncontrolled; no own builds/tests/profilers during primary timing controls; separate diagnostics follow"
+  ]
+}
