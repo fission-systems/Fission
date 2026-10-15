@@ -18,7 +18,7 @@ use fission_sleigh::runtime::{DecodeMemoryContext, RuntimeSleighFrontend};
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::noreturn::no_return_functions_for;
+use crate::analysis::noreturn::{DecodeSeeds, no_return_functions_with_seeds};
 use crate::analysis::xrefs::{XrefDatabase, XrefType};
 
 pub use decode_context::{decode_memory_context_for, function_max_bytes};
@@ -91,6 +91,21 @@ fn with_control_flow_facts<R>(
     binary: &LoadedBinary,
     project: impl FnOnce(AssembledControlFlowFacts<'_>) -> R,
 ) -> R {
+    with_control_flow_facts_and_seeds(binary, None, project)
+}
+
+/// Capture only in the winning cold initializer; no traces enter the global cache.
+pub(crate) fn prepare_fid_decode_seeds(binary: &LoadedBinary) -> DecodeSeeds {
+    let mut seeds = DecodeSeeds::new();
+    with_control_flow_facts_and_seeds(binary, Some(&mut seeds), |_| ());
+    seeds
+}
+
+fn with_control_flow_facts_and_seeds<R>(
+    binary: &LoadedBinary,
+    seeds: Option<&mut DecodeSeeds>,
+    project: impl FnOnce(AssembledControlFlowFacts<'_>) -> R,
+) -> R {
     let hash = binary.hash.clone();
 
     let slot = {
@@ -112,7 +127,7 @@ fn with_control_flow_facts<R>(
             .load_spec()
             .and_then(|load_spec| RuntimeSleighFrontend::new_for_load_spec(load_spec).ok());
         CachedControlFlowFacts {
-            facts: ControlFlowFacts::assemble(binary, frontend.as_ref()),
+            facts: ControlFlowFacts::assemble_with_seeds(binary, frontend.as_ref(), seeds),
             storage,
         }
     });
@@ -124,6 +139,14 @@ fn with_control_flow_facts<R>(
 
 impl ControlFlowFacts {
     pub fn assemble(binary: &LoadedBinary, frontend: Option<&RuntimeSleighFrontend>) -> Self {
+        Self::assemble_with_seeds(binary, frontend, None)
+    }
+
+    fn assemble_with_seeds(
+        binary: &LoadedBinary,
+        frontend: Option<&RuntimeSleighFrontend>,
+        seeds: Option<&mut DecodeSeeds>,
+    ) -> Self {
         let lsda_landing_pads = collect_lsda_landing_pads(binary);
         let mut label_leaders = collect_label_leaders(binary);
         label_leaders.extend(lsda_landing_pads.iter().copied());
@@ -145,7 +168,7 @@ impl ControlFlowFacts {
             // every case this set also covers (it seeds from the same
             // index), but keeping both is a smaller, more obviously
             // behavior-preserving change than replacing the existing check.
-            let computed_no_return = no_return_functions_for(binary);
+            let computed_no_return = no_return_functions_with_seeds(binary, seeds);
 
             for xref in xref_db.iter() {
                 match xref.xref_type {
@@ -719,6 +742,91 @@ fn resolve_call_target_name_direct(
 mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder};
+
+    fn seed_fixture(hash: &str) -> LoadedBinary {
+        let mut binary =
+            LoadedBinaryBuilder::new("seed-test.bin".into(), DataBuffer::Heap(vec![0xc3; 32]))
+                .format("ELF")
+                .arch_spec("x86:LE:64:default")
+                .is_64bit(true)
+                .image_base(0x400000)
+                .add_section(fission_loader::loader::SectionInfo {
+                    name: ".text".into(),
+                    virtual_address: 0x401000,
+                    virtual_size: 32,
+                    file_offset: 0,
+                    file_size: 32,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_function(FunctionInfo {
+                    name: "seed".into(),
+                    address: 0x401000,
+                    size: 1,
+                    ..Default::default()
+                })
+                .build()
+                .unwrap();
+        binary.hash = hash.into();
+        binary
+    }
+
+    #[test]
+    fn transient_decode_seeds_are_cold_transaction_owned_and_warm_preparation_is_empty() {
+        let binary = seed_fixture("transient-cold-cf-seed-fixture");
+        let seeds = prepare_fid_decode_seeds(&binary);
+        assert!(seeds.contains_key(&0x401000));
+        let facts = control_flow_facts_for(&binary);
+        assert!(prepare_fid_decode_seeds(&binary).is_empty());
+        drop(seeds);
+        assert_eq!(control_flow_facts_for(&binary), facts);
+    }
+
+    #[test]
+    fn transient_decode_seeds_do_not_recompute_warm_no_return_or_ordinary_cf() {
+        let binary = seed_fixture("transient-warm-noret-seed-fixture");
+        let known = crate::analysis::noreturn::no_return_functions_for(&binary);
+        assert!(prepare_fid_decode_seeds(&binary).is_empty());
+        assert_eq!(
+            crate::analysis::noreturn::no_return_functions_for(&binary),
+            known
+        );
+        let other = seed_fixture("transient-ordinary-cf-seed-fixture");
+        let _ = control_flow_facts_for(&other);
+        assert!(prepare_fid_decode_seeds(&other).is_empty());
+    }
+
+    #[test]
+    #[ignore = "local real-input diagnostic; not a timing control or CI fixture"]
+    fn transient_decode_seed_local_window_probe() {
+        let input = std::env::var("FISSION_SEED_PROBE_INPUT").expect("explicit local input");
+        let binary = fission_loader::loader::LoadedBinary::from_file(input).unwrap();
+        let seeds = prepare_fid_decode_seeds(&binary);
+        let frontend =
+            RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().unwrap()).unwrap();
+        let mut exact_windows = 0;
+        for func in binary.functions.iter().filter(|f| !f.is_import) {
+            let address = frontend
+                .normalize_low_bit_code_address(func.address)
+                .address;
+            let old_limit =
+                super::super::noreturn::no_return_scan_max_bytes(&binary, address, 4096);
+            let new_limit = function_max_bytes(&binary, address, 4096);
+            if binary.view_bytes(address, old_limit) == binary.view_bytes(address, new_limit) {
+                exact_windows += 1;
+            }
+        }
+        eprintln!(
+            "captured_functions={} exact_windows={} candidate_functions={}",
+            seeds.len(),
+            exact_windows,
+            binary.functions.iter().filter(|f| !f.is_import).count()
+        );
+        for seed in seeds.values() {
+            eprintln!("{seed:?}");
+        }
+    }
 
     #[test]
     fn cached_projections_share_facts_and_preserve_owned_api_and_decode_context() {

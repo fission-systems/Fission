@@ -1317,6 +1317,69 @@ impl RuntimeSleighFrontend {
         memory_context: &DecodeMemoryContext,
         initial_context_override: Option<PackedContextOverride>,
     ) -> Result<DecodedPcodeFunction> {
+        self.lift_raw_pcode_function_impl(
+            bytes,
+            entry_address,
+            contract,
+            memory_context,
+            initial_context_override,
+            None,
+            false,
+        )
+    }
+
+    pub fn lift_raw_pcode_function_capturing_seed(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+        contract: DecodeContract,
+        memory_context: &DecodeMemoryContext,
+        initial_context_override: Option<PackedContextOverride>,
+    ) -> Result<(DecodedPcodeFunction, RawDecodeSeed)> {
+        let mut seed = RawDecodeSeed::new(self, bytes, entry_address);
+        let decoded = self.lift_raw_pcode_function_impl(
+            bytes,
+            entry_address,
+            contract,
+            memory_context,
+            initial_context_override,
+            Some(&mut seed),
+            true,
+        )?;
+        Ok((decoded, seed))
+    }
+
+    pub fn lift_raw_pcode_function_with_seed(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+        contract: DecodeContract,
+        memory_context: &DecodeMemoryContext,
+        initial_context_override: Option<PackedContextOverride>,
+        seed: Option<RawDecodeSeed>,
+    ) -> Result<DecodedPcodeFunction> {
+        let mut seed = seed.filter(|seed| seed.matches(self, bytes, entry_address));
+        self.lift_raw_pcode_function_impl(
+            bytes,
+            entry_address,
+            contract,
+            memory_context,
+            initial_context_override,
+            seed.as_mut(),
+            false,
+        )
+    }
+
+    fn lift_raw_pcode_function_impl(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+        contract: DecodeContract,
+        memory_context: &DecodeMemoryContext,
+        initial_context_override: Option<PackedContextOverride>,
+        mut seed: Option<&mut RawDecodeSeed>,
+        capture: bool,
+    ) -> Result<DecodedPcodeFunction> {
         if bytes.is_empty() {
             bail!("No function bytes available at 0x{:x}", entry_address);
         }
@@ -1377,13 +1440,28 @@ impl RuntimeSleighFrontend {
             };
             let remaining = &bytes[offset..];
 
-            let (instruction, mut ins_ops, decoded_len, details) = self
-                .decode_instruction_and_lift_with_context_override(
-                    remaining,
-                    current,
-                    context_override,
-                )
-                .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
+            let reused = if capture {
+                None
+            } else {
+                seed.as_mut()
+                    .and_then(|s| s.take(current, context_override))
+            };
+            let raw = match reused {
+                Some(raw) => raw,
+                None => self
+                    .decode_instruction_and_lift_with_context_override(
+                        remaining,
+                        current,
+                        context_override,
+                    )
+                    .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?,
+            };
+            if capture {
+                if let Some(seed) = seed.as_mut() {
+                    seed.record(current, context_override, &raw);
+                }
+            }
+            let (instruction, mut ins_ops, decoded_len, details) = raw;
 
             if decoded_len == 0 {
                 bail!("decoder returned zero length at 0x{:x}", current);
@@ -1968,5 +2046,137 @@ mod dispatch_tests {
         let value = dispatch_at_branch(&ops).expect("the block ends in BranchInd");
         assert_eq!(value.table, Some(0x1000));
         assert_eq!(value.table_scale, Some(8));
+    }
+}
+
+#[cfg(test)]
+mod raw_seed_lift_tests {
+    use super::*;
+
+    #[test]
+    fn raw_decode_seed_rebuilds_cfg_and_preserves_complete_results_across_languages() {
+        for (language, bytes, address) in [
+            (
+                "x86-64",
+                vec![0x48, 0x8b, 0x05, 0x10, 0, 0, 0, 0xc3],
+                0x1000,
+            ),
+            (
+                "AARCH64:LE:64:v8A",
+                vec![0x20, 0, 0x80, 0x52, 0xc0, 3, 0x5f, 0xd6],
+                0x1000,
+            ),
+            ("ARM8_le", vec![0x4c, 0xf6, 0xcd, 0x41, 0x70, 0x47], 0x1001),
+            (
+                "MIPS:LE:32:default",
+                vec![0x21, 0x10, 0x85, 0x00, 8, 0, 0xe0, 3, 0, 0, 0, 0],
+                0x1000,
+            ),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language).unwrap();
+            let address = frontend.normalize_low_bit_code_address(address);
+            let contract = DecodeContract::decomp_function(100);
+            let memory = DecodeMemoryContext::default();
+            let (baseline, mut seed) = frontend
+                .lift_raw_pcode_function_capturing_seed(
+                    &bytes,
+                    address.address,
+                    contract,
+                    &memory,
+                    address.context_override,
+                )
+                .unwrap();
+            let before = seed.record_count();
+            assert!(before > 0);
+            // Use the private entry to verify actual consumption, not merely equal fallback.
+            let replay = frontend
+                .lift_raw_pcode_function_impl(
+                    &bytes,
+                    address.address,
+                    contract,
+                    &memory,
+                    address.context_override,
+                    Some(&mut seed),
+                    false,
+                )
+                .unwrap();
+            assert_eq!(replay, baseline, "{language}");
+            assert!(seed.record_count() < before);
+            // Replaying an exhausted seed is a normal native miss.
+            assert_eq!(
+                frontend
+                    .lift_raw_pcode_function_with_seed(
+                        &bytes,
+                        address.address,
+                        contract,
+                        &memory,
+                        address.context_override,
+                        Some(seed)
+                    )
+                    .unwrap(),
+                baseline
+            );
+        }
+    }
+
+    #[test]
+    fn raw_decode_seed_different_memory_context_and_partial_capture_use_native_fallback() {
+        let frontend = RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+        let bytes = [0xc3, 0x90, 0x31, 0xc0, 0xc3];
+        let contract = DecodeContract::decomp_function(100);
+        let (_, seed) = frontend
+            .lift_raw_pcode_function_capturing_seed(
+                &bytes,
+                0x1000,
+                contract,
+                &DecodeMemoryContext::default(),
+                None,
+            )
+            .unwrap();
+        let mut memory = DecodeMemoryContext::default();
+        memory.additional_decode_entries.push(0x1002);
+        let expected = frontend
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                &bytes, 0x1000, contract, &memory, None,
+            )
+            .unwrap();
+        let actual = frontend
+            .lift_raw_pcode_function_with_seed(&bytes, 0x1000, contract, &memory, None, Some(seed))
+            .unwrap();
+        assert_eq!(actual, expected);
+        assert!(actual.reachable_instruction_addresses.contains(&0x1002));
+        let (_, seed) = frontend
+            .lift_raw_pcode_function_capturing_seed(
+                &[0x31, 0xc0, 0xc3],
+                0x1000,
+                DecodeContract::decomp_function(1),
+                &memory,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            frontend
+                .lift_raw_pcode_function_with_seed(
+                    &bytes,
+                    0x1000,
+                    contract,
+                    &memory,
+                    None,
+                    Some(seed)
+                )
+                .unwrap(),
+            expected
+        );
+        // Invalid bytes still return the original typed native error, with no success archive.
+        let invalid = [0x0f];
+        let a = frontend
+            .lift_raw_pcode_function_with_seed(&invalid, 0x1000, contract, &memory, None, None)
+            .unwrap_err();
+        let b = frontend
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                &invalid, 0x1000, contract, &memory, None,
+            )
+            .unwrap_err();
+        assert_eq!(format!("{a:#}"), format!("{b:#}"));
     }
 }
