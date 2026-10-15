@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 const MAGIC: &[u8; 4] = b"FPK1";
 const HEADER_LEN: usize = 72;
@@ -86,6 +86,41 @@ struct BlockRef {
     raw_len: usize,
 }
 
+/// One immutable decoded payload, with optional random row access. Ordinary
+/// block consumers keep their shared String without building the row index.
+struct CachedPayloadBlock {
+    text: Arc<String>,
+    rows: OnceLock<Vec<std::ops::Range<usize>>>,
+}
+
+impl CachedPayloadBlock {
+    fn new(text: String) -> Self {
+        Self {
+            text: Arc::new(text),
+            rows: OnceLock::new(),
+        }
+    }
+
+    fn line_at(&self, row: usize) -> Option<&str> {
+        let rows = self.rows.get_or_init(|| {
+            let mut offset = 0usize;
+            self.text
+                .split_inclusive('\n')
+                .map(|raw| {
+                    let content = raw
+                        .strip_suffix('\n')
+                        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+                        .unwrap_or(raw);
+                    let range = offset..offset + content.len();
+                    offset += raw.len();
+                    range
+                })
+                .collect()
+        });
+        self.text.get(rows.get(row)?.clone())
+    }
+}
+
 pub struct FpkReader {
     map: Mmap,
     blocks: Vec<BlockRef>,
@@ -95,7 +130,7 @@ pub struct FpkReader {
     /// resolve names that sort near each other, so the same block answers many
     /// of them. Without this a lazy database pays a decompress per lookup
     /// instead of per block.
-    cache: Mutex<HashMap<usize, Arc<String>>>,
+    cache: Mutex<HashMap<usize, Arc<CachedPayloadBlock>>>,
 }
 
 fn u16_at(b: &[u8], at: usize) -> u16 {
@@ -237,16 +272,23 @@ impl FpkReader {
 
     /// Decompressed block `index`, from the cache when it is already there.
     pub fn block_at(&self, index: usize) -> Result<Arc<String>, FpkError> {
+        self.cached_block_at(index)
+            .map(|block| Arc::clone(&block.text))
+    }
+
+    fn cached_block_at(&self, index: usize) -> Result<Arc<CachedPayloadBlock>, FpkError> {
         if let Ok(cache) = self.cache.lock()
             && let Some(hit) = cache.get(&index)
         {
             return Ok(Arc::clone(hit));
         }
-        let text = Arc::new(self.decompress(&self.blocks[index])?);
+        let block = Arc::new(CachedPayloadBlock::new(
+            self.decompress(&self.blocks[index])?,
+        ));
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(index, Arc::clone(&text));
+            cache.insert(index, Arc::clone(&block));
         }
-        Ok(text)
+        Ok(block)
     }
 
     /// The index directory, or `None` when the file has none.
@@ -347,8 +389,8 @@ impl FpkReader {
                         self.blocks.len()
                     )));
                 }
-                let text = self.block_at(block)?;
-                match text.lines().nth(row) {
+                let text = self.cached_block_at(block)?;
+                match text.line_at(row) {
                     Some(line) => out.push(line.to_owned()),
                     None => {
                         return Err(FpkError::Corrupt(format!(
@@ -993,6 +1035,105 @@ mod tests {
         assert_eq!(reader.records_by_key(1000).unwrap().len(), 1);
         assert!(reader.records_by_key(9_999_999).unwrap().is_empty());
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn cached_payload_rows_match_str_lines() {
+        for text in [
+            "",
+            "\n",
+            "\n\n",
+            "\r",
+            "\r\n",
+            "a",
+            "a\n",
+            "a\r",
+            "a\r\n",
+            "a\n\nb",
+            "a\r\n\r\nb\n",
+            "\nlast",
+            "a\r\rb\n",
+            "값\r\n다음\n끝",
+            "a\u{2028}b\u{0085}c",
+        ] {
+            let block = CachedPayloadBlock::new(text.to_owned());
+            assert!(block.rows.get().is_none());
+            let expected: Vec<_> = text.lines().collect();
+            for row in 0..expected.len() + 3 {
+                assert_eq!(
+                    block.line_at(row),
+                    expected.get(row).copied(),
+                    "{text:?} row={row}"
+                );
+            }
+            assert_eq!(block.line_at(usize::MAX), None);
+        }
+    }
+
+    #[test]
+    fn hash_rows_share_the_existing_payload_and_preserve_order_under_concurrency() {
+        let records: Vec<_> = (0..80).map(|i| format!("key|row{i:04}|payload")).collect();
+        let (mut image, locators) = pack_with_locators(&records, 1, CODEC_ZLIB, 1, 64 * 1024);
+        append_hash_index(
+            &mut image,
+            locators
+                .iter()
+                .map(|l| HashEntry {
+                    key: 42,
+                    block: l.block,
+                    row: l.row,
+                })
+                .collect(),
+        );
+        let path = write_temp(&image);
+        let reader = FpkReader::open(&path).unwrap();
+        assert_eq!(reader.block_count(), 1);
+        let public = reader.block_at(0).unwrap();
+        let cached = reader.cached_block_at(0).unwrap();
+        assert!(
+            cached.rows.get().is_none(),
+            "ordinary reads must not index lines"
+        );
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        for _ in 0..20 {
+                            assert_eq!(reader.records_by_key(42).unwrap(), records);
+                            assert!(reader.records_by_key(43).unwrap().is_empty());
+                        }
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+        assert_eq!(cached.rows.get().unwrap().len(), records.len());
+        assert!(Arc::ptr_eq(&public, &reader.block_at(0).unwrap()));
+        assert!(Arc::ptr_eq(&cached, &reader.cached_block_at(0).unwrap()));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn indexed_payload_keeps_invalid_locator_errors() {
+        let records = vec!["key|one".to_owned()];
+        let (mut image, _) = pack_with_locators(&records, 1, CODEC_ZLIB, 1, 4096);
+        append_hash_index(
+            &mut image,
+            vec![HashEntry {
+                key: 7,
+                block: 0,
+                row: 100,
+            }],
+        );
+        let path = write_temp(&image);
+        let reader = FpkReader::open(&path).unwrap();
+        assert_eq!(
+            reader.records_by_key(7).unwrap_err().to_string(),
+            "fpk corrupt: hash index points at row 100 of block 0"
+        );
+        std::fs::remove_file(path).ok();
     }
 
     #[test]
