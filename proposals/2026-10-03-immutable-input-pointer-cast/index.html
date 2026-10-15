@@ -1355,8 +1355,8 @@ explicit pointer cast but still declared integer. Examples:</p>
   used as pointer/comparison/address and returned. This row lacks one type.</li>
 <li>cp: rax = (char <em>)(param_8); input remains unchanged, also copied to local_1e8.
   Source-side evaluator says bool</em>, so byte-pointer inference may remain imperfect.</li>
-<li>ssh: r15 = (unsigned long long <em>)(param_3); </em>r15 = 0; input also passed to
-  another helper. Underlying source type is char***; no exact recovery is assumed.</li>
+<li>ssh: r15 = (unsigned long long <em>)(param_3); <em>r15 = 0; input also passed to
+  another helper. Underlying source type is char</em></em>*; no exact recovery is assumed.</li>
 </ul>
 <p>The cp/shred descriptor counterexample has uint32 input cast to a pointer64;
 width mismatch forbids promoting it. Reused ABI slots from #182 remain excluded.
@@ -1536,10 +1536,10 @@ bytes + public requested addresses only. Source/DWARF remains evaluator-only.</p
 </tbody>
 </table>
 <p>Only two of250 NIR/HIR/metadata outputs changed: grep's first input from word
-integer to uchar<em>, ssh's third from word integer to word pointer. Assignments,
+integer to uchar*, ssh's third from word integer to word pointer. Assignments,
 control flow and effects are unchanged; redundant rendered COPY casts disappear.
 The only score delta is grep print_line_tail Type.8→1.0. Exactly one new Union
-function, zero lost. ssh's exact char</em>** spelling remains unrecovered; its score
+function, zero lost. ssh's exact char*** spelling remains unrecovered; its score
 stays unchanged. The unscored optimized grep observation remains unchanged in
 final output, so this change does not claim to repair that full pipeline case.
 copy_reg dead-copy and ssh_rsa_verify carrier counterexamples remain unchanged.</p>

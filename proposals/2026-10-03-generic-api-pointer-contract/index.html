@@ -1322,21 +1322,21 @@ source-only audit pins HF revision 7af6c5e19289b6a357404708e5373bc7bf6fcacd.</p>
 <td>close_files, bin_220.elf 0x6116</td>
 <td>.625 / 28 / .388157895</td>
 <td>141 / 0</td>
-<td>saved_locale char<em> becomes void</em> (__ptr, local_48, local_38); passed to free</td>
+<td>saved_locale char* becomes void* (__ptr, local_48, local_38); passed to free</td>
 </tr>
 <tr>
 <td>sources/libacl/setfacl.c, libacl O2-noinline</td>
 <td>restore, bin_102.elf 0x5480</td>
 <td>.172413793 / 27 / 0</td>
 <td>324 / 24</td>
-<td>path_p char<em> maps to local_60 void</em>; passed to free</td>
+<td>path_p char* maps to local_60 void*; passed to free</td>
 </tr>
 <tr>
 <td>sources/gzip/gzip.c, gzip O0</td>
 <td>get_method, bin_219.elf 0x72f1</td>
 <td>0 / 45 / .130148270</td>
 <td>730 / 16</td>
-<td>p/base char<em> map to __src/__dest void</em>; passed to memmove</td>
+<td>p/base char* map to __src/__dest void*; passed to memmove</td>
 </tr>
 </tbody>
 </table>
@@ -1350,10 +1350,10 @@ whole-program behavior equivalence claim. Accepted Union baseline: 73/250.</p>
 <p>Owner: normalize/type recovery, existing callsite_type_prop and
 call_target_surface::apply_api_surface_type_transitively.</p>
 <p>The current helper sets binding.surface_type_name before testing whether the
-parameter declaration is generic void<em>. This locks an existing pointer binding
-as void</em>, even though the existing structural pointer lattice is more specific.
+parameter declaration is generic void*. This locks an existing pointer binding
+as void*, even though the existing structural pointer lattice is more specific.
 Example NIR: strdup result is saved, then free(local_48); output local_48 is
-void<em> while ground truth and source establish char</em>. The helper explicitly
+void* while ground truth and source establish char*. The helper explicitly
 retains this historical immediate-argument behavior; its existing test asserts
 it. No printer or raw SLEIGH change is needed.</p>
 <h2 id="3-general-invariant">3. General invariant<a class="headerlink" href="#3-general-invariant" title="Permanent link">&para;</a></h2>

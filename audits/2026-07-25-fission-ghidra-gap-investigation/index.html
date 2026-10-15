@@ -2070,7 +2070,7 @@
 </tr>
 <tr>
 <td><code>matrix_multiply</code></td>
-<td><strong><code>3ca1a786</code>:</strong> clang -O0 <strong>sem=1.0 (5/5)</strong> (Index DSE + float<em>). </em><em><code>a6624943</code>:</em><em> XMM Aggregate→Float (midend). </em><em><code>516a33bc</code> (structuring multi-emit cleanup):</em><em> gcc -O1/O2 move </em><em>compile_error → assertion_fail, sem=0.20 (1/5)</em>*; duplicate labels gone. Residual: m32 <code>float80</code>, Os undeclared xmm lane, O3 adapter, O0/O1/O2 semantic correctness.</td>
+<td><strong><code>3ca1a786</code>:</strong> clang -O0 <strong>sem=1.0 (5/5)</strong> (Index DSE + float*). <strong><code>a6624943</code>:</strong> XMM Aggregate→Float (midend). <strong><code>516a33bc</code> (structuring multi-emit cleanup):</strong> gcc -O1/O2 move <strong>compile_error → assertion_fail, sem=0.20 (1/5)</strong>; duplicate labels gone. Residual: m32 <code>float80</code>, Os undeclared xmm lane, O3 adapter, O0/O1/O2 semantic correctness.</td>
 </tr>
 </tbody>
 </table>

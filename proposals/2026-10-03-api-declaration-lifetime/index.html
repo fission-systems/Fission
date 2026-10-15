@@ -1462,7 +1462,7 @@ the reused-local part of the defect is fixed.</p>
 <p>Three focused entry-value anchors before revision: process_all_startpoints
 (findutils O2), wall (sysvinit O2-noinline), and getpasswd (sysvinit
 O2-noinline, sources/sulogin.c, bin_209.elf 0x3b40). The third source argument
-is console<em>, but its input is declared FILE</em>: record-field reads use the input
+is console*, but its input is declared FILE*: record-field reads use the input
 and three later param_1 assignments load stderr for calls. Current type .05,
 GED49, byte0, NIR219 lines/9 gotos. These are three distinct functions across
 two programs and mixed optimization, not duplicate copies of wall.</p>
@@ -1519,7 +1519,7 @@ No metric, adapter, oracle or input-dataset changes.</p>
 <li>Type mean .264112288-&gt;.264490127; perfect17/228 unchanged. Two gains:
   find/process_all_startpoints .133333-&gt;.2; psktool/process_options
   .090909-&gt;.181818. One partial loss remains: ssh_agent_sign .5-&gt;.428571.
-  Its alg char<em> declaration is still lost; key's old char</em> was also incorrect
+  Its alg char* declaration is still lost; key's old char* was also incorrect
   (ground truth sshkey*). The certificate preserves saved values, not every
   interprocedural pointee inference. Do not claim all recovered types correct.</li>
 <li>All250 GED values/source hashes unchanged; perfect65/240, mean33.629167.</li>
