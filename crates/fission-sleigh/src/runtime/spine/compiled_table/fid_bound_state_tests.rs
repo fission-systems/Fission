@@ -238,7 +238,9 @@ fn fid_bound_state_completion_still_validates_commits_lengths_and_display() {
     let bytes = [0x90];
     let state = decode_instruction_raw_state(&compiled, &bytes, 0x1000).unwrap();
     let mut invalid_display = state.clone();
-    let display = std::sync::Arc::make_mut(&mut invalid_display.display_template);
+    let display = std::sync::Arc::make_mut(
+        &mut std::sync::Arc::make_mut(&mut invalid_display.constructor).display_template,
+    );
     display.flowthru_operand_index = None;
     display.first_whitespace = Some(display.pieces.len() + 1);
     // This state emits normally; full decode must still reject its description.
@@ -260,7 +262,7 @@ fn fid_bound_state_completion_still_validates_commits_lengths_and_display() {
     assert!(err.to_string().contains("first_whitespace"));
 
     let mut invalid_commit = state.clone();
-    invalid_commit
+    std::sync::Arc::make_mut(&mut invalid_commit.constructor)
         .context_commits
         .push(crate::compiler::CompiledContextCommit {
             symbol_id: 0,

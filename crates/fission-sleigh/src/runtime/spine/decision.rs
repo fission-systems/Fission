@@ -23,7 +23,7 @@ pub trait DecisionProbeEvaluator {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSelection<'a> {
-    pub constructor: &'a CompiledExecutableConstructor,
+    pub constructor: &'a std::sync::Arc<CompiledExecutableConstructor>,
     pub constructor_index: usize,
     pub subtable_id: u32,
     pub constructor_id: u32,
@@ -323,7 +323,7 @@ fn selection_constructor_slot(
 fn resolve_leaf_constructor<'a>(
     subtable: &'a CompiledSubtableDefinition,
     entry: &CompiledDecisionLeafEntry,
-) -> Option<(usize, &'a CompiledExecutableConstructor)> {
+) -> Option<(usize, &'a std::sync::Arc<CompiledExecutableConstructor>)> {
     let constructor_index = if entry.subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty()
     {
         if entry.subtable_id != 0

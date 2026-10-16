@@ -57,10 +57,7 @@ impl InstNextShared {
 /// formatting is deferred to `Display`, which only ever runs once a decode
 /// has already failed.
 enum WalkFrame {
-    Constructor {
-        source: Box<str>,
-        mnemonic: Box<str>,
-    },
+    Constructor(std::sync::Arc<CompiledExecutableConstructor>),
     Operand(usize),
     Subtable(Box<str>),
 }
@@ -68,8 +65,12 @@ enum WalkFrame {
 impl std::fmt::Display for WalkFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WalkFrame::Constructor { source, mnemonic } => {
-                write!(f, "constructor({source}::{mnemonic})")
+            WalkFrame::Constructor(constructor) => {
+                write!(
+                    f,
+                    "constructor({}::{})",
+                    constructor.source, constructor.mnemonic
+                )
             }
             WalkFrame::Operand(index) => write!(f, "operand({index})"),
             WalkFrame::Subtable(name) => write!(f, "subtable({name})"),
@@ -620,10 +621,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     }
 
     fn walk(mut self) -> Result<RuntimeConstructState> {
-        let _guard = WalkStackGuard::new(WalkFrame::Constructor {
-            source: self.selection.constructor.source.as_str().into(),
-            mnemonic: self.selection.constructor.mnemonic.as_str().into(),
-        });
+        let _guard = WalkStackGuard::new(WalkFrame::Constructor(std::sync::Arc::clone(
+            self.selection.constructor,
+        )));
 
         // `constructor` copies out the `&'a CompiledExecutableConstructor`
         // reference itself (a `Copy` type, independent of `self`'s borrow),
@@ -725,13 +725,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             subtable_id: self.selection.subtable_id,
             constructor_id: self.selection.constructor_id,
             constructor_slot: self.selection.constructor_slot,
-            mnemonic: self.selection.constructor.mnemonic.clone(),
-            construct_tpl_kind: self.selection.constructor.construct_tpl_kind,
-            constructor_template: self.selection.constructor.constructor_template.clone(),
-            named_templates: self.selection.constructor.named_templates.clone(),
-            context_commits: self.selection.constructor.context_commits.clone(),
-            display_template: self.selection.constructor.display_template.clone(),
-            display_operands: self.selection.constructor.display_operands.clone(),
+            constructor: std::sync::Arc::clone(self.selection.constructor),
             construct_nodes: self.walker.into_nodes(),
             handles,
             exported_handle,

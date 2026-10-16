@@ -1187,7 +1187,10 @@ mod tests {
             )],
             Vec::new(),
         );
-        std::sync::Arc::make_mut(&mut state.display_template).first_whitespace = Some(2);
+        std::sync::Arc::make_mut(
+            &mut std::sync::Arc::make_mut(&mut state.constructor).display_template,
+        )
+        .first_whitespace = Some(2);
 
         let err = render_display_template_parts(&state).expect_err("invalid split should fail");
 
@@ -1250,30 +1253,32 @@ mod tests {
             handle.operand_index = index;
         }
         RuntimeConstructState {
+            constructor: crate::runtime::spine::construct::test_constructor_metadata(
+                "test".to_string(),
+                CompiledConstructTplKind::Generic,
+                std::sync::Arc::new(CompiledConstructorTemplate {
+                    handles: Vec::new(),
+                    decode_steps: Vec::new(),
+                    num_labels: 0,
+                    result: None,
+                    ops: Vec::new(),
+                    template_source: CompiledTemplateSource::SpecDerived,
+                }),
+                Vec::new(),
+                Vec::new(),
+                CompiledDisplayTemplate {
+                    constructor_hash: 0,
+                    pieces,
+                    first_whitespace: None,
+                    flowthru_operand_index: None,
+                    display: String::new(),
+                }
+                .into(),
+                Vec::new().into(),
+            ),
             subtable_id: 0,
             constructor_id: 0,
             constructor_slot: 0,
-            mnemonic: "test".to_string(),
-            construct_tpl_kind: CompiledConstructTplKind::Generic,
-            constructor_template: std::sync::Arc::new(CompiledConstructorTemplate {
-                handles: Vec::new(),
-                decode_steps: Vec::new(),
-                num_labels: 0,
-                result: None,
-                ops: Vec::new(),
-                template_source: CompiledTemplateSource::SpecDerived,
-            }),
-            named_templates: Vec::new(),
-            context_commits: Vec::new(),
-            display_template: CompiledDisplayTemplate {
-                constructor_hash: 0,
-                pieces,
-                first_whitespace: None,
-                flowthru_operand_index: None,
-                display: String::new(),
-            }
-            .into(),
-            display_operands: Vec::new().into(),
             construct_nodes: Vec::new(),
             operands: handles
                 .iter()
