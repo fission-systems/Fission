@@ -28,6 +28,17 @@ pub use analyzers::{cpp, golang, rust};
 pub use types::*;
 
 impl LoadedBinary {
+    /// Map the file through canonical format parsing without selecting a legacy
+    /// language/compiler or resolving external debug/signature resources.
+    /// The result has architecture facts but no BinaryLoadSpec. ELF x86 only.
+    pub fn from_file_format_facts<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        pipeline::LoaderPipeline::load_format_facts(
+            DataBuffer::Heap(std::fs::read(path)?),
+            path.to_string_lossy().into_owned(),
+        )
+    }
+
     /// Load and parse a binary file using memory mapping
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path_ref = path.as_ref();

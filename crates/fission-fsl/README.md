@@ -463,3 +463,16 @@ Previous source-backend sections are historical first-slice scope; C/Rust output
 bytes remain locked. Go uses internal transaction snapshots and explicitly
 refuses overlapping output banks. General source signatures and host resource
 failures are outside this execution contract.
+
+## Asset-independent ELF entry point
+
+`fsl-x86 decompile-owned INPUT.elf ADDRESS SIZE c|rust|go NEW_DIRECTORY` compiles
+the embedded owned x86 v2 FSL profile, uses canonical ELF machine/class/endian
+facts without opinion/ldefs selection, then projects the same canonical FIR.
+The bundle includes source, diagnostic FIR, portable profile and route/admission
+reports. Unsupported input refuses without a legacy fallback.
+
+[Contract, isolation evidence and remaining gaps](../../docs/research/fsl-owned-pipeline.md).
+The existing package-based `from_binary` comparison API retains legacy metadata
+selection. General function/ABI recovery and complete product replacement remain
+incomplete.

@@ -17,6 +17,8 @@ pub mod library;
 pub mod output;
 pub mod package;
 mod parser;
+#[cfg(feature = "x86")]
+pub mod pipeline;
 pub mod recovery;
 pub mod registers;
 pub mod semantics;

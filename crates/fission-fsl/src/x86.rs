@@ -6,7 +6,7 @@ use crate::{
     state, DecodedInstruction, ExecutionStatus, FslError, FslcPackage, MachineState, OutputLayer,
 };
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeSet, fmt::Write};
+use std::{collections::BTreeSet, fmt::Write, path::Path};
 const MAGIC_V1: &[u8; 8] = b"FSLXPKG1";
 const MAGIC_V2: &[u8; 8] = b"FSLXPKG2";
 const MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -336,11 +336,33 @@ impl X86Program {
         address: u64,
         size: usize,
     ) -> Result<Self, FslError> {
+        Self::from_binary_policy(package, path, address, size, false)
+    }
+    /// Asset-independent format-facts path. Never selects a legacy LoadSpec.
+    pub fn from_owned_binary(
+        package: &X86Package,
+        path: &Path,
+        address: u64,
+        size: usize,
+    ) -> Result<Self, FslError> {
+        Self::from_binary_policy(package, path, address, size, true)
+    }
+    fn from_binary_policy(
+        package: &X86Package,
+        path: &Path,
+        address: u64,
+        size: usize,
+        format_facts: bool,
+    ) -> Result<Self, FslError> {
         if size == 0 || size > 65536 {
             return Err(error("binary span size must be 1..65536"));
         }
-        let binary = fission_loader::LoadedBinary::from_file(path)
-            .map_err(|e| error(format!("loader: {e}")))?;
+        let binary = if format_facts {
+            fission_loader::LoadedBinary::from_file_format_facts(path)
+        } else {
+            fission_loader::LoadedBinary::from_file(path)
+        }
+        .map_err(|e| error(format!("loader: {e}")))?;
         let architecture = binary
             .architecture
             .as_ref()

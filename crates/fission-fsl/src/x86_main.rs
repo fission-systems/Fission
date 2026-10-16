@@ -38,6 +38,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let usage = concat!(
         "usage: fsl-x86 compile RULES.fslx BODIES.fsl OUTPUT.fslxc | ",
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
+        "decompile-owned BINARY ADDRESS SIZE c|rust|go NEW_DIRECTORY | ",
         "decompile-binary PACKAGE BINARY ADDRESS SIZE fir|c|rust OUTPUT | ",
         "recover-binary PACKAGE BINARY ADDRESS SIZE OUTPUT | ",
         "plan-binary PACKAGE BINARY ADDRESS SIZE c|rust|go | ",
@@ -47,6 +48,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "execute-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET"
     );
     match a.first().map(String::as_str) {
+        Some("decompile-owned") if a.len() == 6 => {
+            let bundle = fission_fsl::pipeline::project_x86_binary(
+                Path::new(&a[1]),
+                number(&a[2])?,
+                a[3].parse()?,
+                &a[4],
+            )?;
+            bundle.write_new(Path::new(&a[5]))?;
+            println!("emitted owned FSL/FIR pipeline bundle into {}", a[5]);
+        }
         Some("compile") if a.len() == 4 => {
             let p = X86Package::compile(&fs::read_to_string(&a[1])?, &fs::read_to_string(&a[2])?)?;
             let data = p.encode_binary()?;
