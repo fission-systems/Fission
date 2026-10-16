@@ -32,7 +32,16 @@ pub(crate) fn render_layered_pseudocode(
     hir: &HirFunction,
     options: &MlilPreviewOptions,
 ) -> LayeredPseudocode {
-    let nir = render_hir_function_with_profile(hir, options, PrintProfile::Nir);
+    render_layered_pseudocode_with_provenance(hir, options, &HashMap::new())
+}
+
+pub(crate) fn render_layered_pseudocode_with_provenance(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+    definitions: &HashMap<String, u64>,
+) -> LayeredPseudocode {
+    let (nir, nir_line_mappings) =
+        render_hir_function_with_provenance(hir, options, PrintProfile::Nir, definitions);
     let mut hir_tree = hir.clone();
     // Presentation must know which names are file-scope, or its
     // dead-assignment pass deletes stores to globals -- the write is the
@@ -57,8 +66,14 @@ pub(crate) fn render_layered_pseudocode(
     // whole reason the set exists.
     collect_address_named_globals(hir, options, &mut global_names);
     apply_hir_presentation_with_globals(&mut hir_tree, &global_names);
-    let hir_code = render_hir_function_with_profile(&hir_tree, options, PrintProfile::Hir);
-    LayeredPseudocode { nir, hir: hir_code }
+    let (hir_code, hir_line_mappings) =
+        render_hir_function_with_provenance(&hir_tree, options, PrintProfile::Hir, definitions);
+    LayeredPseudocode {
+        nir,
+        hir: hir_code,
+        nir_line_mappings,
+        hir_line_mappings,
+    }
 }
 
 #[cfg(test)]
@@ -67,6 +82,62 @@ mod layered_tests {
     use crate::midend::{
         HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirFunctionType, NirType, StructField,
     };
+
+    #[test]
+    fn definition_provenance_tracks_prefixes_and_each_layer_independently() {
+        let ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let hir = HirFunction {
+            name: "caller".into(),
+            return_type: ty.clone(),
+            locals: vec![NirBinding {
+                name: "value".into(),
+                ty: ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("value".into()),
+                    rhs: HirExpr::Call {
+                        target: "external".into(),
+                        args: vec![],
+                        ty,
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("value".into()))),
+            ],
+            ..HirFunction::default()
+        };
+        let options = MlilPreviewOptions::default();
+        let baseline = render_layered_pseudocode(&hir, &options);
+        let traced = render_layered_pseudocode_with_provenance(
+            &hir,
+            &options,
+            &HashMap::from([("value".to_string(), 0x1000)]),
+        );
+        assert_eq!(baseline.nir, traced.nir);
+        assert_eq!(baseline.hir, traced.hir);
+        assert!(traced.nir.starts_with("extern"));
+        assert_eq!(traced.nir_line_mappings.len(), 1);
+        for (code, mappings) in [
+            (&traced.nir, &traced.nir_line_mappings),
+            (&traced.hir, &traced.hir_line_mappings),
+        ] {
+            for mapping in mappings {
+                assert!(
+                    code.lines()
+                        .nth(mapping.line_number - 1)
+                        .unwrap()
+                        .contains("value = external(")
+                );
+                assert_eq!(mapping.addresses, vec![0x1000]);
+            }
+        }
+    }
 
     #[test]
     fn c_external_declaration_and_pre_mapped_call_share_the_symbol() {
@@ -581,6 +652,15 @@ fn render_hir_function_with_profile(
     options: &MlilPreviewOptions,
     profile: PrintProfile,
 ) -> String {
+    render_hir_function_with_provenance(hir, options, profile, &HashMap::new()).0
+}
+
+fn render_hir_function_with_provenance(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+    profile: PrintProfile,
+    definitions: &HashMap<String, u64>,
+) -> (String, Vec<super::RecoveredLineMapping>) {
     let mut printable = hir.clone();
     if has_unknown_arity_declaration(hir) {
         // An unknown-arity thunk is a declaration in C11. Its forwarding
@@ -618,7 +698,12 @@ fn render_hir_function_with_profile(
         && undefined_types.is_empty()
         && !include_stdio
     {
-        return print_hir_function_with_profile(&printable, Some(&options.global_names), profile);
+        return super::printer::print_hir_function_with_provenance(
+            &printable,
+            Some(&options.global_names),
+            profile,
+            definitions,
+        );
     }
 
     let mut rendered = String::new();
@@ -656,12 +741,18 @@ fn render_hir_function_with_profile(
         ));
     }
     rendered.push('\n');
-    rendered.push_str(&print_hir_function_with_profile(
+    let prefix_lines = rendered.bytes().filter(|byte| *byte == b'\n').count();
+    let (code, mut mappings) = super::printer::print_hir_function_with_provenance(
         &printable,
         Some(&options.global_names),
         profile,
-    ));
-    rendered
+        definitions,
+    );
+    for mapping in &mut mappings {
+        mapping.line_number += prefix_lines;
+    }
+    rendered.push_str(&code);
+    (rendered, mappings)
 }
 
 /// Type names the declarations keep, paired with what to define each as.

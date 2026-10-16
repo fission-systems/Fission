@@ -41,6 +41,8 @@ pub(crate) enum CliRustOutcome {
         /// Recovered variables, so a consumer does not have to parse them
         /// back out of the printed declarations.
         variables: Vec<fission_decompiler::RecoveredVariable>,
+        nir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
+        hir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
     },
     AssemblyFallback {
         fallback_code: String,

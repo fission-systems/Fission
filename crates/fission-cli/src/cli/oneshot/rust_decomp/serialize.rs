@@ -16,7 +16,12 @@ fn layered_text(
 ) -> String {
     let nir = code_nir.unwrap_or(code).to_string();
     let hir = code_hir.unwrap_or(code).to_string();
-    LayeredPseudocode { nir, hir }.format_text(layer, true)
+    LayeredPseudocode {
+        nir,
+        hir,
+        ..Default::default()
+    }
+    .format_text(layer, true)
 }
 
 pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) -> serde_json::Value {
@@ -33,6 +38,8 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
             hint_stats,
             decomp_sec,
             variables,
+            nir_line_mappings,
+            hir_line_mappings,
         } => {
             let mut obj = serde_json::json!({
                 "address": addr_str,
@@ -46,6 +53,10 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "fell_back": fell_back,
                 "fallback_reason": fallback_reason,
                 "variables": variables,
+                "line_mappings": if entry.layer == PseudocodeLayer::Hir { hir_line_mappings } else { nir_line_mappings },
+                "line_mappings_nir": nir_line_mappings,
+                "line_mappings_hir": hir_line_mappings,
+                "line_mapping_source": "fission_ssa_assignment_definition",
             });
             // Only present when `decomp --prehir` was passed -- absence means
             // "not requested", not "structuring produced nothing".
