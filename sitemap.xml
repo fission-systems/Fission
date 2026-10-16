@@ -1193,6 +1193,10 @@
          <lastmod>2026-10-16</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-10-16-die-direct-strings/</loc>
+         <lastmod>2026-10-16</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-10-16-fpk-index-chunks/</loc>
          <lastmod>2026-10-16</lastmod>
     </url>
@@ -1230,6 +1234,10 @@
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/validation/decompiler-startup-performance/</loc>
+         <lastmod>2026-10-16</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/validation/die-direct-strings-performance/</loc>
          <lastmod>2026-10-16</lastmod>
     </url>
     <url>
