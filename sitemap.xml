@@ -1193,6 +1193,10 @@
          <lastmod>2026-10-16</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-10-16-fpk-index-chunks/</loc>
+         <lastmod>2026-10-16</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/reports/2026-10-05-ssa-value-emission/</loc>
          <lastmod>2026-10-16</lastmod>
     </url>
@@ -1234,6 +1238,10 @@
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/validation/fid-row-access-performance/</loc>
+         <lastmod>2026-10-16</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/validation/fpk-index-chunks-performance/</loc>
          <lastmod>2026-10-16</lastmod>
     </url>
     <url>
