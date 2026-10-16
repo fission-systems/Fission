@@ -347,6 +347,81 @@ impl X86Program {
     ) -> Result<Self, FslError> {
         Self::from_binary_policy(package, path, address, size, true)
     }
+    /// Conservative entry-only selection for external corpora without sizes.
+    /// Admit only a straight-line prefix ending in an owned near RET. Branches,
+    /// unsupported instructions and exhausted bounds refuse, never guess a size.
+    /// This selects a candidate window, not a recovered source function or ABI.
+    pub fn from_owned_entry(
+        package: &X86Package,
+        path: &Path,
+        address: u64,
+    ) -> Result<Self, FslError> {
+        let binary = fission_loader::LoadedBinary::from_file_format_facts(path)
+            .map_err(|e| error(format!("loader: {e}")))?;
+        let architecture = binary
+            .architecture
+            .as_ref()
+            .ok_or_else(|| error("loader has no authoritative architecture"))?;
+        if !architecture.processor.eq_ignore_ascii_case("x86") || architecture.endian != "little" {
+            return Err(error("loader architecture is not little-endian x86"));
+        }
+        let section = binary
+            .executable_section_containing(address)
+            .ok_or_else(|| error("entry is not executable"))?;
+        let delta = address
+            .checked_sub(section.virtual_address)
+            .ok_or_else(|| error("bad section mapping"))?;
+        let available = section
+            .file_size
+            .min(section.virtual_size)
+            .checked_sub(delta)
+            .ok_or_else(|| error("entry is not file-backed"))?
+            .min(65536) as usize;
+        let raw = binary
+            .view_executable_bytes(address, available)
+            .filter(|b| !b.is_empty())
+            .ok_or_else(|| error("entry is not file-backed"))?;
+        address
+            .checked_add(available as u64)
+            .ok_or_else(|| error("entry window address overflow"))?;
+        let mut offset = 0;
+        for _ in 0..MAX_INSTRUCTIONS {
+            if offset == raw.len() {
+                break;
+            }
+            let instruction = crate::x86_decode::decode(
+                &package.rules,
+                raw,
+                offset,
+                address,
+                u32::from(architecture.bitness),
+                package.version,
+            )
+            .map_err(|e| {
+                error(format!(
+                    "entry decode address=0x{:x} offset={offset}: {}",
+                    address + offset as u64,
+                    e.message
+                ))
+            })?;
+            let form = package.rules[instruction.rule].form;
+            if matches!(form, Form::Branch | Form::Branch8) {
+                return Err(error(
+                    "entry selection requires straight-line code; branch refused",
+                ));
+            }
+            offset += instruction.length;
+            if form == Form::Ret {
+                return Self::from_loaded_binary(package, &binary, address, offset);
+            }
+        }
+        Err(error(
+            "entry selection found no near RET within 65536 bytes / 4096 instructions",
+        ))
+    }
+    pub fn byte_length(&self) -> usize {
+        self.input.len()
+    }
     fn from_binary_policy(
         package: &X86Package,
         path: &Path,
@@ -363,6 +438,14 @@ impl X86Program {
             fission_loader::LoadedBinary::from_file(path)
         }
         .map_err(|e| error(format!("loader: {e}")))?;
+        Self::from_loaded_binary(package, &binary, address, size)
+    }
+    fn from_loaded_binary(
+        package: &X86Package,
+        binary: &fission_loader::LoadedBinary,
+        address: u64,
+        size: usize,
+    ) -> Result<Self, FslError> {
         let architecture = binary
             .architecture
             .as_ref()

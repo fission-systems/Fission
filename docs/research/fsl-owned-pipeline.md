@@ -37,6 +37,29 @@ FIR and invokes the checked backend. There is no separate package preparation
 step or legacy fallback. The current profile has 48 rules / 150 width-specific
 bodies; counts are derived from the actual compiled profile.
 
+For an external eval kit that provides only entry addresses:
+
+```sh
+fsl-x86 decompile-owned-entry INPUT.elf ADDRESS c|rust|go NEW_DIRECTORY
+```
+
+`pipeline::project_x86_entry` uses the same package, loader, FIR and backend.
+`X86Program::from_owned_entry` scans file-backed executable bytes with the owned
+decoder to the first near RET, bounded by 65,536 bytes / 4,096 instructions.
+Any branch, unsupported instruction, absent RET or exhausted bound refuses.
+The final selected span passes the same relocation/original-byte checks as the
+size-supplied path. Padding after RET is excluded. This is a conservative window
+selection policy, not a general function boundary or ABI recovery algorithm.
+
+The research repository's `tools/decbench_fsl_evalkit.py` consumes only the external
+kit's public entry-address selection, invokes this CLI for static analysis and
+records refusals and explicit-state bundles. The current state function has a
+different signature and return contract from the original function, so even a
+successful bundle is ineligible for DecBench source-function metrics. It must
+not be renamed to a target symbol or packaged as a recovered ordinary C function.
+No target binaries are executed/emulated; no private mapping, original source,
+DWARF answer key or legacy/reference decompiler participates in generation.
+
 The new directory contains `output.c`/`.rs`/`.go`, `output.fir`, `profile.fslxc`,
 `projection.txt`, `pipeline.txt`, `build.txt`. The portable package/FIR and source
 retain original bytes/origins/hashes; generated reports mark compilation and

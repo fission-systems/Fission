@@ -52,6 +52,23 @@ pub fn project_x86_binary(
     size: usize,
     backend_id: &str,
 ) -> Result<PipelineBundle, FslError> {
+    project_x86(input, address, Some(size), backend_id)
+}
+/// Address-only conservative candidate selection for static corpus evaluation.
+/// Straight-line to first near RET only; no source function/ABI claim is made.
+pub fn project_x86_entry(
+    input: &Path,
+    address: u64,
+    backend_id: &str,
+) -> Result<PipelineBundle, FslError> {
+    project_x86(input, address, None, backend_id)
+}
+fn project_x86(
+    input: &Path,
+    address: u64,
+    size: Option<usize>,
+    backend_id: &str,
+) -> Result<PipelineBundle, FslError> {
     let registry = BackendRegistry::with_builtin_sources();
     let backend = registry
         .get(backend_id)
@@ -60,7 +77,17 @@ pub fn project_x86_binary(
     let rules = package.rule_count();
     let bodies = package.bodies().instructions.len();
     let profile = package.encode_binary()?;
-    let program = X86Program::from_owned_binary(&package, input, address, size)?;
+    let program = match size {
+        Some(size) => X86Program::from_owned_binary(&package, input, address, size)?,
+        None => X86Program::from_owned_entry(&package, input, address)?,
+    };
+    let selection = match size {
+        Some(size) => format!("caller-supplied-executable-span address=0x{address:x} size={size}"),
+        None => format!(
+            "conservative-straight-line-entry address=0x{address:x} size={} bound=65536-bytes/4096-instructions terminal=near-ret; source-function-boundary=unproven",
+            program.byte_length()
+        ),
+    };
     let plan = backend
         .plan(
             ProjectionInput::X86Window(&program),
@@ -71,7 +98,7 @@ pub fn project_x86_binary(
         .emit(&plan)
         .map_err(|e| FslError::at(1, 1, e.to_string()))?;
     let fir = program.emit(OutputLayer::Fir)?;
-    let report=format!("pipeline-contract=1\nprofile=owned-x86-v2\nspec-input=embedded-fsl\nsemantic-owner=canonical-fir\nloader-architecture=ELF-machine-class-endian-facts; no legacy LoadSpec\nroute=file-loader -> owned-fsl-decode -> canonical-fir -> checked-source-backend\nlegacy-fallback=none\nbackend={}\nselection=caller-supplied-executable-span address=0x{address:x} size={size}\ncoverage={rules} encoding rules; {bodies} width-specific semantic bodies; not full x86\nlimits=no general function discovery, source prototype or ABI recovery; bounded flat memory; no guest fault/concurrency model\ncompilation=not-performed equivalence=not-performed\n",backend.descriptor().id);
+    let report=format!("pipeline-contract=1\nprofile=owned-x86-v2\nspec-input=embedded-fsl\nsemantic-owner=canonical-fir\nloader-architecture=ELF-machine-class-endian-facts; no legacy LoadSpec\nroute=file-loader -> owned-fsl-decode -> canonical-fir -> checked-source-backend\nlegacy-fallback=none\nbackend={}\nselection={selection}\ncoverage={rules} encoding rules; {bodies} width-specific semantic bodies; not full x86\nlimits=no general function discovery, source prototype or ABI recovery; bounded flat memory; no guest fault/concurrency model\ncompilation=not-performed equivalence=not-performed\n",backend.descriptor().id);
     Ok(PipelineBundle {
         projection,
         fir,

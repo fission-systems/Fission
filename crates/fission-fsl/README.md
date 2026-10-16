@@ -472,6 +472,12 @@ facts without opinion/ldefs selection, then projects the same canonical FIR.
 The bundle includes source, diagnostic FIR, portable profile and route/admission
 reports. Unsupported input refuses without a legacy fallback.
 
+`fsl-x86 decompile-owned-entry INPUT.elf ADDRESS c|rust|go NEW_DIRECTORY` adds
+address-only conservative selection for static external eval-kit coverage. It
+admits straight-line code ending in a near RET within 65,536 bytes / 4,096
+instructions; branches and unsupported bytes refuse. This still emits explicit
+machine-state code, not an original-ABI function eligible for DecBench metrics.
+
 [Contract, isolation evidence and remaining gaps](../../docs/research/fsl-owned-pipeline.md).
 The existing package-based `from_binary` comparison API retains legacy metadata
 selection. General function/ABI recovery and complete product replacement remain

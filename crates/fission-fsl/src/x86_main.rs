@@ -39,6 +39,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "usage: fsl-x86 compile RULES.fslx BODIES.fsl OUTPUT.fslxc | ",
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
         "decompile-owned BINARY ADDRESS SIZE c|rust|go NEW_DIRECTORY | ",
+        "decompile-owned-entry BINARY ADDRESS c|rust|go NEW_DIRECTORY | ",
         "decompile-binary PACKAGE BINARY ADDRESS SIZE fir|c|rust OUTPUT | ",
         "recover-binary PACKAGE BINARY ADDRESS SIZE OUTPUT | ",
         "plan-binary PACKAGE BINARY ADDRESS SIZE c|rust|go | ",
@@ -48,6 +49,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "execute-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET"
     );
     match a.first().map(String::as_str) {
+        Some("decompile-owned-entry") if a.len() == 5 => {
+            let bundle =
+                fission_fsl::pipeline::project_x86_entry(Path::new(&a[1]), number(&a[2])?, &a[3])?;
+            bundle.write_new(Path::new(&a[4]))?;
+            println!("emitted conservative owned entry bundle into {}", a[4]);
+        }
         Some("decompile-owned") if a.len() == 6 => {
             let bundle = fission_fsl::pipeline::project_x86_binary(
                 Path::new(&a[1]),

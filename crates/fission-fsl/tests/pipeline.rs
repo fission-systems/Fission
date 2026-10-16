@@ -1,5 +1,5 @@
 #![cfg(feature = "x86")]
-use fission_fsl::pipeline::{owned_x86_package, project_x86_binary};
+use fission_fsl::pipeline::{owned_x86_package, project_x86_binary, project_x86_entry};
 use std::{
     fs,
     path::PathBuf,
@@ -72,4 +72,41 @@ fn unsupported_selection_and_bytes_refuse_before_output_creation() {
     fs::write(&path, b).unwrap();
     assert!(project_x86_binary(&path, 0x400100, 4, "c").is_err());
     assert_eq!(fs::read_dir(&input.0).unwrap().count(), 1);
+}
+#[test]
+fn entry_selection_stops_at_ret_and_preserves_span_semantics() {
+    let input = Fixture::new();
+    let path = input.0.join("input.elf");
+    let mut b = fs::read(&path).unwrap();
+    b[260] = 0xcc; // Unsupported padding after RET must not become part of FIR.
+    fs::write(&path, b).unwrap();
+    for lang in ["c", "rust", "go"] {
+        let entry = project_x86_entry(&path, 0x400100, lang).unwrap();
+        let span = project_x86_binary(&path, 0x400100, 4, lang).unwrap();
+        assert_eq!(entry.fir, span.fir);
+        assert_eq!(entry.projection.sources, span.projection.sources);
+        assert!(entry.pipeline_report.contains("size=4 bound=65536"));
+        assert!(entry
+            .pipeline_report
+            .contains("source-function-boundary=unproven"));
+    }
+}
+#[test]
+fn entry_selection_refuses_branch_unsupported_and_unterminated_input() {
+    let input = Fixture::new();
+    let path = input.0.join("input.elf");
+    let original = fs::read(&path).unwrap();
+    for (bytes, reason) in [
+        (vec![0x74, 0x00, 0xc3], "branch refused"),
+        (vec![0xcc, 0xc3], "entry decode"),
+        (vec![0x90; 256], "found no near RET"),
+    ] {
+        let mut b = original.clone();
+        b[256..256 + bytes.len()].copy_from_slice(&bytes);
+        fs::write(&path, b).unwrap();
+        let err = project_x86_entry(&path, 0x400100, "c").unwrap_err();
+        assert!(err.to_string().contains(reason), "{err}");
+    }
+    assert!(project_x86_entry(&path, 0x400300, "c").is_err());
+    assert!(project_x86_entry(&path, 0x400100, "python").is_err());
 }
