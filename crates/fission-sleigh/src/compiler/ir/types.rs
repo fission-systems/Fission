@@ -12,7 +12,8 @@ pub struct CompiledSubtableDefinition {
     pub sla_subtable_id: u32,
     #[serde(default)]
     pub constructors_by_sla_id: BTreeMap<u32, usize>,
-    pub constructors: Vec<CompiledExecutableConstructor>,
+    /// Immutable executable metadata shared by selected runtime states.
+    pub constructors: Vec<std::sync::Arc<CompiledExecutableConstructor>>,
     pub decision_tree: CompiledDecisionTree,
 }
 
@@ -1444,5 +1445,76 @@ impl ControlFlowClass {
             Self::Return => "return",
             Self::Mixed => "mixed",
         }
+    }
+}
+
+#[cfg(test)]
+mod constructor_ownership_tests {
+    use super::*;
+
+    // Pre-sharing cache representation: serde encodes values, not Arc identity.
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    struct LegacySubtable {
+        name: String,
+        sla_subtable_id: u32,
+        constructors_by_sla_id: BTreeMap<u32, usize>,
+        constructors: Vec<CompiledExecutableConstructor>,
+        decision_tree: CompiledDecisionTree,
+    }
+
+    #[test]
+    fn constructor_ownership_preserves_legacy_json_and_bincode_both_directions() {
+        let compiled = crate::compiler::compile_x86_64_frontend().unwrap();
+        for table in compiled.subtables.values() {
+            let legacy = LegacySubtable {
+                name: table.name.clone(),
+                sla_subtable_id: table.sla_subtable_id,
+                constructors_by_sla_id: table.constructors_by_sla_id.clone(),
+                constructors: table
+                    .constructors
+                    .iter()
+                    .map(|value| (**value).clone())
+                    .collect(),
+                decision_tree: table.decision_tree.clone(),
+            };
+            let old_json = serde_json::to_vec(&legacy).unwrap();
+            let new_json = serde_json::to_vec(table).unwrap();
+            assert_eq!(old_json, new_json);
+            assert_eq!(
+                serde_json::from_slice::<CompiledSubtableDefinition>(&old_json).unwrap(),
+                *table
+            );
+            assert_eq!(
+                serde_json::from_slice::<LegacySubtable>(&new_json).unwrap(),
+                legacy
+            );
+            let old_binary = bincode::serialize(&legacy).unwrap();
+            let new_binary = bincode::serialize(table).unwrap();
+            assert_eq!(old_binary, new_binary);
+            assert_eq!(
+                bincode::deserialize::<CompiledSubtableDefinition>(&old_binary).unwrap(),
+                *table
+            );
+            assert_eq!(
+                bincode::deserialize::<LegacySubtable>(&new_binary).unwrap(),
+                legacy
+            );
+        }
+    }
+
+    #[test]
+    fn constructor_ownership_current_rkyv_roundtrip_preserves_metadata_and_sharing() {
+        let compiled = crate::compiler::compile_x86_64_frontend().unwrap();
+        let mut table = compiled.subtables["instruction"].clone();
+        // Shared references may occur naturally after cloning a compiled table.
+        table.constructors.push(table.constructors[0].clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&table).unwrap();
+        let decoded =
+            rkyv::from_bytes::<CompiledSubtableDefinition, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, table);
+        assert!(std::sync::Arc::ptr_eq(
+            &decoded.constructors[0],
+            decoded.constructors.last().unwrap()
+        ));
     }
 }

@@ -267,7 +267,10 @@ pub fn build_frontend_from_sla_native_model(
                 name: name.clone(),
                 sla_subtable_id: sla_subtable.id,
                 constructors_by_sla_id: constructors_by_sla_id(&executable_constructors),
-                constructors: executable_constructors,
+                constructors: executable_constructors
+                    .into_iter()
+                    .map(std::sync::Arc::new)
+                    .collect(),
                 decision_tree,
             },
         );
