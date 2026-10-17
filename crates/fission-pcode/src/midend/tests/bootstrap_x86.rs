@@ -3373,7 +3373,7 @@ fn preview_recovers_test_reg_reg_jg_as_gt_zero() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_prehir_expr(&cond), "0 < ecx");
+    assert_eq!(print_prehir_expr(&cond), "0 < (int)ecx");
 }
 
 #[test]
@@ -3550,7 +3550,7 @@ fn preview_recovers_cmp_jl_as_signed_lt() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_prehir_expr(&cond), "eax < ecx");
+    assert_eq!(print_prehir_expr(&cond), "(int)eax < (int)ecx");
 }
 
 #[test]

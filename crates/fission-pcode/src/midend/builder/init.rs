@@ -18,7 +18,7 @@ use fission_loader::loader::LoadedBinary;
 /// claim the result register and shadow the value the function actually
 /// returns -- `arm32_bx_lr_returns_primary_r0_not_link_target` and its two
 /// siblings caught exactly that.
-fn op_is_lifted_return(block: &crate::PcodeBasicBlock, op_idx: usize) -> bool {
+pub(super) fn op_is_lifted_return(block: &crate::PcodeBasicBlock, op_idx: usize) -> bool {
     block
         .ops
         .get(op_idx + 1)
@@ -254,6 +254,7 @@ impl<'a> PreviewBuilder<'a> {
             heritage_successors,
             heritage_predecessors,
             scalar_ssa,
+            ssa_emission: super::ssa_emission::SsaEmissionPlan::default(),
             successors,
             predecessors,
             reachability_cache: std::cell::RefCell::new(BuilderCacheMap::default()),

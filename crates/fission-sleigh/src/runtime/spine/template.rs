@@ -43,21 +43,25 @@ mod tests {
     #[test]
     fn spec_derived_empty_template_is_zero_op_success() {
         let state = RuntimeConstructState {
+            constructor: crate::runtime::spine::construct::test_constructor_metadata(
+                "nop".to_string(),
+                CompiledConstructTplKind::Generic,
+                std::sync::Arc::new(CompiledConstructorTemplate {
+                    handles: Vec::new(),
+                    decode_steps: Vec::new(),
+                    num_labels: 0,
+                    result: None,
+                    ops: Vec::new(),
+                    template_source: CompiledTemplateSource::SpecDerived,
+                }),
+                Vec::new(),
+                Vec::new(),
+                CompiledDisplayTemplate::empty().into(),
+                Vec::new().into(),
+            ),
             subtable_id: 0,
             constructor_id: 0,
             constructor_slot: 0,
-            mnemonic: "nop".to_string(),
-            construct_tpl_kind: CompiledConstructTplKind::Generic,
-            constructor_template: std::sync::Arc::new(CompiledConstructorTemplate {
-                handles: Vec::new(),
-                decode_steps: Vec::new(),
-                num_labels: 0,
-                result: None,
-                ops: Vec::new(),
-                template_source: CompiledTemplateSource::SpecDerived,
-            }),
-            display_template: CompiledDisplayTemplate::empty().into(),
-            display_operands: Vec::new().into(),
             construct_nodes: Vec::new(),
             handles: Vec::new(),
             exported_handle: None,
@@ -68,8 +72,6 @@ mod tests {
             relative_length: 1,
             length: 1,
             match_trace: empty_trace(),
-            named_templates: Vec::new(),
-            context_commits: Vec::new(),
             replaced_wrapper_patterns: Vec::new(),
         };
 

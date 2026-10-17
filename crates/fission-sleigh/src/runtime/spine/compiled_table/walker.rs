@@ -28,6 +28,9 @@ struct InstNextShared {
     unbound_min: Cell<usize>,
     /// Growing floor from root `minimum_length` (updated as root learns size).
     root_min_length: Cell<usize>,
+    /// A second walk is necessary only if binding observed this estimate.
+    /// Descendants share the flag with the root; emission is outside binding.
+    observed: Cell<bool>,
 }
 
 impl InstNextShared {
@@ -39,6 +42,8 @@ impl InstNextShared {
     }
 
     fn inst_next_addr(&self, cursor: usize, local_construct_end: usize) -> u64 {
+        super::binding_address_use::read_pc();
+        self.observed.set(true);
         self.inst_address
             .saturating_add(self.estimated_rel_len(cursor, local_construct_end) as u64)
     }
@@ -53,10 +58,7 @@ impl InstNextShared {
 /// formatting is deferred to `Display`, which only ever runs once a decode
 /// has already failed.
 enum WalkFrame {
-    Constructor {
-        source: Box<str>,
-        mnemonic: Box<str>,
-    },
+    Constructor(std::sync::Arc<CompiledExecutableConstructor>),
     Operand(usize),
     Subtable(Box<str>),
 }
@@ -64,8 +66,12 @@ enum WalkFrame {
 impl std::fmt::Display for WalkFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WalkFrame::Constructor { source, mnemonic } => {
-                write!(f, "constructor({source}::{mnemonic})")
+            WalkFrame::Constructor(constructor) => {
+                write!(
+                    f,
+                    "constructor({}::{})",
+                    constructor.source, constructor.mnemonic
+                )
             }
             WalkFrame::Operand(index) => write!(f, "operand({index})"),
             WalkFrame::Subtable(name) => write!(f, "subtable({name})"),
@@ -119,9 +125,17 @@ fn bind_instruction_with_inst_next<'a>(
         // resolveHandles-after-resolve). Nested walkers inherit the parent's shared
         // fallthrough from the second pass.
         if parent_inst_next.is_none() && selection.trace.root_bucket.as_ref() == "instruction" {
-            let probe =
-                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None)?
-                    .walk()?;
+            let probe_walker =
+                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None)?;
+            let estimate = Rc::clone(&probe_walker.inst_next_shared);
+            let probe = probe_walker.walk()?;
+            // Only the estimate differs between the two walks. If no binding
+            // read it, the complete first state is already independent of the
+            // final fallthrough. Keep the full second walk otherwise: early
+            // nested exports can observe inst_next before trailing immediates.
+            if !estimate.observed.get() {
+                return Ok(probe);
+            }
             // Prefer absolute end-relative-to-start: length may be absolute buffer end.
             let full_len = probe
                 .relative_length
@@ -132,6 +146,7 @@ fn bind_instruction_with_inst_next<'a>(
                 bound_end: Cell::new(ctx.cursor),
                 unbound_min: Cell::new(0),
                 root_min_length: Cell::new(full_len),
+                observed: Cell::new(false),
             });
             // owns=false: root_min_length already set to full probe length.
             return CompiledParserWalker::new(compiled, strategy, ctx, selection, Some(shared))?
@@ -566,6 +581,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     bound_end: Cell::new(ctx.cursor),
                     unbound_min: Cell::new(unbound_min),
                     root_min_length: Cell::new(minimum_length),
+                    observed: Cell::new(false),
                 }),
                 true,
             )
@@ -606,10 +622,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     }
 
     fn walk(mut self) -> Result<RuntimeConstructState> {
-        let _guard = WalkStackGuard::new(WalkFrame::Constructor {
-            source: self.selection.constructor.source.as_str().into(),
-            mnemonic: self.selection.constructor.mnemonic.as_str().into(),
-        });
+        let _guard = WalkStackGuard::new(WalkFrame::Constructor(std::sync::Arc::clone(
+            self.selection.constructor,
+        )));
 
         // `constructor` copies out the `&'a CompiledExecutableConstructor`
         // reference itself (a `Copy` type, independent of `self`'s borrow),
@@ -711,13 +726,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             subtable_id: self.selection.subtable_id,
             constructor_id: self.selection.constructor_id,
             constructor_slot: self.selection.constructor_slot,
-            mnemonic: self.selection.constructor.mnemonic.clone(),
-            construct_tpl_kind: self.selection.constructor.construct_tpl_kind,
-            constructor_template: self.selection.constructor.constructor_template.clone(),
-            named_templates: self.selection.constructor.named_templates.clone(),
-            context_commits: self.selection.constructor.context_commits.clone(),
-            display_template: self.selection.constructor.display_template.clone(),
-            display_operands: self.selection.constructor.display_operands.clone(),
+            constructor: std::sync::Arc::clone(self.selection.constructor),
             construct_nodes: self.walker.into_nodes(),
             handles,
             exported_handle,
@@ -959,7 +968,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reject_non_offset_handle_plus(*plus, "export")?;
                 Ok(value)
             }
-            CompiledConstTpl::InstStart => Ok(self.ctx.address),
+            CompiledConstTpl::InstStart => {
+                super::binding_address_use::read_pc();
+                Ok(self.ctx.address)
+            }
             CompiledConstTpl::InstNext => self.resolve_inst_next_addr(),
             other => bail!("export ConstTpl {:?} is unsupported", other),
         }
@@ -1572,7 +1584,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {
         match expr {
             CompiledPatternExpression::Constant(value) => Ok(*value),
-            CompiledPatternExpression::InstStart => Ok(u64_to_i64_bits(self.ctx.address)),
+            CompiledPatternExpression::InstStart => {
+                super::binding_address_use::read_pc();
+                Ok(u64_to_i64_bits(self.ctx.address))
+            }
             CompiledPatternExpression::InstNext => {
                 // Prefer shared root fallthrough so trailing immediates are included.
                 Ok(u64_to_i64_bits(self.resolve_inst_next_addr()?))
@@ -1855,6 +1870,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
 fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> {
     let cursor = checked_usize_to_u64(ctx.cursor, "subtable cursor")?;
+    super::binding_address_use::checked_offset(cursor);
     ctx.address
         .checked_add(cursor)
         .ok_or_else(|| anyhow!("subtable decode address overflowed"))
@@ -2022,6 +2038,129 @@ mod sleigh_parity_gaps_tests {
     use crate::compiler::{compile_x86_64_frontend, discovery};
 
     #[test]
+    fn instruction_probe_observation_is_shared_only_with_its_descendants() {
+        let make_estimate = || {
+            Rc::new(InstNextShared {
+                inst_address: 0x1000,
+                inst_buf_start: 0,
+                bound_end: Cell::new(2),
+                unbound_min: Cell::new(1),
+                root_min_length: Cell::new(4),
+                observed: Cell::new(false),
+            })
+        };
+        let root = make_estimate();
+        let descendant = Rc::clone(&root);
+        let other_instruction = make_estimate();
+        assert_eq!(root.estimated_rel_len(2, 2), 4);
+        assert!(!root.observed.get());
+        assert_eq!(descendant.inst_next_addr(2, 2), 0x1004);
+        assert!(root.observed.get());
+        assert!(!other_instruction.observed.get());
+    }
+
+    /// Independent execution of the original unconditional two-walk algorithm.
+    /// Compare Debug recursively because the parser state has no PartialEq;
+    /// this includes handles, context, exports, templates, offsets and traces.
+    fn assert_probe_reuse_matches_two_walks(
+        compiled: &CompiledFrontend,
+        bytes: &[u8],
+        context_override: Option<crate::runtime::PackedContextOverride>,
+    ) -> bool {
+        let mut ctx = CompiledInstructionContext::parse(bytes, 0x1000).unwrap();
+        ctx.context_register = compiled.default_context;
+        ctx.context_known_mask = compiled.default_context_known_mask;
+        if let Some(bits) = context_override {
+            bits.apply_to_wide(&mut ctx.context_register, &mut ctx.context_known_mask);
+        }
+        let selection = select_constructor(compiled, "instruction", &ctx)
+            .unwrap()
+            .expect("selected instruction");
+        let strategy = RuntimeDecodeStrategy::for_table();
+        let probe_walker =
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), None).unwrap();
+        let estimate = Rc::clone(&probe_walker.inst_next_shared);
+        let probe = probe_walker.walk().expect("original probe");
+        let observed = estimate.observed.get();
+        let full_len = probe
+            .relative_length
+            .max(probe.length.saturating_sub(ctx.cursor));
+        let shared = Rc::new(InstNextShared {
+            inst_address: ctx.address,
+            inst_buf_start: ctx.cursor,
+            bound_end: Cell::new(ctx.cursor),
+            unbound_min: Cell::new(0),
+            root_min_length: Cell::new(full_len),
+            observed: Cell::new(false),
+        });
+        let expected =
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), Some(shared))
+                .unwrap()
+                .walk()
+                .expect("original second walk");
+        let actual = bind_instruction(compiled, strategy, &ctx, selection).expect("optimized bind");
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+        if !observed {
+            assert_eq!(format!("{probe:?}"), format!("{expected:?}"));
+        }
+        observed
+    }
+
+    #[test]
+    fn instruction_probe_reuse_preserves_x86_states_and_relative_fallback() {
+        let compiled = compile_x86_64_frontend().unwrap();
+        for bytes in [
+            &[0x57][..],                                     // register operand
+            &[0x48, 0x89, 0x5c, 0x24, 0x08][..],             // prefix + SIB memory
+            &[0x48, 0xb8, 0x34, 0x12, 0, 0, 0, 0, 0, 0][..], // wide immediate
+        ] {
+            assert!(!assert_probe_reuse_matches_two_walks(
+                &compiled, bytes, None
+            ));
+        }
+        for bytes in [
+            &[0xe8, 0x10, 0, 0, 0][..],
+            &[0x48, 0x8b, 0x05, 0x10, 0, 0, 0][..],
+            &[0xc7, 0x05, 0x10, 0, 0, 0, 0x34, 0x12, 0, 0][..],
+            &[0x83, 0x3d, 0x10, 0, 0, 0, 1][..],
+        ] {
+            assert!(assert_probe_reuse_matches_two_walks(&compiled, bytes, None));
+        }
+    }
+
+    #[test]
+    fn instruction_probe_reuse_preserves_aarch64_and_thumb_states() {
+        let aarch64 = crate::compiler::compile_frontend_for_entry_spec(
+            &crate::compiler::spec_root_for_arch("AARCH64").join("AARCH64.slaspec"),
+        )
+        .unwrap();
+        for bytes in [
+            &[0xc0, 0x03, 0x5f, 0xd6][..], // ret
+            &[0x00, 0x04, 0x00, 0x91][..], // add x0,x0,#1
+            &[0xfd, 0x7b, 0xbf, 0xa9][..], // stp pre-index
+            &[0x04, 0, 0, 0x94][..],       // bl
+        ] {
+            assert_probe_reuse_matches_two_walks(&aarch64, bytes, None);
+        }
+        let thumb = crate::compiler::compile_frontend_for_entry_spec(
+            &crate::compiler::spec_root_for_arch("ARM").join("ARM8m_le.slaspec"),
+        )
+        .unwrap();
+        for bytes in [&[0xff, 0xf7, 0xf4, 0xfe][..], &[0x70, 0x47][..]] {
+            assert_probe_reuse_matches_two_walks(&thumb, bytes, None);
+        }
+        // The bind state contains deferred context commits as well as handles.
+        assert_probe_reuse_matches_two_walks(
+            &thumb,
+            &[0x88, 0xbf],
+            Some(crate::runtime::PackedContextOverride::new_wide(
+                thumb.default_context,
+                thumb.default_context_known_mask,
+            )),
+        );
+    }
+
+    #[test]
     fn test_decode_pool_reuses_allocations() {
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
 
@@ -2061,5 +2200,51 @@ mod sleigh_parity_gaps_tests {
                 "Error should contain sleigh parser path backtrace: {err_str}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod binding_address_witness_tests {
+    use super::*;
+    #[test]
+    fn fid_binding_discarded_checked_overflow_prevents_retention() {
+        let compiled = crate::compiler::compile_x86_64_frontend().unwrap();
+        let mut discarded = CompiledInstructionContext::parse(&[0x57], u64::MAX).unwrap();
+        discarded.cursor = 1;
+        let (winner, witness) = super::super::binding_address_use::capture(|| {
+            assert!(subtable_decode_address(&discarded).is_err());
+            super::super::decode_instruction_raw_state(&compiled, &[0x57], u64::MAX)
+        });
+        assert!(winner.is_ok());
+        assert!(!witness.pc_value_read);
+        assert_eq!(witness.max_checked_offset, 1);
+        assert!(!witness.allows_reuse_at(u64::MAX));
+        assert!(witness.allows_reuse_at(0x1000));
+    }
+    #[test]
+    fn fid_binding_inst_start_export_and_expression_are_observed() {
+        let compiled = crate::compiler::compile_x86_64_frontend().unwrap();
+        let ctx = CompiledInstructionContext::parse(&[0x57], 0x1000).unwrap();
+        let selection = candidate_selections(&compiled, &ctx, ctx.address)
+            .unwrap()
+            .remove(0);
+        let mut walker = CompiledParserWalker::new(
+            &compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection,
+            None,
+        )
+        .unwrap();
+        let (value, witness) = super::super::binding_address_use::capture(|| {
+            walker.eval_pattern_expression(&CompiledPatternExpression::InstStart)
+        });
+        assert_eq!(value.unwrap(), 0x1000);
+        assert!(witness.pc_value_read);
+        let (value, witness) = super::super::binding_address_use::capture(|| {
+            walker.resolve_export_const_tpl(&CompiledConstTpl::InstStart, &[])
+        });
+        assert_eq!(value.unwrap(), 0x1000);
+        assert!(witness.pc_value_read);
     }
 }

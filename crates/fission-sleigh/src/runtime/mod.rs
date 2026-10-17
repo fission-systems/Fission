@@ -5,7 +5,11 @@ mod engine;
 mod frontend;
 mod function;
 mod lift;
+mod packed_decode;
+mod raw_decode_seed;
 pub use lift::{attach_inferred_indirect_edges, resolve_indirect_branch_targets};
+pub use packed_decode::PackedDecodedPcodeFunction;
+pub use raw_decode_seed::RawDecodeSeed;
 mod registry;
 mod spine;
 
@@ -179,14 +183,14 @@ pub struct RuntimeSleighFrontend {
     compiled: Option<std::sync::Arc<CompiledFrontend>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecodeStopReason {
     TerminalControlFlow,
     InputExhausted,
     InstructionLimit,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecodedPcodeFunction {
     pub function: PcodeFunction,
     /// Decoded instructions that contributed to the reachable function graph.

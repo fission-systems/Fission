@@ -172,6 +172,7 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         body.extend(lowered);
+        self.append_ssa_edge_copies(block_idx, &mut body)?;
         if let Some(started) = stage_started {
             eprintln!(
                 "[DIAG] lower_block_stmts ops: block={} ops={} elapsed_ms={:.3}",
@@ -720,6 +721,35 @@ impl<'a> PreviewBuilder<'a> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
+        if let Some(name) = self.ssa_emitted_definition(self.lowering_block_index(block), op_idx) {
+            let Some(rhs) = self.try_lower_materialized_output_rhs(block_addr, op)? else {
+                return Err(MlilPreviewError::UnsupportedPattern(
+                    "planned SSA definition has no RHS",
+                ));
+            };
+            self.materialized_output_names.insert(
+                (
+                    self.lowering_block_index(block),
+                    op_idx,
+                    VarnodeKey::from(output),
+                ),
+                name.clone(),
+            );
+            self.materialized_vns
+                .insert(MaterializedVarnodeKey::new(output, op), name.clone());
+            let assignment = PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name.clone()),
+                rhs,
+            };
+            let mut pieces =
+                self.ssa_definition_piece_stmts(self.lowering_block_index(block), op_idx, &name);
+            return Ok(Some(if pieces.is_empty() {
+                assignment
+            } else {
+                pieces.insert(0, assignment);
+                PreHirStmt::Block(pieces.into())
+            }));
+        }
         // A write to memory is observable whether or not this function reads
         // it back, so it is decided before every suppression rule below --
         // all of which reason about a value's consumers.

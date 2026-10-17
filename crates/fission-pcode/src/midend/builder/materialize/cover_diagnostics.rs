@@ -1,15 +1,17 @@
-//! Diagnostic-only cross-check between the current name-merge decisions
+//! Read-only cross-check and instruction provenance for name-merge decisions
 //! (`materialized_vns` / `explicit_merge_bindings`) and the already-computed
 //! SSA `HighVariable` cover data (`crate::midend::ir::ssa`).
 //!
 //! This module changes no materialize output. It exists to measure, on real
 //! corpus functions, how often the existing reachability-proof-based name
 //! merge system (`materialize/mod.rs`, `cross_block.rs`) assigns the same
-//! rendered name to two SSA values that the (separately built, unconsumed)
+//! rendered name to two SSA values that the separately built
 //! Cover analysis proves have interfering live ranges -- Ghidra's
 //! `HighIntersectTest` failure mode. See
 //! `docs/proposals/2026-07-26-heritage-memory-promotion-and-cover-coalescing.md`
 //! for the Cover data's own provenance.
+//! The same binding-to-high-variable lookup also projects definition/use
+//! instruction addresses into recovered-variable metadata without changing IR.
 use super::*;
 use fission_midend_core::ir::{SsaHighVariableId, SsaOpSite, SsaStorageKey};
 
@@ -109,6 +111,20 @@ fn high_variables_interfere(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    /// Exact instruction addresses where a uniquely named, register-rooted
+    /// scalar high variable is defined or used. Address evidence is attached
+    /// only when every materialized definition under a rendered name resolves
+    /// to the same SSA high variable; physical register reuse alone is not
+    /// enough to join two source variables.
+    pub(crate) fn recovered_variable_instruction_addresses(&self) -> HashMap<String, Vec<u64>> {
+        instruction_addresses_by_materialized_name(
+            self.pcode,
+            &self.scalar_ssa,
+            &self.materialized_vns,
+            &self.explicit_merge_bindings,
+        )
+    }
+
     /// Diagnostic-only: see module docs. Pure/read-only, `FISSION_PREVIEW_DIAG`-gated caller.
     pub(crate) fn scan_cover_violations(&self) -> Vec<CoverViolation> {
         scan_cover_violations(
@@ -251,6 +267,125 @@ impl<'a> PreviewBuilder<'a> {
     }
 }
 
+fn high_variable_has_register_storage(scalar_ssa: &NirScalarSsa, high: SsaHighVariableId) -> bool {
+    scalar_ssa
+        .high_variables
+        .get(high.0 as usize)
+        .is_some_and(|high| {
+            high.storage_family
+                .iter()
+                .any(|storage| is_register_space_id(storage.space_id))
+        })
+}
+
+fn pcode_instruction_address(pcode: &PcodeFunction, block: u32, op: u32) -> Option<u64> {
+    pcode
+        .blocks
+        .get(block as usize)?
+        .ops
+        .get(op as usize)
+        .map(|operation| operation.address)
+}
+
+fn instruction_addresses_by_materialized_name(
+    pcode: &PcodeFunction,
+    scalar_ssa: &NirScalarSsa,
+    materialized_vns: &HashMap<MaterializedVarnodeKey, String>,
+    explicit_merge_bindings: &HashMap<(usize, VarnodeKey), String>,
+) -> HashMap<String, Vec<u64>> {
+    let addr_seq_index = build_addr_seq_index(pcode);
+    let mut high_variables_by_name = HashMap::<String, std::collections::BTreeSet<_>>::default();
+
+    for (key, name) in materialized_vns {
+        let Some(&site) = addr_seq_index.get(&(key.def_addr, key.def_seq)) else {
+            continue;
+        };
+        let Some(high) = high_variable_at_output(scalar_ssa, site, &key.varnode) else {
+            continue;
+        };
+        high_variables_by_name
+            .entry(name.clone())
+            .or_default()
+            .insert(high);
+    }
+
+    for ((block_idx, key), name) in explicit_merge_bindings {
+        let Ok(block_idx) = u32::try_from(*block_idx) else {
+            continue;
+        };
+        let Some(high) = high_variable_at_block_entry(scalar_ssa, block_idx, key) else {
+            continue;
+        };
+        high_variables_by_name
+            .entry(name.clone())
+            .or_default()
+            .insert(high);
+    }
+
+    let candidate_high_variables = high_variables_by_name
+        .values()
+        .filter(|high_variables| high_variables.len() == 1)
+        .filter_map(|high_variables| high_variables.iter().next().copied())
+        .filter(|high| high_variable_has_register_storage(scalar_ssa, *high))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut addresses_by_high_variable =
+        HashMap::<SsaHighVariableId, std::collections::BTreeSet<u64>>::default();
+
+    for (site, pieces) in &scalar_ssa.operation_outputs {
+        let Some(address) = pcode_instruction_address(pcode, site.block, site.op) else {
+            continue;
+        };
+        for piece in pieces {
+            let Some(high) = scalar_ssa
+                .value_high_variables
+                .get(piece.value.0 as usize)
+                .copied()
+            else {
+                continue;
+            };
+            if candidate_high_variables.contains(&high) {
+                addresses_by_high_variable
+                    .entry(high)
+                    .or_default()
+                    .insert(address);
+            }
+        }
+    }
+
+    for (site, pieces) in &scalar_ssa.operation_inputs {
+        let Some(address) = pcode_instruction_address(pcode, site.block, site.op) else {
+            continue;
+        };
+        for piece in pieces {
+            let Some(high) = scalar_ssa
+                .value_high_variables
+                .get(piece.value.0 as usize)
+                .copied()
+            else {
+                continue;
+            };
+            if candidate_high_variables.contains(&high) {
+                addresses_by_high_variable
+                    .entry(high)
+                    .or_default()
+                    .insert(address);
+            }
+        }
+    }
+
+    high_variables_by_name
+        .into_iter()
+        .filter_map(|(name, high_variables)| {
+            if high_variables.len() != 1 {
+                return None;
+            }
+            let high = *high_variables.iter().next()?;
+            let addresses = addresses_by_high_variable.get(&high)?;
+            (!addresses.is_empty()).then(|| (name, addresses.iter().copied().collect()))
+        })
+        .collect()
+}
+
 /// Scan every rendered binding name for cases where it was assigned to more
 /// than one interfering `SsaHighVariable`. Pure/read-only: does not touch
 /// `materialized_vns`/`explicit_merge_bindings`/output.
@@ -322,7 +457,8 @@ mod tests {
     use super::*;
     use crate::pcode::PcodeBasicBlock;
     use fission_midend_core::ir::{
-        SsaCoverBlock, SsaHighVariable, SsaHighVariableId, SsaValue, SsaValueDefinition, SsaValueId,
+        SsaAccessPiece, SsaCoverBlock, SsaHighVariable, SsaHighVariableId, SsaStorageKey,
+        SsaUseSite, SsaValue, SsaValueDefinition, SsaValueId,
     };
 
     fn sample_value(id: u32, space_id: u64, offset: u64, size: u32) -> SsaValue {
@@ -349,7 +485,11 @@ mod tests {
             SsaHighVariable {
                 id: SsaHighVariableId(0),
                 members: vec![SsaValueId(0)],
-                storage_family: vec![],
+                storage_family: vec![SsaStorageKey {
+                    space_id: 4,
+                    offset: 0x10,
+                    size: 4,
+                }],
                 crossing_guards: vec![],
                 cover: vec![SsaCoverBlock {
                     block: 0,
@@ -360,7 +500,11 @@ mod tests {
             SsaHighVariable {
                 id: SsaHighVariableId(1),
                 members: vec![SsaValueId(1)],
-                storage_family: vec![],
+                storage_family: vec![SsaStorageKey {
+                    space_id: 4,
+                    offset: 0x10,
+                    size: 4,
+                }],
                 crossing_guards: vec![],
                 cover: vec![SsaCoverBlock {
                     block: 0,
@@ -381,6 +525,17 @@ mod tests {
             vec![fission_midend_core::ir::SsaAccessPiece {
                 byte_offset: 0,
                 value: SsaValueId(1),
+            }],
+        );
+        ssa.operation_inputs.insert(
+            SsaUseSite {
+                block: 0,
+                op: 1,
+                input: 0,
+            },
+            vec![SsaAccessPiece {
+                byte_offset: 0,
+                value: SsaValueId(0),
             }],
         );
         ssa
@@ -469,6 +624,133 @@ mod tests {
         let materialized = materialized_vns_sharing_one_name(4, 0x10, 4);
         let violations = scan_cover_violations(&ssa, &pcode, &materialized, &HashMap::default());
         assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn instruction_provenance_collects_exact_definition_and_use_addresses() {
+        let ssa = sample_ssa_with_two_high_variables(false);
+        let pcode = sample_pcode_two_defs(4, 0x10, 4);
+        let key = MaterializedVarnodeKey {
+            varnode: VarnodeKey {
+                space_id: 4,
+                offset: 0x10,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+            def_addr: 0x1000,
+            def_seq: 0,
+        };
+        let mut materialized = HashMap::default();
+        materialized.insert(key, "source_local".to_string());
+
+        let addresses = instruction_addresses_by_materialized_name(
+            &pcode,
+            &ssa,
+            &materialized,
+            &HashMap::default(),
+        );
+
+        assert_eq!(addresses.get("source_local"), Some(&vec![0x1000, 0x1004]));
+    }
+
+    #[test]
+    fn instruction_provenance_drops_a_name_reused_for_distinct_values() {
+        let ssa = sample_ssa_with_two_high_variables(false);
+        let pcode = sample_pcode_two_defs(4, 0x10, 4);
+        let materialized = materialized_vns_sharing_one_name(4, 0x10, 4);
+
+        let addresses = instruction_addresses_by_materialized_name(
+            &pcode,
+            &ssa,
+            &materialized,
+            &HashMap::default(),
+        );
+
+        assert!(addresses.is_empty());
+    }
+
+    #[test]
+    fn instruction_provenance_drops_a_name_shared_with_non_register_storage() {
+        let mut ssa = sample_ssa_with_two_high_variables(false);
+        ssa.values[1].storage.space_id = 6;
+        ssa.high_variables[1].storage_family[0].space_id = 6;
+
+        let mut pcode = sample_pcode_two_defs(4, 0x10, 4);
+        pcode.blocks[0].ops[1].output.as_mut().unwrap().space_id = 6;
+
+        let mut materialized = HashMap::default();
+        materialized.insert(
+            MaterializedVarnodeKey {
+                varnode: VarnodeKey {
+                    space_id: 4,
+                    offset: 0x10,
+                    size: 4,
+                    is_constant: false,
+                    constant_val: 0,
+                },
+                def_addr: 0x1000,
+                def_seq: 0,
+            },
+            "source_local".to_string(),
+        );
+        materialized.insert(
+            MaterializedVarnodeKey {
+                varnode: VarnodeKey {
+                    space_id: 6,
+                    offset: 0x10,
+                    size: 4,
+                    is_constant: false,
+                    constant_val: 0,
+                },
+                def_addr: 0x1004,
+                def_seq: 0,
+            },
+            "source_local".to_string(),
+        );
+
+        let addresses = instruction_addresses_by_materialized_name(
+            &pcode,
+            &ssa,
+            &materialized,
+            &HashMap::default(),
+        );
+
+        assert!(addresses.is_empty());
+    }
+
+    #[test]
+    fn instruction_provenance_preserves_aliases_of_one_high_variable() {
+        let mut ssa = sample_ssa_with_two_high_variables(false);
+        ssa.value_high_variables[1] = SsaHighVariableId(0);
+        let pcode = sample_pcode_two_defs(4, 0x10, 4);
+        let mut materialized = HashMap::default();
+        for (def_addr, name) in [(0x1000, "source_local"), (0x1004, "source_alias")] {
+            materialized.insert(
+                MaterializedVarnodeKey {
+                    varnode: VarnodeKey {
+                        space_id: 4,
+                        offset: 0x10,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                    def_addr,
+                    def_seq: 0,
+                },
+                name.to_string(),
+            );
+        }
+
+        let addresses = instruction_addresses_by_materialized_name(
+            &pcode,
+            &ssa,
+            &materialized,
+            &HashMap::default(),
+        );
+
+        assert_eq!(addresses.get("source_local"), Some(&vec![0x1000, 0x1004]));
+        assert_eq!(addresses.get("source_alias"), Some(&vec![0x1000, 0x1004]));
     }
 
     #[test]

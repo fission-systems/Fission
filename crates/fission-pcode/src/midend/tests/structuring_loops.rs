@@ -2031,7 +2031,8 @@ fn for_loop_non_last_update_failure() {
     assert!(code.contains("for ("), "expected for loop: {code}");
     assert!(
         code.contains("for (rbx = 0; rbx < param_1; )")
-            || code.contains("for (rbx = 0; rbx < param_1;)"),
+            || code.contains("for (rbx = 0; rbx < param_1;)")
+            || code.contains("for (rbx = 0; (uint)rbx < param_1; )"),
         "expected empty update in header: {code}"
     );
     // Verify that the update statement is still in the loop body!

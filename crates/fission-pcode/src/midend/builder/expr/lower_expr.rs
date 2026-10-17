@@ -301,6 +301,14 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<(LoweringSite, &'a PcodeOp)> {
         let key = VarnodeKey::from(vn);
         let cache_key = (scope, key.clone());
+        if let Some(scope) = scope
+            && let Some(value) = self.scalar_ssa_value_at_use(vn, scope)
+            && self.ssa_emission.bindings.contains_key(&value)
+            && let Some(site) = self.scalar_ssa_definition_at_use(vn, scope)
+        {
+            let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+            return Some((site, op));
+        }
         if let Some(cached_site) = self.lookup_site_cache.borrow().get(&cache_key).copied() {
             return cached_site.map(|site| {
                 let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
@@ -544,6 +552,9 @@ impl<'a> PreviewBuilder<'a> {
         // the later materializer will reuse; otherwise lowering the Copy RHS
         // reuses the source register's ABI name even after that source has been
         // overwritten on the path to this use.
+        if let Some(expr) = self.ssa_emitted_read(vn) {
+            return Ok(expr);
+        }
         if let Some(use_site) = self.current_lowering_site
             && let Some((def_site, def_op)) = self.lookup_def_site(vn)
             && def_site.block_idx != use_site.block_idx

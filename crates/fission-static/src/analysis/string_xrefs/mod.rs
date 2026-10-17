@@ -2,6 +2,9 @@
 //!
 //! Combines string extraction with xref analysis to find which functions reference specific strings.
 
+mod context;
+pub use context::{FunctionReferenceContext, StringReferenceContext, string_reference_context};
+
 use super::strings::{ExtractedString, StringType};
 use super::xrefs::{Xref, XrefDatabase};
 use fission_loader::loader::LoadedBinary;

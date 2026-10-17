@@ -35,6 +35,8 @@ struct FoundString {
 pub(super) struct StringsView {
     /// Report the functions that read each string (runs disassembly).
     pub with_xrefs: bool,
+    pub context: bool,
+    pub contains: Option<String>,
     /// Keep only strings in these sections, when non-empty.
     pub sections: Vec<String>,
 }
@@ -57,6 +59,12 @@ pub(super) fn print_strings(
                 .as_deref()
                 .is_some_and(|name| view.sections.iter().any(|wanted| wanted == name))
         });
+    }
+    if let Some(contains) = &view.contains {
+        strings.retain(|found| found.text.contains(contains));
+    }
+    if view.context {
+        return print_context(&mut stdout, binary, data, &strings, json);
     }
     if with_xrefs {
         attach_referrers(binary, &mut strings);
@@ -195,6 +203,168 @@ fn referrer_label(binary: &LoadedBinary, address: u64) -> String {
         Some(function) if !function.name.is_empty() => function.name.clone(),
         _ => format!("0x{address:x}"),
     }
+}
+
+/// A context is an explicit new envelope; legacy string arrays stay intact.
+fn print_context(
+    out: &mut impl Write,
+    binary: &LoadedBinary,
+    data: &[u8],
+    strings: &[FoundString],
+    json_out: bool,
+) -> io::Result<()> {
+    use fission_static::analysis::string_xrefs::string_reference_context;
+    use fission_static::analysis::{CallGraph, build_xref_index};
+    let index = build_xref_index(binary, true);
+    let graph = CallGraph::build_from_xref_index(&binary.functions, &index, 0x40);
+    let mut contexts: Vec<_> = strings
+        .iter()
+        .map(|found| {
+            let context = found.address.filter(|_| !found.executable).map(|address| {
+                let terminated = found
+                    .file_offset
+                    .checked_add(found.text.len())
+                    .and_then(|offset| data.get(offset))
+                    .is_some_and(|byte| *byte == 0);
+                string_reference_context(
+                    binary,
+                    &index,
+                    &graph,
+                    address,
+                    found.text.len() as u64 + u64::from(terminated),
+                )
+            });
+            (found, context)
+        })
+        .collect();
+    contexts.sort_by_key(|(found, context)| {
+        (
+            context
+                .as_ref()
+                .is_none_or(|context| context.references.is_empty()),
+            found.address,
+            found.file_offset,
+        )
+    });
+    let note = |found: &FoundString| {
+        if found.executable {
+            "printable bytes in executable storage are not treated as a string lead"
+        } else {
+            "file bytes have no mapped address"
+        }
+    };
+    if json_out {
+        let rows: Vec<_> =
+            contexts
+                .iter()
+                .map(|(found, context)| {
+                    let context_json = context.as_ref().map(|context| {
+                let functions: Vec<_> = context.functions.iter().map(|function| serde_json::json!({
+                    "address": format!("0x{:x}", function.function.address),
+                    "name": function.function.name,
+                    "reference_ids": function.reference_ids,
+                    "callers": relation_rows(binary, function.callers),
+                    "callees": relation_rows(binary, function.callees),
+                })).collect();
+                serde_json::json!({"references": context.references, "functions": functions})
+            });
+                    let mut row = serde_json::json!({
+                        "file_offset": format!("0x{:x}", found.file_offset),
+                        "string": found.text,
+                        "address": found.address.map(|address| format!("0x{address:x}")),
+                        "section": found.section,
+                        "context": context_json,
+                    });
+                    if context.is_none() {
+                        row["context_note"] = serde_json::json!(note(found));
+                    }
+                    row
+                })
+                .collect();
+        return writeln!(
+            out,
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "analysis": index.analysis, "strings": rows,
+            }))?
+        );
+    }
+    writeln!(
+        out,
+        "string_context: {} string(s); callers/callees are one-hop indexed relationships",
+        contexts.len()
+    )?;
+    writeln!(
+        out,
+        "xref_analysis: {}",
+        serde_json::to_string(&index.analysis)?
+    )?;
+    for (found, context) in contexts {
+        let address = found
+            .address
+            .map(|address| format!("0x{address:x}"))
+            .unwrap_or_else(|| "unmapped".into());
+        writeln!(out, "{address}  {:?}", found.text)?;
+        let Some(context) = context else {
+            writeln!(out, "  {}", note(found))?;
+            continue;
+        };
+        writeln!(out, "  {} indexed reference(s)", context.references.len())?;
+        for reference in context.references {
+            writeln!(
+                out,
+                "    ref #{}: 0x{:x} -> {}  {:?}  {:?}",
+                reference.id,
+                reference.source.address,
+                reference
+                    .target
+                    .address
+                    .map(|address| format!("0x{address:x}"))
+                    .unwrap_or_else(|| "?".into()),
+                reference.kind,
+                reference.evidence.layer
+            )?;
+        }
+        for function in context.functions {
+            writeln!(
+                out,
+                "  function 0x{:x}  {}",
+                function.function.address, function.function.name
+            )?;
+            for (relation, edges) in [("callers", function.callers), ("callees", function.callees)]
+            {
+                writeln!(
+                    out,
+                    "    {relation}: {} indexed relationship(s)",
+                    edges.len()
+                )?;
+                for edge in edges {
+                    let name = binary
+                        .function_at_exact(edge.addr)
+                        .map(|function| function.name.as_str())
+                        .unwrap_or("-");
+                    writeln!(out, "      0x{:x}  {name}  x{}", edge.addr, edge.count)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn relation_rows(
+    binary: &LoadedBinary,
+    edges: &[fission_static::analysis::CallEdge],
+) -> Vec<serde_json::Value> {
+    edges
+        .iter()
+        .map(|edge| {
+            serde_json::json!({
+                "address": format!("0x{:x}", edge.addr),
+                "name": binary.function_at_exact(edge.addr).map(|function| function.name.as_str()),
+                "count": edge.count,
+            })
+        })
+        .collect()
 }
 
 /// Printable ASCII runs of at least `min_len` bytes.

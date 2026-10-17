@@ -329,3 +329,172 @@ fn a_chosen_signature_reaches_the_callers() {
             .join("\n")
     );
 }
+
+fn db_json(binary: &Path, args: &[&str]) -> serde_json::Value {
+    let output = cli()
+        .arg("db")
+        .arg(binary)
+        .args(args)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("stdout is one JSON document")
+}
+
+#[test]
+fn history_undo_redo_and_diff_work_across_processes() {
+    let (dir, binary) = sample("history.exe");
+    let bytes = std::fs::read(&binary).unwrap();
+    assert_eq!(db_json(&binary, &["name", ENTRY, "chosen"])["revision"], 1);
+    let snapshot = dir.path().join("snapshot.json");
+    std::fs::copy(db_path(&binary), &snapshot).unwrap();
+    assert_eq!(
+        db_json(&binary, &["sig", ENTRY, "int (char *buf)"])["revision"],
+        2
+    );
+    assert_eq!(
+        db_json(&binary, &["note", ENTRY, "inspect caller"])["revision"],
+        3
+    );
+    assert_eq!(db_json(&binary, &["bp", ENTRY])["revision"], 4);
+    let history = db_json(&binary, &["history"]);
+    assert_eq!(history["cursor"], 4);
+    assert_eq!(history["revisions"].as_array().unwrap().len(), 4);
+    assert_eq!(history["revisions"][0]["changes"][0]["address"], ENTRY);
+    let diff = db_json(&binary, &["diff", snapshot.to_str().unwrap()]);
+    assert_eq!(diff["changes"].as_array().unwrap().len(), 3);
+    assert_eq!(diff["changes"][0]["kind"], "comment");
+    assert_eq!(diff["changes"][0]["after"], serde_json::Value::Null);
+    for revision in (1..=4).rev() {
+        assert_eq!(db_json(&binary, &["undo"])["revision"], revision);
+    }
+    let listing = run(&["list", binary.to_str().unwrap()]);
+    assert!(listing.0 && listing.1.contains("pe_entry"), "{}", listing.1);
+    let undone = db_json(&binary, &["show"]);
+    assert!(undone["names"].as_object().unwrap().is_empty());
+    for revision in 1..=4 {
+        assert_eq!(db_json(&binary, &["redo"])["revision"], revision);
+    }
+    let listing = run(&["list", binary.to_str().unwrap()]);
+    assert!(listing.0 && listing.1.contains("chosen"), "{}", listing.1);
+    assert_eq!(db_json(&binary, &["history"]), history);
+    assert_eq!(
+        std::fs::read(&binary).unwrap(),
+        bytes,
+        "analysis never rewrites the binary"
+    );
+}
+
+#[test]
+fn legacy_project_migrates_on_edit_and_no_op_keeps_redo() {
+    let (_dir, binary) = sample("legacy.exe");
+    db_json(&binary, &["name", ENTRY, "legacy"]);
+    let path = db_path(&binary);
+    let mut legacy = db_json(&binary, &["show"]);
+    legacy["schema_version"] = serde_json::json!(1);
+    legacy.as_object_mut().unwrap().remove("history");
+    std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert_eq!(db_json(&binary, &["show"])["schema_version"], 1);
+    assert_eq!(db_json(&binary, &["name", ENTRY, "next"])["revision"], 1);
+    assert_eq!(db_json(&binary, &["show"])["schema_version"], 2);
+    db_json(&binary, &["undo"]);
+    assert_eq!(db_json(&binary, &["show"])["names"][ENTRY], "legacy");
+    assert_eq!(
+        db_json(&binary, &["name", ENTRY, "legacy"])["revision"],
+        serde_json::Value::Null
+    );
+    assert_eq!(db_json(&binary, &["redo"])["revision"], 1);
+    db_json(&binary, &["undo"]);
+    assert_eq!(
+        db_json(&binary, &["note", ENTRY, "new branch"])["revision"],
+        2
+    );
+    let output = cli()
+        .arg("db")
+        .arg(&binary)
+        .arg("redo")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn read_only_commands_create_no_files_and_invalid_history_is_not_rewritten() {
+    let (dir, binary) = sample("readonly.exe");
+    assert_eq!(db_json(&binary, &["history"])["cursor"], 0);
+    db_json(&binary, &["show"]);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    db_json(&binary, &["name", ENTRY, "chosen"]);
+    let path = db_path(&binary);
+    let mut invalid = db_json(&binary, &["show"]);
+    invalid["history"]["cursor"] = serde_json::json!(999);
+    let bytes = serde_json::to_vec(&invalid).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    let output = cli()
+        .arg("db")
+        .arg(&binary)
+        .args(["undo", "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn a_busy_writer_emits_no_success_and_leaves_committed_bytes_unchanged() {
+    let (_dir, binary) = sample("busy.exe");
+    db_json(&binary, &["name", ENTRY, "original"]);
+    let path = db_path(&binary);
+    let original = std::fs::read(&path).unwrap();
+    let guard = fission_project::ProjectLock::acquire(&path).unwrap();
+    let output = cli()
+        .arg("db")
+        .arg(&binary)
+        .args(["name", ENTRY, "pending", "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("project is being edited"));
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    // A reader still sees the last committed file while a writer is active.
+    assert_eq!(db_json(&binary, &["show"])["names"][ENTRY], "original");
+    drop(guard);
+    assert_eq!(
+        db_json(&binary, &["name", ENTRY, "committed"])["revision"],
+        2
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn failed_save_has_no_success_payload_and_preserves_the_target() {
+    use std::os::unix::fs::symlink;
+    let (dir, binary) = sample("failed-save.exe");
+    db_json(&binary, &["name", ENTRY, "original"]);
+    let path = db_path(&binary);
+    let target = dir.path().join("target.json");
+    std::fs::rename(&path, &target).unwrap();
+    let bytes = std::fs::read(&target).unwrap();
+    symlink(&target, &path).unwrap();
+    let output = cli()
+        .arg("db")
+        .arg(&binary)
+        .args(["name", ENTRY, "pending", "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("symbolic link"));
+    assert_eq!(std::fs::read(&target).unwrap(), bytes);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
+}

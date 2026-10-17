@@ -50,3 +50,27 @@ impl TargetStat {
         buf
     }
 }
+
+/// Bounded libc HLE thread-header contract. This describes ABI storage, not a
+/// complete TLS implementation: no DTV or PT_TLS modules are synthesized.
+pub(super) struct RuntimeGuardLayout {
+    pub thread_pointer_register: &'static str,
+    pub header_size: u64,
+    pub self_offsets: &'static [u64],
+    pub stack_guard_offset: u64,
+    pub pointer_guard_offset: u64,
+}
+
+impl RuntimeGuardLayout {
+    pub fn for_arch(arch: &crate::arch::ArchInfo) -> Option<Self> {
+        // Linux x86-64 LP64 libc thread-header ABI. Other ABIs must supply
+        // their own layout; a register named FS alone is not enough evidence.
+        (arch.name == "x86:LE:64:default" && arch.pointer_size == 8).then_some(Self {
+            thread_pointer_register: "FS_OFFSET",
+            header_size: 0x38,
+            self_offsets: &[0, 0x10],
+            stack_guard_offset: 0x28,
+            pointer_guard_offset: 0x30,
+        })
+    }
+}

@@ -6,6 +6,82 @@ enum LowLaneUse<'a> {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    /// Resolve an actual whole-storage operand, rather than a hypothetical
+    /// read of every value that has occupied the same register. Synthetic
+    /// alias reads and byte partitions remain with their existing owners.
+    pub(in crate::midend::builder) fn scalar_ssa_value_at_use(
+        &self,
+        vn: &Varnode,
+        site: LoweringSite,
+    ) -> Option<SsaValueId> {
+        let block_idx = self.pcode_block_idx(site.block_idx);
+        let op = self.pcode.blocks.get(block_idx)?.ops.get(site.op_idx)?;
+        let key = VarnodeKey::from(vn);
+        let input_idx = op
+            .inputs
+            .iter()
+            .position(|input| VarnodeKey::from(input) == key)?;
+        let pieces = self.scalar_ssa.operation_inputs.get(&SsaUseSite {
+            block: u32::try_from(block_idx).ok()?,
+            op: u32::try_from(site.op_idx).ok()?,
+            input: u32::try_from(input_idx).ok()?,
+        })?;
+        let [piece] = pieces.as_slice() else {
+            return None;
+        };
+        let value = self.scalar_ssa.value(piece.value)?;
+        (piece.byte_offset == 0
+            && value.storage.space_id == vn.space_id
+            && value.storage.offset == vn.offset
+            && value.storage.size == vn.size)
+            .then_some(value.id)
+    }
+
+    /// SSA operation identity is stronger than "the nearest dominating
+    /// storage write". Instruction-local conditional writes are not scalar
+    /// CFG nodes, so they deliberately keep the guarded lowering path.
+    pub(super) fn scalar_ssa_definition_at_use(
+        &self,
+        vn: &Varnode,
+        site: LoweringSite,
+    ) -> Option<LoweringSite> {
+        let value = self
+            .scalar_ssa
+            .value(self.scalar_ssa_value_at_use(vn, site)?)?;
+        let SsaValueDefinition::Operation(definition) = value.definition else {
+            return None;
+        };
+        let definition = LoweringSite {
+            block_idx: definition.block as usize,
+            op_idx: definition.op as usize,
+        };
+        let block = self.pcode.blocks.get(definition.block_idx)?;
+        let op = block.ops.get(definition.op_idx)?;
+        if self.op_is_inside_same_block_forward_cmov_body(block, definition.op_idx)
+            || self.op_is_inside_same_block_forward_cmov_body(
+                self.pcode
+                    .blocks
+                    .get(self.pcode_block_idx(site.block_idx))?,
+                site.op_idx,
+            )
+            || (op.opcode == PcodeOpcode::Copy
+                && op
+                    .inputs
+                    .first()
+                    .zip(op.output.as_ref())
+                    .is_some_and(|(input, output)| {
+                        VarnodeKey::from(input) == VarnodeKey::from(output)
+                    }))
+            || !op
+                .output
+                .as_ref()
+                .is_some_and(|output| VarnodeKey::from(output) == VarnodeKey::from(vn))
+        {
+            return None;
+        }
+        Some(definition)
+    }
+
     pub(super) fn try_lower_scalar_ssa_piece_reassembly(
         &mut self,
         vn: &Varnode,

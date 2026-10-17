@@ -541,6 +541,9 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         )
         .with_stdin_mock(args.stdin_mock)
         .with_ttd(args.ttd_record.unwrap_or(0));
+    // Protocol stdout is one JSON document. The guest bytes remain in VFS
+    // and are attached to the typed report; text mode keeps console echo.
+    emu.set_host_stdout_echo(!args.json);
 
     if let Some(info) = linux_image {
         emu.apply_linux_image(info)?;
@@ -663,7 +666,9 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     if let Some(code) = emu.exit_code {
         tracing::info!("Guest exited with code {code}");
     }
-    let report = report.with_exit_code(emu.exit_code);
+    let report = report
+        .with_exit_code(emu.exit_code)
+        .with_guest_output(&emu.vfs);
 
     if let Some(path) = args.metrics_out {
         let json = report
@@ -884,6 +889,8 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             min_len.max(4),
             &strings::StringsView {
                 with_xrefs: cli.strings_xrefs,
+                context: cli.strings_context,
+                contains: cli.strings_contains.clone(),
                 sections: cli.strings_sections.clone(),
             },
             cli.json,

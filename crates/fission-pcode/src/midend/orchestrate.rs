@@ -583,7 +583,11 @@ fn render_mlil_preview_with_binary_and_context_output(
     // above: this is after the DWARF/signature overlay has put real names and
     // real type names on the bindings, which is what the printed declarations
     // will carry and what a consumer comparing against debug info needs.
-    let recovered_variables = crate::render::recovered_variables(&hir);
+    let variable_instruction_addresses = builder.recovered_variable_instruction_addresses();
+    let recovered_variables = crate::render::recovered_variables_with_instruction_addresses(
+        &hir,
+        &variable_instruction_addresses,
+    );
     if debug.preview_debug {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }

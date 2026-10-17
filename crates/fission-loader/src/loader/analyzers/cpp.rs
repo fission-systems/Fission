@@ -532,6 +532,46 @@ impl<'a> CppAnalyzer<'a> {
             .collect()
     }
 
+    /// Index only the selected COLs, retaining section/slot order for each.
+    /// This lookup is local to one discovery operation, not a program fact.
+    fn msvc_vtable_starts(&self, classes: &[CppClassInfo]) -> HashMap<u64, Vec<u64>> {
+        let mut starts_by_col: HashMap<u64, Vec<u64>> = classes
+            .iter()
+            .map(|class| (class.type_info_address, Vec::new()))
+            .collect();
+        if starts_by_col.is_empty() {
+            return starts_by_col;
+        }
+
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+        for section in &self.binary.sections {
+            if section.name != ".rdata" && section.name != ".data" {
+                continue;
+            }
+            let Some(data) = self
+                .binary
+                .view_bytes(section.virtual_address, section.virtual_size as usize)
+            else {
+                continue;
+            };
+            let step = ptr_size as usize;
+            if data.len() < step {
+                continue;
+            }
+            for i in (0..=data.len() - step).step_by(step) {
+                let value = if ptr_size == 8 {
+                    u64::from_le_bytes(data[i..i + 8].try_into().unwrap())
+                } else {
+                    u32::from_le_bytes(data[i..i + 4].try_into().unwrap()) as u64
+                };
+                if let Some(starts) = starts_by_col.get_mut(&value) {
+                    starts.push(section.virtual_address + i as u64 + ptr_size);
+                }
+            }
+        }
+        starts_by_col
+    }
+
     /// Discovers functions by sweeping VTable payloads.
     pub fn discover_vtable_functions(&self) -> Vec<crate::loader::types::FunctionInfo> {
         let mut functions = Vec::new();
@@ -607,36 +647,11 @@ impl<'a> CppAnalyzer<'a> {
         // In MSVC, the COL (??_R4) is pointed to by the entry immediately preceding the VTable.
         if self.binary.format.starts_with("PE") {
             let msvc_classes = self.analyze_msvc_classes();
+            let starts_by_col = self.msvc_vtable_starts(&msvc_classes);
             for class in msvc_classes {
-                let col_addr = class.type_info_address;
-
-                // Scan .rdata for pointers to this COL
-                for section in &self.binary.sections {
-                    if section.name == ".rdata" || section.name == ".data" {
-                        let Some(data) = self
-                            .binary
-                            .view_bytes(section.virtual_address, section.virtual_size as usize)
-                        else {
-                            continue;
-                        };
-
-                        let step = ptr_size as usize;
-                        if data.len() < step {
-                            continue;
-                        }
-                        for i in (0..=data.len() - step).step_by(step) {
-                            let val = if ptr_size == 8 {
-                                u64::from_le_bytes(data[i..i + 8].try_into().unwrap())
-                            } else {
-                                u32::from_le_bytes(data[i..i + 4].try_into().unwrap()) as u64
-                            };
-
-                            if val == col_addr {
-                                // Found a pointer to COL. The VTable starts immediately after this pointer.
-                                let vtable_start = section.virtual_address + (i as u64) + ptr_size;
-                                sweep_vtable(vtable_start);
-                            }
-                        }
+                if let Some(starts) = starts_by_col.get(&class.type_info_address) {
+                    for &start in starts {
+                        sweep_vtable(start);
                     }
                 }
             }
@@ -662,6 +677,192 @@ struct MsvcColInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+    fn section(name: &str, va: u64, offset: u64, file_size: u64, size: u64) -> SectionInfo {
+        SectionInfo {
+            name: name.into(),
+            virtual_address: va,
+            virtual_size: size,
+            file_offset: offset,
+            file_size,
+            is_executable: name == ".text",
+            is_readable: true,
+            is_writable: name == ".data",
+        }
+    }
+
+    fn class(col: u64) -> CppClassInfo {
+        CppClassInfo {
+            name: "fixture".into(),
+            mangled_name: "fixture".into(),
+            vtable_address: None,
+            base_classes: Vec::new(),
+            type_info_address: col,
+        }
+    }
+
+    fn put_ptr(data: &mut [u8], offset: usize, value: u64, width: usize) {
+        data[offset..offset + width].copy_from_slice(&value.to_le_bytes()[..width]);
+    }
+
+    // The old per-class traversal, kept only as a mechanical equivalence oracle.
+    fn legacy_msvc_starts(binary: &LoadedBinary, classes: &[CppClassInfo]) -> Vec<Vec<u64>> {
+        let width = if binary.is_64bit { 8 } else { 4 };
+        classes
+            .iter()
+            .map(|class| {
+                let mut starts = Vec::new();
+                for section in &binary.sections {
+                    if section.name != ".rdata" && section.name != ".data" {
+                        continue;
+                    }
+                    let Some(data) =
+                        binary.view_bytes(section.virtual_address, section.virtual_size as usize)
+                    else {
+                        continue;
+                    };
+                    if data.len() < width {
+                        continue;
+                    }
+                    for i in (0..=data.len() - width).step_by(width) {
+                        let value = if width == 8 {
+                            u64::from_le_bytes(data[i..i + 8].try_into().unwrap())
+                        } else {
+                            u32::from_le_bytes(data[i..i + 4].try_into().unwrap()) as u64
+                        };
+                        if value == class.type_info_address {
+                            starts.push(section.virtual_address + i as u64 + width as u64);
+                        }
+                    }
+                }
+                starts
+            })
+            .collect()
+    }
+
+    #[test]
+    fn msvc_vtable_index_preserves_class_section_slot_and_duplicate_order() {
+        for width in [4, 8] {
+            let col_a = if width == 8 {
+                0x1234_5678_abcd_0101
+            } else {
+                0xabcd_0101
+            };
+            let col_b = col_a + 0x100;
+            let mut data = vec![0xcc; 512];
+            for (offset, value) in [
+                (0, col_a),
+                (width * 2, col_b),
+                (width * 4, col_a),
+                (width * 6 + 1, col_b), // unaligned decoy
+                (128, col_b),
+                (128 + 64 - width, col_a),
+                (320, col_a), // ignored section
+            ] {
+                put_ptr(&mut data, offset, value, width);
+            }
+            let binary = LoadedBinaryBuilder::new("slots.bin".into(), DataBuffer::Heap(data))
+                .is_64bit(width == 8)
+                .add_sections([
+                    section(".rdata", 0x1000, 0, (8 * width - 1) as u64, 128),
+                    section(".data", 0x2000, 128, 64, 64),
+                    section(".text", 0x3000, 256, 64, 64),
+                    section("ignored", 0x4000, 320, 64, 64),
+                    section(".rdata", 0x5000, 900, 64, 64), // outside file
+                    section(".data", 0x6000, 400, width as u64 - 1, 64),
+                ])
+                .build()
+                .unwrap();
+            let classes = [class(col_b), class(col_a), class(col_a), class(0xfeed)];
+            let expected = legacy_msvc_starts(&binary, &classes);
+            let index = CppAnalyzer::new(&binary).msvc_vtable_starts(&classes);
+            let actual: Vec<_> = classes
+                .iter()
+                .map(|c| index[&c.type_info_address].clone())
+                .collect();
+            assert_eq!(actual, expected);
+            assert_eq!(index.len(), 3);
+            assert_eq!(
+                actual[0],
+                [0x1000 + 3 * width as u64, 0x2000 + width as u64]
+            );
+            assert_eq!(actual[1], actual[2]);
+            assert_eq!(actual[1].len(), 3);
+            assert!(actual[3].is_empty());
+            assert!(CppAnalyzer::new(&binary).msvc_vtable_starts(&[]).is_empty());
+        }
+    }
+
+    #[test]
+    fn msvc_vtable_index_reaches_the_unchanged_payload_sweep() {
+        for width in [4, 8] {
+            let base = if width == 8 { 0x1_4000_0000 } else { 0x40_0000 };
+            let rdata = base + 0x1000;
+            let code = base + 0x3000;
+            let col_a = rdata + 0x100;
+            let col_b = rdata + 0x120;
+            let mut data = vec![0; 0x700];
+            for (offset, value) in [
+                (0, col_a),
+                (width, code),
+                (2 * width, code + 0x10),
+                (0x40, col_b),
+                (0x40 + width, code + 0x20),
+                (0x40 + 2 * width, base + 0x2000), // non-executable stop
+                (0x80, col_a),
+                (0x80 + width, code + 0x10), // duplicate
+                (0x500, col_b),
+                (0x500 + width, code + 0x30),
+                (0x500 + 2 * width, u64::MAX), // unmapped stop
+                (0x540, col_a),
+                (0x540 + width, code + 0xf8),
+                (0x540 + 2 * width, code + 0x100), // section end
+                (0x500 - width, col_a),            // no mapped payload after this slot
+            ] {
+                put_ptr(&mut data, offset, value, width);
+            }
+            for (col, td, chd, name) in [
+                (0x100, 0x200, 0x300, b".?AVFirst@@\0".as_slice()),
+                (0x120, 0x240, 0x320, b".?AVSecond@@\0".as_slice()),
+            ] {
+                data[col..col + 4].copy_from_slice(&u32::from(width == 8).to_le_bytes());
+                let relative_base = if width == 8 { 0 } else { base };
+                put_ptr(&mut data, col + 12, relative_base + 0x1000 + td as u64, 4);
+                put_ptr(&mut data, col + 16, relative_base + 0x1000 + chd as u64, 4);
+                let start = td + 2 * width;
+                data[start..start + name.len()].copy_from_slice(name);
+            }
+            let mut binary = LoadedBinaryBuilder::new("rtti.bin".into(), DataBuffer::Heap(data))
+                .image_base(base)
+                .format("PE")
+                .is_64bit(width == 8)
+                .add_sections([
+                    section(".rdata", rdata, 0, 0x500, 0x500),
+                    section(".data", base + 0x2000, 0x500, 0x100, 0x100),
+                    section(".text", code, 0x600, 0x100, 0x100),
+                ])
+                .build()
+                .unwrap();
+            binary.global_symbols.insert(col_a, "??_R4First".into());
+            binary.global_symbols.insert(col_b, "??_R4Second".into());
+            let analyzer = CppAnalyzer::new(&binary);
+            assert_eq!(analyzer.analyze_msvc_classes().len(), 2);
+            let found = analyzer.discover_vtable_functions();
+            assert_eq!(
+                found.iter().map(|f| f.address).collect::<Vec<_>>(),
+                [code, code + 0x10, code + 0x20, code + 0x30, code + 0xf8]
+            );
+            for function in found {
+                assert_eq!(function.name, format!("vfunc_{:x}", function.address));
+                assert_eq!(function.origin.as_deref(), Some("cpp_rtti"));
+                assert_eq!(function.kind.as_deref(), Some("vtable"));
+                assert_eq!(function.size, 0);
+                assert!(!function.is_import && !function.is_export && !function.is_thunk_like);
+                assert!(function.source_section.is_none() && function.thunk_target.is_none());
+            }
+        }
+    }
 
     /// Real `x86_64-linux-musl-g++`-compiled (`-fPIE`) fixture:
     /// `struct D : public B, public C` (two-base, non-virtual multiple

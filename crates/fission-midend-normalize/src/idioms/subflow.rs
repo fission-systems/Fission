@@ -287,6 +287,15 @@ fn optimize_expr(
     type_map: &HashMap<String, NirType>,
     nz_masks: &HashMap<String, u64>,
 ) -> bool {
+    optimize_expr_with_context(expr, type_map, nz_masks, false)
+}
+
+fn optimize_expr_with_context(
+    expr: &mut PreHirExpr,
+    type_map: &HashMap<String, NirType>,
+    nz_masks: &HashMap<String, u64>,
+    preserve_integer_view: bool,
+) -> bool {
     let mut changed = false;
 
     // 1. Optimize children first (bottom-up)
@@ -299,9 +308,16 @@ fn optimize_expr(
         | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= optimize_expr(inner, type_map, nz_masks);
         }
-        PreHirExpr::Binary { lhs, rhs, .. } => {
-            changed |= optimize_expr(lhs, type_map, nz_masks);
-            changed |= optimize_expr(rhs, type_map, nz_masks);
+        PreHirExpr::Binary { op, lhs, rhs, .. } => {
+            let operand_view = matches!(
+                op,
+                PreHirBinaryOp::Div
+                    | PreHirBinaryOp::Mod
+                    | PreHirBinaryOp::Shr
+                    | PreHirBinaryOp::Sar
+            );
+            changed |= optimize_expr_with_context(lhs, type_map, nz_masks, operand_view);
+            changed |= optimize_expr_with_context(rhs, type_map, nz_masks, operand_view);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
@@ -379,10 +395,12 @@ fn optimize_expr(
         }
     }
 
-    // (C) Redundant Cast to same/wider type: (T)val -> val
+    // (C) A same-type cast is only redundant outside an integer operation
+    // boundary. Later carrier/alias refinement can change a variable's type;
+    // retain the explicit view that determines division/remainder/shift semantics.
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         let inner_ty = get_expr_type(inner, type_map);
-        if *ty == inner_ty {
+        if *ty == inner_ty && !(preserve_integer_view && matches!(ty, NirType::Int { .. })) {
             *expr = (**inner).clone();
             return true;
         }
@@ -522,5 +540,55 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn test_integer_operation_retains_explicit_view_across_carrier_refinement() {
+        for signed in [false, true] {
+            let view = NirType::Int { bits: 64, signed };
+            for op in [
+                PreHirBinaryOp::Div,
+                PreHirBinaryOp::Mod,
+                PreHirBinaryOp::Shr,
+                PreHirBinaryOp::Sar,
+            ] {
+                let mut type_map = HashMap::default();
+                type_map.insert("carrier".to_string(), view.clone());
+                let mut expr = PreHirExpr::Binary {
+                    op,
+                    lhs: Box::new(PreHirExpr::Cast {
+                        ty: view.clone(),
+                        expr: Box::new(PreHirExpr::Var("carrier".to_string())),
+                    }),
+                    rhs: Box::new(PreHirExpr::Const(8, u32_ty())),
+                    ty: view.clone(),
+                };
+                let original = expr.clone();
+                let nz_masks = HashMap::default();
+                assert!(!optimize_expr(&mut expr, &type_map, &nz_masks));
+                assert_eq!(expr, original);
+                type_map.insert(
+                    "carrier".to_string(),
+                    NirType::Int {
+                        bits: 32,
+                        signed: !signed,
+                    },
+                );
+                assert!(!optimize_expr(&mut expr, &type_map, &nz_masks));
+                assert_eq!(expr, original);
+            }
+        }
+    }
+
+    #[test]
+    fn test_standalone_identity_cast_is_still_removed() {
+        let mut type_map = HashMap::default();
+        type_map.insert("carrier".to_string(), u64_ty());
+        let mut expr = PreHirExpr::Cast {
+            ty: u64_ty(),
+            expr: Box::new(PreHirExpr::Var("carrier".to_string())),
+        };
+        assert!(optimize_expr(&mut expr, &type_map, &HashMap::default()));
+        assert_eq!(expr, PreHirExpr::Var("carrier".to_string()));
     }
 }

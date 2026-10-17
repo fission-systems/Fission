@@ -1,0 +1,743 @@
+{
+  "source": {
+    "fid_hash_matrix": {
+      "inputs": 512,
+      "eight_instruction_extents": 383,
+      "successful_hashes": 473,
+      "hashes_and_resolver_order_equal": true,
+      "sha256": "a771dbb8a6b4ef303ab310b1e62ca5f5a7d8a596cf45ef7fe53a51ed618bc6fe"
+    },
+    "base": "6d6d8872a67a3beae2b1eb811d6240a5b6ac80be",
+    "source_only_tree": "ac6f23df4faa49259756ed45a5bc09533ba7d020",
+    "source_files_sha256": {
+      "crates/fission-signatures/src/fpk.rs": "134e5a8ddf64ef012c1f001314eb5ffe11804d2684e580ecd63f4f4a5ee47697"
+    },
+    "source_patch_sha256": "85b946bebc54cfa7dd5bebd514347090b3815413b73c8be056af5ec1b6a06c0e",
+    "candidate_sha256": "9b1abc435f8a4c2240750edad696bc5cf96375e10ba8da2ee1f0bbeb8b460b96",
+    "baseline_sha256": "cad83688200d2aeca0f5b5b559d4df5ebf0b1c2a3cf218e7c83aa14b3fce20a4",
+    "decode_matrix": {
+      "records": 1024,
+      "successes": 746,
+      "errors": 278,
+      "traced_errors": 27,
+      "complete_baseline_candidate_equal": true,
+      "sha256": "5721b8f3f02547208b90aec3889566b5bfb33dab046fcc95a0509c0890bba9b7",
+      "full_raw_states_included": true
+    },
+    "proposal_sha256": "463f04fbb7c19c6ce0b9f9d020c2ba0b6094a3fa74650e7afb2a96527d1f4c50"
+  },
+  "large_medians": {
+    "baseline": {
+      "seconds": 11.680212667,
+      "cpu_seconds": 100.895432,
+      "max_rss_bytes": 2429091840
+    },
+    "candidate": {
+      "seconds": 10.335352499999999,
+      "cpu_seconds": 81.62652799999998,
+      "max_rss_bytes": 2432925696
+    }
+  },
+  "large_ranges": {
+    "baseline": {
+      "seconds": [
+        11.637750417,
+        12.253077458
+      ],
+      "cpu_seconds": [
+        100.68758099999997,
+        101.09107
+      ],
+      "max_rss_bytes": [
+        2385494016,
+        2434695168
+      ]
+    },
+    "candidate": {
+      "seconds": [
+        10.229955500000003,
+        10.746335249999998
+      ],
+      "cpu_seconds": [
+        81.04954699999999,
+        81.77311999999993
+      ],
+      "max_rss_bytes": [
+        2398863360,
+        2453913600
+      ]
+    }
+  },
+  "large_change_percent": {
+    "seconds": -11.514004113980059,
+    "cpu_seconds": -19.097895333854186,
+    "max_rss_bytes": 0.15783083771752082
+  },
+  "small_pairs": [
+    {
+      "cell": "03",
+      "baseline": 1.8491589159239084,
+      "baseline_deterministic": true,
+      "candidate": 1.8429744578897953,
+      "candidate_deterministic": true,
+      "speedup": 1.0033556938391834
+    },
+    {
+      "cell": "27",
+      "baseline": 0.8186147089581937,
+      "baseline_deterministic": true,
+      "candidate": 0.8128449160140008,
+      "candidate_deterministic": true,
+      "speedup": 1.0070982703225686
+    },
+    {
+      "cell": "40",
+      "baseline": 0.9248346250969917,
+      "baseline_deterministic": true,
+      "candidate": 0.9321994578931481,
+      "candidate_deterministic": true,
+      "speedup": 0.9920995096770368
+    }
+  ],
+  "fresh_replay": {
+    "returned": 250,
+    "changed_functions": 0,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "kuna_comparison": [
+    {
+      "cell": "03",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 1.839171834057197,
+        "render_jobs_14_seconds": 1.257896542083472,
+        "faster_observed_seconds": 1.257896542083472
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.18339145905338228,
+        "render_jobs_14_seconds": 0.3237181669101119,
+        "faster_observed_seconds": 0.18339145905338228
+      },
+      "faster_observed_ratio": 6.859079199088104
+    },
+    {
+      "cell": "22",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 11.433334792032838,
+        "render_jobs_14_seconds": 10.291038875002414,
+        "faster_observed_seconds": 10.291038875002414
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 2.6818089578300714,
+        "render_jobs_14_seconds": 5.3986131669953465,
+        "faster_observed_seconds": 2.6818089578300714
+      },
+      "faster_observed_ratio": 3.8373497280466946
+    },
+    {
+      "cell": "27",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 0.8124444580171257,
+        "render_jobs_14_seconds": 0.6400678749196231,
+        "faster_observed_seconds": 0.6400678749196231
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.10578587488271296,
+        "render_jobs_14_seconds": 0.2370288330130279,
+        "faster_observed_seconds": 0.10578587488271296
+      },
+      "faster_observed_ratio": 6.050598679920925
+    },
+    {
+      "cell": "40",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 0.9299321249127388,
+        "render_jobs_14_seconds": 0.8802962501067668,
+        "faster_observed_seconds": 0.8802962501067668
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.3195368340238929,
+        "render_jobs_14_seconds": 0.6731093749403954,
+        "faster_observed_seconds": 0.3195368340238929
+      },
+      "faster_observed_ratio": 2.7549132255624214
+    }
+  ],
+  "repeated_full_record_parity": [
+    {
+      "path": "rows-vs-kuna/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    }
+  ],
+  "related_nextest": {
+    "passed": 2211,
+    "skipped": 9
+  },
+  "targeted_nextest": 17,
+  "bounds": [
+    "Mechanical performance only; no quality, recompilation, execution or ranking claim.",
+    "Fresh 250-function replay generated once; focused address sets repeat.",
+    "No own builds/tests/profilers overlap timing; OS caches/scheduling uncontrolled.",
+    "Both tools choose their own faster median among the two measured settings.",
+    "Fission render=1 does not serialize native preparation/FID."
+  ],
+  "confirmation": {
+    "medians": {
+      "baseline": {
+        "seconds": 11.73247537505813,
+        "cpu_seconds": 101.15533900000003,
+        "max_rss_bytes": 2402467840
+      },
+      "candidate": {
+        "seconds": 10.321780666010454,
+        "cpu_seconds": 81.463894,
+        "max_rss_bytes": 2446065664
+      }
+    },
+    "ranges": {
+      "baseline": {
+        "seconds": [
+          11.64471370796673,
+          11.84646941605024
+        ],
+        "cpu_seconds": [
+          100.77708,
+          101.50455399999996
+        ],
+        "max_rss_bytes": [
+          2390736896,
+          2419310592
+        ]
+      },
+      "candidate": {
+        "seconds": [
+          10.275445292005315,
+          10.33861962496303
+        ],
+        "cpu_seconds": [
+          80.554511,
+          81.59087600000001
+        ],
+        "max_rss_bytes": [
+          2419146752,
+          2453716992
+        ]
+      }
+    },
+    "paired_ratios": [
+      {
+        "seconds": 0.8834991202351865,
+        "cpu_seconds": 0.7993336480874421,
+        "max_rss_bytes": 1.0118833051213345
+      },
+      {
+        "seconds": 0.8878380254114675,
+        "cpu_seconds": 0.8043873609276682,
+        "max_rss_bytes": 1.0219472555687577
+      },
+      {
+        "seconds": 0.881171797552326,
+        "cpu_seconds": 0.8038149303133734,
+        "max_rss_bytes": 1.0078159513372074
+      },
+      {
+        "seconds": 0.8673846131813402,
+        "cpu_seconds": 0.8055838280385065,
+        "max_rss_bytes": 1.0213318784737613
+      },
+      {
+        "seconds": 0.8736989607249482,
+        "cpu_seconds": 0.8056800640053216,
+        "max_rss_bytes": 1.0110589653467694
+      }
+    ],
+    "median_paired_ratios": {
+      "seconds": 0.881171797552326,
+      "cpu_seconds": 0.8043873609276682,
+      "max_rss_bytes": 1.0118833051213345
+    },
+    "separate_median_changes_percent": {
+      "seconds": -12.023845471234884,
+      "cpu_seconds": -19.466540466045025,
+      "max_rss_bytes": 1.8147099942033007
+    }
+  },
+  "phase_diagnostics": {
+    "phases": [
+      {
+        "phase_ending": "binary_loaded:functions=38734",
+        "baseline": {
+          "wall_seconds": 3.1739405,
+          "cpu_seconds": 3.1700000000000004
+        },
+        "candidate": {
+          "wall_seconds": 3.191561875,
+          "cpu_seconds": 3.19
+        }
+      },
+      {
+        "phase_ending": "signature_scan_begin",
+        "baseline": {
+          "wall_seconds": 0.02142962500000012,
+          "cpu_seconds": 0.020000000000000018
+        },
+        "candidate": {
+          "wall_seconds": 0.021309667000000143,
+          "cpu_seconds": 0.020000000000000018
+        }
+      },
+      {
+        "phase_ending": "databases_ready:16",
+        "baseline": {
+          "wall_seconds": 0.06271037499999998,
+          "cpu_seconds": 0.05999999999999961
+        },
+        "candidate": {
+          "wall_seconds": 0.062118667000000016,
+          "cpu_seconds": 0.06000000000000005
+        }
+      },
+      {
+        "phase_ending": "no_return_ready:seeds=38186",
+        "baseline": {
+          "wall_seconds": 3.428065959,
+          "cpu_seconds": 42.28
+        },
+        "candidate": {
+          "wall_seconds": 3.441919583,
+          "cpu_seconds": 43.25
+        }
+      },
+      {
+        "phase_ending": "function_hashes_ready:38023",
+        "baseline": {
+          "wall_seconds": 2.683809750000001,
+          "cpu_seconds": 36.00000000000001
+        },
+        "candidate": {
+          "wall_seconds": 2.79957,
+          "cpu_seconds": 38.18000000000001
+        }
+      },
+      {
+        "phase_ending": "force_relation_scan_ready:true",
+        "baseline": {
+          "wall_seconds": 0.12164962499999987,
+          "cpu_seconds": 0.11999999999999034
+        },
+        "candidate": {
+          "wall_seconds": 0.1152775410000011,
+          "cpu_seconds": 0.11999999999999034
+        }
+      },
+      {
+        "phase_ending": "relation_graph_ready",
+        "baseline": {
+          "wall_seconds": 0.1422701669999995,
+          "cpu_seconds": 0.14000000000000057
+        },
+        "candidate": {
+          "wall_seconds": 0.14135604199999996,
+          "cpu_seconds": 0.14000000000000057
+        }
+      },
+      {
+        "phase_ending": "hash_address_map_ready",
+        "baseline": {
+          "wall_seconds": 0.0016821250000003118,
+          "cpu_seconds": 0.0
+        },
+        "candidate": {
+          "wall_seconds": 0.001521290999999536,
+          "cpu_seconds": 0.0
+        }
+      },
+      {
+        "phase_ending": "matches_ready:4812",
+        "baseline": {
+          "wall_seconds": 2.1503489580000004,
+          "cpu_seconds": 28.120000000000005
+        },
+        "candidate": {
+          "wall_seconds": 0.16720466700000003,
+          "cpu_seconds": 1.0799999999999983
+        }
+      },
+      {
+        "phase_ending": "fact_store_ready:names=38737",
+        "baseline": {
+          "wall_seconds": 0.0029583339999987857,
+          "cpu_seconds": 0.0
+        },
+        "candidate": {
+          "wall_seconds": 0.00279804100000014,
+          "cpu_seconds": 0.0
+        }
+      }
+    ],
+    "bounds": "Three fresh optimized cfg(test) runs per source, ps observation overhead, sequential phase diagnostics, not alternating native CLI controls or Kuna attribution. Identical temporary instrumentation restored before delivery. All three candidate runs retain 38,023 function hashes, 4,812 matches and 38,737 names.",
+    "candidate_source": {
+      "source_head": "6d6d8872a67a3beae2b1eb811d6240a5b6ac80be",
+      "fpk_sha256": "134e5a8ddf64ef012c1f001314eb5ffe11804d2684e580ecd63f4f4a5ee47697",
+      "instrumented_facts_sha256": "85d6f3ab53c1ab835e91ccd7fe65942db3364dbed6aa14b31fee9dbbf894840a",
+      "binary_sha256": "40b78992ddf6d760f4a092ee78de95b5975dbcf2bf07557c0f43d51bc0de035e"
+    }
+  },
+  "verified_inputs": {
+    "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+    "cells": [
+      {
+        "cell": "00",
+        "input": "inputs/linux/arm64/O0/OpenCC/opencc",
+        "sha256": "2b34da75fff8870f32c0a3cee080d06a7bf86618d162bbec37f0148b1bb03ea3"
+      },
+      {
+        "cell": "01",
+        "input": "inputs/linux/arm64/O0/leveldb/libleveldb.so.1.23.0",
+        "sha256": "fb744186acf789dd7936e76e14cb608b41ef3afe7e41304c1a29a7366878ae14"
+      },
+      {
+        "cell": "02",
+        "input": "inputs/linux/arm64/O0/mergerfs/mergerfs",
+        "sha256": "4e2a3d9e45cf60ac57685fa4f6571dc52b123a4a6edaa1f837057d472c381669"
+      },
+      {
+        "cell": "03",
+        "input": "inputs/linux/arm64/O0/snappy/libsnappy.so.1.2.2",
+        "sha256": "f71312d8db4ca40bb626132b3c157c18f49222b8b6619edb949664b2b98bf89f"
+      },
+      {
+        "cell": "04",
+        "input": "inputs/linux/arm64/O0/ssdb/ssdb-server",
+        "sha256": "387640c8d0fed448f69852eae43bb4d4d430269935cc3834d9172085f8eb0bbb"
+      },
+      {
+        "cell": "05",
+        "input": "inputs/linux/arm64/O0/the-powder-toy/powder",
+        "sha256": "2fb8edde86aff3195ea8eadee3b56569ab46e15604c29c09cf6dabf68236fbbc"
+      },
+      {
+        "cell": "06",
+        "input": "inputs/linux/arm64/O2/OpenCC/opencc",
+        "sha256": "b479bb9d7fe117fa1bf498091f57b4596f0b236a0e7ee9048ee47471774346fc"
+      },
+      {
+        "cell": "07",
+        "input": "inputs/linux/arm64/O2/leveldb/libleveldb.so.1.23.0",
+        "sha256": "85211404edaf421a7e3a4fda0e0828bd159f12773aa066a90943e7f99818ae05"
+      },
+      {
+        "cell": "08",
+        "input": "inputs/linux/arm64/O2/mergerfs/mergerfs",
+        "sha256": "3be17911d1cbf52a516b016dd5b2df1234c8f5f5ca68af933209f4620c5ecc5e"
+      },
+      {
+        "cell": "09",
+        "input": "inputs/linux/arm64/O2/snappy/libsnappy.so.1.2.2",
+        "sha256": "610d1dd5c0b42016acee9d487c74d4598c9a5a702946004c94ea84ab2cb94a7e"
+      },
+      {
+        "cell": "10",
+        "input": "inputs/linux/arm64/O2/ssdb/ssdb-server",
+        "sha256": "c72e6ca74deb4905b2c0615ea8be79f538d825f603279ea0c338f63fd0ae7ed5"
+      },
+      {
+        "cell": "11",
+        "input": "inputs/linux/arm64/O2/the-powder-toy/powder",
+        "sha256": "a0127641604507b93359d089d0a12ba9b557d65500349fd45e721bbd8c97af96"
+      },
+      {
+        "cell": "12",
+        "input": "inputs/linux/arm64/O2-noinline/OpenCC/opencc",
+        "sha256": "a396371fb685ddbe812113ab92109204a20ef616fb494752ca364eca88071463"
+      },
+      {
+        "cell": "13",
+        "input": "inputs/linux/arm64/O2-noinline/leveldb/libleveldb.so.1.23.0",
+        "sha256": "e8ef8316bf5ae7554a977e56168a18f172385a6c1700980592259fd2082eeb83"
+      },
+      {
+        "cell": "14",
+        "input": "inputs/linux/arm64/O2-noinline/mergerfs/mergerfs",
+        "sha256": "0633c718ea2d9f161b8453cdf2cb4c7784dadfe02822cb1da2550d851cefbabc"
+      },
+      {
+        "cell": "15",
+        "input": "inputs/linux/arm64/O2-noinline/snappy/libsnappy.so.1.2.2",
+        "sha256": "27b3960b13b8ce4155e30de7d44906388d6c571476b56e4162bc9e4ad90daaae"
+      },
+      {
+        "cell": "16",
+        "input": "inputs/linux/arm64/O2-noinline/ssdb/ssdb-server",
+        "sha256": "66134e36f007c0f4785ba5eeb996d18cd514d15df5f8be673ea2d16041e38f78"
+      },
+      {
+        "cell": "17",
+        "input": "inputs/linux/arm64/O2-noinline/the-powder-toy/powder",
+        "sha256": "316fb82a965c9d0538fd8e52256a970a6598541e8b5ce7235f655eca04da438d"
+      },
+      {
+        "cell": "18",
+        "input": "inputs/windows/x86_64/O0/OpenCC/opencc.exe",
+        "sha256": "1dc4891d2cf7eeeebf96ef8bb15dcd60f13220f5e97a0adc38f6bf787952dd70"
+      },
+      {
+        "cell": "19",
+        "input": "inputs/windows/x86_64/O0/detours/withdll.exe",
+        "sha256": "967a9b6af65106daf535a914de82719346ac0b6df651f72a705a6aa6c315f546"
+      },
+      {
+        "cell": "20",
+        "input": "inputs/windows/x86_64/O0/ninja/ninja.exe",
+        "sha256": "01b31cf9bc601cd06236dec0bfeba1b93068c1663ab66b4789d8507ae25f4589"
+      },
+      {
+        "cell": "21",
+        "input": "inputs/windows/x86_64/O0/snappy/snappy.dll",
+        "sha256": "696f0c504463a557c6ccf56624596745f29bc7e62a7717befc93defe0d613491"
+      },
+      {
+        "cell": "22",
+        "input": "inputs/windows/x86_64/O0/tracy/tracy-profiler.exe",
+        "sha256": "8c089578f78011abef068dd5954aac2af6daf74231382e3dec72bf7ec796a94e"
+      },
+      {
+        "cell": "23",
+        "input": "inputs/windows/x86_64/O0/winsparkle/WinSparkle.dll",
+        "sha256": "3102f0c03e4bbddbdf4c5e799870e6253078370f39eecde4432988067311d06c"
+      },
+      {
+        "cell": "24",
+        "input": "inputs/windows/x86_64/O2/OpenCC/opencc.exe",
+        "sha256": "45a8cdd9f34f4ef3bbbcb05ec4e6165d7cefd9d1393918cf2bcc6ee24d8f9fcf"
+      },
+      {
+        "cell": "25",
+        "input": "inputs/windows/x86_64/O2/detours/withdll.exe",
+        "sha256": "9f6b3fe0bdd1a6496b0665439a230acd6310af94e9dca149cb357420b4968b67"
+      },
+      {
+        "cell": "26",
+        "input": "inputs/windows/x86_64/O2/ninja/ninja.exe",
+        "sha256": "2f944654930b102d9a639591d7977b0a07d94445c97fce4a0fc51955116ec11b"
+      },
+      {
+        "cell": "27",
+        "input": "inputs/windows/x86_64/O2/snappy/snappy.dll",
+        "sha256": "32d32be7699c41d660b34d3ca6260e36c47a382ef9880fd911332ebac3318ba5"
+      },
+      {
+        "cell": "28",
+        "input": "inputs/windows/x86_64/O2/tracy/tracy-profiler.exe",
+        "sha256": "51d411d396c203cd9328b90034b32912252ce00e0b4b633052e7e21df00d0ec4"
+      },
+      {
+        "cell": "29",
+        "input": "inputs/windows/x86_64/O2/winsparkle/WinSparkle.dll",
+        "sha256": "469e4682860c42d2da2d0ddc19df68e77bef1041260b51c2f388448b309a11ed"
+      },
+      {
+        "cell": "30",
+        "input": "inputs/windows/x86_64/O2-noinline/OpenCC/opencc.exe",
+        "sha256": "d1c3dc4ec79ec94b0058b3120afefb070a2be0825833c4d0793f4c8a7b51ef59"
+      },
+      {
+        "cell": "31",
+        "input": "inputs/windows/x86_64/O2-noinline/detours/withdll.exe",
+        "sha256": "882b7cbf0890ef5e13fd05c9659c652650232bdefbef9d82c5ada4c4fb16064b"
+      },
+      {
+        "cell": "32",
+        "input": "inputs/windows/x86_64/O2-noinline/ninja/ninja.exe",
+        "sha256": "dba990b021df2c0189ccb75ee345513ec90d987c73f9f6a169a41705e98df246"
+      },
+      {
+        "cell": "33",
+        "input": "inputs/windows/x86_64/O2-noinline/snappy/snappy.dll",
+        "sha256": "0998482d359e03639280b7f1c90e4dfc41e55cef47e9fbed77f2075e43e1b5f4"
+      },
+      {
+        "cell": "34",
+        "input": "inputs/windows/x86_64/O2-noinline/tracy/tracy-profiler.exe",
+        "sha256": "b5d346dc70c14e9db33ff70d330a8ab594b17783f8651d79baef5f39a324df1a"
+      },
+      {
+        "cell": "35",
+        "input": "inputs/windows/x86_64/O2-noinline/winsparkle/WinSparkle.dll",
+        "sha256": "d65d12084251b25776f8d95176718399e9c2b0989c478c72ea523a54ce4d5492"
+      },
+      {
+        "cell": "36",
+        "input": "inputs/macos/arm64/O0/OpenCC/opencc",
+        "sha256": "67c815d39a1dfca4f436d0f756e97418aadd7963198a3a81e375b4c310f1939e"
+      },
+      {
+        "cell": "37",
+        "input": "inputs/macos/arm64/O0/ninja/ninja",
+        "sha256": "75cf0ed6a02b4ff1eebd959774a9c1be03d84aa77272c8feff683bb217de54b8"
+      },
+      {
+        "cell": "38",
+        "input": "inputs/macos/arm64/O0/snappy/libsnappy.dylib",
+        "sha256": "4f90c07ed46bb47bcef75d19216f737818d5a5efb24a540e92c9fcecd2c94b40"
+      },
+      {
+        "cell": "39",
+        "input": "inputs/macos/arm64/O2/OpenCC/opencc",
+        "sha256": "22cc4554475c4d2d5f7454b298cbb551f0d75d9d02ff69731bfac068573201f8"
+      },
+      {
+        "cell": "40",
+        "input": "inputs/macos/arm64/O2/ninja/ninja",
+        "sha256": "0628307f3fd492bbbec336ee590e604b4f1bd9c0e63d5f6e11fc9955e679931e"
+      },
+      {
+        "cell": "41",
+        "input": "inputs/macos/arm64/O2/snappy/libsnappy.dylib",
+        "sha256": "d518851383b135b64296702fc6dd9d67d2cfc587da212358e8a7a67e921baffd"
+      },
+      {
+        "cell": "42",
+        "input": "inputs/macos/arm64/O2-noinline/OpenCC/opencc",
+        "sha256": "52c1ebb86cb7fd77f7141944adeff8a1025c36393d681036927fee37edb44373"
+      },
+      {
+        "cell": "43",
+        "input": "inputs/macos/arm64/O2-noinline/ninja/ninja",
+        "sha256": "d882afc6667e7d3325b33fcaef5957283e5709b3576326753cbb33f4e74f22b5"
+      },
+      {
+        "cell": "44",
+        "input": "inputs/macos/arm64/O2-noinline/snappy/libsnappy.dylib",
+        "sha256": "816de59e4c6d2c077c56aa697a9ca2d97a18c0b4f39a1e420c09a8b9c6135477"
+      }
+    ]
+  }
+}

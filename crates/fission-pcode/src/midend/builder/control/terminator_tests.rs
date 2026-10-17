@@ -249,7 +249,13 @@ fn x64_cbranch_condition_recovers_cmp_jnz_from_fresh_zero_flag() {
         cond,
         test_binary(
             PreHirBinaryOp::Ne,
-            PreHirExpr::Var("rsi".to_string()),
+            PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false
+                },
+                expr: Box::new(PreHirExpr::Var("rsi".to_string())),
+            },
             PreHirExpr::Var("param_1".to_string()),
             NirType::Bool
         )

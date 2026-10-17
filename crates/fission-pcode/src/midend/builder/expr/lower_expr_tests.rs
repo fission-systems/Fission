@@ -75,6 +75,92 @@ fn test_options() -> MlilPreviewOptions {
 }
 
 #[test]
+fn scalar_ssa_read_keeps_the_exact_redefinition_identity() {
+    let carrier = register(0x38, 8);
+    let copy = varnode(0x9000);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(7)],
+            ),
+            op(1, PcodeOpcode::Copy, Some(copy), vec![carrier.clone()]),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(carrier.clone()),
+                vec![constant(11)],
+            ),
+            op(3, PcodeOpcode::Return, None, vec![carrier.clone()]),
+        ],
+    )]);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    let first = LoweringSite {
+        block_idx: 0,
+        op_idx: 1,
+    };
+    let later = LoweringSite {
+        block_idx: 0,
+        op_idx: 3,
+    };
+    assert_ne!(
+        builder.scalar_ssa_value_at_use(&carrier, first),
+        builder.scalar_ssa_value_at_use(&carrier, later)
+    );
+    assert_eq!(
+        builder.scalar_ssa_definition_at_use(&carrier, first),
+        Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 0
+        })
+    );
+    assert_eq!(
+        builder.scalar_ssa_definition_at_use(&carrier, later),
+        Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 2
+        })
+    );
+}
+
+#[test]
+fn scalar_ssa_read_does_not_extrapolate_a_partial_storage_piece() {
+    let wide = register(0x38, 8);
+    let narrow = register(0x38, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(wide.clone()), vec![constant(7)]),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(narrow),
+                vec![constant_sized(11, 4)],
+            ),
+            op(2, PcodeOpcode::Return, None, vec![wide.clone()]),
+        ],
+    )]);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    assert_eq!(
+        builder.scalar_ssa_value_at_use(
+            &wide,
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 2
+            }
+        ),
+        None
+    );
+}
+
+#[test]
 fn wide_register_subpiece_projects_covering_passthrough_input_lane() {
     let mut source = varnode(0x9000);
     source.size = 8;
@@ -3154,4 +3240,164 @@ fn float_unary_opcodes_all_lower_without_falling_back_to_unsupported() {
         !code.contains("trunc("),
         "FLOAT_TRUNC is a float-to-int conversion, not a call to trunc():\n{code}"
     );
+}
+
+#[test]
+fn comparison_storage_view_preserves_read_width_without_narrowing_carrier() {
+    let pcode = pcode_function(vec![]);
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    for (name, ty) in [
+        (
+            "carrier",
+            NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        ),
+        ("address_carrier", NirType::Ptr(Box::new(NirType::Unknown))),
+        (
+            "narrow",
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        ),
+    ] {
+        builder.temps.insert(
+            name.into(),
+            PreHirBinding {
+                name: name.into(),
+                ty,
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        );
+    }
+    for name in ["carrier", "address_carrier"] {
+        for signed in [false, true] {
+            let expr =
+                builder.coerce_integer_storage_view(PreHirExpr::Var(name.into()), 32, signed);
+            assert!(
+                matches!(expr, PreHirExpr::Cast { ty: NirType::Int { bits: 32, signed: s }, .. } if s == signed)
+            );
+        }
+    }
+    assert!(matches!(
+        builder.temps["carrier"].ty,
+        NirType::Int { bits: 64, .. }
+    ));
+    assert!(matches!(
+        builder.temps["address_carrier"].ty,
+        NirType::Ptr(_)
+    ));
+    for name in ["carrier", "address_carrier", "unknown"] {
+        let input = PreHirExpr::Var(name.into());
+        assert_eq!(
+            builder.coerce_integer_storage_view(input.clone(), 64, false),
+            input
+        );
+    }
+    let input = PreHirExpr::Var("narrow".into());
+    assert_eq!(
+        builder.coerce_integer_storage_view(input.clone(), 32, false),
+        input
+    );
+    assert!(matches!(
+        builder.coerce_integer_storage_view(input, 32, true),
+        PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: 32,
+                signed: true
+            },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn comparison_storage_view_survives_future_carrier_widening() {
+    let pcode = pcode_function(vec![]);
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let low = register(0, 4);
+    let wide = register(0, 8);
+    let name = builder
+        .sla_hw_name(wide.offset, wide.size)
+        .expect("carrier model");
+    builder.temps.insert(
+        name.clone(),
+        PreHirBinding {
+            name: name.clone(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        },
+    );
+    let input = PreHirExpr::Var(name.clone());
+    let read = builder.coerce_varnode_storage_view(input.clone(), &low, false);
+    builder.temps.get_mut(&name).unwrap().ty = NirType::Int {
+        bits: 64,
+        signed: false,
+    };
+    assert!(matches!(
+        read,
+        PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: 32,
+                signed: false
+            },
+            ..
+        }
+    ));
+    assert_eq!(
+        builder.coerce_varnode_storage_view(input.clone(), &wide, false),
+        input
+    );
+}
+
+#[test]
+fn narrow_subtraction_reads_integer_view_of_full_register_carrier() {
+    for width in [1, 4] {
+        let input = register(0x98, width);
+        let mut output = varnode(0x600);
+        output.size = width;
+        let subtraction = op(
+            0,
+            PcodeOpcode::IntSub,
+            Some(output),
+            vec![input.clone(), constant_sized(1, width)],
+        );
+        let pcode = pcode_function(vec![block_at(0x1000, 0, vec![subtraction.clone()])]);
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        let name = builder
+            .sla_hw_name(input.offset, options.pointer_size)
+            .expect("hardware carrier");
+        builder.temps.insert(
+            name.clone(),
+            PreHirBinding {
+                name,
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        );
+        let expr = builder
+            .lower_binary_op(&subtraction, &mut HashSet::default())
+            .expect("integer subtraction");
+        let PreHirExpr::Binary { lhs, .. } = expr else {
+            panic!("binary expected")
+        };
+        assert!(
+            matches!(lhs.as_ref(), PreHirExpr::Cast { ty: NirType::Int { bits, signed: false }, .. } if *bits==width*8),
+            "subtraction must consume the narrow integer storage: {lhs:?}"
+        );
+    }
 }

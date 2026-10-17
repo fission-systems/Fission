@@ -2009,7 +2009,7 @@ fn apply_debug_struct_field_names(
 /// whose fields we'd be naming belongs to `**binding`, not `*binding`, so
 /// applying the struct's field layout at this binding's own offset set
 /// would be a semantic mismatch.
-fn struct_base_name_for_single_pointer(type_name: &str) -> Option<&str> {
+pub(super) fn struct_base_name_for_single_pointer(type_name: &str) -> Option<&str> {
     let mut name = type_name.trim();
     loop {
         if let Some(rest) = name.strip_prefix("const ") {

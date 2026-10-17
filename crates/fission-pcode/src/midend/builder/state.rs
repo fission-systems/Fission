@@ -60,6 +60,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) heritage_successors: Vec<Vec<usize>>,
     pub(crate) heritage_predecessors: Vec<Vec<usize>>,
     pub(crate) scalar_ssa: NirScalarSsa,
+    pub(super) ssa_emission: super::ssa_emission::SsaEmissionPlan,
     pub(crate) successors: Vec<Vec<usize>>,
     pub(crate) predecessors: Vec<Vec<usize>>,
     pub(crate) reachability_cache: RefCell<BuilderCacheMap<(usize, usize, usize), bool>>,

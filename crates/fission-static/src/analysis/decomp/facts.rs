@@ -719,6 +719,11 @@ impl FactStore {
         use rayon::prelude::*;
         let n_decoded = std::sync::atomic::AtomicUsize::new(0);
         let n_hashed = std::sync::atomic::AtomicUsize::new(0);
+        // Explicit preparation keeps trace ownership local and avoids initializing
+        // global CF state from inside the parallel candidate iterator.
+        let decode_seeds = std::sync::Mutex::new(
+            crate::analysis::control_flow_facts::prepare_fid_decode_seeds(binary),
+        );
         let hashed_functions: Vec<HashedFidFunction> = binary
             .functions
             .par_iter()
@@ -743,14 +748,16 @@ impl FactStore {
                 let bytes = binary.view_bytes(decode_address, max_bytes)?;
                 let memory_context = decode_memory_context_for(binary, decode_address, max_bytes);
                 let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
+                let seed = decode_seeds.lock().expect("FID decode seeds poisoned").remove(&func.address);
                 let decoded = Arc::new(
                     frontend
-                        .lift_raw_pcode_function_with_context_and_memory_context(
+                        .lift_raw_pcode_function_with_seed(
                             bytes,
                             decode_address,
                             contract,
                             &memory_context,
                             context_override,
+                            seed,
                         )
                         .ok()?,
                 );
@@ -795,6 +802,8 @@ impl FactStore {
                 })
             })
             .collect();
+
+        drop(decode_seeds);
 
         // Relation records are keyed by a candidate function id and a
         // neighbouring function's FID full hash.  Build the canonical static

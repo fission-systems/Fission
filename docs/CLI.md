@@ -27,6 +27,7 @@ The CLI is intentionally split into explicit subcommands:
 - `resources` (resolved signature / detector bundle diagnostics)
 - `script` (Rhai)
 - `debug` (headless emulation and platform-native debugger commands)
+- `db` (saved analyst decisions, history, undo/redo, and comparison)
 
 Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.
 
@@ -337,6 +338,30 @@ per-operation conditions and handle runtime errors and partial analysis.
 
 ---
 
+## Sandbox Execution Evidence
+
+```sh
+fission_cli sandbox ./challenge.elf --json --max-inst 10000 \
+  --fail-on-budget --max-hle-misses 0 --max-unknown-syscalls 0 -- candidate
+```
+
+`--json` emits one JSON document on host stdout; guest stdout is captured in
+`guest_output.stdout`, and guest stderr in `guest_output.stderr`. Both are byte
+arrays, preserving non-UTF-8 data. Text mode retains console echo. Metrics files
+include the same capture. An unavailable stream is `null` with a corresponding
+`stdout_error` / `stderr_error`; it must not be treated as empty output.
+The capture is retained VFS descriptor 1/2 content, not a redirection transcript.
+
+A successful CLI process means the sandbox/report command completed. Inspect
+`halt_requested`, the guest `exit_code`, output and quality budgets to determine
+the target's verdict. Some crackmes exit zero on both correct and incorrect
+input. An instruction-bound run without a guest exit is incomplete.
+
+The default x86-64 Linux HLE path supplies bounded runtime guard/header storage
+before main; it does not implement full module TLS. Stack-check failure halts
+with conventional status 134 without simulating guest SIGABRT delivery. See the
+measured [crackme workflow](CRACKME_WORKFLOW.md) for a complete solve and replay.
+
 ## Decomp Command
 
 `decomp` is the canonical human-facing decompilation entrypoint.
@@ -602,6 +627,133 @@ fission_cli strings app.exe --min-len 8 --json
 ### Default threshold
 
 If `--min-len` is not provided, the current default is `4`.
+
+---
+
+## String Leads and Call Relationships
+
+```bash
+fission_cli strings sample.elf --contains 'error' --context --json
+fission_cli callgraph sample.elf --function 0x1002000 --json
+fission_cli xrefs sample.elf --to 0x1000190 --json
+fission_cli disasm sample.elf --addr 0x1002000 --function
+```
+
+`strings --contains TEXT` filters by a case-sensitive literal substring. Add
+`--section NAME` (repeatable) and `--min-len N` to narrow the listing further.
+`--context` runs conservative function discovery by default and builds one
+canonical reference index for string uses and one-hop call relationships.
+`--function-discovery-profile` can select conservative, balanced or aggressive
+explicitly; use the same profile in subsequent `callgraph`, `list` or `xrefs`
+queries to keep discovered entries aligned.
+
+The explicit `--context --json` envelope contains:
+
+- `analysis`: the existing per-layer xref coverage report, including scope,
+  omissions, unsupported reasons and layers that were not requested.
+- `strings`: matching printable ASCII runs with `file_offset`, mapped `address`
+  (or `null`), `section`, and `context`.
+- `context.references`: original indexed records whose data read/write or
+  relocation target lands in the run, including suffix pointers and a NUL byte
+  only when actually present. Instruction and pointer-data sources remain
+  distinguishable; loader string anchors and control-flow targets are excluded.
+- `context.functions`: discovered entries explicitly attributed by those
+  records, their names, `reference_ids`, and immediate `callers`/`callees` with
+  address, optional name and indexed count. Unknown owners remain reference
+  records and do not become invented function entries.
+
+Raw reference records retain the `xrefs --json` schema (numeric addresses and
+record IDs); navigation rows use hex address strings. IDs index the canonical
+reference output for the same binary, analyst decisions and analysis options, not cross-build
+persistent identifiers. Analyst names saved by `db` appear in the result;
+`--no-db` ignores them.
+
+Unmapped file bytes and printable runs in executable storage have `context: null` with `context_note`. An empty reference/function list means no matching
+**indexed** evidence; it is not proof that the binary has no uses or callers.
+This lane uses loader/disassembly evidence, not p-code or runtime execution;
+coverage remains bounded by the reported extraction and discovery scope.
+
+Without `--context`, existing string JSON stays an array and `--xrefs` retains
+its legacy `referrers` field. That field can fall back to an instruction address
+when no function owner is known; use `context.references` for explicit ownership.
+
+`callgraph --function` accepts a discovered function **entry** and returns one
+node with its immediate relationships; a missing entry fails rather than
+silently returning an empty successful graph. Existing graph fields are retained;
+`analysis`, `node_count`, and `selected_function` are additive. `function_count`
+and `total_call_sites` describe the whole indexed graph even when node output is
+filtered. Edges are derived from the same canonical index as `xrefs`; unresolved
+indirect calls and jump-only tail calls are not asserted as complete call edges.
+
+---
+
+## Analysis Project (`db`)
+
+Analyst decisions live beside the input binary in `<binary>.fission.json`, bound
+by its content hash. Names and function signatures are applied automatically on
+subsequent analysis commands; notes and debugger stops are also retained.
+`--no-db` requests analysis without these decisions. Saving a project does not
+modify the input binary.
+
+```bash
+fission_cli db sample.exe name 0x140001000 parse_header --json
+fission_cli db sample.exe sig 0x140001000 'int (const char *buf, int len)' --json
+fission_cli db sample.exe note 0x140001008 'check length before reading' --json
+fission_cli db sample.exe bp 0x140001008 --json
+fission_cli db sample.exe show --json
+fission_cli db sample.exe history --json
+fission_cli db sample.exe undo --json
+fission_cli db sample.exe redo --json
+```
+
+Removal commands are `rm-name`, `rm-sig`, `rm-note`, and `rm-bp`, each taking an
+address. Each changed `db` edit records one revision with typed before/after
+values. Its success JSON retains the existing fields and adds `revision` (an
+integer, or `null` for an unchanged decision). Success is emitted after saving.
+Undo/redo return the ID of the revision they moved.
+
+`history --json` returns `revisions`, `cursor`, and `next_id`. The first `cursor`
+records are applied; remaining records are available for redo. IDs increase
+monotonically. A changed edit after undo discards that redo branch; a no-op
+preserves it. History survives process restarts. It records decisions, not
+binary patches, regenerated analysis, wall-clock times, or analyst identity.
+
+To compare a saved snapshot of the **same binary**:
+
+```bash
+cp sample.exe.fission.json before.fission.json
+fission_cli db sample.exe note 0x140001008 'confirmed length check'
+fission_cli db sample.exe diff before.fission.json --json
+```
+
+`diff` returns `{"changes": [...]}` in deterministic decision/address order,
+from current project (`before`) to the supplied project (`after`). It ignores
+paths and revision history, and refuses different binary hashes. It does not
+apply changes. `show`, `history`, and `diff` never create or rewrite a project.
+
+### Storage and compatibility
+
+- Schema 1 projects remain readable, including their decimal addresses. The
+  first recorded edit upgrades to schema 2. Historical decisions start as the
+  baseline; edits made before migration cannot be undone. Older Fission
+  readers reject schema 2. Keep a snapshot before using an older release.
+- Writers hold `<project>.lock` throughout read/edit/save. Another cooperating
+  writer fails rather than overwriting a concurrent edit. A process crash can
+  leave a lock: stop or confirm the writer has exited before removing that
+  lock. External editors do not participate in this lock protocol.
+- Saving syncs a temporary file beside the destination, then renames it over
+  the project. A failed save preserves the committed project; a symlink
+  destination is refused. Existing permissions are retained. This is atomic
+  file replacement, not a guarantee against every power-loss scenario or
+  filesystem/network failure.
+- Undo/redo checks that touched decisions still match the recorded revision.
+  A conflicting manual edit refuses the entire operation without partial
+  changes. Malformed revision cursors/IDs are rejected on read and save.
+- Library callers use `ProjectLock` across read/edit/`record_edit`/write to
+  record a transaction. Low-level setters remain usable for constructing a
+  project; setters alone do not create revisions. Watchpoint changes are
+  supported in the project journal; this milestone adds no watchpoint `db`
+  subcommand.
 
 ---
 

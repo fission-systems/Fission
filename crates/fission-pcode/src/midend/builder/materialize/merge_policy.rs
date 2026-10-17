@@ -1,6 +1,71 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    /// A join's storage is initialized on every incoming edge independently
+    /// of the ABI entry carrier. Missing, partial, call-clobbered or guarded
+    /// definitions cannot establish this fact: the skipped path may still
+    /// require the old value. Keep the existing entry carrier in those cases.
+    pub(in crate::midend::builder) fn merge_has_independent_incoming_definitions(
+        &self,
+        block_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        // Structuring may prune irreducible edges; initialization is a fact
+        // about the original lifted CFG, including those incoming paths.
+        let Some(predecessors) = self.heritage_predecessors.get(block_idx) else {
+            return false;
+        };
+        if predecessors.len() < 2 {
+            return false;
+        }
+        let Some(output_end) = output.offset.checked_add(u64::from(output.size)) else {
+            return false;
+        };
+        let mut pending = predecessors.clone();
+        let mut visited = vec![false; self.pcode.blocks.len()];
+        let mut found_definition = false;
+        while let Some(pred_idx) = pending.pop() {
+            let Some(block) = self.pcode.blocks.get(pred_idx) else {
+                return false;
+            };
+            if std::mem::replace(&mut visited[pred_idx], true) {
+                continue;
+            }
+            if let Some(def_idx) = self.last_redefinition_index_before_terminator(block, output) {
+                let Some(definition) = block.ops[def_idx].output.as_ref() else {
+                    return false;
+                };
+                if definition.space_id != output.space_id
+                    || definition.offset > output.offset
+                    || !definition
+                        .offset
+                        .checked_add(u64::from(definition.size))
+                        .is_some_and(|end| end >= output_end)
+                    || self.op_is_inside_same_block_forward_cmov_body(block, def_idx)
+                    || self.has_call_between_ops(block, def_idx + 1, block.ops.len())
+                {
+                    return false;
+                }
+                found_definition = true;
+                continue;
+            }
+            // A value can reach an edge through arbitrarily many blocks that
+            // merely forward it. Walk every such original predecessor path;
+            // seeing one definition is insufficient for a must-initialize fact.
+            if self.has_call_between_ops(block, 0, block.ops.len()) {
+                return false;
+            }
+            let Some(incoming) = self.heritage_predecessors.get(pred_idx) else {
+                return false;
+            };
+            if incoming.is_empty() {
+                return false;
+            }
+            pending.extend(incoming);
+        }
+        found_definition
+    }
+
     /// Reuse the binding at the first proven merge reached by a loop-carried
     /// definition.  A loop update is not a one-iteration value that can be
     /// folded into a flat `Select`; it is the state variable that must keep

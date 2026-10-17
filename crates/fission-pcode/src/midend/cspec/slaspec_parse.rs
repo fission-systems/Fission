@@ -325,6 +325,11 @@ fn strip_enclosing_parens(expr: &str) -> Option<&str> {
 }
 
 fn substitute_macros(text: &str, defines: &BTreeMap<String, String>) -> String {
+    // Every replacement needle begins with this prefix. Literal lines need
+    // no per-definition allocation/search, regardless of the definition map.
+    if !text.contains("$(") {
+        return text.to_owned();
+    }
     let mut out = text.to_string();
     for (name, value) in defines {
         let needle = format!("$({name})");
@@ -692,5 +697,44 @@ mod if_expression_tests {
         let d = defines(&[("T_VARIANT", "")]);
         assert!(evaluate_if_expression("T_VARIANT", &d));
         assert!(!evaluate_if_expression("IA64", &d));
+    }
+}
+
+#[cfg(test)]
+mod substitution_preparation_tests {
+    use super::*;
+
+    #[test]
+    fn literal_fast_path_preserves_ordered_macro_substitution() {
+        let defines = BTreeMap::from([
+            ("A".to_owned(), "$(B)".to_owned()),
+            ("B".to_owned(), "wide".to_owned()),
+            ("Z".to_owned(), "$(A)".to_owned()),
+            ("이름".to_owned(), "값".to_owned()),
+        ]);
+        for text in [
+            "",
+            "literal register r0",
+            "unicode 값",
+            "$",
+            "$(",
+            "$()",
+            "$(unknown)",
+            "$(A) $(A)",
+            "$(Z)",
+            "$(이름)",
+            "prefix $(B) suffix",
+            "$(A))",
+        ] {
+            let mut expected = text.to_owned();
+            for (name, value) in &defines {
+                let needle = format!("$({name})");
+                if expected.contains(&needle) {
+                    expected = expected.replace(&needle, value);
+                }
+            }
+            assert_eq!(substitute_macros(text, &defines), expected, "{text}");
+            assert_eq!(substitute_macros(text, &BTreeMap::new()), text);
+        }
     }
 }

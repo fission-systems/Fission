@@ -1,22 +1,38 @@
 //! Call graph emission (`fission-static::callgraph`).
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::{CallGraph, XrefDatabase};
+use fission_static::analysis::{CallGraph, build_xref_index};
 use serde_json::json;
 use std::io::Write;
 
 use crate::cli::args::OneShotArgs;
 
 pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> {
-    let xref_db = XrefDatabase::build_from_binary(binary);
-    let graph = CallGraph::build_from_xrefs(&binary.functions, &xref_db, 0x40);
+    if let Some(entry) = cli.callgraph_function {
+        if binary.function_at_exact(entry).is_none() {
+            bail!(
+                "no discovered function starts at 0x{entry:x}; use `list` with the same discovery profile"
+            );
+        }
+    }
+    let index = build_xref_index(binary, true);
+    let graph = CallGraph::build_from_xref_index(&binary.functions, &index, 0x40);
+    let mut functions: Vec<_> = binary
+        .functions
+        .iter()
+        .filter(|function| {
+            cli.callgraph_function
+                .is_none_or(|entry| function.address == entry)
+        })
+        .collect();
+    functions.sort_by_key(|function| function.address);
 
     let mut stdout = std::io::stdout().lock();
 
     if cli.json {
         let mut nodes = Vec::new();
-        for func in &binary.functions {
+        for func in &functions {
             let callers: Vec<_> = graph
                 .callers_of(func.address)
                 .iter()
@@ -47,7 +63,10 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
         let payload = json!({
             "total_call_sites": graph.total_call_sites(),
             "function_count": binary.functions.len(),
+            "node_count": nodes.len(),
+            "selected_function": cli.callgraph_function.map(|entry| format!("0x{entry:x}")),
             "nodes": nodes,
+            "analysis": index.analysis,
         });
         let text = serde_json::to_string_pretty(&payload).context("serialize callgraph JSON")?;
         println!("{}", text);
@@ -62,10 +81,16 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
     )
     .context("write callgraph header")?;
 
-    for func in &binary.functions {
+    writeln!(
+        stdout,
+        "xref_analysis: {}",
+        serde_json::to_string(&index.analysis)?
+    )?;
+
+    for func in &functions {
         let callers = graph.callers_of(func.address);
         let callees = graph.callees_of(func.address);
-        if callers.is_empty() && callees.is_empty() {
+        if callers.is_empty() && callees.is_empty() && cli.callgraph_function.is_none() {
             continue;
         }
         writeln!(

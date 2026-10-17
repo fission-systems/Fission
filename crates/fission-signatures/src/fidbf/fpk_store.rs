@@ -26,9 +26,9 @@ use crate::fpk::{
     BLOCK_TARGET_BULK, CODEC_ZSTD_COLUMNAR, FpkError, FpkReader, HashEntry, append_hash_index,
     pack_with, pack_with_locators,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub const KIND_FID_LIBRARY: u16 = 10;
 pub const KIND_FID_FUNCTION: u16 = 11;
@@ -502,11 +502,51 @@ mod tests {
 /// Library rows are small and are read once, because a match needs its family
 /// name. `domain_path` is not read at all: nothing outside the parser uses it.
 pub struct LazyFidDatabase {
+    candidates: MatchCandidateCache,
     functions: FpkReader,
     libraries: Vec<FidbfLibrary>,
     relations: Option<FpkReader>,
     relation_index: OnceLock<LazyRelationIndex>,
     source_path: String,
+}
+
+/// Positive immutable archive records, not context-dependent match decisions.
+#[derive(Default)]
+struct MatchCandidateCache(Mutex<HashMap<u64, Arc<[FidbfFunction]>>>);
+
+impl MatchCandidateCache {
+    fn get_or_load(
+        &self,
+        full_hash: u64,
+        load: impl FnOnce() -> Result<Vec<String>, FpkError>,
+    ) -> Result<Arc<[FidbfFunction]>, FpkError> {
+        if let Ok(cache) = self.0.lock() {
+            if let Some(hit) = cache.get(&full_hash) {
+                return Ok(Arc::clone(hit));
+            }
+        }
+        // Archive access/parsing never runs under the candidate-map mutex.
+        let lines = load()?;
+        let decoded: Arc<[FidbfFunction]> = lines
+            .iter()
+            .filter_map(|line| decode_function_for_match(line))
+            .collect::<Vec<_>>()
+            .into();
+        if decoded.is_empty() {
+            return Ok(decoded);
+        }
+        let chosen = if let Ok(mut cache) = self.0.lock() {
+            Arc::clone(
+                cache
+                    .entry(full_hash)
+                    .or_insert_with(|| Arc::clone(&decoded)),
+            )
+        } else {
+            Arc::clone(&decoded)
+        };
+        // `decoded` (including any losing allocation) drops after the lock.
+        Ok(chosen)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -533,6 +573,7 @@ impl LazyFidDatabase {
             }
         }
         Some(Self {
+            candidates: MatchCandidateCache::default(),
             functions,
             libraries,
             relations: FpkReader::open(&table("rel")).ok(),
@@ -633,26 +674,26 @@ impl LazyFidDatabase {
     }
 
     pub fn has_force_relation_candidate(&self, full_hash: u64, specific_hash: u64) -> bool {
-        let Ok(records) = self.functions.records_by_key(full_hash) else {
+        let Ok(records) = self
+            .candidates
+            .get_or_load(full_hash, || self.functions.records_by_key(full_hash))
+        else {
             return false;
         };
-        records
-            .iter()
-            .filter_map(|line| decode_function_for_match(line))
-            .any(|func| {
-                func.force_relation
-                    && !func.auto_fail
-                    && (!func.force_specific || func.specific_hash == specific_hash)
-                    && (func.auto_pass
-                        || (func.code_unit_size as f32
-                            + if func.specific_hash == specific_hash {
-                                10.0
-                            } else {
-                                0.0
-                            })
-                        .min(100.0)
-                            >= FID_ACCEPT_THRESHOLD)
-            })
+        records.iter().any(|func| {
+            func.force_relation
+                && !func.auto_fail
+                && (!func.force_specific || func.specific_hash == specific_hash)
+                && (func.auto_pass
+                    || (func.code_unit_size as f32
+                        + if func.specific_hash == specific_hash {
+                            10.0
+                        } else {
+                            0.0
+                        })
+                    .min(100.0)
+                        >= FID_ACCEPT_THRESHOLD)
+        })
     }
 
     /// Same contract as [`FidbfDatabase::identify_by_hashes`], including the
@@ -671,16 +712,18 @@ impl LazyFidDatabase {
         specific_hash: u64,
         context: FidRelationContext<'_>,
     ) -> Vec<FidbfMatch> {
-        let Ok(records) = self.functions.records_by_key(full_hash) else {
+        let Ok(records) = self
+            .candidates
+            .get_or_load(full_hash, || self.functions.records_by_key(full_hash))
+        else {
             return Vec::new();
         };
         let mut results: Vec<FidbfMatch> = records
             .iter()
-            .filter_map(|line| decode_function_for_match(line))
             .filter(|f| !f.auto_fail)
             .filter(|f| !f.force_specific || f.specific_hash == specific_hash)
             .filter_map(|f| {
-                let (child_score, parent_score) = self.relation_scores(&f, context);
+                let (child_score, parent_score) = self.relation_scores(f, context);
                 if f.force_relation && child_score == 0 {
                     return None;
                 }
@@ -703,7 +746,7 @@ impl LazyFidDatabase {
                     .map(|l| l.family_name.clone())
                     .unwrap_or_default();
                 Some(FidbfMatch {
-                    name: f.name,
+                    name: f.name.clone(),
                     library_family: family,
                     score,
                     specific_matched: f.specific_hash == specific_hash,
@@ -759,3 +802,6 @@ fn decode_function_for_match(line: &str) -> Option<FidbfFunction> {
         force_relation: forced & 1 != 0,
     })
 }
+
+#[cfg(test)]
+mod candidate_cache_tests;

@@ -915,19 +915,55 @@ impl DieMatcher {
         }
     }
 
-    fn build_string_cache(&mut self, _binary: &LoadedBinary) {
-        self.string_cache.clear();
+    fn build_string_cache(&mut self, binary: &LoadedBinary) {
+        let mut data = binary.data.as_slice();
+        if let Some(cap) = self.max_string_scan_bytes {
+            if cap < data.len() {
+                data = &data[..cap];
+            }
+        }
+        Self::fill_string_cache(
+            &mut self.string_cache,
+            data,
+            self.database.signatures.iter().flat_map(|sig| &sig.rules),
+        );
+    }
+
+    /// Reuse literal results for direct `match_signature` callers. Their
+    /// uncached StringMatch fallback reads the full binary, independently of
+    /// match_binary's scan cap. Preserve that domain and leave section/EP
+    /// caches untouched: preparing those would change direct rule results.
+    pub(crate) fn prepare_direct_signature_strings(&mut self, binary: &LoadedBinary) {
+        Self::fill_string_cache(
+            &mut self.string_cache,
+            binary.data.as_slice(),
+            self.database
+                .signatures
+                .iter()
+                .filter(|sig| {
+                    sig.source_format
+                        .as_deref()
+                        .is_none_or(|format| binary_matches_die_format(binary, format))
+                })
+                .flat_map(|sig| &sig.rules),
+        );
+    }
+
+    fn fill_string_cache<'a>(
+        cache: &mut HashMap<String, bool>,
+        data: &[u8],
+        rules: impl Iterator<Item = &'a SignatureRule>,
+    ) {
+        cache.clear();
         let mut unique_needles = Vec::new();
         let mut seen = HashSet::new();
 
-        for sig in &self.database.signatures {
-            for rule in &sig.rules {
-                if let SignatureRule::StringMatch { value } = rule
-                    && !value.is_empty()
-                    && seen.insert(value.clone())
-                {
-                    unique_needles.push(value.clone());
-                }
+        for rule in rules {
+            if let SignatureRule::StringMatch { value } = rule
+                && !value.is_empty()
+                && seen.insert(value.clone())
+            {
+                unique_needles.push(value.clone());
             }
         }
 
@@ -936,12 +972,6 @@ impl DieMatcher {
         }
 
         // Evaluate all DIE string rules against the binary in one pass.
-        let mut data = _binary.data.as_slice();
-        if let Some(cap) = self.max_string_scan_bytes {
-            if cap < data.len() {
-                data = &data[..cap];
-            }
-        }
         let escaped = unique_needles
             .iter()
             .map(|needle| regex::escape(needle))
@@ -951,14 +981,13 @@ impl DieMatcher {
             Ok(set) => {
                 let matches = set.matches(data);
                 for (idx, needle) in unique_needles.into_iter().enumerate() {
-                    self.string_cache.insert(needle, matches.matched(idx));
+                    cache.insert(needle, matches.matched(idx));
                 }
             }
             Err(_) => {
                 // Fallback keeps behavior correct if regex-set compilation fails.
                 for needle in unique_needles {
-                    self.string_cache
-                        .insert(needle.clone(), Self::contains_string(data, &needle));
+                    cache.insert(needle.clone(), Self::contains_string(data, &needle));
                 }
             }
         }
@@ -1528,6 +1557,111 @@ pub fn detect_with_die(binary: &LoadedBinary, result: &mut DetectionResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn literal_fixture(data: Vec<u8>) -> LoadedBinary {
+        use crate::loader::{DataBuffer, LoadedBinaryBuilder};
+        let size = data.len() as u64;
+        LoadedBinaryBuilder::new("literal.bin".into(), DataBuffer::Heap(data))
+            .format("PE")
+            .entry_point(0x1000)
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x1000,
+                virtual_size: size,
+                file_offset: 0,
+                file_size: size,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .unwrap()
+    }
+
+    fn literal_database(values: &[&str]) -> SignatureDatabase {
+        SignatureDatabase {
+            format_version: "fixture".into(),
+            description: "fixture".into(),
+            source: "fixture".into(),
+            signatures: values
+                .iter()
+                .enumerate()
+                .map(|(i, value)| Signature {
+                    name: format!("literal-{i}"),
+                    sig_type: "compiler".into(),
+                    rules: vec![SignatureRule::StringMatch {
+                        value: (*value).into(),
+                    }],
+                    source_format: None,
+                    source_file: None,
+                    unsupported_rule_count: 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn direct_string_cache_equals_scalar_bytes_and_complete_detections() {
+        let values = [
+            "a", "A", "a\0b", "é", "한글", "[a].*?\\", "line\r\n", "absent", "a",
+        ];
+        let db = literal_database(&values);
+        for data in [
+            Vec::new(),
+            vec![0xff, 0x80, 0xfe],
+            "é 한글 [a].*?\\ line\r\n".as_bytes().to_vec(),
+            b"\xff\x80 a\0b A \xfe".to_vec(),
+        ] {
+            let binary = literal_fixture(data);
+            let legacy = DieMatcher::new(db.clone());
+            let mut prepared = DieMatcher::new(db.clone());
+            prepared.prepare_direct_signature_strings(&binary);
+            assert_eq!(prepared.string_cache.len(), values.len() - 1);
+            for (value, sig) in values.iter().zip(&db.signatures) {
+                assert_eq!(
+                    prepared.string_cache[*value],
+                    DieMatcher::contains_string(binary.data.as_slice(), value)
+                );
+                assert_eq!(
+                    format!("{:?}", legacy.match_signature(&binary, sig)),
+                    format!("{:?}", prepared.match_signature(&binary, sig))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn direct_string_cache_preserves_full_domain_without_warming_other_rules() {
+        let binary = literal_fixture(b"prefix needle only-elf".to_vec());
+        let mut db = literal_database(&["needle", "only-elf"]);
+        db.signatures[0].rules.push(SignatureRule::SectionName {
+            name: ".text".into(),
+        });
+        db.signatures[1].source_format = Some("ELF".into());
+        let legacy = DieMatcher::new(db.clone()).with_scan_budgets(Some(2), Some(7));
+        let mut prepared = DieMatcher::new(db.clone()).with_scan_budgets(Some(2), Some(7));
+        prepared.prepare_direct_signature_strings(&binary);
+        assert_eq!(prepared.string_cache.len(), 1);
+        assert!(prepared.string_cache["needle"]);
+        assert!(prepared.section_cache.is_empty());
+        assert!(prepared.ep_pattern_cache.is_empty());
+        assert_eq!(prepared.max_string_scan_bytes, Some(2));
+        assert_eq!(prepared.max_entropy_scan_bytes, Some(7));
+        for sig in &db.signatures {
+            assert_eq!(
+                format!("{:?}", legacy.match_signature(&binary, sig)),
+                format!("{:?}", prepared.match_signature(&binary, sig))
+            );
+        }
+        // Ordinary match_binary still applies its existing prefix cap.
+        prepared.match_binary(&binary);
+        assert!(!prepared.string_cache["needle"]);
+        assert_eq!(prepared.max_string_scan_bytes, Some(2));
+        // Reusing a matcher for another prepared input never retains old hits.
+        let other = literal_fixture(b"different bytes".to_vec());
+        prepared.prepare_direct_signature_strings(&other);
+        assert!(!prepared.string_cache["needle"]);
+    }
 
     #[test]
     fn test_parse_pattern() {

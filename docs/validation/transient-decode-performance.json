@@ -1,0 +1,285 @@
+{
+  "base": "533c80c94aedc578ab53c0dea77c55243764b2a7",
+  "source_only_tree": "573d11c323ee90139413d30fc8c5f54a6b113510",
+  "source_patch_sha256": "8a4d7e8bc260486b08f9706f994aa7348e366fdf0c6e11a3e864dab6eeb1086b",
+  "production_files_sha256": {
+    "crates/fission-sleigh/src/runtime/lift.rs": "5faab5e9ff9d5de2d917c51bb3af5d36f444c547d49326c0cb993af712d99830",
+    "crates/fission-sleigh/src/runtime/mod.rs": "86f2b315789c603d84fad682e83670c6a2e75d3108f09f82e8782e124f47a3be",
+    "crates/fission-sleigh/src/runtime/raw_decode_seed.rs": "f6cddab13561cde1197c13f1cf6a0610fcd7817db29c348d0db2c148f5fd5c59",
+    "crates/fission-static/src/analysis/control_flow_facts/mod.rs": "9603a2c8973ce0bf5b57b0db2a27029afc6f7a4c221332a40030845a60520f96",
+    "crates/fission-static/src/analysis/noreturn/mod.rs": "0530617fbf036e88e677f3b3a4a228618831e94b604ab28150c35be768e1c38d",
+    "crates/fission-static/src/analysis/decomp/facts.rs": "c5d653ce703e5170d3a9837e470628d07122fe64162b98d7332bb2f910a5b48e"
+  },
+  "candidate_sha256": "5ec5b83100b10e1d5280ea22a92f6b4fce8b3894c8d50f1e18038b67e0ac1430",
+  "scope": "Mechanical transient raw decode reuse; no semantic/readability/score/ranking claim",
+  "dataset_revision": "07dd95dbe6214b8a78fc1e4a55961ab515986489",
+  "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+  "population_reference": "decompiler-startup-performance.json: population (45 cells/250 functions)",
+  "binaries": {
+    "baseline": "a4e3eafa56886bfc9dc7948364b291bc683dd69e2327c0e587eda1c6467f5e6d",
+    "candidate": "5ec5b83100b10e1d5280ea22a92f6b4fce8b3894c8d50f1e18038b67e0ac1430"
+  },
+  "machine": {
+    "cpu": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "memory_bytes": 25769803776,
+    "release_profile": "lto=true / strip=true / codegen-units=1"
+  },
+  "timing_keys_excluded": [
+    "build_duration_ms",
+    "decomp_sec",
+    "normalize_duration_ms",
+    "postprocess_sec",
+    "render_duration_ms",
+    "structuring_duration_ms",
+    "total_time_ms"
+  ],
+  "large": {
+    "baseline": {
+      "seconds": 31.50728700007312,
+      "cpu_seconds": 141.82526199999995,
+      "max_rss_bytes": 2294677504,
+      "rss_range_bytes": [
+        2176466944,
+        2346975232
+      ]
+    },
+    "candidate": {
+      "seconds": 26.913879749947228,
+      "cpu_seconds": 118.29841900000002,
+      "max_rss_bytes": 2325839872,
+      "rss_range_bytes": [
+        2325708800,
+        2363326464
+      ]
+    }
+  },
+  "paired": [
+    {
+      "cell": "03",
+      "baseline": 2.0866865830030292,
+      "baseline_deterministic": true,
+      "candidate": 2.0738947089994326,
+      "candidate_deterministic": true,
+      "speedup": 1.0061680440902268
+    },
+    {
+      "cell": "27",
+      "baseline": 0.9343396249460056,
+      "baseline_deterministic": true,
+      "candidate": 0.9301015420351177,
+      "candidate_deterministic": true,
+      "speedup": 1.0045565808885928
+    },
+    {
+      "cell": "40",
+      "baseline": 1.0300144579960033,
+      "baseline_deterministic": true,
+      "candidate": 1.004402165999636,
+      "candidate_deterministic": true,
+      "speedup": 1.0255000366022473
+    }
+  ],
+  "kuna_cells": [
+    {
+      "cell": "03",
+      "platform": "linux",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 2.0750947080086917,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.19287254195660353,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 10.758891270669256
+    },
+    {
+      "cell": "22",
+      "platform": "windows",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 28.21833083301317,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 2.7651417499873787,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 10.20502143629417
+    },
+    {
+      "cell": "27",
+      "platform": "windows",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.9170725420117378,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.11092870798893273,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 8.267224586292247
+    },
+    {
+      "cell": "40",
+      "platform": "macos",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 1.0059837499866262,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.33929079095833004,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 2.9649603726208293
+    }
+  ],
+  "kuna_binary_sha256": "46cd0f8109557f8fe1e8bae53e191bd6b92a7d0410ee2b279a37621c5a2c3e05",
+  "validation": {
+    "targeted_passed": 9,
+    "related_passed": 1847,
+    "related_skipped": 6,
+    "fresh_functions_returned": 250,
+    "non_time_functions_changed": 0,
+    "focused_repeat_functions": 22,
+    "focused_runs": 3,
+    "whole_population_two_run_determinism": false,
+    "guest_execution_or_recompile_test": false,
+    "standalone_context_probes": "ARM little/big endian IT commits; x86 partial same-window and changed initial context"
+  },
+  "window_probe": {
+    "captured_functions": 38186,
+    "exact_windows": 38186,
+    "candidate_functions": 38186,
+    "captured_records": 1930323,
+    "packed_bytes": 408001368,
+    "input_window_bytes": 9922678,
+    "scope": "Loader-only local probe, not CLI-prepared population; exact-window eligibility is not an observed runtime hit count; excluded from timings"
+  },
+  "profile": {
+    "diagnostic_only": true,
+    "complete_non_time_release_records_equal": 6,
+    "profiles": [
+      {
+        "file": "startup-large-profile-12.txt",
+        "sha256": "1443b51be3b009e06bcdda22f592680c2144dabb797766a8687f9d51ee7e0130",
+        "footprint": "644.4M",
+        "peak_footprint": "644.4M"
+      },
+      {
+        "file": "startup-large-profile-20.txt",
+        "sha256": "8c7d3d2927b20b0c24f55c29809b854e2a81943dec510bd5233930eff675f3ac",
+        "footprint": "1.0G",
+        "peak_footprint": "1.0G"
+      },
+      {
+        "file": "startup-large-profile-28.txt",
+        "sha256": "5091d75813d15e41d18db1ba39304f5cd902feaf31f74fe7dce8df4dbad81e30",
+        "footprint": "2.0G",
+        "peak_footprint": "2.0G"
+      },
+      {
+        "file": "startup-large-profile-4.txt",
+        "sha256": "19ef17ac965a111c43f38e430cc8c43bcc3fc17b209d7d19b0f68bcc46ae7ea2",
+        "footprint": "353.8M",
+        "peak_footprint": "582.7M"
+      }
+    ],
+    "observations": [
+      "12/20 second samples remain inside no-return raw binding and seed capture",
+      "28 second sample crosses later parallel FID and signature lookup",
+      "No sample count is interpreted as a whole-run contribution or timing/RSS improvement"
+    ]
+  },
+  "limits": [
+    "Timing controls are four native batches, not a whole-corpus speed measurement",
+    "No new all-function hot-cache memory cap; queried completed decodes still become strongly retained",
+    "Warm CF/no-return caches or changed windows/frontends/contexts can provide no reusable seed",
+    "Public/default scoring, adapters, budgets, concurrency policies and schema unchanged",
+    "OS caches were not flushed and desktop scheduling was uncontrolled; no own builds/tests/profilers during timed runs"
+  ]
+}

@@ -199,6 +199,7 @@ pub struct DefinitionDependencyMap {
     dependencies: HashMap<String, HashSet<String>>,
     address_dependencies: HashMap<String, HashSet<String>>,
     identity_dependencies: HashMap<String, HashSet<String>>,
+    identity_barriers: HashSet<String>,
 }
 
 /// Proof that a dependency node has a path to one of a fixed set of roots.
@@ -267,9 +268,48 @@ impl DefinitionDependencyMap {
             dependencies: HashMap::default(),
             address_dependencies: HashMap::default(),
             identity_dependencies: HashMap::default(),
+            identity_barriers: HashSet::default(),
         };
         map.collect_stmts(stmts);
+        map.reject_conflicting_identity_sources();
         map
+    }
+
+    fn reject_conflicting_identity_sources(&mut self) {
+        // Copy SCCs can have several syntactic sources but one exact value
+        // source (head -> cursor -> saved -> cursor). Reject a whole-binding
+        // alias only when the copy graph reaches different terminal values.
+        loop {
+            let mut rejected = Vec::new();
+            for (name, sources) in &self.identity_dependencies {
+                if sources.len() < 2 {
+                    continue;
+                }
+                let mut pending = vec![name.clone()];
+                let mut visited = HashSet::default();
+                let mut terminals = HashSet::default();
+                while let Some(node) = pending.pop() {
+                    if !visited.insert(node.clone()) {
+                        continue;
+                    }
+                    if let Some(sources) = self.identity_dependencies.get(&node) {
+                        pending.extend(sources.iter().cloned());
+                    } else {
+                        terminals.insert(node);
+                    }
+                }
+                if terminals.len() > 1 {
+                    rejected.push(name.clone());
+                }
+            }
+            if rejected.is_empty() {
+                break;
+            }
+            for name in rejected {
+                self.identity_dependencies.remove(&name);
+                self.identity_barriers.insert(name);
+            }
+        }
     }
 
     pub fn roots_reaching(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
@@ -360,9 +400,27 @@ impl DefinitionDependencyMap {
                 let address_dependencies =
                     self.address_dependencies.entry(name.clone()).or_default();
                 collect_address_provenance_vars(rhs, address_dependencies);
-                let identity_dependencies =
-                    self.identity_dependencies.entry(name.clone()).or_default();
-                collect_identity_provenance_vars(rhs, identity_dependencies);
+                let mut identity_sources = HashSet::default();
+                let preserves_identity =
+                    collect_identity_provenance_vars(rhs, &mut identity_sources);
+                if preserves_identity
+                    && identity_sources.len() == 1
+                    && identity_sources.contains(name)
+                {
+                    // A transparent self-copy supplies no new value and
+                    // cannot restore an identity already invalidated.
+                } else if preserves_identity && !self.identity_barriers.contains(name) {
+                    self.identity_dependencies
+                        .entry(name.clone())
+                        .or_default()
+                        .extend(identity_sources);
+                } else {
+                    // A binding with several lifetimes is not one exact
+                    // pointer value. An advancement/load/call cannot leave
+                    // an old alias usable for every later field access.
+                    self.identity_barriers.insert(name.clone());
+                    self.identity_dependencies.remove(name);
+                }
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::Expr(_)
@@ -442,10 +500,11 @@ fn collect_address_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>)
 /// Collect definitions that preserve the exact pointer value. Casts and a
 /// branch-select preserve identity; pointer arithmetic, loads, and calls do
 /// not. This is intentionally narrower than address provenance.
-fn collect_identity_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
+fn collect_identity_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>) -> bool {
     match expr {
         PreHirExpr::Var(name) => {
             out.insert(name.clone());
+            true
         }
         PreHirExpr::Cast { expr, .. } => collect_identity_provenance_vars(expr, out),
         PreHirExpr::Select {
@@ -453,8 +512,17 @@ fn collect_identity_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>
             else_expr,
             ..
         } => {
-            collect_identity_provenance_vars(then_expr, out);
-            collect_identity_provenance_vars(else_expr, out);
+            let mut then_sources = HashSet::default();
+            let mut else_sources = HashSet::default();
+            if collect_identity_provenance_vars(then_expr, &mut then_sources)
+                && collect_identity_provenance_vars(else_expr, &mut else_sources)
+            {
+                out.extend(then_sources);
+                out.extend(else_sources);
+                true
+            } else {
+                false
+            }
         }
         PreHirExpr::Unary { .. }
         | PreHirExpr::PtrOffset { .. }
@@ -466,7 +534,7 @@ fn collect_identity_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>
         | PreHirExpr::AggregateCopy { .. }
         | PreHirExpr::AddressOfGlobal(_)
         | PreHirExpr::AddressOfLocal(_)
-        | PreHirExpr::Const(_, _) => {}
+        | PreHirExpr::Const(_, _) => false,
     }
 }
 
@@ -1743,6 +1811,145 @@ mod tests {
         assert_eq!(
             dependencies.identity_roots_reaching("advanced", &roots),
             ["advanced".to_string()].into_iter().collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn identity_roots_do_not_forward_an_alias_across_redefinition() {
+        let copy = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("cursor".into()),
+            rhs: PreHirExpr::Var("head".into()),
+        };
+        let advance = PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("cursor".into())),
+            offset: 1,
+        };
+        let roots = ["head", "cursor", "saved"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        for replacement in [
+            advance,
+            PreHirExpr::Select {
+                cond: Box::new(PreHirExpr::Var("condition".into())),
+                then_expr: Box::new(PreHirExpr::Var("head".into())),
+                else_expr: Box::new(PreHirExpr::Const(0, NirType::Unknown)),
+                ty: NirType::Unknown,
+            },
+        ] {
+            let redefine = PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cursor".into()),
+                rhs: replacement,
+            };
+            for defs in [
+                vec![copy.clone(), redefine.clone()],
+                vec![redefine, copy.clone()],
+            ] {
+                let mut body = defs;
+                body.push(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("saved".into()),
+                    rhs: PreHirExpr::Var("cursor".into()),
+                });
+                let dependencies = DefinitionDependencyMap::build(&body);
+                assert_eq!(
+                    dependencies.identity_roots_reaching("saved", &roots),
+                    ["saved", "cursor"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<HashSet<_>>()
+                );
+                assert!(
+                    dependencies
+                        .address_roots_reaching("saved", &roots)
+                        .contains("head"),
+                    "address contributors remain conservative possible roots"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn identity_roots_require_the_same_source_across_copy_definitions() {
+        let copy = |destination: &str, source: &str| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(destination.into()),
+            rhs: PreHirExpr::Var(source.into()),
+        };
+        let roots = ["head", "cursor", "next", "saved"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        for defs in [
+            vec![copy("cursor", "head"), copy("cursor", "next")],
+            vec![copy("cursor", "next"), copy("cursor", "head")],
+        ] {
+            let mut body = defs;
+            body.push(copy("cursor", "cursor"));
+            body.push(copy("saved", "cursor"));
+            let dependencies = DefinitionDependencyMap::build(&body);
+            assert_eq!(
+                dependencies.identity_roots_reaching("saved", &roots),
+                ["saved", "cursor"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<HashSet<_>>()
+            );
+            assert!(
+                dependencies
+                    .address_roots_reaching("saved", &roots)
+                    .contains("head")
+            );
+            assert!(
+                dependencies
+                    .address_roots_reaching("saved", &roots)
+                    .contains("next")
+            );
+        }
+        let body = vec![
+            copy("cursor", "head"),
+            copy("cursor", "cursor"),
+            copy("cursor", "head"),
+        ];
+        assert_eq!(
+            DefinitionDependencyMap::build(&body).identity_roots_reaching("cursor", &roots),
+            ["cursor", "head"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn identity_roots_require_identical_select_alternatives() {
+        let roots = ["left", "right", "selected"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        for alternative in ["left", "right"] {
+            let body = vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("selected".into()),
+                rhs: PreHirExpr::Select {
+                    cond: Box::new(PreHirExpr::Var("condition".into())),
+                    then_expr: Box::new(PreHirExpr::Var("left".into())),
+                    else_expr: Box::new(PreHirExpr::Var(alternative.into())),
+                    ty: NirType::Unknown,
+                },
+            }];
+            let reached =
+                DefinitionDependencyMap::build(&body).identity_roots_reaching("selected", &roots);
+            assert_eq!(reached.contains("left"), alternative == "left");
+            assert!(!reached.contains("right"));
+        }
+        let copy = |a: &str, b: &str| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(a.into()),
+            rhs: PreHirExpr::Var(b.into()),
+        };
+        let body = vec![copy("left", "right"), copy("right", "left")];
+        assert_eq!(
+            DefinitionDependencyMap::build(&body).identity_roots_reaching("left", &roots),
+            ["left", "right"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<HashSet<_>>()
         );
     }
 
