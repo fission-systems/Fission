@@ -384,3 +384,231 @@ fn channel_cfg_fixture_is_portable_and_all_bodies_have_bounded_execution() {
         }
     }
 }
+
+#[test]
+fn bounded_loop_returns_only_after_every_path_terminates() {
+    let body = body("block entry() { branch loop(); } block loop() { quantum.x 0; %m:u1=quantum.measure_z 0; branch.if %m, loop(), done(%m); } block done(%out:u1) { return; }");
+    assert!(simulate(&body, &PureState::basis(1, 0).unwrap()).is_err());
+    for initial in [
+        PureState::basis(1, 0).unwrap(),
+        PureState::basis(1, 1).unwrap(),
+        PureState::new(
+            1,
+            vec![Complex { re: 0.6, im: 0.0 }, Complex { re: 0.0, im: 0.8 }],
+        )
+        .unwrap(),
+    ] {
+        let run = simulate_bounded(&body, &initial, QuantumLimits::default()).unwrap();
+        assert!(run.is_complete());
+        assert!(run.pending().is_empty());
+        let result = run.into_complete().unwrap();
+        close(result.total_probability(), 1.0);
+        close(result.density_matrix()[0].re, 1.0);
+        for branch in result.branches() {
+            assert_eq!(branch.values, vec![Some(0), Some(0)]);
+            assert!(branch.measurements.len() <= 2);
+        }
+    }
+}
+#[test]
+fn stopped_loop_preserves_unfinished_probability_without_renormalizing() {
+    let body=body("block entry() { branch loop(); } block loop() { quantum.h 0; %m:u1=quantum.measure_z 0; branch.if %m, loop(), done(); } block done() { return; }");
+    let run = simulate_bounded(
+        &body,
+        &PureState::basis(1, 0).unwrap(),
+        QuantumLimits {
+            steps: 1000,
+            splits: 4,
+            branches: 4096,
+        },
+    )
+    .unwrap();
+    assert!(!run.is_complete());
+    assert_eq!(run.limit(), Some(QuantumLimit::Splits));
+    let finished: f64 = run.completed().iter().map(|b| b.probability).sum();
+    let frontier: f64 = run.pending().iter().map(|b| b.branch.probability).sum();
+    close(finished, 15.0 / 16.0);
+    close(frontier, 1.0 / 16.0);
+    assert!(run.diagnostic_json().contains("\"result\":null"));
+    assert!(run.into_complete().is_err());
+}
+#[test]
+fn all_budgets_stop_before_the_unexecuted_effect() {
+    let empty =
+        body("block entry() { quantum.x 0; branch again(); } block again() { branch again(); }");
+    let initial = PureState::basis(1, 0).unwrap();
+    let zero = simulate_bounded(
+        &empty,
+        &initial,
+        QuantumLimits {
+            steps: 0,
+            ..QuantumLimits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(zero.limit(), Some(QuantumLimit::Steps));
+    assert_eq!(zero.pending()[0].branch.state, initial);
+    let stopped = simulate_bounded(
+        &empty,
+        &initial,
+        QuantumLimits {
+            steps: 7,
+            ..QuantumLimits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(stopped.steps(), 7);
+    assert_eq!(stopped.limit(), Some(QuantumLimit::Steps));
+    let split = body("quantum.h 0; %m:u1=quantum.measure_z 0;");
+    let cap = simulate_bounded(
+        &split,
+        &initial,
+        QuantumLimits {
+            branches: 1,
+            ..QuantumLimits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(cap.limit(), Some(QuantumLimit::Branches));
+    assert!(cap.pending()[0].branch.measurements.is_empty());
+    assert_eq!(cap.pending()[0].operation, 1);
+    let split_bound = simulate_bounded(
+        &split,
+        &initial,
+        QuantumLimits {
+            splits: 0,
+            ..QuantumLimits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(split_bound.limit(), Some(QuantumLimit::Splits));
+    assert!(simulate_bounded(
+        &split,
+        &initial,
+        QuantumLimits {
+            branches: 0,
+            ..QuantumLimits::default()
+        }
+    )
+    .is_err());
+    assert!(simulate_bounded(
+        &split,
+        &initial,
+        QuantumLimits {
+            steps: 1_000_001,
+            ..QuantumLimits::default()
+        }
+    )
+    .is_err());
+}
+#[test]
+fn bounded_cycles_transfer_block_arguments_in_parallel() {
+    let body=body("block entry() { %a:u1=int.const 0; %b:u1=int.const 1; quantum.z 0; branch again(%a,%b); } block again(%x:u1,%y:u1) { branch.if %x, done(%x,%y), again(%y,%x); } block done(%outx:u1,%outy:u1) { return; }");
+    let result = simulate_bounded(
+        &body,
+        &PureState::basis(1, 0).unwrap(),
+        QuantumLimits::default(),
+    )
+    .unwrap()
+    .into_complete()
+    .unwrap();
+    assert_eq!(
+        result.branches()[0].values,
+        vec![Some(0), Some(1), Some(1), Some(0), Some(1), Some(0)]
+    );
+}
+
+#[test]
+fn relaxation_package_and_decay_contract() {
+    let p = program("quantum.relaxation 0,1000000,2000000,3000000;").unwrap();
+    assert_eq!(p.version, 14);
+    assert_eq!(
+        p,
+        FslcPackage::decode_binary(&p.encode_binary().unwrap()).unwrap()
+    );
+    let mut old = p.clone();
+    old.version = 13;
+    assert!(old.encode_binary().is_err());
+    let mut bytes = p.encode_binary().unwrap();
+    bytes[4..6].copy_from_slice(&13u16.to_le_bytes());
+    assert!(FslcPackage::decode_binary(&bytes).is_err());
+    for invalid in ["0,1,0,1", "0,1,1,0", "0,1,2,5"] {
+        assert!(program(&format!("quantum.relaxation {invalid};")).is_err());
+    }
+    let initial = PureState::new(
+        1,
+        vec![
+            Complex {
+                re: std::f64::consts::FRAC_1_SQRT_2,
+                im: 0.0,
+            },
+            Complex {
+                re: 0.0,
+                im: std::f64::consts::FRAC_1_SQRT_2,
+            },
+        ],
+    )
+    .unwrap();
+    let result = simulate(&p.instructions[0], &initial).unwrap();
+    let rho = result.density_matrix();
+    close(rho[3].re, 0.5 * (-0.5f64).exp());
+    close(rho[1].im, -0.5 * (-1.0f64 / 3.0).exp());
+    close(result.total_probability(), 1.0);
+    assert!(result.branches().iter().all(|b| b.measurements.is_empty()));
+    assert!(emit_openqasm(&p.instructions[0], 1).is_err());
+    let run = simulate_bounded(
+        &p.instructions[0],
+        &initial,
+        QuantumLimits {
+            splits: 1,
+            ..QuantumLimits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(run.limit(), Some(QuantumLimit::Splits));
+    assert_eq!(run.pending()[0].branch.state, initial);
+    let zero = body("quantum.relaxation 0,0,1,2;");
+    close(
+        simulate(&zero, &initial).unwrap().density_matrix()[1].im,
+        -0.5,
+    );
+    let extreme = body("quantum.relaxation 0,18446744073709551615,1,2;");
+    close(
+        simulate(&extreme, &initial).unwrap().density_matrix()[0].re,
+        1.0,
+    );
+}
+
+#[test]
+fn upstream_qisa_word_formats_decode_but_execution_remains_unsupported() {
+    let p = compile_source(include_str!("../specs/qisa-qelab-9b024494.fsl")).unwrap();
+    for (raw, field, value) in [
+        (0x600fffffu32, "cycles", 1048575),
+        (0x70038000, "source", 7),
+        (0x813e0200, "separator", 0),
+    ] {
+        let decoded = p
+            .decode_bytes(&p.language, &raw.to_le_bytes())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            decoded
+                .fields
+                .iter()
+                .find(|(name, _)| name == field)
+                .unwrap()
+                .1,
+            value
+        );
+        assert_eq!(p.reencode(&decoded, &[]).unwrap(), raw.to_le_bytes());
+        let body = &p.instructions[decoded.instruction_index];
+        assert_eq!(body.ops, vec![FirOp::Unsupported]);
+        assert!(simulate(body, &PureState::basis(1, 0).unwrap()).is_err());
+        assert!(simulate_bounded(
+            body,
+            &PureState::basis(1, 0).unwrap(),
+            QuantumLimits::default()
+        )
+        .is_err());
+    }
+}

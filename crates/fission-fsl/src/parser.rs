@@ -21,6 +21,12 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    QuantumRelaxation {
+        qubit: u8,
+        duration_ps: u64,
+        t1_ps: u64,
+        t2_ps: u64,
+    },
     QuantumNoise {
         qubit: u8,
         channel: crate::quantum::NoiseChannel,
@@ -1258,6 +1264,23 @@ impl Parser {
             };
             self.expect_symbol(';')?;
             Ok(statement)
+        } else if self.at_ident("quantum.relaxation") {
+            self.advance();
+            let qubit = u8::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("qubit index exceeds u8"))?;
+            self.expect_symbol(',')?;
+            let duration_ps = self.expect_integer()?;
+            self.expect_symbol(',')?;
+            let t1_ps = self.expect_integer()?;
+            self.expect_symbol(',')?;
+            let t2_ps = self.expect_integer()?;
+            self.expect_symbol(';')?;
+            Ok(Statement::QuantumRelaxation {
+                qubit,
+                duration_ps,
+                t1_ps,
+                t2_ps,
+            })
         } else if matches!(&token.kind, TokenKind::Ident(name) if matches!(name.as_str(), "quantum.bit_flip" | "quantum.phase_flip" | "quantum.amplitude_damping"))
         {
             let channel = match self.expect_name()?.as_str() {

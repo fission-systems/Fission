@@ -498,3 +498,14 @@ Explicit bit/phase flip and amplitude damping channels use rational parameters
 in v13. Acyclic canonical blocks and u1 block arguments execute in the same
 reference engine; loops and mixed CPU/GPU effects refuse. OpenQASM projection
 continues to reject CFG and noise instead of erasing those effects.
+
+`simulate_bounded` additionally executes cyclic canonical blocks with explicit
+step/split/branch budgets; it returns retained frontier state and refuses to
+convert incomplete execution to a terminal result. The corresponding
+`simulate-quantum-bounded` CLI exits nonzero on resource stop. It admits the
+existing u1 subset, not general classical loops or all OpenQASM control.
+`quantum.relaxation q,duration_ps,t1_ps,t2_ps;` (FSLC v14) models declared
+zero-temperature Markovian idle evolution. Historical calibration-parameter
+transfer is a bounded research experiment, not current-device noise validation
+or error correction. The pinned QISA data profile decodes word layout with
+unsupported execution semantics; no upstream runtime dependency is introduced.

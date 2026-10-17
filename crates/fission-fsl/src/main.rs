@@ -29,11 +29,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             fs::write(&output, imported.package.encode_binary()?)?;
             println!("imported logical circuit qubits={} into {output}; initial state remains an external precondition", imported.qubits);
         }
-        "emit-qasm" | "simulate-quantum" => {
+        "emit-qasm" | "simulate-quantum" | "simulate-quantum-bounded" => {
             let package = load_package(&required_arg(&mut args, "compiled .fslc")?)?;
             let name = required_arg(&mut args, "instruction name")?;
             let qubits = required_arg(&mut args, "logical qubit count")?.parse()?;
             let argument = required_arg(&mut args, "output .qasm or basis:N / vector:re:im,...")?;
+            let limits = if command == "simulate-quantum-bounded" {
+                Some(fission_fsl::quantum::QuantumLimits {
+                    steps: required_arg(&mut args, "global step budget")?.parse()?,
+                    splits: required_arg(&mut args, "per-path split budget")?.parse()?,
+                    branches: required_arg(&mut args, "retained branch capacity")?.parse()?,
+                })
+            } else {
+                None
+            };
             reject_extra_args(args)?;
             let body = package
                 .instructions
@@ -62,8 +71,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     return Err("initial state must be explicit basis:N or vector:re:im,...".into());
                 };
-                let result = fission_fsl::quantum::simulate(body, &initial)?;
-                print!("{}", result.diagnostic_json());
+                if let Some(limits) = limits {
+                    let run = fission_fsl::quantum::simulate_bounded(body, &initial, limits)?;
+                    print!("{}", run.diagnostic_json());
+                    if !run.is_complete() {
+                        return Err("incomplete quantum execution: resource limit reached; inspect retained frontier".into());
+                    }
+                } else {
+                    let result = fission_fsl::quantum::simulate(body, &initial)?;
+                    print!("{}", result.diagnostic_json());
+                }
             }
         }
         "compose-sequence" => {
@@ -605,6 +622,7 @@ fn print_usage() {
     eprintln!("  fslc import-qasm INPUT.qasm OUTPUT.fslc");
     eprintln!("  fslc emit-qasm PACKAGE NAME QUBITS OUTPUT.qasm");
     eprintln!("  fslc simulate-quantum PACKAGE NAME QUBITS basis:N|vector:re:im,...");
+    eprintln!("  fslc simulate-quantum-bounded PACKAGE NAME QUBITS INITIAL STEPS SPLITS BRANCHES");
     eprintln!("  fslc emit-backend PACKAGE INSTRUCTION c|rust|go OUTPUT");
     eprintln!("  fslc library-inspect <library.fsldb>");
     eprintln!("  fslc library-query <library.fsldb> <exact-symbol>");

@@ -154,3 +154,56 @@ with a dense Kraus oracle over basis, complex product and entangled inputs. The
 original seven ideal-circuit artifacts remain a separate pinned experiment.
 Channel formula reference: [Qiskit Aer standard error definitions](https://github.com/Qiskit/qiskit-aer/blob/main/qiskit_aer/noise/errors/standard_errors.py).
 No SDK code is copied or linked into the executor.
+
+## Bounded cyclic execution and historical idle-model parameters
+
+`simulate_bounded(body, initial, QuantumLimits)` admits cycles in existing FIR
+blocks, with the same unsigned u1 classical subset. It counts global operation
+and terminator steps, per-path split cost and total retained branch capacity.
+Bounds are steps <=1,000,000, splits <=12 and branches 1..4096; default 65,536 /
+12 /4096. Strict `simulate` continues to reject cyclic graphs before execution.
+Both paths execute the same operation helper, with no second semantic IR.
+
+A stopped `QuantumRun` retains completed branches and a frontier with canonical
+block/op positions, latest dynamic SSA slots, measurement history and path split
+counts. Repeated execution of a static measurement ID appends a new measurement
+event; its SSA slot holds the latest dynamic result. Edge arguments transfer in
+parallel. No terminal density is returned for an incomplete run, no probability
+is discarded or renormalized, and `into_complete` refuses. Frontier retention is
+diagnostic/API evidence; a resumable package format is not implemented. The
+worklist is deterministic depth-first, so partial completed probability depends
+on the traversal/budget and is not an unbiased sample or termination proof.
+
+```sh
+fslc simulate-quantum-bounded PACKAGE NAME QUBITS INITIAL STEPS SPLITS BRANCHES
+```
+
+The CLI emits a typed-status JSON envelope. Incomplete output has `result:null`
+and a nonzero exit status. Gates and terminators consume steps; reset/measurement/
+rational noise consume one split; relaxation below consumes two. Admission of
+branch capacity and split cost is atomic before that effect. The canonical FSL
+and FSLC CFG encoding is unchanged by the executor.
+
+`quantum.relaxation qubit,duration_ps,t1_ps,t2_ps;` adds FSLC v14. All times are
+unsigned 64-bit picoseconds. Require T1,T2>0 and T2<=2*T1, checked without integer
+overflow. The model assumes zero-temperature Markovian idle evolution, with
+excited population decay exp(-t/T1) and off-diagonal decay exp(-t/T2). Native
+execution composes amplitude damping and phase flip on the joint state, using
+`expm1` for small rates. No environment event becomes a measurement bit. Wire
+tag 23 / subtag 10 / payload 0 is followed by duration/T1/T2 as little-endian
+u64; older versions refuse it. Ideal/rational-noise sources keep previous bytes.
+
+The research experiment imports an archived IBM Manila property snapshot dated
+2024-05-27, not live calibration. Unit conversion explicitly rounds within 0.5ps,
+records residuals and checks resulting density differences against the original
+parameters. Physical snapshot qubit i is modeled in logical reference slot 0;
+an auxiliary joint-state slot is only a numerical test spectator. No physical
+routing, scheduling, QPU execution, readout/gate-error/crosstalk fit, finite-
+temperature model, calibration measurement or error correction is provided.
+OpenQASM and classical/native codegen still reject these effects.
+
+A separate owned FSL data profile `qisa-qelab-9b024494.fsl` decodes strict canonical
+QWAIT/QWAITR encodings and opaque quantum bundle fields from a pinned reference
+assembler configuration. Every body is explicitly unsupported. This is binary
+layout evidence only: timing queues, physical opcode meaning and pulse execution
+are not implemented. No reference assembler is linked or invoked by Fission.

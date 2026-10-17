@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 13;
+pub const FSL_PACKAGE_VERSION: u16 = 14;
 const INT_BINARY_PACKAGE_VERSION: u16 = 9;
 const GUEST_PC_PACKAGE_VERSION: u16 = 8;
 const STATE_PACKAGE_VERSION: u16 = 3;
@@ -390,6 +390,20 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 14
+                && instruction.ops.iter().any(|op| {
+                    matches!(
+                        op,
+                        FirOp::Quantum(crate::quantum::QuantumOp::Relaxation { .. })
+                    )
+                })
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "quantum relaxation requires package version 14",
+                ));
+            }
             if self.version < 13
                 && instruction
                     .ops
@@ -622,6 +636,17 @@ impl FslcPackage {
                         writer.u8(gate);
                         writer.u8(qubit);
                         writer.u16(payload);
+                        if let crate::quantum::QuantumOp::Relaxation {
+                            duration_ps,
+                            t1_ps,
+                            t2_ps,
+                            ..
+                        } = q
+                        {
+                            writer.u64(*duration_ps);
+                            writer.u64(*t1_ps);
+                            writer.u64(*t2_ps);
+                        }
                     }
                     FirOp::IntConvert {
                         output,
@@ -966,11 +991,28 @@ impl FslcPackage {
             let mut ops = Vec::with_capacity(op_count);
             for _ in 0..op_count {
                 let op = match reader.u8()? {
-                    23 if version >= 12 => FirOp::Quantum(crate::quantum::QuantumOp::decode(
-                        reader.u8()?,
-                        reader.u8()?,
-                        reader.u16()?,
-                    )?),
+                    23 if version >= 12 => {
+                        let gate = reader.u8()?;
+                        let qubit = reader.u8()?;
+                        let payload = reader.u16()?;
+                        if gate == 10 {
+                            if version < 14 || payload != 0 {
+                                return Err(FslError::at(
+                                    1,
+                                    1,
+                                    "invalid relaxation version/payload",
+                                ));
+                            }
+                            FirOp::Quantum(crate::quantum::QuantumOp::Relaxation {
+                                qubit,
+                                duration_ps: reader.u64()?,
+                                t1_ps: reader.u64()?,
+                                t2_ps: reader.u64()?,
+                            })
+                        } else {
+                            FirOp::Quantum(crate::quantum::QuantumOp::decode(gate, qubit, payload)?)
+                        }
+                    }
                     16 if version >= 7 => FirOp::IntConvert {
                         output: reader.value_id(value_count)?,
                         input: reader.value_id(value_count)?,
