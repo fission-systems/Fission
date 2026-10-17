@@ -493,4 +493,8 @@ C/Rust/Go, GPU and native codegen paths reject these effects.
 
 [Syntax, CLI, state contract and limits](../../docs/research/fsl-quantum-reference.md).
 This is ideal logical simulation and numerical authored-fixture evidence; no
-physical QPU binary, hardware/noise, full OpenQASM or formal equivalence support.
+physical QPU binary, calibrated hardware model, full OpenQASM or formal equivalence support.
+Explicit bit/phase flip and amplitude damping channels use rational parameters
+in v13. Acyclic canonical blocks and u1 block arguments execute in the same
+reference engine; loops and mixed CPU/GPU effects refuse. OpenQASM projection
+continues to reject CFG and noise instead of erasing those effects.

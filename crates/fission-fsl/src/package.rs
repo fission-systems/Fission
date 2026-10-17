@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 12;
+pub const FSL_PACKAGE_VERSION: u16 = 13;
 const INT_BINARY_PACKAGE_VERSION: u16 = 9;
 const GUEST_PC_PACKAGE_VERSION: u16 = 8;
 const STATE_PACKAGE_VERSION: u16 = 3;
@@ -390,6 +390,18 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 13
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, FirOp::Quantum(crate::quantum::QuantumOp::Noise { .. })))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "quantum noise requires package version 13",
+                ));
+            }
             if self.version < 12
                 && instruction
                     .ops

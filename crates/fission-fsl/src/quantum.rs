@@ -1,7 +1,7 @@
-//! Ideal logical quantum effects in the canonical FIR, with a bounded numerical
+//! Logical quantum effects in the canonical FIR, with a bounded numerical
 //! reference interpreter. Qubit indices name subsystems of ONE joint state.
 //! Simulator vector copies are host bookkeeping, never a guest cloning operation.
-use crate::{CompiledInstruction, FirOp, FslError, IntegerSign, ValueId};
+use crate::{CompiledInstruction, FirOp, FirTerminator, FslError, IntegerSign, ValueId};
 use std::fmt::Write;
 
 pub use crate::quantum_qasm::{import_openqasm, ImportedQuantum};
@@ -13,19 +13,64 @@ fn error(message: &str) -> FslError {
     FslError::at(1, 1, message)
 }
 
+/// Explicit model parameters, not inferred device calibration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoiseChannel {
+    BitFlip,
+    PhaseFlip,
+    AmplitudeDamping,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuantumOp {
-    H { qubit: u8 },
-    X { qubit: u8 },
-    Z { qubit: u8 },
-    Cx { control: u8, target: u8 },
-    MeasureZ { qubit: u8, output: ValueId },
-    Reset { qubit: u8 },
-    XIf { qubit: u8, condition: ValueId },
+    /// Rational p = numerator/denominator, with 0 <= p <= 1.
+    Noise {
+        qubit: u8,
+        channel: NoiseChannel,
+        numerator: u8,
+        denominator: u8,
+    },
+    H {
+        qubit: u8,
+    },
+    X {
+        qubit: u8,
+    },
+    Z {
+        qubit: u8,
+    },
+    Cx {
+        control: u8,
+        target: u8,
+    },
+    MeasureZ {
+        qubit: u8,
+        output: ValueId,
+    },
+    Reset {
+        qubit: u8,
+    },
+    XIf {
+        qubit: u8,
+        condition: ValueId,
+    },
 }
 impl QuantumOp {
     pub(crate) fn encode(self) -> (u8, u8, u16) {
         match self {
+            Self::Noise {
+                qubit,
+                channel,
+                numerator,
+                denominator,
+            } => (
+                match channel {
+                    NoiseChannel::BitFlip => 7,
+                    NoiseChannel::PhaseFlip => 8,
+                    NoiseChannel::AmplitudeDamping => 9,
+                },
+                qubit,
+                u16::from_be_bytes([numerator, denominator]),
+            ),
             Self::H { qubit } => (0, qubit, 0),
             Self::X { qubit } => (1, qubit, 0),
             Self::Z { qubit } => (2, qubit, 0),
@@ -53,6 +98,19 @@ impl QuantumOp {
                 qubit,
                 condition: ValueId(payload),
             },
+            7..=9 => {
+                let [numerator, denominator] = payload.to_be_bytes();
+                Self::Noise {
+                    qubit,
+                    numerator,
+                    denominator,
+                    channel: match tag {
+                        7 => NoiseChannel::BitFlip,
+                        8 => NoiseChannel::PhaseFlip,
+                        _ => NoiseChannel::AmplitudeDamping,
+                    },
+                }
+            }
             _ => return Err(error("unknown or noncanonical quantum encoding")),
         };
         op.validate()?;
@@ -60,7 +118,8 @@ impl QuantumOp {
     }
     fn qubit(self) -> u8 {
         match self {
-            Self::H { qubit }
+            Self::Noise { qubit, .. }
+            | Self::H { qubit }
             | Self::X { qubit }
             | Self::Z { qubit }
             | Self::Reset { qubit }
@@ -70,6 +129,16 @@ impl QuantumOp {
         }
     }
     pub(crate) fn validate(self) -> Result<(), FslError> {
+        if let Self::Noise {
+            numerator,
+            denominator,
+            ..
+        } = self
+        {
+            if denominator == 0 || numerator > denominator {
+                return Err(error("noise probability requires 0 <= numerator <= denominator <= 255 and nonzero denominator"));
+            }
+        }
         if let Self::Cx { control, target } = self {
             if control == target {
                 return Err(error("CX requires distinct qubits"));
@@ -89,8 +158,8 @@ pub(crate) fn require_bit(body: &CompiledInstruction, id: ValueId) -> Result<(),
     Ok(())
 }
 
-/// This slice admits linear ordered quantum effects plus classical u1 constants.
-/// No allocator, general CFG, CPU/GPU effects, noisy channels or pulse timing.
+/// Bounded acyclic canonical FIR with quantum effects and classical u1 values.
+/// No allocator, cyclic execution, CPU/GPU effects or pulse timing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuantumContract {
     pub minimum_qubits: u16,
@@ -99,51 +168,71 @@ pub struct QuantumContract {
 impl QuantumContract {
     pub fn for_instruction(body: &CompiledInstruction) -> Result<Self, FslError> {
         body.validate()?;
-        if !body.blocks.is_empty() || body.ops.len() > 256 || body.values.len() > 64 {
+        if body.ops.len() > 256 || body.values.len() > 64 {
             return Err(error(
-                "quantum reference requires linear <=256 ops / <=64 classical values",
+                "quantum reference requires <=256 ops / <=64 classical values",
             ));
+        }
+        // Check all syntactic paths before touching state, including untaken cycles.
+        let blocks = crate::control::blocks(body);
+        let mut incoming = vec![0usize; blocks.len()];
+        for block in &blocks {
+            for edge in crate::control::edges(&block.terminator) {
+                incoming[usize::from(edge.target)] += 1;
+            }
+        }
+        let mut queue: std::collections::VecDeque<_> = incoming
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &n)| (n == 0).then_some(i))
+            .collect();
+        let mut visited = 0;
+        while let Some(i) = queue.pop_front() {
+            visited += 1;
+            for edge in crate::control::edges(&blocks[i].terminator) {
+                let n = &mut incoming[usize::from(edge.target)];
+                *n -= 1;
+                if *n == 0 {
+                    queue.push_back(usize::from(edge.target));
+                }
+            }
+        }
+        if visited != blocks.len() {
+            return Err(error(
+                "quantum reference refuses cyclic CFG before execution",
+            ));
+        }
+        for value in &body.values {
+            require_bit(body, value.id)?;
         }
         let mut extent = 0;
         let mut splits = 0;
-        let mut next = 0;
         for op in &body.ops {
-            let output = match *op {
+            match *op {
                 FirOp::Quantum(q) => {
                     extent = extent.max(u16::from(q.qubit()) + 1);
                     if let QuantumOp::Cx { target, .. } = q {
                         extent = extent.max(u16::from(target) + 1);
                     }
                     match q {
-                        QuantumOp::MeasureZ { output, .. } => {
+                        QuantumOp::MeasureZ { .. } => {
                             splits += 1;
-                            Some(output)
                         }
-                        QuantumOp::Reset { .. } => {
+                        QuantumOp::Reset { .. } | QuantumOp::Noise { .. } => {
                             splits += 1;
-                            None
                         }
-                        _ => None,
+                        _ => {}
                     }
                 }
                 FirOp::IntConstant { output, .. } => {
                     require_bit(body, output)?;
-                    Some(output)
                 }
                 _ => return Err(error("quantum reference does not support this FIR effect")),
-            };
-            if let Some(id) = output {
-                if usize::from(id.0) != next {
-                    return Err(error(
-                        "quantum projection requires classical definitions in dense SSA order",
-                    ));
-                }
-                next += 1;
             }
         }
         if extent == 0 || splits > MAX_SPLITS {
             return Err(error(
-                "quantum profile requires quantum effects and <=12 measurement/reset operations",
+                "quantum profile requires quantum effects and <=12 measurement/reset/noise operations",
             ));
         }
         Ok(Self {
@@ -228,6 +317,7 @@ pub struct QuantumBranch {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuantumResult {
     branches: Vec<QuantumBranch>,
+    noisy: bool,
 }
 impl QuantumResult {
     pub fn branches(&self) -> &[QuantumBranch] {
@@ -242,6 +332,12 @@ impl QuantumResult {
                 .join(",")
         };
         let mut text = format!("{{\"simulation\":\"ideal-logical-f64-enumerated\",\"hardware_execution\":false,\"initial_state\":\"caller-supplied\",\"qubits\":{},\"total_probability\":{},\"branches\":[",self.branches[0].state.qubits,self.total_probability());
+        if self.noisy {
+            text = text.replace(
+                "ideal-logical-f64-enumerated",
+                "declared-noise-logical-f64-enumerated",
+            );
+        }
         for (i, branch) in self.branches.iter().enumerate() {
             if i > 0 {
                 text.push(',');
@@ -324,8 +420,70 @@ fn split(branch: QuantumBranch, qubit: u8, output: Option<ValueId>) -> Vec<Quant
     }
     out
 }
+/// Apply the two Kraus alternatives locally to a JOINT state. Environment
+/// outcomes are host decomposition details and never classical FIR definitions.
+fn noise(
+    branch: QuantumBranch,
+    qubit: u8,
+    channel: NoiseChannel,
+    numerator: u8,
+    denominator: u8,
+) -> Vec<QuantumBranch> {
+    let p = f64::from(numerator) / f64::from(denominator);
+    let mut out = Vec::new();
+    for alternative in 0..2 {
+        let mut child = branch.clone();
+        let mask = 1usize << qubit;
+        match channel {
+            NoiseChannel::BitFlip | NoiseChannel::PhaseFlip => {
+                let weight = if alternative == 0 { 1.0 - p } else { p };
+                if weight == 0.0 {
+                    continue;
+                }
+                child.probability *= weight;
+                if alternative == 1 {
+                    if channel == NoiseChannel::BitFlip {
+                        x(&mut child.state, qubit, None);
+                    } else {
+                        for (i, a) in child.state.amplitudes.iter_mut().enumerate() {
+                            if i & mask != 0 {
+                                *a = a.scale(-1.0);
+                            }
+                        }
+                    }
+                }
+            }
+            NoiseChannel::AmplitudeDamping => {
+                for i in 0..child.state.amplitudes.len() {
+                    if i & mask == 0 {
+                        if alternative == 1 {
+                            child.state.amplitudes[i] =
+                                branch.state.amplitudes[i | mask].scale(p.sqrt());
+                        }
+                    } else {
+                        child.state.amplitudes[i] = if alternative == 0 {
+                            branch.state.amplitudes[i].scale((1.0 - p).sqrt())
+                        } else {
+                            Complex::default()
+                        };
+                    }
+                }
+                let weight: f64 = child.state.amplitudes.iter().map(|a| a.norm()).sum();
+                if weight == 0.0 {
+                    continue;
+                }
+                child.probability *= weight;
+                for a in &mut child.state.amplitudes {
+                    *a = a.scale(1.0 / weight.sqrt());
+                }
+            }
+        }
+        out.push(child);
+    }
+    out
+}
 /// Enumerate weighted measurement branches, preserving each joint post-state.
-/// f64 reference evidence, not symbolic equality or a hardware/noise model.
+/// f64 reference evidence with explicit model channels; no calibrated hardware model.
 pub fn simulate(
     body: &CompiledInstruction,
     initial: &PureState,
@@ -338,74 +496,164 @@ pub fn simulate(
         values: vec![None; body.values.len()],
         measurements: Vec::new(),
     }];
-    for op in &body.ops {
-        if let FirOp::Quantum(QuantumOp::MeasureZ { qubit, output }) = *op {
-            branches = branches
-                .into_iter()
-                .flat_map(|b| split(b, qubit, Some(output)))
-                .collect();
-            continue;
-        }
-        if let FirOp::Quantum(QuantumOp::Reset { qubit }) = *op {
-            branches = branches
-                .into_iter()
-                .flat_map(|b| split(b, qubit, None))
-                .collect();
-            continue;
-        }
-        for branch in &mut branches {
-            match *op {
-                FirOp::IntConstant { output, value } => {
-                    branch.values[usize::from(output.0)] = Some(value as u8)
+    let blocks = crate::control::blocks(body);
+    let mut pending = vec![(0usize, branches.remove(0))];
+    let mut finished = Vec::new();
+    while let Some((pc, branch)) = pending.pop() {
+        branches = vec![branch];
+        let block = &blocks[pc];
+        for op in &body.ops[usize::from(block.start)..usize::from(block.end)] {
+            if let FirOp::Quantum(QuantumOp::Noise {
+                qubit,
+                channel,
+                numerator,
+                denominator,
+            }) = *op
+            {
+                branches = branches
+                    .into_iter()
+                    .flat_map(|b| noise(b, qubit, channel, numerator, denominator))
+                    .collect();
+                continue;
+            }
+            if let FirOp::Quantum(QuantumOp::MeasureZ { qubit, output }) = *op {
+                branches = branches
+                    .into_iter()
+                    .flat_map(|b| split(b, qubit, Some(output)))
+                    .collect();
+                continue;
+            }
+            if let FirOp::Quantum(QuantumOp::Reset { qubit }) = *op {
+                branches = branches
+                    .into_iter()
+                    .flat_map(|b| split(b, qubit, None))
+                    .collect();
+                continue;
+            }
+            for branch in &mut branches {
+                match *op {
+                    FirOp::IntConstant { output, value } => {
+                        branch.values[usize::from(output.0)] = Some(value as u8)
+                    }
+                    FirOp::Quantum(q) => match q {
+                        QuantumOp::X { qubit } => x(&mut branch.state, qubit, None),
+                        QuantumOp::Cx { control, target } => {
+                            x(&mut branch.state, target, Some(control))
+                        }
+                        QuantumOp::XIf { qubit, condition } => {
+                            if branch.values[usize::from(condition.0)] == Some(1) {
+                                x(&mut branch.state, qubit, None);
+                            }
+                        }
+                        QuantumOp::Z { qubit } => {
+                            for (i, a) in branch.state.amplitudes.iter_mut().enumerate() {
+                                if i & (1usize << qubit) != 0 {
+                                    *a = a.scale(-1.0);
+                                }
+                            }
+                        }
+                        QuantumOp::H { qubit } => {
+                            let mask = 1usize << qubit;
+                            for i in 0..branch.state.amplitudes.len() {
+                                if i & mask == 0 {
+                                    let a = branch.state.amplitudes[i];
+                                    let b = branch.state.amplitudes[i | mask];
+                                    branch.state.amplitudes[i] = Complex {
+                                        re: a.re + b.re,
+                                        im: a.im + b.im,
+                                    }
+                                    .scale(std::f64::consts::FRAC_1_SQRT_2);
+                                    branch.state.amplitudes[i | mask] = Complex {
+                                        re: a.re - b.re,
+                                        im: a.im - b.im,
+                                    }
+                                    .scale(std::f64::consts::FRAC_1_SQRT_2);
+                                }
+                            }
+                        }
+                        _ => unreachable!("measurement/reset handled above"),
+                    },
+                    _ => unreachable!("quantum admission rejects foreign effects"),
                 }
-                FirOp::Quantum(q) => match q {
-                    QuantumOp::X { qubit } => x(&mut branch.state, qubit, None),
-                    QuantumOp::Cx { control, target } => {
-                        x(&mut branch.state, target, Some(control))
-                    }
-                    QuantumOp::XIf { qubit, condition } => {
-                        if branch.values[usize::from(condition.0)] == Some(1) {
-                            x(&mut branch.state, qubit, None);
-                        }
-                    }
-                    QuantumOp::Z { qubit } => {
-                        for (i, a) in branch.state.amplitudes.iter_mut().enumerate() {
-                            if i & (1usize << qubit) != 0 {
-                                *a = a.scale(-1.0);
-                            }
-                        }
-                    }
-                    QuantumOp::H { qubit } => {
-                        let mask = 1usize << qubit;
-                        for i in 0..branch.state.amplitudes.len() {
-                            if i & mask == 0 {
-                                let a = branch.state.amplitudes[i];
-                                let b = branch.state.amplitudes[i | mask];
-                                branch.state.amplitudes[i] = Complex {
-                                    re: a.re + b.re,
-                                    im: a.im + b.im,
-                                }
-                                .scale(std::f64::consts::FRAC_1_SQRT_2);
-                                branch.state.amplitudes[i | mask] = Complex {
-                                    re: a.re - b.re,
-                                    im: a.im - b.im,
-                                }
-                                .scale(std::f64::consts::FRAC_1_SQRT_2);
-                            }
-                        }
-                    }
-                    _ => unreachable!("measurement/reset handled above"),
-                },
-                _ => unreachable!("quantum admission rejects foreign effects"),
             }
         }
+        for mut branch in branches {
+            let edge = match &block.terminator {
+                FirTerminator::Return => {
+                    finished.push(branch);
+                    continue;
+                }
+                FirTerminator::Branch(edge) => edge,
+                FirTerminator::CondBranch {
+                    condition,
+                    on_true,
+                    on_false,
+                } => {
+                    if branch.values[usize::from(condition.0)]
+                        .ok_or_else(|| error("undefined branch condition"))?
+                        == 1
+                    {
+                        on_true
+                    } else {
+                        on_false
+                    }
+                }
+            };
+            // Snapshot all arguments before binding parameters (parallel transfer).
+            let arguments: Vec<_> = edge
+                .arguments
+                .iter()
+                .map(|id| branch.values[usize::from(id.0)])
+                .collect();
+            for (&param, value) in blocks[usize::from(edge.target)]
+                .parameters
+                .iter()
+                .zip(arguments)
+            {
+                branch.values[usize::from(param.0)] =
+                    Some(value.ok_or_else(|| error("undefined edge argument"))?);
+            }
+            pending.push((usize::from(edge.target), branch));
+        }
     }
-    Ok(QuantumResult { branches })
+    Ok(QuantumResult {
+        branches: finished,
+        noisy: body
+            .ops
+            .iter()
+            .any(|op| matches!(op, FirOp::Quantum(QuantumOp::Noise { .. }))),
+    })
 }
 
 /// Logical OpenQASM 3.0 projection. No hardware mapping, calibration or timing.
 pub fn emit_openqasm(body: &CompiledInstruction, qubits: u8) -> Result<String, FslError> {
     QuantumContract::for_instruction(body)?.admit_qubits(qubits)?;
+    if !body.blocks.is_empty()
+        || body
+            .ops
+            .iter()
+            .any(|op| matches!(op, FirOp::Quantum(QuantumOp::Noise { .. })))
+    {
+        return Err(error(
+            "OpenQASM projection does not support CFG or declared noise channels",
+        ));
+    }
+    let mut next = 0;
+    for op in &body.ops {
+        let id = match *op {
+            FirOp::IntConstant { output, .. }
+            | FirOp::Quantum(QuantumOp::MeasureZ { output, .. }) => Some(output),
+            _ => None,
+        };
+        if let Some(id) = id {
+            if usize::from(id.0) != next {
+                return Err(error(
+                    "OpenQASM projection requires dense classical definition order",
+                ));
+            }
+            next += 1;
+        }
+    }
     let mut text = format!(
         "OPENQASM 3.0;\ninclude \"stdgates.inc\";\nqubit[{qubits}] q;\nbit[{}] m;\n",
         body.values.len().max(1)
@@ -416,6 +664,7 @@ pub fn emit_openqasm(body: &CompiledInstruction, qubits: u8) -> Result<String, F
                 writeln!(text, "m[{}] = {value};", output.0).unwrap()
             }
             FirOp::Quantum(q) => match q {
+                QuantumOp::Noise { .. } => unreachable!("noise projection rejected"),
                 QuantumOp::H { qubit } => writeln!(text, "h q[{qubit}];").unwrap(),
                 QuantumOp::X { qubit } => writeln!(text, "x q[{qubit}];").unwrap(),
                 QuantumOp::Z { qubit } => writeln!(text, "z q[{qubit}];").unwrap(),

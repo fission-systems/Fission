@@ -1,7 +1,7 @@
 # Quantum effects in the single FIR — 2026-10-17
 
-This is an ideal logical-circuit experiment, executed on a classical host. It is
-not a QPU binary decoder, hardware implementation, noisy-device model or quantum
+This is a logical-circuit experiment with explicit noise channels, executed on a
+classical host. It is not a QPU binary decoder, hardware implementation, calibrated device model or quantum
 speedup claim. The CPU/GPU/VM research pipeline remains separate in maturity.
 
 ## Ownership and representation
@@ -10,9 +10,9 @@ speedup claim. The CPU/GPU/VM research pipeline remains separate in maturity.
 H, X, Z, CX, Z-basis measurement, reset and classical-bit-controlled X. There is
 no second quantum semantic IR. The ordinary FSL compiler, SSA/type validator,
 package reader/writer and diagnostic FIR consume these operations. Packages
-containing quantum operations select v12 (tag 23); earlier sources retain their
-previous package version and bytes. New readers accept v1..v12; old readers
-must refuse v12.
+containing ideal quantum operations select v12 (tag 23). Declared noise channels
+select v13. Earlier sources retain their package version and bytes. New readers
+accept v1..v13; v12 packages cannot contain noise.
 
 ```text
 FSL quantum statements ───────┐
@@ -65,17 +65,18 @@ unnormalized density operator. Its trace is the probability; normalization gives
 the conditional post-state. Reset sums its hidden channels. This extends the
 classical possible-outcomes relation with quantum state/probability semantics.
 
-Reference admission: linear bodies, <=256 ops, <=64 classical values in dense
-SSA definition order, <=12 measurement/reset operations (<=4096 enumerated
-branches), <=8 actual state qubits. Canonical FIR can preserve larger logical
+Reference admission: acyclic canonical blocks, <=256 ops, <=64 unsigned u1
+classical values, <=12 total measurement/reset/noise operations (<=4096 enumerated
+branches), <=8 actual state qubits. Block parameters use parallel edge transfer.
+All syntactic paths are checked, including untaken cycles, before execution. Canonical FIR can preserve larger logical
 indices while the reference and OpenQASM projection refuse unsupported extents.
-Mixed CPU/GPU effects and general block CFG are preserved by canonical validation
+Mixed CPU/GPU effects and cyclic CFG are preserved by canonical validation
 when well typed, but not executed by this quantum reference. Classical backends
 C/Rust/Go, CUDA/PTX and native JIT/AOT refuse quantum input. Registered source
 backends have to explicitly declare the quantum projection context.
 
 This is f64 numerical evidence. Rounding, underflow and tolerance matter; no
-symbolic identity proof, exact amplitude arithmetic or hardware/noise model is
+symbolic identity proof, exact amplitude arithmetic or calibrated hardware model is
 claimed. Enumeration/state-vector storage grows exponentially. No RNG is needed
 because all admitted measurement branches are enumerated.
 
@@ -126,3 +127,30 @@ Semantic references: [OpenQASM reset/measurement](https://openqasm.com/versions/
 [classical control](https://openqasm.com/versions/3.0/language/classical.html),
 [standard logical gates](https://github.com/openqasm/openqasm/blob/main/examples/stdgates.inc).
 The design owns these FIR semantics; OpenQASM/QIR do not define FIR's full scope.
+
+## Explicit channels and acyclic CFG
+
+FSL accepts `quantum.bit_flip q,n,d;`, `quantum.phase_flip q,n,d;` and
+`quantum.amplitude_damping q,n,d;`. Each integer is unsigned 8-bit; probability
+p=n/d requires d>0 and n<=d. No floating source parameter or implicit calibration
+is stored. Bit/phase flip implement (1-p)rho+p U rho U† for U=X/Z. Amplitude
+damping uses K0=diag(1,sqrt(1-p)) and K1=sqrt(p)|0><1|. Local channels act on the
+joint state and preserve the partner's reduced density under a trace-preserving
+local operation. These are declared mathematical models, not inferred hardware
+noise. No environment outcome becomes a measurement record or classical SSA bit.
+
+Existing `block`, `branch`, `branch.if`, parameters and `return` are reused.
+Classical conditions select execution paths; quantum state is carried without
+measuring at a join. Paths remain separate ensemble contributions until densities
+are summed for observation. Only constants and unsigned u1 classical values are
+admitted in this executor. No loops, general classical arithmetic, quantum
+control-flow superposition, dynamic allocation or physical scheduling is added.
+OpenQASM import/export retains its earlier linear subset and **rejects** CFG and
+noise; it never silently drops these effects. No classical source/native backend
+is enabled for them.
+
+The channels/cfg research experiment separately compares 33 authored programs
+with a dense Kraus oracle over basis, complex product and entangled inputs. The
+original seven ideal-circuit artifacts remain a separate pinned experiment.
+Channel formula reference: [Qiskit Aer standard error definitions](https://github.com/Qiskit/qiskit-aer/blob/main/qiskit_aer/noise/errors/standard_errors.py).
+No SDK code is copied or linked into the executor.

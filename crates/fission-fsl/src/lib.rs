@@ -126,6 +126,17 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         };
         for statement in instruction.statements {
             match statement {
+                parser::Statement::QuantumNoise {
+                    qubit,
+                    channel,
+                    numerator,
+                    denominator,
+                } => ops.push(FirOp::Quantum(quantum::QuantumOp::Noise {
+                    qubit,
+                    channel,
+                    numerator,
+                    denominator,
+                })),
                 parser::Statement::QuantumGate {
                     operation,
                     qubit,
@@ -595,6 +606,12 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
 
     let package = FslcPackage {
         version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(|op| matches!(op, FirOp::Quantum(quantum::QuantumOp::Noise { .. })))
+        {
+            13
+        } else if instructions
             .iter()
             .flat_map(|i| &i.ops)
             .any(|op| matches!(op, FirOp::Quantum(_)))

@@ -257,3 +257,130 @@ fn bit_constants_roundtrip_and_quantum_effects_never_enter_classical_control() {
         assert!(fission_fsl::emit_instruction(&instruction, layer, "fsl_quantum").is_err());
     }
 }
+
+#[test]
+fn explicit_noise_roundtrip_probability_and_projection_contracts() {
+    for name in ["bit_flip", "phase_flip", "amplitude_damping"] {
+        for (n, d) in [(0, 1), (1, 1), (1, 2), (1, 255), (254, 255)] {
+            let package = program(&format!("quantum.{name} 0,{n},{d};")).unwrap();
+            assert_eq!(package.version, 13);
+            let bytes = package.encode_binary().unwrap();
+            let decoded = FslcPackage::decode_binary(&bytes).unwrap();
+            assert_eq!(decoded, package);
+            let mut old = package.clone();
+            old.version = 12;
+            assert!(old.encode_binary().is_err());
+            // Malformed wire input cannot bypass version admission.
+            let mut old_bytes = bytes;
+            old_bytes[4..6].copy_from_slice(&12u16.to_le_bytes());
+            assert!(FslcPackage::decode_binary(&old_bytes).is_err());
+            assert!(emit_openqasm(&decoded.instructions[0], 1).is_err());
+            let initial = PureState::basis(1, 1).unwrap();
+            let result = simulate(&decoded.instructions[0], &initial).unwrap();
+            close(result.total_probability(), 1.0);
+            assert!(result
+                .branches()
+                .iter()
+                .all(|b| b.measurements.is_empty() && b.values.is_empty()));
+            assert!(result.diagnostic_json().contains("declared-noise"));
+            let rho = result.density_matrix();
+            let p = f64::from(n) / f64::from(d);
+            close(rho[0].re, if name == "phase_flip" { 0.0 } else { p });
+            close(rho[3].re, if name == "phase_flip" { 1.0 } else { 1.0 - p });
+        }
+        for probability in ["1,0", "2,1", "256,255", "-1,2"] {
+            assert!(program(&format!("quantum.{name} 0,{probability};")).is_err());
+        }
+    }
+}
+#[test]
+fn damping_of_entangled_subsystem_preserves_partner_and_coherence() {
+    let instruction = body("quantum.h 0; quantum.cx 0,1; quantum.amplitude_damping 0,1,4;");
+    let result = simulate(&instruction, &PureState::basis(2, 0).unwrap()).unwrap();
+    let rho = result.density_matrix();
+    close(rho[0].re, 0.5);
+    close(rho[10].re, 0.125);
+    close(rho[15].re, 0.375);
+    close(rho[3].re, 0.75f64.sqrt() / 2.0);
+    close(rho[12].re, 0.75f64.sqrt() / 2.0);
+    close(rho[0].re + rho[5].re, 0.5);
+    close(rho[10].re + rho[15].re, 0.5);
+    assert!(result.branches().iter().all(|b| b.measurements.is_empty()));
+    let phase = body("quantum.h 0; quantum.cx 0,1; quantum.phase_flip 0,1,2;");
+    let rho = simulate(&phase, &PureState::basis(2, 0).unwrap())
+        .unwrap()
+        .density_matrix();
+    close(rho[0].re, 0.5);
+    close(rho[15].re, 0.5);
+    close(rho[3].re, 0.0);
+}
+#[test]
+fn measurement_cfg_branches_join_through_canonical_block_parameters() {
+    let instruction = body("block entry() { quantum.h 0; quantum.cx 0,1; %a:u1=quantum.measure_z 0; branch.if %a, correct(%a), unchanged(%a); } block correct(%b:u1) { quantum.x 1; branch join(%b); } block unchanged(%c:u1) { branch join(%c); } block join(%d:u1) { %out:u1=quantum.measure_z 1; return; }");
+    let package = program("block entry() { quantum.h 0; %a:u1=quantum.measure_z 0; branch end(%a); } block end(%b:u1) { quantum.x_if 0,%b; return; }").unwrap();
+    assert_eq!(
+        package,
+        FslcPackage::decode_binary(&package.encode_binary().unwrap()).unwrap()
+    );
+    let initial = PureState::basis(2, 0).unwrap();
+    let result = simulate(&instruction, &initial).unwrap();
+    assert_eq!(result.branches().len(), 2);
+    for b in result.branches() {
+        close(b.probability, 0.5);
+        assert_eq!(b.values[0], b.values[3]);
+        assert_eq!(b.values[4], Some(0));
+        assert_eq!(b.measurements.len(), 2);
+        assert_eq!(b.values[1].is_some(), b.values[0] == Some(1));
+        assert_eq!(b.values[2].is_some(), b.values[0] == Some(0));
+    }
+    assert!(emit_openqasm(&instruction, 2).is_err());
+}
+#[test]
+fn cfg_parameter_transfer_is_parallel_and_noise_outcomes_are_hidden() {
+    let instruction = body("block entry() { %a:u1=int.const 0; %b:u1=int.const 1; quantum.h 0; branch swap(%b,%a); } block swap(%c:u1,%d:u1) { quantum.x_if 0,%c; quantum.phase_flip 0,1,2; branch.if %d, yes(), no(); } block yes() { quantum.x 0; return; } block no() { quantum.z 0; return; }");
+    let result = simulate(&instruction, &PureState::basis(1, 0).unwrap()).unwrap();
+    for b in result.branches() {
+        assert_eq!(b.values, vec![Some(0), Some(1), Some(1), Some(0)]);
+        assert!(b.measurements.is_empty());
+    }
+    let rho = result.density_matrix();
+    close(rho[0].re, 0.5);
+    close(rho[3].re, 0.5);
+    close(rho[1].re, 0.0);
+}
+#[test]
+fn untaken_cycles_and_cross_block_undefined_values_refuse() {
+    let instruction = body("block entry() { %c:u1=int.const 0; quantum.x 0; branch.if %c, forever(), done(); } block forever() { branch forever(); } block done() { return; }");
+    assert!(instruction.validate().is_ok());
+    let initial = PureState::basis(1, 0).unwrap();
+    let saved = initial.clone();
+    assert!(simulate(&instruction, &initial)
+        .unwrap_err()
+        .to_string()
+        .contains("cyclic"));
+    assert_eq!(initial, saved);
+    assert!(program("block entry() { %c:u1=int.const 1; branch next(); } block next() { quantum.x_if 0,%c; return; }").is_err());
+    let excessive = body(&"quantum.bit_flip 0,1,2;".repeat(13));
+    assert!(simulate(&excessive, &initial).is_err());
+}
+
+#[test]
+fn channel_cfg_fixture_is_portable_and_all_bodies_have_bounded_execution() {
+    let package = compile_source(include_str!("../specs/quantum-channels-cfg.fsl")).unwrap();
+    assert_eq!(package.version, 13);
+    assert_eq!(package.instructions.len(), 33);
+    let decoded = FslcPackage::decode_binary(&package.encode_binary().unwrap()).unwrap();
+    assert_eq!(package, decoded);
+    for body in &decoded.instructions {
+        let n = u8::try_from(
+            QuantumContract::for_instruction(body)
+                .unwrap()
+                .minimum_qubits,
+        )
+        .unwrap();
+        for basis in 0..1usize << n {
+            let result = simulate(body, &PureState::basis(n, basis).unwrap()).unwrap();
+            close(result.total_probability(), 1.0);
+        }
+    }
+}

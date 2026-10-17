@@ -21,6 +21,12 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    QuantumNoise {
+        qubit: u8,
+        channel: crate::quantum::NoiseChannel,
+        numerator: u8,
+        denominator: u8,
+    },
     QuantumGate {
         operation: String,
         qubit: u8,
@@ -1252,6 +1258,28 @@ impl Parser {
             };
             self.expect_symbol(';')?;
             Ok(statement)
+        } else if matches!(&token.kind, TokenKind::Ident(name) if matches!(name.as_str(), "quantum.bit_flip" | "quantum.phase_flip" | "quantum.amplitude_damping"))
+        {
+            let channel = match self.expect_name()?.as_str() {
+                "quantum.bit_flip" => crate::quantum::NoiseChannel::BitFlip,
+                "quantum.phase_flip" => crate::quantum::NoiseChannel::PhaseFlip,
+                _ => crate::quantum::NoiseChannel::AmplitudeDamping,
+            };
+            let qubit = u8::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("qubit index exceeds u8"))?;
+            self.expect_symbol(',')?;
+            let numerator = u8::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("noise numerator exceeds u8"))?;
+            self.expect_symbol(',')?;
+            let denominator = u8::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("noise denominator exceeds u8"))?;
+            self.expect_symbol(';')?;
+            Ok(Statement::QuantumNoise {
+                qubit,
+                channel,
+                numerator,
+                denominator,
+            })
         } else if matches!(&token.kind, TokenKind::Ident(name) if matches!(name.as_str(), "quantum.h" | "quantum.x" | "quantum.z" | "quantum.cx" | "quantum.reset" | "quantum.x_if"))
         {
             let operation = self.expect_name()?;
