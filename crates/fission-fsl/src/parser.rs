@@ -1205,6 +1205,9 @@ impl Parser {
                 crate::IntBinaryOp::And,
                 crate::IntBinaryOp::Or,
                 crate::IntBinaryOp::Xor,
+                crate::IntBinaryOp::Mul,
+                crate::IntBinaryOp::ShiftLeft,
+                crate::IntBinaryOp::LogicalShiftRight,
             ]
             .into_iter()
             .find(|op| operation == format!("{ty_name}.{}", op.name()))

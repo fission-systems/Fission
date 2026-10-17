@@ -4,6 +4,52 @@ use std::collections::HashSet;
 
 use crate::{CompiledInstruction, FirOp, FslError, IntegerSign, ValueId};
 
+/// Shared C/Rust spelling over unsigned bit-vector storage. Dynamic shifts
+/// guard the host width before evaluation, including at guest width 64.
+pub(crate) fn binary_source(
+    op: crate::IntBinaryOp,
+    left: &str,
+    right: &str,
+    mask: u64,
+    c: bool,
+) -> String {
+    use crate::IntBinaryOp;
+    let expression = match op {
+        IntBinaryOp::Sub if !c => format!("{left}.wrapping_sub({right})"),
+        IntBinaryOp::Mul if !c => format!("{left}.wrapping_mul({right})"),
+        IntBinaryOp::ShiftLeft | IntBinaryOp::LogicalShiftRight => {
+            let operator = if op == IntBinaryOp::ShiftLeft {
+                "<<"
+            } else {
+                ">>"
+            };
+            if c {
+                format!("({right} >= UINT64_C(64) ? UINT64_C(0) : ({left} {operator} {right}))")
+            } else {
+                format!("if {right} >= 64 {{ 0u64 }} else {{ {left} {operator} ({right} as u32) }}")
+            }
+        }
+        _ => {
+            let operator = match op {
+                IntBinaryOp::Sub => "-",
+                IntBinaryOp::Mul => "*",
+                IntBinaryOp::And => "&",
+                IntBinaryOp::Or => "|",
+                IntBinaryOp::Xor => "^",
+                _ => unreachable!("shifts handled above"),
+            };
+            format!("{left} {operator} {right}")
+        }
+    };
+    if c {
+        format!("({expression}) & UINT64_C(0x{mask:x})")
+    } else if matches!(op, IntBinaryOp::Sub | IntBinaryOp::Mul) {
+        format!("{expression} & 0x{mask:x}u64")
+    } else {
+        format!("({expression}) & 0x{mask:x}u64")
+    }
+}
+
 impl CompiledInstruction {
     /// Validate SSA definitions, operand order, widths, and arithmetic types.
     /// This also applies to packages loaded from disk and edited by API users.
@@ -138,6 +184,17 @@ impl CompiledInstruction {
                                     "integer {} requires equal 1..64 bit operand and result types",
                                     op.name()
                                 ),
+                            ));
+                        }
+                        if matches!(
+                            op,
+                            crate::IntBinaryOp::ShiftLeft | crate::IntBinaryOp::LogicalShiftRight
+                        ) && ty.sign != IntegerSign::Unsigned
+                        {
+                            return Err(FslError::at(
+                                1,
+                                1,
+                                "logical shifts require unsigned operands and result",
                             ));
                         }
                         Some(output)

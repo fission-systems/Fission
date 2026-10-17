@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 14;
+pub const FSL_PACKAGE_VERSION: u16 = 15;
 const INT_BINARY_PACKAGE_VERSION: u16 = 9;
 const GUEST_PC_PACKAGE_VERSION: u16 = 8;
 const STATE_PACKAGE_VERSION: u16 = 3;
@@ -118,6 +118,11 @@ pub enum IntBinaryOp {
     And,
     Or,
     Xor,
+    /// Low-width product; overflow wraps at the declared result width.
+    Mul,
+    /// Unsigned logical shift; counts at least the value width yield zero.
+    ShiftLeft,
+    LogicalShiftRight,
 }
 
 impl IntBinaryOp {
@@ -127,6 +132,9 @@ impl IntBinaryOp {
             Self::And => "and",
             Self::Or => "or",
             Self::Xor => "xor",
+            Self::Mul => "mul.wrap",
+            Self::ShiftLeft => "shl",
+            Self::LogicalShiftRight => "lshr",
         }
     }
     pub(crate) fn tag(self) -> u8 {
@@ -135,6 +143,9 @@ impl IntBinaryOp {
             Self::And => 1,
             Self::Or => 2,
             Self::Xor => 3,
+            Self::Mul => 4,
+            Self::ShiftLeft => 5,
+            Self::LogicalShiftRight => 6,
         }
     }
     pub(crate) fn from_tag(tag: u8) -> Option<Self> {
@@ -143,6 +154,9 @@ impl IntBinaryOp {
             1 => Self::And,
             2 => Self::Or,
             3 => Self::Xor,
+            4 => Self::Mul,
+            5 => Self::ShiftLeft,
+            6 => Self::LogicalShiftRight,
             _ => return None,
         })
     }
@@ -152,7 +166,26 @@ impl IntBinaryOp {
             Self::And => left & right,
             Self::Or => left | right,
             Self::Xor => left ^ right,
+            Self::Mul => left.wrapping_mul(right),
+            Self::ShiftLeft => {
+                if right < 64 {
+                    left << right
+                } else {
+                    0
+                }
+            }
+            Self::LogicalShiftRight => {
+                if right < 64 {
+                    left >> right
+                } else {
+                    0
+                }
+            }
         }
+    }
+
+    pub(crate) fn requires_v15(self) -> bool {
+        matches!(self, Self::Mul | Self::ShiftLeft | Self::LogicalShiftRight)
     }
 }
 
@@ -390,6 +423,18 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 15
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, FirOp::IntBinary { op, .. } if op.requires_v15()))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "multiply/logical shifts require package version 15",
+                ));
+            }
             if self.version < 14
                 && instruction.ops.iter().any(|op| {
                     matches!(

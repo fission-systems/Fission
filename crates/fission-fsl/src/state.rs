@@ -788,26 +788,7 @@ fn emit_state_impl(
                 } => {
                     let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);
                     let (l, r) = (value(left), value(right));
-                    let expression = match (op, c) {
-                        (crate::IntBinaryOp::Sub, true) => {
-                            format!("({l} - {r}) & UINT64_C(0x{mask:x})")
-                        }
-                        (crate::IntBinaryOp::Sub, false) => {
-                            format!("{l}.wrapping_sub({r}) & 0x{mask:x}u64")
-                        }
-                        (crate::IntBinaryOp::And, true) => {
-                            format!("({l} & {r}) & UINT64_C(0x{mask:x})")
-                        }
-                        (crate::IntBinaryOp::And, false) => format!("({l} & {r}) & 0x{mask:x}u64"),
-                        (crate::IntBinaryOp::Or, true) => {
-                            format!("({l} | {r}) & UINT64_C(0x{mask:x})")
-                        }
-                        (crate::IntBinaryOp::Or, false) => format!("({l} | {r}) & 0x{mask:x}u64"),
-                        (crate::IntBinaryOp::Xor, true) => {
-                            format!("({l} ^ {r}) & UINT64_C(0x{mask:x})")
-                        }
-                        (crate::IntBinaryOp::Xor, false) => format!("({l} ^ {r}) & 0x{mask:x}u64"),
-                    };
+                    let expression = crate::semantics::binary_source(op, &l, &r, mask, c);
                     Some((output, expression))
                 }
                 FirOp::MemoryStoreLittle {

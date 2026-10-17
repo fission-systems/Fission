@@ -526,3 +526,33 @@ emission records no hardware verification and introduces no SDK dependency.
 A separate stdlib REST adapter in fission-research prepares/submits/collects IBM
 Open Plan jobs; live access remains unverified. See
 [the target contract](../../docs/research/fsl-quantum-reference.md#ibm-physical-circuit-projection-2026-10-17).
+
+
+## Additional computational research axes / combinational fabric projection
+
+The `fabric` module borrows the same canonical instruction body and emits
+bounded combinational Verilog or an untimed DOT dependency view. `fabric-axes`
+reports eight initial research contracts (FPGA, DSP, tensor accelerator, ASIC,
+neuromorphic, PIM, analog, dataflow) and their unsupported capabilities. These
+labels do not mean eight supported hardware ISAs or runtime backends.
+
+FSLC v15 adds wrapping multiply and unsigned logical left/right shifts. Counts
+at least the declared width yield zero. Older profiles keep their selected
+version. Straight-line bit-vector stack kernels can be evaluated by the existing
+reference and emitted as C/Rust/Go or HDL; the new HDL projection refuses explicit
+CFG, state, memory, quantum and lane effects. It has no clock/timing/X/Z contract.
+Inputs/outputs use 64-bit slots, bottom of stack first, with explicit typed masks.
+
+```sh
+fslc compile crates/fission-fsl/specs/fabric-kernels.fsl /tmp/fabric.fslc
+fslc fabric-axes
+fslc emit-fabric /tmp/fabric.fslc tensor_dot2 fsl_dot2 /tmp/dot2.v
+fslc emit-dataflow /tmp/fabric.fslc tensor_dot2 fsl_dot2 /tmp/dot2.dot
+fslc run-fabric /tmp/fabric.fslc tensor_dot2 /tmp/inputs.csv /tmp/outputs.csv
+```
+
+`run-fabric` is classical reference evaluation, not FPGA execution. The fixtures
+are authored arithmetic/scalar-elaboration/discrete-model examples. No board,
+bitstream, NPU/TPU, DSP device, ASIC, neuromorphic chip, PIM or analog hardware
+support is claimed. Generic synthesis and waveform-free logical simulation are
+separate research measurements in fission-research.

@@ -140,6 +140,7 @@ pub(crate) fn stack_contract(instruction: &CompiledInstruction) -> Result<StackC
             !matches!(
                 op,
                 FirOp::IntConvert { .. }
+                    | FirOp::IntBinary { .. }
                     | FirOp::IntConstant { .. }
                     | FirOp::IntCompare { .. }
                     | FirOp::IntAddWrap { .. }
@@ -357,6 +358,16 @@ pub(crate) fn execute(
                     );
                 }
                 FirOp::IntConstant { output, value } => values[usize::from(output.0)] = value,
+                FirOp::IntBinary {
+                    output,
+                    left,
+                    right,
+                    op,
+                } => {
+                    values[usize::from(output.0)] = op
+                        .apply(values[usize::from(left.0)], values[usize::from(right.0)])
+                        & width_mask(instruction.values[usize::from(output.0)].ty.bits);
+                }
                 FirOp::IntCompare {
                     output,
                     left,
@@ -510,6 +521,21 @@ pub(crate) fn emit(
                 FirOp::IntConstant { output, value } => Some((
                     output,
                     format!("0x{value:x}{}", if c { "ULL" } else { "u64" }),
+                )),
+                FirOp::IntBinary {
+                    output,
+                    left,
+                    right,
+                    op,
+                } => Some((
+                    output,
+                    crate::semantics::binary_source(
+                        op,
+                        &format!("v[{}]", left.0),
+                        &format!("v[{}]", right.0),
+                        width_mask(instruction.values[usize::from(output.0)].ty.bits),
+                        c,
+                    ),
                 )),
                 FirOp::VmStackPop { output } => {
                     let mask = width_mask(instruction.values[usize::from(output.0)].ty.bits);

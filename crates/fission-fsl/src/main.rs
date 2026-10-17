@@ -21,6 +21,83 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_default();
     match command.as_str() {
+        "run-fabric" => {
+            let package = load_package(&required_arg(&mut args, "compiled .fslc")?)?;
+            let name = required_arg(&mut args, "instruction name")?;
+            let input = required_arg(&mut args, "input slot rows CSV")?;
+            let output = required_arg(&mut args, "output slot rows CSV")?;
+            reject_extra_args(args)?;
+            let body = package
+                .instructions
+                .iter()
+                .find(|body| body.name == name)
+                .ok_or("unknown FIR body")?;
+            let plan = fission_fsl::fabric::FabricPlan::new(body)?;
+            let bytes = fs::read(input)?;
+            if bytes.len() > 8 * 1024 * 1024 {
+                return Err("fabric reference input exceeds 8 MiB".into());
+            }
+            let text = std::str::from_utf8(&bytes)?;
+            let mut rows = Vec::new();
+            for line in text.lines() {
+                if rows.len() >= 65536 {
+                    return Err("fabric reference exceeds 65536 rows".into());
+                }
+                let inputs = if line == "-" {
+                    vec![]
+                } else {
+                    line.split(',')
+                        .map(str::parse::<u64>)
+                        .collect::<Result<Vec<_>, _>>()?
+                };
+                rows.push(
+                    plan.evaluate(&inputs)?
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
+            if rows.is_empty() {
+                return Err("fabric reference requires a nonempty row set".into());
+            }
+            fs::write(output, rows.join("\n") + "\n")?;
+            println!("{{\"rows\":{},\"execution\":\"classical_reference\",\"target_hardware_execution\":false}}", rows.len());
+        }
+        "fabric-axes" => {
+            reject_extra_args(args)?;
+            let axes = fission_fsl::fabric::AXES
+                .iter()
+                .map(|axis| {
+                    format!(
+                        "{{\"id\":\"{}\",\"initial_slice\":\"{}\",\"unsupported\":\"{}\"}}",
+                        axis.id, axis.initial_slice, axis.unsupported
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            println!("{{\"axes\":[{axes}],\"target_hardware_execution\":false}}");
+        }
+        "emit-fabric" | "emit-dataflow" => {
+            let package = load_package(&required_arg(&mut args, "compiled .fslc")?)?;
+            let name = required_arg(&mut args, "instruction name")?;
+            let symbol = required_arg(&mut args, "fsl_ module or graph symbol")?;
+            let output = required_arg(&mut args, "output artifact")?;
+            reject_extra_args(args)?;
+            let body = package
+                .instructions
+                .iter()
+                .find(|body| body.name == name)
+                .ok_or("unknown FIR body")?;
+            let plan = fission_fsl::fabric::FabricPlan::new(body)?;
+            let text = if command == "emit-fabric" {
+                plan.emit_verilog(&symbol)?
+            } else {
+                plan.emit_dot(&symbol)?
+            };
+            fs::write(output, text)?;
+            println!("{{\"input_slots\":{},\"output_slots\":{},\"combinational\":true,\"target_hardware_execution\":false}}", plan.input_slots(), plan.output_slots());
+        }
         "emit-ibm" => {
             use fission_fsl::quantum::ibm::{emit, Entangler, Target};
             let package = load_package(&required_arg(&mut args, "compiled .fslc")?)?;
@@ -669,6 +746,9 @@ fn print_usage() {
     eprintln!("  execute-wave <package> <profile> <hex> <lanes> <exec> <scalar-csv> <flags-csv> <lane-slots-csv>");
     eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust|cuda|ptx> <output>");
     eprintln!("usage:");
+    eprintln!("  fslc fabric-axes");
+    eprintln!("  fslc run-fabric PACKAGE NAME INPUT.csv OUTPUT.csv");
+    eprintln!("  fslc emit-fabric|emit-dataflow PACKAGE NAME fsl_SYMBOL OUTPUT");
     eprintln!("  fslc import-qasm INPUT.qasm OUTPUT.fslc");
     eprintln!("  fslc emit-qasm PACKAGE NAME QUBITS OUTPUT.qasm");
     eprintln!("  fslc emit-ibm PACKAGE NAME PHYSICAL_CSV cx|cz COUPLINGS_CSV|- INITIAL_BASIS AXES OUTPUT.qasm");

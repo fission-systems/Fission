@@ -11,6 +11,7 @@ pub mod abi;
 pub mod backend;
 pub mod control;
 pub mod encoding;
+pub mod fabric;
 mod go_output;
 mod gpu_output;
 pub mod jit;
@@ -617,6 +618,12 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
 
     let package = FslcPackage {
         version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(|op| matches!(op, FirOp::IntBinary { op, .. } if op.requires_v15()))
+        {
+            15
+        } else if instructions
             .iter()
             .flat_map(|i| &i.ops)
             .any(|op| matches!(op, FirOp::Quantum(quantum::QuantumOp::Relaxation { .. })))

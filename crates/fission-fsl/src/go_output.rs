@@ -96,6 +96,9 @@ fn expression(body: &CompiledInstruction, op: FirOp) -> Option<(ValueId, String)
                 IntBinaryOp::And => "&",
                 IntBinaryOp::Or => "|",
                 IntBinaryOp::Xor => "^",
+                IntBinaryOp::Mul => "*",
+                IntBinaryOp::ShiftLeft => "<<",
+                IntBinaryOp::LogicalShiftRight => ">>",
             };
             (
                 output,
