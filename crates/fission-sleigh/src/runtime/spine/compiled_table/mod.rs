@@ -23,6 +23,9 @@ use crate::runtime::{
     PackedContextOverride, RuntimeExecutionDetails, RuntimeSleighError,
 };
 
+mod binding_address_use;
+mod fid_bindings;
+pub(crate) use fid_bindings::FrontendScope as FidBindingScope;
 mod context;
 mod display;
 mod feature_audit;

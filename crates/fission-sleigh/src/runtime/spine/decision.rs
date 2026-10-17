@@ -72,6 +72,28 @@ impl ProbeChain {
         self.0.is_none()
     }
 
+    /// Conservative owned payload estimate; bounded traversal avoids extending
+    /// retention policy into a second unbounded parse-tree walk.
+    pub(in crate::runtime::spine) fn retained_payload(&self, limit: usize) -> Option<usize> {
+        let mut node = self.0.as_deref();
+        let mut bytes = 0usize;
+        let mut count = 0usize;
+        while let Some(current) = node {
+            count += 1;
+            if count > 128 {
+                return None;
+            }
+            bytes = bytes.checked_add(
+                std::mem::size_of::<ProbeChainNode>() + 2 * std::mem::size_of::<usize>(),
+            )?;
+            if bytes > limit {
+                return None;
+            }
+            node = current.prev.0.as_deref();
+        }
+        Some(bytes)
+    }
+
     pub fn push(&mut self, probe: RuntimeMatchProbe) {
         let prev = std::mem::take(self);
         self.0 = Some(std::sync::Arc::new(ProbeChainNode { probe, prev }));

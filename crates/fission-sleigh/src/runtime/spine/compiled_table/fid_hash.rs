@@ -844,13 +844,20 @@ pub(crate) fn compute_fid_hashes(
             call_count += 1;
         }
 
-        let state = match decode_instruction_raw_state(compiled, &instr.bytes, instr.address) {
+        let binding = match super::fid_bindings::get_or_decode(
+            compiled,
+            &instr.bytes,
+            instr.address,
+            !replay_decode,
+        ) {
             Ok(state) => state,
             Err(_) => {
                 fid_diag("decode_instruction_raw_state");
                 return None;
             }
         };
+
+        let state = &*binding;
 
         // Ghidra's getNumOperands()/getOpObjects(ii) enumerate *display*
         // operands, e.g. "mov eax,[rbp+8]" has exactly 2 -- not
