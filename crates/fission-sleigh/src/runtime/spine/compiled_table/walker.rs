@@ -42,6 +42,7 @@ impl InstNextShared {
     }
 
     fn inst_next_addr(&self, cursor: usize, local_construct_end: usize) -> u64 {
+        super::binding_address_use::read_pc();
         self.observed.set(true);
         self.inst_address
             .saturating_add(self.estimated_rel_len(cursor, local_construct_end) as u64)
@@ -967,7 +968,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reject_non_offset_handle_plus(*plus, "export")?;
                 Ok(value)
             }
-            CompiledConstTpl::InstStart => Ok(self.ctx.address),
+            CompiledConstTpl::InstStart => {
+                super::binding_address_use::read_pc();
+                Ok(self.ctx.address)
+            }
             CompiledConstTpl::InstNext => self.resolve_inst_next_addr(),
             other => bail!("export ConstTpl {:?} is unsupported", other),
         }
@@ -1580,7 +1584,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {
         match expr {
             CompiledPatternExpression::Constant(value) => Ok(*value),
-            CompiledPatternExpression::InstStart => Ok(u64_to_i64_bits(self.ctx.address)),
+            CompiledPatternExpression::InstStart => {
+                super::binding_address_use::read_pc();
+                Ok(u64_to_i64_bits(self.ctx.address))
+            }
             CompiledPatternExpression::InstNext => {
                 // Prefer shared root fallthrough so trailing immediates are included.
                 Ok(u64_to_i64_bits(self.resolve_inst_next_addr()?))
@@ -1863,6 +1870,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
 fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> {
     let cursor = checked_usize_to_u64(ctx.cursor, "subtable cursor")?;
+    super::binding_address_use::checked_offset(cursor);
     ctx.address
         .checked_add(cursor)
         .ok_or_else(|| anyhow!("subtable decode address overflowed"))
@@ -2192,5 +2200,51 @@ mod sleigh_parity_gaps_tests {
                 "Error should contain sleigh parser path backtrace: {err_str}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod binding_address_witness_tests {
+    use super::*;
+    #[test]
+    fn fid_binding_discarded_checked_overflow_prevents_retention() {
+        let compiled = crate::compiler::compile_x86_64_frontend().unwrap();
+        let mut discarded = CompiledInstructionContext::parse(&[0x57], u64::MAX).unwrap();
+        discarded.cursor = 1;
+        let (winner, witness) = super::super::binding_address_use::capture(|| {
+            assert!(subtable_decode_address(&discarded).is_err());
+            super::super::decode_instruction_raw_state(&compiled, &[0x57], u64::MAX)
+        });
+        assert!(winner.is_ok());
+        assert!(!witness.pc_value_read);
+        assert_eq!(witness.max_checked_offset, 1);
+        assert!(!witness.allows_reuse_at(u64::MAX));
+        assert!(witness.allows_reuse_at(0x1000));
+    }
+    #[test]
+    fn fid_binding_inst_start_export_and_expression_are_observed() {
+        let compiled = crate::compiler::compile_x86_64_frontend().unwrap();
+        let ctx = CompiledInstructionContext::parse(&[0x57], 0x1000).unwrap();
+        let selection = candidate_selections(&compiled, &ctx, ctx.address)
+            .unwrap()
+            .remove(0);
+        let mut walker = CompiledParserWalker::new(
+            &compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection,
+            None,
+        )
+        .unwrap();
+        let (value, witness) = super::super::binding_address_use::capture(|| {
+            walker.eval_pattern_expression(&CompiledPatternExpression::InstStart)
+        });
+        assert_eq!(value.unwrap(), 0x1000);
+        assert!(witness.pc_value_read);
+        let (value, witness) = super::super::binding_address_use::capture(|| {
+            walker.resolve_export_const_tpl(&CompiledConstTpl::InstStart, &[])
+        });
+        assert_eq!(value.unwrap(), 0x1000);
+        assert!(witness.pc_value_read);
     }
 }

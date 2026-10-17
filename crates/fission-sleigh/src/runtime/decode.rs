@@ -120,6 +120,7 @@ impl RuntimeSleighFrontend {
         resolve_register_offset: &dyn Fn(&str) -> Option<i64>,
     ) -> Option<(u16, u64, u8, u64)> {
         let compiled = self.compiled.as_ref()?;
+        let _binding_scope = spine::compiled_table::FidBindingScope::enter(compiled);
         let hashes = spine::compiled_table::fid_hash::compute_fid_hashes(
             compiled,
             extent,

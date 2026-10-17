@@ -100,10 +100,13 @@ fn fid_bound_state_hash_and_resolver_order_matrix_is_repeatable() {
         ("AARCH64", "AARCH64.slaspec"),
         ("ARM", "ARM8m_le.slaspec"),
     ] {
-        let compiled = crate::compiler::compile_frontend_for_entry_spec(
-            &crate::compiler::spec_root_for_arch(arch).join(file),
-        )
-        .unwrap();
+        let compiled = std::sync::Arc::new(
+            crate::compiler::compile_frontend_for_entry_spec(
+                &crate::compiler::spec_root_for_arch(arch).join(file),
+            )
+            .unwrap(),
+        );
+        let _scope = FidBindingScope::enter(&compiled);
         let mut seed = 0x2498_137a_5c60_e1bdu64;
         for index in 0..128 {
             let bytes: Vec<_> = (0..(1 + index % 16))
