@@ -502,8 +502,13 @@ continues to reject CFG and noise instead of erasing those effects.
 `simulate_bounded` additionally executes cyclic canonical blocks with explicit
 step/split/branch budgets; it returns retained frontier state and refuses to
 convert incomplete execution to a terminal result. The corresponding
-`simulate-quantum-bounded` CLI exits nonzero on resource stop. It admits the
-existing u1 subset, not general classical loops or all OpenQASM control.
+`simulate-quantum-bounded` CLI exits nonzero on resource stop. It admits classical integer constants, wrap-add, sub/and/or/xor, comparisons
+and width conversions (1..64 bits) in the same FIR, including loop counters and
+measurement-selected trip counts. SSA slots hold u64 bit patterns with declared
+widths; measurements and branch/feed-forward conditions remain unsigned u1.
+This is a bounded execution subset, not all OpenQASM control or general
+classical memory/CPU/GPU effects. OpenQASM output still refuses integer
+arithmetic and CFG before emission.
 `quantum.relaxation q,duration_ps,t1_ps,t2_ps;` (FSLC v14) models declared
 zero-temperature Markovian idle evolution. Historical calibration-parameter
 transfer is a bounded research experiment, not current-device noise validation

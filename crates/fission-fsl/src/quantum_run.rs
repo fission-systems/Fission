@@ -161,7 +161,7 @@ pub fn simulate_bounded(
                 Some(QuantumLimit::Splits)
             } else {
                 // Keep the pre-effect state until exact branch-capacity admission.
-                let children = apply_op(cursor.branch.clone(), op)?;
+                let children = apply_op(body, cursor.branch.clone(), op)?;
                 if run.pending.len() + run.completed.len() + children.len() > limits.branches {
                     Some(QuantumLimit::Branches)
                 } else {

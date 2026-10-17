@@ -12,7 +12,7 @@ no second quantum semantic IR. The ordinary FSL compiler, SSA/type validator,
 package reader/writer and diagnostic FIR consume these operations. Packages
 containing ideal quantum operations select v12 (tag 23). Declared noise channels
 select v13. Earlier sources retain their package version and bytes. New readers
-accept v1..v13; v12 packages cannot contain noise.
+accept v1..v14; v12 packages cannot contain noise, and relaxation requires v14.
 
 ```text
 FSL quantum statements ───────┐
@@ -65,13 +65,14 @@ unnormalized density operator. Its trace is the probability; normalization gives
 the conditional post-state. Reset sums its hidden channels. This extends the
 classical possible-outcomes relation with quantum state/probability semantics.
 
-Reference admission: acyclic canonical blocks, <=256 ops, <=64 unsigned u1
-classical values, <=12 total measurement/reset/noise operations (<=4096 enumerated
+Strict reference admission: acyclic canonical blocks, <=256 ops, <=64 classical
+integer values (1..64 bits), <=12 total measurement/reset/noise operations (<=4096 enumerated
 branches), <=8 actual state qubits. Block parameters use parallel edge transfer.
 All syntactic paths are checked, including untaken cycles, before execution. Canonical FIR can preserve larger logical
 indices while the reference and OpenQASM projection refuse unsupported extents.
-Mixed CPU/GPU effects and cyclic CFG are preserved by canonical validation
-when well typed, but not executed by this quantum reference. Classical backends
+Mixed CPU/GPU effects are preserved by canonical validation when well typed,
+but not executed by this quantum reference. Cycles require the bounded entry
+point described below. Classical backends
 C/Rust/Go, CUDA/PTX and native JIT/AOT refuse quantum input. Registered source
 backends have to explicitly declare the quantum projection context.
 
@@ -142,9 +143,10 @@ noise. No environment outcome becomes a measurement record or classical SSA bit.
 Existing `block`, `branch`, `branch.if`, parameters and `return` are reused.
 Classical conditions select execution paths; quantum state is carried without
 measuring at a join. Paths remain separate ensemble contributions until densities
-are summed for observation. Only constants and unsigned u1 classical values are
-admitted in this executor. No loops, general classical arithmetic, quantum
-control-flow superposition, dynamic allocation or physical scheduling is added.
+are summed for observation. The initial v13 experiment admitted only constants
+and unsigned u1 classical values; the integer extension below broadens execution.
+Quantum control-flow superposition, dynamic allocation and physical scheduling
+remain unsupported.
 OpenQASM import/export retains its earlier linear subset and **rejects** CFG and
 noise; it never silently drops these effects. No classical source/native backend
 is enabled for them.
@@ -158,7 +160,7 @@ No SDK code is copied or linked into the executor.
 ## Bounded cyclic execution and historical idle-model parameters
 
 `simulate_bounded(body, initial, QuantumLimits)` admits cycles in existing FIR
-blocks, with the same unsigned u1 classical subset. It counts global operation
+blocks, including the integer subset described below. It counts global operation
 and terminator steps, per-path split cost and total retained branch capacity.
 Bounds are steps <=1,000,000, splits <=12 and branches 1..4096; default 65,536 /
 12 /4096. Strict `simulate` continues to reject cyclic graphs before execution.
@@ -207,3 +209,40 @@ QWAIT/QWAITR encodings and opaque quantum bundle fields from a pinned reference
 assembler configuration. Every body is explicitly unsupported. This is binary
 layout evidence only: timing queues, physical opcode meaning and pulse execution
 are not implemented. No reference assembler is linked or invoked by Fission.
+
+
+## Integer-controlled CFG (2026-10-17)
+
+Both reference entry points now admit the existing `IntConstant`, `IntAddWrap`,
+`IntBinary` (sub/and/or/xor), `IntCompare` (eq/ult/slt) and `IntConvert` operations.
+Integer values use `u64` bit patterns masked to the declared 1..64 bit width;
+signed values are two's complement. Existing scalar comparison/conversion/binary
+helpers own the semantics. Quantum measurement, `XIf` and conditional terminators
+still require unsigned u1. `QuantumBranch.values` changes from `Option<u8>` to
+`Option<u64>`; measurement event bits remain u8. JSON clients must preserve u64
+integers exactly rather than rounding them through a floating number type.
+No op tag or wire version changes: the existing package format already holds
+these canonical operations. Older quantum packages retain their bytes.
+
+`simulate` continues to reject every syntactic cycle. `simulate_bounded` follows
+arbitrary validated block edges within its admitted operation subset, without
+requiring a structured loop shape; step/split/branch limits still preserve an
+incomplete frontier. Each static SSA slot retains its latest dynamic definition.
+Unexecuted slots are None; cross-block reads still require explicit parameters.
+Counters transfer through the same parallel edge argument mechanism as bits.
+This adds neither memory, calls, dynamic qubit addressing nor pulse scheduling.
+
+The authored `quantum-integer-cfg.fsl` fixture covers 42 bodies: 16 decrementing
+counters (including zero iterations), two signed loops, 18 arithmetic boundary
+cases, four extension/truncation cases, one measurement-selected counter and one
+cycle with two entry blocks. A separate research oracle uses Python integers,
+closed-form loop summaries and unnormalized dense density operators. It compares
+complete classical slots, ordered measurement history, conditional density and
+probability, including complex product and entangled inputs. Finite evidence
+cannot establish arbitrary program equivalence or hardware correctness.
+
+OpenQASM projection remains restricted to linear u1 constants/measurement and
+supported quantum effects. Integer arithmetic refuses even for u1 values; an
+explicit preflight prevents unsupported operations reaching emission. There is
+no currently connected QPU for this research session. Real QPU execution and
+current-device calibration/correction remain unverified.

@@ -182,8 +182,9 @@ pub(crate) fn require_bit(body: &CompiledInstruction, id: ValueId) -> Result<(),
     Ok(())
 }
 
-/// Bounded acyclic canonical FIR with quantum effects and classical u1 values.
-/// No allocator, cyclic execution, CPU/GPU effects or pulse timing.
+/// Canonical FIR quantum effects and classical 1..64 bit integer values.
+/// The strict entry point admits acyclic CFG; cyclic execution requires budgets.
+/// No allocator, CPU/GPU state effects or pulse timing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuantumContract {
     pub minimum_qubits: u16,
@@ -233,7 +234,11 @@ impl QuantumContract {
             ));
         }
         for value in &body.values {
-            require_bit(body, value.id)?;
+            if value.ty.bits > 64 {
+                return Err(error(
+                    "quantum reference requires 1..64 bit classical values",
+                ));
+            }
         }
         let mut extent = 0;
         let mut splits = 0;
@@ -246,9 +251,11 @@ impl QuantumContract {
                     }
                     splits += q.split_cost();
                 }
-                FirOp::IntConstant { output, .. } => {
-                    require_bit(body, output)?;
-                }
+                FirOp::IntConstant { .. }
+                | FirOp::IntConvert { .. }
+                | FirOp::IntCompare { .. }
+                | FirOp::IntAddWrap { .. }
+                | FirOp::IntBinary { .. } => {}
                 _ => return Err(error("quantum reference does not support this FIR effect")),
             }
         }
@@ -331,8 +338,9 @@ impl PureState {
 pub struct QuantumBranch {
     pub probability: f64,
     pub state: PureState,
-    /// Canonical classical SSA slots; unexecuted definitions are None.
-    pub values: Vec<Option<u8>>,
+    /// Canonical integer SSA bit patterns, masked to their declared widths.
+    /// Unexecuted definitions are None; signed values use two's complement.
+    pub values: Vec<Option<u64>>,
     /// Observable measurement events only. Reset's internal outcomes are hidden.
     pub measurements: Vec<(ValueId, u8)>,
 }
@@ -455,7 +463,7 @@ fn split(branch: QuantumBranch, qubit: u8, output: Option<ValueId>) -> Vec<Quant
             };
         }
         if let Some(id) = output {
-            child.values[usize::from(id.0)] = Some(bit as u8);
+            child.values[usize::from(id.0)] = Some(bit as u64);
             child.measurements.push((id, bit as u8));
         } else if bit == 1 {
             x(&mut child.state, qubit, None);
@@ -519,7 +527,11 @@ fn noise(branch: QuantumBranch, qubit: u8, channel: NoiseChannel, p: f64) -> Vec
     }
     out
 }
-fn apply_op(mut branch: QuantumBranch, op: FirOp) -> Result<Vec<QuantumBranch>, FslError> {
+fn apply_op(
+    body: &CompiledInstruction,
+    mut branch: QuantumBranch,
+    op: FirOp,
+) -> Result<Vec<QuantumBranch>, FslError> {
     match op {
         FirOp::Quantum(QuantumOp::Relaxation {
             qubit,
@@ -557,9 +569,56 @@ fn apply_op(mut branch: QuantumBranch, op: FirOp) -> Result<Vec<QuantumBranch>, 
         _ => {}
     }
 
+    let read = |id: ValueId| {
+        branch.values[usize::from(id.0)].ok_or_else(|| error("undefined quantum classical operand"))
+    };
     match op {
-        FirOp::IntConstant { output, value } => {
-            branch.values[usize::from(output.0)] = Some(value as u8)
+        FirOp::IntConstant { output, value } => branch.values[usize::from(output.0)] = Some(value),
+        FirOp::IntConvert {
+            output,
+            input,
+            kind,
+        } => {
+            branch.values[usize::from(output.0)] = Some(crate::control::convert(
+                read(input)?,
+                body.values[usize::from(input.0)].ty.bits,
+                body.values[usize::from(output.0)].ty.bits,
+                kind,
+            ));
+        }
+        FirOp::IntCompare {
+            output,
+            left,
+            right,
+            predicate,
+        } => {
+            branch.values[usize::from(output.0)] = Some(crate::control::compare(
+                read(left)?,
+                read(right)?,
+                body.values[usize::from(left.0)].ty.bits,
+                predicate,
+            ));
+        }
+        FirOp::IntAddWrap {
+            output,
+            left,
+            right,
+        } => {
+            branch.values[usize::from(output.0)] = Some(
+                read(left)?.wrapping_add(read(right)?)
+                    & crate::semantics::width_mask(body.values[usize::from(output.0)].ty.bits),
+            );
+        }
+        FirOp::IntBinary {
+            output,
+            left,
+            right,
+            op,
+        } => {
+            branch.values[usize::from(output.0)] = Some(
+                op.apply(read(left)?, read(right)?)
+                    & crate::semantics::width_mask(body.values[usize::from(output.0)].ty.bits),
+            );
         }
         FirOp::Quantum(q) => match q {
             QuantumOp::X { qubit } => x(&mut branch.state, qubit, None),
@@ -627,7 +686,7 @@ pub fn simulate(
         for op in &body.ops[usize::from(block.start)..usize::from(block.end)] {
             let mut next = Vec::new();
             for branch in branches {
-                next.extend(apply_op(branch, *op)?);
+                next.extend(apply_op(body, branch, *op)?);
             }
             branches = next;
         }
@@ -685,6 +744,21 @@ pub fn simulate(
 /// Logical OpenQASM 3.0 projection. No hardware mapping, calibration or timing.
 pub fn emit_openqasm(body: &CompiledInstruction, qubits: u8) -> Result<String, FslError> {
     QuantumContract::for_instruction(body)?.admit_qubits(qubits)?;
+    // This projection is deliberately narrower than the execution contract.
+    // Reject new classical forms explicitly before the emission match below.
+    if body
+        .values
+        .iter()
+        .any(|v| v.ty.bits != 1 || v.ty.sign != IntegerSign::Unsigned)
+        || body
+            .ops
+            .iter()
+            .any(|op| !matches!(op, FirOp::IntConstant { .. } | FirOp::Quantum(_)))
+    {
+        return Err(error(
+            "OpenQASM projection supports classical u1 constants/measurements only",
+        ));
+    }
     if !body.blocks.is_empty()
         || body.ops.iter().any(|op| {
             matches!(

@@ -612,3 +612,150 @@ fn upstream_qisa_word_formats_decode_but_execution_remains_unsupported() {
         .is_err());
     }
 }
+
+#[test]
+fn integer_counter_loops_reuse_canonical_arithmetic_and_keep_zero_trip_slots_absent() {
+    for bits in [8, 16, 32, 64] {
+        for count in [0, 1, 3, 6] {
+            let source = format!("block entry() {{ %count:u{bits}=int.const {count}; branch head(%count); }} block head(%i:u{bits}) {{ %zero:u{bits}=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }} block step(%j:u{bits}) {{ quantum.x 0; %one:u{bits}=int.const 1; %next:u{bits}=u{bits}.sub %j,%one; branch head(%next); }} block exit(%out:u{bits}) {{ return; }}");
+            let package = program(&source).unwrap();
+            let decoded = FslcPackage::decode_binary(&package.encode_binary().unwrap()).unwrap();
+            assert_eq!(package, decoded);
+            let instruction = &decoded.instructions[0];
+            let result = simulate_bounded(
+                instruction,
+                &PureState::basis(1, 0).unwrap(),
+                QuantumLimits::default(),
+            )
+            .unwrap()
+            .into_complete()
+            .unwrap();
+            assert_eq!(
+                result.branches()[0].values,
+                vec![
+                    Some(count),
+                    Some(0),
+                    Some(0),
+                    Some(1),
+                    (count > 0).then_some(1),
+                    (count > 0).then_some(1),
+                    (count > 0).then_some(0),
+                    Some(0)
+                ]
+            );
+            close(
+                result.density_matrix()[if count % 2 == 0 { 0 } else { 3 }].re,
+                1.0,
+            );
+            assert!(emit_openqasm(instruction, 1).is_err());
+        }
+    }
+}
+
+#[test]
+fn quantum_classical_integers_preserve_full_width_patterns_and_signed_conversions() {
+    let instruction=body("%max:u64=int.const 18446744073709551615; %one:u64=int.const 1; %sum:u64=u64.add.wrap %max,%one; %sub:u64=u64.sub %sum,%one; %and:u64=u64.and %sub,%one; %or:u64=u64.or %sum,%one; %xor:u64=u64.xor %sub,%max; %less:u1=int.ult %sum,%max; %negative:i8=int.const 128; %extended:i64=int.sext %negative; %zero:i64=int.const 0; %signed:u1=int.slt %extended,%zero; %truncated:i8=int.trunc %extended; %wide:u64=int.zext %less; quantum.x_if 0,%signed;");
+    let state = PureState::basis(1, 0).unwrap();
+    let result = simulate(&instruction, &state).unwrap();
+    assert_eq!(
+        result.branches()[0].values,
+        [
+            u64::MAX,
+            1,
+            0,
+            u64::MAX,
+            1,
+            1,
+            0,
+            1,
+            128,
+            u64::MAX - 127,
+            0,
+            1,
+            128,
+            1
+        ]
+        .map(Some)
+    );
+    assert_eq!(
+        result,
+        simulate_bounded(&instruction, &state, QuantumLimits::default())
+            .unwrap()
+            .into_complete()
+            .unwrap()
+    );
+    assert!(result.diagnostic_json().contains("18446744073709551615"));
+    close(result.density_matrix()[3].re, 1.0);
+    // A u1 arithmetic effect must also refuse projection, without panicking.
+    let bit = body("%a:u1=int.const 1; %b:u1=u1.xor %a,%a; quantum.x_if 0,%b;");
+    assert!(emit_openqasm(&bit, 1).is_err());
+}
+
+#[test]
+fn stopped_integer_loop_retains_counter_and_parallel_swaps_without_truncation() {
+    let instruction=body("block entry() { %a:u64=int.const 18446744073709551615; %b:u64=int.const 256; quantum.z 0; branch loop(%a,%b); } block loop(%x:u64,%y:u64) { %one:u64=int.const 1; %next:u64=u64.sub %x,%one; branch loop(%y,%next); }");
+    let run = simulate_bounded(
+        &instruction,
+        &PureState::basis(1, 0).unwrap(),
+        QuantumLimits {
+            steps: 7,
+            ..QuantumLimits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(run.limit(), Some(QuantumLimit::Steps));
+    assert_eq!(
+        run.pending()[0].branch.values,
+        vec![
+            Some(u64::MAX),
+            Some(256),
+            Some(256),
+            Some(u64::MAX - 1),
+            Some(1),
+            Some(u64::MAX - 1)
+        ]
+    );
+    assert!(run.into_complete().is_err());
+}
+
+#[test]
+fn measurement_can_select_integer_loop_trip_count_and_all_paths_are_preflighted() {
+    let instruction=body("block entry() { quantum.h 0; %m:u1=quantum.measure_z 0; %n:u8=int.zext %m; branch head(%n); } block head(%i:u8) { %z:u8=int.const 0; %done:u1=int.eq %i,%z; branch.if %done, exit(), step(%i); } block step(%j:u8) { quantum.x 1; %one:u8=int.const 1; %next:u8=u8.sub %j,%one; branch head(%next); } block exit() { return; }");
+    let initial = PureState::basis(2, 0).unwrap();
+    let result = simulate_bounded(&instruction, &initial, QuantumLimits::default())
+        .unwrap()
+        .into_complete()
+        .unwrap();
+    close(result.density_matrix()[0].re, 0.5);
+    close(result.density_matrix()[15].re, 0.5);
+    for branch in result.branches() {
+        assert_eq!(branch.values[1], branch.values[0]);
+        assert_eq!(branch.values[5].is_some(), branch.values[0] == Some(1));
+        assert_eq!(branch.measurements.len(), 1);
+    }
+    let foreign=body("block entry() { quantum.x 0; %c:u1=int.const 0; branch.if %c, foreign(), exit(); } block foreign() { %v:u8=stack.pop; return; } block exit() { return; }");
+    let saved = initial.clone();
+    assert!(simulate_bounded(&foreign, &initial, QuantumLimits::default()).is_err());
+    assert_eq!(initial, saved);
+}
+
+#[test]
+fn integer_cfg_fixture_roundtrips_and_executes_without_another_ir() {
+    let package = compile_source(include_str!("../specs/quantum-integer-cfg.fsl")).unwrap();
+    assert_eq!(package.instructions.len(), 42);
+    let decoded = FslcPackage::decode_binary(&package.encode_binary().unwrap()).unwrap();
+    assert_eq!(decoded, package);
+    for body in &decoded.instructions {
+        for basis in 0..4 {
+            let result = simulate_bounded(
+                body,
+                &PureState::basis(2, basis).unwrap(),
+                QuantumLimits::default(),
+            )
+            .unwrap()
+            .into_complete()
+            .unwrap();
+            close(result.total_probability(), 1.0);
+        }
+    }
+}
