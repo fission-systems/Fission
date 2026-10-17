@@ -1,0 +1,426 @@
+{
+  "source": {
+    "fid_hash_matrix": {
+      "inputs": 512,
+      "eight_instruction_extents": 383,
+      "successful_hashes": 473,
+      "hashes_and_resolver_order_equal": true,
+      "sha256": "a771dbb8a6b4ef303ab310b1e62ca5f5a7d8a596cf45ef7fe53a51ed618bc6fe"
+    },
+    "base": "3082064e747cd73dda2dd98777a5eb25e6c1c9d5",
+    "source_only_tree": "cc083352c0ea8bbae68b6adde67970c9a07fa888",
+    "source_files_sha256": {
+      "crates/fission-sleigh/src/runtime/decode.rs": "b489784b8edce004818ea726db68fcd4ea0a27e342746be12053b73ac2b42912",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/fid_bound_state_tests.rs": "530e7ed27e89775d1d27e740d4541463676a0432c92c5c869577dde76ce05c75",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/fid_hash.rs": "c7340b85cee33d29570b1a64be90fd42407718d60828e467060edc0731b76562",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/mod.rs": "86d2147b8d5fc2662d4dd7b93b0cfc317461d438c2a25946112234f44830dc8c",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/walker.rs": "d4dd6c884893a6e6cefdb39a0e9e4a9c038e837dc85298cebd65cbcd7cc72bca",
+      "crates/fission-sleigh/src/runtime/spine/decision.rs": "01cb712090d9bbe814e10e78137366c90ddbfe91b19ec62de779a5536fcdfe06",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/binding_address_use.rs": "0d9b423d31e188a1b7a6774e5335eea9264ed7b23282aac8c3890ec601406ceb",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/fid_binding_tests.rs": "5c8431703e0d0c654ce63d6f4643f3bfebe17308a7e77e801df28150c5f8f92b",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/fid_bindings.rs": "469e0a74228798e5fface901d65873d92a244bec7113dbb28c8fc3738697beb0"
+    },
+    "source_patch_sha256": "6041f2f88e3550f96ef0bf3988462b31ce93681ccdfeacdb6fea414fa20baa5e",
+    "candidate_sha256": "7a3eb9c923537a3280fb80407822fa1a35188b1c8bb71e25279249347ef3ae61",
+    "baseline_sha256": "70d635cedbadf35832151425616ae3ac24c8703ac3c3b85004b7a356a73f6dd8",
+    "decode_matrix": {
+      "records": 1024,
+      "successes": 746,
+      "errors": 278,
+      "traced_errors": 27,
+      "complete_baseline_candidate_equal": true,
+      "sha256": "5721b8f3f02547208b90aec3889566b5bfb33dab046fcc95a0509c0890bba9b7",
+      "full_raw_states_included": true
+    },
+    "proposal_sha256": "ddff5e386cba8e766b4f304ff84571b2432edb42d52ffefa497774c927c2873e",
+    "historical_baseline_sha256": "ac9d1d5a229ca76725a2176d2c54bc2a0d7025c28cbfc60948fb47998d43e8ef",
+    "compiler_pair_fingerprints": {
+      "baseline": [
+        "2d8144b7880597b6e6d3dfd63a9a9efae3f533d3"
+      ],
+      "candidate": [
+        "2d8144b7880597b6e6d3dfd63a9a9efae3f533d3"
+      ]
+    },
+    "clean_baseline_same_compiler_verified": true
+  },
+  "large_medians": {
+    "baseline": {
+      "seconds": 8.23645370802842,
+      "cpu_seconds": 79.967973,
+      "max_rss_bytes": 2401140736
+    },
+    "candidate": {
+      "seconds": 7.453923166031018,
+      "cpu_seconds": 70.40185500000001,
+      "max_rss_bytes": 2482814976
+    }
+  },
+  "large_ranges": {
+    "baseline": {
+      "seconds": [
+        8.187351249856874,
+        8.242636209120974
+      ],
+      "cpu_seconds": [
+        79.139274,
+        80.12370600000003
+      ],
+      "max_rss_bytes": [
+        2399371264,
+        2437218304
+      ]
+    },
+    "candidate": {
+      "seconds": [
+        7.42365474998951,
+        7.477110208012164
+      ],
+      "cpu_seconds": [
+        70.09461699999996,
+        70.46706099999997
+      ],
+      "max_rss_bytes": [
+        2421080064,
+        2503376896
+      ]
+    }
+  },
+  "large_change_percent": {
+    "seconds": -9.500818795771748,
+    "cpu_seconds": -11.962436511927077,
+    "max_rss_bytes": 3.4014765888341403
+  },
+  "small_pairs": [
+    {
+      "cell": "03",
+      "baseline": 1.915251333033666,
+      "baseline_deterministic": true,
+      "candidate": 1.8983879580628127,
+      "candidate_deterministic": true,
+      "speedup": 1.0088829972289022
+    },
+    {
+      "cell": "27",
+      "baseline": 0.8368448750115931,
+      "baseline_deterministic": true,
+      "candidate": 0.8345659160986543,
+      "candidate_deterministic": true,
+      "speedup": 1.00273071170171
+    },
+    {
+      "cell": "40",
+      "baseline": 0.9626242909580469,
+      "baseline_deterministic": true,
+      "candidate": 0.9567846669815481,
+      "candidate_deterministic": true,
+      "speedup": 1.0061033837372433
+    }
+  ],
+  "fresh_replay": {
+    "returned": 250,
+    "changed_functions": 0,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "kuna_comparison": [
+    {
+      "cell": "03",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 1.8985397920478135,
+        "render_jobs_14_seconds": 1.3315195830073208,
+        "faster_observed_seconds": 1.3315195830073208
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.1932434169575572,
+        "render_jobs_14_seconds": 0.3305252499412745,
+        "faster_observed_seconds": 0.1932434169575572
+      },
+      "faster_observed_ratio": 6.890374864877118
+    },
+    {
+      "cell": "22",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 8.64679504209198,
+        "render_jobs_14_seconds": 7.708926707971841,
+        "faster_observed_seconds": 7.708926707971841
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 2.7932236671913415,
+        "render_jobs_14_seconds": 5.619429625105113,
+        "faster_observed_seconds": 2.7932236671913415
+      },
+      "faster_observed_ratio": 2.7598673169354053
+    },
+    {
+      "cell": "27",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 0.8353397918399423,
+        "render_jobs_14_seconds": 0.6602171249687672,
+        "faster_observed_seconds": 0.6602171249687672
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.11104845791123807,
+        "render_jobs_14_seconds": 0.24950158293358982,
+        "faster_observed_seconds": 0.11104845791123807
+      },
+      "faster_observed_ratio": 5.945306557039126
+    },
+    {
+      "cell": "40",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 0.9936803749296814,
+        "render_jobs_14_seconds": 0.9193140419665724,
+        "faster_observed_seconds": 0.9193140419665724
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.3436697090510279,
+        "render_jobs_14_seconds": 0.7232059170491993,
+        "faster_observed_seconds": 0.3436697090510279
+      },
+      "faster_observed_ratio": 2.674992929999755
+    }
+  ],
+  "repeated_full_record_parity": [
+    {
+      "path": "rows-vs-kuna/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    }
+  ],
+  "related_nextest": {
+    "passed": 2401,
+    "skipped": 9
+  },
+  "targeted_nextest": 10,
+  "bounds": [
+    "Mechanical performance only; no quality, recompilation, execution or ranking claim.",
+    "Fresh 250-function replay generated once; focused address sets repeat.",
+    "No own builds/tests/profilers overlap timing; OS caches/scheduling uncontrolled.",
+    "Both tools choose their own faster median among the two measured settings.",
+    "Fission render=1 does not serialize native preparation/FID.",
+    "Baseline/candidate speed deltas use matched Rust 1.97.0; historical Rust 1.96.1 time controls are excluded.",
+    "Binding address witness must remain complete as native PC-read owners evolve.",
+    "Retained-payload estimate excludes shared compiler metadata, allocator overhead and fixed slots; RSS increases."
+  ],
+  "confirmation": {
+    "medians": {
+      "baseline": {
+        "seconds": 8.292456957977265,
+        "cpu_seconds": 79.94962499999998,
+        "max_rss_bytes": 2426126336
+      },
+      "candidate": {
+        "seconds": 7.506716624833643,
+        "cpu_seconds": 70.25947299999993,
+        "max_rss_bytes": 2473377792
+      }
+    },
+    "ranges": {
+      "baseline": {
+        "seconds": [
+          8.210548749892041,
+          8.451682916143909
+        ],
+        "cpu_seconds": [
+          78.92368999999997,
+          80.35371899999998
+        ],
+        "max_rss_bytes": [
+          2391556096,
+          2460516352
+        ]
+      },
+      "candidate": {
+        "seconds": [
+          7.411368625005707,
+          7.510888332966715
+        ],
+        "cpu_seconds": [
+          69.63992300000004,
+          70.88031900000001
+        ],
+        "max_rss_bytes": [
+          2423898112,
+          2481127424
+        ]
+      }
+    },
+    "paired_ratios": [
+      {
+        "seconds": 0.9056328637209898,
+        "cpu_seconds": 0.8782453326078768,
+        "max_rss_bytes": 1.0194760904652247
+      },
+      {
+        "seconds": 0.9041266342583956,
+        "cpu_seconds": 0.8833433573077892,
+        "max_rss_bytes": 1.0172055869449839
+      },
+      {
+        "seconds": 0.9111241709870778,
+        "cpu_seconds": 0.8807261677583341,
+        "max_rss_bytes": 0.9851176603763534
+      },
+      {
+        "seconds": 0.8769103974368164,
+        "cpu_seconds": 0.8823703377274944,
+        "max_rss_bytes": 1.0293925716460928
+      },
+      {
+        "seconds": 0.9083940440755243,
+        "cpu_seconds": 0.8815321887130401,
+        "max_rss_bytes": 1.0211757290931636
+      }
+    ],
+    "median_paired_ratios": {
+      "seconds": 0.9056328637209898,
+      "cpu_seconds": 0.8815321887130401,
+      "max_rss_bytes": 1.0194760904652247
+    },
+    "separate_median_changes_percent": {
+      "seconds": -9.47536221321893,
+      "cpu_seconds": -12.120322015269059,
+      "max_rss_bytes": 1.9476090465224694
+    }
+  },
+  "transport_parity": {
+    "fresh_identity_cells": 45,
+    "fresh_integrated_detection_cells": 4,
+    "fresh_function_list_cells": 45,
+    "function_records": 334275,
+    "all_equal": true
+  },
+  "inputs_reverified": {
+    "all_input_hashes_verified": true,
+    "cells": 45,
+    "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+    "functions": 250
+  }
+}
