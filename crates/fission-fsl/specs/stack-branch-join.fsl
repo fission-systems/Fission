@@ -1,0 +1,31 @@
+language stack.branch.join {
+    byte_order little;
+    address_unit byte;
+    instruction choose {
+        opcode 0x70;
+        mnemonic "choose.add";
+        evidence "self-authored" "synthetic" "v1" "Acyclic unsigned comparison, branch arguments and stack state join; not an ISA instruction.";
+        semantics {
+            block entry() {
+                %input: u32 = stack.pop;
+                %limit: u32 = int.const 10;
+                %small: u1 = int.ult %input, %limit;
+                branch.if %small, low(%input), high(%input);
+            }
+            block low(%low_input: u32) {
+                %low_add: u32 = int.const 1;
+                %low_sum: u32 = u32.add.wrap %low_input, %low_add;
+                branch join(%low_sum);
+            }
+            block high(%high_input: u32) {
+                %high_add: u32 = int.const 2;
+                %high_sum: u32 = u32.add.wrap %high_input, %high_add;
+                branch join(%high_sum);
+            }
+            block join(%joined: u32) {
+                stack.push %joined;
+                return;
+            }
+        }
+    }
+}

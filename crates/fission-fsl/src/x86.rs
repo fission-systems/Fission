@@ -1,0 +1,950 @@
+//! Fission-owned variable-length x86 decoding and canonical FIR projections.
+//! No external instruction decoder, SLEIGH runtime, or P-code translation.
+use crate::x86_decode::{Form, Rule};
+use crate::{
+    sequence::{hex, InstructionOrigin},
+    state, DecodedInstruction, ExecutionStatus, FslError, FslcPackage, MachineState, OutputLayer,
+};
+use sha2::{Digest, Sha256};
+use std::{collections::BTreeSet, fmt::Write, path::Path};
+const MAGIC_V1: &[u8; 8] = b"FSLXPKG1";
+const MAGIC_V2: &[u8; 8] = b"FSLXPKG2";
+const MAX_BYTES: usize = 16 * 1024 * 1024;
+const MAX_INSTRUCTIONS: usize = 4096;
+fn error(s: impl Into<String>) -> FslError {
+    FslError::at(1, 1, s)
+}
+fn hash(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
+}
+
+/// Compiled encoding rules plus the sole canonical FIR body pool. Encoding
+/// fields are normalized operand tokens; original bytes remain in origins.
+#[derive(Clone, Debug)]
+pub struct X86Package {
+    version: u8,
+    rules: Vec<Rule>,
+    bodies: FslcPackage,
+}
+impl X86Package {
+    pub fn compile(manifest: &str, source: &str) -> Result<Self, FslError> {
+        if manifest.len() > MAX_BYTES || source.len() > MAX_BYTES {
+            return Err(error("x86 sources too large"));
+        }
+        let (version, rules) = crate::x86_decode::parse(manifest)?;
+        let value = Self {
+            version,
+            rules,
+            bodies: crate::compile_source(source)?,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+    fn validate(&self) -> Result<(), FslError> {
+        crate::x86_decode::validate(&self.rules)?;
+        self.bodies.validate()?;
+        for r in &self.rules {
+            for width in [16, 32, 64] {
+                let name = r.body.replace("{width}", &width.to_string());
+                let targets = if r.form == Form::Lea {
+                    [16, 32, 64]
+                        .into_iter()
+                        .map(|a| format!("{name}_a{a}"))
+                        .collect()
+                } else {
+                    vec![name]
+                };
+                for target in targets {
+                    let b = self
+                        .bodies
+                        .instructions
+                        .iter()
+                        .find(|b| b.name == target)
+                        .ok_or_else(|| error(format!("missing body {target}")))?;
+                    state::admit_context(b, true, true)?;
+                }
+            }
+        }
+        for b in &self.bodies.instructions {
+            state::admit_context(b, true, true)?;
+            let fields = b
+                .encoding
+                .fields
+                .iter()
+                .map(|f| (f.name.as_str(), f.offset, f.bits))
+                .collect::<Vec<_>>();
+            let legacy = fields
+                == [
+                    ("destination", 0, 5),
+                    ("source", 5, 5),
+                    ("base", 10, 5),
+                    ("index", 15, 5),
+                    ("immediate", 20, 64),
+                    ("scale", 84, 2),
+                ];
+            let split = fields
+                == [
+                    ("destination", 0, 5),
+                    ("source", 5, 5),
+                    ("base", 10, 5),
+                    ("index", 15, 5),
+                    ("displacement", 20, 64),
+                    ("scale", 84, 2),
+                    ("literal", 86, 32),
+                ];
+            if b.encoding.bits != 128
+                || !(legacy || self.version == 2 && split)
+                || b.encoding.fields.iter().any(|f| {
+                    let bits = ((1u128 << f.bits) - 1) << f.offset;
+                    b.encoding.mask & bits != 0
+                })
+            {
+                return Err(error("normalized token schema mismatch"));
+            }
+        }
+        Ok(())
+    }
+    fn decoder(&self) -> &'static str {
+        if self.version == 2 {
+            "owned-x86-v2"
+        } else {
+            "owned-x86-v1"
+        }
+    }
+    pub fn rule_count(&self) -> usize {
+        self.rules.len()
+    }
+    pub fn bodies(&self) -> &FslcPackage {
+        &self.bodies
+    }
+    pub fn encode_binary(&self) -> Result<Vec<u8>, FslError> {
+        self.validate()?;
+        let rules = crate::x86_decode::encode(&self.rules)?;
+        let bodies = self.bodies.encode_binary()?;
+        let mut out = if self.version == 2 {
+            MAGIC_V2
+        } else {
+            MAGIC_V1
+        }
+        .to_vec();
+        out.extend((rules.len() as u32).to_le_bytes());
+        out.extend((bodies.len() as u32).to_le_bytes());
+        out.extend(Sha256::digest(&rules));
+        out.extend(Sha256::digest(&bodies));
+        out.extend(rules);
+        out.extend(bodies);
+        if out.len() > MAX_BYTES {
+            return Err(error("x86 package exceeds 16 MiB"));
+        }
+        Ok(out)
+    }
+    pub fn decode_binary(raw: &[u8]) -> Result<Self, FslError> {
+        if raw.len() < 80
+            || raw.len() > MAX_BYTES
+            || !matches!(raw.get(..8), Some(m) if m == MAGIC_V1 || m == MAGIC_V2)
+        {
+            return Err(error("bad owned x86 package header"));
+        }
+        let n = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
+        let m = u32::from_le_bytes(raw[12..16].try_into().unwrap()) as usize;
+        if n > MAX_BYTES || m > MAX_BYTES || 80 + n + m != raw.len() {
+            return Err(error("bad x86 package lengths/EOF"));
+        }
+        let rule_bytes = &raw[80..80 + n];
+        let body_bytes = &raw[80 + n..];
+        if Sha256::digest(rule_bytes).as_slice() != &raw[16..48]
+            || Sha256::digest(body_bytes).as_slice() != &raw[48..80]
+        {
+            return Err(error("x86 package hash mismatch"));
+        }
+        let result = Self {
+            version: if raw.get(..8) == Some(MAGIC_V2) { 2 } else { 1 },
+            rules: crate::x86_decode::decode_rules(rule_bytes)?,
+            bodies: FslcPackage::decode_binary(body_bytes)?,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Instance {
+    origin: InstructionOrigin,
+    raw: Vec<u8>,
+    code: String,
+    observation: DecodedInstruction,
+    returns: bool,
+    memory_source: bool,
+    memory_destination: bool,
+    address_bits: u32,
+}
+#[derive(Clone, Debug)]
+pub struct BinaryOrigin {
+    pub file_sha256: String,
+    pub file_offset: u64,
+    pub section: String,
+}
+#[derive(Clone, Debug)]
+pub struct X86Program {
+    package: X86Package,
+    mode: u32,
+    input: Vec<u8>,
+    base: u64,
+    instances: Vec<Instance>,
+    binary: Option<BinaryOrigin>,
+}
+
+impl X86Program {
+    pub fn lift(
+        package: &X86Package,
+        mode: u32,
+        base: u64,
+        input: &[u8],
+    ) -> Result<Self, FslError> {
+        if ![16, 32, 64].contains(&mode) || input.is_empty() || input.len() > 65536 {
+            return Err(error("mode 16/32/64 and 1..65536 bytes required"));
+        }
+        let end = base
+            .checked_add(input.len() as u64)
+            .ok_or_else(|| error("address overflow"))?;
+        if mode < 64 && end > (1u64 << mode) {
+            return Err(error("window exceeds mode address space"));
+        }
+        let mut instances = Vec::new();
+        let mut offset = 0;
+        while offset < input.len() {
+            if instances.len() >= MAX_INSTRUCTIONS {
+                return Err(error("window exceeds 4096 instructions"));
+            }
+            let i = crate::x86_decode::decode(
+                &package.rules,
+                input,
+                offset,
+                base,
+                mode,
+                package.version,
+            )
+            .map_err(|e| {
+                error(format!(
+                    "x86 address=0x{:x} offset={offset}: {}",
+                    base + offset as u64,
+                    e.message
+                ))
+            })?;
+            let rule = &package.rules[i.rule];
+            let mut body = rule.body.replace("{width}", &i.width.to_string());
+            if rule.form == Form::Lea {
+                body = format!("{body}_a{}", i.address_bits);
+            } else if i.memory_destination {
+                let stem = if matches!(rule.form, Form::RmImm | Form::RmSimm8) {
+                    body.as_str()
+                } else {
+                    body.strip_suffix("_reg")
+                        .ok_or_else(|| error("memory destination requires register-body stem"))?
+                };
+                body = format!("{stem}_store_a{}", i.address_bits);
+            } else if i.memory_source {
+                let stem = body
+                    .strip_suffix("_reg")
+                    .ok_or_else(|| error("memory source requires a generic register-body stem"))?;
+                body = format!("{stem}_load_a{}", i.address_bits);
+            }
+            let index = package
+                .bodies
+                .instructions
+                .iter()
+                .position(|b| b.name == body)
+                .ok_or_else(|| error("missing FIR body"))?;
+            state::admit_context(&package.bodies.instructions[index], true, true)?;
+            let encoding = &package.bodies.instructions[index].encoding;
+            let split = encoding.fields.last().is_some_and(|f| f.name == "literal");
+            let memory_literal =
+                i.memory_destination && matches!(rule.form, Form::RmImm | Form::RmSimm8);
+            if split != memory_literal {
+                return Err(error(
+                    "operand form and displacement/literal schema disagree",
+                ));
+            }
+            let mut token = encoding.value;
+            for (field, value) in encoding.fields.iter().zip(i.fields) {
+                token |= u128::from(value) << field.offset;
+            }
+            let observation = package
+                .bodies
+                .decode_bytes(&package.bodies.language, &token.to_le_bytes())?
+                .ok_or_else(|| error("normalized operand token rejected"))?;
+            if observation.instruction_index != index
+                || !state::bank_indices_fit(
+                    &package.bodies.instructions[index],
+                    &observation,
+                    17,
+                    12,
+                )
+            {
+                return Err(error("invalid operand binding"));
+            }
+            instances.push(Instance {
+                origin: InstructionOrigin {
+                    address: base + offset as u64,
+                    input_offset: offset as u32,
+                    byte_length: i.length as u16,
+                },
+                raw: input[offset..offset + i.length].to_vec(),
+                code: rule.name.clone(),
+                observation,
+                returns: rule.form == Form::Ret,
+                memory_source: i.memory_source,
+                memory_destination: i.memory_destination,
+                address_bits: i.address_bits,
+            });
+            offset += i.length;
+        }
+        if !instances.iter().any(|i| i.returns) {
+            return Err(error("function window must include an admitted near RET"));
+        }
+        // Direct targets must designate an instruction start in this window.
+        let starts: BTreeSet<_> = instances.iter().map(|i| i.origin.address).collect();
+        for i in &instances {
+            let r = package
+                .rules
+                .iter()
+                .find(|r| r.name == i.code)
+                .ok_or_else(|| error("missing rule identity"))?;
+            if matches!(r.form, Form::Branch | Form::Branch8)
+                && !starts.contains(&i.observation.fields[4].1)
+            {
+                return Err(error(format!(
+                    "branch at 0x{:x} has external or unaligned target",
+                    i.origin.address
+                )));
+            }
+        }
+        Ok(Self {
+            package: package.clone(),
+            mode,
+            input: input.to_vec(),
+            base,
+            instances,
+            binary: None,
+        })
+    }
+    /// Selected file-backed executable span through the canonical Fission loader.
+    /// No function discovery or parallel program metadata store is created.
+    pub fn from_binary(
+        package: &X86Package,
+        path: &std::path::Path,
+        address: u64,
+        size: usize,
+    ) -> Result<Self, FslError> {
+        Self::from_binary_policy(package, path, address, size, false)
+    }
+    /// Asset-independent format-facts path. Never selects a legacy LoadSpec.
+    pub fn from_owned_binary(
+        package: &X86Package,
+        path: &Path,
+        address: u64,
+        size: usize,
+    ) -> Result<Self, FslError> {
+        Self::from_binary_policy(package, path, address, size, true)
+    }
+    /// Conservative entry-only selection for external corpora without sizes.
+    /// Admit only a straight-line prefix ending in an owned near RET. Branches,
+    /// unsupported instructions and exhausted bounds refuse, never guess a size.
+    /// This selects a candidate window, not a recovered source function or ABI.
+    pub fn from_owned_entry(
+        package: &X86Package,
+        path: &Path,
+        address: u64,
+    ) -> Result<Self, FslError> {
+        let binary = fission_loader::LoadedBinary::from_file_format_facts(path)
+            .map_err(|e| error(format!("loader: {e}")))?;
+        let architecture = binary
+            .architecture
+            .as_ref()
+            .ok_or_else(|| error("loader has no authoritative architecture"))?;
+        if !architecture.processor.eq_ignore_ascii_case("x86") || architecture.endian != "little" {
+            return Err(error("loader architecture is not little-endian x86"));
+        }
+        let section = binary
+            .executable_section_containing(address)
+            .ok_or_else(|| error("entry is not executable"))?;
+        let delta = address
+            .checked_sub(section.virtual_address)
+            .ok_or_else(|| error("bad section mapping"))?;
+        let available = section
+            .file_size
+            .min(section.virtual_size)
+            .checked_sub(delta)
+            .ok_or_else(|| error("entry is not file-backed"))?
+            .min(65536) as usize;
+        let raw = binary
+            .view_executable_bytes(address, available)
+            .filter(|b| !b.is_empty())
+            .ok_or_else(|| error("entry is not file-backed"))?;
+        address
+            .checked_add(available as u64)
+            .ok_or_else(|| error("entry window address overflow"))?;
+        let mut offset = 0;
+        for _ in 0..MAX_INSTRUCTIONS {
+            if offset == raw.len() {
+                break;
+            }
+            let instruction = crate::x86_decode::decode(
+                &package.rules,
+                raw,
+                offset,
+                address,
+                u32::from(architecture.bitness),
+                package.version,
+            )
+            .map_err(|e| {
+                error(format!(
+                    "entry decode address=0x{:x} offset={offset}: {}",
+                    address + offset as u64,
+                    e.message
+                ))
+            })?;
+            let form = package.rules[instruction.rule].form;
+            if matches!(form, Form::Branch | Form::Branch8) {
+                return Err(error(
+                    "entry selection requires straight-line code; branch refused",
+                ));
+            }
+            offset += instruction.length;
+            if form == Form::Ret {
+                return Self::from_loaded_binary(package, &binary, address, offset);
+            }
+        }
+        Err(error(
+            "entry selection found no near RET within 65536 bytes / 4096 instructions",
+        ))
+    }
+    pub fn byte_length(&self) -> usize {
+        self.input.len()
+    }
+    fn from_binary_policy(
+        package: &X86Package,
+        path: &Path,
+        address: u64,
+        size: usize,
+        format_facts: bool,
+    ) -> Result<Self, FslError> {
+        if size == 0 || size > 65536 {
+            return Err(error("binary span size must be 1..65536"));
+        }
+        let binary = if format_facts {
+            fission_loader::LoadedBinary::from_file_format_facts(path)
+        } else {
+            fission_loader::LoadedBinary::from_file(path)
+        }
+        .map_err(|e| error(format!("loader: {e}")))?;
+        Self::from_loaded_binary(package, &binary, address, size)
+    }
+    fn from_loaded_binary(
+        package: &X86Package,
+        binary: &fission_loader::LoadedBinary,
+        address: u64,
+        size: usize,
+    ) -> Result<Self, FslError> {
+        let architecture = binary
+            .architecture
+            .as_ref()
+            .ok_or_else(|| error("loader has no authoritative architecture"))?;
+        if !architecture.processor.eq_ignore_ascii_case("x86") || architecture.endian != "little" {
+            return Err(error("loader architecture is not little-endian x86"));
+        }
+        let section = binary
+            .executable_section_containing(address)
+            .ok_or_else(|| error("span is not executable"))?;
+        let delta = address
+            .checked_sub(section.virtual_address)
+            .ok_or_else(|| error("bad section mapping"))?;
+        if delta
+            .checked_add(size as u64)
+            .is_none_or(|n| n > section.file_size || n > section.virtual_size)
+        {
+            return Err(error("span exceeds file-backed executable section"));
+        }
+        let file_offset = section
+            .file_offset
+            .checked_add(delta)
+            .ok_or_else(|| error("file offset overflow"))?;
+        let raw = binary
+            .view_executable_bytes(address, size)
+            .ok_or_else(|| error("loader rejected byte mapping"))?;
+        let end = address
+            .checked_add(size as u64)
+            .ok_or_else(|| error("span overflow"))?;
+        if binary.relocations.iter().any(|r| {
+            r.address < end
+                && r.address
+                    .checked_add(u64::from(r.size.max(1)))
+                    .is_none_or(|e| e > address)
+        }) {
+            return Err(error("relocated instruction window is not admitted"));
+        }
+        let start =
+            usize::try_from(file_offset).map_err(|_| error("file offset outside host range"))?;
+        let file_end = start
+            .checked_add(size)
+            .ok_or_else(|| error("file span overflow"))?;
+        if binary.data.as_slice().get(start..file_end) != Some(raw) {
+            return Err(error("mapped bytes differ from original file span"));
+        }
+        let mut result = Self::lift(package, u32::from(architecture.bitness), address, raw)?;
+        result.binary = Some(BinaryOrigin {
+            file_sha256: hash(binary.data.as_slice()),
+            file_offset,
+            section: section.name.clone(),
+        });
+        Ok(result)
+    }
+    fn valid_state(
+        &self,
+        state: &MachineState,
+        memory_length: usize,
+        base: u64,
+        budget: usize,
+    ) -> bool {
+        state.registers.len() == 17
+            && state.flags.len() == 12
+            && state.registers[16] == 0
+            && !state.flags.iter().any(|&f| f > 1)
+            && !state.flags[6..].iter().any(|&f| f != 1)
+            && base.checked_add(memory_length as u64).is_some()
+            && (1..=1_000_000).contains(&budget)
+    }
+    fn writes_memory(&self) -> bool {
+        self.instances.iter().any(|i| {
+            state::writes_memory(&self.package.bodies.instructions[i.observation.instruction_index])
+        })
+    }
+    fn run_window(
+        &self,
+        trial: &mut MachineState,
+        memory: &mut state::MemoryWindow<'_>,
+        budget: usize,
+    ) -> Result<(ExecutionStatus, Option<u64>), FslError> {
+        let mut pc = self.base;
+        for _ in 0..budget {
+            let Some(i) = self.instances.iter().find(|i| i.origin.address == pc) else {
+                return Ok((ExecutionStatus::InvalidState, None));
+            };
+            let (status, next) = state::execute_decoded_window(
+                &self.package.bodies,
+                &i.observation,
+                trial,
+                Some(pc),
+                Some(memory.reborrow()),
+            )?;
+            if status != ExecutionStatus::Success {
+                return Ok((status, None));
+            }
+            if i.returns {
+                return Ok(next.map_or((ExecutionStatus::InvalidState, None), |exit| {
+                    (ExecutionStatus::Success, Some(exit))
+                }));
+            }
+            pc = next.unwrap_or(pc + u64::from(i.origin.byte_length));
+        }
+        Ok((ExecutionStatus::InvalidState, None))
+    }
+    pub fn execute(
+        &self,
+        state: &mut MachineState,
+        memory: &[u8],
+        memory_base: u64,
+        budget: usize,
+    ) -> Result<(ExecutionStatus, Option<u64>), FslError> {
+        if self.writes_memory() || !self.valid_state(state, memory.len(), memory_base, budget) {
+            return Ok((ExecutionStatus::InvalidState, None));
+        }
+        let mut trial = state.clone();
+        let result = self.run_window(
+            &mut trial,
+            &mut state::MemoryWindow::ReadOnly(memory, memory_base),
+            budget,
+        )?;
+        if result.0 == ExecutionStatus::Success {
+            *state = trial;
+        }
+        Ok(result)
+    }
+    /// Commit state, memory and exit only on whole-window success. Bounded API
+    /// transaction; no claim about architectural exception or atomic ordering.
+    pub fn execute_mut(
+        &self,
+        state: &mut MachineState,
+        memory: &mut [u8],
+        memory_base: u64,
+        budget: usize,
+    ) -> Result<(ExecutionStatus, Option<u64>), FslError> {
+        if memory.len() > state::MAX_TRANSACTION_BYTES
+            || !self.valid_state(state, memory.len(), memory_base, budget)
+        {
+            return Ok((ExecutionStatus::InvalidState, None));
+        }
+        let mut trial = state.clone();
+        let mut bytes = memory.to_vec();
+        let result = self.run_window(
+            &mut trial,
+            &mut state::MemoryWindow::ReadWrite(&mut bytes, memory_base),
+            budget,
+        )?;
+        if result.0 == ExecutionStatus::Success {
+            *state = trial;
+            memory.copy_from_slice(&bytes);
+        }
+        Ok(result)
+    }
+    /// Candidate entry dependencies derived from FIR, with no automatic ABI selection.
+    /// This bounded analysis refuses unknown control paths rather than merging guesses.
+    pub fn recover_input_evidence(&self) -> Result<String, FslError> {
+        use crate::recovery::{EntryDependency, RecoveredSuccessor, RecoveryState};
+        let mut analysis = RecoveryState::new(17, 12, 16)?;
+        let mut reached_return = false;
+        for instance in &self.instances {
+            let instruction =
+                &self.package.bodies.instructions[instance.observation.instruction_index];
+            let successor = analysis.instruction(
+                instruction,
+                &instance.observation,
+                instance.origin.address,
+            )?;
+            if instance.returns {
+                reached_return = true;
+                break;
+            }
+            if successor != RecoveredSuccessor::Fallthrough
+                && successor
+                    != RecoveredSuccessor::Constant(
+                        instance.origin.address + u64::from(instance.origin.byte_length),
+                    )
+            {
+                return Err(error("input recovery requires a straight guest path; control alternatives are not inferred"));
+            }
+        }
+        if !reached_return {
+            return Err(error("input recovery did not reach an admitted return"));
+        }
+        let dependencies = analysis.dependencies(0)?;
+        let mut out = format!("input evidence mode={} decoder={} input-sha256={} package-sha256={}\nstatus=bounded-candidates convention=unselected return-register=0 source-types=unknown\n", self.mode, self.package.decoder(), hash(&self.input), hash(&self.package.encode_binary()?));
+        if let Some(binary) = &self.binary {
+            writeln!(
+                out,
+                "binary file-sha256={} file-offset={} section={:?}",
+                binary.file_sha256, binary.file_offset, binary.section
+            )
+            .unwrap();
+        }
+        for dependency in &dependencies {
+            if let EntryDependency::Register(slot) = dependency {
+                writeln!(
+                    out,
+                    "entry-register slot={slot} role={} confidence=dependency-only",
+                    if *slot == 4 {
+                        "address/stack-context"
+                    } else {
+                        "return-data-candidate"
+                    }
+                )
+                .unwrap();
+            }
+        }
+        for (id, read) in analysis.reads.iter().enumerate() {
+            let origin = self
+                .instances
+                .iter()
+                .find(|i| i.origin.address == read.instruction_address)
+                .ok_or_else(|| error("missing recovery origin"))?;
+            writeln!(out, "memory-read id={id} instruction=0x{:x} raw={} fir-op={} value-bits={} role={} address={:?}", read.instruction_address, hex(&origin.raw), read.operation_index, read.value_bits, if dependencies.contains(&EntryDependency::MemoryRead(id)) {"return-data-candidate"} else {"control-or-other"}, read.address).unwrap();
+        }
+        for (id, read) in analysis.reads.iter().enumerate() {
+            if let Some(store) = read.forwarded_store {
+                writeln!(out, "memory-read-forward id={id} exact-store={store}").unwrap();
+            }
+            if !read.possible_store_aliases.is_empty() {
+                writeln!(
+                    out,
+                    "memory-read-alias id={id} possible-stores={:?} confidence=overapproximation",
+                    read.possible_store_aliases
+                )
+                .unwrap();
+            }
+        }
+        for (id, write) in analysis.writes.iter().enumerate() {
+            let origin = self
+                .instances
+                .iter()
+                .find(|i| i.origin.address == write.instruction_address)
+                .ok_or_else(|| error("missing store origin"))?;
+            writeln!(out,"memory-write id={id} instruction=0x{:x} raw={} fir-op={} value-bits={} address={:?} dependencies={:?}", write.instruction_address,hex(&origin.raw),write.operation_index,write.value_bits,write.address,write.dependencies).unwrap();
+        }
+        out += "limits=flat-memory; no ABI selection, source prototype, argument count, signedness, pointer type or completeness proof; unknown control analysis refuses\n";
+        Ok(out)
+    }
+    pub(crate) fn projection_bodies(&self) -> Vec<&crate::CompiledInstruction> {
+        self.instances
+            .iter()
+            .map(|i| i.observation.instruction_index)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|id| &self.package.bodies.instructions[id])
+            .collect()
+    }
+    pub(crate) fn projection_origins(&self) -> Vec<crate::backend::OriginAssociation> {
+        self.instances
+            .iter()
+            .map(|i| crate::backend::OriginAssociation {
+                body: self.package.bodies.instructions[i.observation.instruction_index]
+                    .name
+                    .clone(),
+                source_symbol: format!("x86_body_{}", i.observation.instruction_index),
+                guest_address: Some(i.origin.address),
+                raw_hex: Some(hex(&i.raw)),
+                input_offset: Some(i.origin.input_offset),
+                byte_length: Some(i.origin.byte_length),
+            })
+            .collect()
+    }
+    pub fn emit(&self, layer: OutputLayer) -> Result<String, FslError> {
+        use crate::backend::{OutputBackend, ProjectionInput, SourceBackend, TargetProfile};
+        if let Some(backend) = SourceBackend::from_layer(layer) {
+            let plan = backend
+                .plan(
+                    ProjectionInput::X86Window(self),
+                    &TargetProfile::for_backend(&backend),
+                )
+                .map_err(|e| error(e.to_string()))?;
+            let bundle = backend.emit(&plan).map_err(|e| error(e.to_string()))?;
+            Ok(bundle
+                .sources
+                .into_iter()
+                .next()
+                .expect("source backend emits one file")
+                .source)
+        } else {
+            self.emit_implementation(layer)
+        }
+    }
+    pub(crate) fn emit_go(&self) -> Result<String, FslError> {
+        let mut out = crate::go_output::PRELUDE.to_string();
+        writeln!(
+            out,
+            "// x86 mode={} input-sha256={} package-sha256={} decoder={}",
+            self.mode,
+            hash(&self.input),
+            hash(&self.package.encode_binary()?),
+            self.package.decoder()
+        )
+        .unwrap();
+        if let Some(b) = &self.binary {
+            writeln!(
+                out,
+                "// binary file-sha256={} file-offset={}",
+                b.file_sha256, b.file_offset
+            )
+            .unwrap();
+        }
+        for id in self
+            .instances
+            .iter()
+            .map(|i| i.observation.instruction_index)
+            .collect::<BTreeSet<_>>()
+        {
+            out += &crate::go_output::state_body(
+                &self.package.bodies.instructions[id],
+                &format!("x86_body_{id}"),
+            )?;
+        }
+        out+="// Explicit banks: GPR[17], flags[12], bounded byte memory. Concurrent access is unsupported.\n// Status 0 commits state/exit. Status 3 preserves caller state/memory/exit.\nfunc fsl_x86(registers, flags []uint64, memory []byte, memory_base uint64, budget int, exit_pc *uint64) uint32 {\nif len(registers)!=17 || len(flags)!=12 || registers[16]!=0 || budget<=0 || budget>1000000 || exit_pc==nil || memory_base>^uint64(0)-uint64(len(memory)) || !fsl_runtime_disjoint(registers,flags) { return 3 }\nfor i, flag:=range flags { if flag>1 || (i>=6 && flag!=1) { return 3 }; if &flags[i]==exit_pc { return 3 } }\nfor i:=range registers { if &registers[i]==exit_pc { return 3 } }\nr:=append([]uint64(nil),registers...); f:=append([]uint64(nil),flags...)\n";
+        if self.writes_memory() {
+            writeln!(out,"if len(memory)>{} {{ return 3 }}\ndestination_memory:=memory; memory=append([]byte(nil),memory...)",state::MAX_TRANSACTION_BYTES).unwrap();
+        }
+        writeln!(
+            out,
+            "pc:=uint64(0x{:x})\nfor step:=0;step<budget;step++ {{ switch pc {{",
+            self.base
+        )
+        .unwrap();
+        for i in &self.instances {
+            let id = i.observation.instruction_index;
+            let fields = i
+                .observation
+                .fields
+                .iter()
+                .map(|(_, v)| format!("0x{v:x}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(out,"case 0x{:x}: // raw={}\nfields:=[]uint64{{{fields}}}\nstatus,next,changed:=x86_body_{id}(r,f,fields,pc,memory,memory_base)\nif status!=0 {{ return status }}",i.origin.address,hex(&i.raw)).unwrap();
+            if i.returns {
+                out += "if !changed { return 3 }; copy(registers,r); copy(flags,f); ";
+                if self.writes_memory() {
+                    out += "copy(destination_memory,memory); ";
+                }
+                out += "*exit_pc=next; return 0\n";
+            } else {
+                writeln!(
+                    out,
+                    "if changed {{ pc=next }} else {{ pc=0x{:x} }}",
+                    i.origin.address + u64::from(i.origin.byte_length)
+                )
+                .unwrap();
+            }
+        }
+        out += "default: return 3\n} }\nreturn 3\n}\n";
+        Ok(out)
+    }
+    pub(crate) fn emit_implementation(&self, layer: OutputLayer) -> Result<String, FslError> {
+        if layer == OutputLayer::Fir {
+            let mut out=format!("x86 program mode={} base=0x{:x} bytes={} decoder={} input-sha256={} package-sha256={}\n",self.mode,self.base,self.input.len(),self.package.decoder(),hash(&self.input),hash(&self.package.encode_binary()?));
+            if let Some(b) = &self.binary {
+                writeln!(
+                    out,
+                    "binary file-sha256={} file-offset={} section={}",
+                    b.file_sha256, b.file_offset, b.section
+                )
+                .unwrap();
+            }
+            for i in &self.instances {
+                writeln!(out,"instance address=0x{:x} offset={} length={} raw={} code={:?} body={} fields={:?}",i.origin.address,i.origin.input_offset,i.origin.byte_length,hex(&i.raw),i.code,self.package.bodies.instructions[i.observation.instruction_index].name,i.observation.fields).unwrap();
+                if i.memory_destination {
+                    writeln!(out, "  operand memory-destination address-bits={} domain=flat-byte-window segment-bases=0", i.address_bits).unwrap();
+                }
+                if i.memory_source {
+                    writeln!(out, "  operand memory-source address-bits={} domain=flat-byte-window segment-bases=0", i.address_bits).unwrap();
+                }
+            }
+            for id in self
+                .instances
+                .iter()
+                .map(|i| i.observation.instruction_index)
+                .collect::<BTreeSet<_>>()
+            {
+                out += &crate::emit_instruction(
+                    &self.package.bodies.instructions[id],
+                    OutputLayer::Fir,
+                    "unused",
+                )?;
+            }
+            return Ok(out);
+        }
+        if !matches!(layer, OutputLayer::C | OutputLayer::Rust) {
+            return Err(error("x86 output supports FIR/C/Rust only"));
+        }
+        let c = layer == OutputLayer::C;
+        let mut out=format!("/* x86 mode={} input-sha256={} package-sha256={}; owned decoder {}.\n * Explicit state function: GPR[0..16]=RAX,RCX,RDX,RBX,RSP,RBP,RSI,RDI,R8..R15; GPR[16]=0.\n * flags=CF,PF,ZF,SF,OF,AF then six known bits. Unknown AF is not observable.\n * Disjoint valid storage required in C. Bounded byte memory, flat SS.base=0, no MMU/fault model.\n * Status 0 commits state and return PC; status 3 preserves caller storage. */\n",self.mode,hash(&self.input),hash(&self.package.encode_binary()?),self.package.decoder());
+        if let Some(b) = &self.binary {
+            writeln!(
+                out,
+                "/* binary file-sha256={} file-offset={} */",
+                b.file_sha256, b.file_offset
+            )
+            .unwrap();
+        }
+        for id in self
+            .instances
+            .iter()
+            .map(|i| i.observation.instruction_index)
+            .collect::<BTreeSet<_>>()
+        {
+            out += &state::emit_state_context(
+                &self.package.bodies.instructions[id],
+                layer,
+                &format!("x86_body_{id}"),
+            )?;
+        }
+        if c {
+            out+="#include <string.h>\nuint32_t fsl_x86(uint64_t *registers, size_t register_count, uint64_t *flags, size_t flag_count, const uint8_t *memory, size_t memory_length, uint64_t memory_base, size_t budget, uint64_t *exit_pc) {\nif (!registers || !flags || !memory || !exit_pc || register_count != 17 || flag_count != 12 || registers[16] != 0 || budget == 0 || budget > 1000000 || memory_base > UINT64_MAX - memory_length) return 3;\nfor (size_t j=0;j<12;j++) if (flags[j] > 1 || (j>=6 && flags[j]!=1)) return 3;\nuint64_t r[17], f[12]; memcpy(r, registers, sizeof r); memcpy(f, flags, sizeof f);\n";
+            writeln!(out,"uint64_t pc=UINT64_C(0x{:x});\nfor (size_t step=0;step<budget;step++) {{\nuint64_t next=0; uint32_t changed=0, status=0;\n(void)next; (void)changed;\nswitch(pc) {{",self.base).unwrap();
+        } else {
+            out+="pub fn fsl_x86(registers: &mut [u64], flags: &mut [u64], memory: &[u8], memory_base: u64, budget: usize, exit_pc: &mut u64) -> u32 {\nif registers.len()!=17 || flags.len()!=12 || registers[16]!=0 || budget==0 || budget>1000000 || flags.iter().any(|&v|v>1) || flags[6..].iter().any(|&v|v!=1) || memory_base.checked_add(memory.len() as u64).is_none() { return 3; }\nlet mut r=[0u64;17]; let mut f=[0u64;12]; r.copy_from_slice(registers); f.copy_from_slice(flags);\n";
+            writeln!(out,"let mut pc=0x{:x}u64;\nfor _step in 0..budget {{\nlet mut next=0u64; let mut changed=false;\nlet _ = (&memory, memory_base, &next, &changed);\nmatch pc {{",self.base).unwrap();
+        }
+        for i in &self.instances {
+            let id = i.observation.instruction_index;
+            let body = &self.package.bodies.instructions[id];
+            let fields = i
+                .observation
+                .fields
+                .iter()
+                .map(|(_, v)| {
+                    if c {
+                        format!("UINT64_C(0x{v:x})")
+                    } else {
+                        format!("0x{v:x}u64")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(
+                out,
+                "{} {{ /* raw={} */",
+                if c {
+                    format!("case UINT64_C(0x{:x}):", i.origin.address)
+                } else {
+                    format!("0x{:x} =>", i.origin.address)
+                },
+                hex(&i.raw)
+            )
+            .unwrap();
+            if c {
+                writeln!(out,"const uint64_t fields[{}]={{{fields}}};\nstatus=x86_body_{id}(r,17,f,12,fields,{}{}{});\nif (status) return status;",i.observation.fields.len(),i.observation.fields.len(),if state::uses_guest_pc(body){",pc,&next,&changed"}else{""},if state::uses_memory(body){",memory,memory_length,memory_base"}else{""}).unwrap();
+            } else {
+                writeln!(out,"let fields=[{fields}];\nlet status=x86_body_{id}(&mut r,&mut f,&fields{}{});\nif status!=0 {{ return status; }}",if state::uses_guest_pc(body){",pc,&mut next,&mut changed"}else{""},if state::uses_memory(body){",memory,memory_base"}else{""}).unwrap();
+            }
+            if i.returns {
+                out += if c {
+                    "if (!changed) return 3; memcpy(registers,r,sizeof r); memcpy(flags,f,sizeof f); *exit_pc=next; return 0;\n"
+                } else {
+                    "if !changed { return 3; } registers.copy_from_slice(&r); flags.copy_from_slice(&f); *exit_pc=next; return 0;\n"
+                };
+            } else {
+                writeln!(
+                    out,
+                    "{}",
+                    if c {
+                        format!(
+                            "pc=changed?next:UINT64_C(0x{:x}); break;",
+                            i.origin.address + u64::from(i.origin.byte_length)
+                        )
+                    } else {
+                        format!(
+                            "pc=if changed {{next}} else {{0x{:x}u64}};",
+                            i.origin.address + u64::from(i.origin.byte_length)
+                        )
+                    }
+                )
+                .unwrap();
+            }
+            out += "}\n";
+        }
+        out += if c {
+            "default: return 3;\n}\n}\nreturn 3;\n}\n"
+        } else {
+            "_ => return 3,\n}\n}\n3\n}\n"
+        };
+        if self.writes_memory() {
+            let limit = state::MAX_TRANSACTION_BYTES;
+            // Preserve the readonly ABI/goldens; mutable projections explicitly
+            // require disjoint caller scratch with exact memory length.
+            if c {
+                out=out.replace("const uint8_t *memory, size_t memory_length, uint64_t memory_base, size_t budget, uint64_t *exit_pc", "uint8_t *memory, size_t memory_length, uint64_t memory_base, uint8_t *scratch, size_t scratch_length, size_t budget, uint64_t *exit_pc");
+                out=out.replace("uint64_t r[17], f[12]; memcpy(r, registers, sizeof r); memcpy(f, flags, sizeof f);", &format!("if (!scratch || scratch_length != memory_length || memory_length > {limit}) return 3;\nmemcpy(scratch,memory,memory_length); uint8_t *destination_memory=memory; memory=scratch;\nuint64_t r[17], f[12]; memcpy(r, registers, sizeof r); memcpy(f, flags, sizeof f);"));
+                out = out.replace(
+                    "*exit_pc=next; return 0;",
+                    "memcpy(destination_memory,memory,memory_length); *exit_pc=next; return 0;",
+                );
+            } else {
+                out=out.replace("memory: &[u8], memory_base: u64, budget: usize, exit_pc: &mut u64", "memory: &mut [u8], memory_base: u64, scratch: &mut [u8], budget: usize, exit_pc: &mut u64");
+                out=out.replace("let mut r=[0u64;17]; let mut f=[0u64;12];", &format!("if scratch.len()!=memory.len() || memory.len()>{limit} {{ return 3; }}\nscratch.copy_from_slice(memory); let destination_memory=memory; let memory=scratch;\nlet mut r=[0u64;17]; let mut f=[0u64;12];"));
+                out = out.replace(
+                    "*exit_pc=next; return 0;",
+                    "destination_memory.copy_from_slice(memory); *exit_pc=next; return 0;",
+                );
+            }
+            out.insert_str(0, "/* Mutable window transaction; disjoint scratch has exact memory length. Scratch contents are unspecified on failure. */\n");
+        }
+        Ok(out)
+    }
+}

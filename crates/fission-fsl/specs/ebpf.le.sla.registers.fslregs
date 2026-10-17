@@ -1,0 +1,19 @@
+layout ebpf.le.sla.registers {
+    evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/compiled/eBPF/eBPF_le.sla" "sha256:7af0479005e8b93385783cc78a60b27eaef0afde2f546af6b3bc45ec23eb63dd" "SLA v4 ordinary spaces and named varnode symbols; byte offsets/widths retained. Internal unique/OTHER spaces are evidence only.";
+    default_space "ram";
+    space "ram" memory 8 byte little;
+    space "register" register 4 byte little;
+    space "syscall" memory 4 byte little;
+    register "R0" "register" 0 8;
+    register "R1" "register" 8 8;
+    register "R2" "register" 16 8;
+    register "R3" "register" 24 8;
+    register "R4" "register" 32 8;
+    register "R5" "register" 40 8;
+    register "R6" "register" 48 8;
+    register "R7" "register" 56 8;
+    register "R8" "register" 64 8;
+    register "R9" "register" 72 8;
+    register "R10" "register" 80 8;
+    register "PC" "register" 88 8;
+}

@@ -48,7 +48,7 @@ fn main() {
             compiled.default_context,
             compiled.default_context_known_mask,
         );
-        let got = (from_sla.context_bits(), from_sla.mask_bits());
+        let got = (from_sla.context_bits_wide(), from_sla.mask_bits_wide());
         if want == got {
             agree += 1;
         } else {

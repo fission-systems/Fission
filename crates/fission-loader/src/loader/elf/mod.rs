@@ -3,7 +3,8 @@ use crate::loader::types::{
     DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
-use fission_core::architecture::select_elf_load_spec;
+use fission_core::architecture::{ArchitectureDescriptor, BinaryLoadSpec, select_elf_load_spec};
+use fission_core::core_constants::{ELFCLASS32, ELFCLASS64, ELFDATA2LSB};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 
@@ -24,6 +25,48 @@ use relocation_patches::{
     ppc64_function_descriptor_map_64, riscv_relocation_patches_64, x86_64_relocation_patches_64,
 };
 pub struct ElfLoader;
+
+#[derive(Clone, Copy)]
+enum ArchitectureSelection {
+    Opinion,
+    X86ContainerFacts,
+}
+fn select_architecture(
+    policy: ArchitectureSelection,
+    machine: u16,
+    class: u8,
+    endian: u8,
+    flags: u32,
+    image_base: u64,
+) -> Result<(ArchitectureDescriptor, Option<BinaryLoadSpec>)> {
+    if matches!(policy, ArchitectureSelection::Opinion) {
+        return select_elf_load_spec(machine, class, endian, flags, image_base)
+            .map(|(a, s)| (a, Some(s)))
+            .map_err(|e| err!(loader, "{}", e));
+    }
+    // Container machine and class must agree; do not infer a compiler/ABI.
+    let bits = match (machine, class, endian) {
+        (EM_386, ELFCLASS32, ELFDATA2LSB) => 32,
+        (EM_X86_64, ELFCLASS64, ELFDATA2LSB) => 64,
+        _ => {
+            return Err(err!(
+                loader,
+                "UnsupportedFormatFacts: require matching little-endian ELF i386/x86-64 machine/class"
+            ));
+        }
+    };
+    Ok((
+        ArchitectureDescriptor::new(
+            "x86",
+            "little",
+            bits,
+            "container-metadata",
+            None,
+            format!("ELF machine={machine}, class={class}, endian={endian}, flags=0x{flags:x}"),
+        ),
+        None,
+    ))
+}
 
 /// A loadable ELF program-header range, retaining the file/virtual-coordinate
 /// pair needed to correlate an ELF image with process mappings.
@@ -171,6 +214,16 @@ impl ElfLoader {
     }
 
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
+        Self::parse_selected(data, path, ArchitectureSelection::Opinion)
+    }
+    pub(super) fn parse_format_facts(data: DataBuffer, path: String) -> Result<LoadedBinary> {
+        Self::parse_selected(data, path, ArchitectureSelection::X86ContainerFacts)
+    }
+    fn parse_selected(
+        data: DataBuffer,
+        path: String,
+        policy: ArchitectureSelection,
+    ) -> Result<LoadedBinary> {
         // 1. Read Identification (first 16 bytes)
         let ident = ElfIdent::parse(data.as_slice())?;
 
@@ -187,6 +240,7 @@ impl ElfLoader {
                 } else {
                     Endian::Big
                 },
+                policy,
             )
         } else {
             Self::parse_32(
@@ -197,11 +251,17 @@ impl ElfLoader {
                 } else {
                     Endian::Big
                 },
+                policy,
             )
         }
     }
 
-    fn parse_64(mut data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
+    fn parse_64(
+        mut data: DataBuffer,
+        path: String,
+        endian: Endian,
+        policy: ArchitectureSelection,
+    ) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
         let reader = ByteReader::new(bytes, endian);
         // Read Header
@@ -431,14 +491,14 @@ impl ElfLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
-        let (architecture, load_spec) = select_elf_load_spec(
+        let (architecture, load_spec) = select_architecture(
+            policy,
             header.machine,
             header.ident.class,
             header.ident.endian,
             header.flags,
             image_base,
-        )
-        .map_err(|e| err!(loader, "{}", e))?;
+        )?;
 
         // Entry point fallback
         if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
@@ -483,10 +543,15 @@ impl ElfLoader {
         );
         global_symbols.extend(header_symbols);
 
-        LoadedBinaryBuilder::new(path, data)
+        let builder = LoadedBinaryBuilder::new(path, data)
             .format("ELF64")
-            .architecture(architecture)
-            .load_spec(load_spec)
+            .architecture(architecture);
+        let builder = if let Some(spec) = load_spec {
+            builder.load_spec(spec)
+        } else {
+            builder
+        };
+        builder
             .entry_point(entry_point)
             .image_base(image_base)
             .is_64bit(is_64bit)
@@ -502,7 +567,12 @@ impl ElfLoader {
             .build()
     }
 
-    fn parse_32(mut data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
+    fn parse_32(
+        mut data: DataBuffer,
+        path: String,
+        endian: Endian,
+        policy: ArchitectureSelection,
+    ) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
         let reader = ByteReader::new(bytes, endian);
         // Read Header
@@ -706,14 +776,14 @@ impl ElfLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
-        let (architecture, load_spec) = select_elf_load_spec(
+        let (architecture, load_spec) = select_architecture(
+            policy,
             header.machine,
             header.ident.class,
             header.ident.endian,
             header.flags,
             image_base,
-        )
-        .map_err(|e| err!(loader, "{}", e))?;
+        )?;
 
         // Entry point fallback
         if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
@@ -758,10 +828,15 @@ impl ElfLoader {
         );
         global_symbols.extend(header_symbols);
 
-        LoadedBinaryBuilder::new(path, data)
+        let builder = LoadedBinaryBuilder::new(path, data)
             .format("ELF32")
-            .architecture(architecture)
-            .load_spec(load_spec)
+            .architecture(architecture);
+        let builder = if let Some(spec) = load_spec {
+            builder.load_spec(spec)
+        } else {
+            builder
+        };
+        builder
             .entry_point(entry_point)
             .image_base(image_base)
             .is_64bit(is_64bit)
@@ -3350,6 +3425,48 @@ mod tests {
         assert!(
             plt_puts.address > 0x1000,
             "PLT stub address should be a real guest VA"
+        );
+    }
+}
+
+#[cfg(test)]
+mod format_facts_tests {
+    use crate::loader::{DataBuffer, pipeline::LoaderPipeline};
+    fn elf(bits: u8) -> Vec<u8> {
+        let mut b = vec![0; 64];
+        b[..7].copy_from_slice(&[0x7f, b'E', b'L', b'F', if bits == 64 { 2 } else { 1 }, 1, 1]);
+        b[16..18].copy_from_slice(&2u16.to_le_bytes());
+        b[18..20].copy_from_slice(&(if bits == 64 { 62u16 } else { 3 }).to_le_bytes());
+        b[20..24].copy_from_slice(&1u32.to_le_bytes());
+        b
+    }
+    #[test]
+    fn format_facts_has_architecture_without_legacy_load_spec() {
+        for bits in [32, 64] {
+            let b =
+                LoaderPipeline::load_format_facts(DataBuffer::Heap(elf(bits)), "owned.elf".into())
+                    .unwrap();
+            assert!(b.load_spec().is_none());
+            assert_eq!(b.arch_spec, "unknown");
+            let a = b.architecture.as_ref().unwrap();
+            assert_eq!(a.processor, "x86");
+            assert_eq!(a.bitness, bits);
+            assert_eq!(a.abi, None);
+            assert_eq!(a.variant, "container-metadata");
+        }
+    }
+    #[test]
+    fn format_facts_refuses_machine_class_endian_and_route_mismatches() {
+        for (index, value) in [(18, 3), (18, 183), (4, 3), (5, 2)] {
+            let mut b = elf(64);
+            b[index] = value;
+            assert!(
+                LoaderPipeline::load_format_facts(DataBuffer::Heap(b), "bad.elf".into()).is_err()
+            );
+        }
+        assert!(
+            LoaderPipeline::load_format_facts(DataBuffer::Heap(vec![1, 2, 3, 4]), "bad.bin".into())
+                .is_err()
         );
     }
 }

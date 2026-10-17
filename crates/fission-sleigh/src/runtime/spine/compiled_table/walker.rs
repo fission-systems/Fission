@@ -211,8 +211,8 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     minimum_length: usize,
-    context_register: u64,
-    context_known_mask: u64,
+    context_register: u128,
+    context_known_mask: u128,
     cursor: usize,
     pool_guard: PoolGuard,
     walker: spine::RuntimeParserWalker,
@@ -2071,7 +2071,7 @@ mod sleigh_parity_gaps_tests {
         ctx.context_register = compiled.default_context;
         ctx.context_known_mask = compiled.default_context_known_mask;
         if let Some(bits) = context_override {
-            bits.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
+            bits.apply_to_wide(&mut ctx.context_register, &mut ctx.context_known_mask);
         }
         let selection = select_constructor(compiled, "instruction", &ctx)
             .unwrap()
@@ -2153,7 +2153,7 @@ mod sleigh_parity_gaps_tests {
         assert_probe_reuse_matches_two_walks(
             &thumb,
             &[0x88, 0xbf],
-            Some(crate::runtime::PackedContextOverride::new(
+            Some(crate::runtime::PackedContextOverride::new_wide(
                 thumb.default_context,
                 thumb.default_context_known_mask,
             )),

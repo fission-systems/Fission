@@ -1,0 +1,188 @@
+language quantum.integer.reference { byte_order little; address_unit byte;
+instruction counter_u8_0 { opcode 1; mnemonic "counter_u8_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u8=int.const 0; branch head(%count); }
+block head(%i:u8) { %zero:u8=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u8) { quantum.x 0; %one:u8=int.const 1; %next:u8=u8.sub %j,%one; branch head(%next); }
+block exit(%out:u8) { return; } } }
+instruction counter_u8_1 { opcode 2; mnemonic "counter_u8_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u8=int.const 1; branch head(%count); }
+block head(%i:u8) { %zero:u8=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u8) { quantum.x 0; %one:u8=int.const 1; %next:u8=u8.sub %j,%one; branch head(%next); }
+block exit(%out:u8) { return; } } }
+instruction counter_u8_3 { opcode 3; mnemonic "counter_u8_3"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u8=int.const 3; branch head(%count); }
+block head(%i:u8) { %zero:u8=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u8) { quantum.x 0; %one:u8=int.const 1; %next:u8=u8.sub %j,%one; branch head(%next); }
+block exit(%out:u8) { return; } } }
+instruction counter_u8_6 { opcode 4; mnemonic "counter_u8_6"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u8=int.const 6; branch head(%count); }
+block head(%i:u8) { %zero:u8=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u8) { quantum.x 0; %one:u8=int.const 1; %next:u8=u8.sub %j,%one; branch head(%next); }
+block exit(%out:u8) { return; } } }
+instruction counter_u16_0 { opcode 5; mnemonic "counter_u16_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u16=int.const 0; branch head(%count); }
+block head(%i:u16) { %zero:u16=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u16) { quantum.x 0; %one:u16=int.const 1; %next:u16=u16.sub %j,%one; branch head(%next); }
+block exit(%out:u16) { return; } } }
+instruction counter_u16_1 { opcode 6; mnemonic "counter_u16_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u16=int.const 1; branch head(%count); }
+block head(%i:u16) { %zero:u16=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u16) { quantum.x 0; %one:u16=int.const 1; %next:u16=u16.sub %j,%one; branch head(%next); }
+block exit(%out:u16) { return; } } }
+instruction counter_u16_3 { opcode 7; mnemonic "counter_u16_3"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u16=int.const 3; branch head(%count); }
+block head(%i:u16) { %zero:u16=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u16) { quantum.x 0; %one:u16=int.const 1; %next:u16=u16.sub %j,%one; branch head(%next); }
+block exit(%out:u16) { return; } } }
+instruction counter_u16_6 { opcode 8; mnemonic "counter_u16_6"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u16=int.const 6; branch head(%count); }
+block head(%i:u16) { %zero:u16=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u16) { quantum.x 0; %one:u16=int.const 1; %next:u16=u16.sub %j,%one; branch head(%next); }
+block exit(%out:u16) { return; } } }
+instruction counter_u32_0 { opcode 9; mnemonic "counter_u32_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u32=int.const 0; branch head(%count); }
+block head(%i:u32) { %zero:u32=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u32) { quantum.x 0; %one:u32=int.const 1; %next:u32=u32.sub %j,%one; branch head(%next); }
+block exit(%out:u32) { return; } } }
+instruction counter_u32_1 { opcode 10; mnemonic "counter_u32_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u32=int.const 1; branch head(%count); }
+block head(%i:u32) { %zero:u32=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u32) { quantum.x 0; %one:u32=int.const 1; %next:u32=u32.sub %j,%one; branch head(%next); }
+block exit(%out:u32) { return; } } }
+instruction counter_u32_3 { opcode 11; mnemonic "counter_u32_3"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u32=int.const 3; branch head(%count); }
+block head(%i:u32) { %zero:u32=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u32) { quantum.x 0; %one:u32=int.const 1; %next:u32=u32.sub %j,%one; branch head(%next); }
+block exit(%out:u32) { return; } } }
+instruction counter_u32_6 { opcode 12; mnemonic "counter_u32_6"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u32=int.const 6; branch head(%count); }
+block head(%i:u32) { %zero:u32=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u32) { quantum.x 0; %one:u32=int.const 1; %next:u32=u32.sub %j,%one; branch head(%next); }
+block exit(%out:u32) { return; } } }
+instruction counter_u64_0 { opcode 13; mnemonic "counter_u64_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u64=int.const 0; branch head(%count); }
+block head(%i:u64) { %zero:u64=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u64) { quantum.x 0; %one:u64=int.const 1; %next:u64=u64.sub %j,%one; branch head(%next); }
+block exit(%out:u64) { return; } } }
+instruction counter_u64_1 { opcode 14; mnemonic "counter_u64_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u64=int.const 1; branch head(%count); }
+block head(%i:u64) { %zero:u64=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u64) { quantum.x 0; %one:u64=int.const 1; %next:u64=u64.sub %j,%one; branch head(%next); }
+block exit(%out:u64) { return; } } }
+instruction counter_u64_3 { opcode 15; mnemonic "counter_u64_3"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u64=int.const 3; branch head(%count); }
+block head(%i:u64) { %zero:u64=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u64) { quantum.x 0; %one:u64=int.const 1; %next:u64=u64.sub %j,%one; branch head(%next); }
+block exit(%out:u64) { return; } } }
+instruction counter_u64_6 { opcode 16; mnemonic "counter_u64_6"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %count:u64=int.const 6; branch head(%count); }
+block head(%i:u64) { %zero:u64=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u64) { quantum.x 0; %one:u64=int.const 1; %next:u64=u64.sub %j,%one; branch head(%next); }
+block exit(%out:u64) { return; } } }
+instruction signed_loop_i8 { opcode 17; mnemonic "signed_loop_i8"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %start:i8=int.const 254; branch head(%start); }
+block head(%i:i8) { %limit:i8=int.const 1; %more:u1=int.slt %i,%limit; branch.if %more, step(%i), exit(%i); }
+block step(%j:i8) { quantum.x 0; %one:i8=int.const 1; %next:i8=i8.add.wrap %j,%one; branch head(%next); }
+block exit(%out:i8) { return; } } }
+instruction signed_loop_i64 { opcode 18; mnemonic "signed_loop_i64"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %start:i64=int.const 18446744073709551614; branch head(%start); }
+block head(%i:i64) { %limit:i64=int.const 1; %more:u1=int.slt %i,%limit; branch.if %more, step(%i), exit(%i); }
+block step(%j:i64) { quantum.x 0; %one:i64=int.const 1; %next:i64=i64.add.wrap %j,%one; branch head(%next); }
+block exit(%out:i64) { return; } } }
+instruction arithmetic_u1_0 { opcode 19; mnemonic "arithmetic_u1_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u1=int.const 1; %b:u1=int.const 1;
+%sum:u1=u1.add.wrap %a,%b; %sub:u1=u1.sub %a,%b;
+%and:u1=u1.and %a,%b; %or:u1=u1.or %a,%b; %xor:u1=u1.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u1_1 { opcode 20; mnemonic "arithmetic_u1_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u1=int.const 1; %b:u1=int.const 1;
+%sum:u1=u1.add.wrap %a,%b; %sub:u1=u1.sub %a,%b;
+%and:u1=u1.and %a,%b; %or:u1=u1.or %a,%b; %xor:u1=u1.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u1_2 { opcode 21; mnemonic "arithmetic_u1_2"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u1=int.const 0; %b:u1=int.const 0;
+%sum:u1=u1.add.wrap %a,%b; %sub:u1=u1.sub %a,%b;
+%and:u1=u1.and %a,%b; %or:u1=u1.or %a,%b; %xor:u1=u1.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u8_0 { opcode 22; mnemonic "arithmetic_u8_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u8=int.const 255; %b:u8=int.const 1;
+%sum:u8=u8.add.wrap %a,%b; %sub:u8=u8.sub %a,%b;
+%and:u8=u8.and %a,%b; %or:u8=u8.or %a,%b; %xor:u8=u8.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u8_1 { opcode 23; mnemonic "arithmetic_u8_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u8=int.const 128; %b:u8=int.const 255;
+%sum:u8=u8.add.wrap %a,%b; %sub:u8=u8.sub %a,%b;
+%and:u8=u8.and %a,%b; %or:u8=u8.or %a,%b; %xor:u8=u8.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u8_2 { opcode 24; mnemonic "arithmetic_u8_2"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u8=int.const 0; %b:u8=int.const 0;
+%sum:u8=u8.add.wrap %a,%b; %sub:u8=u8.sub %a,%b;
+%and:u8=u8.and %a,%b; %or:u8=u8.or %a,%b; %xor:u8=u8.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u32_0 { opcode 25; mnemonic "arithmetic_u32_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u32=int.const 4294967295; %b:u32=int.const 1;
+%sum:u32=u32.add.wrap %a,%b; %sub:u32=u32.sub %a,%b;
+%and:u32=u32.and %a,%b; %or:u32=u32.or %a,%b; %xor:u32=u32.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u32_1 { opcode 26; mnemonic "arithmetic_u32_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u32=int.const 2147483648; %b:u32=int.const 4294967295;
+%sum:u32=u32.add.wrap %a,%b; %sub:u32=u32.sub %a,%b;
+%and:u32=u32.and %a,%b; %or:u32=u32.or %a,%b; %xor:u32=u32.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u32_2 { opcode 27; mnemonic "arithmetic_u32_2"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u32=int.const 0; %b:u32=int.const 0;
+%sum:u32=u32.add.wrap %a,%b; %sub:u32=u32.sub %a,%b;
+%and:u32=u32.and %a,%b; %or:u32=u32.or %a,%b; %xor:u32=u32.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u64_0 { opcode 28; mnemonic "arithmetic_u64_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u64=int.const 18446744073709551615; %b:u64=int.const 1;
+%sum:u64=u64.add.wrap %a,%b; %sub:u64=u64.sub %a,%b;
+%and:u64=u64.and %a,%b; %or:u64=u64.or %a,%b; %xor:u64=u64.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u64_1 { opcode 29; mnemonic "arithmetic_u64_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u64=int.const 9223372036854775808; %b:u64=int.const 18446744073709551615;
+%sum:u64=u64.add.wrap %a,%b; %sub:u64=u64.sub %a,%b;
+%and:u64=u64.and %a,%b; %or:u64=u64.or %a,%b; %xor:u64=u64.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_u64_2 { opcode 30; mnemonic "arithmetic_u64_2"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u64=int.const 0; %b:u64=int.const 0;
+%sum:u64=u64.add.wrap %a,%b; %sub:u64=u64.sub %a,%b;
+%and:u64=u64.and %a,%b; %or:u64=u64.or %a,%b; %xor:u64=u64.xor %a,%b;
+%less:u1=int.ult %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_i8_0 { opcode 31; mnemonic "arithmetic_i8_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i8=int.const 255; %b:i8=int.const 1;
+%sum:i8=i8.add.wrap %a,%b; %sub:i8=i8.sub %a,%b;
+%and:i8=i8.and %a,%b; %or:i8=i8.or %a,%b; %xor:i8=i8.xor %a,%b;
+%less:u1=int.slt %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_i8_1 { opcode 32; mnemonic "arithmetic_i8_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i8=int.const 128; %b:i8=int.const 255;
+%sum:i8=i8.add.wrap %a,%b; %sub:i8=i8.sub %a,%b;
+%and:i8=i8.and %a,%b; %or:i8=i8.or %a,%b; %xor:i8=i8.xor %a,%b;
+%less:u1=int.slt %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_i8_2 { opcode 33; mnemonic "arithmetic_i8_2"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i8=int.const 0; %b:i8=int.const 0;
+%sum:i8=i8.add.wrap %a,%b; %sub:i8=i8.sub %a,%b;
+%and:i8=i8.and %a,%b; %or:i8=i8.or %a,%b; %xor:i8=i8.xor %a,%b;
+%less:u1=int.slt %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_i64_0 { opcode 34; mnemonic "arithmetic_i64_0"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i64=int.const 18446744073709551615; %b:i64=int.const 1;
+%sum:i64=i64.add.wrap %a,%b; %sub:i64=i64.sub %a,%b;
+%and:i64=i64.and %a,%b; %or:i64=i64.or %a,%b; %xor:i64=i64.xor %a,%b;
+%less:u1=int.slt %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_i64_1 { opcode 35; mnemonic "arithmetic_i64_1"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i64=int.const 9223372036854775808; %b:i64=int.const 18446744073709551615;
+%sum:i64=i64.add.wrap %a,%b; %sub:i64=i64.sub %a,%b;
+%and:i64=i64.and %a,%b; %or:i64=i64.or %a,%b; %xor:i64=i64.xor %a,%b;
+%less:u1=int.slt %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction arithmetic_i64_2 { opcode 36; mnemonic "arithmetic_i64_2"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i64=int.const 0; %b:i64=int.const 0;
+%sum:i64=i64.add.wrap %a,%b; %sub:i64=i64.sub %a,%b;
+%and:i64=i64.and %a,%b; %or:i64=i64.or %a,%b; %xor:i64=i64.xor %a,%b;
+%less:u1=int.slt %a,%b; %eq:u1=int.eq %a,%b;
+quantum.x_if 0,%less; quantum.cx 0,1; } }
+instruction conversion_u_128 { opcode 37; mnemonic "conversion_u_128"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u8=int.const 128;
+%wide:u64=int.zext %a;
+%middle:u16=int.trunc %wide; %back:u8=int.trunc %middle;
+%eq:u1=int.eq %a,%back; quantum.x_if 0,%eq; quantum.cx 0,1; } }
+instruction conversion_u_255 { opcode 38; mnemonic "conversion_u_255"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:u8=int.const 255;
+%wide:u64=int.zext %a;
+%middle:u16=int.trunc %wide; %back:u8=int.trunc %middle;
+%eq:u1=int.eq %a,%back; quantum.x_if 0,%eq; quantum.cx 0,1; } }
+instruction conversion_i_128 { opcode 39; mnemonic "conversion_i_128"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i8=int.const 128;
+%wide:i64=int.sext %a;
+%middle:i16=int.trunc %wide; %back:i8=int.trunc %middle;
+%eq:u1=int.eq %a,%back; quantum.x_if 0,%eq; quantum.cx 0,1; } }
+instruction conversion_i_255 { opcode 40; mnemonic "conversion_i_255"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { %a:i8=int.const 255;
+%wide:i64=int.sext %a;
+%middle:i16=int.trunc %wide; %back:i8=int.trunc %middle;
+%eq:u1=int.eq %a,%back; quantum.x_if 0,%eq; quantum.cx 0,1; } }
+instruction adaptive_count { opcode 41; mnemonic "adaptive_count"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %m:u1=quantum.measure_z 0; %count:u8=int.zext %m; branch head(%count); }
+block head(%i:u8) { %zero:u8=int.const 0; %done:u1=int.eq %i,%zero; branch.if %done, exit(%i), step(%i); }
+block step(%j:u8) { quantum.x 1; %one:u8=int.const 1; %next:u8=u8.sub %j,%one; branch head(%next); }
+block exit(%out:u8) { return; } } }
+instruction two_entry_cycle { opcode 42; mnemonic "two_entry_cycle"; evidence "self-authored" "synthetic" "integer-cfg-v1" "Authored logical selector; integer-controlled quantum CFG on a classical host."; semantics { block entry() { %m:u1=quantum.measure_z 0; %count:u8=int.const 3; branch.if %m, left(%count), right(%count); }
+block left(%a:u8) { quantum.x 1; %za:u8=int.const 0; %da:u1=int.eq %a,%za; %oa:u8=int.const 1; %na:u8=u8.sub %a,%oa; branch.if %da, exit(%a), right(%na); }
+block right(%b:u8) { quantum.z 1; %zb:u8=int.const 0; %db:u1=int.eq %b,%zb; %ob:u8=int.const 1; %nb:u8=u8.sub %b,%ob; branch.if %db, exit(%b), left(%nb); }
+block exit(%out:u8) { return; } } }
+}

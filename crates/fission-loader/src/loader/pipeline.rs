@@ -72,6 +72,16 @@ pub enum LoaderRoute {
 pub struct LoaderPipeline;
 
 impl LoaderPipeline {
+    /// Explicit opt-in to container facts without a language/compiler spec.
+    /// Initial coverage is little-endian ELF i386/x86-64 only. Unsupported
+    /// formats refuse; there is no fallback to opinion/ldefs selection.
+    pub fn load_format_facts(data: DataBuffer, path: String) -> Result<LoadedBinary> {
+        if Self::detect(data.as_slice())? != DetectedFormat::Elf {
+            return Err(err!(loader, "UnsupportedFormatFacts: ELF x86 only"));
+        }
+        elf::ElfLoader::parse_format_facts(data, path)
+    }
+
     pub fn load(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         let format = match Self::route(data.as_slice())? {
             LoaderRoute::Executable(format) => format,
