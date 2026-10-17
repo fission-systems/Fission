@@ -21,6 +21,19 @@ pub(super) struct ParsedInstruction {
 
 #[derive(Debug)]
 pub(super) enum Statement {
+    QuantumGate {
+        operation: String,
+        qubit: u8,
+        other: Option<u8>,
+        condition: Option<String>,
+    },
+    QuantumMeasure {
+        name: String,
+        ty: ValueType,
+        qubit: u8,
+        line: usize,
+        column: usize,
+    },
     MemoryStoreLittle {
         address: String,
         value: String,
@@ -1012,7 +1025,17 @@ impl Parser {
             })?;
             self.expect_symbol('=')?;
             let operation = self.expect_name()?;
-            let statement = if matches!(operation.as_str(), "int.zext" | "int.sext" | "int.trunc") {
+            let statement = if operation == "quantum.measure_z" {
+                let qubit = u8::try_from(self.expect_integer()?)
+                    .map_err(|_| self.error_here("qubit index exceeds u8"))?;
+                Statement::QuantumMeasure {
+                    name,
+                    ty,
+                    qubit,
+                    line: token.line,
+                    column: token.column,
+                }
+            } else if matches!(operation.as_str(), "int.zext" | "int.sext" | "int.trunc") {
                 self.expect_symbol('%')?;
                 let input = self.expect_name()?;
                 let kind = match operation.as_str() {
@@ -1229,6 +1252,34 @@ impl Parser {
             };
             self.expect_symbol(';')?;
             Ok(statement)
+        } else if matches!(&token.kind, TokenKind::Ident(name) if matches!(name.as_str(), "quantum.h" | "quantum.x" | "quantum.z" | "quantum.cx" | "quantum.reset" | "quantum.x_if"))
+        {
+            let operation = self.expect_name()?;
+            let qubit = u8::try_from(self.expect_integer()?)
+                .map_err(|_| self.error_here("qubit index exceeds u8"))?;
+            let other = if operation == "quantum.cx" {
+                self.expect_symbol(',')?;
+                Some(
+                    u8::try_from(self.expect_integer()?)
+                        .map_err(|_| self.error_here("qubit index exceeds u8"))?,
+                )
+            } else {
+                None
+            };
+            let condition = if operation == "quantum.x_if" {
+                self.expect_symbol(',')?;
+                self.expect_symbol('%')?;
+                Some(self.expect_name()?)
+            } else {
+                None
+            };
+            self.expect_symbol(';')?;
+            Ok(Statement::QuantumGate {
+                operation,
+                qubit,
+                other,
+                condition,
+            })
         } else if self.at_ident("memory.store.le") {
             self.advance();
             self.expect_symbol('%')?;

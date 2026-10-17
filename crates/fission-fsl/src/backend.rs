@@ -11,6 +11,7 @@ pub enum ProjectionContext {
     VmStackInstruction,
     RegisterInstruction,
     WaveInstruction,
+    QuantumInstruction,
     X86BoundedWindow,
 }
 const SOURCE_CONTEXTS: &[ProjectionContext] = &[
@@ -92,6 +93,7 @@ pub enum Requirement {
     VmStack,
     RegistersAndFlags,
     MaskedLanes,
+    QuantumState,
     GuestPc,
     ReadOnlyByteMemory,
     TransactionalByteMemory,
@@ -186,7 +188,9 @@ impl<'a> ProjectionPlan<'a> {
                     operation: None,
                     message: e.to_string(),
                 })?;
-                if body.ops.iter().any(FirOp::requires_lane_version) {
+                if body.ops.iter().any(|op| matches!(op, FirOp::Quantum(_))) {
+                    ProjectionContext::QuantumInstruction
+                } else if body.ops.iter().any(FirOp::requires_lane_version) {
                     ProjectionContext::WaveInstruction
                 } else if body.ops.iter().any(FirOp::requires_state_version) {
                     ProjectionContext::RegisterInstruction
@@ -290,6 +294,7 @@ fn collect(body: &CompiledInstruction, out: &mut BTreeSet<Requirement>) {
     }
     for op in &body.ops {
         let feature = match op {
+            FirOp::Quantum(_) => Some(Requirement::QuantumState),
             FirOp::VmStackPop { .. } | FirOp::VmStackPush { .. } => Some(Requirement::VmStack),
             FirOp::RegisterRead { .. }
             | FirOp::RegisterWrite { .. }

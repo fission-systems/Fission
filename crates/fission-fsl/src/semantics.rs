@@ -71,6 +71,19 @@ impl CompiledInstruction {
             }
             for op in &self.ops[usize::from(block.start)..usize::from(block.end)] {
                 let output = match *op {
+                    FirOp::Quantum(q) => {
+                        q.validate()?;
+                        if let crate::quantum::QuantumOp::XIf { condition, .. } = q {
+                            read(condition, &defined)?;
+                            crate::quantum::require_bit(self, condition)?;
+                        }
+                        if let crate::quantum::QuantumOp::MeasureZ { output, .. } = q {
+                            crate::quantum::require_bit(self, output)?;
+                            Some(output)
+                        } else {
+                            None
+                        }
+                    }
                     FirOp::IntConvert {
                         output,
                         input,
@@ -472,6 +485,17 @@ impl StackContract {
     /// Admit the current exact execution domain: bit vectors of 1..=64 bits.
     pub fn for_instruction(instruction: &CompiledInstruction) -> Result<Self, FslError> {
         instruction.validate()?;
+        if instruction
+            .ops
+            .iter()
+            .any(|op| matches!(op, FirOp::Quantum(_)))
+        {
+            return Err(FslError::at(
+                1,
+                1,
+                "quantum effects require the quantum executor",
+            ));
+        }
         if crate::control::has_control(instruction) {
             return crate::control::stack_contract(instruction);
         }
@@ -517,6 +541,7 @@ impl StackContract {
                 | FirOp::FieldRead { .. }
                 | FirOp::GuestPcRead { .. }
                 | FirOp::GuestNextPcWrite { .. } => unreachable!("state execution rejected"),
+                FirOp::Quantum(_) => unreachable!("quantum execution rejected"),
                 FirOp::Unsupported => unreachable!("unsupported execution rejected"),
             }
             low = low.min(delta);
@@ -567,6 +592,7 @@ pub fn execute_instruction(
     let mut values = vec![0u64; instruction.values.len()];
     for op in &instruction.ops {
         match *op {
+            FirOp::Quantum(_) => unreachable!("quantum execution rejected by stack admission"),
             FirOp::IntConstant { .. }
             | FirOp::IntCompare { .. }
             | FirOp::IntConvert { .. }

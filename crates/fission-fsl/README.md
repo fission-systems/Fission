@@ -482,3 +482,15 @@ machine-state code, not an original-ABI function eligible for DecBench metrics.
 The existing package-based `from_binary` comparison API retains legacy metadata
 selection. General function/ABI recovery and complete product replacement remain
 incomplete.
+
+## Quantum logical-circuit reference
+
+Canonical `FirOp::Quantum` adds H/X/Z/CX, measurement, reset and classical-bit
+feed-forward X in package v12. A bounded classical-host interpreter enumerates
+measurement probabilities and joint post-states for 1..8 qubits. Restricted
+OpenQASM 3.0 input/output consumes the same FIR; no new dependency or second IR.
+C/Rust/Go, GPU and native codegen paths reject these effects.
+
+[Syntax, CLI, state contract and limits](../../docs/research/fsl-quantum-reference.md).
+This is ideal logical simulation and numerical authored-fixture evidence; no
+physical QPU binary, hardware/noise, full OpenQASM or formal equivalence support.

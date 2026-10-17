@@ -4,7 +4,8 @@
 //! JSON, or P-code. Fixed-width encoding plans support 8/32/64/128-bit words.
 //! Executable FIR currently supports a small typed VM-stack/arithmetic dialect
 //! and narrow register/flag and masked-lane state dialects; other GPU semantic bodies remain
-//! explicitly unsupported.
+//! explicitly unsupported. Quantum logical effects use a separate bounded
+//! reference state domain within the same canonical FIR; no QPU hardware model.
 
 pub mod abi;
 pub mod backend;
@@ -19,6 +20,8 @@ pub mod package;
 mod parser;
 #[cfg(feature = "x86")]
 pub mod pipeline;
+pub mod quantum;
+mod quantum_qasm;
 pub mod recovery;
 pub mod registers;
 pub mod semantics;
@@ -123,6 +126,49 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
         };
         for statement in instruction.statements {
             match statement {
+                parser::Statement::QuantumGate {
+                    operation,
+                    qubit,
+                    other,
+                    condition,
+                } => {
+                    use quantum::QuantumOp;
+                    let q = match operation.as_str() {
+                        "quantum.h" => QuantumOp::H { qubit },
+                        "quantum.x" => QuantumOp::X { qubit },
+                        "quantum.z" => QuantumOp::Z { qubit },
+                        "quantum.reset" => QuantumOp::Reset { qubit },
+                        "quantum.cx" => QuantumOp::Cx {
+                            control: qubit,
+                            target: other.unwrap(),
+                        },
+                        "quantum.x_if" => QuantumOp::XIf {
+                            qubit,
+                            condition: require_value(
+                                &values,
+                                &value_ids,
+                                &condition.unwrap(),
+                                1,
+                                1,
+                            )?,
+                        },
+                        _ => return Err(FslError::at(1, 1, "unknown quantum operation")),
+                    };
+                    ops.push(FirOp::Quantum(q));
+                }
+                parser::Statement::QuantumMeasure {
+                    name,
+                    ty,
+                    qubit,
+                    line,
+                    column,
+                } => {
+                    let output = define_value(&mut values, &mut value_ids, name, ty, line, column)?;
+                    ops.push(FirOp::Quantum(quantum::QuantumOp::MeasureZ {
+                        qubit,
+                        output,
+                    }));
+                }
                 parser::Statement::MemoryStoreLittle {
                     address,
                     value,
@@ -549,6 +595,12 @@ pub fn compile_source(source: &str) -> Result<FslcPackage, FslError> {
 
     let package = FslcPackage {
         version: if instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .any(|op| matches!(op, FirOp::Quantum(_)))
+        {
+            12
+        } else if instructions
             .iter()
             .flat_map(|i| &i.ops)
             .any(|op| matches!(op, FirOp::MemoryStoreLittle { .. }))

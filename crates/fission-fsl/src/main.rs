@@ -21,6 +21,51 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_default();
     match command.as_str() {
+        "import-qasm" => {
+            let input = required_arg(&mut args, "restricted OpenQASM 3.0 source")?;
+            let output = required_arg(&mut args, "output .fslc")?;
+            reject_extra_args(args)?;
+            let imported = fission_fsl::quantum::import_openqasm(&fs::read_to_string(input)?)?;
+            fs::write(&output, imported.package.encode_binary()?)?;
+            println!("imported logical circuit qubits={} into {output}; initial state remains an external precondition", imported.qubits);
+        }
+        "emit-qasm" | "simulate-quantum" => {
+            let package = load_package(&required_arg(&mut args, "compiled .fslc")?)?;
+            let name = required_arg(&mut args, "instruction name")?;
+            let qubits = required_arg(&mut args, "logical qubit count")?.parse()?;
+            let argument = required_arg(&mut args, "output .qasm or basis:N / vector:re:im,...")?;
+            reject_extra_args(args)?;
+            let body = package
+                .instructions
+                .iter()
+                .find(|i| i.name == name)
+                .ok_or("unknown quantum instruction")?;
+            if command == "emit-qasm" {
+                fs::write(argument, fission_fsl::quantum::emit_openqasm(body, qubits)?)?;
+            } else {
+                use fission_fsl::quantum::{Complex, PureState};
+                let initial = if let Some(index) = argument.strip_prefix("basis:") {
+                    PureState::basis(qubits, index.parse()?)?
+                } else if let Some(vector) = argument.strip_prefix("vector:") {
+                    let amplitudes = vector
+                        .split(',')
+                        .map(|pair| -> Result<Complex, Box<dyn std::error::Error>> {
+                            let (re, im) =
+                                pair.split_once(':').ok_or("expected re:im amplitude")?;
+                            Ok(Complex {
+                                re: re.parse()?,
+                                im: im.parse()?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    PureState::new(qubits, amplitudes)?
+                } else {
+                    return Err("initial state must be explicit basis:N or vector:re:im,...".into());
+                };
+                let result = fission_fsl::quantum::simulate(body, &initial)?;
+                print!("{}", result.diagnostic_json());
+            }
+        }
         "compose-sequence" => {
             let package = load_package(&required_arg(&mut args, "compiled .fslc path")?)?;
             let profile = required_arg(&mut args, "exact profile")?;
@@ -557,6 +602,9 @@ fn print_usage() {
     eprintln!("  execute-wave <package> <profile> <hex> <lanes> <exec> <scalar-csv> <flags-csv> <lane-slots-csv>");
     eprintln!("  execute-state <package> <profile> <hex> <registers-csv> <flags-csv>\n  emit-bytes <package> <profile> <hex> <fir|c|rust|cuda|ptx> <output>");
     eprintln!("usage:");
+    eprintln!("  fslc import-qasm INPUT.qasm OUTPUT.fslc");
+    eprintln!("  fslc emit-qasm PACKAGE NAME QUBITS OUTPUT.qasm");
+    eprintln!("  fslc simulate-quantum PACKAGE NAME QUBITS basis:N|vector:re:im,...");
     eprintln!("  fslc emit-backend PACKAGE INSTRUCTION c|rust|go OUTPUT");
     eprintln!("  fslc library-inspect <library.fsldb>");
     eprintln!("  fslc library-query <library.fsldb> <exact-symbol>");

@@ -1,7 +1,7 @@
 use crate::{BitField, Encoding, FslError};
 use std::fmt;
 
-pub const FSL_PACKAGE_VERSION: u16 = 11;
+pub const FSL_PACKAGE_VERSION: u16 = 12;
 const INT_BINARY_PACKAGE_VERSION: u16 = 9;
 const GUEST_PC_PACKAGE_VERSION: u16 = 8;
 const STATE_PACKAGE_VERSION: u16 = 3;
@@ -158,6 +158,8 @@ impl IntBinaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirOp {
+    /// Ordered effect on one joint quantum state; measurement produces classical u1.
+    Quantum(crate::quantum::QuantumOp),
     /// Ordered scalar store into an explicit mutable byte window.
     MemoryStoreLittle {
         address: ValueId,
@@ -388,6 +390,18 @@ impl FslcPackage {
                 }
             }
             instruction.encoding.validate()?;
+            if self.version < 12
+                && instruction
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, FirOp::Quantum(_)))
+            {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "quantum FIR requires package version 12",
+                ));
+            }
             if self.version < 11
                 && instruction
                     .ops
@@ -590,6 +604,13 @@ impl FslcPackage {
             writer.u16(count_u16(instruction.ops.len(), "FIR operations")?);
             for op in &instruction.ops {
                 match op {
+                    FirOp::Quantum(q) => {
+                        let (gate, qubit, payload) = q.encode();
+                        writer.u8(23);
+                        writer.u8(gate);
+                        writer.u8(qubit);
+                        writer.u16(payload);
+                    }
                     FirOp::IntConvert {
                         output,
                         input,
@@ -933,6 +954,11 @@ impl FslcPackage {
             let mut ops = Vec::with_capacity(op_count);
             for _ in 0..op_count {
                 let op = match reader.u8()? {
+                    23 if version >= 12 => FirOp::Quantum(crate::quantum::QuantumOp::decode(
+                        reader.u8()?,
+                        reader.u8()?,
+                        reader.u16()?,
+                    )?),
                     16 if version >= 7 => FirOp::IntConvert {
                         output: reader.value_id(value_count)?,
                         input: reader.value_id(value_count)?,

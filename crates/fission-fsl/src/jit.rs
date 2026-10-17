@@ -376,6 +376,7 @@ fn native_record(instruction: &CompiledInstruction, op: &FirOp) -> Result<Native
                 "state FIR is unsupported by native lift records",
             ))
         }
+        FirOp::Quantum(_) => return Err(FslError::at(1, 1, "quantum native lifting unsupported")),
         FirOp::Unsupported => return Err(FslError::at(1, 1, "unsupported native FIR semantics")),
         FirOp::VmStackPop { output } => {
             let mut record = encode_type(get_value(*output)?);

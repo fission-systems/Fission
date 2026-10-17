@@ -194,6 +194,9 @@ pub(crate) fn emit_instruction_implementation(
                     )
                     .unwrap();
                 }
+                FirOp::Quantum(q) => {
+                    let _ = writeln!(text, "  quantum {q:?}");
+                }
                 FirOp::Unsupported => text.push_str("  unsupported semantics\n"),
                 FirOp::VmStackPop { output } => {
                     writeln!(
@@ -398,6 +401,13 @@ pub(crate) fn emit_instruction_implementation(
                 | FirOp::GuestNextPcWrite { .. },
                 _,
             ) => unreachable!("state projection handled above"),
+            (FirOp::Quantum(_), _) => {
+                return Err(FslError::at(
+                    1,
+                    1,
+                    "quantum source projection unsupported by this backend",
+                ))
+            }
             (FirOp::Unsupported, _) => unreachable!("unsupported execution rejected"),
         }
     }

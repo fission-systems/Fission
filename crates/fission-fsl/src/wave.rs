@@ -169,6 +169,18 @@ pub(crate) fn validate_domains(
             FirOp::RegisterRead { output, .. }
             | FirOp::FlagRead { output, .. }
             | FirOp::VmStackPop { output } => Some((output, ValueDomain::Uniform)),
+            FirOp::Quantum(q) => match q {
+                crate::quantum::QuantumOp::MeasureZ { output, .. } => {
+                    Some((output, ValueDomain::Uniform))
+                }
+                crate::quantum::QuantumOp::XIf { condition, .. } => {
+                    if at(condition) != ValueDomain::Uniform {
+                        return Err(error());
+                    }
+                    None
+                }
+                _ => None,
+            },
             FirOp::Unsupported => None,
         };
         if let Some((output, domain)) = result {
