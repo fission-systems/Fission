@@ -514,3 +514,15 @@ zero-temperature Markovian idle evolution. Historical calibration-parameter
 transfer is a bounded research experiment, not current-device noise validation
 or error correction. The pinned QISA data profile decodes word layout with
 unsupported execution semantics; no upstream runtime dependency is introduced.
+
+## IBM circuit experiment
+
+`fslc emit-ibm PACKAGE NAME PHYSICAL_CSV cx|cz COUPLINGS_CSV|- INITIAL_BASIS AXES OUTPUT.qasm`
+projects the linear ideal quantum subset to RZ/SX/X and an explicitly coupled
+CX/CZ basis. `AXES` specifies X/Y/Z observation for each logical qubit; reset/X
+preparation gives the explicit initial basis state. Measurement trace slots retain
+canonical SSA IDs. Layout/coupling gaps, CFG, arithmetic and noise refuse. Native
+emission records no hardware verification and introduces no SDK dependency.
+A separate stdlib REST adapter in fission-research prepares/submits/collects IBM
+Open Plan jobs; live access remains unverified. See
+[the target contract](../../docs/research/fsl-quantum-reference.md#ibm-physical-circuit-projection-2026-10-17).

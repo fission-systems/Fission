@@ -21,6 +21,56 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_default();
     match command.as_str() {
+        "emit-ibm" => {
+            use fission_fsl::quantum::ibm::{emit, Entangler, Target};
+            let package = load_package(&required_arg(&mut args, "compiled .fslc")?)?;
+            let name = required_arg(&mut args, "instruction name")?;
+            let layout = required_arg(&mut args, "physical qubits CSV")?;
+            let physical_qubits = layout
+                .split(',')
+                .map(str::parse::<u16>)
+                .collect::<Result<Vec<_>, _>>()?;
+            let entangler = match required_arg(&mut args, "cx or cz")?.as_str() {
+                "cx" => Entangler::Cx,
+                "cz" => Entangler::Cz,
+                _ => return Err("IBM entangler must be cx or cz".into()),
+            };
+            let edges = required_arg(&mut args, "physical couplings a:b CSV, or -")?;
+            let couplings = if edges == "-" {
+                vec![]
+            } else {
+                edges
+                    .split(',')
+                    .map(|edge| -> Result<(u16, u16), Box<dyn std::error::Error>> {
+                        let (a, b) = edge.split_once(':').ok_or("coupling must be a:b")?;
+                        Ok((a.parse()?, b.parse()?))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            let initial_basis = required_arg(&mut args, "explicit initial basis index")?.parse()?;
+            let observation = required_arg(&mut args, "logical X/Y/Z observation axes")?;
+            let output = required_arg(&mut args, "output physical .qasm")?;
+            reject_extra_args(args)?;
+            let body = package
+                .instructions
+                .iter()
+                .find(|i| i.name == name)
+                .ok_or("unknown quantum instruction")?;
+            let target = Target {
+                physical_qubits,
+                entangler,
+                couplings,
+            };
+            let circuit = emit(body, &target, initial_basis, &observation)?;
+            fs::write(output, &circuit.qasm)?;
+            let ids = circuit
+                .trace_values
+                .iter()
+                .map(|id| id.0.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            println!("{{\"trace_values\":[{ids}],\"hardware_execution\":false,\"target_verified\":false}}");
+        }
         "import-qasm" => {
             let input = required_arg(&mut args, "restricted OpenQASM 3.0 source")?;
             let output = required_arg(&mut args, "output .fslc")?;
@@ -621,6 +671,7 @@ fn print_usage() {
     eprintln!("usage:");
     eprintln!("  fslc import-qasm INPUT.qasm OUTPUT.fslc");
     eprintln!("  fslc emit-qasm PACKAGE NAME QUBITS OUTPUT.qasm");
+    eprintln!("  fslc emit-ibm PACKAGE NAME PHYSICAL_CSV cx|cz COUPLINGS_CSV|- INITIAL_BASIS AXES OUTPUT.qasm");
     eprintln!("  fslc simulate-quantum PACKAGE NAME QUBITS basis:N|vector:re:im,...");
     eprintln!("  fslc simulate-quantum-bounded PACKAGE NAME QUBITS INITIAL STEPS SPLITS BRANCHES");
     eprintln!("  fslc emit-backend PACKAGE INSTRUCTION c|rust|go OUTPUT");

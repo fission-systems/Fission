@@ -4,6 +4,9 @@
 use crate::{CompiledInstruction, FirOp, FirTerminator, FslError, IntegerSign, ValueId};
 use std::fmt::Write;
 
+#[path = "quantum_ibm.rs"]
+pub mod ibm;
+
 pub use crate::quantum_qasm::{import_openqasm, ImportedQuantum};
 #[path = "quantum_run.rs"]
 mod bounded;

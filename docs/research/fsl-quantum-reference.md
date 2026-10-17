@@ -246,3 +246,39 @@ supported quantum effects. Integer arithmetic refuses even for u1 values; an
 explicit preflight prevents unsupported operations reaching emission. There is
 no currently connected QPU for this research session. Real QPU execution and
 current-device calibration/correction remain unverified.
+
+## IBM physical-circuit projection (2026-10-17)
+
+`quantum::ibm::emit` projects a checked linear subset of the same canonical FIR
+into physical OpenQASM 3, with an explicit injective logical-to-physical layout,
+computational-basis input index and one X/Y/Z terminal observation per logical
+qubit. Input preparation is explicit reset followed by X for set input bits.
+Terminal observations and preparation are wrappers, not inferred FIR effects.
+Measurement record slots map back to canonical SSA IDs. FIR operation index
+comments retain source operation ownership in the emitted sequence.
+
+The native basis is RZ/SX/X plus directed CX or CZ on supplied physical tuples.
+H becomes RZ(pi/2);SX;RZ(pi/2), Z becomes RZ(pi), and CX on a CZ target becomes
+H(target);CZ;H(target). These preserve the instrument up to unobservable global
+phase; no coherent control of these gate decompositions is admitted. CZ can use
+a reported reverse tuple because CZ is symmetric; reverse CX never substitutes
+for forward CX. Missing couplings refuse without routing. A selected entangler
+is not automatically replaced by another gate family.
+
+Unsigned u1 constants fold into classical X conditions; measurement conditions
+become single `if` statements. Blocks (including acyclic ones), arithmetic,
+noise, dynamic addressing and unknown effects refuse before an output file is
+written. There is no ECR lowering, scheduler, pulse or device noise model.
+The old logical OpenQASM interface and package bytes remain unchanged.
+
+```sh
+fslc emit-ibm PACKAGE bell 7,3 cz 3:7 0 XX /tmp/bell-xx.qasm
+```
+
+`Target` is a caller-declared contract. Native emission alone does not validate a
+live backend, authenticate or submit. The separate fission-research
+`tools/ibm_quantum.py` adapter checks snapshot gate availability and coupling,
+prepares a reviewable request/reference bundle, and rechecks the Open Plan and
+live target before an explicitly invoked submission. It uses Python stdlib REST,
+not a core SDK dependency. Hardware API acceptance and real-device comparison
+require account access and remain unverified in this session.
