@@ -1,9 +1,12 @@
 //! Recover low-byte truncation after a sum of two byte-ranged values.
 //!
-//! A widening copy from the low lane of a byte sum represents
+//! A widening copy from the low lane of an 8-bit sum represents
 //! `(byte_a + byte_b) mod 256`. If that lane boundary is lost and the copy is
 //! materialized as `w = v` after `v = a + b`, downstream indexing can use the
-//! unbounded sum. This pass restores the bit-vector operation as `w = v & 0xff`.
+//! unbounded sum. This pass restores the bit-vector operation as `w = v & 0xff`
+//! only when both the producer width and downstream use prove that truncation.
+
+use std::collections::HashSet;
 
 use crate::HashMap;
 use crate::prelude::*;
@@ -14,14 +17,22 @@ pub fn apply_byte_sum_index_trunc(func: &mut PreHirFunction) -> bool {
     for b in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(b.name.clone(), b.ty.clone());
     }
+
+    // A low-byte mask is meaningful only when the copied value is actually
+    // consumed as an index. Range information alone is not a reason to alter
+    // a full-width scalar copy.
+    let mut index_consumers = HashSet::new();
+    collect_index_consumers(&func.body, &mut index_consumers);
+
     let mut last_def: HashMap<String, PreHirExpr> = HashMap::default();
     let mut byte_ranged: HashMap<String, bool> = HashMap::default();
-    // Names whose *last* def was a sum of two byte-ranged values (frozen at assign time).
+    // Names whose *last* def was an 8-bit sum of two byte-ranged values.
     let mut byte_sum_names: HashMap<String, bool> = HashMap::default();
     let mut changed = false;
     rewrite_stmts(
         &mut func.body,
         &type_map,
+        &index_consumers,
         &mut last_def,
         &mut byte_ranged,
         &mut byte_sum_names,
@@ -33,6 +44,7 @@ pub fn apply_byte_sum_index_trunc(func: &mut PreHirFunction) -> bool {
 fn rewrite_stmts(
     stmts: &mut [PreHirStmt],
     type_map: &HashMap<String, NirType>,
+    index_consumers: &HashSet<String>,
     last_def: &mut HashMap<String, PreHirExpr>,
     byte_ranged: &mut HashMap<String, bool>,
     byte_sum_names: &mut HashMap<String, bool>,
@@ -42,6 +54,7 @@ fn rewrite_stmts(
         rewrite_stmt(
             stmt,
             type_map,
+            index_consumers,
             last_def,
             byte_ranged,
             byte_sum_names,
@@ -53,6 +66,7 @@ fn rewrite_stmts(
 fn rewrite_stmt(
     stmt: &mut PreHirStmt,
     type_map: &HashMap<String, NirType>,
+    index_consumers: &HashSet<String>,
     last_def: &mut HashMap<String, PreHirExpr>,
     byte_ranged: &mut HashMap<String, bool>,
     byte_sum_names: &mut HashMap<String, bool>,
@@ -63,9 +77,12 @@ fn rewrite_stmt(
             lhs: PreHirLValue::Var(name),
             rhs,
         } => {
-            // Pattern: w = v  where v's last def was a byte-sum.
+            // Pattern: w = v, where v's last def was an 8-bit byte-sum and w
+            // is actually consumed as an index later in the function.
             if let PreHirExpr::Var(src) = rhs {
-                if byte_sum_names.get(src).copied().unwrap_or(false) {
+                if byte_sum_names.get(src).copied().unwrap_or(false)
+                    && index_consumers.contains(name)
+                {
                     let source_ty = last_def
                         .get(src)
                         .and_then(|d| match d {
@@ -73,10 +90,10 @@ fn rewrite_stmt(
                             _ => None,
                         })
                         .unwrap_or(NirType::Int {
-                            bits: 32,
+                            bits: 8,
                             signed: false,
                         });
-                    let ty = unsigned_mask_type(name, &source_ty, type_map);
+                    let ty = mask_type(name, &source_ty, type_map);
                     *rhs = PreHirExpr::Binary {
                         op: PreHirBinaryOp::And,
                         lhs: Box::new(PreHirExpr::Var(src.clone())),
@@ -92,23 +109,44 @@ fn rewrite_stmt(
             }
 
             let is_sum = is_byte_sum(rhs, byte_ranged, type_map);
-            // A byte-sum itself is not byte-ranged (can exceed 255).
+            // A byte-sum itself is not byte-ranged until an explicit low-lane
+            // truncation is observed or restored.
             let ranged = expr_is_byte_ranged(rhs, byte_ranged, type_map) && !is_sum;
             byte_ranged.insert(name.clone(), ranged);
             byte_sum_names.insert(name.clone(), is_sum);
             last_def.insert(name.clone(), rhs.clone());
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) => {
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
+                index_consumers,
                 last_def,
                 byte_ranged,
                 byte_sum_names,
                 changed,
             );
+        }
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            // Loop bodies may execute zero or multiple times. Analyze a clone
+            // for rewrites, then retain only facts that are unchanged across
+            // the loop boundary. This prevents body-only defs from leaking out
+            // and kills stale pre-loop facts modified by the body.
+            let mut body_def = last_def.clone();
+            let mut body_br = byte_ranged.clone();
+            let mut body_sum = byte_sum_names.clone();
+            rewrite_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                type_map,
+                index_consumers,
+                &mut body_def,
+                &mut body_br,
+                &mut body_sum,
+                changed,
+            );
+            retain_unchanged(last_def, &body_def);
+            retain_unchanged(byte_ranged, &body_br);
+            retain_unchanged(byte_sum_names, &body_sum);
         }
         PreHirStmt::If {
             then_body,
@@ -124,6 +162,7 @@ fn rewrite_stmt(
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 type_map,
+                index_consumers,
                 &mut then_def,
                 &mut then_br,
                 &mut then_sum,
@@ -132,6 +171,7 @@ fn rewrite_stmt(
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 type_map,
+                index_consumers,
                 &mut else_def,
                 &mut else_br,
                 &mut else_sum,
@@ -152,14 +192,24 @@ fn rewrite_stmt(
             init, update, body, ..
         } => {
             if let Some(i) = init.as_mut() {
-                rewrite_stmt(i, type_map, last_def, byte_ranged, byte_sum_names, changed);
+                rewrite_stmt(
+                    i,
+                    type_map,
+                    index_consumers,
+                    last_def,
+                    byte_ranged,
+                    byte_sum_names,
+                    changed,
+                );
             }
+
             let mut body_def = last_def.clone();
             let mut body_br = byte_ranged.clone();
             let mut body_sum = byte_sum_names.clone();
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
+                index_consumers,
                 &mut body_def,
                 &mut body_br,
                 &mut body_sum,
@@ -169,14 +219,23 @@ fn rewrite_stmt(
                 rewrite_stmt(
                     u,
                     type_map,
+                    index_consumers,
                     &mut body_def,
                     &mut body_br,
                     &mut body_sum,
                     changed,
                 );
             }
+
+            retain_unchanged(last_def, &body_def);
+            retain_unchanged(byte_ranged, &body_br);
+            retain_unchanged(byte_sum_names, &body_sum);
         }
         PreHirStmt::Switch { cases, default, .. } => {
+            let mut branch_defs = Vec::with_capacity(cases.len() + 1);
+            let mut branch_ranges = Vec::with_capacity(cases.len() + 1);
+            let mut branch_sums = Vec::with_capacity(cases.len() + 1);
+
             for case in cases.iter_mut() {
                 let mut d = last_def.clone();
                 let mut b = byte_ranged.clone();
@@ -184,49 +243,73 @@ fn rewrite_stmt(
                 rewrite_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     type_map,
+                    index_consumers,
                     &mut d,
                     &mut b,
                     &mut s,
                     changed,
                 );
+                branch_defs.push(d);
+                branch_ranges.push(b);
+                branch_sums.push(s);
             }
+
             let mut d = last_def.clone();
             let mut b = byte_ranged.clone();
             let mut s = byte_sum_names.clone();
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                 type_map,
+                index_consumers,
                 &mut d,
                 &mut b,
                 &mut s,
                 changed,
             );
+            branch_defs.push(d);
+            branch_ranges.push(b);
+            branch_sums.push(s);
+
+            retain_across_branches(last_def, &branch_defs);
+            retain_across_branches(byte_ranged, &branch_ranges);
+            retain_across_branches(byte_sum_names, &branch_sums);
         }
         _ => {}
     }
 }
 
-fn unsigned_mask_type(
+fn retain_unchanged<T: PartialEq>(
+    before: &mut HashMap<String, T>,
+    after: &HashMap<String, T>,
+) {
+    before.retain(|name, value| after.get(name).is_some_and(|next| next == value));
+}
+
+fn retain_across_branches<T: PartialEq>(
+    state: &mut HashMap<String, T>,
+    branches: &[HashMap<String, T>],
+) {
+    state.retain(|name, value| {
+        branches
+            .iter()
+            .all(|branch| branch.get(name).is_some_and(|candidate| candidate == value))
+    });
+}
+
+fn mask_type(
     destination: &str,
     source_ty: &NirType,
     type_map: &HashMap<String, NirType>,
 ) -> NirType {
-    let bits = type_map
-        .get(destination)
-        .and_then(int_type_width)
-        .or_else(|| int_type_width(source_ty))
-        .unwrap_or(32);
-    NirType::Int {
-        bits,
-        signed: false,
+    if let Some(ty @ NirType::Int { .. }) = type_map.get(destination) {
+        return ty.clone();
     }
-}
-
-fn int_type_width(ty: &NirType) -> Option<u32> {
-    match ty {
-        NirType::Bool => Some(1),
-        NirType::Int { bits, .. } if *bits > 0 => Some(*bits),
-        _ => None,
+    if matches!(source_ty, NirType::Int { .. }) {
+        return source_ty.clone();
+    }
+    NirType::Int {
+        bits: 32,
+        signed: false,
     }
 }
 
@@ -240,9 +323,10 @@ fn is_byte_sum(
             op: PreHirBinaryOp::Add,
             lhs,
             rhs,
-            ..
+            ty,
         } => {
-            expr_is_byte_ranged(lhs, byte_ranged, type_map)
+            is_byte_int_ty(ty)
+                && expr_is_byte_ranged(lhs, byte_ranged, type_map)
                 && expr_is_byte_ranged(rhs, byte_ranged, type_map)
         }
         _ => false,
@@ -270,14 +354,12 @@ fn expr_is_byte_ranged(
             if byte_ranged.get(name).copied().unwrap_or(false) {
                 return true;
             }
-            // Typed as uchar / byte binding.
             type_map.get(name).is_some_and(is_byte_int_ty)
         }
         PreHirExpr::Load { ptr, ty, .. } => {
             if is_byte_int_ty(ty) {
                 return true;
             }
-            // `*uchar_ptr` may be typed as a wider int after promotion.
             if let PreHirExpr::Var(pn) = ptr.as_ref() {
                 if type_map.get(pn).is_some_and(ptr_elem_is_byte) {
                     return true;
@@ -312,15 +394,175 @@ fn expr_is_byte_ranged(
     }
 }
 
+fn collect_index_consumers(stmts: &[PreHirStmt], consumers: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                collect_index_consumers_lvalue(lhs, consumers);
+                collect_index_consumers_expr(rhs, consumers);
+            }
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+                collect_index_consumers_expr(expr, consumers);
+            }
+            PreHirStmt::VaStart { va_list, .. } => {
+                collect_index_consumers_expr(va_list, consumers);
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => collect_index_consumers(body, consumers),
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_index_consumers_expr(cond, consumers);
+                collect_index_consumers(then_body, consumers);
+                collect_index_consumers(else_body, consumers);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_index_consumers(std::slice::from_ref(init.as_ref()), consumers);
+                }
+                if let Some(cond) = cond {
+                    collect_index_consumers_expr(cond, consumers);
+                }
+                if let Some(update) = update {
+                    collect_index_consumers(std::slice::from_ref(update.as_ref()), consumers);
+                }
+                collect_index_consumers(body, consumers);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_index_consumers_expr(expr, consumers);
+                for case in cases {
+                    collect_index_consumers(&case.body, consumers);
+                }
+                collect_index_consumers(default, consumers);
+            }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_index_consumers_lvalue(lhs: &PreHirLValue, consumers: &mut HashSet<String>) {
+    match lhs {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => collect_index_consumers_expr(ptr, consumers),
+        PreHirLValue::Index { base, index, .. } => {
+            collect_index_vars(index, consumers);
+            collect_index_consumers_expr(base, consumers);
+            collect_index_consumers_expr(index, consumers);
+        }
+        PreHirLValue::FieldAccess { base, .. } => collect_index_consumers_expr(base, consumers),
+    }
+}
+
+fn collect_index_consumers_expr(expr: &PreHirExpr, consumers: &mut HashSet<String>) {
+    match expr {
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
+            collect_index_consumers_expr(expr, consumers);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_index_consumers_expr(lhs, consumers);
+            collect_index_consumers_expr(rhs, consumers);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_index_consumers_expr(cond, consumers);
+            collect_index_consumers_expr(then_expr, consumers);
+            collect_index_consumers_expr(else_expr, consumers);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_index_consumers_expr(arg, consumers);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_index_vars(index, consumers);
+            collect_index_consumers_expr(base, consumers);
+            collect_index_consumers_expr(index, consumers);
+        }
+    }
+}
+
+fn collect_index_vars(expr: &PreHirExpr, consumers: &mut HashSet<String>) {
+    match expr {
+        PreHirExpr::Var(name) => {
+            consumers.insert(name.clone());
+        }
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => collect_index_vars(expr, consumers),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_index_vars(lhs, consumers);
+            collect_index_vars(rhs, consumers);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_index_vars(cond, consumers);
+            collect_index_vars(then_expr, consumers);
+            collect_index_vars(else_expr, consumers);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_index_vars(arg, consumers);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_index_vars(base, consumers);
+            collect_index_vars(index, consumers);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    // prelude via parent
 
     fn u32_ty() -> NirType {
         NirType::Int {
             bits: 32,
             signed: false,
+        }
+    }
+
+    fn i32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: true,
         }
     }
 
@@ -348,87 +590,137 @@ mod tests {
         }
     }
 
+    fn index_use(name: &str) -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Index {
+            base: Box::new(PreHirExpr::Var("table".into())),
+            index: Box::new(PreHirExpr::Var(name.into())),
+            elem_ty: u8_ty(),
+        })
+    }
+
+    fn byte_sum_assign(name: &str, ty: NirType) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.into()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("a".into())),
+                rhs: Box::new(PreHirExpr::Var("b".into())),
+                ty,
+            },
+        }
+    }
+
     #[test]
-    fn recovers_truncation_after_byte_sum_copy() {
+    fn recovers_truncation_only_for_an_indexed_copy_of_an_8_bit_sum() {
         let mut func = PreHirFunction {
             name: "f".into(),
             params: vec![],
-            locals: vec![],
+            locals: vec![
+                binding("a", u8_ty()),
+                binding("b", u8_ty()),
+                binding("s", u8_ty()),
+                binding("idx", u32_ty()),
+            ],
             return_type: u32_ty(),
             body: vec![
-                PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("a".into()),
-                    rhs: PreHirExpr::Load {
-                        ptr: Box::new(PreHirExpr::Var("p".into())),
-                        ty: u8_ty(),
-                    },
-                },
-                PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("b".into()),
-                    rhs: PreHirExpr::Load {
-                        ptr: Box::new(PreHirExpr::Var("q".into())),
-                        ty: u8_ty(),
-                    },
-                },
-                PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("s".into()),
-                    rhs: PreHirExpr::Binary {
-                        op: PreHirBinaryOp::Add,
-                        lhs: Box::new(PreHirExpr::Var("a".into())),
-                        rhs: Box::new(PreHirExpr::Var("b".into())),
-                        ty: u32_ty(),
-                    },
-                },
+                byte_sum_assign("s", u8_ty()),
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("idx".into()),
                     rhs: PreHirExpr::Var("s".into()),
                 },
+                index_use("idx"),
             ],
             ..Default::default()
         };
 
         assert!(apply_byte_sum_index_trunc(&mut func));
-        match &func.body[3] {
-            PreHirStmt::Assign { rhs, .. } => match rhs {
-                PreHirExpr::Binary {
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary {
                     op: PreHirBinaryOp::And,
-                    rhs: mask,
+                    rhs,
                     ..
-                } => {
-                    assert!(matches!(mask.as_ref(), PreHirExpr::Const(0xff, _)));
-                }
-                other => panic!("expected masked assign, got {other:?}"),
-            },
-            _ => panic!("expected assign"),
-        }
+                },
+                ..
+            } if matches!(rhs.as_ref(), PreHirExpr::Const(0xff, _))
+        ));
     }
 
     #[test]
-    fn recovered_mask_uses_unsigned_destination_width() {
+    fn does_not_truncate_a_legitimate_wide_sum() {
         let mut func = PreHirFunction {
-            name: "signed_byte_sum".into(),
+            name: "wide_sum".into(),
+            params: vec![],
+            locals: vec![
+                binding("a", u8_ty()),
+                binding("b", u8_ty()),
+                binding("sum", u32_ty()),
+                binding("idx", u32_ty()),
+            ],
+            body: vec![
+                byte_sum_assign("sum", u32_ty()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("idx".into()),
+                    rhs: PreHirExpr::Var("sum".into()),
+                },
+                index_use("idx"),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_byte_sum_index_trunc(&mut func));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Var(name),
+                ..
+            } if name == "sum"
+        ));
+    }
+
+    #[test]
+    fn does_not_truncate_a_copy_without_index_use() {
+        let mut func = PreHirFunction {
+            name: "plain_copy".into(),
+            params: vec![],
+            locals: vec![
+                binding("a", u8_ty()),
+                binding("b", u8_ty()),
+                binding("sum", u8_ty()),
+                binding("copy", u32_ty()),
+            ],
+            body: vec![
+                byte_sum_assign("sum", u8_ty()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("copy".into()),
+                    rhs: PreHirExpr::Var("sum".into()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_byte_sum_index_trunc(&mut func));
+    }
+
+    #[test]
+    fn recovered_mask_preserves_destination_signedness() {
+        let mut func = PreHirFunction {
+            name: "signed_index".into(),
             params: vec![],
             locals: vec![
                 binding("a", u8_ty()),
                 binding("b", u8_ty()),
                 binding("sum", i8_ty()),
-                binding("index", u32_ty()),
+                binding("index", i32_ty()),
             ],
-            return_type: u32_ty(),
             body: vec![
-                PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("sum".into()),
-                    rhs: PreHirExpr::Binary {
-                        op: PreHirBinaryOp::Add,
-                        lhs: Box::new(PreHirExpr::Var("a".into())),
-                        rhs: Box::new(PreHirExpr::Var("b".into())),
-                        ty: i8_ty(),
-                    },
-                },
+                byte_sum_assign("sum", i8_ty()),
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("index".into()),
                     rhs: PreHirExpr::Var("sum".into()),
                 },
+                index_use("index"),
             ],
             ..Default::default()
         };
@@ -442,7 +734,7 @@ mod tests {
                     rhs,
                     ty: NirType::Int {
                         bits: 32,
-                        signed: false,
+                        signed: true,
                     },
                     ..
                 },
@@ -453,10 +745,76 @@ mod tests {
                     0xff,
                     NirType::Int {
                         bits: 32,
-                        signed: false,
+                        signed: true,
                     }
                 )
             )
         ));
+    }
+
+    #[test]
+    fn while_body_definition_does_not_leak_past_loop() {
+        let mut func = PreHirFunction {
+            name: "while_kill".into(),
+            params: vec![],
+            locals: vec![
+                binding("a", u8_ty()),
+                binding("b", u8_ty()),
+                binding("sum", u8_ty()),
+                binding("idx", u32_ty()),
+            ],
+            body: vec![
+                byte_sum_assign("sum", u8_ty()),
+                PreHirStmt::While {
+                    cond: PreHirExpr::Const(0, u8_ty()),
+                    body: std::rc::Rc::new(vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("sum".into()),
+                        rhs: PreHirExpr::Const(7, u8_ty()),
+                    }]),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("idx".into()),
+                    rhs: PreHirExpr::Var("sum".into()),
+                },
+                index_use("idx"),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_byte_sum_index_trunc(&mut func));
+    }
+
+    #[test]
+    fn for_body_kills_preloop_sum_fact() {
+        let mut func = PreHirFunction {
+            name: "for_kill".into(),
+            params: vec![],
+            locals: vec![
+                binding("a", u8_ty()),
+                binding("b", u8_ty()),
+                binding("sum", u8_ty()),
+                binding("idx", u32_ty()),
+            ],
+            body: vec![
+                byte_sum_assign("sum", u8_ty()),
+                PreHirStmt::For {
+                    init: None,
+                    cond: None,
+                    update: None,
+                    body: std::rc::Rc::new(vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("sum".into()),
+                        rhs: PreHirExpr::Const(9, u8_ty()),
+                    }]),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("idx".into()),
+                    rhs: PreHirExpr::Var("sum".into()),
+                },
+                index_use("idx"),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_byte_sum_index_trunc(&mut func));
     }
 }
