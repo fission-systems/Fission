@@ -11,24 +11,22 @@ fn fixture() -> fission_loader::LoadedBinary {
         .image_base(0x1000)
         .entry_point(0x1000)
         .is_64bit(true)
-        .add_functions([
-            FunctionInfo {
-                name: "first".into(),
-                address: 0x1000,
-                size: 16,
-                is_export: true,
-                origin: Some("export_table".into()),
-                kind: Some("export".into()),
-                ..FunctionInfo::default()
-            },
-            FunctionInfo {
-                name: "second".into(),
-                address: 0x1010,
-                size: 8,
-                origin: Some("static_discovery".into()),
-                ..FunctionInfo::default()
-            },
-        ])
+        .add_function(FunctionInfo {
+            name: "first".into(),
+            address: 0x1000,
+            size: 16,
+            is_export: true,
+            origin: Some("export_table".into()),
+            kind: Some("export".into()),
+            ..FunctionInfo::default()
+        })
+        .add_function(FunctionInfo {
+            name: "second".into(),
+            address: 0x1010,
+            size: 8,
+            origin: Some("static_discovery".into()),
+            ..FunctionInfo::default()
+        })
         .add_section(SectionInfo {
             name: ".text".into(),
             virtual_address: 0x1000,
