@@ -8,10 +8,14 @@ use rhai::packages::{
     LogicPackage, MoreStringPackage, Package,
 };
 
+const MAX_COLLECTION_ITEMS: usize = 10_000;
+
 pub fn configure_engine(engine: &mut Engine, limits: &ScriptLimits) -> Result<(), ScriptError> {
     engine.set_max_operations(limits.max_operations);
     engine.set_max_expr_depths(64, 64);
     engine.set_max_string_size(256 * 1024);
+    engine.set_max_array_size(MAX_COLLECTION_ITEMS);
+    engine.set_max_map_size(MAX_COLLECTION_ITEMS);
     // Scripts use host bindings and pure language helpers only.  No script
     // imports are part of the API, so fail closed even if a future package
     // adds a resolver-backed module by default.
