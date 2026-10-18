@@ -62,6 +62,10 @@ impl CnfBuilder {
     }
 
     fn get_cnf_var(&mut self, aig_idx: u32) -> u32 {
+        assert_ne!(
+            aig_idx, 0,
+            "AIG constant index 0 must not be allocated as a CNF variable"
+        );
         while self.var_map.len() <= aig_idx as usize {
             self.var_map.push(0);
         }
