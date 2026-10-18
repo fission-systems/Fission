@@ -614,15 +614,31 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             ),
         );
     }
+    for (address, name) in &binary.relocation_symbols {
+        if name.is_empty() {
+            continue;
+        }
+        rows.insert(
+            (*address, SymbolKind::RelocationTarget, name.clone()),
+            (
+                None,
+                binary.symbol_versions.get(address).cloned(),
+                FactSource::RelocationTable,
+            ),
+        );
+    }
     for symbol in &binary.loader_symbols {
-        let kind = match symbol.kind {
-            LoaderSymbolKind::CodeLabel => SymbolKind::Label,
-            LoaderSymbolKind::Data => SymbolKind::Data,
+        let (kind, size) = match symbol.kind {
+            LoaderSymbolKind::CodeLabel => (SymbolKind::Label, None),
+            LoaderSymbolKind::Data => (
+                SymbolKind::Data,
+                binary.global_symbol_sizes.get(&symbol.address).copied(),
+            ),
         };
         rows.insert(
             (symbol.address, kind, symbol.name.clone()),
             (
-                binary.global_symbol_sizes.get(&symbol.address).copied(),
+                size,
                 binary.symbol_versions.get(&symbol.address).cloned(),
                 FactSource::SymbolTable,
             ),
