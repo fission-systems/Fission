@@ -147,6 +147,10 @@ pub fn canonical_variadic_runtime_symbol(name: &str) -> String {
             symbol = stripped.to_string();
             continue;
         }
+        if let Some(stripped) = symbol.strip_prefix("isoc99_") {
+            symbol = stripped.to_string();
+            continue;
+        }
         if let Some(stripped) = symbol.strip_prefix('_') {
             symbol = stripped.to_string();
             continue;
@@ -214,6 +218,7 @@ pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
                 | "fwscanf_s"
                 | "swscanf_s"
                 | "wsprintf"
+                | "wsprintfa"
                 | "wsprintfw"
                 | "scanf_s"
                 | "fscanf_s"
@@ -222,6 +227,16 @@ pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
                 | "snwprintf_s"
                 | "fwprintf_s"
                 | "wprintf_s"
+                | "open"
+                | "openat"
+                | "fcntl"
+                | "ioctl"
+                | "syscall"
+                | "syslog"
+                | "execl"
+                | "execle"
+                | "execlp"
+                | "sem_open"
         )
 }
 
@@ -565,6 +580,40 @@ mod tests {
         assert!(is_known_variadic_runtime_symbol("__imp___printf_chk"));
         assert!(is_known_variadic_runtime_symbol("error"));
         assert_eq!(printf_style_format_string_arg_index("fputs"), None);
+    }
+
+    #[test]
+    fn variadic_runtime_metadata_covers_posix_c99_and_win32_families() {
+        assert_eq!(canonical_variadic_runtime_symbol("__isoc99_sscanf"), "sscanf");
+        assert_eq!(
+            canonical_variadic_runtime_symbol("libc.so.6!__isoc99_scanf"),
+            "scanf"
+        );
+
+        for symbol in [
+            "__isoc99_scanf",
+            "__isoc99_sscanf",
+            "__isoc99_fscanf",
+            "wsprintfA",
+            "open",
+            "openat",
+            "fcntl",
+            "ioctl",
+            "syscall",
+            "syslog",
+            "execl",
+            "execle",
+            "execlp",
+            "sem_open",
+        ] {
+            assert!(
+                is_known_variadic_runtime_symbol(symbol),
+                "expected {symbol} to retain its variadic suffix"
+            );
+        }
+
+        assert!(!is_known_variadic_runtime_symbol("fputs"));
+        assert!(!is_known_variadic_runtime_symbol("wvsprintfA"));
     }
 
     #[test]
