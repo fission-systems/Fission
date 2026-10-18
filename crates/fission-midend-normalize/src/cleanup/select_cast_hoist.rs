@@ -111,11 +111,7 @@ fn walk_stmts(stmts: &mut Vec<PreHirStmt>, type_map: &TypeMap, changed: &mut boo
                         changed,
                     );
                 }
-                walk_stmts(
-                    Rc::<Vec<PreHirStmt>>::make_mut(default),
-                    type_map,
-                    changed,
-                );
+                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(default), type_map, changed);
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -194,10 +190,11 @@ fn rewrite(expr: &mut PreHirExpr, type_map: &TypeMap, changed: &mut bool) {
     };
 
     let hoisted = match (then_expr.as_ref(), else_expr.as_ref()) {
-        (
-            PreHirExpr::Cast { ty: then_ty, .. },
-            PreHirExpr::Cast { ty: else_ty, .. },
-        ) if then_ty == else_ty => then_ty.clone(),
+        (PreHirExpr::Cast { ty: then_ty, .. }, PreHirExpr::Cast { ty: else_ty, .. })
+            if then_ty == else_ty =>
+        {
+            then_ty.clone()
+        }
         _ => return,
     };
 
