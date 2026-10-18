@@ -656,7 +656,7 @@ mod packed_structures_tests {
             .resolved
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        assert_eq!(cache.get(missing), Some(&None));
+        assert!(matches!(cache.get(missing), Some(None)));
     }
 
     /// The size index must return exactly the set a full scan would, for every
