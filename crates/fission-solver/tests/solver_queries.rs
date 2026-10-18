@@ -1,4 +1,4 @@
-use fission_solver::{Solver, SymExpr};
+use fission_solver::{SatResult, Solver, SymExpr};
 
 #[test]
 fn eval_returns_compound_expression_values() {
@@ -63,6 +63,46 @@ fn unsatisfiable_assumption_probes_do_not_leak_into_later_queries() {
         Box::new(SymExpr::new_const(1, 4)),
         Box::new(x),
     )]));
+}
+
+#[test]
+fn aig_constant_assumptions_do_not_allocate_cnf_variables() {
+    let x = SymExpr::new_var("x", 4);
+    // Construct these directly so AST-level constructor folding cannot turn
+    // them into literal Const nodes. The AIG layer must discover the constants.
+    let tautology = SymExpr::Eq(Box::new(x.clone()), Box::new(x.clone()));
+    let contradiction = SymExpr::Neq(Box::new(x.clone()), Box::new(x));
+
+    let mut solver = Solver::new();
+
+    assert_eq!(
+        solver.check_sat_with_oracle(None, &[tautology]).unwrap(),
+        SatResult::Sat
+    );
+    assert_eq!(solver.bv_theory.cnf.get_cnf_var_for_aig(0), 0);
+
+    assert_eq!(
+        solver
+            .check_sat_with_oracle(None, &[contradiction])
+            .unwrap(),
+        SatResult::Unsat
+    );
+    assert_eq!(solver.bv_theory.cnf.get_cnf_var_for_aig(0), 0);
+
+    // Constant model evaluation must keep using the AIG literal itself rather
+    // than an unrelated SAT assignment for the reserved constant node.
+    assert_eq!(
+        solver
+            .bv_theory
+            .evaluate_expr_in_model(&solver.sat, &SymExpr::new_const(0, 4)),
+        0
+    );
+    assert_eq!(
+        solver
+            .bv_theory
+            .evaluate_expr_in_model(&solver.sat, &SymExpr::new_const(0xf, 4)),
+        0xf
+    );
 }
 
 #[test]
