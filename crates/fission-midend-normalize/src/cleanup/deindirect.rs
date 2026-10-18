@@ -81,10 +81,7 @@ fn collect_assigned_vars(stmts: &[PreHirStmt], assigned: &mut HashSet<String>) {
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. } => collect_assigned_vars(body, assigned),
             PreHirStmt::For {
-                init,
-                update,
-                body,
-                ..
+                init, update, body, ..
             } => {
                 if let Some(init) = init {
                     collect_assigned_vars(std::slice::from_ref(init.as_ref()), assigned);
