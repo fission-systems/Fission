@@ -8,6 +8,8 @@ use fission_loader::loader::LoadedBinary;
 use rhai::{Dynamic, Engine, Map};
 use std::sync::{Arc, Mutex};
 
+const MAX_STATIC_READ_BYTES: usize = 64 * 1024;
+
 #[derive(Clone)]
 pub struct BinaryHost(pub Arc<LoadedBinary>);
 
@@ -24,8 +26,26 @@ impl BinaryHost {
         format!("0x{:x}", self.0.image_base)
     }
 
+    pub fn entry_point(&mut self) -> i64 {
+        self.0.entry_point as i64
+    }
+
     pub fn is_64bit(&mut self) -> bool {
         self.0.is_64bit
+    }
+
+    /// Read file-backed bytes at a loaded virtual address without starting an
+    /// emulator. `LoadedBinary::get_bytes` already truncates at the section's
+    /// file-backed extent; the host-facing cap keeps a script from turning one
+    /// call into an unbounded Rhai allocation.
+    pub fn read_bytes(&mut self, address: i64, size: i64) -> rhai::Array {
+        let size = size.clamp(0, MAX_STATIC_READ_BYTES as i64) as usize;
+        self.0
+            .get_bytes(address as u64, size)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|byte| Dynamic::from(byte as i64))
+            .collect()
     }
 
     pub fn functions(&mut self) -> rhai::Array {
@@ -69,7 +89,9 @@ pub fn register_binary(engine: &mut Engine) -> Result<(), ScriptError> {
         .register_fn("path", BinaryHost::path)
         .register_fn("format", BinaryHost::format)
         .register_fn("image_base", BinaryHost::image_base)
+        .register_fn("entry_point", BinaryHost::entry_point)
         .register_fn("is_64bit", BinaryHost::is_64bit)
+        .register_fn("read_bytes", BinaryHost::read_bytes)
         .register_fn("functions", BinaryHost::functions)
         .register_fn("imports", BinaryHost::imports)
         .register_fn("exports", BinaryHost::exports)
