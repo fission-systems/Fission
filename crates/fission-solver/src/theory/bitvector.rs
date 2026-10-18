@@ -82,11 +82,7 @@ impl BvTheorySolver {
 
     /// Lower an expression into a SAT assumption.
     /// This also ensures the SAT solver gets any newly generated CNF clauses.
-    pub fn lower_to_literal(
-        &mut self,
-        expr: &SymExpr,
-        sat: &mut SatSolver,
-    ) -> LoweredAssumption {
+    pub fn lower_to_literal(&mut self, expr: &SymExpr, sat: &mut SatSolver) -> LoweredAssumption {
         let bits = self.aig.lower_expr(expr);
         if bits.len() != 1 {
             tracing::warn!("Expression size != 1, cannot lower to literal: {:?}", expr);
