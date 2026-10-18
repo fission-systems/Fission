@@ -6,6 +6,19 @@ use crate::sat::SatSolver;
 use crate::theory::{Theory, TheoryStatus};
 use std::collections::HashMap;
 
+/// Result of lowering a boolean expression for use as a SAT assumption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoweredAssumption {
+    /// A non-constant boolean represented by a SAT literal.
+    Literal(Lit),
+    /// The expression lowered to AIG constant true, so no SAT assumption is needed.
+    TriviallyTrue,
+    /// The expression lowered to AIG constant false, so the query is immediately UNSAT.
+    TriviallyFalse,
+    /// Lowering could not produce a usable assumption, or loading CNF found a conflict.
+    Refuted,
+}
+
 /// The Bitvector Theory Solver.
 ///
 /// In a DPLL(T) architecture, this component is responsible for reasoning about
@@ -67,27 +80,30 @@ impl BvTheorySolver {
         true
     }
 
-    /// Lower an expression into a single CNF literal, to be used as an assumption.
+    /// Lower an expression into a SAT assumption.
     /// This also ensures the SAT solver gets any newly generated CNF clauses.
-    pub fn lower_to_literal(&mut self, expr: &SymExpr, sat: &mut SatSolver) -> Option<Lit> {
+    pub fn lower_to_literal(
+        &mut self,
+        expr: &SymExpr,
+        sat: &mut SatSolver,
+    ) -> LoweredAssumption {
         let bits = self.aig.lower_expr(expr);
-        if bits.len() == 1 {
-            // Ensure the newly generated AIG nodes are loaded into the SAT solver
-            if !self.load_into_sat(sat) {
-                return None; // trivially UNSAT
-            }
-
-            let aig_lit = bits[0];
-            let cnf_lit = self.cnf.get_cnf_lit(aig_lit);
-            Some(cnf_lit)
-        } else {
+        if bits.len() != 1 {
             tracing::warn!("Expression size != 1, cannot lower to literal: {:?}", expr);
-            // `None` also means "trivially UNSAT", and the caller cannot tell
-            // the two apart; the recorded miss is what turns its UNSAT into
-            // `Unknown`.
             self.aig
                 .note_unsupported(format!("assumption {} bits wide", bits.len()));
-            None
+            return LoweredAssumption::Refuted;
+        }
+
+        // Ensure the newly generated AIG nodes are loaded into the SAT solver.
+        if !self.load_into_sat(sat) {
+            return LoweredAssumption::Refuted;
+        }
+
+        match bits[0] {
+            AigLit::TRUE => LoweredAssumption::TriviallyTrue,
+            AigLit::FALSE => LoweredAssumption::TriviallyFalse,
+            aig_lit => LoweredAssumption::Literal(self.cnf.get_cnf_lit(aig_lit)),
         }
     }
 

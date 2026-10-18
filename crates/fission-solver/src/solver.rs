@@ -1,4 +1,5 @@
 use crate::ast::{Sort, SymExpr, SymNodeId};
+use crate::theory::bitvector::LoweredAssumption;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -123,10 +124,11 @@ impl Solver {
                 if is_false(e) {
                     return Ok(SatResult::Unsat);
                 }
-                if let Some(lit) = self.bv_theory.lower_to_literal(e, &mut self.sat) {
-                    assumptions.push(lit);
-                } else {
-                    return Ok(self.refuted());
+                match self.bv_theory.lower_to_literal(e, &mut self.sat) {
+                    LoweredAssumption::Literal(lit) => assumptions.push(lit),
+                    LoweredAssumption::TriviallyTrue => {}
+                    LoweredAssumption::TriviallyFalse => return Ok(SatResult::Unsat),
+                    LoweredAssumption::Refuted => return Ok(self.refuted()),
                 }
             }
 
