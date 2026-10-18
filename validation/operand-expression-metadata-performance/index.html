@@ -1,0 +1,1514 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/validation/operand-expression-metadata-performance/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Borrowed operand-expression metadata: performance and preservation - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#borrowed-operand-expression-metadata-performance-and-preservation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Borrowed operand-expression metadata: performance and preservation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.2.3/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#source-compiler-and-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source, compiler and owner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#native-measurements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native measurements
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fixed-kuna-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed Kuna comparison
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preservation-and-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preservation and validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reproduction-and-bounds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduction and bounds
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="borrowed-operand-expression-metadata-performance-and-preservation">Borrowed operand-expression metadata: performance and preservation<a class="headerlink" href="#borrowed-operand-expression-metadata-performance-and-preservation" title="Permanent link">&para;</a></h1>
+<p>Mechanical CPU performance validation, 2026-10-18. <strong>Kuna-level speed is not achieved.</strong> No decompilation quality, score, ranking, recompilation or guest-execution claim. <a href="../operand-expression-metadata-performance.json">Compact evidence</a>; <a href="../../proposals/2026-10-18-borrow-operand-expression-metadata/">pre-implementation proposal and owner proof</a>.</p>
+<h2 id="source-compiler-and-owner">Source, compiler and owner<a class="headerlink" href="#source-compiler-and-owner" title="Permanent link">&para;</a></h2>
+<p>Baseline main <code>49ea4ebc175a4b28b28ed17266c367c42f3caea0</code>; candidate production/test patch SHA256 <code>ddb588b582b65de608550fe923a2c58c404195306429245a63a97ef1894f6d06</code>. Immutable release executables: baseline <code>7a3eb9c923537a3280fb80407822fa1a35188b1c8bb71e25279249347ef3ae61</code>, candidate <code>00b474686d53c8b9e21184bdeeb2f8989af186fe89176e966ed9cbdfa9566c84</code>. Both use Rust 1.97.0 (<code>2d8144b7880597b6e6d3dfd63a9a9efae3f533d3</code>), release opt-level=3/LTO=true/codegen-units=1, the same isolated checkout, resources and inputs. Source and both executables are reverified after measurements. The unrelated linked-main files are preserved.</p>
+<p>A symbol-enabled diagnostic from the identical baseline source tree, with complete output equal to the accepted release, recorded 448,881,845 positive sampled thread-CPU microseconds. <code>eval_pattern_expression</code> self-weight was 151,582,399; offsets 0x294 and 0x5e0 contributed 79,203,318 and 64,036,441 immediately after the atomic increment/decrement instructions of an inlined operand-spec Arc clone/drop. These weights diagnose CPU work; they are not wall-time percentages. Diagnostic binary times are excluded from acceptance. An initial symbol-demangling hypothesis was not implemented.</p>
+<p><code>RuntimeSelection&lt;'a&gt;</code> stores <code>&amp;'a Arc&lt;CompiledExecutableConstructor&gt;</code>. The constructor and operand specs are immutable frontend metadata. A private typed lookup returns <code>&amp;'a CompiledOperandSpec</code>; it remains valid through mutable/recursive walker calls. The evaluator no longer creates a temporary Arc owner solely to avoid borrowing the mutable walker. Returned handle/state ownership, offset and expression evaluation order, errors, context/PC witnesses, and actual decoding remain in the existing owner. No new cache, unsafe code, dependency, ISA/function/address predicate, work limit, CLI/schema or program-fact map. Ghidra <code>context.hh</code> was consulted for constructor/walker lifetime invariants only; no copied implementation or vendor dependency.</p>
+<h2 id="native-measurements">Native measurements<a class="headerlink" href="#native-measurements" title="Permanent link">&para;</a></h2>
+<p>M4 Pro, 14 logical CPUs / 24 GiB. Fresh sequential CLI processes; no own build/test/profiler overlaps timings. Same resource root, cwd, address sets, <code>--no-db</code>, <code>DECBENCH_NO_CACHE=1</code>, 30-second per-function limit. Existing internal runtime/resource caches remain enabled. OS cache and desktop scheduling are uncontrolled. <strong><code>info</code> includes function discovery and decode preparation, not just loader parsing.</strong> This is not cold-storage latency or whole-corpus throughput evidence.</p>
+<p>Primary workload: real 156 MiB arm64 Mach-O <code>libLLVM.dylib</code>, using <code>info --json --no-db --identity --detections</code>. Initial three alternating pairs gave a 32.37% separate-median wall reduction. Five independent pairs invert the initial order; the predeclared &gt;=2% paired-median wall reduction / &lt;=2% CPU regression gate passes. All complete metadata agrees in all 16 runs.</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th style="text-align: right;">Baseline wall (s)</th>
+<th style="text-align: right;">Candidate wall (s)</th>
+<th style="text-align: right;">Separate-median reduction</th>
+<th style="text-align: right;">Paired-median reduction</th>
+<th style="text-align: right;">Paired CPU reduction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>llvm</td>
+<td style="text-align: right;">40.443693</td>
+<td style="text-align: right;">26.449099</td>
+<td style="text-align: right;">34.60%</td>
+<td style="text-align: right;">34.31%</td>
+<td style="text-align: right;">38.80%</td>
+</tr>
+</tbody>
+</table>
+<p>Maximum RSS confirmation medians: baseline 2,854,584,320 bytes; candidate 2,767,503,360 bytes. Ranges are retained in compact evidence; this change does not guarantee a memory reduction.</p>
+<p>Two other actual large LLVM inputs, three alternating pairs each, complete metadata equal:</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th style="text-align: right;">Baseline wall (s)</th>
+<th style="text-align: right;">Candidate wall (s)</th>
+<th style="text-align: right;">Separate-median reduction</th>
+<th style="text-align: right;">Paired-median reduction</th>
+<th style="text-align: right;">Paired CPU reduction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>mlir</td>
+<td style="text-align: right;">20.672878</td>
+<td style="text-align: right;">17.096010</td>
+<td style="text-align: right;">17.30%</td>
+<td style="text-align: right;">17.30%</td>
+<td style="text-align: right;">35.42%</td>
+</tr>
+<tr>
+<td>mlir-opt</td>
+<td style="text-align: right;">10.649719</td>
+<td style="text-align: right;">8.130759</td>
+<td style="text-align: right;">23.65%</td>
+<td style="text-align: right;">23.83%</td>
+<td style="text-align: right;">37.81%</td>
+</tr>
+</tbody>
+</table>
+<p>Their median RSS bytes (baseline/candidate): libMLIR 2,259,648,512/2,283,388,928; mlir-transform-opt 1,400,438,784/1,397,686,272. Broader controls are not tuning targets; all three large inputs are from the same LLVM distribution and do not establish platform-wide speedups.</p>
+<p>Four frozen qualification batches, five alternating pairs each, same complete non-duration output. All satisfy the no &gt;2% separate-median latency regression control:</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th style="text-align: right;">Baseline wall (s)</th>
+<th style="text-align: right;">Candidate wall (s)</th>
+<th style="text-align: right;">Separate-median reduction</th>
+<th style="text-align: right;">Paired-median reduction</th>
+<th style="text-align: right;">Paired CPU reduction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>03</td>
+<td style="text-align: right;">1.263215</td>
+<td style="text-align: right;">1.251894</td>
+<td style="text-align: right;">0.90%</td>
+<td style="text-align: right;">1.45%</td>
+<td style="text-align: right;">4.38%</td>
+</tr>
+<tr>
+<td>22</td>
+<td style="text-align: right;">6.994536</td>
+<td style="text-align: right;">6.934430</td>
+<td style="text-align: right;">0.86%</td>
+<td style="text-align: right;">0.84%</td>
+<td style="text-align: right;">1.70%</td>
+</tr>
+<tr>
+<td>27</td>
+<td style="text-align: right;">0.630840</td>
+<td style="text-align: right;">0.631304</td>
+<td style="text-align: right;">-0.07%</td>
+<td style="text-align: right;">0.05%</td>
+<td style="text-align: right;">-0.00%</td>
+</tr>
+<tr>
+<td>40</td>
+<td style="text-align: right;">0.888339</td>
+<td style="text-align: right;">0.858743</td>
+<td style="text-align: right;">3.33%</td>
+<td style="text-align: right;">3.19%</td>
+<td style="text-align: right;">16.04%</td>
+</tr>
+</tbody>
+</table>
+<p>These smaller changes do not establish a general small-input gain. Cell 22 is the large x86-64 Windows six-request input; the other three are bounded Linux/Windows/macOS controls. Full per-run CPU, RSS, commands and outputs remain in artifacts.</p>
+<h2 id="fixed-kuna-comparison">Fixed Kuna comparison<a class="headerlink" href="#fixed-kuna-comparison" title="Permanent link">&para;</a></h2>
+<p>Four frozen batches / 22 requests, three alternating native runs per tool/setting. Fixed Kuna 1.808 executable SHA256 <code>46cd0f8109557f8fe1e8bae53e191bd6b92a7d0410ee2b279a37621c5a2c3e05</code>. Both use exact requested addresses and 30-second limits; jobs/render 1 and 14 measured separately, with Rayon 14 in the 14 lane. Fission render 1 does not serialize preparation. Each tool's faster observed median supplies the final ratio. No equal-quality or latest-Kuna claim.</p>
+<table>
+<thead>
+<tr>
+<th>Cell</th>
+<th style="text-align: right;">Fission jobs 1 (s)</th>
+<th style="text-align: right;">Kuna jobs 1 (s)</th>
+<th style="text-align: right;">Fission jobs 14 (s)</th>
+<th style="text-align: right;">Kuna jobs 14 (s)</th>
+<th style="text-align: right;">Faster-setting ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>03</td>
+<td style="text-align: right;">1.8334</td>
+<td style="text-align: right;">0.1844</td>
+<td style="text-align: right;">1.2483</td>
+<td style="text-align: right;">0.3217</td>
+<td style="text-align: right;">6.77x</td>
+</tr>
+<tr>
+<td>22</td>
+<td style="text-align: right;">8.1051</td>
+<td style="text-align: right;">2.7029</td>
+<td style="text-align: right;">6.9358</td>
+<td style="text-align: right;">5.4170</td>
+<td style="text-align: right;">2.57x</td>
+</tr>
+<tr>
+<td>27</td>
+<td style="text-align: right;">0.8075</td>
+<td style="text-align: right;">0.1078</td>
+<td style="text-align: right;">0.6320</td>
+<td style="text-align: right;">0.2440</td>
+<td style="text-align: right;">5.86x</td>
+</tr>
+<tr>
+<td>40</td>
+<td style="text-align: right;">0.9031</td>
+<td style="text-align: right;">0.3205</td>
+<td style="text-align: right;">0.8660</td>
+<td style="text-align: right;">0.6759</td>
+<td style="text-align: right;">2.70x</td>
+</tr>
+</tbody>
+</table>
+<h2 id="preservation-and-validation">Preservation and validation<a class="headerlink" href="#preservation-and-validation" title="Permanent link">&para;</a></h2>
+<p>Frozen <a href="https://huggingface.co/datasets/sjkim1127/decbench-cpp-qualification/tree/07dd95dbe6214b8a78fc1e4a55961ab515986489">qualification revision</a>: 45 stripped inputs / 250 requests (Linux 108, Windows 97, macOS 45); sample SHA256 <code>f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620</code>. Rechecked all 45 corpus inputs and three large files against previously frozen hashes. Source/debug truth is not supplied to Fission. <a href="https://huggingface.co/datasets/sjkim1127/decbench-cpp-qualification">Dataset</a>; <a href="https://huggingface.co/datasets/sjkim1127/decbench-cpp-raw-corpus">earlier raw corpus</a>.</p>
+<ul>
+<li>Three targeted nextest tests pass: frontend lifetime/pointer/strong-count proof plus original clone-based evaluator comparisons on x86-64, AArch64 and Thumb. Compare values, full logical error chains and the selected mutable walker fields. The independent reference is test-only.</li>
+<li><strong>2,404 related nextest tests passed / 9 skipped</strong> across loader, analysis-db, sleigh, signatures, static, pcode, decompiler, CLI and emulator. Crate checks, CI-scoped Sleigh Clippy, release CLI, workspace fmt and owner-boundary scan pass. Existing unrelated example warnings remain.</li>
+<li>Initial full validation exposed a new test-harness issue: Debug error strings included the different physical evaluator backtraces. Compare logical error-chain messages instead; rerun targeted and full tests with <code>RUST_BACKTRACE=1</code>, all passed. Retain the failed log. No production behavior was changed to silence that failure.</li>
+<li>Complete raw-state/lift/error matrix 1,024 records is byte-identical (746 successes /278 errors /27 traces), uncompressed SHA256 <code>5721b8f3f02547208b90aec3889566b5bfb33dab046fcc95a0509c0890bba9b7</code>. The 512-record FID hash/resolver matrix is byte-identical, SHA256 <code>a771dbb8a6b4ef303ab310b1e62ca5f5a7d8a596cf45ef7fe53a51ed618bc6fe</code>. Host backtraces are not part of the raw matrix contract.</li>
+<li>Fresh matched-baseline/candidate <strong>45 complete identity/detections JSONs and 45 whole-function lists /334,275 records</strong> are equal with no field exclusions. This does not serialize every internal LoadedBinary/ProgramSnapshot field.</li>
+<li>Fresh matched-baseline/candidate <strong>250/250 complete function records</strong>, all 250 nonempty, are equal. Code, NIR/HIR, types, variables, addresses/maps, errors/fallbacks, evidence and counters are included. Recursively exclude exactly <code>build_duration_ms</code>, <code>render_duration_ms</code>, <code>structuring_duration_ms</code>, <code>normalize_duration_ms</code>, <code>decomp_sec</code>, <code>postprocess_sec</code>, <code>total_time_ms</code>.</li>
+<li>All 64 repeated Fission control/Kuna-lane outputs equal the fresh full replay after the same duration exclusions. Kuna selected code/variable/map digests repeat per setting. Full 250 replay is generated once per executable; no full-corpus determinism or execution-parity claim.</li>
+</ul>
+<h2 id="reproduction-and-bounds">Reproduction and bounds<a class="headerlink" href="#reproduction-and-bounds" title="Permanent link">&para;</a></h2>
+<p>Pin compiler and both immutable executable hashes. Run targeted nextest <code>-p fission-sleigh -E 'test(operand_expression_)'</code>; related nextest/checks; <code>cargo clippy -p fission-sleigh --locked -- -D warnings -A clippy::style -A clippy::complexity</code>; <code>cargo build --locked -p fission-cli --release</code>; workspace fmt and <code>bash scripts/check/owner_boundaries.sh</code>. Native scripts <code>compare.py initial</code>, <code>compare.py confirm</code>, <code>accepted-followup.sh</code>, <code>corpus.py</code>, <code>freeze-verify.py</code> and all commands/stdout/stderr, binaries, profile/symbols/disassembly, failed-test log and input/source hashes are retained under <code>benchmark/artifacts/performance/2026-10-18-loader-metadata/</code>. Local paths are measurement configuration, not production resource lookup.</p>
+<p>GPU work remains discarded. This removes one observed CPU cost. Other preparation, allocation and decompilation costs remain; the measured Kuna gap persists. Output parity and focused regression coverage do not prove full guest-function execution, recompilability or source equivalence. No external semantic bake, score rerun, official ranking or Pages update.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
