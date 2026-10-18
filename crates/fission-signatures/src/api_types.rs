@@ -584,7 +584,10 @@ mod tests {
 
     #[test]
     fn variadic_runtime_metadata_covers_posix_c99_and_win32_families() {
-        assert_eq!(canonical_variadic_runtime_symbol("__isoc99_sscanf"), "sscanf");
+        assert_eq!(
+            canonical_variadic_runtime_symbol("__isoc99_sscanf"),
+            "sscanf"
+        );
         assert_eq!(
             canonical_variadic_runtime_symbol("libc.so.6!__isoc99_scanf"),
             "scanf"
