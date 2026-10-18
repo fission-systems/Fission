@@ -58,6 +58,8 @@ impl Session {
 
 /// The one thread an emulated process has.
 const THREAD: u32 = 1;
+const MAX_SCRIPT_MEMORY_READ: usize = 64 * 1024;
+const STRING_READ_CHUNK: usize = 256;
 
 type ScriptResult<T> = Result<T, Box<EvalAltResult>>;
 
@@ -66,6 +68,16 @@ fn fail(message: impl std::fmt::Display) -> Box<EvalAltResult> {
         Dynamic::from(message.to_string()),
         rhai::Position::NONE,
     ))
+}
+
+fn bounded_read_size(size: i64) -> ScriptResult<usize> {
+    let requested = usize::try_from(size.max(0)).unwrap_or(usize::MAX);
+    if requested > MAX_SCRIPT_MEMORY_READ {
+        return Err(fail(format!(
+            "memory reads are limited to {MAX_SCRIPT_MEMORY_READ} bytes per call"
+        )));
+    }
+    Ok(requested)
 }
 
 impl MachineHost {
@@ -271,23 +283,69 @@ impl MachineHost {
 
     /// Memory as an array of byte values, so a script can index it.
     pub fn read(&mut self, address: i64, size: i64) -> ScriptResult<Array> {
+        let size = bounded_read_size(size)?;
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
+            let bytes = b.read_memory(address as u64, size).map_err(fail)?;
             Ok(bytes.into_iter().map(|v| Dynamic::from(v as i64)).collect())
         })
     }
 
     /// Memory as a string, for the common case of looking at what a program
-    /// wrote into a buffer.
+    /// wrote into a buffer. Reads incrementally so a valid C string ending
+    /// before an unmapped page boundary is still returned successfully.
     pub fn read_string(&mut self, address: i64, size: i64) -> ScriptResult<String> {
+        let limit = bounded_read_size(size)?;
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
-            let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-            Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+            let mut bytes = Vec::with_capacity(limit.min(4096));
+            let base = address as u64;
+            let mut offset = 0usize;
+
+            while offset < limit {
+                let chunk_len = (limit - offset).min(STRING_READ_CHUNK);
+                let Some(chunk_addr) = base.checked_add(offset as u64) else {
+                    break;
+                };
+
+                match b.read_memory(chunk_addr, chunk_len) {
+                    Ok(chunk) if !chunk.is_empty() => {
+                        if let Some(nul) = chunk.iter().position(|byte| *byte == 0) {
+                            bytes.extend_from_slice(&chunk[..nul]);
+                            return Ok(String::from_utf8_lossy(&bytes).into_owned());
+                        }
+                        let consumed = chunk.len().min(chunk_len);
+                        bytes.extend_from_slice(&chunk[..consumed]);
+                        offset += consumed;
+                        if consumed < chunk_len {
+                            break;
+                        }
+                    }
+                    Ok(_) => break,
+                    Err(_) => {
+                        // A multi-byte request can straddle a valid/unmapped
+                        // boundary. Probe only this chunk byte-by-byte so the
+                        // readable prefix (and an earlier NUL) is not lost.
+                        for delta in 0..chunk_len {
+                            let Some(byte_addr) = chunk_addr.checked_add(delta as u64) else {
+                                return Ok(String::from_utf8_lossy(&bytes).into_owned());
+                            };
+                            match b.read_memory(byte_addr, 1) {
+                                Ok(one) if !one.is_empty() => {
+                                    if one[0] == 0 {
+                                        return Ok(String::from_utf8_lossy(&bytes).into_owned());
+                                    }
+                                    bytes.push(one[0]);
+                                    offset += 1;
+                                }
+                                _ => {
+                                    return Ok(String::from_utf8_lossy(&bytes).into_owned());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(String::from_utf8_lossy(&bytes).into_owned())
         })
     }
 
@@ -475,4 +533,19 @@ pub fn register(engine: &mut rhai::Engine) {
         .register_fn("disasm", MachineHost::disasm_here)
         .register_fn("events", MachineHost::events)
         .register_fn("output", MachineHost::output);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_memory_reads_reject_oversized_requests() {
+        assert_eq!(bounded_read_size(0).unwrap(), 0);
+        assert_eq!(
+            bounded_read_size(MAX_SCRIPT_MEMORY_READ as i64).unwrap(),
+            MAX_SCRIPT_MEMORY_READ
+        );
+        assert!(bounded_read_size(100_000_000).is_err());
+    }
 }
