@@ -1675,18 +1675,22 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
-    fn eval_operand_value_expression(&mut self, operand_index: usize) -> Result<i64> {
-        let spec = self
-            .selection
-            .constructor
+    // The selection borrows immutable frontend metadata. Keep that lifetime
+    // rather than adding a temporary Arc owner across mutable walker calls.
+    fn operand_spec_for_expression(&self, operand_index: usize) -> Result<&'a CompiledOperandSpec> {
+        let constructor = self.selection.constructor;
+        constructor
             .constructor_template
             .handles
             .get(operand_index)
-            .ok_or_else(|| anyhow!("missing operand {operand_index} for pattern expression"))?
-            .spec
-            .clone();
-        let operand_absolute_offset = self.operand_absolute_offset(&spec)?;
-        match spec.as_ref() {
+            .map(|handle| handle.spec.as_ref())
+            .ok_or_else(|| anyhow!("missing operand {operand_index} for pattern expression"))
+    }
+
+    fn eval_operand_value_expression(&mut self, operand_index: usize) -> Result<i64> {
+        let spec = self.operand_spec_for_expression(operand_index)?;
+        let operand_absolute_offset = self.operand_absolute_offset(spec)?;
+        match spec {
             CompiledOperandSpec::SlaTokenField {
                 big_endian,
                 sign_bit,
@@ -2246,5 +2250,263 @@ mod binding_address_witness_tests {
         });
         assert_eq!(value.unwrap(), 0x1000);
         assert!(witness.pc_value_read);
+    }
+}
+
+#[cfg(test)]
+mod operand_expression_borrow_tests {
+    use super::*;
+
+    impl<'a, 'b> CompiledParserWalker<'a, 'b> {
+        fn eval_operand_value_expression_legacy_owned(
+            &mut self,
+            operand_index: usize,
+        ) -> Result<i64> {
+            let spec = self
+                .selection
+                .constructor
+                .constructor_template
+                .handles
+                .get(operand_index)
+                .ok_or_else(|| anyhow!("missing operand {operand_index} for pattern expression"))?
+                .spec
+                .clone();
+            let operand_absolute_offset = self.operand_absolute_offset(&spec)?;
+            match spec.as_ref() {
+                CompiledOperandSpec::SlaTokenField {
+                    big_endian,
+                    sign_bit,
+                    bit_start,
+                    bit_end,
+                    byte_start,
+                    byte_end,
+                    shift,
+                    ..
+                }
+                | CompiledOperandSpec::SlaVarnodeList {
+                    big_endian,
+                    sign_bit,
+                    bit_start,
+                    bit_end,
+                    byte_start,
+                    byte_end,
+                    shift,
+                    ..
+                }
+                | CompiledOperandSpec::SlaValueMap {
+                    big_endian,
+                    sign_bit,
+                    bit_start,
+                    bit_end,
+                    byte_start,
+                    byte_end,
+                    shift,
+                    ..
+                } => Ok(u64_to_i64_bits(read_sla_token_field_at(
+                    self.ctx,
+                    operand_absolute_offset,
+                    *big_endian,
+                    *sign_bit,
+                    *bit_start,
+                    *bit_end,
+                    *byte_start,
+                    *byte_end,
+                    *shift,
+                )?)),
+                CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
+                | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
+                | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
+                    if let CompiledPatternExpression::TokenField {
+                        big_endian,
+                        sign_bit,
+                        bit_start,
+                        bit_end,
+                        byte_start,
+                        byte_end,
+                        shift,
+                    } = expr
+                    {
+                        Ok(u64_to_i64_bits(read_sla_token_field_at(
+                            self.ctx,
+                            operand_absolute_offset,
+                            *big_endian,
+                            *sign_bit,
+                            *bit_start,
+                            *bit_end,
+                            *byte_start,
+                            *byte_end,
+                            *shift,
+                        )?))
+                    } else {
+                        self.eval_pattern_expression(expr)
+                    }
+                }
+                CompiledOperandSpec::ContextFieldExtraction {
+                    bit_offset,
+                    bit_width,
+                    sign_extend,
+                } => {
+                    let raw = u64::from(packed_context_bits(
+                        self.context_register,
+                        *bit_offset,
+                        *bit_width,
+                    )?);
+                    pattern_context_bits_i64(raw, *bit_width, *sign_extend)
+                }
+                CompiledOperandSpec::SlaFixedVarnode { .. }
+                | CompiledOperandSpec::SubtableEvaluation { .. } => {
+                    self.decode_operand(operand_index)?;
+                    let handle = self
+                        .handles
+                        .get(operand_index)
+                        .and_then(|value| value.as_ref())
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "operand {operand_index} was not decoded for pattern expression"
+                            )
+                        })?;
+                    let fixed = &handle.fixed;
+                    if fixed.offset_space.is_none()
+                        && fixed
+                            .space
+                            .as_ref()
+                            .is_some_and(|space| space.name == "const" || space.index == 0)
+                    {
+                        return Ok(u64_to_i64_bits(fixed.offset_offset));
+                    }
+                    bail!(
+                        "operand {operand_index} has no evaluable defining expression for pattern expression"
+                    )
+                }
+            }
+        }
+    }
+
+    fn snapshot(walker: &CompiledParserWalker<'_, '_>) -> String {
+        format!(
+            "{:?} {:?} {:?} {} {} {} {:?}",
+            walker.handles,
+            walker.operand_absolute_offsets,
+            walker.operand_relative_lengths,
+            walker.cursor,
+            walker.context_register,
+            walker.context_known_mask,
+            walker.inst_next_shared,
+        )
+    }
+
+    fn compare_with_owned_reference(compiled: &CompiledFrontend, bytes: &[u8]) {
+        let mut ctx = CompiledInstructionContext::parse(bytes, 0x1000).unwrap();
+        ctx.context_register = compiled.default_context;
+        ctx.context_known_mask = compiled.default_context_known_mask;
+        let selection = select_constructor(compiled, "instruction", &ctx)
+            .unwrap()
+            .expect("selected instruction");
+        let count = selection.constructor.constructor_template.handles.len();
+        let mut borrowed = CompiledParserWalker::new(
+            compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection.clone(),
+            None,
+        )
+        .unwrap();
+        let mut owned = CompiledParserWalker::new(
+            compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection,
+            None,
+        )
+        .unwrap();
+        for index in 0..=count {
+            let actual = borrowed.eval_operand_value_expression(index);
+            let expected = owned.eval_operand_value_expression_legacy_owned(index);
+            // Backtraces name these two deliberately different evaluator
+            // functions. Compare the complete logical error chain instead.
+            let logical_result = |result: Result<i64>| {
+                result.map_err(|error| error.chain().map(ToString::to_string).collect::<Vec<_>>())
+            };
+            assert_eq!(
+                logical_result(actual),
+                logical_result(expected),
+                "operand {index}"
+            );
+            assert_eq!(snapshot(&borrowed), snapshot(&owned), "operand {index}");
+        }
+    }
+
+    #[test]
+    fn operand_expression_metadata_borrow_has_frontend_lifetime() {
+        let compiled = crate::compiler::compile_x86_64_frontend().unwrap();
+        let mut ctx = CompiledInstructionContext::parse(&[0x57], 0x1000).unwrap();
+        ctx.context_register = compiled.default_context;
+        ctx.context_known_mask = compiled.default_context_known_mask;
+        let selection = select_constructor(&compiled, "instruction", &ctx)
+            .unwrap()
+            .unwrap();
+        let owner = &selection.constructor.constructor_template.handles[0].spec;
+        let owners = std::sync::Arc::strong_count(owner);
+        let mut walker = CompiledParserWalker::new(
+            &compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection,
+            None,
+        )
+        .unwrap();
+        let spec = walker.operand_spec_for_expression(0).unwrap();
+        assert!(std::ptr::eq(spec, owner.as_ref()));
+        assert_eq!(std::sync::Arc::strong_count(owner), owners);
+        // Holding this reference must not borrow the mutable walker: the
+        // constructor remains owned by the frontend across recursive binding.
+        let _ = walker.eval_operand_value_expression(0);
+        assert!(std::ptr::eq(spec, owner.as_ref()));
+        let error = walker.operand_spec_for_expression(usize::MAX).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("missing operand {} for pattern expression", usize::MAX)
+        );
+    }
+
+    #[test]
+    fn operand_expression_borrow_matches_owned_x86_and_aarch64_state() {
+        let x86 = crate::compiler::compile_x86_64_frontend().unwrap();
+        for bytes in [
+            &[0x57][..],
+            &[0x48, 0x89, 0x5c, 0x24, 8][..],
+            &[0x48, 0xb8, 0x34, 0x12, 0, 0, 0, 0, 0, 0][..],
+            &[0xe8, 0x10, 0, 0, 0][..],
+            &[0x48, 0x8b, 0x05, 0x10, 0, 0, 0][..],
+        ] {
+            compare_with_owned_reference(&x86, bytes);
+        }
+        let aarch64 = crate::compiler::compile_frontend_for_entry_spec(
+            &crate::compiler::spec_root_for_arch("AARCH64").join("AARCH64.slaspec"),
+        )
+        .unwrap();
+        for bytes in [
+            &[0xc0, 0x03, 0x5f, 0xd6][..],
+            &[0x00, 0x04, 0x00, 0x91][..],
+            &[0xfd, 0x7b, 0xbf, 0xa9][..],
+            &[0x04, 0, 0, 0x94][..],
+        ] {
+            compare_with_owned_reference(&aarch64, bytes);
+        }
+    }
+
+    #[test]
+    fn operand_expression_borrow_matches_owned_thumb_state() {
+        let thumb = crate::compiler::compile_frontend_for_entry_spec(
+            &crate::compiler::spec_root_for_arch("ARM").join("ARM8m_le.slaspec"),
+        )
+        .unwrap();
+        for bytes in [
+            &[0xff, 0xf7, 0xf4, 0xfe][..],
+            &[0x70, 0x47][..],
+            &[0x88, 0xbf][..],
+        ] {
+            compare_with_owned_reference(&thumb, bytes);
+        }
     }
 }
