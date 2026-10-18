@@ -278,10 +278,7 @@ fn rewrite_stmt(
     }
 }
 
-fn retain_unchanged<T: PartialEq>(
-    before: &mut HashMap<String, T>,
-    after: &HashMap<String, T>,
-) {
+fn retain_unchanged<T: PartialEq>(before: &mut HashMap<String, T>, after: &HashMap<String, T>) {
     before.retain(|name, value| after.get(name).is_some_and(|next| next == value));
 }
 
@@ -515,7 +512,9 @@ fn collect_index_vars(expr: &PreHirExpr, consumers: &mut HashSet<String>) {
         PreHirExpr::Var(name) => {
             consumers.insert(name.clone());
         }
-        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
