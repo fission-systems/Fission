@@ -579,7 +579,14 @@ mod tests {
         };
         db.init_all_groups();
 
-        for name in ["FILE_CREATE", "WH_HOOK", "REG_KEY", "REG_TYPE", "WAIT", "SW_SHOW"] {
+        for name in [
+            "FILE_CREATE",
+            "WH_HOOK",
+            "REG_KEY",
+            "REG_TYPE",
+            "WAIT",
+            "SW_SHOW",
+        ] {
             assert!(!db.get_group(name).expect("built-in group").flags, "{name}");
         }
         assert!(db.resolve_in_group("FILE_CREATE", 6).is_none());
