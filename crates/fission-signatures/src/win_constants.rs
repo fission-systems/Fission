@@ -24,10 +24,18 @@ pub struct EnumGroup {
 
 impl EnumGroup {
     pub fn new(name: &str, values: &[(&str, u64)]) -> Self {
+        Self::new_with_flags(name, values, true)
+    }
+
+    pub fn new_enum(name: &str, values: &[(&str, u64)]) -> Self {
+        Self::new_with_flags(name, values, false)
+    }
+
+    pub fn new_with_flags(name: &str, values: &[(&str, u64)], flags: bool) -> Self {
         Self {
             name: name.to_string(),
             values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(),
-            flags: true,
+            flags,
         }
     }
 
@@ -185,7 +193,7 @@ impl WinConstantsDb {
     }
 
     pub fn resolve_in_group(&self, group_name: &str, value: u64) -> Option<String> {
-        self.groups.get(group_name)?.resolve_flags(value)
+        self.groups.get(group_name)?.resolve(value)
     }
 
     fn add_group(&mut self, group: EnumGroup) {
@@ -250,7 +258,7 @@ impl WinConstantsDb {
         ));
 
         // FILE_CREATE - CreateFile dwCreationDisposition parameter
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "FILE_CREATE",
             &[
                 ("CREATE_NEW", 1),
@@ -340,7 +348,7 @@ impl WinConstantsDb {
         ));
 
         // WH_HOOK - SetWindowsHookEx idHook parameter
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "WH_HOOK",
             &[
                 ("WH_MSGFILTER", -1_i32 as u64),
@@ -362,7 +370,7 @@ impl WinConstantsDb {
         ));
 
         // REG_KEY - Registry root keys
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "REG_KEY",
             &[
                 ("HKEY_CLASSES_ROOT", 0x80000000),
@@ -393,7 +401,7 @@ impl WinConstantsDb {
         ));
 
         // REG_TYPE - Registry value types
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "REG_TYPE",
             &[
                 ("REG_NONE", 0),
@@ -409,7 +417,7 @@ impl WinConstantsDb {
         ));
 
         // WAIT - WaitForSingleObject return values
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "WAIT",
             &[
                 ("WAIT_OBJECT_0", 0x00000000),
@@ -449,7 +457,7 @@ impl WinConstantsDb {
         ));
 
         // SW_SHOW - ShowWindow nCmdShow parameter
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "SW_SHOW",
             &[
                 ("SW_HIDE", 0),
@@ -546,6 +554,37 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn plain_enum_groups_require_exact_members() {
+        let group = EnumGroup::new_enum(
+            "FILE_CREATE",
+            &[
+                ("CREATE_NEW", 1),
+                ("CREATE_ALWAYS", 2),
+                ("OPEN_EXISTING", 3),
+                ("OPEN_ALWAYS", 4),
+                ("TRUNCATE_EXISTING", 5),
+            ],
+        );
+        assert_eq!(group.resolve(4).as_deref(), Some("OPEN_ALWAYS"));
+        assert!(group.resolve(6).is_none());
+    }
+
+    #[test]
+    fn built_in_cardinal_groups_are_not_flags() {
+        let mut db = WinConstantsDb {
+            groups: HashMap::new(),
+            uses: HashMap::new(),
+        };
+        db.init_all_groups();
+
+        for name in ["FILE_CREATE", "WH_HOOK", "REG_KEY", "REG_TYPE", "WAIT", "SW_SHOW"] {
+            assert!(!db.get_group(name).expect("built-in group").flags, "{name}");
+        }
+        assert!(db.resolve_in_group("FILE_CREATE", 6).is_none());
+        assert!(db.resolve_in_group("SW_SHOW", 12).is_none());
+    }
 
     #[test]
     fn test_resolve_single_flag() {
