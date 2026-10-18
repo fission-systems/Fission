@@ -52,7 +52,9 @@ impl FunctionSignature {
                 continue;
             }
             if token.len() != 2 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err(format!("invalid token {token:?} at byte-pattern index {index}"));
+                return Err(format!(
+                    "invalid token {token:?} at byte-pattern index {index}"
+                ));
             }
             let byte = u8::from_str_radix(token, 16)
                 .map_err(|_| format!("invalid hex byte {token:?} at index {index}"))?;
