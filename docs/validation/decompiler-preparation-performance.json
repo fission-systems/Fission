@@ -1,0 +1,765 @@
+{
+  "baseline_source": "87825864db969d07f398117a48604c747e7bce11",
+  "candidate_production_commit": "308d0c317",
+  "binaries": {
+    "baseline": "20b4ccf68b5562084953fb4441b0e84dea25c1151b1dc1b325d05e36505571d0",
+    "candidate": "63e11b25c2412e510351e03396434ba2f51103300eab52ba83a5b60e684d1db5"
+  },
+  "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+  "dataset_revision": "07dd95dbe6214b8a78fc1e4a55961ab515986489",
+  "machine": {
+    "cpu": "Apple M4 Pro",
+    "logical_cpus": 14,
+    "memory_bytes": 25769803776
+  },
+  "timing_keys_excluded": [
+    "build_duration_ms",
+    "decomp_sec",
+    "normalize_duration_ms",
+    "postprocess_sec",
+    "render_duration_ms",
+    "structuring_duration_ms",
+    "total_time_ms"
+  ],
+  "paired": [
+    {
+      "cell": "03",
+      "label": "Linux AArch64 / Snappy O0",
+      "functions": 6,
+      "baseline": {
+        "wall_seconds": [
+          3.4297965419245884,
+          2.4127335420344025,
+          2.3917601669672877,
+          2.3346626249840483,
+          2.3934243749827147
+        ],
+        "cpu_seconds": [
+          3.8823809999999996,
+          3.8647769999999992,
+          3.7596909999999992,
+          3.685198999999997,
+          3.844321
+        ]
+      },
+      "candidate": {
+        "wall_seconds": [
+          2.827296666917391,
+          2.3242789999349043,
+          2.36680083302781,
+          2.3051484999014065,
+          2.3036796670639887
+        ],
+        "cpu_seconds": [
+          3.686273,
+          3.7042720000000005,
+          3.6226340000000006,
+          3.665136000000002,
+          3.6688910000000026
+        ]
+      }
+    },
+    {
+      "cell": "27",
+      "label": "Windows x86-64 / Snappy O2",
+      "functions": 5,
+      "baseline": {
+        "wall_seconds": [
+          1.2931258749449626,
+          1.2900598340202123,
+          1.298549540922977,
+          1.261665124911815,
+          1.255795249948278
+        ],
+        "cpu_seconds": [
+          1.7899140000000038,
+          1.8009839999999984,
+          1.8045499999999963,
+          1.783799000000002,
+          1.792487000000003
+        ]
+      },
+      "candidate": {
+        "wall_seconds": [
+          1.2576236670138314,
+          1.2563960829284042,
+          1.2504367909859866,
+          1.246423166943714,
+          1.2524567919317633
+        ],
+        "cpu_seconds": [
+          1.8079789999999978,
+          1.7950179999999991,
+          1.7872329999999979,
+          1.7342739999999968,
+          1.7838359999999969
+        ]
+      }
+    },
+    {
+      "cell": "40",
+      "label": "macOS arm64 / Ninja O2",
+      "functions": 5,
+      "baseline": {
+        "wall_seconds": [
+          1.4917885420145467,
+          1.4963414589874446,
+          1.502043875050731,
+          1.4897522500250489,
+          1.4917064169421792
+        ],
+        "cpu_seconds": [
+          3.137598999999998,
+          3.176284999999996,
+          3.1856330000000086,
+          3.0528860000000004,
+          3.171557999999994
+        ]
+      },
+      "candidate": {
+        "wall_seconds": [
+          1.5064133330015466,
+          1.4877341670216992,
+          1.4813001670408994,
+          1.4905030829831958,
+          1.4877546249190345
+        ],
+        "cpu_seconds": [
+          3.3270960000000027,
+          3.2925549999999992,
+          3.243819999999982,
+          3.310695000000005,
+          3.27556500000001
+        ]
+      }
+    }
+  ],
+  "large_control": {
+    "candidate": {
+      "seconds": 149.09500141697936,
+      "cpu_seconds": 1590.411708,
+      "returned": 6,
+      "sha256": "63e11b25c2412e510351e03396434ba2f51103300eab52ba83a5b60e684d1db5"
+    },
+    "baseline": {
+      "seconds": 155.8539906659862,
+      "cpu_seconds": 1554.7894220000003,
+      "returned": 6,
+      "sha256": "20b4ccf68b5562084953fb4441b0e84dea25c1151b1dc1b325d05e36505571d0"
+    }
+  },
+  "returned": 250,
+  "changed_functions": 0,
+  "population": [
+    {
+      "cell": "00",
+      "input": "inputs/linux/arm64/O0/OpenCC/opencc",
+      "sha256": "2b34da75fff8870f32c0a3cee080d06a7bf86618d162bbec37f0148b1bb03ea3",
+      "addresses": [
+        70576,
+        168196,
+        199344,
+        150932,
+        68704,
+        137184
+      ],
+      "normalized_output_sha256": "db4da9f19648e7a96b6efafbfd72d1736dcb43ea3cf56a70fb6754dc783427af"
+    },
+    {
+      "cell": "01",
+      "input": "inputs/linux/arm64/O0/leveldb/libleveldb.so.1.23.0",
+      "sha256": "fb744186acf789dd7936e76e14cb608b41ef3afe7e41304c1a29a7366878ae14",
+      "addresses": [
+        356320,
+        476864,
+        180020,
+        322480,
+        361924,
+        251792
+      ],
+      "normalized_output_sha256": "7f6938eb15761eaa2dddc210e11627b66ea4d5863fa6903c4a5ffe4766ce189e"
+    },
+    {
+      "cell": "02",
+      "input": "inputs/linux/arm64/O0/mergerfs/mergerfs",
+      "sha256": "4e2a3d9e45cf60ac57685fa4f6571dc52b123a4a6edaa1f837057d472c381669",
+      "addresses": [
+        330576,
+        300692,
+        608396,
+        714420,
+        1187244,
+        1241028
+      ],
+      "normalized_output_sha256": "aa9bd37400f87134a3b2b5b4aed646c7c42f24ecdb2f8b1bc572318036c7d61b"
+    },
+    {
+      "cell": "03",
+      "input": "inputs/linux/arm64/O0/snappy/libsnappy.so.1.2.2",
+      "sha256": "f71312d8db4ca40bb626132b3c157c18f49222b8b6619edb949664b2b98bf89f",
+      "addresses": [
+        102688,
+        60756,
+        106728,
+        90180,
+        80028,
+        57948
+      ],
+      "normalized_output_sha256": "2c243fef3e4e8640e9bc0d613f9505778900aa281195acd55b208fff68b9de24"
+    },
+    {
+      "cell": "04",
+      "input": "inputs/linux/arm64/O0/ssdb/ssdb-server",
+      "sha256": "387640c8d0fed448f69852eae43bb4d4d430269935cc3834d9172085f8eb0bbb",
+      "addresses": [
+        263848,
+        356140,
+        169424,
+        414736,
+        243992,
+        246436
+      ],
+      "normalized_output_sha256": "fd72675f15ac954e4df18c0eb3ccdfc4ec0052e5b2ae17d4df1bc05ae72cb67d"
+    },
+    {
+      "cell": "05",
+      "input": "inputs/linux/arm64/O0/the-powder-toy/powder",
+      "sha256": "2fb8edde86aff3195ea8eadee3b56569ab46e15604c29c09cf6dabf68236fbbc",
+      "addresses": [
+        365308,
+        3357028,
+        2856520,
+        1541412,
+        2078336,
+        1848584
+      ],
+      "normalized_output_sha256": "9dd651ff9bc437bf8786c0bc69c1d40f5ec678debdbb2fe45857b9f4cca7629c"
+    },
+    {
+      "cell": "06",
+      "input": "inputs/linux/arm64/O2/OpenCC/opencc",
+      "sha256": "b479bb9d7fe117fa1bf498091f57b4596f0b236a0e7ee9048ee47471774346fc",
+      "addresses": [
+        103824,
+        43024,
+        72944,
+        27856,
+        82080,
+        99248
+      ],
+      "normalized_output_sha256": "5dc50e012606fb9bf8ff05fbd34125923337e505f05175d338bde7d40ca768b6"
+    },
+    {
+      "cell": "07",
+      "input": "inputs/linux/arm64/O2/leveldb/libleveldb.so.1.23.0",
+      "sha256": "85211404edaf421a7e3a4fda0e0828bd159f12773aa066a90943e7f99818ae05",
+      "addresses": [
+        206752,
+        162464,
+        145296,
+        140768,
+        171952,
+        116064
+      ],
+      "normalized_output_sha256": "3821f6085b05e57eb1c5e68bc68bb6f592f3f776bc0f5c022863cc2152ee2531"
+    },
+    {
+      "cell": "08",
+      "input": "inputs/linux/arm64/O2/mergerfs/mergerfs",
+      "sha256": "3be17911d1cbf52a516b016dd5b2df1234c8f5f5ca68af933209f4620c5ecc5e",
+      "addresses": [
+        753616,
+        521680,
+        281936,
+        224384,
+        146208,
+        144064
+      ],
+      "normalized_output_sha256": "a1875eb08b26272be074446bf3a73d973d2f242b5cbce96572979ce8742fdda2"
+    },
+    {
+      "cell": "09",
+      "input": "inputs/linux/arm64/O2/snappy/libsnappy.so.1.2.2",
+      "sha256": "610d1dd5c0b42016acee9d487c74d4598c9a5a702946004c94ea84ab2cb94a7e",
+      "addresses": [
+        36992,
+        29568,
+        15072,
+        14480,
+        15028,
+        25072
+      ],
+      "normalized_output_sha256": "653fb1bad9338190cce8b0044e70b271138a63856eb9b1a52c48a37f83cf71bc"
+    },
+    {
+      "cell": "10",
+      "input": "inputs/linux/arm64/O2/ssdb/ssdb-server",
+      "sha256": "c72e6ca74deb4905b2c0615ea8be79f538d825f603279ea0c338f63fd0ae7ed5",
+      "addresses": [
+        786288,
+        223908,
+        806980,
+        275520,
+        205488,
+        163600
+      ],
+      "normalized_output_sha256": "f264efec6cdaddb8c429152903fecaa0fd3a388a10361e0047d05fa2b74c5a1d"
+    },
+    {
+      "cell": "11",
+      "input": "inputs/linux/arm64/O2/the-powder-toy/powder",
+      "sha256": "a0127641604507b93359d089d0a12ba9b557d65500349fd45e721bbd8c97af96",
+      "addresses": [
+        1866144,
+        935632,
+        381936,
+        1976576,
+        1920768,
+        970464
+      ],
+      "normalized_output_sha256": "8b4cd93ee9d9633f37a9ef9734d6780341897ae47b12e7e586cc1ff33c734670"
+    },
+    {
+      "cell": "12",
+      "input": "inputs/linux/arm64/O2-noinline/OpenCC/opencc",
+      "sha256": "a396371fb685ddbe812113ab92109204a20ef616fb494752ca364eca88071463",
+      "addresses": [
+        58564,
+        56544,
+        129184,
+        113296,
+        98016,
+        82944
+      ],
+      "normalized_output_sha256": "1820b5e0bf436cbe0cd7ec65b62dadcb72e6ab05b4ff5b1511e9f9365754b714"
+    },
+    {
+      "cell": "13",
+      "input": "inputs/linux/arm64/O2-noinline/leveldb/libleveldb.so.1.23.0",
+      "sha256": "e8ef8316bf5ae7554a977e56168a18f172385a6c1700980592259fd2082eeb83",
+      "addresses": [
+        217428,
+        262464,
+        130180,
+        170864,
+        332032,
+        347348
+      ],
+      "normalized_output_sha256": "17801c1aede3d59a9250fd1499d205e51beed58989b1366a94e5989e52717856"
+    },
+    {
+      "cell": "14",
+      "input": "inputs/linux/arm64/O2-noinline/mergerfs/mergerfs",
+      "sha256": "0633c718ea2d9f161b8453cdf2cb4c7784dadfe02822cb1da2550d851cefbabc",
+      "addresses": [
+        397636,
+        439632,
+        1216368,
+        272176,
+        568112,
+        1105408
+      ],
+      "normalized_output_sha256": "9bbc5eb934ea662078a758faed5ca6f4aec45baa6224f2a20f23ff18fef94218"
+    },
+    {
+      "cell": "15",
+      "input": "inputs/linux/arm64/O2-noinline/snappy/libsnappy.so.1.2.2",
+      "sha256": "27b3960b13b8ce4155e30de7d44906388d6c571476b56e4162bc9e4ad90daaae",
+      "addresses": [
+        60848,
+        40112,
+        41056,
+        66048,
+        47300,
+        56128
+      ],
+      "normalized_output_sha256": "a2123bfb18c59f052a09d553a08d1d897b5dcd5180f32d5795037bf731bb0b22"
+    },
+    {
+      "cell": "16",
+      "input": "inputs/linux/arm64/O2-noinline/ssdb/ssdb-server",
+      "sha256": "66134e36f007c0f4785ba5eeb996d18cd514d15df5f8be673ea2d16041e38f78",
+      "addresses": [
+        356304,
+        276864,
+        787764,
+        275312,
+        798180,
+        259856
+      ],
+      "normalized_output_sha256": "1cca51bb0ca5b5b96c9c6b2203fc378c7bbf1552ddef5ebd1e6a5e8eb570ab7a"
+    },
+    {
+      "cell": "17",
+      "input": "inputs/linux/arm64/O2-noinline/the-powder-toy/powder",
+      "sha256": "316fb82a965c9d0538fd8e52256a970a6598541e8b5ce7235f655eca04da438d",
+      "addresses": [
+        337760,
+        1481648,
+        2305584,
+        1715348,
+        1354788,
+        2772724
+      ],
+      "normalized_output_sha256": "91c02eb5470d14d563c37f372cceb65364fa30349dfdd1621e829f42ff65c670"
+    },
+    {
+      "cell": "18",
+      "input": "inputs/windows/x86_64/O0/OpenCC/opencc.exe",
+      "sha256": "1dc4891d2cf7eeeebf96ef8bb15dcd60f13220f5e97a0adc38f6bf787952dd70",
+      "addresses": [
+        5369530208,
+        5369331680,
+        5368779088,
+        5368934176,
+        5369420688,
+        5369175024
+      ],
+      "normalized_output_sha256": "d02b9721820ff0285e4e34af2bcfcca47a4ecbf4173f5ec4d99fab0eade8792c"
+    },
+    {
+      "cell": "19",
+      "input": "inputs/windows/x86_64/O0/detours/withdll.exe",
+      "sha256": "967a9b6af65106daf535a914de82719346ac0b6df651f72a705a6aa6c315f546",
+      "addresses": [
+        5368746256,
+        5368726192,
+        5368720736,
+        5368743200,
+        5368758768,
+        5368728496
+      ],
+      "normalized_output_sha256": "6fa03a22bacece04fc1d5e924956b3d251787a05afea9b09b8f0847c872552a9"
+    },
+    {
+      "cell": "20",
+      "input": "inputs/windows/x86_64/O0/ninja/ninja.exe",
+      "sha256": "01b31cf9bc601cd06236dec0bfeba1b93068c1663ab66b4789d8507ae25f4589",
+      "addresses": [
+        5368871632,
+        5368738640,
+        5369346976,
+        5369277184,
+        5369171312,
+        5369228496
+      ],
+      "normalized_output_sha256": "93b565d5a975d23db697cffd88300d5fc286c8b7a9ea176752aa13302e519fd2"
+    },
+    {
+      "cell": "21",
+      "input": "inputs/windows/x86_64/O0/snappy/snappy.dll",
+      "sha256": "696f0c504463a557c6ccf56624596745f29bc7e62a7717befc93defe0d613491",
+      "addresses": [
+        6442458512,
+        6442494016,
+        6442494448,
+        6442460656,
+        6442500448,
+        6442500704
+      ],
+      "normalized_output_sha256": "402864ae384b69d3a96c4829855bf962d71ec16d52bf35be7d1bf79e587e57ee"
+    },
+    {
+      "cell": "22",
+      "input": "inputs/windows/x86_64/O0/tracy/tracy-profiler.exe",
+      "sha256": "8c089578f78011abef068dd5954aac2af6daf74231382e3dec72bf7ec796a94e",
+      "addresses": [
+        5371849952,
+        5369490400,
+        5369056096,
+        5370617184,
+        5369167696,
+        5371386032
+      ],
+      "normalized_output_sha256": "a7d78b4baf0f9386f70e5bc072563da85432b33c2be3c0fca597429f638eb835"
+    },
+    {
+      "cell": "23",
+      "input": "inputs/windows/x86_64/O0/winsparkle/WinSparkle.dll",
+      "sha256": "3102f0c03e4bbddbdf4c5e799870e6253078370f39eecde4432988067311d06c",
+      "addresses": [
+        6442532172,
+        6442657484,
+        6442582792,
+        6442571460,
+        6442584892,
+        6442616972
+      ],
+      "normalized_output_sha256": "f7fc77bfb99535d861f689a1d4903fc0c7cafa4a3281a77a94e814a6274af26d"
+    },
+    {
+      "cell": "24",
+      "input": "inputs/windows/x86_64/O2/OpenCC/opencc.exe",
+      "sha256": "45a8cdd9f34f4ef3bbbcb05ec4e6165d7cefd9d1393918cf2bcc6ee24d8f9fcf",
+      "addresses": [
+        5368851280,
+        5369069536,
+        5368756304,
+        5368803552,
+        5369048736,
+        5369106320
+      ],
+      "normalized_output_sha256": "634de12cf8d7bbefa42114a2e7528af402bbc8a7529a1e07fc35beae1d31e0c2"
+    },
+    {
+      "cell": "25",
+      "input": "inputs/windows/x86_64/O2/detours/withdll.exe",
+      "sha256": "9f6b3fe0bdd1a6496b0665439a230acd6310af94e9dca149cb357420b4968b67",
+      "addresses": [
+        5368722096,
+        5368736032,
+        5368749952,
+        5368723152,
+        5368757712
+      ],
+      "normalized_output_sha256": "fe125c970f308a763f1423c1cd75cec7aafdadd517b87270c9a3b7249dffbc51"
+    },
+    {
+      "cell": "26",
+      "input": "inputs/windows/x86_64/O2/ninja/ninja.exe",
+      "sha256": "2f944654930b102d9a639591d7977b0a07d94445c97fce4a0fc51955116ec11b",
+      "addresses": [
+        5368726864,
+        5368984880,
+        5368752336,
+        5368907216,
+        5368934368
+      ],
+      "normalized_output_sha256": "d9e9caf0699fc358df5f867ef76137a358ba1d2bf4905dc4553168f828542f0c"
+    },
+    {
+      "cell": "27",
+      "input": "inputs/windows/x86_64/O2/snappy/snappy.dll",
+      "sha256": "32d32be7699c41d660b34d3ca6260e36c47a382ef9880fd911332ebac3318ba5",
+      "addresses": [
+        6442456320,
+        6442471952,
+        6442478192,
+        6442483808,
+        6442490224
+      ],
+      "normalized_output_sha256": "561a5e1e1dad723fefa2f2fa5f515becc6989cfa614a12e5bc6d7bf481f02e64"
+    },
+    {
+      "cell": "28",
+      "input": "inputs/windows/x86_64/O2/tracy/tracy-profiler.exe",
+      "sha256": "51d411d396c203cd9328b90034b32912252ce00e0b4b633052e7e21df00d0ec4",
+      "addresses": [
+        5371116688,
+        5369328048,
+        5371686704,
+        5368911392,
+        5370045408
+      ],
+      "normalized_output_sha256": "4faa08d63b7e111ec496f2071479ba434dbb567788766e00a5c98d99ba85ccf0"
+    },
+    {
+      "cell": "29",
+      "input": "inputs/windows/x86_64/O2/winsparkle/WinSparkle.dll",
+      "sha256": "469e4682860c42d2da2d0ddc19df68e77bef1041260b51c2f388448b309a11ed",
+      "addresses": [
+        6442623764,
+        6442591412,
+        6442534180,
+        6442598780,
+        6442592052
+      ],
+      "normalized_output_sha256": "f2c961d6ba1a1bc4f8427e2f5192dc49244cf179475217675b38ca6ec73d33a6"
+    },
+    {
+      "cell": "30",
+      "input": "inputs/windows/x86_64/O2-noinline/OpenCC/opencc.exe",
+      "sha256": "d1c3dc4ec79ec94b0058b3120afefb070a2be0825833c4d0793f4c8a7b51ef59",
+      "addresses": [
+        5369102496,
+        5369017984,
+        5368786336,
+        5369017024,
+        5368722512
+      ],
+      "normalized_output_sha256": "3622e93a53fb03ca85981feb9a47891e1216f5dca206a9d0583fadc4e850b2ed"
+    },
+    {
+      "cell": "31",
+      "input": "inputs/windows/x86_64/O2-noinline/detours/withdll.exe",
+      "sha256": "882b7cbf0890ef5e13fd05c9659c652650232bdefbef9d82c5ada4c4fb16064b",
+      "addresses": [
+        5368753200,
+        5368725568,
+        5368748912,
+        5368754080,
+        5368724080
+      ],
+      "normalized_output_sha256": "65f32542a9d696e886e7abe9f6781eeb68faa5db66455dc4dd6359ed5a2e920e"
+    },
+    {
+      "cell": "32",
+      "input": "inputs/windows/x86_64/O2-noinline/ninja/ninja.exe",
+      "sha256": "dba990b021df2c0189ccb75ee345513ec90d987c73f9f6a169a41705e98df246",
+      "addresses": [
+        5369006896,
+        5368884160,
+        5369006064,
+        5368885520,
+        5368735072
+      ],
+      "normalized_output_sha256": "6ad45d03bdcb2e7d9028007d2653b681b603ba8cb513247e0e15ce3a150b7edf"
+    },
+    {
+      "cell": "33",
+      "input": "inputs/windows/x86_64/O2-noinline/snappy/snappy.dll",
+      "sha256": "0998482d359e03639280b7f1c90e4dfc41e55cef47e9fbed77f2075e43e1b5f4",
+      "addresses": [
+        6442481776,
+        6442470240,
+        6442480800,
+        6442484096,
+        6442479472
+      ],
+      "normalized_output_sha256": "64d51a337e21300be7d96097313ac6a6d629d0d325590a0cb20d743d35ec90f6"
+    },
+    {
+      "cell": "34",
+      "input": "inputs/windows/x86_64/O2-noinline/tracy/tracy-profiler.exe",
+      "sha256": "b5d346dc70c14e9db33ff70d330a8ab594b17783f8651d79baef5f39a324df1a",
+      "addresses": [
+        5368918560,
+        5370210544,
+        5370194528,
+        5369723472,
+        5371373120
+      ],
+      "normalized_output_sha256": "5425b7f4f697212f37b4476ac0d161265c5ad743b48ea99cae160c25b5bb37b2"
+    },
+    {
+      "cell": "35",
+      "input": "inputs/windows/x86_64/O2-noinline/winsparkle/WinSparkle.dll",
+      "sha256": "d65d12084251b25776f8d95176718399e9c2b0989c478c72ea523a54ce4d5492",
+      "addresses": [
+        6442521088,
+        6442501184,
+        6442590884,
+        6442619508,
+        6442624904
+      ],
+      "normalized_output_sha256": "183bc03042a381c1aa7203b5254bac10f4acda217ae534b1b6b8b91e56f442d0"
+    },
+    {
+      "cell": "36",
+      "input": "inputs/macos/arm64/O0/OpenCC/opencc",
+      "sha256": "67c815d39a1dfca4f436d0f756e97418aadd7963198a3a81e375b4c310f1939e",
+      "addresses": [
+        4295469832,
+        4295136360,
+        4295165176,
+        4295560260,
+        4295144012
+      ],
+      "normalized_output_sha256": "fd661d56e57ab13c571a0b596e2a3dedf01ec58e3534a0aa861121cbf296d481"
+    },
+    {
+      "cell": "37",
+      "input": "inputs/macos/arm64/O0/ninja/ninja",
+      "sha256": "75cf0ed6a02b4ff1eebd959774a9c1be03d84aa77272c8feff683bb217de54b8",
+      "addresses": [
+        4295304968,
+        4295101904,
+        4295304616,
+        4295129500,
+        4295414460
+      ],
+      "normalized_output_sha256": "35ffb61dad064adb2b3c9d6ffc141fa5ba4dd325277cdf9c57ab07c109f978d3"
+    },
+    {
+      "cell": "38",
+      "input": "inputs/macos/arm64/O0/snappy/libsnappy.dylib",
+      "sha256": "4f90c07ed46bb47bcef75d19216f737818d5a5efb24a540e92c9fcecd2c94b40",
+      "addresses": [
+        38396,
+        17812,
+        49728,
+        23648,
+        20972
+      ],
+      "normalized_output_sha256": "f89362832e5d28281496e863a088a06fae37928b9efccc2b910a197a57cb9629"
+    },
+    {
+      "cell": "39",
+      "input": "inputs/macos/arm64/O2/OpenCC/opencc",
+      "sha256": "22cc4554475c4d2d5f7454b298cbb551f0d75d9d02ff69731bfac068573201f8",
+      "addresses": [
+        4295331624,
+        4295071540,
+        4294972844,
+        4295247992,
+        4295335864
+      ],
+      "normalized_output_sha256": "850582b87bab8979ded72780c10afbd73107156f830156d048f6f0a163662e76"
+    },
+    {
+      "cell": "40",
+      "input": "inputs/macos/arm64/O2/ninja/ninja",
+      "sha256": "0628307f3fd492bbbec336ee590e604b4f1bd9c0e63d5f6e11fc9955e679931e",
+      "addresses": [
+        4295011732,
+        4295180224,
+        4295116668,
+        4295103556,
+        4295045872
+      ],
+      "normalized_output_sha256": "33923701a75d02dc01d24981e80bd53e4902d5ee45dddcde046ac42447f325a4"
+    },
+    {
+      "cell": "41",
+      "input": "inputs/macos/arm64/O2/snappy/libsnappy.dylib",
+      "sha256": "d518851383b135b64296702fc6dd9d67d2cfc587da212358e8a7a67e921baffd",
+      "addresses": [
+        16172,
+        18392,
+        4736,
+        25764,
+        25496
+      ],
+      "normalized_output_sha256": "392e4f6226a8209dcebb66f516752379713e19344952ee3a1e0e79f96f270722"
+    },
+    {
+      "cell": "42",
+      "input": "inputs/macos/arm64/O2-noinline/OpenCC/opencc",
+      "sha256": "52c1ebb86cb7fd77f7141944adeff8a1025c36393d681036927fee37edb44373",
+      "addresses": [
+        4295091500,
+        4295320812,
+        4294974572,
+        4295068292,
+        4295088464
+      ],
+      "normalized_output_sha256": "fe55ba6aa9d2edb034e7b9bcb6154b4ff2be3cfa160261a7a8d56d28646de1e2"
+    },
+    {
+      "cell": "43",
+      "input": "inputs/macos/arm64/O2-noinline/ninja/ninja",
+      "sha256": "d882afc6667e7d3325b33fcaef5957283e5709b3576326753cbb33f4e74f22b5",
+      "addresses": [
+        4295172112,
+        4294978148,
+        4295196936,
+        4295086932,
+        4295188472
+      ],
+      "normalized_output_sha256": "e3ef0468096e0653d857cb0d844ea440abd2542e9818aaf3407276e4e823366a"
+    },
+    {
+      "cell": "44",
+      "input": "inputs/macos/arm64/O2-noinline/snappy/libsnappy.dylib",
+      "sha256": "816de59e4c6d2c077c56aa697a9ca2d97a18c0b4f39a1e420c09a8b9c6135477",
+      "addresses": [
+        22440,
+        4732,
+        19576,
+        21628,
+        21516
+      ],
+      "normalized_output_sha256": "2b7bc61d8a932e2f931681be25cf16a609f05ae5512d4155273e9252640c01a8"
+    }
+  ]
+}

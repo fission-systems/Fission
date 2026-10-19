@@ -85,9 +85,10 @@ impl RuntimeSleighFrontend {
     }
 
     fn exact_entry_for_id(entry_id: &str) -> Result<EntrySpec> {
-        discover_all_entry_specs()?
-            .into_iter()
+        crate::compiler::runtime_entry_specs()?
+            .iter()
             .find(|entry| entry.entry_id == entry_id)
+            .cloned()
             .ok_or_else(|| anyhow!("Sleigh runtime entry '{entry_id}' is not registered"))
     }
 
@@ -96,11 +97,11 @@ impl RuntimeSleighFrontend {
     }
 
     pub fn find_spec_path_for(language_name: &str) -> Option<PathBuf> {
-        discover_all_entry_specs()
+        crate::compiler::runtime_entry_specs()
             .ok()?
-            .into_iter()
+            .iter()
             .find(|entry| entry_matches_language_name(entry, language_name))
-            .map(|entry| entry.path)
+            .map(|entry| entry.path.clone())
     }
 
     pub fn spec_path_for(language_name: &str) -> PathBuf {
@@ -109,9 +110,10 @@ impl RuntimeSleighFrontend {
     }
 
     pub fn new_for_language(language_name: &str) -> Result<Self> {
-        let entry = discover_all_entry_specs()?
-            .into_iter()
+        let entry = crate::compiler::runtime_entry_specs()?
+            .iter()
             .find(|entry| entry_matches_language_name(entry, language_name))
+            .cloned()
             .ok_or_else(|| {
                 anyhow!("Sleigh runtime frontend not registered for '{language_name}'")
             })?;
