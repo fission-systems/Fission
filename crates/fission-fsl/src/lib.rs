@@ -12,6 +12,8 @@ pub mod backend;
 pub mod control;
 pub mod encoding;
 pub mod fabric;
+#[cfg(feature = "x86")]
+pub mod function;
 mod go_output;
 mod gpu_output;
 pub mod jit;

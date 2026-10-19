@@ -97,13 +97,63 @@ pub fn project_profiled_x86(
     size: usize,
     backend_id: &str,
 ) -> Result<PipelineBundle, FslError> {
-    if !(1..=65536).contains(&size) {
-        return Err(FslError::at(1, 1, "binary span size must be 1..65536"));
-    }
     let registry = BackendRegistry::with_builtin_sources();
     let backend = registry
         .get(backend_id)
         .ok_or_else(|| FslError::at(1, 1, "unregistered source backend"))?;
+    let (package, program, report) = load_profiled_x86(profiles, input, address, size)?;
+    let selection = format!("caller-supplied-executable-span address=0x{address:x} size={size}");
+    let mut bundle = emit_program(&package, &program, backend, &selection)?;
+    bundle.pipeline_report = report + &bundle.pipeline_report;
+    Ok(bundle)
+}
+
+/// Explicitly selected scalar ABI, recovered FIR CFG/dependencies, ordinary C
+/// machine-word function. Unsupported contracts refuse before output publication.
+pub fn project_profiled_x86_function(
+    profiles: &crate::profiles::ProfilePackage,
+    input: &Path,
+    address: u64,
+    size: usize,
+    abi: &str,
+    symbol: &str,
+) -> Result<PipelineBundle, FslError> {
+    let (package, program, loader_report) = load_profiled_x86(profiles, input, address, size)?;
+    let (source, evidence) = program.emit_scalar_function(abi, symbol)?;
+    let registry = BackendRegistry::with_builtin_sources();
+    let backend = registry.get("c").expect("builtin C backend");
+    let mut bundle = emit_program(
+        &package,
+        &program,
+        backend,
+        "caller-supplied-function-candidate-span",
+    )?;
+    bundle.projection.sources = vec![crate::backend::SourceArtifact {
+        name: "output.c".into(),
+        source,
+    }];
+    for origin in &mut bundle.projection.origins {
+        origin.source_symbol = origin
+            .source_symbol
+            .replace("x86_body_", &format!("fsl_internal_{symbol}_body_"));
+    }
+    bundle.projection.report = evidence
+        + &bundle
+            .projection
+            .report
+            .replace("x86_body_", &format!("fsl_internal_{symbol}_body_"));
+    bundle.pipeline_report = loader_report + "projection=checked-scalar-function-c\nabi-selection=explicit-caller-assertion; see projection.txt for admitted contract\n" + &bundle.pipeline_report;
+    Ok(bundle)
+}
+fn load_profiled_x86(
+    profiles: &crate::profiles::ProfilePackage,
+    input: &Path,
+    address: u64,
+    size: usize,
+) -> Result<(X86Package, X86Program, String), FslError> {
+    if !(1..=65536).contains(&size) {
+        return Err(FslError::at(1, 1, "binary span size must be 1..65536"));
+    }
     let loaded = fission_loader::LoadedBinary::from_file_with_catalog(input, &profiles.catalog)
         .map_err(|e| FslError::at(1, 1, format!("loader: {e}")))?;
     let package = owned_x86_package()?;
@@ -119,11 +169,9 @@ pub fn project_profiled_x86(
         ));
     }
     let program = X86Program::from_loaded_binary(&package, &loaded.binary, address, size)?;
-    let selection = format!("caller-supplied-executable-span address=0x{address:x} size={size}");
-    let mut bundle = emit_program(&package, &program, backend, &selection)?;
-    bundle.pipeline_report = format!("loader-profile-contract=1\nloader-route=owned-catalog\nselected-profile={}\ncatalog-sha256={}\nbound-package-sha256={}\nabi=unselected\ntarget-facts={:?}\n{}",
-        loaded.profile.id,crate::sequence::hex(&Sha256::digest(profiles.encode_binary()?)),package_hash,loaded.target_facts,bundle.pipeline_report);
-    Ok(bundle)
+    let report = format!("loader-profile-contract=1\nloader-route=owned-catalog\nselected-profile={}\ncatalog-sha256={}\nbound-package-sha256={}\nloader-abi=unselected\ntarget-facts={:?}\n",
+        loaded.profile.id,crate::sequence::hex(&Sha256::digest(profiles.encode_binary()?)),package_hash,loaded.target_facts);
+    Ok((package, program, report))
 }
 
 fn emit_program(

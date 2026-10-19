@@ -39,6 +39,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "usage: fsl-x86 compile RULES.fslx BODIES.fsl OUTPUT.fslxc | ",
         "compile-profiles SOURCE.fslprofiles OUTPUT.fslpc | ",
         "inspect-profiles CATALOG.fslpc | select-profile CATALOG.fslpc BINARY | ",
+        "decompile-function CATALOG.fslpc BINARY ADDRESS SIZE sysv-amd64-u64-leaf-v1 recovered_NAME NEW_DIRECTORY | ",
         "decompile-profiled CATALOG.fslpc BINARY ADDRESS SIZE c|rust|go NEW_DIRECTORY | ",
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
         "decompile-owned BINARY ADDRESS SIZE c|rust|go NEW_DIRECTORY | ",
@@ -69,6 +70,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &profiles.catalog,
             )?;
             println!("selected-profile={} decoder={} package-sha256={} abi=unselected legacy-load-spec={} target-facts={:?}",loaded.profile.id,loaded.profile.decoder,loaded.profile.package_sha256,loaded.binary.load_spec().is_some(),loaded.target_facts);
+        }
+        Some("decompile-function") if a.len() == 8 => {
+            let profiles = fission_fsl::profiles::ProfilePackage::decode_binary(&fs::read(&a[1])?)?;
+            let bundle = fission_fsl::pipeline::project_profiled_x86_function(
+                &profiles,
+                Path::new(&a[2]),
+                number(&a[3])?,
+                a[4].parse()?,
+                &a[5],
+                &a[6],
+            )?;
+            bundle.write_new(Path::new(&a[7]))?;
+            println!("emitted checked scalar C function into {}", a[7]);
         }
         Some("decompile-profiled") if a.len() == 7 => {
             let profiles = fission_fsl::profiles::ProfilePackage::decode_binary(&fs::read(&a[1])?)?;

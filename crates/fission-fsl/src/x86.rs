@@ -683,6 +683,101 @@ impl X86Program {
         out += "limits=flat-memory; no ABI selection, source prototype, argument count, signedness, pointer type or completeness proof; unknown control analysis refuses\n";
         Ok(out)
     }
+    /// Project a checked integer leaf into an ordinary C machine-word function.
+    /// Source prototypes/types are not recovered. Caller selects the ABI explicitly.
+    pub fn emit_scalar_function(
+        &self,
+        abi_id: &str,
+        symbol: &str,
+    ) -> Result<(String, String), FslError> {
+        if self.mode != 64 || abi_id != "sysv-amd64-u64-leaf-v1" {
+            return Err(error(
+                "scalar function requires explicit sysv-amd64-u64-leaf-v1 and 64-bit mode",
+            ));
+        }
+        if !symbol.starts_with("recovered_")
+            || symbol.len() > 64
+            || !symbol
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(error(
+                "C function symbol must be an ASCII recovered_NAME identifier of at most 64 bytes",
+            ));
+        }
+        let abi_source = include_str!("../specs/x86/sysv-amd64-u64-leaf.fslabi");
+        let abi = crate::abi::compile_abi_source(abi_source)?;
+        let cc = &abi.conventions[0];
+        // Physical names are bound here; CFG/dataflow admission uses logical slots.
+        let names = [
+            "RAX", "RCX", "RDX", "RBX", "RSP", "RBP", "RSI", "RDI", "R8", "R9", "R10", "R11",
+            "R12", "R13", "R14", "R15",
+        ];
+        let slot = |name: &str| {
+            names
+                .iter()
+                .position(|s| *s == name)
+                .ok_or_else(|| error("ABI register has no owned x86 bank binding"))
+        };
+        let contract = crate::function::ScalarAbi {
+            registers: 17,
+            flags: 12,
+            zero: 16,
+            inputs: cc
+                .inputs
+                .iter()
+                .map(|r| slot(&r.register))
+                .collect::<Result<_, _>>()?,
+            output: slot(&cc.outputs[0].register)?,
+            stack: slot(&abi.stack_register)?,
+            preserved: cc
+                .preserved_registers
+                .iter()
+                .map(|r| slot(r))
+                .collect::<Result<_, _>>()?,
+            return_bytes: cc.stackshift as u16,
+        };
+        let instructions = self
+            .instances
+            .iter()
+            .map(|i| crate::function::Instruction {
+                address: i.origin.address,
+                length: i.origin.byte_length,
+                body: &self.package.bodies.instructions[i.observation.instruction_index],
+                decoded: &i.observation,
+                returns: i.returns,
+            })
+            .collect::<Vec<_>>();
+        let evidence = crate::function::recover(&instructions, &contract)?;
+        // Reuse the canonical FIR state backend, including RET's actual effects.
+        // Internal initial state is safe only after dependency/preservation admission.
+        let mut source = self
+            .emit(OutputLayer::C)?
+            .replace(
+                "uint32_t fsl_x86(",
+                &format!("static uint32_t fsl_internal_{symbol}_run("),
+            )
+            .replace("uint32_t x86_body_", "static uint32_t x86_body_")
+            .replace("x86_body_", &format!("fsl_internal_{symbol}_body_"));
+        let parameters = (0..evidence.parameter_prefix)
+            .map(|i| format!("uint64_t arg{i}"))
+            .collect::<Vec<_>>();
+        writeln!(source,"\n#include <stdlib.h>\nuint64_t {symbol}({}) {{\nuint64_t r[17]={{0}}, f[12]={{0,0,0,0,0,0,1,1,1,1,1,1}}, exit_pc=0;\nconst uint8_t memory[8]={{0}};\nr[{}]=UINT64_C(4096);",if parameters.is_empty(){"void".to_string()}else{parameters.join(", ")},contract.stack).unwrap();
+        for (i, slot) in contract
+            .inputs
+            .iter()
+            .take(evidence.parameter_prefix)
+            .enumerate()
+        {
+            writeln!(source, "r[{slot}]=arg{i};").unwrap();
+        }
+        writeln!(source,"if (fsl_internal_{symbol}_run(r,17,f,12,memory,8,4096,{},&exit_pc)!=0 || exit_pc!=0) abort();\nreturn r[{}];\n}}",self.instances.len()+1,contract.output).unwrap();
+        let mut report=format!("scalar-function-contract=1\nabi={abi_id} selection=explicit-caller-assertion\nabi-source-sha256={}\nsymbol={symbol}\nparameter-prefix={} input-slots={:?}\nreturn-sites={:?} return-paths={}\nchecks=acyclic CFG; all feasible-or-overapproximated paths; no memory except original return token; stack delta; preserved GPR identity; return/control entry dependencies\nlimits=machine-word integer leaf; prefix is not original source argument count; no source signedness, pointers, float, aggregates, calls, loops or general ABI recovery\n",hash(abi_source.as_bytes()),evidence.parameter_prefix,evidence.input_slots,evidence.return_sites,evidence.return_paths);
+        for (from, to) in evidence.edges {
+            writeln!(report, "cfg-edge 0x{from:x} -> 0x{to:x}").unwrap();
+        }
+        Ok((source, report))
+    }
     pub(crate) fn projection_bodies(&self) -> Vec<&crate::CompiledInstruction> {
         self.instances
             .iter()

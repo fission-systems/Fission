@@ -110,3 +110,63 @@ fn entry_selection_refuses_branch_unsupported_and_unterminated_input() {
     assert!(project_x86_entry(&path, 0x400300, "c").is_err());
     assert!(project_x86_entry(&path, 0x400100, "python").is_err());
 }
+
+#[test]
+fn owned_catalog_selects_binds_and_projects_a_scalar_function() {
+    use fission_fsl::{pipeline::project_profiled_x86_function, profiles::ProfilePackage};
+    let fixture = Fixture::new();
+    let path = fixture.0.join("input.elf");
+    let text = include_str!("../specs/x86/elf.fslprofiles");
+    let profiles = ProfilePackage::compile(text).unwrap();
+    let p = project_profiled_x86_function(
+        &profiles,
+        &path,
+        0x400100,
+        4,
+        "sysv-amd64-u64-leaf-v1",
+        "recovered_input",
+    )
+    .unwrap();
+    assert!(p.pipeline_report.contains("loader-route=owned-catalog"));
+    assert!(p
+        .pipeline_report
+        .contains("selected-profile=fission.x86.elf64.scalar"));
+    assert!(p.projection.report.contains("parameter-prefix=1"));
+    assert!(p.projection.sources[0]
+        .source
+        .contains("uint64_t recovered_input(uint64_t arg0)"));
+    for origin in &p.projection.origins {
+        assert!(p.projection.sources[0]
+            .source
+            .contains(&origin.source_symbol));
+    }
+    p.write_new(&fixture.0.join("function")).unwrap();
+    let bad = ProfilePackage::compile(&text.replace(
+        "4f21befdc46ff60cb74913f0e2dea88b770cc1edbcb414590c99a72b90a67470",
+        &"0".repeat(64),
+    ))
+    .unwrap();
+    assert!(project_profiled_x86_function(
+        &bad,
+        &path,
+        0x400100,
+        4,
+        "sysv-amd64-u64-leaf-v1",
+        "recovered_bad"
+    )
+    .unwrap_err()
+    .message
+    .contains("binding mismatch"));
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[18..20].copy_from_slice(&183u16.to_le_bytes());
+    fs::write(&path, bytes).unwrap();
+    assert!(project_profiled_x86_function(
+        &profiles,
+        &path,
+        0x400100,
+        4,
+        "sysv-amd64-u64-leaf-v1",
+        "recovered_bad"
+    )
+    .is_err());
+}

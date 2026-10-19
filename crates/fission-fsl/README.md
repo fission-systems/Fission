@@ -566,3 +566,13 @@ package by header facts and exact package hash, with ABI explicitly unselected.
 `decompile-profiled` expose the opt-in route. Legacy loaders remain available.
 This is not complete opinion/ldefs import or product cutover. See
 [the loader contract](../../docs/research/fsl-loader-profiles.md).
+
+### Checked scalar C functions
+
+`fsl-x86 decompile-function CATALOG.fslpc INPUT ADDRESS SIZE
+sysv-amd64-u64-leaf-v1 recovered_NAME NEW_DIRECTORY` connects the owned loader
+catalog to canonical FIR CFG/dependency admission and an ordinary `uint64_t` C
+function. It supports a restricted 64-bit integer leaf contract with explicit
+ABI selection, preserved-register/stack checks and no data memory or loops.
+The inferred register prefix is not an original source prototype. C internals
+reuse the same FIR state backend. See [the contract](../../docs/research/fsl-scalar-functions.md).

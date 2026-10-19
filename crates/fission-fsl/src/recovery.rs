@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 pub enum EntryDependency {
     Register(usize),
     MemoryRead(usize),
+    Flag(usize),
 }
 
 /// Modular affine address relative to an entry register (or a constant).
@@ -48,6 +49,7 @@ fn disjoint(a: &AffineAddress, a_size: u64, b: &AffineAddress, b_size: u64) -> b
 #[derive(Clone, Debug, Default)]
 struct Value {
     affine: Option<AffineAddress>,
+    exact_read: Option<usize>,
     dependencies: BTreeSet<EntryDependency>,
 }
 fn mask(bits: u16) -> u64 {
@@ -63,6 +65,7 @@ fn error(message: &str) -> FslError {
 impl Value {
     fn constant(value: u64, bits: u16) -> Self {
         Self {
+            exact_read: None,
             affine: Some(AffineAddress {
                 entry_register: None,
                 offset: value & mask(bits),
@@ -78,6 +81,9 @@ impl Value {
             .map(|a| a.offset)
     }
     fn narrow(mut self, bits: u16) -> Self {
+        if bits < 64 {
+            self.exact_read = None;
+        }
         if let Some(a) = &mut self.affine {
             a.bits = a.bits.min(bits);
             a.offset &= mask(a.bits);
@@ -87,6 +93,7 @@ impl Value {
     fn combined(a: &Self, b: &Self) -> Self {
         Self {
             affine: None,
+            exact_read: None,
             dependencies: a.dependencies.union(&b.dependencies).cloned().collect(),
         }
     }
@@ -100,12 +107,15 @@ pub enum RecoveredSuccessor {
 }
 
 /// Derived analysis view. It is never used as executable instruction semantics.
+#[derive(Clone)]
 pub struct RecoveryState {
     registers: Vec<Value>,
     flags: Vec<Value>,
     pub reads: Vec<MemoryReadEvidence>,
     pub writes: Vec<MemoryWriteEvidence>,
     stored_values: Vec<Value>,
+    pub control_dependencies: BTreeSet<EntryDependency>,
+    next_value: Option<Value>,
 }
 impl RecoveryState {
     pub fn new(registers: usize, flags: usize, zero_register: usize) -> Result<Self, FslError> {
@@ -114,6 +124,7 @@ impl RecoveryState {
         }
         let mut values: Vec<_> = (0..registers)
             .map(|slot| Value {
+                exact_read: None,
                 affine: Some(AffineAddress {
                     entry_register: Some(slot),
                     offset: 0,
@@ -125,10 +136,17 @@ impl RecoveryState {
         values[zero_register] = Value::constant(0, 64);
         Ok(Self {
             registers: values,
-            flags: vec![Value::default(); flags],
+            flags: (0..flags)
+                .map(|slot| Value {
+                    dependencies: BTreeSet::from([EntryDependency::Flag(slot)]),
+                    ..Value::default()
+                })
+                .collect(),
             reads: Vec::new(),
             writes: Vec::new(),
             stored_values: Vec::new(),
+            control_dependencies: BTreeSet::new(),
+            next_value: None,
         })
     }
     pub fn dependencies(&self, register: usize) -> Result<BTreeSet<EntryDependency>, FslError> {
@@ -147,6 +165,52 @@ impl RecoveryState {
         decoded: &DecodedInstruction,
         address: u64,
     ) -> Result<RecoveredSuccessor, FslError> {
+        self.instruction_path(instruction, decoded, address, &[])?
+            .ok_or_else(|| error("unknown branch in recovery; alternatives not requested"))
+    }
+    /// Enumerate both successors of unknown FIR conditions, with bounded replay.
+    /// Values and effects still come exclusively from canonical FIR transfers.
+    pub fn alternatives(
+        &self,
+        instruction: &CompiledInstruction,
+        decoded: &DecodedInstruction,
+        address: u64,
+    ) -> Result<Vec<(Self, RecoveredSuccessor)>, FslError> {
+        let mut pending = vec![Vec::new()];
+        let mut result = Vec::new();
+        while let Some(choices) = pending.pop() {
+            if choices.len() > 8 || result.len() + pending.len() >= 256 {
+                return Err(error("recovery alternative budget exhausted"));
+            }
+            let mut state = self.clone();
+            match state.instruction_path(instruction, decoded, address, &choices)? {
+                Some(successor) => result.push((state, successor)),
+                None => {
+                    for choice in [false, true] {
+                        let mut fork = choices.clone();
+                        fork.push(choice);
+                        pending.push(fork);
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+    pub fn register_address(&self, slot: usize) -> Option<&AffineAddress> {
+        self.registers.get(slot).and_then(|v| v.affine.as_ref())
+    }
+    pub fn next_exact_read(&self) -> Option<usize> {
+        self.next_value.as_ref().and_then(|v| v.exact_read)
+    }
+    fn instruction_path(
+        &mut self,
+        instruction: &CompiledInstruction,
+        decoded: &DecodedInstruction,
+        address: u64,
+        choices: &[bool],
+    ) -> Result<Option<RecoveredSuccessor>, FslError> {
+        let mut choice_index = 0;
+        self.next_value = None;
         crate::state::admit_context(instruction, true, true)?;
         if !crate::state::bank_indices_fit(
             instruction,
@@ -196,6 +260,7 @@ impl RecoveryState {
                             );
                         } else if kind == crate::IntConversion::SignExtend {
                             v.affine = None;
+                            v.exact_read = None;
                         } else {
                             v = v.narrow(bits(output));
                         }
@@ -304,6 +369,7 @@ impl RecoveryState {
                         let mut forwarded = None;
                         let mut v = Value {
                             affine: None,
+                            exact_read: Some(id),
                             dependencies: pointer.dependencies.clone(),
                         };
                         for (store_id, store) in self.writes.iter().enumerate().rev() {
@@ -353,6 +419,7 @@ impl RecoveryState {
                         if next_pc != RecoveredSuccessor::Fallthrough {
                             return Err(error("multiple recovery guest successors"));
                         }
+                        self.next_value = Some(get(value));
                         next_pc = get(value)
                             .number()
                             .map_or(RecoveredSuccessor::Dynamic, RecoveredSuccessor::Constant);
@@ -369,21 +436,32 @@ impl RecoveryState {
                 }
             }
             let edge = match &block.terminator {
-                FirTerminator::Return => return Ok(next_pc),
+                FirTerminator::Return => return Ok(Some(next_pc)),
                 FirTerminator::Branch(edge) => edge,
                 FirTerminator::CondBranch {
                     condition,
                     on_true,
                     on_false,
-                } => match values[usize::from(condition.0)].number() {
-                    Some(0) => on_false,
-                    Some(1) => on_true,
-                    _ => {
-                        return Err(error(
-                            "unknown branch in recovery; alternatives not implemented",
-                        ))
+                } => {
+                    let condition = &values[usize::from(condition.0)];
+                    self.control_dependencies
+                        .extend(condition.dependencies.clone());
+                    match condition.number() {
+                        Some(0) => on_false,
+                        Some(1) => on_true,
+                        _ => {
+                            let Some(&choice) = choices.get(choice_index) else {
+                                return Ok(None);
+                            };
+                            choice_index += 1;
+                            if choice {
+                                on_true
+                            } else {
+                                on_false
+                            }
+                        }
                     }
-                },
+                }
             };
             let arguments: Vec<_> = edge
                 .arguments
