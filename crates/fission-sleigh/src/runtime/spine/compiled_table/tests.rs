@@ -820,12 +820,19 @@ fn generated_runtime_lifts_x86_scalar_float_templates_without_unsupported_cutove
 
 #[test]
 fn packed_context_bit_reads_cross_word_boundaries_like_ghidra() {
-    let mut context = 0u64;
+    let mut context = 0u128;
     set_packed_context_word(&mut context, 0, 0x0000_0001, 0x0000_0001).expect("set low word");
     set_packed_context_word(&mut context, 1, 0x8000_0000, 0x8000_0000).expect("set high word");
     assert_eq!(
         packed_context_bits(context, 31, 2).expect("cross-word bits"),
         0b11
+    );
+
+    set_packed_context_word(&mut context, 3, 0x8000_0000, 0x8000_0000)
+        .expect("set JVM high context word");
+    assert_eq!(
+        packed_context_bits(context, 96, 1).expect("JVM context bit 96"),
+        1
     );
 }
 

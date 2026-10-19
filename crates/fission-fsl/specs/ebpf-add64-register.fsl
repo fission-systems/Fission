@@ -1,0 +1,21 @@
+# Migrated leaf subset; other constructors and immediate ADD are unsupported.
+# Logical register slots R0..R10; unused off/imm bytes are retained by reencoding.
+language ebpf.le.add64.register {
+    byte_order little;
+    address_unit byte;
+    instruction add64_register {
+        encoding 64 mask 0xff value 0x0f {
+            field destination offset 8 bits 4 exclude 11, 12, 13, 14, 15;
+            field source offset 12 bits 4 exclude 11, 12, 13, 14, 15;
+        }
+        mnemonic "ADD";
+        evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/languages/eBPF/eBPF.sinc" "sha256:7b69ca1e901dca162bae29a8f18819c5f84afc3195296cf1662e39d86bbf5a34" "Leaf ADD dst,SRC8 with SRC8 register branch; 64-bit modulo sum. Logical bank slots preserve Sleigh R0..R10 binding. eBPF verifier restrictions are not inferred.";
+        evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/languages/eBPF/eBPF_le.slaspec" "sha256:1285e4332bb36db58923db6acce9346438415ff71aa32060140ac171bfe226b4" "Entry selects little endian and includes eBPF.sinc.";
+        semantics {
+            %lhs: u64 = register.read destination;
+            %rhs: u64 = register.read source;
+            %sum: u64 = u64.add.wrap %lhs, %rhs;
+            register.write destination, %sum;
+        }
+    }
+}

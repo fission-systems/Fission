@@ -1,0 +1,50 @@
+# Self-authored semantic-body CFG. This encoding is not an ISA instruction.
+language register.branch.convert {
+    byte_order little;
+    address_unit byte;
+    instruction choose {
+        encoding 32 mask 0xfffff000 value 0xa000 {
+            field source offset 0 bits 4;
+            field destination offset 4 bits 4;
+            field auxiliary offset 8 bits 4;
+        }
+        mnemonic "fixture.convert.branch";
+        evidence "self-authored" "synthetic" "v1" "Integer conversion, ordered register/flag effects and acyclic join; no binary function lifting or GPU CFG claim.";
+        semantics {
+            block entry() {
+                %input: i8 = register.read source;
+                %wide: i32 = int.sext %input;
+                %unsigned: u8 = register.read source;
+                %zero_extended: u64 = int.zext %unsigned;
+                register.write auxiliary, %zero_extended;
+                %zero: i32 = int.const 0;
+                %negative: u1 = int.slt %wide, %zero;
+                branch.if %negative, negative(%wide), positive(%wide);
+            }
+            block negative(%negative_input: i32) {
+                %narrow: i16 = int.trunc %negative_input;
+                %restored: i32 = int.sext %narrow;
+                register.write destination, %restored;
+                %one: u1 = int.const 1;
+                flag.write 0, %one;
+                branch join(%restored);
+            }
+            block positive(%positive_input: i32) {
+                %small: i8 = int.trunc %positive_input;
+                %restored_positive: i32 = int.sext %small;
+                register.write destination, %restored_positive;
+                %off: u1 = int.const 0;
+                flag.write 0, %off;
+                branch join(%restored_positive);
+            }
+            block join(%joined: i32) {
+                %observed: i32 = register.read destination;
+                %equal: u1 = int.eq %observed, %joined;
+                flag.write 1, %equal;
+                %flag: u1 = flag.read 0;
+                flag.write 2, %flag;
+                return;
+            }
+        }
+    }
+}

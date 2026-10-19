@@ -361,7 +361,7 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
              pub context_changes: &'static [GeneratedContextOp],\n\
          }}\n\n\
          pub const GENERATED_ARCH: &str = {};\n\
-         pub const GENERATED_DEFAULT_CONTEXT: u64 = {};\n\
+         pub const GENERATED_DEFAULT_CONTEXT: u128 = {};\n\
          pub const GENERATED_ENTRY_SPEC: &str = {};\n\
          pub const GENERATED_ENTRY_ID: &str = {};\n\
          pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = {};\n\

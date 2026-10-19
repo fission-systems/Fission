@@ -1,0 +1,32 @@
+abi bpf.compiler {
+    evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/languages/BPF/BPF.cspec" "sha256:d488af417f0d43734329315cea802980ddd4e04187b5382acce39cf73fca1a66" "Strict compiler metadata migration; byte units and ordered register entries retained. No ABI allocator or execution contract is inferred.";
+    data absolute_max_alignment 0;
+    data machine_alignment 2;
+    data default_alignment 1;
+    data default_pointer_alignment 8;
+    data pointer_size 8;
+    data wchar_size 2;
+    data short_size 2;
+    data integer_size 4;
+    data long_size 4;
+    data long_long_size 8;
+    data float_size 4;
+    data double_size 8;
+    data long_double_size 8;
+    alignment 1 1;
+    alignment 2 2;
+    alignment 4 4;
+    alignment 8 8;
+    global_space "packet";
+    global_space "ram";
+    global_space "mem";
+    stack_pointer "RS" "ram";
+    default_convention "__fastcall";
+    convention "__fastcall" {
+        extrapop 0;
+        stackshift 0;
+        input_register "A" 1 4;
+        output_killed_by_call true;
+        output_register "R" 1 4;
+    }
+}

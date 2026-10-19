@@ -19,6 +19,7 @@ members = [
     "crates/fission-ttd",
     "crates/fission-plugin",
     "crates/fission-cli",
+    "crates/fission-fsl",
     "crates/fission-sleigh",
     "crates/fission-emulator",
     "crates/fission-solver",

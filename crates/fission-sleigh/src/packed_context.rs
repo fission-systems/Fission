@@ -3,16 +3,27 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PackedContext {
-    bits: u64,
+    /// Ghidra context register words 0..=3, packed in native word order.
+    bits: u128,
 }
 
 impl PackedContext {
     pub const fn new(bits: u64) -> Self {
-        Self { bits }
+        Self { bits: bits as u128 }
     }
 
     pub const fn bits(self) -> u64 {
+        // Preserve the original low-64-bit accessor for existing callers.
+        self.bits as u64
+    }
+
+    /// Return all four 32-bit context words.
+    pub const fn wide_bits(self) -> u128 {
         self.bits
+    }
+
+    pub const fn new_wide(bits: u128) -> Self {
+        Self { bits }
     }
 
     pub fn set_bits(&mut self, startbit: u32, bitsize: u32, value: u64) -> Result<()> {
@@ -39,11 +50,29 @@ impl PackedContextOverride {
     }
 
     pub const fn context_bits(self) -> u64 {
+        // Preserve the original low-64-bit accessor for existing callers.
         self.context.bits()
     }
 
     pub const fn mask_bits(self) -> u64 {
         self.mask.bits()
+    }
+
+    /// Return the full 128-bit context value, including words 2 and 3.
+    pub const fn context_bits_wide(self) -> u128 {
+        self.context.wide_bits()
+    }
+
+    /// Return the full 128-bit known-bit mask, including words 2 and 3.
+    pub const fn mask_bits_wide(self) -> u128 {
+        self.mask.wide_bits()
+    }
+
+    pub const fn new_wide(context_bits: u128, mask_bits: u128) -> Self {
+        Self {
+            context: PackedContext::new_wide(context_bits),
+            mask: PackedContext::new_wide(mask_bits),
+        }
     }
 
     pub fn set_bits(&mut self, startbit: u32, bitsize: u32, value: u64) -> Result<()> {
@@ -59,19 +88,20 @@ impl PackedContextOverride {
     }
 
     pub fn merge_commit_word(&mut self, word_index: u32, mask: u32, value: u32) -> Result<()> {
-        let mask_u64 = packed_context_word_to_u64(word_index, mask)?;
-        let value_u64 = packed_context_word_to_u64(word_index, value)?;
-        let context_bits = (self.context_bits() & !mask_u64) | (value_u64 & mask_u64);
-        let mask_bits = self.mask_bits() | mask_u64;
-        *self = Self::new(context_bits, mask_bits);
+        let mask_wide = packed_context_word_to_u128(word_index, mask)?;
+        let value_wide = packed_context_word_to_u128(word_index, value)?;
+        let context_bits = (self.context_bits_wide() & !mask_wide) | (value_wide & mask_wide);
+        let mask_bits = self.mask_bits_wide() | mask_wide;
+        *self = Self::new_wide(context_bits, mask_bits);
         Ok(())
     }
 
     pub const fn merge_override(self, pending: Self) -> Self {
-        let pending_mask = pending.mask_bits();
-        Self::new(
-            (self.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
-            self.mask_bits() | pending_mask,
+        let pending_mask = pending.mask_bits_wide();
+        Self::new_wide(
+            (self.context_bits_wide() & !pending_mask)
+                | (pending.context_bits_wide() & pending_mask),
+            self.mask_bits_wide() | pending_mask,
         )
     }
 
@@ -80,45 +110,56 @@ impl PackedContextOverride {
         *context_register = (*context_register & !mask) | (self.context_bits() & mask);
         *known_mask |= mask;
     }
-}
 
-pub fn packed_context_word(context_register: u64, index: u32) -> Result<u32> {
-    match index {
-        0 => Ok(context_register as u32),
-        1 => Ok((context_register >> 32) as u32),
-        _ => bail!("packed context word index {index} is out of range"),
+    /// Apply the complete four-word context override.
+    pub fn apply_to_wide(self, context_register: &mut u128, known_mask: &mut u128) {
+        let mask = self.mask_bits_wide();
+        *context_register = (*context_register & !mask) | (self.context_bits_wide() & mask);
+        *known_mask |= mask;
     }
 }
 
-pub fn packed_context_word_to_u64(word_index: u32, value: u32) -> Result<u64> {
+pub fn packed_context_word(context_register: u128, index: u32) -> Result<u32> {
+    let shift = index
+        .checked_mul(32)
+        .ok_or_else(|| anyhow!("packed context word index {index} shift overflows"))?;
+    let word = context_register
+        .checked_shr(shift)
+        .ok_or_else(|| anyhow!("packed context word index {index} is out of range"))?;
+    Ok(word as u32)
+}
+
+fn packed_context_word_to_u128(word_index: u32, value: u32) -> Result<u128> {
     let shift = word_index
         .checked_mul(32)
         .ok_or_else(|| anyhow!("context commit word index {word_index} shift overflows"))?;
-    u64::from(value)
-        .checked_shl(shift)
-        .ok_or_else(|| anyhow!("context commit word index {word_index} exceeds packed u64 context"))
+    u128::from(value).checked_shl(shift).ok_or_else(|| {
+        anyhow!("context commit word index {word_index} exceeds packed u128 context")
+    })
 }
 
 pub fn set_packed_context_word(
-    context_register: &mut u64,
+    context_register: &mut u128,
     index: u32,
     value: u32,
     mask: u32,
 ) -> Result<()> {
-    let shift = match index {
-        0 => 0,
-        1 => 32,
-        _ => bail!("packed context word index {index} is out of range"),
-    };
-    let shifted_mask = u64::from(mask) << shift;
-    let shifted_value = u64::from(value & mask) << shift;
+    let shift = index
+        .checked_mul(32)
+        .ok_or_else(|| anyhow!("packed context word index {index} shift overflows"))?;
+    let shifted_mask = u128::from(mask)
+        .checked_shl(shift)
+        .ok_or_else(|| anyhow!("packed context word index {index} is out of range"))?;
+    let shifted_value = u128::from(value & mask)
+        .checked_shl(shift)
+        .ok_or_else(|| anyhow!("packed context word index {index} is out of range"))?;
     *context_register &= !shifted_mask;
     *context_register |= shifted_value;
     Ok(())
 }
 
 pub fn set_packed_context_bits(
-    context_register: &mut u64,
+    context_register: &mut u128,
     startbit: u32,
     bitsize: u32,
     value: u64,
@@ -128,6 +169,12 @@ pub fn set_packed_context_bits(
     }
     if bitsize > 64 {
         bail!("packed context bit write must be 1..=64 bits, got {bitsize}");
+    }
+    let end_bit = startbit
+        .checked_add(bitsize)
+        .ok_or_else(|| anyhow!("packed context bit write range overflows"))?;
+    if end_bit > 128 {
+        bail!("packed context bit write ends at bit {end_bit}, beyond 128-bit context");
     }
 
     let mut remaining = bitsize;
@@ -179,12 +226,39 @@ mod tests {
     }
 
     #[test]
-    fn packed_context_word_to_u64_fails_closed_above_two_words() {
+    fn packed_context_supports_four_words_and_fails_closed_after_128_bits() {
+        let mut context = 0u128;
+        for index in 0..4 {
+            let value = 1u32 << 31;
+            set_packed_context_word(&mut context, index, value, u32::MAX)
+                .expect("write supported context word");
+            assert_eq!(
+                packed_context_word(context, index).expect("read context word"),
+                value
+            );
+        }
+        assert!(set_packed_context_word(&mut context, 4, 1, u32::MAX).is_err());
+        assert!(packed_context_word(context, 4).is_err());
+    }
+
+    #[test]
+    fn packed_context_bit_write_handles_jvm_switch_flags_above_bit_64() {
+        let mut context = 0u128;
+        set_packed_context_bits(&mut context, 96, 4, 0b1010).expect("write JVM context flags");
         assert_eq!(
-            packed_context_word_to_u64(1, 0x8000_0000).expect("word 1"),
-            0x8000_0000_0000_0000
+            packed_context_word(context, 3).expect("JVM context word 3"),
+            0xa000_0000
         );
-        assert!(packed_context_word_to_u64(2, 1).is_err());
+
+        let mut override_bits = PackedContextOverride::default();
+        override_bits
+            .set_bits(96, 4, 0b1010)
+            .expect("set JVM context override");
+        assert_eq!(override_bits.context_bits_wide(), context);
+        assert_eq!(
+            override_bits.mask_bits_wide(),
+            0xf000_0000_0000_0000_0000_0000_0000_0000
+        );
     }
 
     #[test]
@@ -206,5 +280,12 @@ mod tests {
 
         assert_eq!(context_override.context_bits(), 0x8000_0000_0000_0000);
         assert_eq!(context_override.mask_bits(), 0x8000_0000_0000_0000);
+
+        context_override
+            .merge_commit_word(3, 0x0000_0001, 0x0000_0001)
+            .expect("merge JVM context word");
+        assert_ne!(context_override.context_bits_wide() >> 96, 0);
+        assert_ne!(context_override.mask_bits_wide() >> 96, 0);
+        assert!(context_override.merge_commit_word(4, 1, 1).is_err());
     }
 }
