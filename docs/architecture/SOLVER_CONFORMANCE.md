@@ -47,3 +47,26 @@ verifiers share one result classifier: only `Unsat` maps to `Equivalent`.
 
 Arrays are outside this QF_BV matrix and are checked through the solver's
 separate array/memory-oracle path.
+
+## Incremental query contracts
+
+- Unsigned mixed-width subtraction zero-extends the subtrahend **before**
+  complementing it for two's-complement addition.
+- Eager assertion loading and query catch-up share one monotonic cursor. Pending
+  append-only compatibility assertions are loaded before the cursor advances.
+- Concrete evaluation and extrema require a satisfiable, supported context.
+  Unsupported widths and UNSAT contexts do not produce guessed `u64` values.
+- Input clauses and global theory lemmas are installed at decision level zero.
+  All query assumptions are replayed after theory lemmas are installed. Clause
+  insertion validates fresh variables, watches and immediate root conflicts.
+- Learned-clause quality is captured on the conflict trail before backtracking.
+  Collection retains every glue clause (`LBD <= 2`), every input/theory clause,
+  and every locked reason clause.
+
+`issue_regressions.rs` checks all 900 pairs of unsigned operands at widths one
+through four (both equality and disequality queries), assertion cursors,
+constant-query context, invalid extracts, array scalar abstention, and widths
+through `u32::MAX`. `theory_lemma_regressions.rs` compares 2,000 delayed theory
+clause sets with assumptions against direct enumeration and checks each SAT
+model. The separate SAT-core suite retains its 20,000-CNF checks and the 2,000
+incremental clause-sequence checks.

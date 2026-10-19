@@ -1,4 +1,5 @@
 use crate::ast::{Sort, SymExpr, SymNodeId};
+use crate::theory::bitvector::LoweredAssumption;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -69,10 +70,19 @@ impl Solver {
         if expr.get_bit_width() != 1 {
             tracing::warn!("Asserted expression does not evaluate to a boolean (size != 1)");
         }
-        self.assertions.push(expr.clone());
-        self.bv_theory.assert_expr(&expr);
-        // Load into SAT immediately so it's ready
-        self.bv_theory.load_into_sat(&mut self.sat);
+        self.assertions.push(expr);
+        // Catch up through the same cursor used by queries, including any
+        // assertions appended through the public compatibility list.
+        self.lower_pending_assertions();
+    }
+
+    fn lower_pending_assertions(&mut self) -> bool {
+        while self.lowered_assertions < self.assertions.len() {
+            self.bv_theory
+                .assert_expr(&self.assertions[self.lowered_assertions]);
+            self.lowered_assertions += 1;
+        }
+        self.bv_theory.load_into_sat(&mut self.sat)
     }
 
     pub fn check_sat(&mut self) -> Result<SatResult> {
@@ -95,15 +105,7 @@ impl Solver {
             }
         }
 
-        // Push missing assertions to SAT (if any somehow bypassed assert)
-        while self.lowered_assertions < self.assertions.len() {
-            let expr = &self.assertions[self.lowered_assertions];
-            if !is_true(expr) {
-                self.bv_theory.assert_expr(expr);
-            }
-            self.lowered_assertions += 1;
-        }
-        if !self.bv_theory.load_into_sat(&mut self.sat) {
+        if !self.lower_pending_assertions() {
             return Ok(self.refuted());
         }
 
@@ -123,10 +125,11 @@ impl Solver {
                 if is_false(e) {
                     return Ok(SatResult::Unsat);
                 }
-                if let Some(lit) = self.bv_theory.lower_to_literal(e, &mut self.sat) {
-                    assumptions.push(lit);
-                } else {
-                    return Ok(self.refuted());
+                match self.bv_theory.lower_to_literal(e, &mut self.sat) {
+                    LoweredAssumption::Literal(lit) => assumptions.push(lit),
+                    LoweredAssumption::TriviallyTrue => {}
+                    LoweredAssumption::TriviallyFalse => return Ok(SatResult::Unsat),
+                    LoweredAssumption::Refuted => return Ok(self.refuted()),
                 }
             }
 
@@ -249,16 +252,11 @@ impl Solver {
     /// Evaluate the expression and return up to `n` concrete values that satisfy
     /// the current path constraints.
     ///
-    /// Concrete shortcut: if `expr` is a constant, returns `vec![const_val]`
-    /// immediately without invoking the SAT core.
+    /// Constants obey the same satisfiability and supported-width checks as
+    /// symbolic queries; an inconsistent context has no concrete values.
     pub fn eval(&mut self, expr: &SymExpr, n: usize) -> Vec<u64> {
         if n == 0 {
             return Vec::new();
-        }
-
-        // Concrete shortcut (angr pattern #13)
-        if let SymExpr::Const { val, .. } = expr {
-            return vec![*val];
         }
 
         // Lower the queried expression before solving.  `check_sat` only
@@ -349,14 +347,12 @@ impl Solver {
     /// Find the minimum concrete value of `expr` satisfying the current constraints.
     /// Uses binary search over constraint space (reference: angr min/max with signed flag).
     pub fn min(&mut self, expr: &SymExpr) -> Option<u64> {
-        // Concrete shortcut
-        if let SymExpr::Const { val, .. } = expr {
-            return Some(*val);
-        }
-
         let solutions = self.eval(expr, 1);
         if solutions.is_empty() {
             return None;
+        }
+        if matches!(expr, SymExpr::Const { .. }) {
+            return solutions.first().copied();
         }
 
         let mut lo = 0u64;
@@ -388,14 +384,12 @@ impl Solver {
 
     /// Find the maximum concrete value of `expr` satisfying the current constraints.
     pub fn max(&mut self, expr: &SymExpr) -> Option<u64> {
-        // Concrete shortcut
-        if let SymExpr::Const { val, .. } = expr {
-            return Some(*val);
-        }
-
         let solutions = self.eval(expr, 1);
         if solutions.is_empty() {
             return None;
+        }
+        if matches!(expr, SymExpr::Const { .. }) {
+            return solutions.first().copied();
         }
 
         let mut lo = solutions[0];
@@ -415,7 +409,7 @@ impl Solver {
         while lo < hi {
             let span = hi - lo;
             let mid = lo + span / 2 + span % 2;
-            let constraint = SymExpr::Ult(
+            let constraint = SymExpr::Ule(
                 Box::new(SymExpr::new_const(mid, expr.get_bit_width())),
                 Box::new(expr.clone()),
             );

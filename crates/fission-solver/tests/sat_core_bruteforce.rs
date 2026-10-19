@@ -253,3 +253,45 @@ fn pigeonhole_is_unsatisfiable_even_after_clause_collection() {
         );
     }
 }
+
+#[test]
+fn adding_a_global_unit_after_a_model_discards_old_decisions() {
+    let mut sat = SatSolver::new();
+    assert!(sat.add_clause(vec![Lit(1), Lit(-1)]));
+    assert!(sat.solve());
+    assert!(sat.decision_level() > 0);
+    let required = if sat.get_var_value(1) == LBool::True {
+        Lit(-1)
+    } else {
+        Lit(1)
+    };
+    assert!(sat.add_clause(vec![required]));
+    assert_eq!(sat.decision_level(), 0);
+    assert!(sat.solve());
+    assert_eq!(sat.value_lit(required), LBool::True);
+}
+
+#[test]
+fn incremental_clause_additions_agree_with_enumeration() {
+    let mut rng = Rng(0x5A17_1AC4_E321);
+    for _ in 0..2_000 {
+        let vars = 2 + rng.below(5) as u32;
+        let mut sat = SatSolver::new();
+        let mut clauses = Vec::new();
+        for _ in 0..10 {
+            let clause: Vec<Lit> = (0..1 + rng.below(3))
+                .map(|_| Lit::new(1 + rng.below(vars as u64) as u32, rng.below(2) == 0))
+                .collect();
+            clauses.push(clause.clone());
+            let want = satisfiable_by_enumeration(vars, &clauses);
+            let got = sat.add_clause(clause) && sat.solve();
+            assert_eq!(got, want, "incremental clauses {clauses:?}");
+            if !got {
+                break;
+            }
+            assert!(clauses
+                .iter()
+                .all(|c| c.iter().any(|&lit| sat.value_lit(lit) == LBool::True)));
+        }
+    }
+}

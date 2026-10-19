@@ -589,7 +589,12 @@ impl AigManager {
             SymExpr::Sub(a, b) => {
                 let a_bits = self.lower_expr(a);
                 let b_bits = self.lower_expr(b);
-                let b_inv: Vec<AigLit> = b_bits.into_iter().map(|lit| lit.not()).collect();
+                // Extend B before complementing it: zero-extending !B would
+                // turn the implicit high one bits of two's complement into zero.
+                let width = a_bits.len().max(b_bits.len());
+                let b_inv: Vec<AigLit> = (0..width)
+                    .map(|i| b_bits.get(i).copied().unwrap_or(AigLit::FALSE).not())
+                    .collect();
                 // A - B = A + (!B) + 1
                 self.add_ripple_carry_adder(&a_bits, &b_inv, AigLit::TRUE)
             }

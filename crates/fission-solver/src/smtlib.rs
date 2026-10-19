@@ -134,7 +134,14 @@ impl Printer {
                 size,
             } => {
                 let (text, width) = self.bitvector(inner)?;
-                let high = lsb + size - 1;
+                if *size == 0 {
+                    return Err(Unsupported("zero-width extract".to_string()));
+                }
+                let Some(high) = lsb.checked_add(*size - 1) else {
+                    return Err(Unsupported(format!(
+                        "extract index overflow for lsb {lsb} and size {size}"
+                    )));
+                };
                 if high >= width {
                     return Err(Unsupported(format!(
                         "extract [{high}:{lsb}] from {width} bits"
@@ -269,6 +276,34 @@ mod tests {
         assert!(
             script.contains(&format!("(bvadd {a_sym} ((_ zero_extend 4) {b_sym}))")),
             "{script}"
+        );
+    }
+
+    #[test]
+    fn invalid_extract_bounds_are_refused_without_arithmetic_panics() {
+        let inner = SymExpr::new_var("x", 8);
+
+        let zero_width = SymExpr::Extract {
+            expr: Box::new(inner.clone()),
+            lsb: 0,
+            size: 0,
+        };
+        assert_eq!(
+            Printer::default().bitvector(&zero_width),
+            Err(Unsupported("zero-width extract".to_string()))
+        );
+
+        let overflowing = SymExpr::Extract {
+            expr: Box::new(inner),
+            lsb: u32::MAX,
+            size: 2,
+        };
+        assert_eq!(
+            Printer::default().bitvector(&overflowing),
+            Err(Unsupported(format!(
+                "extract index overflow for lsb {} and size 2",
+                u32::MAX
+            )))
         );
     }
 
