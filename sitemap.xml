@@ -1165,6 +1165,10 @@
          <lastmod>2026-10-19</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-10-14-shared-decompiler-preparation/</loc>
+         <lastmod>2026-10-19</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-10-15-completed-decode-storage/</loc>
          <lastmod>2026-10-19</lastmod>
     </url>
@@ -1242,6 +1246,10 @@
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/validation/constructor-ownership-performance/</loc>
+         <lastmod>2026-10-19</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/validation/decompiler-preparation-performance/</loc>
          <lastmod>2026-10-19</lastmod>
     </url>
     <url>
