@@ -152,3 +152,60 @@ fn unsupported_array_scalars_do_not_panic_or_use_byte_counts_as_bits() {
         assert_eq!(solver.check_sat().unwrap(), SatResult::Unknown);
     }
 }
+
+#[test]
+fn nested_array_store_scalar_lowering_is_unknown_without_panicking() {
+    use fission_solver::ast::Sort;
+    let mut array = SymExpr::new_array_var("nested", 64, 8);
+    if let SymExpr::Var { sort, .. } = &mut array {
+        *sort = Sort::Array {
+            domain: Box::new(Sort::BitVector(64)),
+            range: Box::new(Sort::Array {
+                domain: Box::new(Sort::BitVector(32)),
+                range: Box::new(Sort::BitVector(8)),
+            }),
+        };
+    }
+    let stored = SymExpr::ArrayStore {
+        array: Box::new(array),
+        index: Box::new(SymExpr::new_const(0, 64)),
+        value: Box::new(SymExpr::new_array_var("row", 32, 8)),
+    };
+    let mut solver = Solver::new();
+    solver.assert(SymExpr::Eq(Box::new(stored.clone()), Box::new(stored)));
+    assert_eq!(solver.check_sat().unwrap(), SatResult::Unknown);
+}
+
+#[test]
+fn unsupported_array_placeholders_remain_bounded_for_huge_range_widths() {
+    use fission_solver::aig::AigManager;
+    for width in [0, 65, 128, 256, u32::MAX] {
+        let stored = SymExpr::ArrayStore {
+            array: Box::new(SymExpr::new_array_var("wide_array", 64, width)),
+            index: Box::new(SymExpr::new_const(0, 64)),
+            value: Box::new(SymExpr::new_const(0, width)),
+        };
+        let mut aig = AigManager::new();
+        assert!((1..=64).contains(&aig.lower_expr(&stored).len()));
+        assert!(!aig.unsupported().is_empty());
+    }
+}
+
+#[test]
+fn registered_nested_arrays_are_not_extracted_as_u64_scalars() {
+    use fission_solver::ast::Sort;
+    let mut array = SymExpr::new_array_var("nested", 64, 8);
+    if let SymExpr::Var { sort, .. } = &mut array {
+        *sort = Sort::Array {
+            domain: Box::new(Sort::BitVector(64)),
+            range: Box::new(Sort::Array {
+                domain: Box::new(Sort::BitVector(32)),
+                range: Box::new(Sort::BitVector(8)),
+            }),
+        };
+    }
+    let mut solver = Solver::new();
+    let id = solver.register_node(array);
+    assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
+    assert!(!solver.model.contains_key(&id));
+}

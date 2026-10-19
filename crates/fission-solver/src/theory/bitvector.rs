@@ -123,7 +123,10 @@ impl BvTheorySolver {
             .collect();
 
         for (node_id, expr) in &var_nodes {
-            let width_bits = expr.get_bit_width();
+            let width_bits = match expr.get_sort() {
+                crate::ast::Sort::BitVector(width) | crate::ast::Sort::Float(width) => width,
+                crate::ast::Sort::Array { .. } => continue,
+            };
             if width_bits == 0 || width_bits > 64 {
                 self.aig.note_unsupported(format!(
                     "cannot extract a {width_bits}-bit value into the u64 model"
@@ -134,9 +137,6 @@ impl BvTheorySolver {
                 SymExpr::Var {
                     id: ast_id, sort, ..
                 } => {
-                    if let crate::ast::Sort::Array { .. } = sort {
-                        continue;
-                    }
                     let size = sort.expect_bv();
                     Some(if let Some(b) = self.aig.get_var_bits(*ast_id) {
                         b.clone()
@@ -149,6 +149,11 @@ impl BvTheorySolver {
             };
 
             if let Some(bits) = bits_opt {
+                if bits.len() != width_bits as usize {
+                    self.aig
+                        .note_unsupported("model bit width differs from scalar sort".into());
+                    continue;
+                }
                 let size = width_bits;
                 let mut value: u64 = 0;
                 for (bit_idx, aig_lit) in bits.iter().enumerate() {
@@ -180,8 +185,27 @@ impl BvTheorySolver {
         }
     }
 
+    /// Returns a scalar payload. The caller must check `unsupported()` before
+    /// treating the payload as a model value; unsupported shapes return zero.
     pub fn evaluate_expr_in_model(&mut self, sat: &SatSolver, expr: &SymExpr) -> u64 {
+        let width = match expr.get_sort() {
+            crate::ast::Sort::BitVector(width) | crate::ast::Sort::Float(width)
+                if (1..=64).contains(&width) =>
+            {
+                width
+            }
+            _ => {
+                self.aig
+                    .note_unsupported("model evaluation requires a 1..=64-bit scalar".into());
+                return 0;
+            }
+        };
         let bits = self.aig.lower_expr(expr);
+        if bits.len() != width as usize {
+            self.aig
+                .note_unsupported("model bit width differs from scalar sort".into());
+            return 0;
+        }
         let mut value: u64 = 0;
         for (bit_idx, aig_lit) in bits.iter().enumerate() {
             let aig_node_idx = aig_lit.index();

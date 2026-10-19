@@ -70,3 +70,7 @@ through `u32::MAX`. `theory_lemma_regressions.rs` compares 2,000 delayed theory
 clause sets with assumptions against direct enumeration and checks each SAT
 model. The separate SAT-core suite retains its 20,000-CNF checks and the 2,000
 incremental clause-sequence checks.
+
+Whole-array scalar projections, including nested array sorts, abstain before
+bit-blasting. Unsupported placeholders are capped at 64 bits regardless of
+array range width; array-valued model entries are never cast into `u64`.
