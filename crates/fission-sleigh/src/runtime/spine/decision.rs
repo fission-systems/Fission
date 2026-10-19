@@ -23,7 +23,7 @@ pub trait DecisionProbeEvaluator {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSelection<'a> {
-    pub constructor: &'a CompiledExecutableConstructor,
+    pub constructor: &'a std::sync::Arc<CompiledExecutableConstructor>,
     pub constructor_index: usize,
     pub subtable_id: u32,
     pub constructor_id: u32,
@@ -70,6 +70,28 @@ pub struct ProbeChainNode {
 impl ProbeChain {
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
+    }
+
+    /// Conservative owned payload estimate; bounded traversal avoids extending
+    /// retention policy into a second unbounded parse-tree walk.
+    pub(in crate::runtime::spine) fn retained_payload(&self, limit: usize) -> Option<usize> {
+        let mut node = self.0.as_deref();
+        let mut bytes = 0usize;
+        let mut count = 0usize;
+        while let Some(current) = node {
+            count += 1;
+            if count > 128 {
+                return None;
+            }
+            bytes = bytes.checked_add(
+                std::mem::size_of::<ProbeChainNode>() + 2 * std::mem::size_of::<usize>(),
+            )?;
+            if bytes > limit {
+                return None;
+            }
+            node = current.prev.0.as_deref();
+        }
+        Some(bytes)
     }
 
     pub fn push(&mut self, probe: RuntimeMatchProbe) {
@@ -323,7 +345,7 @@ fn selection_constructor_slot(
 fn resolve_leaf_constructor<'a>(
     subtable: &'a CompiledSubtableDefinition,
     entry: &CompiledDecisionLeafEntry,
-) -> Option<(usize, &'a CompiledExecutableConstructor)> {
+) -> Option<(usize, &'a std::sync::Arc<CompiledExecutableConstructor>)> {
     let constructor_index = if entry.subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty()
     {
         if entry.subtable_id != 0

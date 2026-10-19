@@ -170,12 +170,119 @@ pub(super) fn die_compat_identity_with_db(
         return (summary, Vec::new());
     }
 
-    let matcher = DieMatcher::new(filtered.clone()).with_scan_budgets(
+    let mut matcher = DieMatcher::new(filtered.clone()).with_scan_budgets(
         Some(limits.max_string_scan_bytes),
         Some(limits.max_scan_bytes),
     );
+    matcher.prepare_direct_signature_strings(binary);
 
     let raw = collect_die_raw_matches(binary, &matcher, &filtered, &originals);
     summary.signatures_matched = raw.len();
     (summary, raw)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+    #[test]
+    fn prepared_identity_strings_preserve_complete_legacy_raw_evidence() {
+        for format in ["PE", "ELF"] {
+            for cap in [0, 2, 64] {
+                let bytes = b"prefix needle suffix".to_vec();
+                let size = bytes.len() as u64;
+                let binary =
+                    LoadedBinaryBuilder::new("identity.bin".into(), DataBuffer::Heap(bytes))
+                        .format(format)
+                        .entry_point(0x1000)
+                        .add_section(SectionInfo {
+                            name: ".text".into(),
+                            virtual_address: 0x1000,
+                            virtual_size: size,
+                            file_offset: 0,
+                            file_size: size,
+                            is_executable: true,
+                            is_readable: true,
+                            is_writable: false,
+                        })
+                        .build()
+                        .unwrap();
+                let db = SignatureDatabase {
+                    format_version: "fixture".into(),
+                    description: "fixture".into(),
+                    source: "fixture".into(),
+                    signatures: vec![
+                        Signature {
+                            name: "pe-evidence".into(),
+                            sig_type: "compiler".into(),
+                            source_format: Some("PE".into()),
+                            source_file: Some("fixture/PE/rule.sg".into()),
+                            unsupported_rule_count: 1,
+                            rules: vec![
+                                SignatureRule::StringMatch {
+                                    value: "needle".into(),
+                                },
+                                SignatureRule::SectionName {
+                                    name: ".text".into(),
+                                },
+                                SignatureRule::EpPattern {
+                                    arch: None,
+                                    pattern: "70".into(),
+                                    offset: Some(0),
+                                },
+                            ],
+                        },
+                        Signature {
+                            name: "elf-evidence".into(),
+                            sig_type: "framework".into(),
+                            source_format: Some("ELF".into()),
+                            source_file: None,
+                            unsupported_rule_count: 0,
+                            rules: vec![
+                                SignatureRule::StringMatch {
+                                    value: "needle".into(),
+                                },
+                                SignatureRule::StringMatch {
+                                    value: "needle".into(),
+                                },
+                                SignatureRule::StringMatch {
+                                    value: "missing".into(),
+                                },
+                            ],
+                        },
+                        Signature {
+                            name: "unprepared-section".into(),
+                            sig_type: "tool".into(),
+                            source_format: None,
+                            source_file: None,
+                            unsupported_rule_count: 0,
+                            rules: vec![SignatureRule::SectionName {
+                                name: ".text".into(),
+                            }],
+                        },
+                    ],
+                };
+                let limits = IdentityScanLimits {
+                    max_string_scan_bytes: cap,
+                    ..Default::default()
+                };
+                // The exact old direct-call path, with no precomputed caches.
+                let mut expected_summary = index_die_compat(&db);
+                let filtered = filter_die_database(db.clone());
+                let legacy = DieMatcher::new(filtered.clone()).with_scan_budgets(
+                    Some(limits.max_string_scan_bytes),
+                    Some(limits.max_scan_bytes),
+                );
+                let expected_raw =
+                    collect_die_raw_matches(&binary, &legacy, &filtered, &db.signatures);
+                expected_summary.signatures_matched = expected_raw.len();
+                let actual = die_compat_identity_with_db(&binary, &limits, db);
+                assert_eq!(
+                    serde_json::to_value(actual).unwrap(),
+                    serde_json::to_value((expected_summary, expected_raw)).unwrap()
+                );
+            }
+        }
+    }
 }

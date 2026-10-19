@@ -825,6 +825,11 @@ pub(crate) fn compute_fid_hashes(
     let mut call_count: i32 = 0;
     let mut specific_count: i32 = 0;
 
+    // Diagnostic traces retain the ordinary decoder replay for every operand.
+    let replay_decode = crate::runtime::diagnostics::terminal_reselect_trace_enabled()
+        || crate::runtime::diagnostics::terminal_verify_trace_enabled()
+        || crate::runtime::diagnostics::sleigh_build_debug_enabled();
+
     // Ghidra caps at Short.MAX_VALUE - 1 code units.
     const SHORT_MAX_VALUE: usize = i16::MAX as usize;
     for instr in extent.iter().take(SHORT_MAX_VALUE - 1) {
@@ -839,13 +844,20 @@ pub(crate) fn compute_fid_hashes(
             call_count += 1;
         }
 
-        let state = match decode_instruction_raw_state(compiled, &instr.bytes, instr.address) {
+        let binding = match super::fid_bindings::get_or_decode(
+            compiled,
+            &instr.bytes,
+            instr.address,
+            !replay_decode,
+        ) {
             Ok(state) => state,
             Err(_) => {
                 fid_diag("decode_instruction_raw_state");
                 return None;
             }
         };
+
+        let state = &*binding;
 
         // Ghidra's getNumOperands()/getOpObjects(ii) enumerate *display*
         // operands, e.g. "mov eax,[rbp+8]" has exactly 2 -- not
@@ -856,6 +868,7 @@ pub(crate) fn compute_fid_hashes(
         // from the same place Ghidra takes it: `cacheMnemonicState` descends
         // the flowthru chain, then `Constructor.getOpsPrintOrder` enumerates
         // the print pieces *after the first whitespace* only.
+        let mut lifted_ops: Option<Vec<PcodeOp>> = None;
         let mnemonic_state = mnemonic_state(&state);
         let display_order = operand_print_order(mnemonic_state);
 
@@ -924,9 +937,34 @@ pub(crate) fn compute_fid_hashes(
                 // hardcode one target space, try register space first (the
                 // pre-index/no-writeback shape), then unique space (x86's
                 // shape, and AArch64 post-index's pre-writeback snapshot).
-                let ops = &decode_and_lift_with_details(compiled, &instr.bytes, instr.address)
-                    .ok()?
-                    .0;
+                let replay_ops;
+                let ops = if replay_decode {
+                    replay_ops =
+                        decode_and_lift_with_details(compiled, &instr.bytes, instr.address)
+                            .ok()?
+                            .0;
+                    &replay_ops
+                } else {
+                    if lifted_ops.is_none() {
+                        // The raw state was bound above from these exact inputs.
+                        // On completion failure retain normal candidate/error
+                        // selection, including any later successful candidate.
+                        let ops = lift_existing_bound_instruction_with_details(
+                            compiled,
+                            &instr.bytes,
+                            instr.address,
+                            &state,
+                        )
+                        .map(|(_, ops, _, _)| ops)
+                        .or_else(|_| {
+                            decode_and_lift_with_details(compiled, &instr.bytes, instr.address)
+                                .map(|(ops, _, _)| ops)
+                        })
+                        .ok()?;
+                        lifted_ops = Some(ops);
+                    }
+                    lifted_ops.as_ref()?
+                };
                 // `offset_size == 0` shows up for AArch64's register-space-
                 // direct handles (unlike x86's, which populate it); fall
                 // back to the handle's own overall size in that case.

@@ -3,7 +3,7 @@
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::DecodeMemoryContext;
 
-use super::control_flow_facts_for;
+use super::with_control_flow_facts;
 
 /// Build the production `DecodeMemoryContext` slice for one function entry.
 pub fn decode_memory_context_for(
@@ -11,8 +11,9 @@ pub fn decode_memory_context_for(
     entry_address: u64,
     max_bytes: usize,
 ) -> DecodeMemoryContext {
-    let facts = control_flow_facts_for(binary);
-    facts.decode_context_for(binary, entry_address, max_bytes)
+    with_control_flow_facts(binary, |facts| {
+        facts.decode_context_for(binary, entry_address, max_bytes)
+    })
 }
 
 /// Compute a conservative byte window for `entry_address`.
@@ -26,11 +27,9 @@ pub fn function_max_bytes(binary: &LoadedBinary, entry_address: u64, fallback: u
         }
     }
 
-    if let Some(end) = control_flow_facts_for(binary)
-        .function_extents
-        .get(&entry_address)
-        .copied()
-    {
+    if let Some(end) = with_control_flow_facts(binary, |facts| {
+        facts.facts.function_extents.get(&entry_address).copied()
+    }) {
         if end > entry_address {
             return end.saturating_sub(entry_address) as usize;
         }

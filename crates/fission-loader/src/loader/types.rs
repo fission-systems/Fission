@@ -15,6 +15,9 @@ mod builder_methods;
 mod discovery;
 #[path = "types/patching.rs"]
 mod patching;
+#[path = "types/storage_token.rs"]
+mod storage_token;
+pub use storage_token::LoadedBinaryStorageToken;
 #[path = "types/query.rs"]
 mod query;
 #[path = "types/string_utils.rs"]

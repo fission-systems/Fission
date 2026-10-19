@@ -18,7 +18,7 @@ use fission_sleigh::runtime::{DecodeMemoryContext, RuntimeSleighFrontend};
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::noreturn::no_return_functions_for;
+use crate::analysis::noreturn::{DecodeSeeds, no_return_functions_with_seeds};
 use crate::analysis::xrefs::{XrefDatabase, XrefType};
 
 pub use decode_context::{decode_memory_context_for, function_max_bytes};
@@ -48,10 +48,17 @@ pub struct FunctionControlFlowFacts {
     pub noreturn_callsites: Vec<u64>,
 }
 
-static FACTS_CACHE: OnceLock<Mutex<LruCache<String, std::sync::Arc<OnceLock<ControlFlowFacts>>>>> =
-    OnceLock::new();
+struct CachedControlFlowFacts {
+    facts: ControlFlowFacts,
+    storage: fission_loader::loader::LoadedBinaryStorageToken,
+}
 
-fn facts_cache() -> &'static Mutex<LruCache<String, std::sync::Arc<OnceLock<ControlFlowFacts>>>> {
+static FACTS_CACHE: OnceLock<
+    Mutex<LruCache<String, std::sync::Arc<OnceLock<CachedControlFlowFacts>>>>,
+> = OnceLock::new();
+
+fn facts_cache()
+-> &'static Mutex<LruCache<String, std::sync::Arc<OnceLock<CachedControlFlowFacts>>>> {
     FACTS_CACHE.get_or_init(|| {
         Mutex::new(LruCache::new(
             NonZeroUsize::new(FACTS_CACHE_CAPACITY).expect("non-zero cache capacity"),
@@ -76,6 +83,29 @@ fn facts_cache() -> &'static Mutex<LruCache<String, std::sync::Arc<OnceLock<Cont
 /// one slot's `get_or_init` instead of redoing the work, so only one thread
 /// ever actually computes it.
 pub fn control_flow_facts_for(binary: &LoadedBinary) -> ControlFlowFacts {
+    with_control_flow_facts(binary, |view| view.facts.clone())
+}
+
+/// Project immutable cached facts while retaining their initialization slot.
+fn with_control_flow_facts<R>(
+    binary: &LoadedBinary,
+    project: impl FnOnce(AssembledControlFlowFacts<'_>) -> R,
+) -> R {
+    with_control_flow_facts_and_seeds(binary, None, project)
+}
+
+/// Capture only in the winning cold initializer; no traces enter the global cache.
+pub(crate) fn prepare_fid_decode_seeds(binary: &LoadedBinary) -> DecodeSeeds {
+    let mut seeds = DecodeSeeds::new();
+    with_control_flow_facts_and_seeds(binary, Some(&mut seeds), |_| ());
+    seeds
+}
+
+fn with_control_flow_facts_and_seeds<R>(
+    binary: &LoadedBinary,
+    seeds: Option<&mut DecodeSeeds>,
+    project: impl FnOnce(AssembledControlFlowFacts<'_>) -> R,
+) -> R {
     let hash = binary.hash.clone();
 
     let slot = {
@@ -91,17 +121,32 @@ pub fn control_flow_facts_for(binary: &LoadedBinary) -> ControlFlowFacts {
         }
     };
 
-    slot.get_or_init(|| {
+    let cached = slot.get_or_init(|| {
+        let storage = binary.storage_token();
         let frontend = binary
             .load_spec()
             .and_then(|load_spec| RuntimeSleighFrontend::new_for_load_spec(load_spec).ok());
-        ControlFlowFacts::assemble(binary, frontend.as_ref())
+        CachedControlFlowFacts {
+            facts: ControlFlowFacts::assemble_with_seeds(binary, frontend.as_ref(), seeds),
+            storage,
+        }
+    });
+    project(AssembledControlFlowFacts {
+        facts: &cached.facts,
+        storage: &cached.storage,
     })
-    .clone()
 }
 
 impl ControlFlowFacts {
     pub fn assemble(binary: &LoadedBinary, frontend: Option<&RuntimeSleighFrontend>) -> Self {
+        Self::assemble_with_seeds(binary, frontend, None)
+    }
+
+    fn assemble_with_seeds(
+        binary: &LoadedBinary,
+        frontend: Option<&RuntimeSleighFrontend>,
+        seeds: Option<&mut DecodeSeeds>,
+    ) -> Self {
         let lsda_landing_pads = collect_lsda_landing_pads(binary);
         let mut label_leaders = collect_label_leaders(binary);
         label_leaders.extend(lsda_landing_pads.iter().copied());
@@ -123,7 +168,7 @@ impl ControlFlowFacts {
             // every case this set also covers (it seeds from the same
             // index), but keeping both is a smaller, more obviously
             // behavior-preserving change than replacing the existing check.
-            let computed_no_return = no_return_functions_for(binary);
+            let computed_no_return = no_return_functions_with_seeds(binary, seeds);
 
             for xref in xref_db.iter() {
                 match xref.xref_type {
@@ -167,7 +212,116 @@ impl ControlFlowFacts {
         max_bytes: usize,
     ) -> DecodeMemoryContext {
         let limit_addr = function_limit_addr(binary, entry_address, max_bytes);
+        FlowFactSlices::from_facts(self).decode_context_for(
+            binary,
+            entry_address,
+            limit_addr,
+            collect_relocation_targets_in_range(binary, entry_address, limit_addr),
+        )
+    }
 
+    pub fn facts_for_function(
+        &self,
+        binary: &LoadedBinary,
+        entry_address: u64,
+        max_bytes: usize,
+    ) -> FunctionControlFlowFacts {
+        let ctx = self.decode_context_for(binary, entry_address, max_bytes);
+        FunctionControlFlowFacts {
+            function_address: entry_address,
+            labels: ctx.block_entry_hints,
+            flow_edges: ctx.flow_edges,
+            indirect_targets: ctx.jump_table_targets,
+            noreturn_callsites: ctx.noreturn_callsites,
+        }
+    }
+}
+
+/// A view obtained only from the immutable, fully assembled cache slot.
+/// All address vectors (and edge sources) are sorted; indirect targets already
+/// include every successfully read relocation target in the binary.
+struct AssembledControlFlowFacts<'a> {
+    facts: &'a ControlFlowFacts,
+    storage: &'a fission_loader::loader::LoadedBinaryStorageToken,
+}
+
+impl AssembledControlFlowFacts<'_> {
+    fn decode_context_for(
+        &self,
+        binary: &LoadedBinary,
+        entry_address: u64,
+        max_bytes: usize,
+    ) -> DecodeMemoryContext {
+        let limit_addr = function_limit_addr(binary, entry_address, max_bytes);
+        let facts = self.facts;
+        let slices = FlowFactSlices {
+            label_leaders: sorted_range(&facts.label_leaders, entry_address, limit_addr, |v| *v),
+            flow_edges: sorted_range(&facts.flow_edges, entry_address, limit_addr, |v| v.0),
+            indirect_targets: sorted_range(
+                &facts.indirect_targets,
+                entry_address,
+                limit_addr,
+                |v| *v,
+            ),
+            noreturn_callsites: sorted_range(
+                &facts.noreturn_callsites,
+                entry_address,
+                limit_addr,
+                |v| *v,
+            ),
+            lsda_landing_pads: sorted_range(
+                &facts.lsda_landing_pads,
+                entry_address,
+                limit_addr,
+                |v| *v,
+            ),
+        };
+        // The general query's use-site-bounded relocation reads form a subset
+        // of the assembled indirect targets. The final union is sorted and
+        // deduplicated, so reading/sorting all use sites again adds no target.
+        let relocation_targets = if self.storage.matches(binary) {
+            Vec::new()
+        } else {
+            // The public patch APIs retain the content hash. A stale cache
+            // entry must keep the old query's reads from the current bytes.
+            collect_relocation_targets_in_range(binary, entry_address, limit_addr)
+        };
+        slices.decode_context_for(binary, entry_address, limit_addr, relocation_targets)
+    }
+}
+
+fn sorted_range<T>(items: &[T], start: u64, end: u64, key: impl Fn(&T) -> u64) -> &[T] {
+    let first = items.partition_point(|item| key(item) < start);
+    let last = first + items[first..].partition_point(|item| key(item) < end);
+    &items[first..last]
+}
+
+struct FlowFactSlices<'a> {
+    label_leaders: &'a [u64],
+    flow_edges: &'a [(u64, u64)],
+    indirect_targets: &'a [u64],
+    noreturn_callsites: &'a [u64],
+    lsda_landing_pads: &'a [u64],
+}
+
+impl<'a> FlowFactSlices<'a> {
+    fn from_facts(facts: &'a ControlFlowFacts) -> Self {
+        Self {
+            label_leaders: &facts.label_leaders,
+            flow_edges: &facts.flow_edges,
+            indirect_targets: &facts.indirect_targets,
+            noreturn_callsites: &facts.noreturn_callsites,
+            lsda_landing_pads: &facts.lsda_landing_pads,
+        }
+    }
+
+    fn decode_context_for(
+        &self,
+        binary: &LoadedBinary,
+        entry_address: u64,
+        limit_addr: u64,
+        relocation_targets: Vec<u64>,
+    ) -> DecodeMemoryContext {
         let mut block_entry_hints: Vec<u64> = self
             .label_leaders
             .iter()
@@ -216,11 +370,7 @@ impl ControlFlowFacts {
             .copied()
             .filter(|addr| (entry_address..limit_addr).contains(addr))
             .collect();
-        jump_table_targets.extend(collect_relocation_targets_in_range(
-            binary,
-            entry_address,
-            limit_addr,
-        ));
+        jump_table_targets.extend(relocation_targets);
         jump_table_targets.sort_unstable();
         jump_table_targets.dedup();
 
@@ -247,22 +397,6 @@ impl ControlFlowFacts {
             noreturn_callsites,
             additional_decode_entries,
             readonly_windows: readonly_windows_for(binary),
-        }
-    }
-
-    pub fn facts_for_function(
-        &self,
-        binary: &LoadedBinary,
-        entry_address: u64,
-        max_bytes: usize,
-    ) -> FunctionControlFlowFacts {
-        let ctx = self.decode_context_for(binary, entry_address, max_bytes);
-        FunctionControlFlowFacts {
-            function_address: entry_address,
-            labels: ctx.block_entry_hints,
-            flow_edges: ctx.flow_edges,
-            indirect_targets: ctx.jump_table_targets,
-            noreturn_callsites: ctx.noreturn_callsites,
         }
     }
 }
@@ -608,6 +742,306 @@ fn resolve_call_target_name_direct(
 mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder};
+
+    fn seed_fixture(hash: &str) -> LoadedBinary {
+        let mut binary =
+            LoadedBinaryBuilder::new("seed-test.bin".into(), DataBuffer::Heap(vec![0xc3; 32]))
+                .format("ELF")
+                .arch_spec("x86:LE:64:default")
+                .is_64bit(true)
+                .image_base(0x400000)
+                .add_section(fission_loader::loader::SectionInfo {
+                    name: ".text".into(),
+                    virtual_address: 0x401000,
+                    virtual_size: 32,
+                    file_offset: 0,
+                    file_size: 32,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_function(FunctionInfo {
+                    name: "seed".into(),
+                    address: 0x401000,
+                    size: 1,
+                    ..Default::default()
+                })
+                .build()
+                .unwrap();
+        binary.hash = hash.into();
+        binary
+    }
+
+    #[test]
+    fn transient_decode_seeds_are_cold_transaction_owned_and_warm_preparation_is_empty() {
+        let binary = seed_fixture("transient-cold-cf-seed-fixture");
+        let seeds = prepare_fid_decode_seeds(&binary);
+        assert!(seeds.contains_key(&0x401000));
+        let facts = control_flow_facts_for(&binary);
+        assert!(prepare_fid_decode_seeds(&binary).is_empty());
+        drop(seeds);
+        assert_eq!(control_flow_facts_for(&binary), facts);
+    }
+
+    #[test]
+    fn transient_decode_seeds_do_not_recompute_warm_no_return_or_ordinary_cf() {
+        let binary = seed_fixture("transient-warm-noret-seed-fixture");
+        let known = crate::analysis::noreturn::no_return_functions_for(&binary);
+        assert!(prepare_fid_decode_seeds(&binary).is_empty());
+        assert_eq!(
+            crate::analysis::noreturn::no_return_functions_for(&binary),
+            known
+        );
+        let other = seed_fixture("transient-ordinary-cf-seed-fixture");
+        let _ = control_flow_facts_for(&other);
+        assert!(prepare_fid_decode_seeds(&other).is_empty());
+    }
+
+    #[test]
+    #[ignore = "local real-input diagnostic; not a timing control or CI fixture"]
+    fn transient_decode_seed_local_window_probe() {
+        let input = std::env::var("FISSION_SEED_PROBE_INPUT").expect("explicit local input");
+        let binary = fission_loader::loader::LoadedBinary::from_file(input).unwrap();
+        let seeds = prepare_fid_decode_seeds(&binary);
+        let frontend =
+            RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().unwrap()).unwrap();
+        let mut exact_windows = 0;
+        for func in binary.functions.iter().filter(|f| !f.is_import) {
+            let address = frontend
+                .normalize_low_bit_code_address(func.address)
+                .address;
+            let old_limit =
+                super::super::noreturn::no_return_scan_max_bytes(&binary, address, 4096);
+            let new_limit = function_max_bytes(&binary, address, 4096);
+            if binary.view_bytes(address, old_limit) == binary.view_bytes(address, new_limit) {
+                exact_windows += 1;
+            }
+        }
+        eprintln!(
+            "captured_functions={} exact_windows={} candidate_functions={}",
+            seeds.len(),
+            exact_windows,
+            binary.functions.iter().filter(|f| !f.is_import).count()
+        );
+        for seed in seeds.values() {
+            eprintln!("{seed:?}");
+        }
+    }
+
+    #[test]
+    fn cached_projections_share_facts_and_preserve_owned_api_and_decode_context() {
+        let binary =
+            LoadedBinaryBuilder::new("projection.bin".into(), DataBuffer::Heap(vec![7; 128]))
+                .format("PE")
+                .is_64bit(true)
+                .image_base(0x1000)
+                .add_function(FunctionInfo {
+                    name: "first".into(),
+                    address: 0x1000,
+                    size: 0,
+                    ..Default::default()
+                })
+                .add_function(FunctionInfo {
+                    name: "next".into(),
+                    address: 0x1040,
+                    size: 16,
+                    ..Default::default()
+                })
+                .build()
+                .expect("projection fixture");
+        let expected = control_flow_facts_for(&binary);
+        let first = with_control_flow_facts(&binary, |view| view.facts as *const _ as usize);
+        let second = with_control_flow_facts(&binary, |view| view.facts as *const _ as usize);
+        assert_eq!(first, second);
+        let mut owned = control_flow_facts_for(&binary);
+        owned.label_leaders.clear();
+        owned.function_extents.clear();
+        owned.flow_edges.push((1, 2));
+        assert_eq!(control_flow_facts_for(&binary), expected);
+        for address in [0x1000, 0x1008, 0x1040] {
+            assert_eq!(
+                decode_memory_context_for(&binary, address, 64),
+                expected.decode_context_for(&binary, address, 64)
+            );
+        }
+        assert_eq!(function_max_bytes(&binary, 0x1000, 8), 64);
+        assert!(with_control_flow_facts(&binary, |facts| {
+            control_flow_facts_for(&binary) == *facts.facts
+        }));
+    }
+
+    #[test]
+    fn sorted_ranges_preserve_all_filter_results_and_duplicate_order() {
+        let values: Vec<_> = (0..24u64).map(|i| i / 3).collect();
+        for start in 0..10 {
+            for end in 0..10 {
+                let expected: Vec<_> = values
+                    .iter()
+                    .copied()
+                    .filter(|v| *v >= start && *v < end)
+                    .collect();
+                assert_eq!(sorted_range(&values, start, end, |v| *v), expected);
+            }
+        }
+        assert!(sorted_range::<u64>(&[], 0, u64::MAX, |v| *v).is_empty());
+    }
+
+    #[test]
+    fn assembled_range_queries_match_general_queries_including_relocations() {
+        use fission_loader::loader::{RelocationEntry, SectionInfo};
+
+        for big_endian in [false, true] {
+            let mut data = vec![0u8; 256];
+            for offset in [8, 16] {
+                let value = if big_endian {
+                    0x1020u64.to_be_bytes()
+                } else {
+                    0x1020u64.to_le_bytes()
+                };
+                data[offset..offset + 8].copy_from_slice(&value);
+            }
+            // Preserve the existing helper's abstention on a truncated
+            // eight-byte view at the end of the mapped bytes.
+            let narrow = if big_endian {
+                0x1030u32.to_be_bytes()
+            } else {
+                0x1030u32.to_le_bytes()
+            };
+            data[252..].copy_from_slice(&narrow);
+            let binary = LoadedBinaryBuilder::new("ranges.bin".into(), DataBuffer::Heap(data))
+                .format("PE")
+                .arch_spec(if big_endian {
+                    "test:BE:64"
+                } else {
+                    "test:LE:64"
+                })
+                .is_64bit(true)
+                .image_base(0x1000)
+                .add_section(SectionInfo {
+                    name: ".text".into(),
+                    virtual_address: 0x1000,
+                    virtual_size: 256,
+                    file_offset: 0,
+                    file_size: 256,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_relocations(
+                    [8, 16, 252]
+                        .into_iter()
+                        .map(|offset| RelocationEntry {
+                            address: 0x1000 + offset,
+                            r_type: 10,
+                            size: if offset == 252 { 4 } else { 8 },
+                            addend: 0,
+                            symbol_name: None,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .build()
+                .expect("range fixture");
+            let mut facts = ControlFlowFacts::assemble(&binary, None);
+            assert_eq!(facts.indirect_targets, vec![0x1020]);
+            facts.label_leaders = vec![0x1000, 0x1010, 0x1010, 0x1040, 0x2000];
+            facts.flow_edges = vec![
+                (0, 0x1020),
+                (0x1000, 0x1010),
+                (0x1010, 0x1020),
+                (0x1010, 0x1020),
+                (0x1020, 0x2000),
+                (0x2000, 0x1010),
+            ];
+            facts.noreturn_callsites = vec![0x1008, 0x1040, 0x1040, 0x2000];
+            facts.lsda_landing_pads = vec![0x1020, 0x1040, 0x2000];
+            let storage = binary.storage_token();
+            let assembled = AssembledControlFlowFacts {
+                facts: &facts,
+                storage: &storage,
+            };
+            for entry in [
+                0,
+                0xfff,
+                0x1000,
+                0x1008,
+                0x1020,
+                0x10fc,
+                0x1100,
+                0x2000,
+                u64::MAX,
+            ] {
+                for size in [0, 1, 7, 31, 64, 256, 512, usize::MAX] {
+                    assert_eq!(
+                        assembled.decode_context_for(&binary, entry, size),
+                        facts.decode_context_for(&binary, entry, size),
+                        "big_endian={big_endian} entry={entry:x} size={size}"
+                    );
+                }
+            }
+            // An ordinary public record need not be sorted or complete.
+            // Its general query must still discover the relocation targets.
+            facts.label_leaders.reverse();
+            facts.noreturn_callsites.reverse();
+            facts.indirect_targets.clear();
+            let general = facts.decode_context_for(&binary, 0x1000, 256);
+            assert_eq!(
+                general.block_entry_hints,
+                vec![0x1040, 0x1010, 0x1010, 0x1000]
+            );
+            assert_eq!(general.noreturn_callsites, vec![0x1040, 0x1040, 0x1008]);
+            assert_eq!(general.jump_table_targets, vec![0x1020]);
+        }
+    }
+
+    #[test]
+    fn assembled_queries_rescan_relocations_after_storage_mutation() {
+        use fission_loader::loader::{RelocationEntry, SectionInfo};
+
+        let mut data = vec![0u8; 128];
+        data[8..16].copy_from_slice(&0x1020u64.to_le_bytes());
+        let mut binary =
+            LoadedBinaryBuilder::new("patched-range.bin".into(), DataBuffer::Heap(data))
+                .format("PE")
+                .is_64bit(true)
+                .image_base(0x1000)
+                .add_section(SectionInfo {
+                    name: ".text".into(),
+                    virtual_address: 0x1000,
+                    virtual_size: 128,
+                    file_offset: 0,
+                    file_size: 128,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_relocations(vec![RelocationEntry {
+                    address: 0x1008,
+                    r_type: 10,
+                    size: 8,
+                    addend: 0,
+                    symbol_name: None,
+                }])
+                .build()
+                .expect("patched range fixture");
+        let facts = ControlFlowFacts::assemble(&binary, None);
+        let storage = binary.storage_token();
+        let assembled = AssembledControlFlowFacts {
+            facts: &facts,
+            storage: &storage,
+        };
+        assert_eq!(facts.indirect_targets, vec![0x1020]);
+        let hash = binary.hash.clone();
+        assert!(
+            binary
+                .patch_bytes_va(0x1008, &0x1040u64.to_le_bytes())
+                .is_some()
+        );
+        assert_eq!(binary.hash, hash);
+        assert!(!storage.matches(&binary));
+        let expected = facts.decode_context_for(&binary, 0x1000, 128);
+        assert_eq!(expected.jump_table_targets, vec![0x1020, 0x1040]);
+        assert_eq!(assembled.decode_context_for(&binary, 0x1000, 128), expected);
+    }
 
     #[test]
     fn label_leaders_include_function_entries_and_loader_labels() {

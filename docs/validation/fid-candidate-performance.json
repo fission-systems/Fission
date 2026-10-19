@@ -1,0 +1,422 @@
+{
+  "base": "0f0e8f75a536fcb6ec9b349dec372d44d7c65d0c",
+  "source_only_tree": "b21bed933a2cadd595de61c169233359e24feee7",
+  "source_files_sha256": {
+    "crates/fission-signatures/src/fidbf/fpk_store.rs": "6f37c928c822bcc78b6b1a2673c063511a265ab4f403c92e9cc5a26a8a69b98f",
+    "crates/fission-signatures/src/fidbf/fpk_store/candidate_cache_tests.rs": "39732d2b33aca3c0c140e807ddcc608537b449b48fc91888ff753cedf4e951bd"
+  },
+  "source_patch_sha256": "a86b24be58e7c53eee736353b1ceb58ed025430b72ed0127ba40dfa02a5b54ff",
+  "candidate_sha256": "26dc790eed98282e603e8ee6b3ad91ba40590c9c61b25c51a25d72f38bdb8d0c",
+  "baseline_sha256": "5fde8204f59b90a4fba7ca2af4c32c08c41efcb066df8586a9085cf7022f65d7",
+  "proposal_sha256": "78135d23d511b92c34c97c7cefe7554c1ce1f399f0deb1c99c53d10b1ee90515",
+  "scope": "Mechanical performance/output preservation only; no semantic/readability/ranking claim",
+  "dataset_revision": "07dd95dbe6214b8a78fc1e4a55961ab515986489",
+  "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+  "input_sha256_verified": 45,
+  "population_reference": "decompiler-startup-performance.json (45 cells/250 functions)",
+  "timing_keys_excluded": [
+    "build_duration_ms",
+    "decomp_sec",
+    "normalize_duration_ms",
+    "postprocess_sec",
+    "render_duration_ms",
+    "structuring_duration_ms",
+    "total_time_ms"
+  ],
+  "large": {
+    "baseline": {
+      "seconds": 14.66100295796059,
+      "cpu_seconds": 133.6655700000001,
+      "max_rss_bytes": 2387591168,
+      "rss_range_bytes": [
+        2373091328,
+        2404827136
+      ]
+    },
+    "candidate": {
+      "seconds": 13.857975125079975,
+      "cpu_seconds": 121.64714999999997,
+      "max_rss_bytes": 2452586496,
+      "rss_range_bytes": [
+        2441265152,
+        2453405696
+      ]
+    }
+  },
+  "paired": [
+    {
+      "cell": "03",
+      "baseline": 2.0387150410097092,
+      "baseline_deterministic": true,
+      "candidate": 2.0348929999163374,
+      "candidate_deterministic": true,
+      "speedup": 1.001878251629707
+    },
+    {
+      "cell": "27",
+      "baseline": 0.8943503750488162,
+      "baseline_deterministic": true,
+      "candidate": 0.8822981250705197,
+      "candidate_deterministic": true,
+      "speedup": 1.0136600652725327
+    },
+    {
+      "cell": "40",
+      "baseline": 1.0087519580265507,
+      "baseline_deterministic": true,
+      "candidate": 0.9994211249286309,
+      "candidate_deterministic": true,
+      "speedup": 1.0093362376131345
+    }
+  ],
+  "kuna_requested_one": [
+    {
+      "cell": "03",
+      "platform": "linux",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 2.0495725829387084,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.2296216250397265,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 8.925869166652378
+    },
+    {
+      "cell": "22",
+      "platform": "windows",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 15.659113459056243,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 2.8571348750265315,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 5.480705022338447
+    },
+    {
+      "cell": "27",
+      "platform": "windows",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.8723695409717038,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.11481045896653086,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 7.598345558622094
+    },
+    {
+      "cell": "40",
+      "platform": "macos",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 1.003544667037204,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.3554729169700295,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 2.823125529762411
+    }
+  ],
+  "kuna_requested_14": [
+    {
+      "cell": "03",
+      "platform": "linux",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 1.3917942910920829,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.34261891699861735,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 4.062222551178339
+    },
+    {
+      "cell": "22",
+      "platform": "windows",
+      "requested": 6,
+      "fission": {
+        "median_seconds": 14.615581582998857,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "kuna": {
+        "median_seconds": 5.63659104204271,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          6,
+          6,
+          6
+        ]
+      },
+      "ratio": 2.5929824381408637
+    },
+    {
+      "cell": "27",
+      "platform": "windows",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.6999259160365909,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.24952654109802097,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 2.80501590314451
+    },
+    {
+      "cell": "40",
+      "platform": "macos",
+      "requested": 5,
+      "fission": {
+        "median_seconds": 0.971402750001289,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "kuna": {
+        "median_seconds": 0.7153794999467209,
+        "deterministic": true,
+        "exits": [
+          0,
+          0,
+          0
+        ],
+        "returned": [
+          5,
+          5,
+          5
+        ]
+      },
+      "ratio": 1.3578845215352633
+    }
+  ],
+  "best_observed_settings": [
+    {
+      "cell": "03",
+      "fission": {
+        "seconds": 1.3917942910920829,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 0.2296216250397265,
+        "requested_workers": 1
+      },
+      "ratio": 6.061250942071726
+    },
+    {
+      "cell": "22",
+      "fission": {
+        "seconds": 14.615581582998857,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 2.8571348750265315,
+        "requested_workers": 1
+      },
+      "ratio": 5.11546784534039
+    },
+    {
+      "cell": "27",
+      "fission": {
+        "seconds": 0.6999259160365909,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 0.11481045896653086,
+        "requested_workers": 1
+      },
+      "ratio": 6.096360230043422
+    },
+    {
+      "cell": "40",
+      "fission": {
+        "seconds": 0.971402750001289,
+        "requested_workers": 14
+      },
+      "kuna": {
+        "seconds": 0.3554729169700295,
+        "requested_workers": 1
+      },
+      "ratio": 2.732705372553571
+    }
+  ],
+  "kuna_binary_sha256": "46cd0f8109557f8fe1e8bae53e191bd6b92a7d0410ee2b279a37621c5a2c3e05",
+  "validation": {
+    "targeted_passed": 5,
+    "related_passed": 1952,
+    "related_skipped": 6,
+    "fresh_returned": 250,
+    "non_time_functions_changed": 0,
+    "focused_functions": 22,
+    "focused_lanes": 2,
+    "focused_runs_per_lane": 3,
+    "whole_250_repeated": false,
+    "guest_execution_or_rescore": false
+  },
+  "limits": [
+    "Parsed positive candidate records remain retained per immutable database; this is not a fixed memory-cap cache",
+    "Concurrent cold lookups may duplicate loading before the first insertion; this is not per-key singleflight",
+    "Misses/malformed-empty results/errors are retried, not cached; final relation/specific/confidence decisions are recomputed",
+    "Native Apple M4 Pro/14 logical CPUs/24 GiB; release LTO=true/strip=true/codegen-units=1",
+    "Fresh processes, --no-db, DECBENCH_NO_CACHE=1, fixed resources/cwd/addresses; internal caches operate normally",
+    "No own builds/tests/profilers during primary timing; OS caches and desktop scheduling uncontrolled",
+    "One requested render worker does not serialize FID/preparation; faster observed setting selected separately per tool",
+    "Only four timing batches, not full corpus timing or equal cross-tool output quality",
+    "Completed-function hot-cache growth and first frontend preparation are unchanged"
+  ]
+}
