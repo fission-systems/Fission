@@ -494,7 +494,18 @@ impl AigManager {
     pub fn lower_expr(&mut self, expr: &SymExpr) -> Vec<AigLit> {
         let width = match expr.get_sort() {
             crate::ast::Sort::BitVector(width) | crate::ast::Sort::Float(width) => Some(width),
-            crate::ast::Sort::Array { .. } => None,
+            crate::ast::Sort::Array { range, .. } => {
+                // Whole arrays have no scalar bitvector encoding. Keep the
+                // placeholder bounded, including arrays with array-valued ranges.
+                self.note_unsupported("array expression used as a scalar".to_string());
+                let width = match range.as_ref() {
+                    crate::ast::Sort::BitVector(width) | crate::ast::Sort::Float(width) => {
+                        (*width).clamp(1, 64)
+                    }
+                    crate::ast::Sort::Array { .. } => 1,
+                };
+                return self.fresh_bits(width as usize);
+            }
         };
         if let Some(width) = width.filter(|width| *width == 0 || *width > 64) {
             self.note_unsupported(format!(
@@ -515,10 +526,6 @@ impl AigManager {
                 bits
             }
             SymExpr::Var { id, sort, .. } => {
-                if matches!(sort, crate::ast::Sort::Array { .. }) {
-                    self.note_unsupported("array variable used as a scalar".to_string());
-                    return self.fresh_bits(1);
-                }
                 if let Some(bits) = self.var_map.get(id) {
                     bits.clone()
                 } else {
@@ -589,7 +596,12 @@ impl AigManager {
             SymExpr::Sub(a, b) => {
                 let a_bits = self.lower_expr(a);
                 let b_bits = self.lower_expr(b);
-                let b_inv: Vec<AigLit> = b_bits.into_iter().map(|lit| lit.not()).collect();
+                // Extend B before complementing it: zero-extending !B would
+                // turn the implicit high one bits of two's complement into zero.
+                let width = a_bits.len().max(b_bits.len());
+                let b_inv: Vec<AigLit> = (0..width)
+                    .map(|i| b_bits.get(i).copied().unwrap_or(AigLit::FALSE).not())
+                    .collect();
                 // A - B = A + (!B) + 1
                 self.add_ripple_carry_adder(&a_bits, &b_inv, AigLit::TRUE)
             }
@@ -820,7 +832,9 @@ impl AigManager {
                 let n = match expr.get_sort() {
                     crate::ast::Sort::Float(sz) => sz,
                     crate::ast::Sort::BitVector(sz) => sz,
-                    crate::ast::Sort::Array { range, .. } => range.expect_bv(),
+                    crate::ast::Sort::Array { .. } => {
+                        unreachable!("array sorts handled before lowering")
+                    }
                 };
                 self.fresh_bits(n.max(1) as usize)
             }

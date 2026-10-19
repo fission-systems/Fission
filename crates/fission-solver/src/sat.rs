@@ -302,6 +302,8 @@ impl SatSolver {
         if !self.ok {
             return false;
         }
+        // Public additions are permanent constraints, not part of the last model.
+        self.cancel_until(0);
         let accepted = self.add_clause_inner(lits);
         if !accepted && self.decision_level() == 0 {
             self.ok = false;
@@ -314,9 +316,7 @@ impl SatSolver {
             self.ensure_var(lit.var());
         }
 
-        if self.decision_level() != 0 {
-            tracing::warn!("Adding clauses during search is not fully supported yet.");
-        }
+        debug_assert_eq!(self.decision_level(), 0);
 
         // Simplify clause (remove duplicates, handle True/False if any)
         lits.sort_by_key(|l| l.0);
@@ -615,7 +615,7 @@ impl SatSolver {
         for i in 0..total {
             let keep = match &self.clause_meta[i] {
                 None => true,
-                Some(_) => to_keep.contains(&i) || locked.contains(&i),
+                Some(meta) => meta.lbd <= 2 || to_keep.contains(&i) || locked.contains(&i),
             };
             if keep {
                 index_map[i] = Some(new_clauses.len());
@@ -710,6 +710,21 @@ impl SatSolver {
         self.solve_with_assumptions(theory, &[])
     }
 
+    fn restore_assumptions(&mut self, assumptions: &[Lit]) -> bool {
+        self.cancel_until(0);
+        if self.propagate().is_some() {
+            self.ok = false;
+            return false;
+        }
+        for &lit in assumptions {
+            self.trail_lim.push(self.trail.len());
+            if !self.enqueue(lit, None) || self.propagate().is_some() {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn solve_with_assumptions(
         &mut self,
         mut theory: Option<&mut dyn crate::theory::Theory>,
@@ -718,25 +733,12 @@ impl SatSolver {
         if !self.ok {
             return false;
         }
-        self.cancel_until(0);
-
-        for &lit in assumptions {
-            self.trail_lim.push(self.trail.len());
-            if !self.enqueue(lit, None) {
-                return false;
-            }
-            if self.propagate().is_some() {
-                return false;
-            }
-        }
-
-        // Initial BCP
-        if self.propagate().is_some() {
+        if !self.restore_assumptions(assumptions) {
             return false;
         }
 
         loop {
-            let mut confl_opt = self.propagate();
+            let confl_opt = self.propagate();
 
             // If BCP found no conflict, ask the Theory if we have one
             if confl_opt.is_none() {
@@ -745,46 +747,19 @@ impl SatSolver {
                     let assignments: Vec<Lit> = self.trail.clone();
 
                     if let crate::theory::TheoryStatus::Lemmas(lemmas) = th.check(&assignments) {
-                        // Theory produced new clauses (lazy constraints or conflicts)
-                        for lits in lemmas {
-                            if lits.is_empty() {
-                                return false; // Trivially UNSAT
-                            }
-
-                            let c_idx = self.clauses.len();
-                            self.clauses.push(Clause(lits.clone()));
-                            // A theory lemma is a constraint the theory will not
-                            // repeat; deleting it would lose it.
-                            self.clause_meta.push(None);
-
-                            if lits.len() == 1 {
-                                // Unit clause. Enqueue it.
-                                // It could be conflicting right now, so we backtrack to 0 just in case.
-                                self.cancel_until(0);
-                                self.enqueue(lits[0], None);
-                            } else {
-                                let lit0 = lits[0];
-                                let lit1 = lits[1];
-                                self.watches[lit0.not().index()].push(Watcher {
-                                    clause_idx: c_idx,
-                                    blocker: lit1,
-                                });
-                                self.watches[lit1.not().index()].push(Watcher {
-                                    clause_idx: c_idx,
-                                    blocker: lit0,
-                                });
-
-                                // Check if this new clause is conflicting under the current trail
-                                // A clause is conflicting if ALL its literals are False.
-                                let is_conflicting = lits.iter().all(|&l| {
-                                    self.assigns[l.var() as usize]
-                                        == (if l.0 < 0 { LBool::True } else { LBool::False })
-                                });
-
-                                if is_conflicting {
-                                    confl_opt = Some(c_idx);
+                        if !lemmas.is_empty() {
+                            // Theory clauses are permanent constraints. Install at root
+                            // using the same simplification/watching path as input clauses,
+                            // then replay every query assumption before resuming search.
+                            for clause in lemmas {
+                                if !self.add_clause(clause) {
+                                    return false;
                                 }
                             }
+                            if !self.restore_assumptions(assumptions) {
+                                return false;
+                            }
+                            continue;
                         }
                     }
                 }
@@ -817,6 +792,8 @@ impl SatSolver {
                     backtrack_level = assumptions.len() as u32;
                 }
 
+                // Capture the conflict's decision levels before unassigning its trail.
+                let learned_lbd = self.compute_lbd(&learned_clause);
                 self.cancel_until(backtrack_level);
 
                 if learned_clause.len() == 1 {
@@ -842,12 +819,11 @@ impl SatSolver {
                     let lit0 = final_clause[0];
                     let lit1 = final_clause[1];
 
-                    // Compute LBD before moving final_clause into the Clause struct
-                    let lbd = self.compute_lbd(&final_clause);
-
                     self.clauses.push(Clause(final_clause));
-                    self.clause_meta
-                        .push(Some(LearnedMeta { lbd, activity: 0 }));
+                    self.clause_meta.push(Some(LearnedMeta {
+                        lbd: learned_lbd,
+                        activity: 0,
+                    }));
 
                     self.watches[lit0.not().index()].push(Watcher {
                         clause_idx: c_idx,
@@ -877,5 +853,60 @@ impl SatSolver {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod retention_regressions {
+    use super::*;
+
+    #[test]
+    fn garbage_collection_keeps_every_glue_clause() {
+        let mut sat = SatSolver::new();
+        sat.ensure_var(64);
+        for i in 0..24 {
+            sat.clauses
+                .push(Clause(vec![Lit::new(i + 1, false), Lit::new(i + 2, false)]));
+            sat.clause_meta.push(Some(LearnedMeta {
+                lbd: if i < 18 { 2 } else { 9 },
+                activity: 0,
+            }));
+        }
+        sat.gc_learned();
+        assert_eq!(
+            sat.clause_meta
+                .iter()
+                .flatten()
+                .filter(|m| m.lbd <= 2)
+                .count(),
+            18
+        );
+    }
+
+    #[test]
+    fn learned_lbd_counts_levels_before_backtracking() {
+        let mut sat = SatSolver::new();
+        sat.add_clause(vec![
+            Lit::new(1, false),
+            Lit::new(2, false),
+            Lit::new(3, false),
+            Lit::new(4, false),
+        ]);
+        sat.add_clause(vec![
+            Lit::new(1, false),
+            Lit::new(2, false),
+            Lit::new(3, false),
+            Lit::new(4, true),
+        ]);
+        for (var, bumps) in [(1, 12), (2, 8), (3, 4)] {
+            for _ in 0..bumps {
+                sat.var_bump_activity(var);
+            }
+        }
+        assert!(sat.solve());
+        assert!(
+            sat.clause_meta.iter().flatten().any(|m| m.lbd == 3),
+            "the first learned clause spans three decision levels"
+        );
     }
 }
