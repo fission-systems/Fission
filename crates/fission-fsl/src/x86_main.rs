@@ -37,6 +37,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let a: Vec<_> = std::env::args().skip(1).collect();
     let usage = concat!(
         "usage: fsl-x86 compile RULES.fslx BODIES.fsl OUTPUT.fslxc | ",
+        "compile-profiles SOURCE.fslprofiles OUTPUT.fslpc | ",
+        "inspect-profiles CATALOG.fslpc | select-profile CATALOG.fslpc BINARY | ",
+        "decompile-profiled CATALOG.fslpc BINARY ADDRESS SIZE c|rust|go NEW_DIRECTORY | ",
         "decompile PACKAGE MODE BASE HEX fir|c|rust OUTPUT | ",
         "decompile-owned BINARY ADDRESS SIZE c|rust|go NEW_DIRECTORY | ",
         "decompile-owned-entry BINARY ADDRESS c|rust|go NEW_DIRECTORY | ",
@@ -49,6 +52,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "execute-binary PACKAGE BINARY ADDRESS SIZE REGISTERS_CSV FLAGS_CSV MEMORY_BASE MEMORY_HEX BUDGET"
     );
     match a.first().map(String::as_str) {
+        Some("compile-profiles") if a.len() == 3 => {
+            let profiles =
+                fission_fsl::profiles::ProfilePackage::compile(&fs::read_to_string(&a[1])?)?;
+            fs::write(&a[2], profiles.encode_binary()?)?;
+            print!("{}", profiles.describe());
+        }
+        Some("inspect-profiles") if a.len() == 2 => {
+            let profiles = fission_fsl::profiles::ProfilePackage::decode_binary(&fs::read(&a[1])?)?;
+            print!("{}", profiles.describe());
+        }
+        Some("select-profile") if a.len() == 3 => {
+            let profiles = fission_fsl::profiles::ProfilePackage::decode_binary(&fs::read(&a[1])?)?;
+            let loaded = fission_loader::LoadedBinary::from_file_with_catalog(
+                Path::new(&a[2]),
+                &profiles.catalog,
+            )?;
+            println!("selected-profile={} decoder={} package-sha256={} abi=unselected legacy-load-spec={} target-facts={:?}",loaded.profile.id,loaded.profile.decoder,loaded.profile.package_sha256,loaded.binary.load_spec().is_some(),loaded.target_facts);
+        }
+        Some("decompile-profiled") if a.len() == 7 => {
+            let profiles = fission_fsl::profiles::ProfilePackage::decode_binary(&fs::read(&a[1])?)?;
+            let bundle = fission_fsl::pipeline::project_profiled_x86(
+                &profiles,
+                Path::new(&a[2]),
+                number(&a[3])?,
+                a[4].parse()?,
+                &a[5],
+            )?;
+            bundle.write_new(Path::new(&a[6]))?;
+            println!("emitted catalog-selected FIR bundle into {}", a[6]);
+        }
         Some("decompile-owned-entry") if a.len() == 5 => {
             let bundle =
                 fission_fsl::pipeline::project_x86_entry(Path::new(&a[1]), number(&a[2])?, &a[3])?;

@@ -23,7 +23,8 @@ sha2 = "0.10.9"
 fission-loader = { path = "../fission-loader", optional = true }
 
 [features]
-x86 = ["dep:fission-loader"]
+loader = ["dep:fission-loader"]
+x86 = ["loader"]
 
 [[bin]]
 name = "fslc"

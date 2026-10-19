@@ -1,7 +1,7 @@
 //! Asset-independent experimental entry point. Canonical FIR remains the sole
 //! semantic owner; unsupported bytes/contracts never route to a legacy engine.
 use crate::{
-    backend::{ArtifactBundle, BackendRegistry, ProjectionInput, TargetProfile},
+    backend::{ArtifactBundle, BackendRegistry, OutputBackend, ProjectionInput, TargetProfile},
     x86::{X86Package, X86Program},
     FslError, OutputLayer,
 };
@@ -74,9 +74,6 @@ fn project_x86(
         .get(backend_id)
         .ok_or_else(|| FslError::at(1, 1, "unregistered source backend"))?;
     let package = owned_x86_package()?;
-    let rules = package.rule_count();
-    let bodies = package.bodies().instructions.len();
-    let profile = package.encode_binary()?;
     let program = match size {
         Some(size) => X86Program::from_owned_binary(&package, input, address, size)?,
         None => X86Program::from_owned_entry(&package, input, address)?,
@@ -88,9 +85,59 @@ fn project_x86(
             program.byte_length()
         ),
     };
+    emit_program(&package, &program, backend, &selection)
+}
+
+/// Caller-supplied owned profile catalog -> canonical loader -> existing x86 FIR.
+/// The profile pins the exact encoding/semantic package. No ABI is inferred.
+pub fn project_profiled_x86(
+    profiles: &crate::profiles::ProfilePackage,
+    input: &Path,
+    address: u64,
+    size: usize,
+    backend_id: &str,
+) -> Result<PipelineBundle, FslError> {
+    if !(1..=65536).contains(&size) {
+        return Err(FslError::at(1, 1, "binary span size must be 1..65536"));
+    }
+    let registry = BackendRegistry::with_builtin_sources();
+    let backend = registry
+        .get(backend_id)
+        .ok_or_else(|| FslError::at(1, 1, "unregistered source backend"))?;
+    let loaded = fission_loader::LoadedBinary::from_file_with_catalog(input, &profiles.catalog)
+        .map_err(|e| FslError::at(1, 1, format!("loader: {e}")))?;
+    let package = owned_x86_package()?;
+    let package_bytes = package.encode_binary()?;
+    use sha2::{Digest, Sha256};
+    let package_hash = crate::sequence::hex(&Sha256::digest(&package_bytes));
+    if loaded.profile.decoder != package.decoder() || loaded.profile.package_sha256 != package_hash
+    {
+        return Err(FslError::at(
+            1,
+            1,
+            "owned profile decoder/package binding mismatch",
+        ));
+    }
+    let program = X86Program::from_loaded_binary(&package, &loaded.binary, address, size)?;
+    let selection = format!("caller-supplied-executable-span address=0x{address:x} size={size}");
+    let mut bundle = emit_program(&package, &program, backend, &selection)?;
+    bundle.pipeline_report = format!("loader-profile-contract=1\nloader-route=owned-catalog\nselected-profile={}\ncatalog-sha256={}\nbound-package-sha256={}\nabi=unselected\ntarget-facts={:?}\n{}",
+        loaded.profile.id,crate::sequence::hex(&Sha256::digest(profiles.encode_binary()?)),package_hash,loaded.target_facts,bundle.pipeline_report);
+    Ok(bundle)
+}
+
+fn emit_program(
+    package: &X86Package,
+    program: &X86Program,
+    backend: &dyn OutputBackend,
+    selection: &str,
+) -> Result<PipelineBundle, FslError> {
+    let rules = package.rule_count();
+    let bodies = package.bodies().instructions.len();
+    let profile = package.encode_binary()?;
     let plan = backend
         .plan(
-            ProjectionInput::X86Window(&program),
+            ProjectionInput::X86Window(program),
             &TargetProfile::for_backend(backend),
         )
         .map_err(|e| FslError::at(1, 1, e.to_string()))?;

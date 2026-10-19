@@ -556,3 +556,13 @@ are authored arithmetic/scalar-elaboration/discrete-model examples. No board,
 bitstream, NPU/TPU, DSP device, ASIC, neuromorphic chip, PIM or analog hardware
 support is claimed. Generic synthesis and waveform-free logical simulation are
 separate research measurements in fission-research.
+
+## Owned loader profile catalog
+
+The optional `loader` feature adds `.fslprofiles` source and `.fslpc` binary
+catalogs; `x86` includes it. Two authored ELF rules select the existing x86 v2
+package by header facts and exact package hash, with ABI explicitly unselected.
+`fsl-x86 compile-profiles`, `inspect-profiles`, `select-profile` and
+`decompile-profiled` expose the opt-in route. Legacy loaders remain available.
+This is not complete opinion/ldefs import or product cutover. See
+[the loader contract](../../docs/research/fsl-loader-profiles.md).

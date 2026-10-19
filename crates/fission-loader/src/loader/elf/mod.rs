@@ -27,12 +27,13 @@ use relocation_patches::{
 pub struct ElfLoader;
 
 #[derive(Clone, Copy)]
-enum ArchitectureSelection {
+enum ArchitectureSelection<'a> {
     Opinion,
     X86ContainerFacts,
+    Owned(&'a super::profiles::OwnedProfile),
 }
 fn select_architecture(
-    policy: ArchitectureSelection,
+    policy: ArchitectureSelection<'_>,
     machine: u16,
     class: u8,
     endian: u8,
@@ -43,6 +44,13 @@ fn select_architecture(
         return select_elf_load_spec(machine, class, endian, flags, image_base)
             .map(|(a, s)| (a, Some(s)))
             .map_err(|e| err!(loader, "{}", e));
+    }
+    if let ArchitectureSelection::Owned(profile) = policy {
+        let facts = target_facts(machine, class, endian, flags)?;
+        if !profile.matches(&facts) {
+            return Err(err!(loader, "OwnedProfileTargetMismatch"));
+        }
+        return Ok((profile.architecture(&facts), None));
     }
     // Container machine and class must agree; do not infer a compiler/ABI.
     let bits = match (machine, class, endian) {
@@ -66,6 +74,29 @@ fn select_architecture(
         ),
         None,
     ))
+}
+
+fn target_facts(
+    machine: u16,
+    class: u8,
+    endian: u8,
+    flags: u32,
+) -> Result<super::profiles::BinaryTargetFacts> {
+    Ok(super::profiles::BinaryTargetFacts {
+        format: super::pipeline::DetectedFormat::Elf,
+        machine,
+        bitness: match class {
+            ELFCLASS32 => 32,
+            ELFCLASS64 => 64,
+            _ => return Err(err!(loader, "Invalid ELF class")),
+        },
+        endian: match endian {
+            1 => Endian::Little,
+            2 => Endian::Big,
+            _ => return Err(err!(loader, "Invalid ELF byte order")),
+        },
+        flags,
+    })
 }
 
 /// A loadable ELF program-header range, retaining the file/virtual-coordinate
@@ -213,6 +244,44 @@ impl ElfLoader {
         Ok(segments)
     }
 
+    /// Header facts from the canonical schema, before any architecture selection.
+    pub fn probe_target_facts(bytes: &[u8]) -> Result<super::profiles::BinaryTargetFacts> {
+        let ident = ElfIdent::parse(bytes)?;
+        let byte_order = match ident.endian {
+            1 => Endian::Little,
+            2 => Endian::Big,
+            _ => return Err(err!(loader, "Invalid ELF byte order")),
+        };
+        let reader = ByteReader::new(bytes, byte_order);
+        let (machine, flags, version, ehsize, minimum) = match ident.class {
+            ELFCLASS32 => {
+                let h = Elf32Header::parse(bytes, &reader)?;
+                (h.machine, h.flags, h.version, h.ehsize, 52)
+            }
+            ELFCLASS64 => {
+                let h = Elf64Header::parse(bytes, &reader)?;
+                (h.machine, h.flags, h.version, h.ehsize, 64)
+            }
+            _ => return Err(err!(loader, "Invalid ELF class")),
+        };
+        if ident.version != 1
+            || version != 1
+            || ehsize < minimum
+            || usize::from(ehsize) > bytes.len()
+        {
+            return Err(err!(loader, "Invalid ELF version or header size"));
+        }
+        target_facts(machine, ident.class, ident.endian, flags)
+    }
+
+    pub(super) fn parse_with_profile(
+        data: DataBuffer,
+        path: String,
+        profile: &super::profiles::OwnedProfile,
+    ) -> Result<LoadedBinary> {
+        Self::parse_selected(data, path, ArchitectureSelection::Owned(profile))
+    }
+
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         Self::parse_selected(data, path, ArchitectureSelection::Opinion)
     }
@@ -222,7 +291,7 @@ impl ElfLoader {
     fn parse_selected(
         data: DataBuffer,
         path: String,
-        policy: ArchitectureSelection,
+        policy: ArchitectureSelection<'_>,
     ) -> Result<LoadedBinary> {
         // 1. Read Identification (first 16 bytes)
         let ident = ElfIdent::parse(data.as_slice())?;
@@ -260,7 +329,7 @@ impl ElfLoader {
         mut data: DataBuffer,
         path: String,
         endian: Endian,
-        policy: ArchitectureSelection,
+        policy: ArchitectureSelection<'_>,
     ) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
         let reader = ByteReader::new(bytes, endian);
@@ -571,7 +640,7 @@ impl ElfLoader {
         mut data: DataBuffer,
         path: String,
         endian: Endian,
-        policy: ArchitectureSelection,
+        policy: ArchitectureSelection<'_>,
     ) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
         let reader = ByteReader::new(bytes, endian);

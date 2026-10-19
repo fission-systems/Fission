@@ -21,6 +21,8 @@ pub mod package;
 mod parser;
 #[cfg(feature = "x86")]
 pub mod pipeline;
+#[cfg(feature = "loader")]
+pub mod profiles;
 pub mod quantum;
 mod quantum_qasm;
 pub mod recovery;

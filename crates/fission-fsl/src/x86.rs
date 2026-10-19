@@ -104,7 +104,7 @@ impl X86Package {
         }
         Ok(())
     }
-    fn decoder(&self) -> &'static str {
+    pub(crate) fn decoder(&self) -> &'static str {
         if self.version == 2 {
             "owned-x86-v2"
         } else {
@@ -440,7 +440,7 @@ impl X86Program {
         .map_err(|e| error(format!("loader: {e}")))?;
         Self::from_loaded_binary(package, &binary, address, size)
     }
-    fn from_loaded_binary(
+    pub(crate) fn from_loaded_binary(
         package: &X86Package,
         binary: &fission_loader::LoadedBinary,
         address: u64,

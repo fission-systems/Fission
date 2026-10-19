@@ -65,13 +65,36 @@ pub enum LoaderRoute {
     KnownUnsupported(KnownUnsupportedLoaderFamily),
 }
 
-/// Ghidra-style loader pipeline entrypoint.
+/// Canonical loader pipeline entrypoint with explicit legacy or owned selection.
 ///
 /// The pipeline owns detection and routing. Individual format loaders own
 /// parsing, mapping, symbol classification, and final `LoadedBinary` creation.
 pub struct LoaderPipeline;
 
 impl LoaderPipeline {
+    /// Select an owned profile from canonical header facts before mapping.
+    /// Initial format support is ELF. Unsupported formats and unmatched catalogs refuse.
+    pub fn load_with_catalog(
+        data: DataBuffer,
+        path: String,
+        catalog: &super::profiles::OwnedProfileCatalog,
+    ) -> Result<super::profiles::ProfiledBinary> {
+        if Self::detect(data.as_slice())? != DetectedFormat::Elf {
+            return Err(err!(loader, "UnsupportedOwnedProfileFormat: ELF only"));
+        }
+        let facts = elf::ElfLoader::probe_target_facts(data.as_slice())?;
+        let profile = catalog
+            .select(&facts)
+            .map_err(|e| err!(loader, "{e}"))?
+            .clone();
+        let binary = elf::ElfLoader::parse_with_profile(data, path, &profile)?;
+        Ok(super::profiles::ProfiledBinary {
+            binary,
+            target_facts: facts,
+            profile,
+        })
+    }
+
     /// Explicit opt-in to container facts without a language/compiler spec.
     /// Initial coverage is little-endian ELF i386/x86-64 only. Unsupported
     /// formats refuse; there is no fallback to opinion/ldefs selection.
