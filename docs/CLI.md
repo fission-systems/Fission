@@ -1046,3 +1046,19 @@ cargo run -p fission-cli -- inventory --help
 ```
 
 If you change compatibility behavior, also verify at least one legacy flat invocation still routes correctly and emits a deprecation warning.
+
+## Decompilation line provenance
+
+JSON decompilation includes additive `line_mappings_nir`, `line_mappings_hir`,
+and `line_mappings` (the selected layer). Each row contains 1-based physical
+`line_number`, native instruction `addresses`, and `defined_variables`.
+`line_mapping_source` is `fission_ssa_assignment_definition`.
+
+These partial maps describe the result definition of a single-assignment SSA
+binding at an actual printed assignment/initializer. They are not complete
+provenance of every RHS variable, call, load, predicate, or effect on that line.
+Input/phi values, cloned/ambiguous sites, partial accesses, repeated definitions,
+and unproved lines remain unmapped. Consumers must honor `defined_variables`
+and prefer direct variable `addresses` when available. NIR and HIR maps are
+computed separately; CLI header/warning deletion remaps physical lines and
+abstains on ambiguous repeated text. No code or effect transformation is added.

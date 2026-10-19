@@ -57,7 +57,7 @@ mod presentation;
 mod printer;
 mod variables;
 
-pub use layer::{LayeredPseudocode, PrintProfile, PseudocodeLayer};
+pub use layer::{LayeredPseudocode, PrintProfile, PseudocodeLayer, RecoveredLineMapping};
 
 pub(crate) use pipeline::{
     recover_global_symbol_accesses, render_hir_function_with_global_decls,
@@ -71,3 +71,5 @@ pub(crate) use printer::{
 };
 pub(crate) use variables::recovered_variables_with_instruction_addresses;
 pub use variables::{RecoveredVariable, recovered_variables};
+
+pub(crate) use layered::render_layered_pseudocode_with_provenance;

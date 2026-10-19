@@ -125,6 +125,15 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    pub(crate) fn recovered_single_definition_addresses(&self) -> HashMap<String, u64> {
+        single_definition_addresses(
+            self.pcode,
+            &self.scalar_ssa,
+            &self.materialized_vns,
+            &self.explicit_merge_bindings,
+        )
+    }
+
     /// Diagnostic-only: see module docs. Pure/read-only, `FISSION_PREVIEW_DIAG`-gated caller.
     pub(crate) fn scan_cover_violations(&self) -> Vec<CoverViolation> {
         scan_cover_violations(
@@ -384,6 +393,76 @@ fn instruction_addresses_by_materialized_name(
             (!addresses.is_empty()).then(|| (name, addresses.iter().copied().collect()))
         })
         .collect()
+}
+
+/// A result's defining instruction, never its entire def/use lifetime.
+fn single_definition_addresses(
+    pcode: &PcodeFunction,
+    scalar_ssa: &NirScalarSsa,
+    materialized_vns: &HashMap<MaterializedVarnodeKey, String>,
+    explicit_merge_bindings: &HashMap<(usize, VarnodeKey), String>,
+) -> HashMap<String, u64> {
+    use fission_midend_core::ir::SsaValueDefinition;
+    let admitted = instruction_addresses_by_materialized_name(
+        pcode,
+        scalar_ssa,
+        materialized_vns,
+        explicit_merge_bindings,
+    );
+    let joins = explicit_merge_bindings
+        .values()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut sites = HashMap::default();
+    for (block_idx, block) in pcode.blocks.iter().enumerate() {
+        for (op_idx, op) in block.ops.iter().enumerate() {
+            let key = (op.address, op.seq_num);
+            let site = LoweringSite { block_idx, op_idx };
+            sites
+                .entry(key)
+                .and_modify(|value| *value = None)
+                .or_insert(Some(site));
+        }
+    }
+    let mut output = HashMap::default();
+    let mut rejected = std::collections::BTreeSet::new();
+    for (key, name) in materialized_vns {
+        if !admitted.contains_key(name) || joins.contains(name) {
+            continue;
+        }
+        let Some(Some(site)) = sites.get(&(key.def_addr, key.def_seq)) else {
+            rejected.insert(name.clone());
+            continue;
+        };
+        let Some(high_id) = high_variable_at_output(scalar_ssa, *site, &key.varnode) else {
+            rejected.insert(name.clone());
+            continue;
+        };
+        let Some(high) = scalar_ssa.high_variables.get(high_id.0 as usize) else {
+            continue;
+        };
+        let proved = !high.members.is_empty()
+            && high.members.iter().all(|member| {
+                let Some(value) = scalar_ssa.values.get(member.0 as usize) else {
+                    return false;
+                };
+                let SsaValueDefinition::Operation(definition) = value.definition else {
+                    return false;
+                };
+                pcode_instruction_address(pcode, definition.block, definition.op)
+                    == Some(key.def_addr)
+            });
+        if !proved
+            || output
+                .get(name)
+                .is_some_and(|address| *address != key.def_addr)
+        {
+            rejected.insert(name.clone());
+        } else {
+            output.insert(name.clone(), key.def_addr);
+        }
+    }
+    output.retain(|name, _| !rejected.contains(name));
+    output
 }
 
 /// Scan every rendered binding name for cases where it was assigned to more
@@ -652,6 +731,44 @@ mod tests {
         );
 
         assert_eq!(addresses.get("source_local"), Some(&vec![0x1000, 0x1004]));
+    }
+
+    #[test]
+    fn single_definition_projection_rejects_inputs_phis_and_cloned_sites() {
+        let mut ssa = sample_ssa_with_two_high_variables(false);
+        let mut pcode = sample_pcode_two_defs(4, 0x10, 4);
+        let key = MaterializedVarnodeKey {
+            varnode: VarnodeKey {
+                space_id: 4,
+                offset: 0x10,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+            def_addr: 0x1000,
+            def_seq: 0,
+        };
+        let materialized = HashMap::from_iter([(key, "value".to_string())]);
+        assert!(
+            single_definition_addresses(&pcode, &ssa, &materialized, &HashMap::default())
+                .is_empty()
+        );
+        ssa.values[0].definition = SsaValueDefinition::Operation(SsaOpSite { block: 0, op: 0 });
+        assert_eq!(
+            single_definition_addresses(&pcode, &ssa, &materialized, &HashMap::default())["value"],
+            0x1000
+        );
+        ssa.values[0].definition = SsaValueDefinition::Phi { block: 0 };
+        assert!(
+            single_definition_addresses(&pcode, &ssa, &materialized, &HashMap::default())
+                .is_empty()
+        );
+        ssa.values[0].definition = SsaValueDefinition::Operation(SsaOpSite { block: 0, op: 0 });
+        pcode.blocks.push(pcode.blocks[0].clone());
+        assert!(
+            single_definition_addresses(&pcode, &ssa, &materialized, &HashMap::default())
+                .is_empty()
+        );
     }
 
     #[test]
