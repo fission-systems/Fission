@@ -1,0 +1,901 @@
+{
+  "date": "2026-10-18",
+  "scope": "mechanical CPU performance; no quality/execution/ranking claim",
+  "source": {
+    "base": "49ea4ebc175a4b28b28ed17266c367c42f3caea0",
+    "patch_sha256": "ddb588b582b65de608550fe923a2c58c404195306429245a63a97ef1894f6d06",
+    "file_sha256": "312ad5b8419f06d2a551c3816ce1c5e76d1b75b7f98c12b4516e043f816a384a",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)\nbinary: rustc\ncommit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3\ncommit-date: 2026-07-07\nhost: aarch64-apple-darwin\nrelease: 1.97.0\nLLVM version: 22.1.6\n"
+  },
+  "executables": {
+    "baseline": "7a3eb9c923537a3280fb80407822fa1a35188b1c8bb71e25279249347ef3ae61",
+    "candidate": "00b474686d53c8b9e21184bdeeb2f8989af186fe89176e966ed9cbdfa9566c84"
+  },
+  "initial": {
+    "rows": [
+      {
+        "label": "llvm",
+        "baseline": {
+          "seconds": 40.09300016704947,
+          "cpu_seconds": 474.25,
+          "rss_bytes": 2829697024
+        },
+        "candidate": {
+          "seconds": 27.11524729197845,
+          "cpu_seconds": 289.16,
+          "rss_bytes": 2664054784
+        },
+        "separate_median_wall_reduction_percent": 32.369123839569426,
+        "paired_median_wall_reduction_percent": 33.34432748522923,
+        "paired_median_cpu_increase_percent": -39.24188939317532
+      }
+    ],
+    "all_non_duration_outputs_equal": true,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "confirmation": {
+    "rows": [
+      {
+        "label": "llvm",
+        "baseline": {
+          "seconds": 40.443693292094395,
+          "cpu_seconds": 476.19,
+          "rss_bytes": 2854584320
+        },
+        "candidate": {
+          "seconds": 26.449098583078012,
+          "cpu_seconds": 293.51,
+          "rss_bytes": 2767503360
+        },
+        "separate_median_wall_reduction_percent": 34.60266254108878,
+        "paired_median_wall_reduction_percent": 34.314601663654585,
+        "paired_median_cpu_increase_percent": -38.79709600700966
+      }
+    ],
+    "all_non_duration_outputs_equal": true,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "controls": {
+    "rows": [
+      {
+        "label": "03",
+        "baseline": {
+          "seconds": 1.263214958133176,
+          "cpu_seconds": 2.9699999999999998,
+          "rss_bytes": 836403200
+        },
+        "candidate": {
+          "seconds": 1.2518941250164062,
+          "cpu_seconds": 2.84,
+          "rss_bytes": 839991296
+        },
+        "separate_median_wall_reduction_percent": 0.8961921360953529,
+        "paired_median_wall_reduction_percent": 1.4539526281590276,
+        "paired_median_cpu_increase_percent": -4.3771043771043905
+      },
+      {
+        "label": "22",
+        "baseline": {
+          "seconds": 6.994536167010665,
+          "cpu_seconds": 68.31,
+          "rss_bytes": 2471968768
+        },
+        "candidate": {
+          "seconds": 6.9344302078243345,
+          "cpu_seconds": 67.38,
+          "rss_bytes": 2468691968
+        },
+        "separate_median_wall_reduction_percent": 0.8593273056448969,
+        "paired_median_wall_reduction_percent": 0.838291241493061,
+        "paired_median_cpu_increase_percent": -1.6981408285756228
+      },
+      {
+        "label": "27",
+        "baseline": {
+          "seconds": 0.6308395420201123,
+          "cpu_seconds": 1.21,
+          "rss_bytes": 330465280
+        },
+        "candidate": {
+          "seconds": 0.6313040410168469,
+          "cpu_seconds": 1.21,
+          "rss_bytes": 323043328
+        },
+        "separate_median_wall_reduction_percent": -0.07363187717230879,
+        "paired_median_wall_reduction_percent": 0.05203338108592526,
+        "paired_median_cpu_increase_percent": 0.0
+      },
+      {
+        "label": "40",
+        "baseline": {
+          "seconds": 0.8883393339347094,
+          "cpu_seconds": 2.13,
+          "rss_bytes": 707264512
+        },
+        "candidate": {
+          "seconds": 0.85874337493442,
+          "cpu_seconds": 1.7999999999999998,
+          "rss_bytes": 708165632
+        },
+        "separate_median_wall_reduction_percent": 3.3316051501626642,
+        "paired_median_wall_reduction_percent": 3.1861347597501033,
+        "paired_median_cpu_increase_percent": -16.037735849056624
+      }
+    ],
+    "all_non_duration_outputs_equal": true,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "large_controls": {
+    "rows": [
+      {
+        "label": "mlir",
+        "baseline": {
+          "seconds": 20.672877582954243,
+          "cpu_seconds": 139.89999999999998,
+          "rss_bytes": 2259648512
+        },
+        "candidate": {
+          "seconds": 17.096010041888803,
+          "cpu_seconds": 89.97,
+          "rss_bytes": 2283388928
+        },
+        "separate_median_wall_reduction_percent": 17.302223779502935,
+        "paired_median_wall_reduction_percent": 17.302223779502935,
+        "paired_median_cpu_increase_percent": -35.4181558255897
+      },
+      {
+        "label": "mlir-opt",
+        "baseline": {
+          "seconds": 10.649718707893044,
+          "cpu_seconds": 90.39,
+          "rss_bytes": 1400438784
+        },
+        "candidate": {
+          "seconds": 8.130759082967415,
+          "cpu_seconds": 56.31,
+          "rss_bytes": 1397686272
+        },
+        "separate_median_wall_reduction_percent": 23.652827778997587,
+        "paired_median_wall_reduction_percent": 23.825432881538276,
+        "paired_median_cpu_increase_percent": -37.81391746874654
+      }
+    ],
+    "all_non_duration_outputs_equal": true,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "ranges": {
+    "initial": {
+      "llvm": {
+        "baseline": {
+          "seconds": {
+            "min": 40.00489500002004,
+            "max": 40.67957950010896
+          },
+          "cpu_seconds": {
+            "min": 471.67,
+            "max": 475.92
+          },
+          "rss_bytes": {
+            "min": 2711257088,
+            "max": 3177185280
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 26.58899191697128,
+            "max": 27.755683209048584
+          },
+          "cpu_seconds": {
+            "min": 286.91,
+            "max": 294.97999999999996
+          },
+          "rss_bytes": {
+            "min": 2640445440,
+            "max": 2824257536
+          }
+        }
+      }
+    },
+    "confirm": {
+      "llvm": {
+        "baseline": {
+          "seconds": {
+            "min": 39.66959116701037,
+            "max": 40.90471679181792
+          },
+          "cpu_seconds": {
+            "min": 460.46999999999997,
+            "max": 485.01000000000005
+          },
+          "rss_bytes": {
+            "min": 2703523840,
+            "max": 3059712000
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 25.961655583931133,
+            "max": 26.695186541881412
+          },
+          "cpu_seconds": {
+            "min": 289.41999999999996,
+            "max": 295.38
+          },
+          "rss_bytes": {
+            "min": 2553036800,
+            "max": 2861973504
+          }
+        }
+      }
+    },
+    "controls": {
+      "03": {
+        "baseline": {
+          "seconds": {
+            "min": 1.2473394579719752,
+            "max": 1.3176426668651402
+          },
+          "cpu_seconds": {
+            "min": 2.95,
+            "max": 2.98
+          },
+          "rss_bytes": {
+            "min": 832684032,
+            "max": 838893568
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 1.2418192920740694,
+            "max": 1.2560764581430703
+          },
+          "cpu_seconds": {
+            "min": 2.81,
+            "max": 2.8600000000000003
+          },
+          "rss_bytes": {
+            "min": 830423040,
+            "max": 841728000
+          }
+        }
+      },
+      "22": {
+        "baseline": {
+          "seconds": {
+            "min": 6.955419749952853,
+            "max": 7.013019834179431
+          },
+          "cpu_seconds": {
+            "min": 68.19,
+            "max": 68.78
+          },
+          "rss_bytes": {
+            "min": 2441199616,
+            "max": 2508013568
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 6.834194499999285,
+            "max": 6.999434542143717
+          },
+          "cpu_seconds": {
+            "min": 65.67999999999999,
+            "max": 68.11
+          },
+          "rss_bytes": {
+            "min": 2407972864,
+            "max": 2512601088
+          }
+        }
+      },
+      "27": {
+        "baseline": {
+          "seconds": {
+            "min": 0.6278628329746425,
+            "max": 0.6387161661405116
+          },
+          "cpu_seconds": {
+            "min": 1.19,
+            "max": 1.22
+          },
+          "rss_bytes": {
+            "min": 321241088,
+            "max": 336658432
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 0.6264739581383765,
+            "max": 0.6426091250032187
+          },
+          "cpu_seconds": {
+            "min": 1.19,
+            "max": 1.22
+          },
+          "rss_bytes": {
+            "min": 317915136,
+            "max": 334970880
+          }
+        }
+      },
+      "40": {
+        "baseline": {
+          "seconds": {
+            "min": 0.8733126251026988,
+            "max": 0.8928900000173599
+          },
+          "cpu_seconds": {
+            "min": 2.12,
+            "max": 2.15
+          },
+          "rss_bytes": {
+            "min": 703561728,
+            "max": 708296704
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 0.8454877079930156,
+            "max": 0.8805856250692159
+          },
+          "cpu_seconds": {
+            "min": 1.7799999999999998,
+            "max": 1.9
+          },
+          "rss_bytes": {
+            "min": 704741376,
+            "max": 709345280
+          }
+        }
+      }
+    },
+    "large-controls": {
+      "mlir": {
+        "baseline": {
+          "seconds": {
+            "min": 20.5762354999315,
+            "max": 20.747514040907845
+          },
+          "cpu_seconds": {
+            "min": 139.21,
+            "max": 140.33
+          },
+          "rss_bytes": {
+            "min": 2250981376,
+            "max": 2291089408
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 16.967706915922463,
+            "max": 17.16189229208976
+          },
+          "cpu_seconds": {
+            "min": 89.78,
+            "max": 90.35
+          },
+          "rss_bytes": {
+            "min": 2223505408,
+            "max": 2286370816
+          }
+        }
+      },
+      "mlir-opt": {
+        "baseline": {
+          "seconds": {
+            "min": 10.545967750018463,
+            "max": 11.42169712507166
+          },
+          "cpu_seconds": {
+            "min": 89.11999999999999,
+            "max": 100.97
+          },
+          "rss_bytes": {
+            "min": 1400373248,
+            "max": 1407451136
+          }
+        },
+        "candidate": {
+          "seconds": {
+            "min": 8.112377125071362,
+            "max": 8.202965458855033
+          },
+          "cpu_seconds": {
+            "min": 56.21,
+            "max": 57.21
+          },
+          "rss_bytes": {
+            "min": 1378107392,
+            "max": 1427701760
+          }
+        }
+      }
+    }
+  },
+  "preservation": {
+    "metadata_cells": 45,
+    "identity_detections_equal": true,
+    "function_lists_equal": true,
+    "listed_records": 334275,
+    "fresh_functions": 250,
+    "nonempty": 250,
+    "error_field_count": 0,
+    "full_non_duration_records_equal": true,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ],
+    "repeated_fission_batches_equal": 64,
+    "raw_parity": {
+      "full_raw_state_lift_error_records": 1024,
+      "raw_sha256": "5721b8f3f02547208b90aec3889566b5bfb33dab046fcc95a0509c0890bba9b7",
+      "fid_records": 512,
+      "fid_sha256": "a771dbb8a6b4ef303ab310b1e62ca5f5a7d8a596cf45ef7fe53a51ed618bc6fe",
+      "all_equal": true
+    }
+  },
+  "validation": {
+    "targeted_passed": 3,
+    "related_passed": 2404,
+    "related_skipped": 9,
+    "checks_clippy_release_fmt_owner": "passed",
+    "log_sha256": {
+      "targeted-backtrace-enabled.log": "17ac71ee625ac837bdd12bb535822b95b84e7f25abc29ef8451988a0120bb045",
+      "related.log": "4b6831e2af19e99c64a6adabccf4667f85a2a5a6393dbab118ee07280e67efaa",
+      "check.log": "356f21c3d8e5377c015b44ee67d9a5bba2f4375d2610e0d69620c167320555d5",
+      "clippy.log": "2dcd0453021f80da530b169f7a62e2595c8271dddf6fb24a172ae1dd6b5d409d",
+      "release.log": "c209c4bbc162e51b71cd315e486e0c2e7375ce7d6c770e632d29c66b5a8b4c18",
+      "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "owner.log": "ca80b7d4297db236d86fdbfe9f67da7324bf49aae388dea05d77231441c0807c"
+    },
+    "pre_fix_test_failure": "Debug backtraces differed between evaluator functions; logical error-chain comparison corrected; full backtrace-enabled rerun passed"
+  },
+  "frozen": {
+    "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+    "input_hash_reference": "/Users/sjkim1127/Fission/benchmark/artifacts/performance/2026-10-18-metal-batch/run/freeze.json",
+    "input_hash_reference_sha256": "0b0d18f5faab636a4279e68fc3296e945cf91388fb0e53839139de03474776fa",
+    "inputs": [
+      {
+        "id": "00",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O0/OpenCC/opencc",
+        "bytes": 329728,
+        "sha256": "2b34da75fff8870f32c0a3cee080d06a7bf86618d162bbec37f0148b1bb03ea3",
+        "verified_sha256": "2b34da75fff8870f32c0a3cee080d06a7bf86618d162bbec37f0148b1bb03ea3"
+      },
+      {
+        "id": "01",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O0/leveldb/libleveldb.so.1.23.0",
+        "bytes": 664944,
+        "sha256": "fb744186acf789dd7936e76e14cb608b41ef3afe7e41304c1a29a7366878ae14",
+        "verified_sha256": "fb744186acf789dd7936e76e14cb608b41ef3afe7e41304c1a29a7366878ae14"
+      },
+      {
+        "id": "02",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O0/mergerfs/mergerfs",
+        "bytes": 2429448,
+        "sha256": "4e2a3d9e45cf60ac57685fa4f6571dc52b123a4a6edaa1f837057d472c381669",
+        "verified_sha256": "4e2a3d9e45cf60ac57685fa4f6571dc52b123a4a6edaa1f837057d472c381669"
+      },
+      {
+        "id": "03",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O0/snappy/libsnappy.so.1.2.2",
+        "bytes": 135400,
+        "sha256": "f71312d8db4ca40bb626132b3c157c18f49222b8b6619edb949664b2b98bf89f",
+        "verified_sha256": "f71312d8db4ca40bb626132b3c157c18f49222b8b6619edb949664b2b98bf89f"
+      },
+      {
+        "id": "04",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O0/ssdb/ssdb-server",
+        "bytes": 1183968,
+        "sha256": "387640c8d0fed448f69852eae43bb4d4d430269935cc3834d9172085f8eb0bbb",
+        "verified_sha256": "387640c8d0fed448f69852eae43bb4d4d430269935cc3834d9172085f8eb0bbb"
+      },
+      {
+        "id": "05",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O0/the-powder-toy/powder",
+        "bytes": 5837840,
+        "sha256": "2fb8edde86aff3195ea8eadee3b56569ab46e15604c29c09cf6dabf68236fbbc",
+        "verified_sha256": "2fb8edde86aff3195ea8eadee3b56569ab46e15604c29c09cf6dabf68236fbbc"
+      },
+      {
+        "id": "06",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2/OpenCC/opencc",
+        "bytes": 198656,
+        "sha256": "b479bb9d7fe117fa1bf498091f57b4596f0b236a0e7ee9048ee47471774346fc",
+        "verified_sha256": "b479bb9d7fe117fa1bf498091f57b4596f0b236a0e7ee9048ee47471774346fc"
+      },
+      {
+        "id": "07",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2/leveldb/libleveldb.so.1.23.0",
+        "bytes": 396560,
+        "sha256": "85211404edaf421a7e3a4fda0e0828bd159f12773aa066a90943e7f99818ae05",
+        "verified_sha256": "85211404edaf421a7e3a4fda0e0828bd159f12773aa066a90943e7f99818ae05"
+      },
+      {
+        "id": "08",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2/mergerfs/mergerfs",
+        "bytes": 1380072,
+        "sha256": "3be17911d1cbf52a516b016dd5b2df1234c8f5f5ca68af933209f4620c5ecc5e",
+        "verified_sha256": "3be17911d1cbf52a516b016dd5b2df1234c8f5f5ca68af933209f4620c5ecc5e"
+      },
+      {
+        "id": "09",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2/snappy/libsnappy.so.1.2.2",
+        "bytes": 67872,
+        "sha256": "610d1dd5c0b42016acee9d487c74d4598c9a5a702946004c94ea84ab2cb94a7e",
+        "verified_sha256": "610d1dd5c0b42016acee9d487c74d4598c9a5a702946004c94ea84ab2cb94a7e"
+      },
+      {
+        "id": "10",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2/ssdb/ssdb-server",
+        "bytes": 1052800,
+        "sha256": "c72e6ca74deb4905b2c0615ea8be79f538d825f603279ea0c338f63fd0ae7ed5",
+        "verified_sha256": "c72e6ca74deb4905b2c0615ea8be79f538d825f603279ea0c338f63fd0ae7ed5"
+      },
+      {
+        "id": "11",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2/the-powder-toy/powder",
+        "bytes": 3347336,
+        "sha256": "a0127641604507b93359d089d0a12ba9b557d65500349fd45e721bbd8c97af96",
+        "verified_sha256": "a0127641604507b93359d089d0a12ba9b557d65500349fd45e721bbd8c97af96"
+      },
+      {
+        "id": "12",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2-noinline/OpenCC/opencc",
+        "bytes": 264192,
+        "sha256": "a396371fb685ddbe812113ab92109204a20ef616fb494752ca364eca88071463",
+        "verified_sha256": "a396371fb685ddbe812113ab92109204a20ef616fb494752ca364eca88071463"
+      },
+      {
+        "id": "13",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2-noinline/leveldb/libleveldb.so.1.23.0",
+        "bytes": 531504,
+        "sha256": "e8ef8316bf5ae7554a977e56168a18f172385a6c1700980592259fd2082eeb83",
+        "verified_sha256": "e8ef8316bf5ae7554a977e56168a18f172385a6c1700980592259fd2082eeb83"
+      },
+      {
+        "id": "14",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2-noinline/mergerfs/mergerfs",
+        "bytes": 2166504,
+        "sha256": "0633c718ea2d9f161b8453cdf2cb4c7784dadfe02822cb1da2550d851cefbabc",
+        "verified_sha256": "0633c718ea2d9f161b8453cdf2cb4c7784dadfe02822cb1da2550d851cefbabc"
+      },
+      {
+        "id": "15",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2-noinline/snappy/libsnappy.so.1.2.2",
+        "bytes": 134680,
+        "sha256": "27b3960b13b8ce4155e30de7d44906388d6c571476b56e4162bc9e4ad90daaae",
+        "verified_sha256": "27b3960b13b8ce4155e30de7d44906388d6c571476b56e4162bc9e4ad90daaae"
+      },
+      {
+        "id": "16",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2-noinline/ssdb/ssdb-server",
+        "bytes": 1118336,
+        "sha256": "66134e36f007c0f4785ba5eeb996d18cd514d15df5f8be673ea2d16041e38f78",
+        "verified_sha256": "66134e36f007c0f4785ba5eeb996d18cd514d15df5f8be673ea2d16041e38f78"
+      },
+      {
+        "id": "17",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/linux/arm64/O2-noinline/the-powder-toy/powder",
+        "bytes": 4461448,
+        "sha256": "316fb82a965c9d0538fd8e52256a970a6598541e8b5ce7235f655eca04da438d",
+        "verified_sha256": "316fb82a965c9d0538fd8e52256a970a6598541e8b5ce7235f655eca04da438d"
+      },
+      {
+        "id": "18",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O0/OpenCC/opencc.exe",
+        "bytes": 1588736,
+        "sha256": "1dc4891d2cf7eeeebf96ef8bb15dcd60f13220f5e97a0adc38f6bf787952dd70",
+        "verified_sha256": "1dc4891d2cf7eeeebf96ef8bb15dcd60f13220f5e97a0adc38f6bf787952dd70"
+      },
+      {
+        "id": "19",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O0/detours/withdll.exe",
+        "bytes": 615424,
+        "sha256": "967a9b6af65106daf535a914de82719346ac0b6df651f72a705a6aa6c315f546",
+        "verified_sha256": "967a9b6af65106daf535a914de82719346ac0b6df651f72a705a6aa6c315f546"
+      },
+      {
+        "id": "20",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O0/ninja/ninja.exe",
+        "bytes": 1141760,
+        "sha256": "01b31cf9bc601cd06236dec0bfeba1b93068c1663ab66b4789d8507ae25f4589",
+        "verified_sha256": "01b31cf9bc601cd06236dec0bfeba1b93068c1663ab66b4789d8507ae25f4589"
+      },
+      {
+        "id": "21",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O0/snappy/snappy.dll",
+        "bytes": 107520,
+        "sha256": "696f0c504463a557c6ccf56624596745f29bc7e62a7717befc93defe0d613491",
+        "verified_sha256": "696f0c504463a557c6ccf56624596745f29bc7e62a7717befc93defe0d613491"
+      },
+      {
+        "id": "22",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O0/tracy/tracy-profiler.exe",
+        "bytes": 39033344,
+        "sha256": "8c089578f78011abef068dd5954aac2af6daf74231382e3dec72bf7ec796a94e",
+        "verified_sha256": "8c089578f78011abef068dd5954aac2af6daf74231382e3dec72bf7ec796a94e"
+      },
+      {
+        "id": "23",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O0/winsparkle/WinSparkle.dll",
+        "bytes": 6009344,
+        "sha256": "3102f0c03e4bbddbdf4c5e799870e6253078370f39eecde4432988067311d06c",
+        "verified_sha256": "3102f0c03e4bbddbdf4c5e799870e6253078370f39eecde4432988067311d06c"
+      },
+      {
+        "id": "24",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2/OpenCC/opencc.exe",
+        "bytes": 968704,
+        "sha256": "45a8cdd9f34f4ef3bbbcb05ec4e6165d7cefd9d1393918cf2bcc6ee24d8f9fcf",
+        "verified_sha256": "45a8cdd9f34f4ef3bbbcb05ec4e6165d7cefd9d1393918cf2bcc6ee24d8f9fcf"
+      },
+      {
+        "id": "25",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2/detours/withdll.exe",
+        "bytes": 613888,
+        "sha256": "9f6b3fe0bdd1a6496b0665439a230acd6310af94e9dca149cb357420b4968b67",
+        "verified_sha256": "9f6b3fe0bdd1a6496b0665439a230acd6310af94e9dca149cb357420b4968b67"
+      },
+      {
+        "id": "26",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2/ninja/ninja.exe",
+        "bytes": 720896,
+        "sha256": "2f944654930b102d9a639591d7977b0a07d94445c97fce4a0fc51955116ec11b",
+        "verified_sha256": "2f944654930b102d9a639591d7977b0a07d94445c97fce4a0fc51955116ec11b"
+      },
+      {
+        "id": "27",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2/snappy/snappy.dll",
+        "bytes": 90112,
+        "sha256": "32d32be7699c41d660b34d3ca6260e36c47a382ef9880fd911332ebac3318ba5",
+        "verified_sha256": "32d32be7699c41d660b34d3ca6260e36c47a382ef9880fd911332ebac3318ba5"
+      },
+      {
+        "id": "28",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2/tracy/tracy-profiler.exe",
+        "bytes": 33728000,
+        "sha256": "51d411d396c203cd9328b90034b32912252ce00e0b4b633052e7e21df00d0ec4",
+        "verified_sha256": "51d411d396c203cd9328b90034b32912252ce00e0b4b633052e7e21df00d0ec4"
+      },
+      {
+        "id": "29",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2/winsparkle/WinSparkle.dll",
+        "bytes": 5915648,
+        "sha256": "469e4682860c42d2da2d0ddc19df68e77bef1041260b51c2f388448b309a11ed",
+        "verified_sha256": "469e4682860c42d2da2d0ddc19df68e77bef1041260b51c2f388448b309a11ed"
+      },
+      {
+        "id": "30",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2-noinline/OpenCC/opencc.exe",
+        "bytes": 1003008,
+        "sha256": "d1c3dc4ec79ec94b0058b3120afefb070a2be0825833c4d0793f4c8a7b51ef59",
+        "verified_sha256": "d1c3dc4ec79ec94b0058b3120afefb070a2be0825833c4d0793f4c8a7b51ef59"
+      },
+      {
+        "id": "31",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2-noinline/detours/withdll.exe",
+        "bytes": 612352,
+        "sha256": "882b7cbf0890ef5e13fd05c9659c652650232bdefbef9d82c5ada4c4fb16064b",
+        "verified_sha256": "882b7cbf0890ef5e13fd05c9659c652650232bdefbef9d82c5ada4c4fb16064b"
+      },
+      {
+        "id": "32",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2-noinline/ninja/ninja.exe",
+        "bytes": 827904,
+        "sha256": "dba990b021df2c0189ccb75ee345513ec90d987c73f9f6a169a41705e98df246",
+        "verified_sha256": "dba990b021df2c0189ccb75ee345513ec90d987c73f9f6a169a41705e98df246"
+      },
+      {
+        "id": "33",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2-noinline/snappy/snappy.dll",
+        "bytes": 84480,
+        "sha256": "0998482d359e03639280b7f1c90e4dfc41e55cef47e9fbed77f2075e43e1b5f4",
+        "verified_sha256": "0998482d359e03639280b7f1c90e4dfc41e55cef47e9fbed77f2075e43e1b5f4"
+      },
+      {
+        "id": "34",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2-noinline/tracy/tracy-profiler.exe",
+        "bytes": 33890304,
+        "sha256": "b5d346dc70c14e9db33ff70d330a8ab594b17783f8651d79baef5f39a324df1a",
+        "verified_sha256": "b5d346dc70c14e9db33ff70d330a8ab594b17783f8651d79baef5f39a324df1a"
+      },
+      {
+        "id": "35",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/windows/x86_64/O2-noinline/winsparkle/WinSparkle.dll",
+        "bytes": 5892608,
+        "sha256": "d65d12084251b25776f8d95176718399e9c2b0989c478c72ea523a54ce4d5492",
+        "verified_sha256": "d65d12084251b25776f8d95176718399e9c2b0989c478c72ea523a54ce4d5492"
+      },
+      {
+        "id": "36",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O0/OpenCC/opencc",
+        "bytes": 1786304,
+        "sha256": "67c815d39a1dfca4f436d0f756e97418aadd7963198a3a81e375b4c310f1939e",
+        "verified_sha256": "67c815d39a1dfca4f436d0f756e97418aadd7963198a3a81e375b4c310f1939e"
+      },
+      {
+        "id": "37",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O0/ninja/ninja",
+        "bytes": 1063008,
+        "sha256": "75cf0ed6a02b4ff1eebd959774a9c1be03d84aa77272c8feff683bb217de54b8",
+        "verified_sha256": "75cf0ed6a02b4ff1eebd959774a9c1be03d84aa77272c8feff683bb217de54b8"
+      },
+      {
+        "id": "38",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O0/snappy/libsnappy.dylib",
+        "bytes": 107152,
+        "sha256": "4f90c07ed46bb47bcef75d19216f737818d5a5efb24a540e92c9fcecd2c94b40",
+        "verified_sha256": "4f90c07ed46bb47bcef75d19216f737818d5a5efb24a540e92c9fcecd2c94b40"
+      },
+      {
+        "id": "39",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O2/OpenCC/opencc",
+        "bytes": 719920,
+        "sha256": "22cc4554475c4d2d5f7454b298cbb551f0d75d9d02ff69731bfac068573201f8",
+        "verified_sha256": "22cc4554475c4d2d5f7454b298cbb551f0d75d9d02ff69731bfac068573201f8"
+      },
+      {
+        "id": "40",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O2/ninja/ninja",
+        "bytes": 330416,
+        "sha256": "0628307f3fd492bbbec336ee590e604b4f1bd9c0e63d5f6e11fc9955e679931e",
+        "verified_sha256": "0628307f3fd492bbbec336ee590e604b4f1bd9c0e63d5f6e11fc9955e679931e"
+      },
+      {
+        "id": "41",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O2/snappy/libsnappy.dylib",
+        "bytes": 53776,
+        "sha256": "d518851383b135b64296702fc6dd9d67d2cfc587da212358e8a7a67e921baffd",
+        "verified_sha256": "d518851383b135b64296702fc6dd9d67d2cfc587da212358e8a7a67e921baffd"
+      },
+      {
+        "id": "42",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O2-noinline/OpenCC/opencc",
+        "bytes": 725872,
+        "sha256": "52c1ebb86cb7fd77f7141944adeff8a1025c36393d681036927fee37edb44373",
+        "verified_sha256": "52c1ebb86cb7fd77f7141944adeff8a1025c36393d681036927fee37edb44373"
+      },
+      {
+        "id": "43",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O2-noinline/ninja/ninja",
+        "bytes": 400896,
+        "sha256": "d882afc6667e7d3325b33fcaef5957283e5709b3576326753cbb33f4e74f22b5",
+        "verified_sha256": "d882afc6667e7d3325b33fcaef5957283e5709b3576326753cbb33f4e74f22b5"
+      },
+      {
+        "id": "44",
+        "path": "/Users/sjkim1127/cpp_qualification_v2/staged/qualification-v2/inputs/macos/arm64/O2-noinline/snappy/libsnappy.dylib",
+        "bytes": 54032,
+        "sha256": "816de59e4c6d2c077c56aa697a9ca2d97a18c0b4f39a1e420c09a8b9c6135477",
+        "verified_sha256": "816de59e4c6d2c077c56aa697a9ca2d97a18c0b4f39a1e420c09a8b9c6135477"
+      },
+      {
+        "id": "large-0",
+        "path": "/opt/homebrew/Cellar/llvm/22.1.8/lib/libLLVM.dylib",
+        "bytes": 163648752,
+        "sha256": "21be63841572f7f00e754426f389ec6bf6b704fc1993b890e276a82df894257c",
+        "verified_sha256": "21be63841572f7f00e754426f389ec6bf6b704fc1993b890e276a82df894257c"
+      },
+      {
+        "id": "large-1",
+        "path": "/opt/homebrew/Cellar/llvm/22.1.8/lib/libMLIR.dylib",
+        "bytes": 155816480,
+        "sha256": "aec2b3839888beabafd9095b006d099ebe2130fdbd838d9a89d01afcafc7819f",
+        "verified_sha256": "aec2b3839888beabafd9095b006d099ebe2130fdbd838d9a89d01afcafc7819f"
+      },
+      {
+        "id": "large-2",
+        "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/mlir-transform-opt",
+        "bytes": 101044304,
+        "sha256": "c98d6ad79a8b65bdb37826ace094cf3ec8eafa3ff9fd960100cbd074a0ddf3ba",
+        "verified_sha256": "c98d6ad79a8b65bdb37826ace094cf3ec8eafa3ff9fd960100cbd074a0ddf3ba"
+      }
+    ],
+    "resource_utils_tree": "10b8ffc7a849cdddd7e9dc1f2d6854e4ad9d2d6f",
+    "resource_tracked_diff_empty": true,
+    "source": {
+      "base": "49ea4ebc175a4b28b28ed17266c367c42f3caea0",
+      "patch_sha256": "ddb588b582b65de608550fe923a2c58c404195306429245a63a97ef1894f6d06",
+      "file_sha256": "312ad5b8419f06d2a551c3816ce1c5e76d1b75b7f98c12b4516e043f816a384a",
+      "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)\nbinary: rustc\ncommit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3\ncommit-date: 2026-07-07\nhost: aarch64-apple-darwin\nrelease: 1.97.0\nLLVM version: 22.1.6\n"
+    },
+    "binaries": {
+      "baseline": "7a3eb9c923537a3280fb80407822fa1a35188b1c8bb71e25279249347ef3ae61",
+      "candidate": "00b474686d53c8b9e21184bdeeb2f8989af186fe89176e966ed9cbdfa9566c84"
+    }
+  },
+  "kuna": {
+    "version": "1.808",
+    "sha256": "46cd0f8109557f8fe1e8bae53e191bd6b92a7d0410ee2b279a37621c5a2c3e05",
+    "cells": [
+      {
+        "cell": "03",
+        "jobs1": {
+          "fission": 1.8334453329443932,
+          "kuna": 0.1843708751257509
+        },
+        "jobs14": {
+          "fission": 1.248311209026724,
+          "kuna": 0.32174475002102554
+        },
+        "faster_setting_ratio": 6.770652947084557
+      },
+      {
+        "cell": "22",
+        "jobs1": {
+          "fission": 8.105059124995023,
+          "kuna": 2.7028748330194503
+        },
+        "jobs14": {
+          "fission": 6.935830208007246,
+          "kuna": 5.416955499909818
+        },
+        "faster_setting_ratio": 2.5660937470267737
+      },
+      {
+        "cell": "27",
+        "jobs1": {
+          "fission": 0.80745470803231,
+          "kuna": 0.10781204211525619
+        },
+        "jobs14": {
+          "fission": 0.6320070419460535,
+          "kuna": 0.24401983292773366
+        },
+        "faster_setting_ratio": 5.862119198803488
+      },
+      {
+        "cell": "40",
+        "jobs1": {
+          "fission": 0.9031172499526292,
+          "kuna": 0.32053858297877014
+        },
+        "jobs14": {
+          "fission": 0.8660042921546847,
+          "kuna": 0.6759156249463558
+        },
+        "faster_setting_ratio": 2.7017162305607427
+      }
+    ],
+    "same_quality_claim": false
+  }
+}

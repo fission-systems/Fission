@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::OnceLock;
 
@@ -175,6 +175,7 @@ impl std::error::Error for RuntimeEntrySelectionError {}
 
 #[derive(Debug, Clone)]
 struct RegistryData {
+    variants_by_entry_id: BTreeMap<String, Vec<usize>>,
     processors: Vec<ProcessorDescriptor>,
     variants: Vec<RuntimeVariantDescriptor>,
     frontends: Vec<RuntimeFrontendDescriptor>,
@@ -346,34 +347,56 @@ fn variant_language_facts(variant: &RuntimeVariantDescriptor) -> Option<Language
 }
 
 pub fn runtime_variant_for_entry(entry: &EntrySpec) -> Result<RuntimeVariantDescriptor> {
-    registry_data()
-        .variants
-        .iter()
-        .find(|variant| {
-            variant.processor == entry.arch
-                && variant.entry_spec == entry.entry_spec
-                && variant.entry_id == entry.entry_id
-        })
-        .cloned()
-        .ok_or_else(|| {
-            anyhow!(
-                "runtime variant descriptor missing for {} ({})",
-                entry.entry_id,
-                entry.arch
-            )
-        })
+    runtime_variant_for_entry_ref(entry).cloned()
+}
+
+pub(crate) fn runtime_variant_for_entry_ref(
+    entry: &EntrySpec,
+) -> Result<&'static RuntimeVariantDescriptor> {
+    registry_data().variant_for_entry(entry).ok_or_else(|| {
+        anyhow!(
+            "runtime variant descriptor missing for {} ({})",
+            entry.entry_id,
+            entry.arch
+        )
+    })
 }
 
 pub fn status_for_entry(entry: &EntrySpec) -> RuntimeFrontendStatus {
-    runtime_variant_for_entry(entry)
+    runtime_variant_for_entry_ref(entry)
         .map(|variant| variant.support_level.as_frontend_status())
         .unwrap_or(RuntimeFrontendStatus::RegisteredCompileOnly)
 }
 
 pub fn executable_engine_key_for_entry(entry: &EntrySpec) -> Option<ExecutionEngineKey> {
-    runtime_variant_for_entry(entry)
+    runtime_variant_for_entry_ref(entry)
         .ok()
         .and_then(|variant| variant.execution_engine_key)
+}
+
+fn variant_entry_index(variants: &[RuntimeVariantDescriptor]) -> BTreeMap<String, Vec<usize>> {
+    let mut index = BTreeMap::<String, Vec<usize>>::new();
+    for (position, variant) in variants.iter().enumerate() {
+        index
+            .entry(variant.entry_id.clone())
+            .or_default()
+            .push(position);
+    }
+    index
+}
+
+impl RegistryData {
+    fn variant_for_entry(&self, entry: &EntrySpec) -> Option<&RuntimeVariantDescriptor> {
+        self.variants_by_entry_id
+            .get(&entry.entry_id)?
+            .iter()
+            .filter_map(|&i| self.variants.get(i))
+            .find(|variant| {
+                variant.processor == entry.arch
+                    && variant.entry_spec == entry.entry_spec
+                    && variant.entry_id == entry.entry_id
+            })
+    }
 }
 
 fn registry_data() -> &'static RegistryData {
@@ -431,6 +454,7 @@ fn load_registry_data() -> RegistryData {
     assert_eq!(manifest.variant_count, variants.len());
 
     RegistryData {
+        variants_by_entry_id: variant_entry_index(&variants),
         processors,
         variants,
         frontends,
@@ -489,6 +513,99 @@ pub fn module_name_for_processor(processor: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry_for(variant: &RuntimeVariantDescriptor) -> EntrySpec {
+        EntrySpec {
+            arch: variant.processor.clone(),
+            path: std::path::PathBuf::new(),
+            entry_spec: variant.entry_spec.clone(),
+            entry_id: variant.entry_id.clone(),
+            language_ids: vec![],
+            language_aliases: vec![],
+            processor_spec: None,
+        }
+    }
+
+    #[test]
+    fn borrowed_runtime_variant_matches_original_scan_for_every_entry_and_mismatch() {
+        let data = registry_data();
+        for variant in &data.variants {
+            let mut entry = entry_for(variant);
+            for mismatch in 0..4 {
+                let expected = data.variants.iter().find(|v| {
+                    v.processor == entry.arch
+                        && v.entry_spec == entry.entry_spec
+                        && v.entry_id == entry.entry_id
+                });
+                let actual = data.variant_for_entry(&entry);
+                assert_eq!(actual, expected);
+                if let Some(expected) = expected {
+                    assert!(std::ptr::eq(actual.unwrap(), expected));
+                    assert_eq!(runtime_variant_for_entry(&entry).unwrap(), *expected);
+                    assert!(std::ptr::eq(
+                        runtime_variant_for_entry_ref(&entry).unwrap(),
+                        expected
+                    ));
+                    assert_eq!(
+                        status_for_entry(&entry),
+                        expected.support_level.as_frontend_status()
+                    );
+                    assert_eq!(
+                        executable_engine_key_for_entry(&entry),
+                        expected.execution_engine_key
+                    );
+                } else {
+                    assert_eq!(
+                        runtime_variant_for_entry(&entry).unwrap_err().to_string(),
+                        format!(
+                            "runtime variant descriptor missing for {} ({})",
+                            entry.entry_id, entry.arch
+                        )
+                    );
+                    assert_eq!(
+                        status_for_entry(&entry),
+                        RuntimeFrontendStatus::RegisteredCompileOnly
+                    );
+                    assert_eq!(executable_engine_key_for_entry(&entry), None);
+                }
+                entry = entry_for(variant);
+                match mismatch {
+                    0 => entry.arch.push_str("__missing"),
+                    1 => entry.entry_spec.push_str("__missing"),
+                    _ => entry.entry_id.push_str("__missing"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn borrowed_runtime_variant_preserves_duplicate_order_and_owned_independence() {
+        let variant = registry_data().variants.first().unwrap().clone();
+        let mut other = variant.clone();
+        other.processor.push_str("other");
+        let mut duplicate = variant.clone();
+        duplicate.module_name.push_str("later");
+        let variants = vec![other.clone(), variant.clone(), duplicate];
+        let data = RegistryData {
+            variants_by_entry_id: variant_entry_index(&variants),
+            variants,
+            processors: vec![],
+            frontends: vec![],
+        };
+        assert!(std::ptr::eq(
+            data.variant_for_entry(&entry_for(&variant)).unwrap(),
+            &data.variants[1]
+        ));
+        assert!(std::ptr::eq(
+            data.variant_for_entry(&entry_for(&other)).unwrap(),
+            &data.variants[0]
+        ));
+        let entry = entry_for(&variant);
+        let before = runtime_variant_for_entry_ref(&entry).unwrap().clone();
+        let mut owned = runtime_variant_for_entry(&entry).unwrap();
+        owned.language_ids.push("changed owned copy".into());
+        assert_eq!(*runtime_variant_for_entry_ref(&entry).unwrap(), before);
+    }
 
     #[test]
     fn repeated_discovery_shares_immutable_catalogs() {

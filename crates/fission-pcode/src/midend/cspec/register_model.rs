@@ -4,7 +4,7 @@
 
 use crate::midend::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use super::SlaRegisterMap;
 use super::apply::sleigh_languages_root;
@@ -17,10 +17,36 @@ use crate::midend::{
 };
 use fission_core::CallingConvention;
 
-static REGISTER_MODEL_CACHE: OnceLock<RwLock<HashMap<String, Arc<RegisterModel>>>> =
+#[derive(Default)]
+struct RegisterModelSlot {
+    model: OnceLock<Arc<RegisterModel>>,
+    construction: Mutex<()>,
+}
+
+impl RegisterModelSlot {
+    fn get_or_build(
+        &self,
+        build: impl FnOnce() -> Option<Arc<RegisterModel>>,
+    ) -> Option<Arc<RegisterModel>> {
+        if let Some(model) = self.model.get() {
+            return Some(Arc::clone(model));
+        }
+        // Construction only parses source files/builds tables. It neither
+        // re-enters this cache nor schedules work on the caller's Rayon pool.
+        let _guard = self.construction.lock().ok()?;
+        if let Some(model) = self.model.get() {
+            return Some(Arc::clone(model));
+        }
+        // Keep failed lookups retryable, as in the original cache.
+        let model = build()?;
+        Some(Arc::clone(self.model.get_or_init(|| model)))
+    }
+}
+
+static REGISTER_MODEL_CACHE: OnceLock<RwLock<HashMap<String, Arc<RegisterModelSlot>>>> =
     OnceLock::new();
 
-fn model_cache() -> &'static RwLock<HashMap<String, Arc<RegisterModel>>> {
+fn model_cache() -> &'static RwLock<HashMap<String, Arc<RegisterModelSlot>>> {
     REGISTER_MODEL_CACHE.get_or_init(|| RwLock::new(HashMap::default()))
 }
 
@@ -181,14 +207,32 @@ fn add_register_aliases(name_index: &mut SlaRegisterMap, by_offset: &HashMap<(u6
 
 /// Load (or return cached) [`RegisterModel`] for `language_id`.
 pub fn register_model_for_language(language_id: &str) -> Option<Arc<RegisterModel>> {
-    if let Some(cached) = model_cache().read().ok()?.get(language_id).cloned() {
-        return Some(cached);
+    let cached = model_cache().read().ok()?.get(language_id).cloned();
+    let slot = if let Some(slot) = cached {
+        slot
+    } else {
+        model_cache()
+            .write()
+            .ok()?
+            .entry(language_id.to_owned())
+            .or_default()
+            .clone()
+    };
+    let model = slot.get_or_build(|| build_register_model_for_language(language_id));
+    if model.is_none() {
+        // Failed language/resource lookups were never cached. Avoid retaining
+        // an empty slot for every unknown language, while allowing retries.
+        if let Ok(mut cache) = model_cache().write() {
+            if slot.model.get().is_none()
+                && cache
+                    .get(language_id)
+                    .is_some_and(|cached| Arc::ptr_eq(cached, &slot))
+            {
+                cache.remove(language_id);
+            }
+        }
     }
-    let model = build_register_model_for_language(language_id)?;
-    if let Ok(mut cache) = model_cache().write() {
-        cache.insert(language_id.to_string(), model.clone());
-    }
-    Some(model)
+    model
 }
 
 pub fn build_register_model_for_language(language_id: &str) -> Option<Arc<RegisterModel>> {
@@ -1265,5 +1309,69 @@ mod tests {
                 "unresolved int-proto register names for {abi:?} ({lang}/{comp}): {missing:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod preparation_cache_tests {
+    use super::*;
+    use std::sync::{
+        Barrier,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn model_slot_constructs_once_for_concurrent_cold_reads() {
+        let slot = RegisterModelSlot::default();
+        let barrier = Barrier::new(8);
+        let builds = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        slot.get_or_build(|| {
+                            builds.fetch_add(1, Ordering::SeqCst);
+                            Some(Arc::new(RegisterModel::build_from_parsed(&[])))
+                        })
+                        .unwrap()
+                    })
+                })
+                .collect();
+            let models: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+            assert!(models.iter().all(|m| Arc::ptr_eq(m, &models[0])));
+        });
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+        assert!(
+            slot.get_or_build(|| panic!("warm read must not rebuild"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn failed_language_lookup_does_not_retain_an_empty_slot() {
+        let language = "unregistered:preparation-cache-test";
+        assert!(register_model_for_language(language).is_none());
+        assert!(!model_cache().read().unwrap().contains_key(language));
+        assert!(register_model_for_language(language).is_none());
+    }
+
+    #[test]
+    fn model_slot_retries_failures_and_other_languages_remain_independent() {
+        let slot = RegisterModelSlot::default();
+        assert!(slot.get_or_build(|| None).is_none());
+        assert!(slot.model.get().is_none());
+        let model = slot
+            .get_or_build(|| Some(Arc::new(RegisterModel::build_from_parsed(&[]))))
+            .unwrap();
+        assert!(Arc::ptr_eq(&model, &slot.get_or_build(|| None).unwrap()));
+        let other = RegisterModelSlot::default();
+        let _guard = slot.construction.lock().unwrap();
+        assert!(
+            other
+                .get_or_build(|| Some(Arc::new(RegisterModel::build_from_parsed(&[]))))
+                .is_some()
+        );
+        assert!(slot.get_or_build(|| None).is_some());
     }
 }

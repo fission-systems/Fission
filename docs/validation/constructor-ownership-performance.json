@@ -1,0 +1,688 @@
+{
+  "source": {
+    "fid_hash_matrix": {
+      "inputs": 512,
+      "eight_instruction_extents": 383,
+      "successful_hashes": 473,
+      "hashes_and_resolver_order_equal": true,
+      "sha256": "a771dbb8a6b4ef303ab310b1e62ca5f5a7d8a596cf45ef7fe53a51ed618bc6fe"
+    },
+    "base": "2091f9038f9337260174bb7b619e67759b956d35",
+    "source_only_tree": "1c7f12493251d1c41b7e603e9eeba33fd9fc9681",
+    "source_files_sha256": {
+      "crates/fission-sleigh/src/compiler/ir/lowering.rs": "e04f022ce5ad220a558385e60b305245b0f41023c066512c9b3cda940cf15a44",
+      "crates/fission-sleigh/src/compiler/ir/types.rs": "236768fe7fc007e0bde04a14c4f55506a1c4d63ab8f0468f65cb6eee7e19c4b0",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/display.rs": "8ed8fe4c089add8acdca07603ef1fa412aaf3fc291bb839444fa89cb596553e7",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/fid_bound_state_tests.rs": "d231e74a8b7751a48d009860d05013fbce7d8e01c28a1793414ad5844e649562",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/template_eval.rs": "79bdf0a5b6e022640a661fc2389b1617b440726f2f51d423875b72350cd4ea63",
+      "crates/fission-sleigh/src/runtime/spine/compiled_table/walker.rs": "9d5239b1dc271b55dbbd5cd7e55c901fbd71f55d869c02967075962c09bb34f0",
+      "crates/fission-sleigh/src/runtime/spine/construct.rs": "92a807e22a05414f9cd17b8d545517c11419707d81cec1b1f675414dedea7cff",
+      "crates/fission-sleigh/src/runtime/spine/decision.rs": "6682d08dfdaabca176d92876a0a46c72ef8259332290c47a24b0c1bd1efcbeb3",
+      "crates/fission-sleigh/src/runtime/spine/template.rs": "cbf2799f841430ec5ec988b874d18210f39ef859e53bb210f2631e380df6a9c4"
+    },
+    "source_patch_sha256": "44b25ce02ea09d3fe2bfb6013f0b640c9915347df1e519cdd8bdf9927bf0e1f8",
+    "candidate_sha256": "cad83688200d2aeca0f5b5b559d4df5ebf0b1c2a3cf218e7c83aa14b3fce20a4",
+    "baseline_sha256": "6f39d552d6dee077a45272ef89cc9821091eb4b327ca1d984b97472a9d080762",
+    "decode_matrix": {
+      "records": 1024,
+      "successes": 746,
+      "errors": 278,
+      "traced_errors": 27,
+      "complete_baseline_candidate_equal": true,
+      "sha256": "5721b8f3f02547208b90aec3889566b5bfb33dab046fcc95a0509c0890bba9b7",
+      "full_raw_states_included": true
+    },
+    "proposal_sha256": "71c674e49af7f54eb3e098506c5a92c128d21f2ca69a8bfbb50d72c19582a835"
+  },
+  "large_medians": {
+    "baseline": {
+      "seconds": 12.261267875088379,
+      "cpu_seconds": 107.44997200000006,
+      "max_rss_bytes": 2428911616
+    },
+    "candidate": {
+      "seconds": 11.99047104199417,
+      "cpu_seconds": 100.36217500000001,
+      "max_rss_bytes": 2396962816
+    }
+  },
+  "large_ranges": {
+    "baseline": {
+      "seconds": [
+        12.253122999798506,
+        13.331941208103672
+      ],
+      "cpu_seconds": [
+        106.093081,
+        107.63200999999998
+      ],
+      "max_rss_bytes": [
+        2413658112,
+        2469363712
+      ]
+    },
+    "candidate": {
+      "seconds": [
+        11.70600129198283,
+        12.54218624997884
+      ],
+      "cpu_seconds": [
+        98.53162099999999,
+        100.91375200000002
+      ],
+      "max_rss_bytes": [
+        2386264064,
+        2414133248
+      ]
+    }
+  },
+  "large_change_percent": {
+    "seconds": -2.208554905193749,
+    "cpu_seconds": -6.596369331766827,
+    "max_rss_bytes": -1.3153545723748605
+  },
+  "small_pairs": [
+    {
+      "cell": "03",
+      "baseline": 1.9816612089052796,
+      "baseline_deterministic": true,
+      "candidate": 1.9702544999308884,
+      "candidate_deterministic": true,
+      "speedup": 1.0057894596737587
+    },
+    {
+      "cell": "27",
+      "baseline": 0.8477784160058945,
+      "baseline_deterministic": true,
+      "candidate": 0.8526527499780059,
+      "candidate_deterministic": true,
+      "speedup": 0.9942833304973953
+    },
+    {
+      "cell": "40",
+      "baseline": 0.9501995409373194,
+      "baseline_deterministic": true,
+      "candidate": 0.9555846250150353,
+      "candidate_deterministic": true,
+      "speedup": 0.9943646183323313
+    }
+  ],
+  "fresh_replay": {
+    "returned": 250,
+    "changed_functions": 0,
+    "duration_keys_excluded": [
+      "build_duration_ms",
+      "decomp_sec",
+      "normalize_duration_ms",
+      "postprocess_sec",
+      "render_duration_ms",
+      "structuring_duration_ms",
+      "total_time_ms"
+    ]
+  },
+  "kuna_comparison": [
+    {
+      "cell": "03",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 1.976643875008449,
+        "render_jobs_14_seconds": 1.3573699579574168,
+        "faster_observed_seconds": 1.3573699579574168
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.19658208405598998,
+        "render_jobs_14_seconds": 0.33600408281199634,
+        "faster_observed_seconds": 0.19658208405598998
+      },
+      "faster_observed_ratio": 6.904850787779899
+    },
+    {
+      "cell": "22",
+      "requested": 6,
+      "fission": {
+        "render_jobs_1_seconds": 13.911342999897897,
+        "render_jobs_14_seconds": 12.3100469999481,
+        "faster_observed_seconds": 12.3100469999481
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 2.844477582955733,
+        "render_jobs_14_seconds": 5.554692249977961,
+        "faster_observed_seconds": 2.844477582955733
+      },
+      "faster_observed_ratio": 4.327700479592661
+    },
+    {
+      "cell": "27",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 0.8711340418085456,
+        "render_jobs_14_seconds": 0.6768212500028312,
+        "faster_observed_seconds": 0.6768212500028312
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.11365937488153577,
+        "render_jobs_14_seconds": 0.24620849988423288,
+        "faster_observed_seconds": 0.11365937488153577
+      },
+      "faster_observed_ratio": 5.954821154948851
+    },
+    {
+      "cell": "40",
+      "requested": 5,
+      "fission": {
+        "render_jobs_1_seconds": 1.0121034160256386,
+        "render_jobs_14_seconds": 0.9511546671856195,
+        "faster_observed_seconds": 0.9511546671856195
+      },
+      "kuna": {
+        "render_jobs_1_seconds": 0.34812854090705514,
+        "render_jobs_14_seconds": 0.6929153329692781,
+        "faster_observed_seconds": 0.34812854090705514
+      },
+      "faster_observed_ratio": 2.732193875019178
+    }
+  ],
+  "repeated_full_record_parity": [
+    {
+      "path": "rows-vs-kuna/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/03-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-0.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-1.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/22-fission-2.json",
+      "functions": 6,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/27-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-0.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-1.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    },
+    {
+      "path": "rows-vs-kuna-14/40-fission-2.json",
+      "functions": 5,
+      "complete_non_time_equal": true
+    }
+  ],
+  "related_nextest": {
+    "passed": 2209,
+    "skipped": 9,
+    "leaky_passes": 1
+  },
+  "targeted_nextest": 13,
+  "bounds": [
+    "Mechanical performance only; no quality, recompilation, execution or ranking claim.",
+    "Fresh 250-function replay generated once; focused address sets repeat.",
+    "No own builds/tests/profilers overlap timing; OS caches/scheduling uncontrolled.",
+    "Both tools choose their own faster median among the two measured settings.",
+    "Fission render=1 does not serialize native preparation/FID."
+  ],
+  "confirmation": {
+    "medians": {
+      "baseline": {
+        "seconds": 12.311457291943952,
+        "cpu_seconds": 108.48235100000002,
+        "max_rss_bytes": 2427551744
+      },
+      "candidate": {
+        "seconds": 11.741746125044301,
+        "cpu_seconds": 99.322057,
+        "max_rss_bytes": 2402271232
+      }
+    },
+    "ranges": {
+      "baseline": {
+        "seconds": [
+          12.262113125063479,
+          13.758468084037304
+        ],
+        "cpu_seconds": [
+          103.22340800000005,
+          108.69935999999998
+        ],
+        "max_rss_bytes": [
+          2229026816,
+          2459860992
+        ]
+      },
+      "candidate": {
+        "seconds": [
+          11.692337499931455,
+          12.183332583867013
+        ],
+        "cpu_seconds": [
+          98.46656,
+          100.66567700000002
+        ],
+        "max_rss_bytes": [
+          2395013120,
+          2434170880
+        ]
+      }
+    },
+    "paired_ratios": [
+      {
+        "seconds": 0.9548828917676119,
+        "cpu_seconds": 0.9137317551823674,
+        "max_rss_bytes": 0.9765882055175905
+      },
+      {
+        "seconds": 0.9497119002786436,
+        "cpu_seconds": 0.9165354837325812,
+        "max_rss_bytes": 0.9746567898600489
+      },
+      {
+        "seconds": 0.9575274197271748,
+        "cpu_seconds": 0.9279452009663766,
+        "max_rss_bytes": 1.0027266714360918
+      },
+      {
+        "seconds": 0.8855151975823692,
+        "cpu_seconds": 0.9423717936957303,
+        "max_rss_bytes": 1.0574077248314477
+      },
+      {
+        "seconds": 0.9287377550081586,
+        "cpu_seconds": 0.9577404187236284,
+        "max_rss_bytes": 1.0756051128637476
+      }
+    ],
+    "median_paired_ratios": {
+      "seconds": 0.9497119002786436,
+      "cpu_seconds": 0.9279452009663766,
+      "max_rss_bytes": 1.0027266714360918
+    },
+    "separate_median_changes_percent": {
+      "seconds": -4.627487659583918,
+      "cpu_seconds": -8.444040819137498,
+      "max_rss_bytes": -1.0413995113588759
+    }
+  },
+  "input_identity": {
+    "sample_sha256": "f432c528e3071efa60fdaecc132aafa8c351e386bf7203d252e2875d6de02620",
+    "inputs": [
+      {
+        "cell": "00",
+        "input": "inputs/linux/arm64/O0/OpenCC/opencc",
+        "sha256": "2b34da75fff8870f32c0a3cee080d06a7bf86618d162bbec37f0148b1bb03ea3",
+        "functions": 6
+      },
+      {
+        "cell": "01",
+        "input": "inputs/linux/arm64/O0/leveldb/libleveldb.so.1.23.0",
+        "sha256": "fb744186acf789dd7936e76e14cb608b41ef3afe7e41304c1a29a7366878ae14",
+        "functions": 6
+      },
+      {
+        "cell": "02",
+        "input": "inputs/linux/arm64/O0/mergerfs/mergerfs",
+        "sha256": "4e2a3d9e45cf60ac57685fa4f6571dc52b123a4a6edaa1f837057d472c381669",
+        "functions": 6
+      },
+      {
+        "cell": "03",
+        "input": "inputs/linux/arm64/O0/snappy/libsnappy.so.1.2.2",
+        "sha256": "f71312d8db4ca40bb626132b3c157c18f49222b8b6619edb949664b2b98bf89f",
+        "functions": 6
+      },
+      {
+        "cell": "04",
+        "input": "inputs/linux/arm64/O0/ssdb/ssdb-server",
+        "sha256": "387640c8d0fed448f69852eae43bb4d4d430269935cc3834d9172085f8eb0bbb",
+        "functions": 6
+      },
+      {
+        "cell": "05",
+        "input": "inputs/linux/arm64/O0/the-powder-toy/powder",
+        "sha256": "2fb8edde86aff3195ea8eadee3b56569ab46e15604c29c09cf6dabf68236fbbc",
+        "functions": 6
+      },
+      {
+        "cell": "06",
+        "input": "inputs/linux/arm64/O2/OpenCC/opencc",
+        "sha256": "b479bb9d7fe117fa1bf498091f57b4596f0b236a0e7ee9048ee47471774346fc",
+        "functions": 6
+      },
+      {
+        "cell": "07",
+        "input": "inputs/linux/arm64/O2/leveldb/libleveldb.so.1.23.0",
+        "sha256": "85211404edaf421a7e3a4fda0e0828bd159f12773aa066a90943e7f99818ae05",
+        "functions": 6
+      },
+      {
+        "cell": "08",
+        "input": "inputs/linux/arm64/O2/mergerfs/mergerfs",
+        "sha256": "3be17911d1cbf52a516b016dd5b2df1234c8f5f5ca68af933209f4620c5ecc5e",
+        "functions": 6
+      },
+      {
+        "cell": "09",
+        "input": "inputs/linux/arm64/O2/snappy/libsnappy.so.1.2.2",
+        "sha256": "610d1dd5c0b42016acee9d487c74d4598c9a5a702946004c94ea84ab2cb94a7e",
+        "functions": 6
+      },
+      {
+        "cell": "10",
+        "input": "inputs/linux/arm64/O2/ssdb/ssdb-server",
+        "sha256": "c72e6ca74deb4905b2c0615ea8be79f538d825f603279ea0c338f63fd0ae7ed5",
+        "functions": 6
+      },
+      {
+        "cell": "11",
+        "input": "inputs/linux/arm64/O2/the-powder-toy/powder",
+        "sha256": "a0127641604507b93359d089d0a12ba9b557d65500349fd45e721bbd8c97af96",
+        "functions": 6
+      },
+      {
+        "cell": "12",
+        "input": "inputs/linux/arm64/O2-noinline/OpenCC/opencc",
+        "sha256": "a396371fb685ddbe812113ab92109204a20ef616fb494752ca364eca88071463",
+        "functions": 6
+      },
+      {
+        "cell": "13",
+        "input": "inputs/linux/arm64/O2-noinline/leveldb/libleveldb.so.1.23.0",
+        "sha256": "e8ef8316bf5ae7554a977e56168a18f172385a6c1700980592259fd2082eeb83",
+        "functions": 6
+      },
+      {
+        "cell": "14",
+        "input": "inputs/linux/arm64/O2-noinline/mergerfs/mergerfs",
+        "sha256": "0633c718ea2d9f161b8453cdf2cb4c7784dadfe02822cb1da2550d851cefbabc",
+        "functions": 6
+      },
+      {
+        "cell": "15",
+        "input": "inputs/linux/arm64/O2-noinline/snappy/libsnappy.so.1.2.2",
+        "sha256": "27b3960b13b8ce4155e30de7d44906388d6c571476b56e4162bc9e4ad90daaae",
+        "functions": 6
+      },
+      {
+        "cell": "16",
+        "input": "inputs/linux/arm64/O2-noinline/ssdb/ssdb-server",
+        "sha256": "66134e36f007c0f4785ba5eeb996d18cd514d15df5f8be673ea2d16041e38f78",
+        "functions": 6
+      },
+      {
+        "cell": "17",
+        "input": "inputs/linux/arm64/O2-noinline/the-powder-toy/powder",
+        "sha256": "316fb82a965c9d0538fd8e52256a970a6598541e8b5ce7235f655eca04da438d",
+        "functions": 6
+      },
+      {
+        "cell": "18",
+        "input": "inputs/windows/x86_64/O0/OpenCC/opencc.exe",
+        "sha256": "1dc4891d2cf7eeeebf96ef8bb15dcd60f13220f5e97a0adc38f6bf787952dd70",
+        "functions": 6
+      },
+      {
+        "cell": "19",
+        "input": "inputs/windows/x86_64/O0/detours/withdll.exe",
+        "sha256": "967a9b6af65106daf535a914de82719346ac0b6df651f72a705a6aa6c315f546",
+        "functions": 6
+      },
+      {
+        "cell": "20",
+        "input": "inputs/windows/x86_64/O0/ninja/ninja.exe",
+        "sha256": "01b31cf9bc601cd06236dec0bfeba1b93068c1663ab66b4789d8507ae25f4589",
+        "functions": 6
+      },
+      {
+        "cell": "21",
+        "input": "inputs/windows/x86_64/O0/snappy/snappy.dll",
+        "sha256": "696f0c504463a557c6ccf56624596745f29bc7e62a7717befc93defe0d613491",
+        "functions": 6
+      },
+      {
+        "cell": "22",
+        "input": "inputs/windows/x86_64/O0/tracy/tracy-profiler.exe",
+        "sha256": "8c089578f78011abef068dd5954aac2af6daf74231382e3dec72bf7ec796a94e",
+        "functions": 6
+      },
+      {
+        "cell": "23",
+        "input": "inputs/windows/x86_64/O0/winsparkle/WinSparkle.dll",
+        "sha256": "3102f0c03e4bbddbdf4c5e799870e6253078370f39eecde4432988067311d06c",
+        "functions": 6
+      },
+      {
+        "cell": "24",
+        "input": "inputs/windows/x86_64/O2/OpenCC/opencc.exe",
+        "sha256": "45a8cdd9f34f4ef3bbbcb05ec4e6165d7cefd9d1393918cf2bcc6ee24d8f9fcf",
+        "functions": 6
+      },
+      {
+        "cell": "25",
+        "input": "inputs/windows/x86_64/O2/detours/withdll.exe",
+        "sha256": "9f6b3fe0bdd1a6496b0665439a230acd6310af94e9dca149cb357420b4968b67",
+        "functions": 5
+      },
+      {
+        "cell": "26",
+        "input": "inputs/windows/x86_64/O2/ninja/ninja.exe",
+        "sha256": "2f944654930b102d9a639591d7977b0a07d94445c97fce4a0fc51955116ec11b",
+        "functions": 5
+      },
+      {
+        "cell": "27",
+        "input": "inputs/windows/x86_64/O2/snappy/snappy.dll",
+        "sha256": "32d32be7699c41d660b34d3ca6260e36c47a382ef9880fd911332ebac3318ba5",
+        "functions": 5
+      },
+      {
+        "cell": "28",
+        "input": "inputs/windows/x86_64/O2/tracy/tracy-profiler.exe",
+        "sha256": "51d411d396c203cd9328b90034b32912252ce00e0b4b633052e7e21df00d0ec4",
+        "functions": 5
+      },
+      {
+        "cell": "29",
+        "input": "inputs/windows/x86_64/O2/winsparkle/WinSparkle.dll",
+        "sha256": "469e4682860c42d2da2d0ddc19df68e77bef1041260b51c2f388448b309a11ed",
+        "functions": 5
+      },
+      {
+        "cell": "30",
+        "input": "inputs/windows/x86_64/O2-noinline/OpenCC/opencc.exe",
+        "sha256": "d1c3dc4ec79ec94b0058b3120afefb070a2be0825833c4d0793f4c8a7b51ef59",
+        "functions": 5
+      },
+      {
+        "cell": "31",
+        "input": "inputs/windows/x86_64/O2-noinline/detours/withdll.exe",
+        "sha256": "882b7cbf0890ef5e13fd05c9659c652650232bdefbef9d82c5ada4c4fb16064b",
+        "functions": 5
+      },
+      {
+        "cell": "32",
+        "input": "inputs/windows/x86_64/O2-noinline/ninja/ninja.exe",
+        "sha256": "dba990b021df2c0189ccb75ee345513ec90d987c73f9f6a169a41705e98df246",
+        "functions": 5
+      },
+      {
+        "cell": "33",
+        "input": "inputs/windows/x86_64/O2-noinline/snappy/snappy.dll",
+        "sha256": "0998482d359e03639280b7f1c90e4dfc41e55cef47e9fbed77f2075e43e1b5f4",
+        "functions": 5
+      },
+      {
+        "cell": "34",
+        "input": "inputs/windows/x86_64/O2-noinline/tracy/tracy-profiler.exe",
+        "sha256": "b5d346dc70c14e9db33ff70d330a8ab594b17783f8651d79baef5f39a324df1a",
+        "functions": 5
+      },
+      {
+        "cell": "35",
+        "input": "inputs/windows/x86_64/O2-noinline/winsparkle/WinSparkle.dll",
+        "sha256": "d65d12084251b25776f8d95176718399e9c2b0989c478c72ea523a54ce4d5492",
+        "functions": 5
+      },
+      {
+        "cell": "36",
+        "input": "inputs/macos/arm64/O0/OpenCC/opencc",
+        "sha256": "67c815d39a1dfca4f436d0f756e97418aadd7963198a3a81e375b4c310f1939e",
+        "functions": 5
+      },
+      {
+        "cell": "37",
+        "input": "inputs/macos/arm64/O0/ninja/ninja",
+        "sha256": "75cf0ed6a02b4ff1eebd959774a9c1be03d84aa77272c8feff683bb217de54b8",
+        "functions": 5
+      },
+      {
+        "cell": "38",
+        "input": "inputs/macos/arm64/O0/snappy/libsnappy.dylib",
+        "sha256": "4f90c07ed46bb47bcef75d19216f737818d5a5efb24a540e92c9fcecd2c94b40",
+        "functions": 5
+      },
+      {
+        "cell": "39",
+        "input": "inputs/macos/arm64/O2/OpenCC/opencc",
+        "sha256": "22cc4554475c4d2d5f7454b298cbb551f0d75d9d02ff69731bfac068573201f8",
+        "functions": 5
+      },
+      {
+        "cell": "40",
+        "input": "inputs/macos/arm64/O2/ninja/ninja",
+        "sha256": "0628307f3fd492bbbec336ee590e604b4f1bd9c0e63d5f6e11fc9955e679931e",
+        "functions": 5
+      },
+      {
+        "cell": "41",
+        "input": "inputs/macos/arm64/O2/snappy/libsnappy.dylib",
+        "sha256": "d518851383b135b64296702fc6dd9d67d2cfc587da212358e8a7a67e921baffd",
+        "functions": 5
+      },
+      {
+        "cell": "42",
+        "input": "inputs/macos/arm64/O2-noinline/OpenCC/opencc",
+        "sha256": "52c1ebb86cb7fd77f7141944adeff8a1025c36393d681036927fee37edb44373",
+        "functions": 5
+      },
+      {
+        "cell": "43",
+        "input": "inputs/macos/arm64/O2-noinline/ninja/ninja",
+        "sha256": "d882afc6667e7d3325b33fcaef5957283e5709b3576326753cbb33f4e74f22b5",
+        "functions": 5
+      },
+      {
+        "cell": "44",
+        "input": "inputs/macos/arm64/O2-noinline/snappy/libsnappy.dylib",
+        "sha256": "816de59e4c6d2c077c56aa697a9ca2d97a18c0b4f39a1e420c09a8b9c6135477",
+        "functions": 5
+      }
+    ],
+    "total_functions": 250
+  },
+  "api_bounds": {
+    "compiled_subtable_constructors": "Vec<Arc<CompiledExecutableConstructor>>",
+    "runtime_construct_state": "owns selected constructor Arc; seven metadata fields read through Deref; explicit mutation via Arc::make_mut",
+    "legacy_serde_json_bincode": "identical bytes; both directions checked for every x86-64 compiled subtable",
+    "rkyv": "current roundtrip and shared references checked; legacy raw archive memory layout not promised"
+  },
+  "kuna_source_reference": {
+    "commit": "b637463a36b07c6a031804ec0ae0cf3af09c794f",
+    "path": "decompiler/crates/kuna-sleigh/src/sleigh.rs",
+    "scope": "structural reference only; not asserted to be the source of the fixed measured v1.808 executable"
+  }
+}
