@@ -417,7 +417,7 @@ impl Solver {
         while lo < hi {
             let span = hi - lo;
             let mid = lo + span / 2 + span % 2;
-            let constraint = SymExpr::Ult(
+            let constraint = SymExpr::Ule(
                 Box::new(SymExpr::new_const(mid, expr.get_bit_width())),
                 Box::new(expr.clone()),
             );

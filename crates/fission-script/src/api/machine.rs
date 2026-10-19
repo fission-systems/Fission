@@ -80,6 +80,61 @@ fn bounded_read_size(size: i64) -> ScriptResult<usize> {
     Ok(requested)
 }
 
+fn read_string_from_memory(
+    base: u64,
+    limit: usize,
+    mut read: impl FnMut(u64, usize) -> ScriptResult<Vec<u8>>,
+) -> ScriptResult<String> {
+    let mut bytes = Vec::with_capacity(limit.min(4096));
+    let mut offset = 0usize;
+
+    while offset < limit {
+        let chunk_len = (limit - offset).min(STRING_READ_CHUNK);
+        let chunk_addr = base
+            .checked_add(offset as u64)
+            .ok_or_else(|| fail("memory address overflow"))?;
+
+        match read(chunk_addr, chunk_len) {
+            Ok(chunk) if !chunk.is_empty() => {
+                if let Some(nul) = chunk.iter().position(|byte| *byte == 0) {
+                    bytes.extend_from_slice(&chunk[..nul]);
+                    return Ok(String::from_utf8_lossy(&bytes).into_owned());
+                }
+                let consumed = chunk.len().min(chunk_len);
+                bytes.extend_from_slice(&chunk[..consumed]);
+                offset += consumed;
+                if consumed < chunk_len {
+                    break;
+                }
+            }
+            Ok(_) => break,
+            Err(_) => {
+                // A multi-byte request can straddle a valid/unmapped
+                // boundary. Probe only this chunk byte-by-byte so the
+                // readable prefix (and an earlier NUL) is not lost.
+                for delta in 0..chunk_len {
+                    let byte_addr = chunk_addr
+                        .checked_add(delta as u64)
+                        .ok_or_else(|| fail("memory address overflow"))?;
+                    match read(byte_addr, 1) {
+                        Ok(one) if !one.is_empty() => {
+                            if one[0] == 0 {
+                                return Ok(String::from_utf8_lossy(&bytes).into_owned());
+                            }
+                            bytes.push(one[0]);
+                            offset += 1;
+                        }
+                        Ok(_) => return Err(fail("empty memory read before string terminator")),
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 impl MachineHost {
     /// Launch `path` under the emulator.
     pub fn launch(
@@ -296,56 +351,9 @@ impl MachineHost {
     pub fn read_string(&mut self, address: i64, size: i64) -> ScriptResult<String> {
         let limit = bounded_read_size(size)?;
         self.with("read memory", |b| {
-            let mut bytes = Vec::with_capacity(limit.min(4096));
-            let base = address as u64;
-            let mut offset = 0usize;
-
-            while offset < limit {
-                let chunk_len = (limit - offset).min(STRING_READ_CHUNK);
-                let Some(chunk_addr) = base.checked_add(offset as u64) else {
-                    break;
-                };
-
-                match b.read_memory(chunk_addr, chunk_len) {
-                    Ok(chunk) if !chunk.is_empty() => {
-                        if let Some(nul) = chunk.iter().position(|byte| *byte == 0) {
-                            bytes.extend_from_slice(&chunk[..nul]);
-                            return Ok(String::from_utf8_lossy(&bytes).into_owned());
-                        }
-                        let consumed = chunk.len().min(chunk_len);
-                        bytes.extend_from_slice(&chunk[..consumed]);
-                        offset += consumed;
-                        if consumed < chunk_len {
-                            break;
-                        }
-                    }
-                    Ok(_) => break,
-                    Err(_) => {
-                        // A multi-byte request can straddle a valid/unmapped
-                        // boundary. Probe only this chunk byte-by-byte so the
-                        // readable prefix (and an earlier NUL) is not lost.
-                        for delta in 0..chunk_len {
-                            let Some(byte_addr) = chunk_addr.checked_add(delta as u64) else {
-                                return Ok(String::from_utf8_lossy(&bytes).into_owned());
-                            };
-                            match b.read_memory(byte_addr, 1) {
-                                Ok(one) if !one.is_empty() => {
-                                    if one[0] == 0 {
-                                        return Ok(String::from_utf8_lossy(&bytes).into_owned());
-                                    }
-                                    bytes.push(one[0]);
-                                    offset += 1;
-                                }
-                                _ => {
-                                    return Ok(String::from_utf8_lossy(&bytes).into_owned());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Ok(String::from_utf8_lossy(&bytes).into_owned())
+            read_string_from_memory(address as u64, limit, |at, count| {
+                b.read_memory(at, count).map_err(fail)
+            })
         })
     }
 
@@ -547,5 +555,53 @@ mod tests {
             MAX_SCRIPT_MEMORY_READ
         );
         assert!(bounded_read_size(100_000_000).is_err());
+    }
+
+    fn memory_reader(
+        base: u64,
+        bytes: &[u8],
+    ) -> impl FnMut(u64, usize) -> ScriptResult<Vec<u8>> + '_ {
+        move |address, size| {
+            let offset = address
+                .checked_sub(base)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| fail("unmapped"))?;
+            let end = offset.checked_add(size).ok_or_else(|| fail("overflow"))?;
+            bytes
+                .get(offset..end)
+                .map(|data| data.to_vec())
+                .ok_or_else(|| fail("unmapped"))
+        }
+    }
+
+    #[test]
+    fn string_reads_accept_nul_before_unmapped_bytes() {
+        assert_eq!(
+            read_string_from_memory(0x1000, 256, memory_reader(0x1000, b"abc\0")).unwrap(),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn string_reads_preserve_invalid_address_errors() {
+        assert!(read_string_from_memory(0x2000, 8, memory_reader(0x1000, b"abc\0")).is_err());
+    }
+
+    #[test]
+    fn unterminated_strings_do_not_hide_unmapped_reads() {
+        assert!(read_string_from_memory(0x1000, 8, memory_reader(0x1000, b"abc")).is_err());
+    }
+
+    #[test]
+    fn bounded_strings_need_no_nul_when_limit_is_readable() {
+        assert_eq!(
+            read_string_from_memory(0x1000, 3, memory_reader(0x1000, b"abc")).unwrap(),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn string_reads_reject_address_wraparound() {
+        assert!(read_string_from_memory(u64::MAX, 2, memory_reader(u64::MAX, b"a")).is_err());
     }
 }

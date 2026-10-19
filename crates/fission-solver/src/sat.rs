@@ -302,6 +302,8 @@ impl SatSolver {
         if !self.ok {
             return false;
         }
+        // Public additions are permanent constraints, not part of the last model.
+        self.cancel_until(0);
         let accepted = self.add_clause_inner(lits);
         if !accepted && self.decision_level() == 0 {
             self.ok = false;
@@ -314,9 +316,7 @@ impl SatSolver {
             self.ensure_var(lit.var());
         }
 
-        if self.decision_level() != 0 {
-            tracing::warn!("Adding clauses during search is not fully supported yet.");
-        }
+        debug_assert_eq!(self.decision_level(), 0);
 
         // Simplify clause (remove duplicates, handle True/False if any)
         lits.sort_by_key(|l| l.0);
