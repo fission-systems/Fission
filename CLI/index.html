@@ -1606,6 +1606,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#decompilation-line-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompilation line provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3327,6 +3338,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#decompilation-line-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompilation line provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4110,6 +4132,19 @@ unknown.</p>
 </span><span id="__span-58-7"><a id="__codelineno-58-7" name="__codelineno-58-7" href="#__codelineno-58-7"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>inventory<span class="w"> </span>--help
 </span></code></pre></div>
 <p>If you change compatibility behavior, also verify at least one legacy flat invocation still routes correctly and emits a deprecation warning.</p>
+<h2 id="decompilation-line-provenance">Decompilation line provenance<a class="headerlink" href="#decompilation-line-provenance" title="Permanent link">&para;</a></h2>
+<p>JSON decompilation includes additive <code>line_mappings_nir</code>, <code>line_mappings_hir</code>,
+and <code>line_mappings</code> (the selected layer). Each row contains 1-based physical
+<code>line_number</code>, native instruction <code>addresses</code>, and <code>defined_variables</code>.
+<code>line_mapping_source</code> is <code>fission_ssa_assignment_definition</code>.</p>
+<p>These partial maps describe the result definition of a single-assignment SSA
+binding at an actual printed assignment/initializer. They are not complete
+provenance of every RHS variable, call, load, predicate, or effect on that line.
+Input/phi values, cloned/ambiguous sites, partial accesses, repeated definitions,
+and unproved lines remain unmapped. Consumers must honor <code>defined_variables</code>
+and prefer direct variable <code>addresses</code> when available. NIR and HIR maps are
+computed separately; CLI header/warning deletion remaps physical lines and
+abstains on ambiguous repeated text. No code or effect transformation is added.</p>
 
 
 
