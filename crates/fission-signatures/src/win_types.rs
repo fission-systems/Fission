@@ -259,10 +259,10 @@ pub struct WindowsStructures {
 pub struct PackedStructures {
     by_name: crate::fpk::FpkReader,
     by_size: crate::fpk::FpkReader,
-    /// Resolved entries, leaked so `get` can hand out `&StructDef` like the
-    /// eager map did. Bounded by how many distinct structs a run looks up, and
-    /// the cache is process-lifetime anyway.
-    resolved: std::sync::Mutex<HashMap<String, &'static StructDef>>,
+    /// Resolved entries, including misses. Positive entries are leaked so
+    /// `get` can hand out `&StructDef` like the eager map did. Caching `None`
+    /// keeps repeated unknown-name probes O(1).
+    resolved: std::sync::Mutex<HashMap<String, Option<&'static StructDef>>>,
 }
 
 impl PackedStructures {
@@ -277,27 +277,46 @@ impl PackedStructures {
     }
 
     fn get(&self, name: &str) -> Option<&'static StructDef> {
-        if let Ok(cache) = self.resolved.lock()
-            && let Some(hit) = cache.get(name)
         {
-            return Some(*hit);
-        }
-        let block = self.by_name.block_for(name).ok()??;
-        let mut found = None;
-        for line in block.lines() {
-            let Ok(item) = serde_json::from_str::<JsonStructDef>(line) else {
-                continue;
-            };
-            if item.name == name {
-                found = Some(struct_def_from_json(item));
-                break;
+            let cache = self
+                .resolved
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(hit) = cache.get(name) {
+                return *hit;
             }
         }
-        let leaked: &'static StructDef = Box::leak(Box::new(found?));
-        if let Ok(mut cache) = self.resolved.lock() {
-            cache.insert(name.to_string(), leaked);
+
+        let found = match self.by_name.block_for(name) {
+            Ok(Some(block)) => {
+                let mut found = None;
+                for line in block.lines() {
+                    let Ok(item) = serde_json::from_str::<JsonStructDef>(line) else {
+                        continue;
+                    };
+                    if item.name == name {
+                        found = Some(struct_def_from_json(item));
+                        break;
+                    }
+                }
+                found
+            }
+            Ok(None) | Err(_) => None,
+        };
+
+        // Another thread may have completed the same lookup while the packed
+        // block was being decoded. Re-check under the lock before allocating a
+        // process-lifetime entry so only one allocation can be leaked.
+        let mut cache = self
+            .resolved
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(hit) = cache.get(name) {
+            return *hit;
         }
-        Some(leaked)
+        let resolved = found.map(|def| &*Box::leak(Box::new(def)) as &'static StructDef);
+        cache.insert(name.to_string(), resolved);
+        resolved
     }
 
     /// Names of every struct whose width-appropriate size is exactly `size`.
@@ -616,6 +635,28 @@ mod packed_structures_tests {
             checked += 1;
         }
         assert_eq!(checked, all.len());
+    }
+
+    #[test]
+    fn packed_get_caches_missing_names() {
+        let Some(dir) = resources()
+            .win32_typeinfo_json_path("structures.fpk")
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        else {
+            return;
+        };
+        let Some(packed) = PackedStructures::open(&dir) else {
+            return;
+        };
+        let missing = "__fission_missing_struct_for_negative_cache__";
+        assert!(packed.get(missing).is_none());
+        assert!(packed.get(missing).is_none());
+
+        let cache = packed
+            .resolved
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(matches!(cache.get(missing), Some(None)));
     }
 
     /// The size index must return exactly the set a full scan would, for every

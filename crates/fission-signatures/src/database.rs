@@ -30,7 +30,8 @@ pub struct SignatureDatabase {
     /// Index of signatures by their first non-wildcard byte for O(1) initial filtering.
     /// Key: first byte value, Value: indices into signatures vec
     first_byte_index: HashMap<u8, Vec<usize>>,
-    /// Indices of signatures that start with wildcards (must be checked for all inputs)
+    /// Indices of signatures that start with wildcards (or have no byte
+    /// pattern and therefore cannot use the first-byte index).
     wildcard_signatures: Vec<usize>,
 }
 
@@ -56,51 +57,25 @@ impl SignatureDatabase {
         self.first_byte_index.clear();
         self.wildcard_signatures.clear();
         for (idx, sig) in self.signatures.iter().enumerate() {
-            // Find the first non-wildcard byte in the pattern
-            if let Some(&Some(first_byte)) = sig.pattern.first() {
-                self.first_byte_index
-                    .entry(first_byte)
-                    .or_insert_with(Vec::new)
-                    .push(idx);
-            } else if sig.pattern.first() == Some(&None) {
-                // Signature starts with wildcard
-                self.wildcard_signatures.push(idx);
+            match sig.pattern.first() {
+                Some(Some(first_byte)) => {
+                    self.first_byte_index
+                        .entry(*first_byte)
+                        .or_default()
+                        .push(idx);
+                }
+                Some(None) | None => self.wildcard_signatures.push(idx),
             }
         }
     }
 
-    /// Try to match a function's bytes against known signatures
+    /// Try to match a function's bytes against known signatures.
     ///
-    /// Performance: Uses first-byte index to reduce candidates from ~150 to typically 1-10,
-    /// providing significant speedup for large binaries with many functions.
+    /// Candidates are ranked by constrained-byte specificity and then by the
+    /// signature's base confidence, so the answer does not depend on JSON or
+    /// insertion order when patterns overlap.
     pub fn identify(&self, bytes: &[u8]) -> Option<&FunctionSignature> {
-        if bytes.is_empty() {
-            return None;
-        }
-
-        let first_byte = bytes[0];
-
-        // Use the index to only check signatures that start with the same first byte
-        if let Some(indices) = self.first_byte_index.get(&first_byte) {
-            for &idx in indices {
-                if let Some(sig) = self.signatures.get(idx) {
-                    if sig.matches(bytes) {
-                        return Some(sig);
-                    }
-                }
-            }
-        }
-
-        // Check signatures that start with wildcards (pre-indexed, no full scan needed)
-        for &idx in &self.wildcard_signatures {
-            if let Some(sig) = self.signatures.get(idx) {
-                if sig.matches(bytes) {
-                    return Some(sig);
-                }
-            }
-        }
-
-        None
+        self.find_all_matches(bytes).into_iter().next()
     }
 
     /// Try to match a function's bytes with call graph relation validation
@@ -115,7 +90,7 @@ impl SignatureDatabase {
         func_addr: u64,
         call_graph: &G,
     ) -> Option<IdentifyResult> {
-        // First, find all byte-pattern matches
+        // First, find all byte-pattern matches, already most-specific first.
         let candidates = self.find_all_matches(bytes);
 
         for sig in candidates {
@@ -134,7 +109,7 @@ impl SignatureDatabase {
         None
     }
 
-    /// Find all byte-pattern matches (internal helper)
+    /// Find all byte-pattern matches, ranked most specific first.
     fn find_all_matches(&self, bytes: &[u8]) -> Vec<&FunctionSignature> {
         let mut matches = Vec::new();
 
@@ -146,22 +121,29 @@ impl SignatureDatabase {
 
         if let Some(indices) = self.first_byte_index.get(&first_byte) {
             for &idx in indices {
-                if let Some(sig) = self.signatures.get(idx) {
-                    if sig.matches(bytes) {
-                        matches.push(sig);
-                    }
-                }
-            }
-        }
-
-        for &idx in &self.wildcard_signatures {
-            if let Some(sig) = self.signatures.get(idx) {
-                if sig.matches(bytes) {
+                if let Some(sig) = self.signatures.get(idx)
+                    && sig.matches(bytes)
+                {
                     matches.push(sig);
                 }
             }
         }
 
+        for &idx in &self.wildcard_signatures {
+            if let Some(sig) = self.signatures.get(idx)
+                && sig.matches(bytes)
+            {
+                matches.push(sig);
+            }
+        }
+
+        matches.sort_by(|a, b| {
+            b.specificity()
+                .cmp(&a.specificity())
+                .then_with(|| b.confidence.cmp(&a.confidence))
+                .then_with(|| b.pattern.len().cmp(&a.pattern.len()))
+                .then_with(|| a.name.cmp(&b.name))
+        });
         matches
     }
 
@@ -173,15 +155,14 @@ impl SignatureDatabase {
     /// Add a custom signature
     pub fn add_signature(&mut self, sig: FunctionSignature) {
         let idx = self.signatures.len();
-        // Update index if signature has a non-wildcard first byte
-        if let Some(&Some(first_byte)) = sig.pattern.first() {
-            self.first_byte_index
-                .entry(first_byte)
-                .or_insert_with(Vec::new)
-                .push(idx);
-        } else if sig.pattern.first() == Some(&None) {
-            // Wildcard signature
-            self.wildcard_signatures.push(idx);
+        match sig.pattern.first() {
+            Some(Some(first_byte)) => {
+                self.first_byte_index
+                    .entry(*first_byte)
+                    .or_default()
+                    .push(idx);
+            }
+            Some(None) | None => self.wildcard_signatures.push(idx),
         }
         self.signatures.push(sig);
     }
@@ -234,14 +215,67 @@ impl Default for SignatureDatabase {
 mod tests {
     use super::*;
 
+    fn empty_database() -> SignatureDatabase {
+        SignatureDatabase {
+            signatures: Vec::new(),
+            first_byte_index: HashMap::new(),
+            wildcard_signatures: Vec::new(),
+        }
+    }
+
     #[test]
     fn test_pattern_match() {
-        let sig = FunctionSignature::from_hex("test", "55 8B EC ?? 6A");
+        let mut sig = FunctionSignature::from_hex("test", "55 8B EC ?? 6A");
+        sig.min_size = 5;
 
         assert!(sig.matches(&[0x55, 0x8B, 0xEC, 0x00, 0x6A]));
         assert!(sig.matches(&[0x55, 0x8B, 0xEC, 0xFF, 0x6A])); // wildcard
         assert!(!sig.matches(&[0x55, 0x8B, 0xED, 0x00, 0x6A])); // wrong byte
         assert!(!sig.matches(&[0x55, 0x8B])); // too short
+    }
+
+    #[test]
+    fn identify_prefers_more_specific_pattern_then_confidence() {
+        let mut db = empty_database();
+
+        let mut broad = FunctionSignature::from_hex("broad", "AA ??");
+        broad.min_size = 2;
+        broad.confidence = 100;
+        db.add_signature(broad);
+
+        let mut specific_low_confidence = FunctionSignature::from_hex("specific", "AA BB");
+        specific_low_confidence.min_size = 2;
+        specific_low_confidence.confidence = 80;
+        db.add_signature(specific_low_confidence);
+
+        assert_eq!(
+            db.identify(&[0xAA, 0xBB]).map(|sig| sig.name.as_str()),
+            Some("specific")
+        );
+
+        let mut same_specificity_higher_confidence =
+            FunctionSignature::from_hex("specific-hi", "AA BB");
+        same_specificity_higher_confidence.min_size = 2;
+        same_specificity_higher_confidence.confidence = 95;
+        db.add_signature(same_specificity_higher_confidence);
+
+        assert_eq!(
+            db.identify(&[0xAA, 0xBB]).map(|sig| sig.name.as_str()),
+            Some("specific-hi")
+        );
+    }
+
+    #[test]
+    fn empty_patterns_remain_matchable_when_min_size_is_satisfied() {
+        let mut db = empty_database();
+        let mut empty = FunctionSignature::from_hex("empty", "");
+        empty.min_size = 1;
+        db.add_signature(empty);
+
+        assert_eq!(
+            db.identify(&[0x90]).map(|sig| sig.name.as_str()),
+            Some("empty")
+        );
     }
 
     #[test]

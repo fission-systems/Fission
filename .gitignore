@@ -34,8 +34,9 @@ memory_loadimage.cc
 /sum_array_debug.json
 /fill_matrix*.c
 /fill_matrix*.o
-# Rust compiler intermediate artifacts (*.rcgu.o) that can appear at root
+# Rust compiler intermediate artifacts that can appear at root
 /*.rcgu.o
+/*.rlib
 # Patch files inside crates (use git diff instead)
 crates/**/*.patch
 # Backup files
@@ -198,9 +199,9 @@ cargo-flamegraph.trace/
 /scripts/corpus/*
 !/scripts/corpus/build_real_programs.sh
 /scripts/ghidra-fid-generator/
-/scripts/gdt_extract_signatures.py
+scripts/gdt_extract_signatures.py
 /scripts/check_no_fission_analysis_dependency.sh
-/scripts/check_signatures_canonical_data.sh
+scripts/check_signatures_canonical_data.sh
 # Python cache files (never commit)
 __pycache__/
 *.pyc

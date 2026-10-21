@@ -32,21 +32,36 @@ pub struct FunctionSignature {
 }
 
 impl FunctionSignature {
-    /// Create a new signature from a hex pattern string
-    /// Use ?? for wildcards, e.g., "55 8B EC ?? ?? 6A"
+    /// Create a new signature from a hex pattern string.
+    ///
+    /// Use `??` for wildcards, e.g. `"55 8B EC ?? ?? 6A"`. Malformed
+    /// tokens are programmer/configuration errors and fail loudly rather than
+    /// silently becoming wildcards.
     pub fn from_hex(name: &str, hex_pattern: &str) -> Self {
-        let pattern: Vec<Option<u8>> = hex_pattern
-            .split_whitespace()
-            .map(|s| {
-                if s == "??" {
-                    None
-                } else {
-                    u8::from_str_radix(s, 16).ok()
-                }
-            })
-            .collect();
+        Self::try_from_hex(name, hex_pattern)
+            .unwrap_or_else(|error| panic!("invalid signature pattern for {name}: {error}"))
+    }
 
-        Self {
+    /// Fallible form of [`Self::from_hex`] for data-driven callers that need
+    /// to report a bad pattern instead of panicking.
+    pub fn try_from_hex(name: &str, hex_pattern: &str) -> Result<Self, String> {
+        let mut pattern = Vec::new();
+        for (index, token) in hex_pattern.split_whitespace().enumerate() {
+            if token == "??" {
+                pattern.push(None);
+                continue;
+            }
+            if token.len() != 2 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(format!(
+                    "invalid token {token:?} at byte-pattern index {index}"
+                ));
+            }
+            let byte = u8::from_str_radix(token, 16)
+                .map_err(|_| format!("invalid hex byte {token:?} at index {index}"))?;
+            pattern.push(Some(byte));
+        }
+
+        Ok(Self {
             name: name.to_string(),
             pattern,
             min_size: 16,
@@ -57,7 +72,12 @@ impl FunctionSignature {
             expected_callers: Vec::new(),
             force_relation: false,
             confidence: 100,
-        }
+        })
+    }
+
+    /// Number of pattern bytes that actually constrain the input.
+    pub fn specificity(&self) -> usize {
+        self.pattern.iter().filter(|byte| byte.is_some()).count()
     }
 
     /// Create a signature with expected callees for relation validation
@@ -86,17 +106,41 @@ impl FunctionSignature {
 
     /// Match pattern against bytes
     pub fn matches(&self, bytes: &[u8]) -> bool {
-        if bytes.len() < self.pattern.len() {
+        if bytes.len() < self.pattern.len() || bytes.len() < self.min_size {
             return false;
         }
 
         for (i, &pat_byte) in self.pattern.iter().enumerate() {
-            if let Some(expected) = pat_byte {
-                if bytes[i] != expected {
-                    return false;
-                }
+            if let Some(expected) = pat_byte
+                && bytes[i] != expected
+            {
+                return false;
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_hex_tokens_are_rejected_not_wildcarded() {
+        for pattern in ["55 ? EC", "55 0x8B EC", "55 ZZ EC", "55 ??? EC"] {
+            assert!(
+                FunctionSignature::try_from_hex("bad", pattern).is_err(),
+                "{pattern:?} should be rejected"
+            );
+        }
+        assert!(FunctionSignature::try_from_hex("ok", "55 ?? EC").is_ok());
+    }
+
+    #[test]
+    fn minimum_size_is_part_of_matching_contract() {
+        let mut signature = FunctionSignature::from_hex("short-prefix", "55 8B EC");
+        signature.min_size = 8;
+        assert!(!signature.matches(&[0x55, 0x8B, 0xEC, 0, 0, 0, 0]));
+        assert!(signature.matches(&[0x55, 0x8B, 0xEC, 0, 0, 0, 0, 0]));
     }
 }

@@ -2,32 +2,12 @@
 //!
 //! Ghidra source: `coreaction.hh` L206–213, `coreaction.cc` L9964–10041.
 //!
-//! ## Algorithm
-//!
-//! Ghidra's `ActionDeindirect` attempts to convert indirect calls (CALLIND) into
-//! direct calls (CALL) when the target address of the call points to a constant
-//! address whose symbol name is known in the function call summaries.
-//!
-//! ## Fission HIR mapping
-//!
-//! In Fission, when the builder is unable to statically resolve an indirect call
-//! at materialization time, it creates an opaque call to `__fission_callind_opaque`
-//! with the target function pointer expression (`fn_ptr`) as the first argument,
-//! followed by any recovered arguments:
-//!
-//! ```text
-//! __fission_callind_opaque(fn_ptr, args...)
-//! ```
-//!
-//! This pass recursively traverses the HIR function body to find such calls and
-//! analyzes the `fn_ptr` expression:
-//! - If `fn_ptr` evaluates to a constant address (directly or via variable initializers),
-//!   or is a direct global symbol pointer, it matches that address/symbol against
-//!   `callee_summaries` to find the resolved symbol name.
-//! - If a match is found, the call is rewritten to a direct call to the target symbol:
-//!   ```text
-//!   resolved_symbol(args...)
-//!   ```
+//! Fission materializes unresolved indirect calls as
+//! `__fission_callind_opaque(fn_ptr, args...)`. This pass rewrites one to a
+//! direct call only when the target can be tied to a known callee summary.
+//! Unique-space temporary names and data-symbol names are not addresses.
+
+use std::collections::HashSet;
 
 use crate::HashMap;
 use crate::prelude::*;
@@ -38,10 +18,17 @@ use crate::prelude::*;
 pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
 
-    // 1. Gather all local variable initializers representing constants or global symbol addresses.
-    // This allows resolving variables whose values are established at local definition sites.
+    // A declaration initializer is not a reaching definition once the local
+    // is assigned elsewhere. Without statement-order SSA here, fail closed:
+    // retain initializer facts only for locals that are never reassigned.
+    let mut reassigned = HashSet::new();
+    collect_assigned_vars(&func.body, &mut reassigned);
+
     let mut const_initializers = HashMap::<String, PreHirExpr>::default();
     for local in &func.locals {
+        if reassigned.contains(&local.name) {
+            continue;
+        }
         if let Some(initializer) = &local.initializer {
             match initializer {
                 PreHirExpr::Const(val, ty) => {
@@ -65,7 +52,9 @@ pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
         }
     }
 
-    // 2. Build address-to-symbol mapping from the callee summaries in the function context.
+    // Known executable/function targets. An arbitrary numeric constant is not
+    // enough evidence to synthesize `sub_<addr>`; it may name data or unmapped
+    // memory. Callee summaries are the proof boundary this pass already owns.
     let mut addr_to_symbol = HashMap::<u64, String>::default();
     for (symbol, summary) in &func.callee_summaries {
         if let Some(addr) = summary.target.address {
@@ -73,12 +62,52 @@ pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
         }
     }
 
-    // 3. Recursively traverse and rewrite calls in function statements.
     for stmt in &mut func.body {
         changed |= deindirect_in_stmt(stmt, &const_initializers, &addr_to_symbol);
     }
 
     changed
+}
+
+fn collect_assigned_vars(stmts: &[PreHirStmt], assigned: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, .. } => {
+                if let PreHirLValue::Var(name) = lhs {
+                    assigned.insert(name.clone());
+                }
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => collect_assigned_vars(body, assigned),
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_assigned_vars(std::slice::from_ref(init.as_ref()), assigned);
+                }
+                if let Some(update) = update {
+                    collect_assigned_vars(std::slice::from_ref(update.as_ref()), assigned);
+                }
+                collect_assigned_vars(body, assigned);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_assigned_vars(then_body, assigned);
+                collect_assigned_vars(else_body, assigned);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_assigned_vars(&case.body, assigned);
+                }
+                collect_assigned_vars(default, assigned);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn deindirect_in_stmt(
@@ -183,7 +212,6 @@ fn deindirect_in_expr(
 ) -> bool {
     let mut changed = false;
 
-    // 1. Process sub-expressions first to normalize targets nested in complexes.
     match expr {
         PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::Unary { expr: inner, .. }
@@ -223,21 +251,19 @@ fn deindirect_in_expr(
         _ => {}
     }
 
-    // 2. Try to resolve __fission_callind_opaque in the current expression.
-    if let PreHirExpr::Call { target, args, ty } = expr {
-        if target == "__fission_callind_opaque" && !args.is_empty() {
-            let fn_ptr = &args[0];
-            if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol)
-            {
-                // Found a static direct target symbol. Re-write the call!
-                let remaining_args = args[1..].to_vec();
-                *expr = PreHirExpr::Call {
-                    target: resolved_symbol,
-                    args: remaining_args,
-                    ty: ty.clone(),
-                };
-                changed = true;
-            }
+    if let PreHirExpr::Call { target, args, ty } = expr
+        && target == "__fission_callind_opaque"
+        && !args.is_empty()
+    {
+        let fn_ptr = &args[0];
+        if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol) {
+            let remaining_args = args[1..].to_vec();
+            *expr = PreHirExpr::Call {
+                target: resolved_symbol,
+                args: remaining_args,
+                ty: ty.clone(),
+            };
+            changed = true;
         }
     }
 
@@ -250,61 +276,112 @@ fn resolve_call_target(
     addr_to_symbol: &HashMap<u64, String>,
 ) -> Option<String> {
     match fn_ptr {
-        // Direct constant address.
-        PreHirExpr::Const(addr, _) => {
-            let target_addr = *addr as u64;
-            if let Some(symbol) = addr_to_symbol.get(&target_addr) {
-                return Some(symbol.clone());
-            }
-            if target_addr > 0 {
-                return Some(format!("sub_{:x}", target_addr));
-            }
-        }
-        // Pointer cast const.
+        // A numeric constant becomes a direct call only if the analysis context
+        // already knows that exact address as a callee/function target.
+        PreHirExpr::Const(addr, _) => addr_to_symbol.get(&(*addr as u64)).cloned(),
         PreHirExpr::Cast { expr: inner, .. } => {
-            return resolve_call_target(inner, initializers, addr_to_symbol);
+            resolve_call_target(inner, initializers, addr_to_symbol)
         }
-        // Direct global symbol.
-        PreHirExpr::AddressOfGlobal(symbol_name) => {
-            return Some(symbol_name.clone());
-        }
+        // `&symbol` is sufficient only when the symbol is also present among
+        // known callees. This keeps `&DAT_xxx` and other data globals indirect.
+        PreHirExpr::AddressOfGlobal(symbol_name) => addr_to_symbol
+            .values()
+            .any(|known| known == symbol_name)
+            .then(|| symbol_name.clone()),
         // Load through a known IAT slot address: *(IAT_addr).
-        // This is the pattern emitted by x86-64 Sleigh for `CALL qword ptr [IAT_addr]`
-        // where the IAT slot address is a statically known constant.
         PreHirExpr::Load { ptr, .. } => {
             if let PreHirExpr::Const(iat_addr, _) = ptr.as_ref() {
-                let slot_addr = *iat_addr as u64;
-                if let Some(symbol) = addr_to_symbol.get(&slot_addr) {
-                    return Some(symbol.clone());
-                }
+                return addr_to_symbol.get(&(*iat_addr as u64)).cloned();
             }
+            None
         }
-        // Local variable reference, trace to its definition initializer.
         PreHirExpr::Var(var_name) => {
-            if let Some(init_expr) = initializers.get(var_name) {
-                if let PreHirExpr::Var(next_var) = init_expr {
-                    if next_var == var_name {
-                        return None;
-                    }
-                }
-                return resolve_call_target(init_expr, initializers, addr_to_symbol);
+            let init_expr = initializers.get(var_name)?;
+            if matches!(init_expr, PreHirExpr::Var(next) if next == var_name) {
+                return None;
             }
-            // Parse temporary register variables if they carry inline address hints in their names.
-            if let Some(addr) = parse_address_from_name(var_name) {
-                if let Some(symbol) = addr_to_symbol.get(&addr) {
-                    return Some(symbol.clone());
-                }
-                return Some(format!("sub_{:x}", addr));
-            }
+            resolve_call_target(init_expr, initializers, addr_to_symbol)
         }
-        _ => {}
+        _ => None,
     }
-    None
 }
 
-fn parse_address_from_name(name: &str) -> Option<u64> {
-    let raw = name
-        .strip_prefix("tmp_")
-        .or_else(|| name.strip_prefix("DAT_"))?;
-    u64::from_str_radix(raw.trim_start_matches("0x"), 16).ok()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unknown_ty() -> NirType {
+        NirType::Unknown
+    }
+
+    #[test]
+    fn temporary_and_data_names_are_not_lexical_code_addresses() {
+        let initializers = HashMap::default();
+        let known = HashMap::default();
+        assert_eq!(
+            resolve_call_target(&PreHirExpr::Var("tmp_100".into()), &initializers, &known),
+            None
+        );
+        assert_eq!(
+            resolve_call_target(
+                &PreHirExpr::Var("DAT_00405000".into()),
+                &initializers,
+                &known
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn constants_and_globals_require_known_callee_evidence() {
+        let initializers = HashMap::default();
+        let mut known = HashMap::default();
+        known.insert(0x401000, "target".to_string());
+
+        assert_eq!(
+            resolve_call_target(
+                &PreHirExpr::Const(0x401000, unknown_ty()),
+                &initializers,
+                &known
+            ),
+            Some("target".to_string())
+        );
+        assert_eq!(
+            resolve_call_target(
+                &PreHirExpr::Const(0x405000, unknown_ty()),
+                &initializers,
+                &known
+            ),
+            None
+        );
+        assert_eq!(
+            resolve_call_target(
+                &PreHirExpr::AddressOfGlobal("target".to_string()),
+                &initializers,
+                &known
+            ),
+            Some("target".to_string())
+        );
+        assert_eq!(
+            resolve_call_target(
+                &PreHirExpr::AddressOfGlobal("DAT_00405000".to_string()),
+                &initializers,
+                &known
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn assigned_locals_are_removed_from_initializer_facts() {
+        let mut assigned = HashSet::new();
+        collect_assigned_vars(
+            &[PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("fn_ptr".to_string()),
+                rhs: PreHirExpr::Const(0x402000, unknown_ty()),
+            }],
+            &mut assigned,
+        );
+        assert!(assigned.contains("fn_ptr"));
+    }
 }

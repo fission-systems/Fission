@@ -164,12 +164,19 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
                 });
             continue;
         };
-        let contains_entry = block.start <= function.entry
-            && block
-                .start
-                .checked_add(block.size)
-                .is_some_and(|end| function.entry < end);
-        if !contains_entry {
+        let block_end = block.start.checked_add(block.size);
+        let contains_function = block.start <= function.entry
+            && block_end.is_some_and(|end| {
+                if function.size == 0 {
+                    function.entry < end
+                } else {
+                    function
+                        .entry
+                        .checked_add(function.size)
+                        .is_some_and(|function_end| function_end <= end)
+                }
+            });
+        if !contains_function {
             report
                 .issues
                 .push(SnapshotIntegrityIssue::FunctionOutsideMemoryBlock {
@@ -205,10 +212,7 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
             u64::from(relocation.size),
         );
         if let Some(symbol_id) = relocation.symbol {
-            let valid_symbol_id = usize::try_from(symbol_id.0)
-                .ok()
-                .and_then(|index| snapshot.symbols.get(index))
-                .is_some_and(|symbol| symbol.id == symbol_id);
+            let valid_symbol_id = snapshot.symbols.iter().any(|symbol| symbol.id == symbol_id);
             if valid_symbol_id {
                 continue;
             }
