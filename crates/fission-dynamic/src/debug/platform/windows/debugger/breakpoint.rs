@@ -186,38 +186,103 @@ impl WindowsDebugger {
             .ok_or_else(|| FissionError::debug("No thread id for step out"))?;
 
         let regs = self.fetch_registers(tid)?;
-        // `ESP` in a 32-bit process, `RSP` in a 64-bit one -- the state is
-        // named the way its own machine names things.
-        let stack_pointer = regs.get("RSP").or_else(|| regs.get("ESP")).unwrap_or(0);
-        let ret_addr = if self.is_wow64 == Some(true) {
-            let esp = stack_pointer as u32;
-            let bytes = self.read_memory(esp as u64, 4)?;
-            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
+        let rip = regs.pc;
+
+        // Check if current instruction is already RET
+        let is_at_ret = if let Ok(code_bytes) = self.read_memory(rip, 16) {
+            if let Some(decoder) = self.decoder.as_ref() {
+                decoder
+                    .decode_one(&code_bytes, rip)
+                    .map(|insn| insn.is_return)
+                    .unwrap_or(false)
+            } else {
+                code_bytes.first().is_some_and(|&b| b == 0xC3 || b == 0xC2)
+            }
         } else {
-            let rsp = stack_pointer;
-            let bytes = self.read_memory(rsp, 8)?;
-            u64::from_le_bytes([
-                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-            ])
+            false
         };
 
-        let original_byte = self.read_memory(ret_addr, 1)?[0];
-        if original_byte != 0xCC {
-            self.write_memory(ret_addr, &[0xCC])?;
-            self.state.breakpoints.insert(
-                ret_addr,
-                Breakpoint {
-                    address: ret_addr,
-                    original_byte,
-                    enabled: true,
-                    temporary: true,
-                    kind: crate::debug::types::BreakpointKind::Software,
-                    hits: 0,
-                    condition: None,
-                },
-            );
+        if is_at_ret {
+            // At RET instruction, the return address is currently on the top of stack [RSP]
+            let stack_pointer = regs.get("RSP").or_else(|| regs.get("ESP")).unwrap_or(0);
+            let ret_addr = if self.is_wow64 == Some(true) {
+                let esp = stack_pointer as u32;
+                let bytes = self.read_memory(esp as u64, 4)?;
+                u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
+            } else {
+                let rsp = stack_pointer;
+                let bytes = self.read_memory(rsp, 8)?;
+                u64::from_le_bytes([
+                    bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                ])
+            };
+
+            if ret_addr > 0x10000 && ret_addr < 0x0000_7FFF_FFFF_FFFF {
+                let original_byte = self.read_memory(ret_addr, 1)?[0];
+                if original_byte != 0xCC {
+                    self.write_memory(ret_addr, &[0xCC])?;
+                    self.state.breakpoints.insert(
+                        ret_addr,
+                        Breakpoint {
+                            address: ret_addr,
+                            original_byte,
+                            enabled: true,
+                            temporary: true,
+                            kind: crate::debug::types::BreakpointKind::Software,
+                            hits: 0,
+                            condition: None,
+                        },
+                    );
+                }
+                return self.continue_execution();
+            }
         }
-        self.continue_execution()
+
+        // Standard frame-pointer functions: caller's return address is at [RBP + pointer_size]
+        let frame_pointer = regs.get("RBP").or_else(|| regs.get("EBP")).unwrap_or(0);
+        let stack_pointer = regs.get("RSP").or_else(|| regs.get("ESP")).unwrap_or(0);
+        let ptr_size = if self.is_wow64 == Some(true) { 4 } else { 8 };
+
+        if frame_pointer > stack_pointer
+            && frame_pointer.saturating_sub(stack_pointer) < 0x100000
+            && frame_pointer % ptr_size as u64 == 0
+        {
+            let ret_slot = frame_pointer + ptr_size as u64;
+            if let Ok(bytes) = self.read_memory(ret_slot, ptr_size) {
+                let ret_addr = if ptr_size == 4 {
+                    u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
+                } else {
+                    u64::from_le_bytes([
+                        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
+                        bytes[7],
+                    ])
+                };
+                if ret_addr > 0x10000 && ret_addr < 0x0000_7FFF_FFFF_FFFF {
+                    if let Ok(orig) = self.read_memory(ret_addr, 1) {
+                        let original_byte = orig[0];
+                        if original_byte != 0xCC {
+                            self.write_memory(ret_addr, &[0xCC])?;
+                            self.state.breakpoints.insert(
+                                ret_addr,
+                                Breakpoint {
+                                    address: ret_addr,
+                                    original_byte,
+                                    enabled: true,
+                                    temporary: true,
+                                    kind: crate::debug::types::BreakpointKind::Software,
+                                    hits: 0,
+                                    condition: None,
+                                },
+                            );
+                        }
+                        return self.continue_execution();
+                    }
+                }
+            }
+        }
+
+        // Safe fallback: step instruction
+        self.single_step()
     }
 
     pub(super) fn skip_instruction(&mut self) -> FissionResult<()> {
