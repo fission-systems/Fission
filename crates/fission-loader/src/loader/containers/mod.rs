@@ -107,6 +107,7 @@ fn validate_compound_document_header(bytes: &[u8]) -> Result<()> {
     let byte_order = u16_le(bytes, 0x1c)?;
     let sector_shift = u16_le(bytes, 0x1e)?;
     let mini_sector_shift = u16_le(bytes, 0x20)?;
+    let num_dir_sectors = u32_le(bytes, 0x28)?;
     let num_fat_sectors = u32_le(bytes, 0x2c)?;
     let first_dir_sector = u32_le(bytes, 0x30)?;
     let mini_stream_cutoff = u32_le(bytes, 0x38)?;
@@ -130,6 +131,11 @@ fn validate_compound_document_header(bytes: &[u8]) -> Result<()> {
             "MalformedHeader: CompoundDocument sector size does not match major version",
         ));
     }
+    if major_version == 3 && num_dir_sectors != 0 {
+        return Err(FissionError::loader(
+            "MalformedHeader: CompoundDocument v3 directory sector count must be zero",
+        ));
+    }
     if mini_sector_shift != 6 {
         return Err(FissionError::loader(
             "MalformedHeader: CompoundDocument mini sector size is invalid",
@@ -150,7 +156,7 @@ fn validate_compound_document_header(bytes: &[u8]) -> Result<()> {
     })?;
     let sector_count = bytes
         .len()
-        .saturating_sub(CFB_HEADER_LEN)
+        .saturating_sub(sector_size)
         .checked_div(sector_size)
         .unwrap_or(0) as u32;
     if num_fat_sectors > sector_count {
@@ -158,7 +164,17 @@ fn validate_compound_document_header(bytes: &[u8]) -> Result<()> {
             "MalformedHeader: CompoundDocument FAT sector count exceeds file size",
         ));
     }
-    validate_sector_id(first_dir_sector, sector_count, false, "directory")?;
+    if first_dir_sector == CFB_FREESECT {
+        return Err(FissionError::loader(
+            "MalformedHeader: CompoundDocument directory sector is out of bounds",
+        ));
+    }
+    validate_sector_id(
+        first_dir_sector,
+        sector_count,
+        major_version == 4,
+        "directory",
+    )?;
     if num_mini_fat_sectors > 0 || first_mini_fat_sector != CFB_ENDOFCHAIN {
         validate_sector_id(first_mini_fat_sector, sector_count, true, "mini FAT")?;
     }
@@ -253,5 +269,54 @@ mod tests {
             detect_container(b"!<arch>\nmember").unwrap(),
             Some(ContainerFormat::UnixArchive)
         );
+    }
+
+    #[test]
+    fn accepts_v4_cfb_with_unallocated_directory_endofchain_and_4096_sector_alignment() {
+        // 4096-byte header block + 1 FAT sector (4096 bytes) = 8192 bytes total
+        let mut bytes = vec![0u8; 8192];
+        bytes[0..8].copy_from_slice(&CFB_MAGIC);
+        bytes[0x18..0x1a].copy_from_slice(&0x003eu16.to_le_bytes());
+        bytes[0x1a..0x1c].copy_from_slice(&4u16.to_le_bytes()); // major_version = 4
+        bytes[0x1c..0x1e].copy_from_slice(&CFB_BYTE_ORDER.to_le_bytes());
+        bytes[0x1e..0x20].copy_from_slice(&12u16.to_le_bytes()); // sector_shift = 12 (4096)
+        bytes[0x20..0x22].copy_from_slice(&6u16.to_le_bytes());
+        bytes[0x28..0x2c].copy_from_slice(&0u32.to_le_bytes()); // _csectDir
+        bytes[0x2c..0x30].copy_from_slice(&1u32.to_le_bytes()); // 1 FAT sector
+        bytes[0x30..0x34].copy_from_slice(&CFB_ENDOFCHAIN.to_le_bytes()); // unallocated directory stream
+        bytes[0x38..0x3c].copy_from_slice(&4096u32.to_le_bytes());
+        bytes[0x3c..0x40].copy_from_slice(&CFB_ENDOFCHAIN.to_le_bytes());
+        bytes[0x44..0x48].copy_from_slice(&CFB_ENDOFCHAIN.to_le_bytes());
+
+        assert_eq!(
+            detect_container(&bytes).unwrap(),
+            Some(ContainerFormat::CompoundDocument)
+        );
+
+        // With 8192 bytes (4096 header + 4096 sector 0), sector_count is 1.
+        // Sector index 1 must be out of bounds.
+        bytes[0x30..0x34].copy_from_slice(&1u32.to_le_bytes());
+        let err =
+            detect_container(&bytes).expect_err("sector 1 is out of bounds for 8192-byte v4 CFB");
+        assert!(format!("{err}").contains("directory sector is out of bounds"));
+
+        // FREESECT on first_dir_sector must be rejected even on v4
+        bytes[0x30..0x34].copy_from_slice(&CFB_FREESECT.to_le_bytes());
+        let err = detect_container(&bytes).expect_err("FREESECT directory sector is invalid");
+        assert!(format!("{err}").contains("directory sector is out of bounds"));
+    }
+
+    #[test]
+    fn rejects_v3_cfb_with_nonzero_dir_sector_count_or_endofchain_dir() {
+        let mut bytes = valid_cfb_header();
+        bytes[0x28..0x2c].copy_from_slice(&1u32.to_le_bytes());
+        let err = detect_container(&bytes).expect_err("v3 must have _csectDir == 0");
+        assert!(format!("{err}").contains("v3 directory sector count must be zero"));
+
+        let mut bytes2 = valid_cfb_header();
+        bytes2[0x30..0x34].copy_from_slice(&CFB_ENDOFCHAIN.to_le_bytes());
+        let err2 =
+            detect_container(&bytes2).expect_err("v3 cannot have ENDOFCHAIN directory sector");
+        assert!(format!("{err2}").contains("directory sector is out of bounds"));
     }
 }
