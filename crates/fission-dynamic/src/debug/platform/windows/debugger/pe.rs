@@ -34,7 +34,7 @@ impl WindowsDebugger {
         let export_dd = self.read_memory(dd_offset, 8)?;
         let export_rva =
             u32::from_le_bytes([export_dd[0], export_dd[1], export_dd[2], export_dd[3]]);
-        let _export_size =
+        let export_size =
             u32::from_le_bytes([export_dd[4], export_dd[5], export_dd[6], export_dd[7]]);
 
         if export_rva == 0 {
@@ -43,6 +43,7 @@ impl WindowsDebugger {
 
         let ed_offset = base + export_rva as u64;
         let ed = self.read_memory(ed_offset, 40)?;
+        let base_ordinal = u32::from_le_bytes([ed[16], ed[17], ed[18], ed[19]]);
         let number_of_functions = u32::from_le_bytes([ed[20], ed[21], ed[22], ed[23]]);
         let number_of_names = u32::from_le_bytes([ed[24], ed[25], ed[26], ed[27]]);
         let addr_of_functions = u32::from_le_bytes([ed[28], ed[29], ed[30], ed[31]]);
@@ -50,38 +51,95 @@ impl WindowsDebugger {
         let addr_of_name_ordinals = u32::from_le_bytes([ed[36], ed[37], ed[38], ed[39]]);
 
         let mut exports = Vec::new();
-        if number_of_names > 0 && addr_of_names != 0 && addr_of_name_ordinals != 0 {
-            let names_table = base + addr_of_names as u64;
-            let ordinals_table = base + addr_of_name_ordinals as u64;
+        let mut named_func_indices = std::collections::HashSet::new();
+
+        if addr_of_functions != 0 {
             let functions_table = base + addr_of_functions as u64;
 
-            for idx in 0..number_of_names.min(10000) {
-                let name_rva_bytes = self.read_memory(names_table + idx as u64 * 4, 4)?;
-                let name_rva = u32::from_le_bytes([
-                    name_rva_bytes[0],
-                    name_rva_bytes[1],
-                    name_rva_bytes[2],
-                    name_rva_bytes[3],
-                ]);
-                let ord_bytes = self.read_memory(ordinals_table + idx as u64 * 2, 2)?;
-                let ordinal = u16::from_le_bytes([ord_bytes[0], ord_bytes[1]]);
+            // 1. Process named exports
+            if number_of_names > 0 && addr_of_names != 0 && addr_of_name_ordinals != 0 {
+                let names_table = base + addr_of_names as u64;
+                let ordinals_table = base + addr_of_name_ordinals as u64;
 
-                if name_rva != 0 {
-                    let name = self.read_cstring(base + name_rva as u64, 256);
-                    let func_idx = ordinal as u64;
-                    if func_idx < number_of_functions as u64 {
-                        let func_rva_bytes = self.read_memory(functions_table + func_idx * 4, 4)?;
-                        let func_rva = u32::from_le_bytes([
-                            func_rva_bytes[0],
-                            func_rva_bytes[1],
-                            func_rva_bytes[2],
-                            func_rva_bytes[3],
-                        ]);
-                        if func_rva != 0 {
+                for idx in 0..number_of_names.min(10000) {
+                    let name_rva_bytes = self.read_memory(names_table + idx as u64 * 4, 4)?;
+                    let name_rva = u32::from_le_bytes([
+                        name_rva_bytes[0],
+                        name_rva_bytes[1],
+                        name_rva_bytes[2],
+                        name_rva_bytes[3],
+                    ]);
+                    let ord_bytes = self.read_memory(ordinals_table + idx as u64 * 2, 2)?;
+                    let ordinal_index = u16::from_le_bytes([ord_bytes[0], ord_bytes[1]]);
+
+                    if name_rva != 0 {
+                        let name = self.read_cstring(base + name_rva as u64, 256);
+                        let func_idx = ordinal_index as u64;
+                        if func_idx < number_of_functions as u64 {
+                            named_func_indices.insert(func_idx);
+                            let func_rva_bytes =
+                                self.read_memory(functions_table + func_idx * 4, 4)?;
+                            let func_rva = u32::from_le_bytes([
+                                func_rva_bytes[0],
+                                func_rva_bytes[1],
+                                func_rva_bytes[2],
+                                func_rva_bytes[3],
+                            ]);
+                            if func_rva != 0 {
+                                let actual_ordinal = base_ordinal + ordinal_index as u32;
+                                let is_forwarder = export_size > 0
+                                    && func_rva >= export_rva
+                                    && func_rva < export_rva.saturating_add(export_size);
+
+                                let target_address = if is_forwarder {
+                                    let forwarder_str =
+                                        self.read_cstring(base + func_rva as u64, 256);
+                                    self.resolve_forwarder_depth(&forwarder_str, 0).unwrap_or(0)
+                                } else {
+                                    base + func_rva as u64
+                                };
+
+                                if target_address != 0 {
+                                    exports.push(crate::debug::types::ExportInfo {
+                                        name,
+                                        address: target_address,
+                                        ordinal: Some(actual_ordinal),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Process ordinal-only exports
+            for func_idx in 0..(number_of_functions as u64).min(10000) {
+                if !named_func_indices.contains(&func_idx) {
+                    let func_rva_bytes = self.read_memory(functions_table + func_idx * 4, 4)?;
+                    let func_rva = u32::from_le_bytes([
+                        func_rva_bytes[0],
+                        func_rva_bytes[1],
+                        func_rva_bytes[2],
+                        func_rva_bytes[3],
+                    ]);
+                    if func_rva != 0 {
+                        let actual_ordinal = base_ordinal + func_idx as u32;
+                        let is_forwarder = export_size > 0
+                            && func_rva >= export_rva
+                            && func_rva < export_rva.saturating_add(export_size);
+
+                        let target_address = if is_forwarder {
+                            let forwarder_str = self.read_cstring(base + func_rva as u64, 256);
+                            self.resolve_forwarder_depth(&forwarder_str, 0).unwrap_or(0)
+                        } else {
+                            base + func_rva as u64
+                        };
+
+                        if target_address != 0 {
                             exports.push(crate::debug::types::ExportInfo {
-                                name,
-                                address: base + func_rva as u64,
-                                ordinal: Some(ordinal as u32),
+                                name: format!("Ordinal_{actual_ordinal}"),
+                                address: target_address,
+                                ordinal: Some(actual_ordinal),
                             });
                         }
                     }
@@ -89,6 +147,48 @@ impl WindowsDebugger {
             }
         }
         Ok(exports)
+    }
+
+    fn resolve_forwarder_depth(&self, forwarder: &str, depth: usize) -> Option<u64> {
+        if depth > 4 {
+            return None;
+        }
+        let (mod_part, func_part) = forwarder.split_once('.')?;
+        let mod_name_lower = mod_part.to_ascii_lowercase();
+        let mod_base = self.state.modules.values().find_map(|m| {
+            let name_lower = m.name.to_ascii_lowercase();
+            let stem = name_lower.strip_suffix(".dll").unwrap_or(&name_lower);
+            if name_lower == mod_name_lower || stem == mod_name_lower {
+                Some(m.base_address)
+            } else {
+                None
+            }
+        })?;
+
+        if let Some(ord_str) = func_part.strip_prefix('#') {
+            let ord = ord_str.parse::<u32>().ok()?;
+            self.get_module_exports(mod_base)
+                .ok()?
+                .into_iter()
+                .find_map(|e| {
+                    if e.ordinal == Some(ord) {
+                        Some(e.address)
+                    } else {
+                        None
+                    }
+                })
+        } else {
+            self.get_module_exports(mod_base)
+                .ok()?
+                .into_iter()
+                .find_map(|e| {
+                    if e.name.eq_ignore_ascii_case(func_part) {
+                        Some(e.address)
+                    } else {
+                        None
+                    }
+                })
+        }
     }
 
     pub(super) fn get_module_imports(
@@ -182,7 +282,8 @@ impl WindowsDebugger {
                     break;
                 }
 
-                if (thunk_val & (1u64 << 63)) != 0 {
+                let ordinal_mask = if is_64 { 1u64 << 63 } else { 1u64 << 31 };
+                if (thunk_val & ordinal_mask) != 0 {
                     // Ordinal import
                     let ordinal = (thunk_val & 0xFFFF) as u16;
                     imports.push(crate::debug::types::ImportInfo {
@@ -230,5 +331,60 @@ impl WindowsDebugger {
             .take_while(|&&b| b != 0)
             .map(|&b| b as char)
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ordinal_import_masks_32_and_64() {
+        let is_64_false = false;
+        let ordinal_mask_32 = if is_64_false { 1u64 << 63 } else { 1u64 << 31 };
+        assert_eq!(ordinal_mask_32, 0x8000_0000);
+
+        // 32-bit ordinal import with ordinal 42
+        let thunk_32: u64 = 0x8000_002A;
+        assert_ne!(thunk_32 & ordinal_mask_32, 0);
+        assert_eq!((thunk_32 & 0xFFFF) as u16, 42);
+
+        // Name import (RVA < 0x8000_0000)
+        let thunk_name_32: u64 = 0x0000_2040;
+        assert_eq!(thunk_name_32 & ordinal_mask_32, 0);
+
+        let is_64_true = true;
+        let ordinal_mask_64 = if is_64_true { 1u64 << 63 } else { 1u64 << 31 };
+        assert_eq!(ordinal_mask_64, 0x8000_0000_0000_0000);
+
+        // 64-bit ordinal import with ordinal 99
+        let thunk_64: u64 = 0x8000_0000_0000_0063;
+        assert_ne!(thunk_64 & ordinal_mask_64, 0);
+        assert_eq!((thunk_64 & 0xFFFF) as u16, 99);
+    }
+
+    #[test]
+    fn test_export_forwarder_detection_and_base_ordinal() {
+        let export_rva: u32 = 0x4000;
+        let export_size: u32 = 0x500;
+        let base_ordinal: u32 = 100;
+        let ordinal_index: u16 = 5;
+
+        let actual_ordinal = base_ordinal + ordinal_index as u32;
+        assert_eq!(actual_ordinal, 105);
+
+        // Function RVA pointing inside export section -> forwarder
+        let forwarder_rva: u32 = 0x4120;
+        let is_forwarder = export_size > 0
+            && forwarder_rva >= export_rva
+            && forwarder_rva < export_rva.saturating_add(export_size);
+        assert!(is_forwarder);
+
+        // Function RVA pointing outside export section -> code
+        let code_rva: u32 = 0x1200;
+        let is_code_forwarder = export_size > 0
+            && code_rva >= export_rva
+            && code_rva < export_rva.saturating_add(export_size);
+        assert!(!is_code_forwarder);
     }
 }
