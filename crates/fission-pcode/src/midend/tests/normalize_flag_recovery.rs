@@ -86,6 +86,7 @@ fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
 
 fn sborrow_call(a: PreHirExpr, b: PreHirExpr) -> PreHirExpr {
     PreHirExpr::Call {
+        origin: None,
         target: "__sborrow".to_string(),
         args: vec![a, b],
         ty: NirType::Bool,

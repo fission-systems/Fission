@@ -234,7 +234,15 @@ impl<'a> PreviewBuilder<'a> {
                     .map(|out| type_from_size(out.size, false))
             })
             .unwrap_or(NirType::Unknown);
-        Ok(PreHirExpr::Call { target, args, ty })
+        Ok(PreHirExpr::Call {
+            origin: Some(fission_midend_core::ir::CallOrigin {
+                instruction_address: op.address,
+                pcode_sequence: op.seq_num,
+            }),
+            target,
+            args,
+            ty,
+        })
     }
 
     /// True when a recovered call argument expression is the same surface as
@@ -280,6 +288,7 @@ impl<'a> PreviewBuilder<'a> {
                 .collect::<Result<Vec<_>, _>>()?
         };
         Ok(PreHirExpr::Call {
+            origin: None,
             target,
             args,
             ty: op
@@ -307,6 +316,7 @@ impl<'a> PreviewBuilder<'a> {
         let refs: Vec<&PreHirExpr> = args.iter().collect();
         self.note_operand_metatypes(op.opcode, &refs);
         Ok(PreHirExpr::Call {
+            origin: None,
             target: target.to_string(),
             args,
             ty,

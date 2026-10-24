@@ -118,6 +118,7 @@ mod tests {
         assert!(!is_identity_var_assign(
             &lhs,
             &PreHirExpr::Call {
+                origin: None,
                 target: "f".into(),
                 args: vec![],
                 ty: NirType::Unknown,

@@ -119,6 +119,7 @@ impl<'a> PreviewBuilder<'a> {
             Vec::new()
         };
         Some(PreHirExpr::Call {
+            origin: None,
             target,
             args,
             ty: NirType::Unknown,
@@ -145,6 +146,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut args = self.recover_tail_call_args(block_idx, block, term_idx);
         if let Some(target) = resolved_symbol {
             return PreHirExpr::Call {
+                origin: None,
                 target,
                 args,
                 ty: NirType::Unknown,
@@ -153,6 +155,7 @@ impl<'a> PreviewBuilder<'a> {
         // Unresolved fp: opaque form — printer casts to callable.
         args.insert(0, target_expr.clone());
         PreHirExpr::Call {
+            origin: None,
             target: "__fission_callind_opaque".to_string(),
             args,
             ty: NirType::Unknown,
@@ -293,6 +296,7 @@ impl<'a> PreviewBuilder<'a> {
         // the argument dropped.
         let args = self.recover_tail_call_args(block_idx, block, term_idx);
         Some(PreHirExpr::Call {
+            origin: None,
             target: resolved_target,
             args,
             ty: NirType::Unknown,

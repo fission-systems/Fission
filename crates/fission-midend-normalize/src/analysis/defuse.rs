@@ -2341,7 +2341,13 @@ fn replace_matching_pure_expr(
             rhs: Box::new(replace_matching_pure_expr(rhs, needle, replacement)),
             ty: ty.clone(),
         },
-        PreHirExpr::Call { target, args, ty } => PreHirExpr::Call {
+        PreHirExpr::Call {
+            target,
+            args,
+            ty,
+            origin,
+        } => PreHirExpr::Call {
+            origin: *origin,
             target: target.clone(),
             args: args
                 .iter()

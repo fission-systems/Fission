@@ -149,7 +149,13 @@ pub fn prehir_expr_to_hir_expr(expr: PreHirExpr) -> HirExpr {
             else_expr: Box::new(prehir_expr_to_hir_expr(*else_expr)),
             ty,
         },
-        PreHirExpr::Call { target, args, ty } => HirExpr::Call {
+        PreHirExpr::Call {
+            target,
+            args,
+            ty,
+            origin,
+        } => HirExpr::Call {
+            origin: origin,
             target,
             args: args.into_iter().map(prehir_expr_to_hir_expr).collect(),
             ty,
@@ -359,7 +365,13 @@ pub fn hir_expr_to_prehir_expr(expr: HirExpr) -> PreHirExpr {
             else_expr: Box::new(hir_expr_to_prehir_expr(*else_expr)),
             ty,
         },
-        HirExpr::Call { target, args, ty } => PreHirExpr::Call {
+        HirExpr::Call {
+            target,
+            args,
+            ty,
+            origin,
+        } => PreHirExpr::Call {
+            origin: origin,
             target,
             args: args.into_iter().map(hir_expr_to_prehir_expr).collect(),
             ty,

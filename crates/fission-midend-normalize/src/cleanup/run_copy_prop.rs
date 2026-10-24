@@ -743,6 +743,7 @@ mod tests {
             vec![
                 set("xVar1", var("local_4")),
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "f".into(),
                     args: vec![],
                     ty: ty(),

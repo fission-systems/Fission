@@ -473,6 +473,7 @@ mod tests {
                 set(
                     "xVar1",
                     PreHirExpr::Call {
+                        origin: None,
                         target: "side_effect".to_string(),
                         args: vec![],
                         ty: u32_ty(),

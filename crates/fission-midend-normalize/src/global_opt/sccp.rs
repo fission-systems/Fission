@@ -686,6 +686,7 @@ mod tests {
                     rhs: PreHirExpr::Const(0, int(64)),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "getline".to_string(),
                     args: vec![PreHirExpr::AddressOfLocal("buf".to_string())],
                     ty: int(64),
@@ -723,6 +724,7 @@ mod tests {
                     rhs: PreHirExpr::Const(0, int(64)),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "getline".to_string(),
                     args: vec![PreHirExpr::AddressOfLocal("buf".to_string())],
                     ty: int(64),
@@ -768,6 +770,7 @@ mod tests {
                     rhs: PreHirExpr::AddressOfLocal("buf".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "write_through_pointer".to_string(),
                     args: vec![var("p")],
                     ty: int(64),
@@ -802,12 +805,14 @@ mod tests {
             body: vec![PreHirStmt::If {
                 cond: PreHirExpr::Const(1, int(32)),
                 then_body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "add".to_string(),
                     args: vec![PreHirExpr::Const(1, int(32)), PreHirExpr::Const(2, int(32))],
                     ty: int(32),
                 })]
                 .into(),
                 else_body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "max".to_string(),
                     args: vec![PreHirExpr::Const(3, int(32)), PreHirExpr::Const(4, int(32))],
                     ty: int(32),

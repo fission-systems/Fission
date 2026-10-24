@@ -3783,6 +3783,7 @@ mod read_kind_index_tests {
     #[test]
     fn call_args_and_plain_expr_keep_their_distinct_kinds() {
         let call = PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "f".to_string(),
             args: vec![var("a")],
             ty: NirType::Unknown,

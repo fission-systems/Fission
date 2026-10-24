@@ -40,6 +40,7 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
         surface_return_type_name: None,
         body: vec![
             HirStmt::Expr(HirExpr::Call {
+                origin: None,
                 target: "GetClientRect".to_string(),
                 args: vec![
                     HirExpr::Var("param_1".to_string()),

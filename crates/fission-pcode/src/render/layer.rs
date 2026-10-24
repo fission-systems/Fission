@@ -11,13 +11,18 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A proved contributing result definition on an actual output line.
-/// It does not assert provenance for every RHS occurrence on that line.
+/// Scoped instruction evidence on an actual output line.
+/// Definition records apply only to `defined_variables`; call-only records
+/// have an empty variable scope and an explicit `call_site`. Neither grants
+/// provenance to unrelated RHS occurrences.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveredLineMapping {
     pub line_number: usize,
     pub addresses: Vec<u64>,
     pub defined_variables: Vec<String>,
+    /// Call-only ownership. Empty variable scope never grants RHS variable PCs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_site: Option<fission_midend_core::ir::CallOrigin>,
 }
 
 /// Which pseudocode surface to emit (CLI / JSON primary selection).

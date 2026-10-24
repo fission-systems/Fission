@@ -151,6 +151,7 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             assign(
                 "of",
                 PreHirExpr::Call {
+                    origin: None,
                     target: "__sborrow".into(),
                     args: vec![var("uVar5"), var("uVar2")],
                     ty: bool_ty(),
@@ -223,6 +224,7 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             assign(
                 "of",
                 PreHirExpr::Call {
+                    origin: None,
                     target: "__sborrow".into(),
                     args: vec![var("uVar13"), var("ecx")],
                     ty: bool_ty(),

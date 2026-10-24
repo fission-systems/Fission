@@ -149,6 +149,7 @@ mod tests {
 
     fn call(target: &str) -> PreHirStmt {
         PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: target.to_string(),
             args: Vec::new(),
             ty: fission_midend_core::ir::NirType::Unknown,

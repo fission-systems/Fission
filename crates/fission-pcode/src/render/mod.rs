@@ -70,6 +70,8 @@ pub(crate) use printer::{
     print_hir_function_with_profile, print_stmt, print_type,
 };
 pub(crate) use variables::recovered_variables_with_instruction_addresses;
-pub use variables::{RecoveredVariable, recovered_variables};
+pub use variables::{
+    RecoveredTypeField, RecoveredTypeShape, RecoveredVariable, recovered_variables,
+};
 
 pub(crate) use layered::render_layered_pseudocode_with_provenance;

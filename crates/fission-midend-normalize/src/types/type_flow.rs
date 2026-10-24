@@ -962,6 +962,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "produce_pointer".into(),
                         args: vec![],
                         ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -1241,6 +1242,7 @@ mod tests {
         let barriers = vec![
             PreHirStmt::Label("join".into()),
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "unknown_effect".into(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -1335,6 +1337,7 @@ mod tests {
         let mut func = copy_lifetime_fixture(PreHirStmt::Assign {
             lhs: PreHirLValue::Var("carrier".into()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "produce_pointer".into(),
                 args: vec![],
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -1372,6 +1375,7 @@ mod tests {
         let mut func = copy_lifetime_fixture(PreHirStmt::Assign {
             lhs: PreHirLValue::Var("carrier".into()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "produce_pointer".into(),
                 args: vec![],
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),

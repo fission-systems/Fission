@@ -296,6 +296,7 @@ fn normalize_preserves_side_effect_in_redundant_conditional_return() {
         vec![],
         vec![PreHirStmt::If {
             cond: PreHirExpr::Call {
+                origin: None,
                 target: "check".to_string(),
                 args: vec![],
                 ty: NirType::Bool,

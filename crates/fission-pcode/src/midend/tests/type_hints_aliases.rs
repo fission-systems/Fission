@@ -30,6 +30,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Expr(HirExpr::Call {
+            origin: None,
             target: "GetClientRect".to_string(),
             args: vec![
                 HirExpr::Var("param_1".to_string()),
@@ -98,6 +99,7 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Expr(HirExpr::Call {
+            origin: None,
             target: "GetClientRect".to_string(),
             args: vec![
                 HirExpr::Var("param_1".to_string()),

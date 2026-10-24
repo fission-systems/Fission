@@ -2023,6 +2023,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("rax".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "f".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -2035,6 +2036,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("rax".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "g".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -2521,6 +2523,7 @@ mod tests {
                         }),
                         then_expr: Box::new(HirExpr::Const(0, int_ty(64, false))),
                         else_expr: Box::new(HirExpr::Call {
+                            origin: None,
                             target: "fn".into(),
                             args: vec![HirExpr::Var("param_2".into())],
                             ty: int_ty(64, false),
@@ -2580,6 +2583,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("xVar2".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "__popcount".into(),
                         args: vec![HirExpr::Var("uVar1".into())],
                         ty: int_ty(8, false),
@@ -2862,6 +2866,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("x".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "side_effect".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -2915,6 +2920,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("x".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "once".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -3004,6 +3010,7 @@ mod tests {
                     then_body: vec![HirStmt::Assign {
                         lhs: HirLValue::Var("x".into()),
                         rhs: HirExpr::Call {
+                            origin: None,
                             target: "side".into(),
                             args: vec![],
                             ty: int_ty(32, true),
@@ -3950,6 +3957,7 @@ mod tests {
                         HirStmt::Assign {
                             lhs: HirLValue::Var("i".into()),
                             rhs: HirExpr::Call {
+                                origin: None,
                                 target: "other".into(),
                                 args: vec![],
                                 ty: i32.clone(),
