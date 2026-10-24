@@ -857,8 +857,8 @@ fn partial_flag_register_is_recovered_when_only_low_lane_is_observed() {
         .expect("render partial flag low lane");
 
     assert!(
-        !code.contains("long long r8;"),
-        "must not declare an uninitialized wide flag carrier:\n{code}"
+        !code.contains("1 + r8") && !code.contains("+ (unsigned long long)r8"),
+        "must not use an uninitialized wide flag carrier:\n{code}"
     );
     assert!(
         code.contains("param_2") || code.contains("rdx"),

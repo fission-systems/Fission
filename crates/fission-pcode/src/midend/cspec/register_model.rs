@@ -80,7 +80,12 @@ impl RegisterModel {
             // Wider covering register (e.g. RAX covers EAX at same offset).
             self.by_offset_grouped
                 .get(&offset)
-                .and_then(|variants| variants.iter().find(|(sz, _)| *sz >= size))
+                .and_then(|variants| {
+                    variants
+                        .iter()
+                        .filter(|(sz, _)| *sz >= size)
+                        .min_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)))
+                })
                 .map(|(_, name)| name.as_str())
         })
     }
@@ -279,6 +284,9 @@ fn group_sla_map_by_offset(map: &HashMap<(u64, u32), String>) -> HashMap<u64, Ve
             .or_default()
             .push((size, name.clone()));
     }
+    for variants in by_offset.values_mut() {
+        variants.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    }
     by_offset
 }
 
@@ -471,14 +479,6 @@ impl RegisterNamer {
                 "x0".to_string()
             });
         }
-        if matches!(
-            self.abi,
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
-        ) && size == 1
-            && is_x64_canonical_gpr_slot(offset)
-        {
-            return self.hw_name_at(offset, 8);
-        }
         // SLA EFLAGS bits at 0x200.. (CF/ZF/SF/OF/…). Must be distinct names —
         // never collapse to the shared `"reg"` fallback (destroys Jcc recovery).
         if matches!(
@@ -528,7 +528,12 @@ impl RegisterNamer {
                 .sla_map_by_offset
                 .as_ref()
                 .and_then(|by_offset| by_offset.get(&offset))
-                .and_then(|variants| variants.iter().find(|(sz, _)| *sz >= prefer_size))
+                .and_then(|variants| {
+                    variants
+                        .iter()
+                        .filter(|(sz, _)| *sz >= prefer_size)
+                        .min_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)))
+                })
             {
                 return Some(name.to_ascii_lowercase());
             }
@@ -564,6 +569,9 @@ impl RegisterNamer {
                 })
             })
             .or_else(|| x86_ia32_low_gpr_name(self.abi, offset, size))
+            .or_else(|| x86_64_low_gpr_name(self.abi, offset, size))
+            .or_else(|| x86_ia32_byte_gpr_name(self.abi, offset, size))
+            .or_else(|| x86_64_byte_gpr_name(self.abi, offset, size))
     }
 
     fn x64_canonical_hw_name(&self, offset: u64, size: u32) -> Option<String> {
@@ -580,8 +588,8 @@ impl RegisterNamer {
     fn preferred_lookup_size(&self, offset: u64, size: u32) -> u32 {
         match self.abi {
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
-                if size == 4 {
-                    return 4;
+                if size == 1 || size == 2 || size == 4 {
+                    return size;
                 }
                 if self
                     .sla_map
@@ -980,13 +988,7 @@ fn is_x64_canonical_gpr_slot(offset: u64) -> bool {
 }
 
 fn x86_ia32_low_gpr_name(abi: CallingConvention, offset: u64, size: u32) -> Option<String> {
-    if size != 4 {
-        return None;
-    }
-    if !matches!(
-        abi,
-        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32
-    ) {
+    if size != 4 || abi != CallingConvention::X86_32 {
         return None;
     }
     Some(
@@ -999,6 +1001,90 @@ fn x86_ia32_low_gpr_name(abi: CallingConvention, offset: u64, size: u32) -> Opti
             0x14 => "ebp",
             0x18 => "esi",
             0x1c => "edi",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+fn x86_64_low_gpr_name(abi: CallingConvention, offset: u64, size: u32) -> Option<String> {
+    if size != 4 {
+        return None;
+    }
+    if !matches!(
+        abi,
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+    ) {
+        return None;
+    }
+    Some(
+        match offset {
+            0x00 => "eax",
+            0x08 => "ecx",
+            0x10 => "edx",
+            0x18 => "ebx",
+            0x20 => "esp",
+            0x28 => "ebp",
+            0x30 => "esi",
+            0x38 => "edi",
+            0x80 => "r8d",
+            0x88 => "r9d",
+            0x90 => "r10d",
+            0x98 => "r11d",
+            0xa0 => "r12d",
+            0xa8 => "r13d",
+            0xb0 => "r14d",
+            0xb8 => "r15d",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+fn x86_ia32_byte_gpr_name(abi: CallingConvention, offset: u64, size: u32) -> Option<String> {
+    if size != 1 || abi != CallingConvention::X86_32 {
+        return None;
+    }
+    Some(
+        match offset {
+            0x00 => "al",
+            0x04 => "cl",
+            0x08 => "dl",
+            0x0c => "bl",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+fn x86_64_byte_gpr_name(abi: CallingConvention, offset: u64, size: u32) -> Option<String> {
+    if size != 1 {
+        return None;
+    }
+    if !matches!(
+        abi,
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+    ) {
+        return None;
+    }
+    Some(
+        match offset {
+            0x00 => "al",
+            0x08 => "cl",
+            0x10 => "dl",
+            0x18 => "bl",
+            0x20 => "spl",
+            0x28 => "bpl",
+            0x30 => "sil",
+            0x38 => "dil",
+            0x80 => "r8b",
+            0x88 => "r9b",
+            0x90 => "r10b",
+            0x98 => "r11b",
+            0xa0 => "r12b",
+            0xa8 => "r13b",
+            0xb0 => "r14b",
+            0xb8 => "r15b",
             _ => return None,
         }
         .to_string(),
@@ -1309,6 +1395,86 @@ mod tests {
                 "unresolved int-proto register names for {abi:?} ({lang}/{comp}): {missing:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_group_sla_map_by_offset_is_deterministic() {
+        let mut map = HashMap::default();
+        map.insert((0x00, 8), "rax".to_string());
+        map.insert((0x00, 4), "eax".to_string());
+        map.insert((0x00, 2), "ax".to_string());
+        map.insert((0x00, 1), "al".to_string());
+
+        let grouped = group_sla_map_by_offset(&map);
+        let variants = grouped.get(&0x00).expect("variants at 0x00");
+        assert_eq!(
+            variants,
+            &[
+                (1, "al".to_string()),
+                (2, "ax".to_string()),
+                (4, "eax".to_string()),
+                (8, "rax".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_x86_64_vs_ia32_low_gpr_names() {
+        // x86_ia32_low_gpr_name must reject 64-bit ABIs
+        assert_eq!(
+            x86_ia32_low_gpr_name(CallingConvention::WindowsX64, 0x08, 4),
+            None
+        );
+        assert_eq!(
+            x86_ia32_low_gpr_name(CallingConvention::SystemVAmd64, 0x08, 4),
+            None
+        );
+        // IA-32 mapping
+        assert_eq!(
+            x86_ia32_low_gpr_name(CallingConvention::X86_32, 0x00, 4).as_deref(),
+            Some("eax")
+        );
+        assert_eq!(
+            x86_ia32_low_gpr_name(CallingConvention::X86_32, 0x04, 4).as_deref(),
+            Some("ecx")
+        );
+        assert_eq!(
+            x86_ia32_low_gpr_name(CallingConvention::X86_32, 0x08, 4).as_deref(),
+            Some("edx")
+        );
+
+        // x86_64 mapping: 8-byte aligned offsets
+        assert_eq!(
+            x86_64_low_gpr_name(CallingConvention::WindowsX64, 0x00, 4).as_deref(),
+            Some("eax")
+        );
+        assert_eq!(
+            x86_64_low_gpr_name(CallingConvention::WindowsX64, 0x08, 4).as_deref(),
+            Some("ecx")
+        );
+        assert_eq!(
+            x86_64_low_gpr_name(CallingConvention::WindowsX64, 0x10, 4).as_deref(),
+            Some("edx")
+        );
+        assert_eq!(
+            x86_64_low_gpr_name(CallingConvention::WindowsX64, 0x28, 4).as_deref(),
+            Some("ebp")
+        );
+        assert_eq!(
+            x86_64_low_gpr_name(CallingConvention::WindowsX64, 0x80, 4).as_deref(),
+            Some("r8d")
+        );
+    }
+
+    #[test]
+    fn test_x86_64_byte_gpr_names_preserved() {
+        let namer = register_namer_for_abi(CallingConvention::WindowsX64);
+        assert_eq!(namer.hw_name_at(0x00, 1).as_deref(), Some("al"));
+        assert_eq!(namer.hw_name_at(0x08, 1).as_deref(), Some("cl"));
+        assert_eq!(namer.hw_name_at(0x10, 1).as_deref(), Some("dl"));
+        assert_eq!(namer.hw_name_at(0x18, 1).as_deref(), Some("bl"));
+        assert_eq!(namer.hw_name_at(0x28, 1).as_deref(), Some("bpl"));
+        assert_eq!(namer.hw_name_at(0x80, 1).as_deref(), Some("r8b"));
     }
 }
 
