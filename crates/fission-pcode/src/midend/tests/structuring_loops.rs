@@ -1506,10 +1506,193 @@ fn for_loop_with_body_branch() {
         !code.contains("goto block_8010"),
         "expected no goto to loop head: {code}"
     );
+    assert!(
+        !code.contains("goto block_8050"),
+        "expected no dangling goto to absorbed latch: {code}"
+    );
     // Body stores must appear
     assert!(
         code.contains("local_10 = 77;") || code.contains("local_14 = 88;"),
         "expected body stores: {code}"
+    );
+}
+
+#[test]
+fn for_loop_with_explicit_continue_and_head_bypass() {
+    let counter = uniq(0xa00, 4);
+    let loop_cond = uniq(0xa01, 1);
+    let continue_cond = uniq(0xa02, 1);
+    let bypass_cond = uniq(0xa03, 1);
+    let ptr = uniq(0xa04, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            // block 0: init (counter = 0)
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0xa000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0xa000,
+                        output: Some(counter.clone()),
+                        inputs: vec![cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0xa001,
+                        output: None,
+                        inputs: vec![cst(0xa010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 1: head (if counter >= 10 goto exit 0xa050)
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0xa010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLess,
+                        address: 0xa010,
+                        output: Some(loop_cond.clone()),
+                        inputs: vec![counter.clone(), cst(10, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0xa011,
+                        output: None,
+                        inputs: vec![cst(0xa050, 8), loop_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 2: body (if continue_cond goto latch 0xa040 else goto block 3 0xa030)
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0xa020,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0xa020,
+                        output: Some(continue_cond.clone()),
+                        inputs: vec![reg(0x10, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0xa021,
+                        output: None,
+                        inputs: vec![cst(0xa040, 8), continue_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 3: body2 (store; if bypass_cond goto head 0xa010 else goto latch 0xa040)
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0xa030,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0xa030,
+                        output: Some(ptr.clone()),
+                        inputs: vec![reg(0x28, 8), cst(-0x10_i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Store,
+                        address: 0xa031,
+                        output: None,
+                        inputs: vec![cst(0, 4), ptr, cst(42, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0xa032,
+                        output: Some(bypass_cond.clone()),
+                        inputs: vec![reg(0x11, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0xa033,
+                        output: None,
+                        inputs: vec![cst(0xa010, 8), bypass_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 4: latch (counter += 1; goto head 0xa010)
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0xa040,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0xa040,
+                        output: Some(counter.clone()),
+                        inputs: vec![counter.clone(), cst(1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0xa041,
+                        output: None,
+                        inputs: vec![cst(0xa010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 5: exit
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0xa050,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0xa050,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(
+        &func,
+        "for_continue_and_bypass_fn",
+        0xa000,
+        &preview_options(),
+    )
+    .expect("preview render");
+    assert!(
+        code.contains("for (") || code.contains("while ("),
+        "expected loop: {code}"
+    );
+    assert!(
+        !code.contains("goto block_a040"),
+        "must not emit dangling goto to latch: {code}"
     );
 }
 
