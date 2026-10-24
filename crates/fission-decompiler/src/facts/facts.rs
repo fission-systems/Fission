@@ -527,14 +527,14 @@ fn build_nir_import_call_prototype_summaries(
             continue;
         };
         let arity = signature.params.len();
+        let is_variadic = is_known_variadic_runtime_symbol(&target_ref.symbol);
         summaries.insert(
             target_ref.symbol.clone(),
             NirCallPrototypeSummary {
                 min_arity: arity,
                 max_arity: arity,
-                locked_exact_arity: (!is_known_variadic_runtime_symbol(&target_ref.symbol))
-                    .then_some(arity),
-                variadic_fixed_arity: None,
+                locked_exact_arity: (!is_variadic).then_some(arity),
+                variadic_fixed_arity: is_variadic.then_some(arity),
                 returns_void: signature.return_type.trim().eq_ignore_ascii_case("void"),
                 param_pointer_pointees: vec![None; arity],
                 param_surface_type_names: vec![None; arity],
@@ -2765,11 +2765,25 @@ mod tests {
                     confidence: 255,
                 },
             ),
+            (
+                0x403000,
+                CallTargetRef {
+                    address: Some(0x403000),
+                    symbol: "open".to_string(),
+                    provenance: CallTargetProvenance::Import,
+                    edge_kind: CallEdgeKind::Import,
+                    confidence: 255,
+                },
+            ),
         ]);
 
         let summaries = build_nir_import_call_prototype_summaries(&call_targets);
         assert_eq!(summaries["fstat"].locked_exact_arity, Some(2));
+        assert_eq!(summaries["fstat"].variadic_fixed_arity, None);
         assert_eq!(summaries["printf"].locked_exact_arity, None);
+        assert_eq!(summaries["printf"].variadic_fixed_arity, Some(1));
+        assert_eq!(summaries["open"].locked_exact_arity, None);
+        assert_eq!(summaries["open"].variadic_fixed_arity, Some(2));
     }
 
     #[test]
