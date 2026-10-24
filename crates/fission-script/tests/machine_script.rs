@@ -211,3 +211,64 @@ fn a_script_can_read_the_code_it_stopped_in() {
         "the listing is not consecutive"
     );
 }
+
+#[test]
+fn machine_read_clamps_unbounded_size() {
+    let result = run(r#"
+        let pc = machine.pc();
+        // Read a small valid window (16 bytes)
+        let bytes = machine.read(pc, 16);
+        emit(#{ kind: "valid_read", len: bytes.len() });
+
+        // Request 100 million bytes -- must not OOM or panic with capacity overflow;
+        // it is capped to <= 64KB and either returns <= 64KB or errors cleanly.
+        try {
+            let big = machine.read(pc, 100_000_000);
+            emit(#{ kind: "capped_read", len: big.len() });
+        } catch (e) {
+            emit(#{ kind: "capped_read", error: e });
+        }
+    "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        result.findings[0].data.as_ref().unwrap()["len"],
+        serde_json::json!(16)
+    );
+    let finding2 = result
+        .findings
+        .iter()
+        .find(|f| f.kind == "capped_read")
+        .unwrap();
+    if let Some(len) = finding2.data.as_ref().unwrap().get("len") {
+        assert!(len.as_i64().unwrap() <= 64 * 1024);
+    } else {
+        assert!(finding2.data.as_ref().unwrap().get("error").is_some());
+    }
+}
+
+#[test]
+fn machine_read_string_resilient_to_boundary() {
+    let result = run(r#"
+        let sp = machine.reg("RSP");
+        // Write a null-terminated string onto stack
+        machine.write(sp - 0x20, [104, 101, 108, 108, 111, 0]); // "hello\0"
+        // Request a large size crossing beyond the buffer
+        let s = machine.read_string(sp - 0x20, 10_000);
+        emit(#{ kind: "read_str", str: s });
+    "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        result.findings[0].data.as_ref().unwrap()["str"],
+        serde_json::json!("hello")
+    );
+}
