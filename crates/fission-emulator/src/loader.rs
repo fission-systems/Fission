@@ -79,6 +79,10 @@ pub fn map_binary_to_state(state: &mut MachineState, binary: &LoadedBinary) -> R
         );
     }
 
+    if !binary.inner().is_64bit {
+        state.page_map.set_32bit();
+    }
+
     // Program break starts after the highest mapped image page (heap grows up).
     if max_end > 0 {
         state.page_map.set_brk_base(max_end);

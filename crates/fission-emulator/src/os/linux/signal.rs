@@ -89,6 +89,8 @@ pub struct SignalState {
     pub actions: Vec<SigAction>,
     /// sa_flags per signal (SA_RESTART etc.) — stored for fidelity, mostly ignored.
     pub flags: Vec<u64>,
+    /// sa_mask per signal — signals blocked while executing the signal handler.
+    pub masks: Vec<u64>,
     /// If Some, we are inside a user handler and `rt_sigreturn` should restore this PC.
     pub return_pc: Option<u64>,
     /// Signal currently being handled (for debugging / nested delivery).
@@ -102,6 +104,7 @@ impl Default for SignalState {
             blocked: 0,
             actions: vec![SigAction::Default; NSIG + 1],
             flags: vec![0; NSIG + 1],
+            masks: vec![0; NSIG + 1],
             return_pc: None,
             current: None,
         }
@@ -130,6 +133,10 @@ impl SignalState {
         Self::bit(sig).is_some_and(|b| self.pending & b != 0)
     }
 
+    pub fn is_blocked(&self, sig: i32) -> bool {
+        Self::bit(sig).is_some_and(|b| self.blocked & b != 0)
+    }
+
     pub fn set_blocked_mask(&mut self, mask: u64) {
         // Cannot block KILL/STOP.
         let immutable = Self::bit(sig::SIGKILL).unwrap() | Self::bit(sig::SIGSTOP).unwrap();
@@ -140,7 +147,7 @@ impl SignalState {
         self.blocked
     }
 
-    pub fn set_action(&mut self, sig: i32, action: SigAction, flags: u64) -> bool {
+    pub fn set_action(&mut self, sig: i32, action: SigAction, flags: u64, mask: u64) -> bool {
         if sig < 1 || sig as usize > NSIG {
             return false;
         }
@@ -149,6 +156,7 @@ impl SignalState {
         }
         self.actions[sig as usize] = action;
         self.flags[sig as usize] = flags;
+        self.masks[sig as usize] = mask;
         true
     }
 
@@ -213,6 +221,12 @@ impl SignalState {
             SigAction::Handler(handler) => {
                 self.return_pc = Some(current_pc);
                 self.current = Some(sig);
+                let sa_mask = self.masks.get(sig as usize).copied().unwrap_or(0);
+                let sa_flags = self.flags.get(sig as usize).copied().unwrap_or(0);
+                // SA_NODEFER = 0x40000000. Unless SA_NODEFER is set, block the signal itself during execution.
+                let nodefer = sa_flags & 0x4000_0000 != 0;
+                let add_mask = if nodefer { sa_mask } else { sa_mask | b };
+                self.blocked |= add_mask;
                 DeliverResult::Handler {
                     signo: sig,
                     handler,
@@ -246,14 +260,14 @@ mod tests {
     #[test]
     fn ignore_and_handler() {
         let mut s = SignalState::default();
-        s.set_action(sig::SIGINT, SigAction::Ignore, 0);
+        s.set_action(sig::SIGINT, SigAction::Ignore, 0, 0);
         s.queue(sig::SIGINT);
         assert!(matches!(
             s.take_delivery(0x1000),
             DeliverResult::Ignored { .. }
         ));
 
-        s.set_action(sig::SIGUSR1, SigAction::Handler(0x401000), 0);
+        s.set_action(sig::SIGUSR1, SigAction::Handler(0x401000), 0, 0);
         s.queue(sig::SIGUSR1);
         match s.take_delivery(0x2000) {
             DeliverResult::Handler {
@@ -278,5 +292,20 @@ mod tests {
             s.take_delivery(0),
             DeliverResult::Terminate { .. }
         ));
+    }
+
+    #[test]
+    fn handler_applies_sa_mask_and_blocks_self_unless_nodefer() {
+        let mut s = SignalState::default();
+        let mask = SignalState::bit(sig::SIGTERM).unwrap();
+        s.set_action(sig::SIGUSR1, SigAction::Handler(0x401000), 0, mask);
+        s.queue(sig::SIGUSR1);
+        match s.take_delivery(0x2000) {
+            DeliverResult::Handler { .. } => {}
+            other => panic!("unexpected {other:?}"),
+        }
+        // During handler execution, both SIGUSR1 (self) and SIGTERM (from sa_mask) must be blocked
+        assert!(s.is_blocked(sig::SIGUSR1));
+        assert!(s.is_blocked(sig::SIGTERM));
     }
 }

@@ -101,6 +101,8 @@ pub struct PageMap {
     mappings: Vec<GuestMapping>,
     /// Next address hint for anonymous `mmap` without a fixed base.
     pub mmap_hint: u64,
+    /// Upper limit for anonymous mappings (e.g. 0x0000_7FFF_0000_0000 for 64-bit, 0xFFFF_0000 for 32-bit).
+    pub max_address: u64,
     /// Current program break (heap end) for `brk`.
     pub brk: u64,
     /// Initial program break (heap start).
@@ -114,8 +116,16 @@ impl PageMap {
             mappings: Vec::new(),
             // High enough to avoid typical ELF load ranges; still below stack.
             mmap_hint: 0x0000_0000_6000_0000,
+            max_address: 0x0000_7FFF_0000_0000,
             brk: 0,
             brk_base: 0,
+        }
+    }
+
+    pub fn set_32bit(&mut self) {
+        self.max_address = 0xFFFF_0000;
+        if self.mmap_hint >= 0xFFFF_0000 {
+            self.mmap_hint = 0x4000_0000;
         }
     }
 
@@ -321,27 +331,62 @@ impl PageMap {
     }
 
     /// Allocate an anonymous region of `len` bytes (page-rounded) near `mmap_hint`.
-    /// Returns the base address on success.
+    /// Returns the base address on success, or 0 if out of memory.
     pub fn mmap_anon(&mut self, len: u64, page_prot: u8) -> u64 {
         let len = page_align_up(len.max(1));
+        let max_addr = if self.max_address != 0 {
+            self.max_address
+        } else {
+            0x0000_7FFF_0000_0000
+        };
+        let wrap_base = if max_addr <= 0xFFFF_FFFF {
+            0x0000_0000_4000_0000.min(max_addr / 2)
+        } else {
+            0x0000_0000_4000_0000
+        };
+
         let mut candidate = page_align_down(self.mmap_hint);
-        // Simple linear scan for a free hole; wrap once if we hit high addresses.
-        for _ in 0..4096 {
-            if self.region_free(candidate, len) {
-                self.map_region(candidate, len, page_prot | prot::ANON, true);
-                self.mmap_hint = candidate.saturating_add(len);
-                return candidate;
-            }
-            candidate = candidate.saturating_add(PAGE_SIZE);
-            if candidate >= 0x0000_7FFF_0000_0000 {
-                candidate = 0x0000_0000_4000_0000;
-            }
+        if candidate == 0 || candidate >= max_addr {
+            candidate = wrap_base;
         }
-        // Fallback: force-map at hint even if overlapping (should be rare).
-        let base = page_align_down(self.mmap_hint);
-        self.map_region(base, len, page_prot | prot::ANON, true);
-        self.mmap_hint = base.saturating_add(len);
-        base
+
+        // Search for a gap. If we reach max_addr, wrap once to wrap_base.
+        for pass in 0..2 {
+            let pass_limit = if pass == 0 {
+                max_addr
+            } else {
+                page_align_down(self.mmap_hint).min(max_addr)
+            };
+
+            while candidate < pass_limit {
+                let candidate_end = match candidate.checked_add(len) {
+                    Some(end) if end <= pass_limit => end,
+                    _ => break,
+                };
+
+                // Find any mapping that intersects [candidate, candidate_end)
+                if let Some(m) = self
+                    .mappings
+                    .iter()
+                    .find(|m| m.start < candidate_end && m.end > candidate)
+                {
+                    let next_candidate = page_align_up(m.end);
+                    if next_candidate <= candidate {
+                        break;
+                    }
+                    candidate = next_candidate;
+                } else {
+                    self.map_region(candidate, len, page_prot | prot::ANON, true);
+                    self.mmap_hint = candidate.saturating_add(len);
+                    return candidate;
+                }
+            }
+
+            candidate = wrap_base;
+        }
+
+        // Out of memory: return 0 without corrupting existing mappings.
+        0
     }
 
     /// Adjust the program break. Returns the new break.
@@ -363,13 +408,24 @@ impl PageMap {
         }
         let old_brk = self.brk;
         if request > old_brk {
-            let start = page_align_down(old_brk.max(self.brk_base));
+            let start = if old_brk == self.brk_base
+                && self.page_flags(page_align_down(self.brk_base)).is_none()
+            {
+                page_align_down(self.brk_base)
+            } else {
+                page_align_up(old_brk)
+            };
             let end = page_align_up(request);
             if end > start {
-                self.map_region(start, end - start, prot::RW | prot::ANON, true);
+                let expansion_len = end - start;
+                // Collision detection: do not clobber intersecting mappings; return old_brk on failure.
+                if !self.region_free(start, expansion_len) {
+                    return old_brk;
+                }
+                self.map_region(start, expansion_len, prot::RW | prot::ANON, true);
             }
         } else if request < old_brk {
-            let unmap_from = page_align_up(request);
+            let unmap_from = page_align_up(request.max(self.brk_base));
             let unmap_to = page_align_up(old_brk);
             if unmap_to > unmap_from {
                 self.unmap_region(unmap_from, unmap_to - unmap_from);
@@ -420,7 +476,7 @@ impl PageMap {
         out
     }
 
-    fn region_free(&self, start: u64, len: u64) -> bool {
+    pub fn region_free(&self, start: u64, len: u64) -> bool {
         let end = start.saturating_add(len);
         !self.mappings.iter().any(|m| m.start < end && m.end > start)
     }
@@ -563,5 +619,51 @@ mod tests {
             !pm.mprotect_checked(0x1000, 0x2000, prot::RW),
             "partial unmapped must fail"
         );
+    }
+
+    #[test]
+    fn mmap_anon_skips_large_mapping_without_force_overwriting() {
+        let mut pm = PageMap::new();
+        // 32MB mapping starting at 0x6000_0000.
+        // Previously, 4096-iteration 4KB scan could only advance 16MB before wrapping and force-clobbering.
+        pm.map_region(0x6000_0000, 0x0200_0000, prot::RW, false);
+        pm.mmap_hint = 0x6000_0000;
+
+        let allocated = pm.mmap_anon(0x1000, prot::RW);
+        assert_eq!(allocated, 0x6200_0000);
+        assert!(pm.is_mapped(0x6000_0000));
+        assert!(pm.is_mapped(0x61FF_F000));
+        assert!(pm.is_mapped(0x6200_0000));
+    }
+
+    #[test]
+    fn mmap_anon_32bit_guest_bounds() {
+        let mut pm = PageMap::new();
+        pm.set_32bit();
+        pm.mmap_hint = 0xF000_0000;
+
+        let allocated = pm.mmap_anon(0x1000, prot::RW);
+        assert!(allocated > 0);
+        assert!(allocated < 0xFFFF_0000);
+    }
+
+    #[test]
+    fn set_brk_collision_detection_preserves_existing_mappings() {
+        let mut pm = PageMap::new();
+        pm.set_brk_base(0x5000_0000);
+        assert_eq!(pm.set_brk(0), 0x5000_0000);
+
+        // Pre-map a conflicting region ahead of brk
+        pm.map_region(0x5000_2000, 0x2000, prot::RX, false);
+
+        // Expanding brk to 0x5000_3000 intersects [0x5000_2000, 0x5000_4000)
+        let res = pm.set_brk(0x5000_3000);
+        assert_eq!(
+            res, 0x5000_0000,
+            "brk must fail closed and return old_brk on collision"
+        );
+
+        // Existing mapping must remain intact
+        assert_eq!(pm.page_flags(0x5000_2000), Some(prot::RX | prot::VALID));
     }
 }
