@@ -1,3 +1,4 @@
+use crate::global_opt::nir_byte_size;
 use crate::prelude::*;
 
 pub fn apply_split_datatype_pass(func: &mut PreHirFunction) -> bool {
@@ -88,12 +89,15 @@ fn try_split_stmt(stmt: &PreHirStmt) -> Option<Vec<PreHirStmt>> {
     };
     let PreHirLValue::Deref {
         ptr: dest,
-        ty: NirType::Aggregate { fields, .. },
+        ty: NirType::Aggregate { size, fields },
     } = lhs
     else {
         return None;
     };
     if fields.is_empty() {
+        return None;
+    }
+    if fields.iter().any(|f| matches!(f.ty, NirType::Unknown)) {
         return None;
     }
 
@@ -139,7 +143,12 @@ fn try_split_stmt(stmt: &PreHirStmt) -> Option<Vec<PreHirStmt>> {
         }
         PreHirExpr::Const(0, _) => {
             let mut split = Vec::new();
+            let mut current_offset = 0u32;
             for field in fields {
+                if field.offset > current_offset {
+                    emit_zero_fill(dest, current_offset, field.offset, &mut split);
+                }
+                let f_size = nir_byte_size(&field.ty);
                 let new_lhs = PreHirLValue::Deref {
                     ptr: Box::new(make_ptr_offset((**dest).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
@@ -149,10 +158,67 @@ fn try_split_stmt(stmt: &PreHirStmt) -> Option<Vec<PreHirStmt>> {
                     lhs: new_lhs,
                     rhs: new_rhs,
                 });
+                current_offset = (field.offset + f_size).max(current_offset);
+            }
+            if *size > current_offset {
+                emit_zero_fill(dest, current_offset, *size, &mut split);
             }
             Some(split)
         }
         _ => None,
+    }
+}
+
+fn emit_zero_fill(
+    dest: &PreHirExpr,
+    start_offset: u32,
+    end_offset: u32,
+    split: &mut Vec<PreHirStmt>,
+) {
+    let mut cur = start_offset;
+    while cur < end_offset {
+        let rem = end_offset - cur;
+        let (ty, step) = if rem >= 8 && cur % 8 == 0 {
+            (
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+                8,
+            )
+        } else if rem >= 4 && cur % 4 == 0 {
+            (
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                4,
+            )
+        } else if rem >= 2 && cur % 2 == 0 {
+            (
+                NirType::Int {
+                    bits: 16,
+                    signed: false,
+                },
+                2,
+            )
+        } else {
+            (
+                NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
+                1,
+            )
+        };
+        split.push(PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(make_ptr_offset(dest.clone(), cur as i64)),
+                ty: ty.clone(),
+            },
+            rhs: PreHirExpr::Const(0, ty),
+        });
+        cur += step;
     }
 }
 
@@ -169,5 +235,133 @@ fn make_ptr_offset(ptr: PreHirExpr, offset: i64) -> PreHirExpr {
             base: Box::new(ptr),
             offset,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_const_split_fills_padding_gaps() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+
+        let agg_ty = NirType::Aggregate {
+            size: 16,
+            fields: vec![
+                fission_midend_core::StructField {
+                    offset: 0,
+                    ty: u32_ty.clone(),
+                    name: "a".to_string(),
+                },
+                fission_midend_core::StructField {
+                    offset: 8,
+                    ty: u64_ty.clone(),
+                    name: "b".to_string(),
+                },
+            ],
+        };
+
+        let mut func = PreHirFunction {
+            name: "test_zero".to_string(),
+            is_64bit: true,
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("p".to_string())),
+                    ty: agg_ty,
+                },
+                rhs: PreHirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                ),
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_split_datatype_pass(&mut func));
+        // Should have 3 writes: field 0 (4 bytes), gap 4..8 (4 bytes), field 1 (8 bytes)
+        assert_eq!(func.body.len(), 3);
+        match &func.body[0] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ptr, ty },
+                ..
+            } => {
+                assert_eq!(*ty, u32_ty);
+                assert!(matches!(
+                    ptr.as_ref(),
+                    PreHirExpr::PtrOffset { offset: 0, .. }
+                ));
+            }
+            _ => panic!("expected Deref assign"),
+        }
+        match &func.body[1] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ptr, ty },
+                ..
+            } => {
+                assert_eq!(*ty, u32_ty);
+                assert!(matches!(
+                    ptr.as_ref(),
+                    PreHirExpr::PtrOffset { offset: 4, .. }
+                ));
+            }
+            _ => panic!("expected gap zero fill assign"),
+        }
+        match &func.body[2] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ptr, ty },
+                ..
+            } => {
+                assert_eq!(*ty, u64_ty);
+                assert!(matches!(
+                    ptr.as_ref(),
+                    PreHirExpr::PtrOffset { offset: 8, .. }
+                ));
+            }
+            _ => panic!("expected Deref assign"),
+        }
+    }
+
+    #[test]
+    fn rejects_splitting_unknown_field_type() {
+        let agg_ty = NirType::Aggregate {
+            size: 4,
+            fields: vec![fission_midend_core::StructField {
+                offset: 0,
+                ty: NirType::Unknown,
+                name: "f0".to_string(),
+            }],
+        };
+
+        let mut func = PreHirFunction {
+            name: "test_unknown".to_string(),
+            is_64bit: true,
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("p".to_string())),
+                    ty: agg_ty,
+                },
+                rhs: PreHirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            }],
+            ..Default::default()
+        };
+
+        assert!(!apply_split_datatype_pass(&mut func));
     }
 }

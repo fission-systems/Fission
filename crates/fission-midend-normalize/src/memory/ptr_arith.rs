@@ -1205,7 +1205,7 @@ fn try_recover_field_access(
 
     let (typed_ptr_expr, ptr_ty, _from_byte_cast) = typed_pointer_base(&base_expr, binding_types)?;
     let elem_ty = pointee_ty(&ptr_ty)?;
-    let NirType::Aggregate { fields, .. } = elem_ty else {
+    let NirType::Aggregate { size, fields } = elem_ty else {
         return None;
     };
 
@@ -1214,20 +1214,36 @@ fn try_recover_field_access(
     }
     let field_offset = offset as u32;
 
-    let field = fields.iter().find(|f| f.offset == field_offset);
-    let (field_name, field_ty) = match field {
-        Some(f) => (f.name.clone(), f.ty.clone()),
-        // Hex, like every other synthetic field name -- the typedef the
-        // printer emits spells them `field_{offset:x}`, so a decimal name here
-        // reads `->field_16` against a struct that declares `field_10` and the
-        // member does not exist.
-        None => (format!("field_{field_offset:x}"), NirType::Unknown),
-    };
+    let access_size = type_byte_size(access_ty, pointer_layout)?;
+    if access_size == 0 {
+        return None;
+    }
 
-    let final_ty = if matches!(field_ty, NirType::Unknown) {
-        access_ty.clone()
-    } else {
-        field_ty
+    if *size > 0 && (field_offset as u64).checked_add(access_size)? > *size as u64 {
+        return None;
+    }
+    if *size == 0 && fields.is_empty() {
+        return None;
+    }
+
+    let field = fields.iter().find(|f| f.offset == field_offset);
+    let (field_name, final_ty) = match field {
+        Some(f) => {
+            if f.ty != NirType::Unknown {
+                if type_byte_size(&f.ty, pointer_layout) != Some(access_size) {
+                    return None;
+                }
+                (f.name.clone(), f.ty.clone())
+            } else {
+                (f.name.clone(), access_ty.clone())
+            }
+        }
+        None => {
+            if *size > 0 && field_offset >= *size {
+                return None;
+            }
+            (format!("field_{field_offset:x}"), access_ty.clone())
+        }
     };
 
     Some(PreHirExpr::FieldAccess {
@@ -3533,6 +3549,84 @@ mod tests {
                 );
             }
             other => panic!("expected FieldAccess(field_0) of Index, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_access_rejects_mismatched_width_and_oob_offset() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let agg_ty = NirType::Aggregate {
+            size: 8,
+            fields: vec![fission_midend_core::StructField {
+                offset: 0,
+                ty: u64_ty.clone(),
+                name: "quad".to_owned(),
+            }],
+        };
+        let p_ty = NirType::Ptr(Box::new(agg_ty));
+
+        // 1-byte store to offset 0 (where field is 8 bytes)
+        let body = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("p".to_owned())),
+                        offset: 0,
+                    }),
+                    ty: u8_ty.clone(),
+                },
+                rhs: PreHirExpr::Const(1, u8_ty.clone()),
+            },
+            // 4-byte store to offset 16 (beyond struct size 8)
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("p".to_owned())),
+                        offset: 16,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+                rhs: PreHirExpr::Const(
+                    2,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+        ];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+
+        // Neither access should be rewritten to FieldAccess
+        super::apply_ptr_arith_recovery_pass(&mut func);
+
+        match &func.body[0] {
+            PreHirStmt::Assign { lhs, .. } => {
+                assert!(
+                    !matches!(lhs, PreHirLValue::FieldAccess { .. }),
+                    "mismatched store width should not become FieldAccess"
+                );
+            }
+            _ => panic!("expected Assign"),
+        }
+        match &func.body[1] {
+            PreHirStmt::Assign { lhs, .. } => {
+                assert!(
+                    !matches!(lhs, PreHirLValue::FieldAccess { .. }),
+                    "out of bounds offset should not become FieldAccess"
+                );
+            }
+            _ => panic!("expected Assign"),
         }
     }
 }

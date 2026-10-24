@@ -391,7 +391,7 @@ impl<'a> Rewriter<'a> {
                             if let Some(then_var) =
                                 self.var_names.get(&(phi.key.clone(), then_input))
                             {
-                                append_to_body_before_cf(
+                                append_to_branch_before_cf(
                                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
@@ -403,7 +403,7 @@ impl<'a> Rewriter<'a> {
                             if let Some(else_var) =
                                 self.var_names.get(&(phi.key.clone(), else_input))
                             {
-                                append_to_body_before_cf(
+                                append_to_branch_before_cf(
                                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
@@ -448,7 +448,7 @@ impl<'a> Rewriter<'a> {
                             if let Some(body_var) =
                                 self.var_names.get(&(phi.key.clone(), body_input))
                             {
-                                append_to_body_before_cf(
+                                splice_loop_carried_phi(
                                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
@@ -489,7 +489,7 @@ impl<'a> Rewriter<'a> {
                             if let Some(body_var) =
                                 self.var_names.get(&(phi.key.clone(), body_input))
                             {
-                                append_to_body_before_cf(
+                                splice_loop_carried_phi(
                                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
@@ -557,7 +557,7 @@ impl<'a> Rewriter<'a> {
                             if let Some(body_var) =
                                 self.var_names.get(&(phi.key.clone(), body_input))
                             {
-                                append_to_body_before_cf(
+                                splice_loop_carried_phi(
                                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
@@ -618,7 +618,7 @@ impl<'a> Rewriter<'a> {
                                     let arm_var = find_last_def_in_stmts(&case.body, &base_name)
                                         .or_else(|| pre_var.cloned());
                                     if let Some(v) = arm_var {
-                                        append_to_body_before_cf(
+                                        append_to_branch_before_cf(
                                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
                                                 &mut case.body,
                                             ),
@@ -633,7 +633,7 @@ impl<'a> Rewriter<'a> {
                                 let default_var = find_last_def_in_stmts(default, &base_name)
                                     .or_else(|| pre_var.cloned());
                                 if let Some(v) = default_var {
-                                    append_to_body_before_cf(
+                                    append_to_branch_before_cf(
                                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                                         PreHirStmt::Assign {
                                             lhs: PreHirLValue::Var(phi_var.clone()),
@@ -782,8 +782,23 @@ fn find_last_def_in_stmts(stmts: &[PreHirStmt], base_name: &str) -> Option<Strin
     None
 }
 
-fn append_to_body_before_cf(body: &mut Vec<PreHirStmt>, stmt: PreHirStmt) {
+fn ends_with_cf(body: &[PreHirStmt]) -> bool {
     if let Some(last) = body.last() {
+        match last {
+            PreHirStmt::Break
+            | PreHirStmt::Continue
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_) => true,
+            PreHirStmt::Block(inner) => ends_with_cf(inner),
+            _ => false,
+        }
+    } else {
+        false
+    }
+}
+
+fn append_to_branch_before_cf(body: &mut Vec<PreHirStmt>, stmt: PreHirStmt) {
+    if let Some(last) = body.last_mut() {
         if matches!(
             last,
             PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Goto(_) | PreHirStmt::Return(_)
@@ -792,6 +807,195 @@ fn append_to_body_before_cf(body: &mut Vec<PreHirStmt>, stmt: PreHirStmt) {
             body.insert(idx, stmt);
             return;
         }
+        if let PreHirStmt::Block(inner) = last {
+            let inner_mut = std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner);
+            if ends_with_cf(inner_mut) {
+                append_to_branch_before_cf(inner_mut, stmt);
+                return;
+            }
+        }
     }
     body.push(stmt);
+}
+
+fn stmt_ends_in_unconditional_jump(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Goto(_) | PreHirStmt::Return(_) => {
+            true
+        }
+        PreHirStmt::Block(inner) => inner.last().is_some_and(stmt_ends_in_unconditional_jump),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            !then_body.is_empty()
+                && !else_body.is_empty()
+                && then_body
+                    .last()
+                    .is_some_and(stmt_ends_in_unconditional_jump)
+                && else_body
+                    .last()
+                    .is_some_and(stmt_ends_in_unconditional_jump)
+        }
+        _ => false,
+    }
+}
+
+fn splice_loop_phi_before_continues(stmts: &mut Vec<PreHirStmt>, phi_stmt: &PreHirStmt) {
+    let mut i = 0;
+    while i < stmts.len() {
+        match &mut stmts[i] {
+            PreHirStmt::Continue => {
+                stmts.insert(i, phi_stmt.clone());
+                i += 2;
+            }
+            PreHirStmt::Block(inner) => {
+                splice_loop_phi_before_continues(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner),
+                    phi_stmt,
+                );
+                i += 1;
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                splice_loop_phi_before_continues(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    phi_stmt,
+                );
+                splice_loop_phi_before_continues(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    phi_stmt,
+                );
+                i += 1;
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    splice_loop_phi_before_continues(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        phi_stmt,
+                    );
+                }
+                splice_loop_phi_before_continues(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    phi_stmt,
+                );
+                i += 1;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+}
+
+fn splice_loop_carried_phi(body: &mut Vec<PreHirStmt>, phi_stmt: PreHirStmt) {
+    splice_loop_phi_before_continues(body, &phi_stmt);
+    if !body.last().is_some_and(stmt_ends_in_unconditional_jump) {
+        body.push(phi_stmt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loop_phi_splices_before_nested_continue_and_fallthrough() {
+        let phi_assign = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("var_phi".to_string()),
+            rhs: PreHirExpr::Var("var_update".to_string()),
+        };
+
+        let mut body = vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                then_body: vec![PreHirStmt::Continue].into(),
+                else_body: vec![].into(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(
+                    42,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
+            },
+        ];
+
+        splice_loop_carried_phi(&mut body, phi_assign);
+
+        // Check then_body of the If has the phi assign before continue
+        if let PreHirStmt::If { then_body, .. } = &body[0] {
+            assert_eq!(then_body.len(), 2);
+            assert!(matches!(
+                &then_body[0],
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    ..
+                } if name == "var_phi"
+            ));
+            assert!(matches!(&then_body[1], PreHirStmt::Continue));
+        } else {
+            panic!("expected If");
+        }
+
+        // Check body end has the fallthrough phi assignment
+        assert_eq!(body.len(), 3);
+        assert!(matches!(
+            &body[2],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } if name == "var_phi"
+        ));
+    }
+
+    #[test]
+    fn branch_phi_splices_inside_block_before_terminal_return() {
+        let phi_assign = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("var_phi".to_string()),
+            rhs: PreHirExpr::Var("then_val".to_string()),
+        };
+
+        let mut branch = vec![PreHirStmt::Block(
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".to_string()),
+                    rhs: PreHirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    ),
+                },
+                PreHirStmt::Return(None),
+            ]
+            .into(),
+        )];
+
+        append_to_branch_before_cf(&mut branch, phi_assign);
+
+        // Should be inserted inside the block before Return(None)
+        assert_eq!(branch.len(), 1);
+        if let PreHirStmt::Block(inner) = &branch[0] {
+            assert_eq!(inner.len(), 3);
+            assert!(matches!(
+                &inner[1],
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    ..
+                } if name == "var_phi"
+            ));
+            assert!(matches!(&inner[2], PreHirStmt::Return(None)));
+        } else {
+            panic!("expected Block");
+        }
+    }
 }
