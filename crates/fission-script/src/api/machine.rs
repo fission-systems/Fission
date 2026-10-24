@@ -271,23 +271,79 @@ impl MachineHost {
 
     /// Memory as an array of byte values, so a script can index it.
     pub fn read(&mut self, address: i64, size: i64) -> ScriptResult<Array> {
+        const MAX_READ_SIZE: i64 = 8192;
+        let size = size.clamp(0, MAX_READ_SIZE) as usize;
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
-            Ok(bytes.into_iter().map(|v| Dynamic::from(v as i64)).collect())
+            match b.read_memory(address as u64, size) {
+                Ok(bytes) => Ok(bytes.into_iter().map(|v| Dynamic::from(v as i64)).collect()),
+                Err(_) => {
+                    let mut bytes = Vec::new();
+                    let mut offset = 0;
+                    while offset < size {
+                        let chunk_size = (size - offset).min(4096);
+                        match b
+                            .read_memory((address as u64).wrapping_add(offset as u64), chunk_size)
+                        {
+                            Ok(chunk) => {
+                                bytes.extend(chunk);
+                                offset += chunk_size;
+                            }
+                            Err(_) => {
+                                while offset < size {
+                                    match b.read_memory(
+                                        (address as u64).wrapping_add(offset as u64),
+                                        1,
+                                    ) {
+                                        Ok(one) if !one.is_empty() => {
+                                            bytes.push(one[0]);
+                                            offset += 1;
+                                        }
+                                        _ => break,
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if bytes.is_empty() {
+                        b.read_memory(address as u64, 1).map_err(fail)?;
+                    }
+                    Ok(bytes.into_iter().map(|v| Dynamic::from(v as i64)).collect())
+                }
+            }
         })
     }
 
     /// Memory as a string, for the common case of looking at what a program
     /// wrote into a buffer.
     pub fn read_string(&mut self, address: i64, size: i64) -> ScriptResult<String> {
+        const MAX_STRING_SIZE: i64 = 64 * 1024;
+        let max_size = size.clamp(0, MAX_STRING_SIZE) as usize;
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
-            let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-            Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+            match b.read_memory(address as u64, max_size) {
+                Ok(bytes) => {
+                    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+                    Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+                }
+                Err(_) => {
+                    let mut bytes = Vec::new();
+                    for offset in 0..max_size {
+                        match b.read_memory((address as u64).wrapping_add(offset as u64), 1) {
+                            Ok(chunk) if !chunk.is_empty() => {
+                                if chunk[0] == 0 {
+                                    break;
+                                }
+                                bytes.push(chunk[0]);
+                            }
+                            _ => break,
+                        }
+                    }
+                    if bytes.is_empty() {
+                        b.read_memory(address as u64, 1).map_err(fail)?;
+                    }
+                    Ok(String::from_utf8_lossy(&bytes).into_owned())
+                }
+            }
         })
     }
 

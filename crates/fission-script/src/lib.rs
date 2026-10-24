@@ -170,4 +170,33 @@ mod tests {
         );
         assert_eq!(out.status, ScriptRunStatus::Timeout, "{out:?}");
     }
+
+    #[test]
+    fn run_script_rejects_excessive_array_allocation() {
+        let bin = prepare_binary_for_script(test_binary());
+        let limits = ScriptLimits {
+            max_operations: 1_000_000,
+            ..ScriptLimits::default()
+        };
+        let out = run_script(
+            &bin,
+            r#"
+            let arr = [];
+            for i in 0..20000 {
+                arr.push(i);
+            }
+            "#,
+            "array_limit.rhai",
+            limits,
+        );
+        assert_eq!(out.status, ScriptRunStatus::Error);
+        assert!(
+            out.diagnostics.iter().any(|d| {
+                let msg = d.message.to_lowercase();
+                msg.contains("array") || msg.contains("size") || msg.contains("large")
+            }),
+            "{:?}",
+            out.diagnostics
+        );
+    }
 }

@@ -12,6 +12,8 @@ pub fn configure_engine(engine: &mut Engine, limits: &ScriptLimits) -> Result<()
     engine.set_max_operations(limits.max_operations);
     engine.set_max_expr_depths(64, 64);
     engine.set_max_string_size(256 * 1024);
+    engine.set_max_array_size(10_000);
+    engine.set_max_map_size(10_000);
     // Scripts use host bindings and pure language helpers only.  No script
     // imports are part of the API, so fail closed even if a future package
     // adds a resolver-backed module by default.
