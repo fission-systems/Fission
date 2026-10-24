@@ -53,6 +53,8 @@ const SHF_ALLOC: u64 = 0x2;
 const SHF_EXECINSTR: u64 = 0x4;
 const SHT_NOBITS: u32 = 8;
 const SHN_UNDEF: u16 = 0;
+const SHN_XINDEX: u16 = 0xffff;
+const PN_XNUM: u16 = 0xffff;
 const STT_NOTYPE: u8 = 0;
 const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
@@ -221,7 +223,45 @@ impl ElfLoader {
         let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
-        let phdrs = read_program_headers_64(bytes, &header, endian);
+
+        // Resolve extended numbering via section header 0 if section headers exist:
+        // 1. e_shnum == 0 and sh_size > 0 -> real shnum in sh0.sh_size
+        // 2. e_shstrndx == 0xffff (SHN_XINDEX) -> real shstrndx in sh0.sh_link
+        // 3. e_phnum == 0xffff (PN_XNUM) -> real phnum in sh0.sh_info
+        let (real_shnum, real_shstrndx, real_phnum) = if header.shoff != 0 {
+            if let Ok(sh0) = Elf64Shdr::parse(&reader, header.shoff as usize) {
+                let shnum = if header.shnum == 0 && sh0.sh_size > 0 {
+                    sh0.sh_size as usize
+                } else {
+                    header.shnum as usize
+                };
+                let shstrndx = if header.shstrndx == SHN_XINDEX {
+                    sh0.sh_link as usize
+                } else {
+                    header.shstrndx as usize
+                };
+                let phnum = if header.phnum == PN_XNUM {
+                    sh0.sh_info as usize
+                } else {
+                    header.phnum as usize
+                };
+                (shnum, shstrndx, phnum)
+            } else {
+                (
+                    header.shnum as usize,
+                    header.shstrndx as usize,
+                    header.phnum as usize,
+                )
+            }
+        } else {
+            (
+                header.shnum as usize,
+                header.shstrndx as usize,
+                header.phnum as usize,
+            )
+        };
+
+        let phdrs = read_program_headers_64(bytes, &header, real_phnum, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_64(&phdrs).unwrap_or(u64::MAX)
         } else {
@@ -229,14 +269,14 @@ impl ElfLoader {
         };
 
         // Parse Sections
-        if header.shoff != 0 && header.shnum > 0 {
-            let mut shdrs = Vec::new();
+        if header.shoff != 0 && real_shnum > 0 {
+            let mut shdrs = Vec::with_capacity(real_shnum);
             let section_header_size = if header.shentsize > 0 {
                 header.shentsize as usize
             } else {
                 Elf64Shdr::SIZE
             };
-            for index in 0..header.shnum as usize {
+            for index in 0..real_shnum {
                 let offset = header
                     .shoff
                     .saturating_add((index * section_header_size) as u64)
@@ -251,7 +291,7 @@ impl ElfLoader {
             };
 
             // Get String Table for Section Names
-            let strtab_idx = header.shstrndx as usize;
+            let strtab_idx = real_shstrndx;
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
@@ -424,7 +464,8 @@ impl ElfLoader {
             relocs = parse_relocations_64(bytes_patched, &shdrs, &section_addresses, endian);
             let ver_names = parse_gnu_versions_64(bytes_patched, &shdrs, endian);
             symbol_versions = map_symbol_versions_64(bytes_patched, &shdrs, endian, &ver_names);
-        } else if !is_relocatable {
+        }
+        if sections_info.is_empty() && !is_relocatable {
             sections_info.extend(load_segments_as_sections_64(&phdrs));
         }
 
@@ -522,7 +563,45 @@ impl ElfLoader {
         let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
-        let phdrs = read_program_headers_32(bytes, &header, endian);
+
+        // Resolve extended numbering via section header 0 if section headers exist:
+        // 1. e_shnum == 0 and sh_size > 0 -> real shnum in sh0.sh_size
+        // 2. e_shstrndx == 0xffff (SHN_XINDEX) -> real shstrndx in sh0.sh_link
+        // 3. e_phnum == 0xffff (PN_XNUM) -> real phnum in sh0.sh_info
+        let (real_shnum, real_shstrndx, real_phnum) = if header.shoff != 0 {
+            if let Ok(sh0) = Elf32Shdr::parse(&reader, header.shoff as usize) {
+                let shnum = if header.shnum == 0 && sh0.sh_size > 0 {
+                    sh0.sh_size as usize
+                } else {
+                    header.shnum as usize
+                };
+                let shstrndx = if header.shstrndx == SHN_XINDEX {
+                    sh0.sh_link as usize
+                } else {
+                    header.shstrndx as usize
+                };
+                let phnum = if header.phnum == PN_XNUM {
+                    sh0.sh_info as usize
+                } else {
+                    header.phnum as usize
+                };
+                (shnum, shstrndx, phnum)
+            } else {
+                (
+                    header.shnum as usize,
+                    header.shstrndx as usize,
+                    header.phnum as usize,
+                )
+            }
+        } else {
+            (
+                header.shnum as usize,
+                header.shstrndx as usize,
+                header.phnum as usize,
+            )
+        };
+
+        let phdrs = read_program_headers_32(bytes, &header, real_phnum, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_32(&phdrs).unwrap_or(u64::MAX)
         } else {
@@ -530,14 +609,14 @@ impl ElfLoader {
         };
 
         // Parse Sections
-        if header.shoff != 0 && header.shnum > 0 {
-            let mut shdrs = Vec::new();
+        if header.shoff != 0 && real_shnum > 0 {
+            let mut shdrs = Vec::with_capacity(real_shnum);
             let section_header_size = if header.shentsize > 0 {
                 header.shentsize as usize
             } else {
                 Elf32Shdr::SIZE
             };
-            for index in 0..header.shnum as usize {
+            for index in 0..real_shnum {
                 let offset = header
                     .shoff
                     .saturating_add((index * section_header_size) as u32)
@@ -552,7 +631,7 @@ impl ElfLoader {
             };
 
             // Get String Table for Section Names
-            let strtab_idx = header.shstrndx as usize;
+            let strtab_idx = real_shstrndx;
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
@@ -699,7 +778,8 @@ impl ElfLoader {
             relocs = parse_relocations_32(bytes_patched, &shdrs, &section_addresses, endian);
             let ver_names = parse_gnu_versions_32(bytes_patched, &shdrs, endian);
             symbol_versions = map_symbol_versions_32(bytes_patched, &shdrs, endian, &ver_names);
-        } else if !is_relocatable {
+        }
+        if sections_info.is_empty() && !is_relocatable {
             sections_info.extend(load_segments_as_sections_32(&phdrs));
         }
 
@@ -1556,7 +1636,22 @@ fn read_load_segments_64<R: Read + Seek>(
     header: &Elf64Header,
     endian: Endian,
 ) -> Result<Vec<ElfLoadSegment>> {
-    if header.phoff == 0 || header.phnum == 0 {
+    let phnum = if header.phnum == PN_XNUM && header.shoff != 0 {
+        let mut sh0_bytes = [0; Elf64Shdr::SIZE];
+        if reader.seek(SeekFrom::Start(header.shoff)).is_ok()
+            && reader.read_exact(&mut sh0_bytes).is_ok()
+        {
+            let sh_reader = ByteReader::new(&sh0_bytes, endian);
+            Elf64Shdr::parse(&sh_reader, 0)
+                .map(|sh0| sh0.sh_info as usize)
+                .unwrap_or(header.phnum as usize)
+        } else {
+            header.phnum as usize
+        }
+    } else {
+        header.phnum as usize
+    };
+    if header.phoff == 0 || phnum == 0 {
         return Ok(Vec::new());
     }
     let entry_size = if header.phentsize == 0 {
@@ -1569,7 +1664,7 @@ fn read_load_segments_64<R: Read + Seek>(
     }
 
     let mut segments = Vec::new();
-    for index in 0..header.phnum as u64 {
+    for index in 0..phnum as u64 {
         let offset = header
             .phoff
             .checked_add(
@@ -1603,7 +1698,22 @@ fn read_load_segments_32<R: Read + Seek>(
     header: &Elf32Header,
     endian: Endian,
 ) -> Result<Vec<ElfLoadSegment>> {
-    if header.phoff == 0 || header.phnum == 0 {
+    let phnum = if header.phnum == PN_XNUM && header.shoff != 0 {
+        let mut sh0_bytes = [0; Elf32Shdr::SIZE];
+        if reader.seek(SeekFrom::Start(header.shoff as u64)).is_ok()
+            && reader.read_exact(&mut sh0_bytes).is_ok()
+        {
+            let sh_reader = ByteReader::new(&sh0_bytes, endian);
+            Elf32Shdr::parse(&sh_reader, 0)
+                .map(|sh0| sh0.sh_info as usize)
+                .unwrap_or(header.phnum as usize)
+        } else {
+            header.phnum as usize
+        }
+    } else {
+        header.phnum as usize
+    };
+    if header.phoff == 0 || phnum == 0 {
         return Ok(Vec::new());
     }
     let entry_size = if header.phentsize == 0 {
@@ -1616,7 +1726,7 @@ fn read_load_segments_32<R: Read + Seek>(
     }
 
     let mut segments = Vec::new();
-    for index in 0..header.phnum as u64 {
+    for index in 0..phnum as u64 {
         let offset = (header.phoff as u64)
             .checked_add(
                 index
@@ -1644,8 +1754,13 @@ fn read_load_segments_32<R: Read + Seek>(
     Ok(segments)
 }
 
-fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -> Vec<Elf64Phdr> {
-    if header.phoff == 0 || header.phnum == 0 {
+fn read_program_headers_64(
+    bytes: &[u8],
+    header: &Elf64Header,
+    phnum: usize,
+    endian: Endian,
+) -> Vec<Elf64Phdr> {
+    if header.phoff == 0 || phnum == 0 {
         return Vec::new();
     }
     let reader = ByteReader::new(bytes, endian);
@@ -1654,7 +1769,7 @@ fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -
     } else {
         Elf64Phdr::SIZE
     };
-    (0..header.phnum)
+    (0..phnum)
         .filter_map(|index| {
             let offset = header
                 .phoff
@@ -1664,8 +1779,13 @@ fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -
         .collect()
 }
 
-fn read_program_headers_32(bytes: &[u8], header: &Elf32Header, endian: Endian) -> Vec<Elf32Phdr> {
-    if header.phoff == 0 || header.phnum == 0 {
+fn read_program_headers_32(
+    bytes: &[u8],
+    header: &Elf32Header,
+    phnum: usize,
+    endian: Endian,
+) -> Vec<Elf32Phdr> {
+    if header.phoff == 0 || phnum == 0 {
         return Vec::new();
     }
     let reader = ByteReader::new(bytes, endian);
@@ -1674,7 +1794,7 @@ fn read_program_headers_32(bytes: &[u8], header: &Elf32Header, endian: Endian) -
     } else {
         Elf32Phdr::SIZE
     };
-    (0..header.phnum)
+    (0..phnum)
         .filter_map(|index| {
             let offset = header
                 .phoff
@@ -3350,6 +3470,105 @@ mod tests {
         assert!(
             plt_puts.address > 0x1000,
             "PLT stub address should be a real guest VA"
+        );
+    }
+
+    #[test]
+    fn stripped_binary_without_section_headers_synthesizes_load_sections() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        let mut bytes = std::fs::read(&path).expect("read elf fixture");
+
+        // Zero out e_shoff (bytes 40..48), e_shnum (bytes 60..62), e_shstrndx (bytes 62..64)
+        bytes[40..48].fill(0);
+        bytes[60..62].fill(0);
+        bytes[62..64].fill(0);
+
+        let bin = ElfLoader::parse(DataBuffer::Heap(bytes), "stripped.elf".into())
+            .expect("load stripped ELF without section headers");
+
+        assert!(
+            !bin.sections.is_empty(),
+            "sections must be synthesized from PT_LOAD program headers on stripped binary"
+        );
+        assert!(
+            bin.sections.iter().any(|s| s.name.starts_with("PT_LOAD")),
+            "expected synthetic PT_LOAD section names"
+        );
+        let entry = bin.entry_point;
+        assert!(entry > 0, "entry point must be preserved");
+        assert!(
+            bin.view_bytes(entry, 1).is_some(),
+            "entry point memory must be readable via synthesized PT_LOAD sections"
+        );
+    }
+
+    #[test]
+    fn extended_section_numbering_shnum_overflow_resolves_via_section_0() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        let mut bytes = std::fs::read(&path).expect("read elf fixture");
+
+        let shoff = u64::from_le_bytes(bytes[40..48].try_into().unwrap()) as usize;
+        let orig_shnum = u16::from_le_bytes(bytes[60..62].try_into().unwrap());
+        assert!(orig_shnum > 0);
+
+        // Put orig_shnum into sh0.sh_size (shoff + 32..shoff + 40)
+        bytes[shoff + 32..shoff + 40].copy_from_slice(&(orig_shnum as u64).to_le_bytes());
+        // Set e_shnum = 0 to trigger extended section numbering
+        bytes[60..62].fill(0);
+
+        let bin = ElfLoader::parse(DataBuffer::Heap(bytes), "extended_shnum.elf".into())
+            .expect("load ELF with extended section numbering (e_shnum == 0)");
+
+        assert_eq!(
+            bin.sections.len(),
+            orig_shnum as usize,
+            "all sections must be parsed when shnum is stored in sh0.sh_size"
+        );
+    }
+
+    #[test]
+    fn extended_string_table_index_overflow_resolves_via_section_0() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        let mut bytes = std::fs::read(&path).expect("read elf fixture");
+
+        let shoff = u64::from_le_bytes(bytes[40..48].try_into().unwrap()) as usize;
+        let orig_shstrndx = u16::from_le_bytes(bytes[62..64].try_into().unwrap());
+        assert!(orig_shstrndx > 0);
+
+        // Put orig_shstrndx into sh0.sh_link (shoff + 40..shoff + 44)
+        bytes[shoff + 40..shoff + 44].copy_from_slice(&(orig_shstrndx as u32).to_le_bytes());
+        // Set e_shstrndx = SHN_XINDEX (0xffff)
+        bytes[62..64].copy_from_slice(&SHN_XINDEX.to_le_bytes());
+
+        let bin = ElfLoader::parse(DataBuffer::Heap(bytes), "extended_shstrndx.elf".into())
+            .expect("load ELF with extended shstrndx (SHN_XINDEX)");
+
+        assert!(
+            bin.sections.iter().any(|s| s.name == ".text"),
+            "section names must be resolved when shstrndx is stored in sh0.sh_link"
+        );
+    }
+
+    #[test]
+    fn extended_program_header_count_overflow_resolves_via_section_0() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        let mut bytes = std::fs::read(&path).expect("read elf fixture");
+
+        let shoff = u64::from_le_bytes(bytes[40..48].try_into().unwrap()) as usize;
+        let orig_phnum = u16::from_le_bytes(bytes[56..58].try_into().unwrap());
+        assert!(orig_phnum > 0);
+
+        // Put orig_phnum into sh0.sh_info (shoff + 44..shoff + 48)
+        bytes[shoff + 44..shoff + 48].copy_from_slice(&(orig_phnum as u32).to_le_bytes());
+        // Set e_phnum = PN_XNUM (0xffff)
+        bytes[56..58].copy_from_slice(&PN_XNUM.to_le_bytes());
+
+        let bin = ElfLoader::parse(DataBuffer::Heap(bytes), "extended_phnum.elf".into())
+            .expect("load ELF with extended phnum (PN_XNUM)");
+
+        assert!(
+            !bin.sections.is_empty(),
+            "parsing must succeed when phnum is stored in sh0.sh_info"
         );
     }
 }
