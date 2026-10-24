@@ -110,13 +110,20 @@ fn patch_binary(binary: &mut LoadedBinary, request: &PatchRequest, json: bool) -
         ));
     }
 
-    binary.patch_bytes(offset as u64, &patch).ok_or_else(|| {
-        io::Error::new(
+    let slice = binary.data.as_slice();
+    if offset
+        .checked_add(patch.len())
+        .map_or(true, |end| end > slice.len())
+    {
+        return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "the patch runs past the end of the file",
-        )
-    })?;
-    write_atomically(output, binary.data.as_slice())?;
+        ));
+    }
+    let mut buffer = slice.to_vec();
+    buffer[offset..offset + patch.len()].copy_from_slice(&patch);
+    write_atomically(output, &buffer)?;
+    binary.patch_bytes(offset as u64, &patch);
 
     report(
         &mut stdout,
@@ -368,6 +375,58 @@ fn nop_fill(language: &str, count: usize) -> io::Result<Vec<u8>> {
         };
         return Ok(nop.iter().copied().cycle().take(count).collect());
     }
+    if language.starts_with("MIPS:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; MIPS instructions are 4 bytes"),
+            ));
+        }
+        let nop: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
+        return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
+    if language.starts_with("PowerPC:") || language.starts_with("ppc:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; PowerPC instructions are 4 bytes"),
+            ));
+        }
+        let nop: [u8; 4] = if language.contains(":BE:") {
+            [0x60, 0x00, 0x00, 0x00]
+        } else {
+            [0x00, 0x00, 0x00, 0x60]
+        };
+        return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
+    if language.starts_with("RISCV:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; RISC-V instructions are 4 bytes"),
+            ));
+        }
+        let nop: [u8; 4] = if language.contains(":BE:") {
+            [0x00, 0x00, 0x00, 0x13]
+        } else {
+            [0x13, 0x00, 0x00, 0x00]
+        };
+        return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
+    if language.starts_with("Sparc:") || language.starts_with("SPARC:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; SPARC instructions are 4 bytes"),
+            ));
+        }
+        let nop: [u8; 4] = if language.contains(":LE:") {
+            [0x00, 0x00, 0x00, 0x01]
+        } else {
+            [0x01, 0x00, 0x00, 0x00]
+        };
+        return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
     // 32-bit ARM is deliberately not here. Which NOP is correct depends on
     // whether the address is ARM or Thumb code, the language id does not say,
     // and the two are different widths -- guessing writes a four-byte NOP over
@@ -500,8 +559,27 @@ mod tests {
         );
         // A count that cannot be whole instructions would leave a fragment.
         assert!(nop_fill("AARCH64:LE:64:v8A", 6).is_err());
-        // Better to say so than to invent an encoding.
-        assert!(nop_fill("MIPS:BE:32:default", 4).is_err());
+        assert_eq!(
+            nop_fill("MIPS:BE:32:default", 4).expect("mips"),
+            vec![0x00, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            nop_fill("PowerPC:BE:32:default", 4).expect("powerpc be"),
+            vec![0x60, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            nop_fill("PowerPC:LE:32:default", 4).expect("powerpc le"),
+            vec![0x00, 0x00, 0x00, 0x60]
+        );
+        assert_eq!(
+            nop_fill("RISCV:LE:64:default", 4).expect("riscv le"),
+            vec![0x13, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            nop_fill("Sparc:BE:32:default", 4).expect("sparc be"),
+            vec![0x01, 0x00, 0x00, 0x00]
+        );
+        assert!(nop_fill("UNKNOWN:BE:32:default", 4).is_err());
         // 32-bit ARM is refused on purpose: ARM and Thumb NOPs are different
         // widths and the language id does not say which the address holds.
         // The refusal has to name both, or it is just a dead end.
