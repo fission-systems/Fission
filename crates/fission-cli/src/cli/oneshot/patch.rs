@@ -110,13 +110,21 @@ fn patch_binary(binary: &mut LoadedBinary, request: &PatchRequest, json: bool) -
         ));
     }
 
-    binary.patch_bytes(offset as u64, &patch).ok_or_else(|| {
-        io::Error::new(
+    let data_slice = binary.data.as_slice();
+    if offset
+        .checked_add(patch.len())
+        .is_none_or(|end| end > data_slice.len())
+    {
+        return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "the patch runs past the end of the file",
-        )
-    })?;
-    write_atomically(output, binary.data.as_slice())?;
+        ));
+    }
+
+    let mut staged = data_slice.to_vec();
+    staged[offset..offset + patch.len()].copy_from_slice(&patch);
+    write_atomically(output, staged.as_slice())?;
+    binary.patch_bytes(offset as u64, &patch);
 
     report(
         &mut stdout,
@@ -351,20 +359,76 @@ fn parse_patch_bytes(spec: &str) -> io::Result<Vec<u8>> {
 /// Filling with `0x90` on AArch64 would be `0x90` as a byte, not a NOP -- the
 /// point of the flag is to leave something that runs.
 fn nop_fill(language: &str, count: usize) -> io::Result<Vec<u8>> {
-    if language.starts_with("x86:") {
+    let lang = language.to_ascii_lowercase();
+    if lang.starts_with("x86:") {
         return Ok(vec![0x90; count]);
     }
-    if language.starts_with("AARCH64:") {
+    if lang.starts_with("aarch64:") {
         if count % 4 != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("--nop {count} is not a multiple of 4; AArch64 instructions are 4 bytes"),
             ));
         }
-        let nop: [u8; 4] = if language.contains(":BE:") {
+        let nop: [u8; 4] = if lang.contains(":be:") {
             [0xd5, 0x03, 0x20, 0x1f]
         } else {
             [0x1f, 0x20, 0x03, 0xd5]
+        };
+        return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
+    if lang.starts_with("mips:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; MIPS instructions are 4 bytes"),
+            ));
+        }
+        // MIPS `nop` is `sll $zero, $zero, 0` -> 0x00000000 in both endiannesses.
+        return Ok(vec![0x00; count]);
+    }
+    if lang.starts_with("powerpc:") || lang.starts_with("ppc:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; PowerPC instructions are 4 bytes"),
+            ));
+        }
+        // PowerPC `nop` is `ori 0, 0, 0` -> 0x60000000.
+        let nop: [u8; 4] = if lang.contains(":le:") {
+            [0x00, 0x00, 0x00, 0x60]
+        } else {
+            [0x60, 0x00, 0x00, 0x00]
+        };
+        return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
+    if lang.starts_with("riscv:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; RISC-V instructions are 4 bytes"),
+            ));
+        }
+        // RISC-V `nop` is `addi x0, x0, 0` -> 0x00000013.
+        let nop: [u8; 4] = if lang.contains(":be:") {
+            [0x00, 0x00, 0x00, 0x13]
+        } else {
+            [0x13, 0x00, 0x00, 0x00]
+        };
+        return Ok(nop.iter().copied().cycle().take(count).collect());
+    }
+    if lang.starts_with("sparc:") {
+        if count % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("--nop {count} is not a multiple of 4; SPARC instructions are 4 bytes"),
+            ));
+        }
+        // SPARC `nop` is `sethi 0, %g0` -> 0x01000000.
+        let nop: [u8; 4] = if lang.contains(":le:") {
+            [0x00, 0x00, 0x00, 0x01]
+        } else {
+            [0x01, 0x00, 0x00, 0x00]
         };
         return Ok(nop.iter().copied().cycle().take(count).collect());
     }
@@ -373,7 +437,7 @@ fn nop_fill(language: &str, count: usize) -> io::Result<Vec<u8>> {
     // and the two are different widths -- guessing writes a four-byte NOP over
     // two Thumb instructions, or leaves half of one behind. Naming both
     // encodings lets the operator pick the one they know applies.
-    if language.starts_with("ARM:") {
+    if lang.starts_with("arm:") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
@@ -500,8 +564,44 @@ mod tests {
         );
         // A count that cannot be whole instructions would leave a fragment.
         assert!(nop_fill("AARCH64:LE:64:v8A", 6).is_err());
-        // Better to say so than to invent an encoding.
-        assert!(nop_fill("MIPS:BE:32:default", 4).is_err());
+        // MIPS uses 0x00000000 (sll $zero, $zero, 0) in both BE and LE.
+        assert_eq!(
+            nop_fill("MIPS:BE:32:default", 4).expect("mips be"),
+            vec![0x00, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            nop_fill("MIPS:LE:32:default", 4).expect("mips le"),
+            vec![0x00, 0x00, 0x00, 0x00]
+        );
+        // PowerPC uses 0x60000000 (ori 0, 0, 0).
+        assert_eq!(
+            nop_fill("PowerPC:BE:32:default", 4).expect("powerpc be"),
+            vec![0x60, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            nop_fill("PowerPC:LE:64:default", 4).expect("powerpc le"),
+            vec![0x00, 0x00, 0x00, 0x60]
+        );
+        // RISC-V uses 0x00000013 (addi x0, x0, 0).
+        assert_eq!(
+            nop_fill("RISCV:LE:64:default", 4).expect("riscv le"),
+            vec![0x13, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            nop_fill("RISCV:BE:32:default", 4).expect("riscv be"),
+            vec![0x00, 0x00, 0x00, 0x13]
+        );
+        // SPARC uses 0x01000000 (sethi 0, %g0).
+        assert_eq!(
+            nop_fill("sparc:BE:32:default", 4).expect("sparc be"),
+            vec![0x01, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            nop_fill("sparc:LE:64:default", 4).expect("sparc le"),
+            vec![0x00, 0x00, 0x00, 0x01]
+        );
+        // Unknown or unsupported architecture.
+        assert!(nop_fill("UnknownArch:32:default", 4).is_err());
         // 32-bit ARM is refused on purpose: ARM and Thumb NOPs are different
         // widths and the language id does not say which the address holds.
         // The refusal has to name both, or it is just a dead end.
