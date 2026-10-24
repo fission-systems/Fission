@@ -83,6 +83,7 @@ mod tests {
             relocations: vec![],
             rich_header_records: None,
             symbol_versions: HashMap::new(),
+            symbol_version_names: HashMap::new(),
             cfg_label_leaders: Vec::new(),
         }
     }
