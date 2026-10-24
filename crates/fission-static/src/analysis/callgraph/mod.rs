@@ -88,7 +88,7 @@ impl CallGraph {
         fallback_range: u64,
     ) -> Self {
         let mut functions = functions.to_vec();
-        functions.sort_by_key(|func| func.address);
+        functions.sort_by(|a, b| a.address.cmp(&b.address).then_with(|| b.size.cmp(&a.size)));
 
         let fallback_range = fallback_range.max(1);
         let mut callers_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
@@ -147,7 +147,7 @@ impl CallGraph {
         fallback_range: u64,
     ) -> Self {
         let mut functions = functions.to_vec();
-        functions.sort_by_key(|func| func.address);
+        functions.sort_by(|a, b| a.address.cmp(&b.address).then_with(|| b.size.cmp(&a.size)));
 
         let fallback_range = fallback_range.max(1);
         let mut callers_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
@@ -213,27 +213,7 @@ fn finalize_edges(map: FxHashMap<u64, FxHashMap<u64, usize>>) -> FxHashMap<u64, 
 }
 
 fn find_function_addr(functions: &[FunctionInfo], addr: u64, fallback_range: u64) -> Option<u64> {
-    if functions.is_empty() {
-        return None;
-    }
-
-    let idx = match functions.binary_search_by_key(&addr, |func| func.address) {
-        Ok(index) => index,
-        Err(index) => index.checked_sub(1)?,
-    };
-
-    let func = &functions[idx];
-    let size = if func.size > 0 {
-        func.size
-    } else {
-        fallback_range
-    };
-    let end = func.address.saturating_add(size);
-    if addr >= func.address && addr < end {
-        Some(func.address)
-    } else {
-        None
-    }
+    resolve_enclosing_function(functions, addr, fallback_range)
 }
 
 #[cfg(test)]
@@ -297,5 +277,70 @@ mod tests {
         let validation = fission_signatures::validate_relation(&signature, 0x1000, &view);
         assert!(validation.passed);
         assert_eq!(validation.matched_callees, vec!["callee"]);
+    }
+
+    #[test]
+    fn unsized_function_bounds_to_next_function_in_callgraph() {
+        let functions = vec![
+            FunctionInfo {
+                name: "unsized_caller".into(),
+                address: 0x1000,
+                size: 0, // Unsized stripped function
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            },
+            FunctionInfo {
+                name: "callee".into(),
+                address: 0x2000,
+                size: 0x50,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            },
+        ];
+
+        let mut db = XrefDatabase::new();
+        // Call site at 0x1080 (128 bytes in) - past the old 64-byte fallback cap!
+        db.add_xref(Xref {
+            from_addr: 0x1080,
+            to_addr: 0x2000,
+            xref_type: XrefType::Call,
+            operand_index: OPERAND_INDEX_MNEMONIC,
+            sleigh_kind: None,
+            flow_kind: Some(DecodedFlowKind::Call),
+        });
+
+        let g = CallGraph::build_from_xrefs(&functions, &db, 0x40);
+        assert_eq!(
+            g.total_call_sites(),
+            1,
+            "call past 64 bytes in unsized function must not be dropped"
+        );
+        let callees = g.callees_of(0x1000);
+        assert_eq!(callees.len(), 1);
+        assert_eq!(callees[0].addr, 0x2000);
+    }
+
+    #[test]
+    fn duplicate_function_address_prefers_sized_entry() {
+        let functions = vec![
+            FunctionInfo {
+                name: "alias".into(),
+                address: 0x1000,
+                size: 0,
+                ..Default::default()
+            },
+            FunctionInfo {
+                name: "real_func".into(),
+                address: 0x1000,
+                size: 0x200,
+                ..Default::default()
+            },
+        ];
+
+        // Address 0x1100 (256 bytes in) falls within 0x200
+        let enclosing = resolve_enclosing_function(&functions, 0x1100, 0x40);
+        assert_eq!(enclosing, Some(0x1000));
     }
 }

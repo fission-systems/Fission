@@ -488,20 +488,28 @@ impl FactStore {
         ) else {
             return;
         };
-        if infer_entry_register_param_arity(&callback_pcode.function, &register_namer)
-            .is_none_or(|arity| arity < 2)
-        {
-            return;
+        let arity =
+            match infer_entry_register_param_arity(&callback_pcode.function, &register_namer) {
+                Some(arity) if arity >= 2 => arity,
+                _ => return,
+            };
+
+        self.ingest_name_fact(callback, "main".to_string(), FactProvenance::NativeMetadata);
+
+        let mut param_names = vec!["argc".to_string(), "argv".to_string()];
+        let mut param_type_names =
+            HashMap::from([(0, "int".to_string()), (1, "char **".to_string())]);
+
+        if arity >= 3 {
+            param_names.push("envp".to_string());
+            param_type_names.insert(2, "char **".to_string());
         }
 
         self.record_structuring_hints(
             callback,
             fission_midend_core::NirFunctionHints {
-                param_names: vec!["argc".to_string(), "argv".to_string()],
-                param_type_names: HashMap::from([
-                    (0, "int".to_string()),
-                    (1, "char **".to_string()),
-                ]),
+                param_names,
+                param_type_names,
                 return_type_name: Some("int".to_string()),
                 ..Default::default()
             },
@@ -1153,12 +1161,47 @@ fn inferred_type_identity(ty: &InferredTypeInfo) -> (&str, u64, &str) {
     (&ty.name, ty.metadata_address, &ty.mangled_name)
 }
 
-fn merge_type_fields(existing: &mut Vec<InferredFieldInfo>, incoming: Vec<InferredFieldInfo>) {
+fn merge_type_fields(
+    existing: &mut Vec<InferredFieldInfo>,
+    incoming: Vec<InferredFieldInfo>,
+    is_union: bool,
+) {
+    let mut incoming_offset_counts = HashMap::new();
+    for f in &incoming {
+        *incoming_offset_counts.entry(f.offset).or_insert(0usize) += 1;
+    }
+    let mut existing_offset_counts = HashMap::new();
+    for f in existing.iter() {
+        *existing_offset_counts.entry(f.offset).or_insert(0usize) += 1;
+    }
+
     for field in incoming {
-        if let Some(current) = existing
-            .iter_mut()
-            .find(|current| current.offset == field.offset)
-        {
+        let is_overlapping = is_union
+            || incoming_offset_counts
+                .get(&field.offset)
+                .copied()
+                .unwrap_or(0)
+                > 1
+            || existing_offset_counts
+                .get(&field.offset)
+                .copied()
+                .unwrap_or(0)
+                > 1;
+
+        if let Some(current) = existing.iter_mut().find(|current| {
+            if current.offset != field.offset {
+                return false;
+            }
+            if is_overlapping {
+                if current.name.is_empty() || field.name.is_empty() {
+                    true
+                } else {
+                    current.name == field.name
+                }
+            } else {
+                true
+            }
+        }) {
             if current.name.is_empty() && !field.name.is_empty() {
                 current.name = field.name.clone();
             }
@@ -1170,8 +1213,10 @@ fn merge_type_fields(existing: &mut Vec<InferredFieldInfo>, incoming: Vec<Inferr
             }
             continue;
         }
+        *existing_offset_counts.entry(field.offset).or_insert(0) += 1;
         existing.push(field);
     }
+    existing.sort_by(|a, b| a.offset.cmp(&b.offset).then_with(|| a.name.cmp(&b.name)));
 }
 
 fn merge_type_fact_layers(
@@ -1202,9 +1247,14 @@ fn merge_type_fact_layers(
             if existing.size == 0 && ty.size != 0 {
                 existing.size = ty.size;
             }
-            merge_type_fields(&mut existing.fields, ty.fields);
+            let is_union = existing.kind == "union" || ty.kind == "union";
+            merge_type_fields(&mut existing.fields, ty.fields, is_union);
             continue;
         }
+        let is_union = ty.kind == "union";
+        let mut ty = ty;
+        let fields = std::mem::take(&mut ty.fields);
+        merge_type_fields(&mut ty.fields, fields, is_union);
         merged.push(ty);
     }
 
@@ -1876,5 +1926,59 @@ mod tests {
                 .map(|i| (i.address, i.mnemonic.clone()))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_merge_type_fields_preserves_union_members_and_sorts_offsets() {
+        let mut existing = vec![
+            InferredFieldInfo {
+                name: "tag".into(),
+                type_name: "int".into(),
+                offset: 16,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "i".into(),
+                type_name: "int".into(),
+                offset: 0,
+                size: 4,
+            },
+        ];
+
+        let incoming = vec![
+            InferredFieldInfo {
+                name: "f".into(),
+                type_name: "float".into(),
+                offset: 0,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "s".into(),
+                type_name: "char *".into(),
+                offset: 0,
+                size: 8,
+            },
+            InferredFieldInfo {
+                name: "extra".into(),
+                type_name: "u64".into(),
+                offset: 8,
+                size: 8,
+            },
+        ];
+
+        merge_type_fields(&mut existing, incoming, true);
+
+        // Fields must be sorted by offset (0, 0, 0, 8, 16)
+        assert_eq!(existing.len(), 5);
+        assert_eq!(existing[0].offset, 0);
+        assert_eq!(existing[1].offset, 0);
+        assert_eq!(existing[2].offset, 0);
+        assert_eq!(existing[3].offset, 8);
+        assert_eq!(existing[4].offset, 16);
+
+        let names_at_0: Vec<&str> = existing[0..3].iter().map(|f| f.name.as_str()).collect();
+        assert!(names_at_0.contains(&"i"));
+        assert!(names_at_0.contains(&"f"));
+        assert!(names_at_0.contains(&"s"));
     }
 }
