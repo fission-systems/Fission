@@ -63,7 +63,8 @@ pub(super) fn apply_variadic_printf_format_string_arg_types(
         else {
             continue;
         };
-        for (offset, ty) in parse_printf_format_specifier_types(literal)
+        let pointer_bits = if func.is_64bit { 64 } else { 32 };
+        for (offset, ty) in parse_printf_format_specifier_types(literal, pointer_bits)
             .into_iter()
             .enumerate()
         {
@@ -378,7 +379,8 @@ pub(super) fn apply_site_sensitive_translated_format_types(func: &mut PreHirFunc
 
     let mut changed = false;
     for (format_index, literal, arg_chains) in evidence {
-        for (offset, ty) in parse_printf_format_specifier_types(&literal)
+        let pointer_bits = if func.is_64bit { 64 } else { 32 };
+        for (offset, ty) in parse_printf_format_specifier_types(&literal, pointer_bits)
             .into_iter()
             .enumerate()
         {
@@ -514,7 +516,10 @@ fn quoted_string_literal_text(name: &str) -> Option<&str> {
 /// argument supplying [a `*`] width/precision... shall appear before the
 /// argument (if any) to be converted") are both handled to keep the
 /// specifier-to-argument-position alignment correct.
-pub(super) fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirType>> {
+pub(super) fn parse_printf_format_specifier_types(
+    text: &str,
+    pointer_bits: usize,
+) -> Vec<Option<NirType>> {
     let mut result = Vec::new();
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
@@ -553,13 +558,12 @@ pub(super) fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirT
                 }
             }
         }
-        // Length modifiers: `hh`/`h` (narrower, doesn't affect promoted
-        // vararg width so ignored), `l`/`ll` (`ll` is always 64-bit, while
-        // a lone `l` has ABI-dependent integer width and also means wide-char
-        // for `%s`/`%c`), `L`/`z`/`j`/`t`
-        // (ignored, doesn't change the promoted vararg width this cares
-        // about), MSVC `I32`/`I64`.
+        // Length modifiers: `hh`/`h`, `l`/`ll`, `z` (size_t), `t` (ptrdiff_t),
+        // `j` (intmax_t), `L`, MSVC `I32`/`I64`.
         let mut long_count = 0u8;
+        let mut is_size_t = false;
+        let mut is_ptrdiff_t = false;
+        let mut is_intmax = false;
         loop {
             match chars.peek().copied() {
                 Some('h') => {
@@ -576,7 +580,19 @@ pub(super) fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirT
                         long_count += 1;
                     }
                 }
-                Some('L' | 'z' | 'j' | 't') => {
+                Some('z') => {
+                    chars.next();
+                    is_size_t = true;
+                }
+                Some('t') => {
+                    chars.next();
+                    is_ptrdiff_t = true;
+                }
+                Some('j') => {
+                    chars.next();
+                    is_intmax = true;
+                }
+                Some('L') => {
                     chars.next();
                 }
                 Some('I') => {
@@ -601,10 +617,17 @@ pub(super) fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirT
             break;
         };
         let is_wide = long_count >= 1;
-        let integer_bits = match long_count {
-            0 => Some(32),
-            1 => None,
-            _ => Some(64),
+        let ptr_bits = (if pointer_bits == 0 { 64 } else { pointer_bits }) as u32;
+        let integer_bits: Option<u32> = if is_size_t || is_ptrdiff_t {
+            Some(ptr_bits)
+        } else if is_intmax {
+            Some(64)
+        } else {
+            match long_count {
+                0 => Some(32),
+                1 => Some(ptr_bits),
+                _ => Some(64),
+            }
         };
         let ty = match conv {
             'd' | 'i' => integer_bits.map(|bits| NirType::Int { bits, signed: true }),

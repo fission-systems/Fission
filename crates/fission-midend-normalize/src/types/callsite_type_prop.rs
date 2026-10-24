@@ -2274,8 +2274,8 @@ mod tests {
     }
 
     #[test]
-    fn printf_format_parser_does_not_guess_abi_dependent_long_width() {
-        let types = parse_printf_format_specifier_types("%u %lu %llu %s");
+    fn printf_format_parser_resolves_length_modifiers() {
+        let types = parse_printf_format_specifier_types("%u %lu %llu %s %zu %zd %td %jd", 64);
         assert_eq!(
             types,
             vec![
@@ -2283,7 +2283,10 @@ mod tests {
                     bits: 32,
                     signed: false,
                 }),
-                None,
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
                 Some(NirType::Int {
                     bits: 64,
                     signed: false,
@@ -2292,6 +2295,49 @@ mod tests {
                     bits: 8,
                     signed: false,
                 }))),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: true,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: true,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: true,
+                }),
+            ]
+        );
+
+        let types_32 = parse_printf_format_specifier_types("%u %lu %llu %zu %zd", 32);
+        assert_eq!(
+            types_32,
+            vec![
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: true,
+                }),
             ]
         );
     }
