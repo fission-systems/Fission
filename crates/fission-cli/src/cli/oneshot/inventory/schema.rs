@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(super) struct FactSourcesPresent {
     pub(super) dwarf: bool,
     pub(super) pdb: bool,
@@ -12,7 +12,7 @@ pub(super) struct FactSourcesPresent {
     pub(super) native_inferred: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(super) struct ExplicitFactBreakdown {
     pub(super) param_count: usize,
     pub(super) local_count: usize,
@@ -21,7 +21,7 @@ pub(super) struct ExplicitFactBreakdown {
     pub(super) native_type_count: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(super) struct ProvenanceFactBreakdown {
     pub(super) dwarf_type_count: usize,
     pub(super) pdb_type_count: usize,
@@ -29,7 +29,7 @@ pub(super) struct ProvenanceFactBreakdown {
     pub(super) loader_type_count: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(super) struct FunctionFactsInventoryRow {
     pub(super) binary: String,
     pub(super) binary_path: String,
@@ -159,5 +159,14 @@ pub(super) fn write_inventory_summary(
 ) -> io::Result<()> {
     let body = serde_json::to_string_pretty(summary)
         .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
-    fs::write(path, body)
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let temp_path = parent.join(format!(
+        ".{}.tmp.{}",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("summary"),
+        std::process::id()
+    ));
+    fs::write(&temp_path, body)?;
+    fs::rename(&temp_path, path)
 }

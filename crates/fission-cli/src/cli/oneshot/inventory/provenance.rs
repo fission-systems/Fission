@@ -332,6 +332,9 @@ pub(super) fn update_inventory_summary(
         "internal_error" => summary.internal_error_count += 1,
         _ => {}
     }
+    let is_timeout = row.row_error_kind.as_deref() == Some("preview_timeout")
+        || row.preview_fallback_kind_refined.as_deref() == Some("preview_timeout")
+        || row.preview_fallback_kind.as_deref() == Some("preview_timeout");
     if row.row_status != "ok" {
         let failure_kind = row
             .row_error_kind
@@ -341,22 +344,17 @@ pub(super) fn update_inventory_summary(
             .unwrap_or("preview_non_success_unknown")
             .to_string();
         *summary.failure_kind_counts.entry(failure_kind).or_insert(0) += 1;
+    } else if is_timeout {
+        *summary
+            .failure_kind_counts
+            .entry("preview_timeout".to_string())
+            .or_insert(0) += 1;
     }
     if let Some(kind) = row.row_error_kind.as_ref() {
         *summary
             .row_error_kind_counts
             .entry(kind.clone())
             .or_insert(0) += 1;
-    }
-    let is_timeout = row.row_error_kind.as_deref() == Some("preview_timeout")
-        || row.preview_fallback_kind_refined.as_deref() == Some("preview_timeout")
-        || row.preview_fallback_kind.as_deref() == Some("preview_timeout");
-    if is_timeout {
-        summary
-            .failure_kind_counts
-            .entry("preview_timeout".to_string())
-            .and_modify(|count| *count += 0)
-            .or_insert(0);
     }
 }
 
@@ -383,5 +381,25 @@ mod tests {
         assert!(!classification.has_indirect_control);
         assert!(!classification.has_preserved_indirect_surface);
         assert!(!classification.has_unresolved_unsupported_indirect);
+    }
+
+    #[test]
+    fn update_inventory_summary_counts_preview_timeouts() {
+        use super::super::schema::{FunctionFactsInventoryRow, FunctionFactsInventorySummary};
+        let mut summary = FunctionFactsInventorySummary::default();
+        let mut row = FunctionFactsInventoryRow {
+            row_status: "ok".into(),
+            preview_fallback_kind: Some("preview_timeout".into()),
+            ..Default::default()
+        };
+
+        update_inventory_summary(&mut summary, &row);
+        assert_eq!(summary.failure_kind_counts.get("preview_timeout"), Some(&1));
+
+        row.preview_fallback_kind = None;
+        row.row_error_kind = Some("preview_timeout".into());
+        row.row_status = "error".into();
+        update_inventory_summary(&mut summary, &row);
+        assert_eq!(summary.failure_kind_counts.get("preview_timeout"), Some(&2));
     }
 }
