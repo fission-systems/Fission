@@ -31,12 +31,13 @@ fn hoist_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut i = 0;
     while i < stmts.len() {
         if let PreHirStmt::If {
+            cond,
             then_body,
             else_body,
             ..
         } = &mut stmts[i]
         {
-            let n = common_hoist_prefix_len(then_body.as_slice(), else_body.as_slice());
+            let n = common_hoist_prefix_len(cond, then_body.as_slice(), else_body.as_slice());
             if n > 0 {
                 let lifted: Vec<PreHirStmt> = std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body)
                     .drain(0..n)
@@ -94,17 +95,63 @@ fn hoist_stmt_deep(stmt: &mut PreHirStmt) -> bool {
     changed
 }
 
-fn common_hoist_prefix_len(then_body: &[PreHirStmt], else_body: &[PreHirStmt]) -> usize {
+fn common_hoist_prefix_len(
+    cond: &PreHirExpr,
+    then_body: &[PreHirStmt],
+    else_body: &[PreHirStmt],
+) -> usize {
+    if expr_has_side_effects(cond) {
+        return 0;
+    }
     let max = MAX_HOIST_PREFIX.min(then_body.len()).min(else_body.len());
     let mut n = 0;
     while n < max {
         if same_hoistable_pair(&then_body[n], &else_body[n]) {
+            if let PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(var_name),
+                ..
+            } = &then_body[n]
+            {
+                if expr_uses_var(cond, var_name) {
+                    break;
+                }
+            }
             n += 1;
         } else {
             break;
         }
     }
     n
+}
+
+fn expr_uses_var(expr: &PreHirExpr, name: &str) -> bool {
+    match expr {
+        PreHirExpr::Var(v) => v == name,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_uses_var(expr, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_uses_var(lhs, name) || expr_uses_var(rhs, name),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_uses_var(cond, name)
+                || expr_uses_var(then_expr, name)
+                || expr_uses_var(else_expr, name)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_var(arg, name)),
+        PreHirExpr::Index { base, index, .. } => {
+            expr_uses_var(base, name) || expr_uses_var(index, name)
+        }
+        PreHirExpr::Const(..)
+        | PreHirExpr::AddressOfGlobal(..)
+        | PreHirExpr::AddressOfLocal(..) => false,
+    }
 }
 
 /// Both statements must be `Assign { lhs: Var(same), rhs }` with identical
@@ -132,5 +179,100 @@ fn same_hoistable_pair(a: &PreHirStmt, b: &PreHirStmt) -> bool {
     match (pure_expr_key(ra), pure_expr_key(rb)) {
         (Some(ka), Some(kb)) => ka == kb,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn does_not_hoist_assignment_to_variable_used_in_condition() {
+        let mut func = PreHirFunction {
+            name: "hoist_clobber_test".into(),
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("x".into())),
+                    rhs: Box::new(PreHirExpr::Const(5, u32_ty())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("x".into()),
+                        rhs: PreHirExpr::Const(0, u32_ty()),
+                    },
+                    PreHirStmt::Return(None),
+                ]
+                .into(),
+                else_body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("x".into()),
+                        rhs: PreHirExpr::Const(0, u32_ty()),
+                    },
+                    PreHirStmt::Return(None),
+                ]
+                .into(),
+            }],
+            ..Default::default()
+        };
+
+        assert!(
+            !apply_branch_prefix_hoist_pass(&mut func),
+            "x = 0 must NOT be hoisted before if (x == 5)"
+        );
+        assert_eq!(func.body.len(), 1);
+    }
+
+    #[test]
+    fn hoists_unrelated_common_assignment() {
+        let mut func = PreHirFunction {
+            name: "hoist_unrelated_test".into(),
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("x".into())),
+                    rhs: Box::new(PreHirExpr::Const(5, u32_ty())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("y".into()),
+                        rhs: PreHirExpr::Const(42, u32_ty()),
+                    },
+                    PreHirStmt::Return(None),
+                ]
+                .into(),
+                else_body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("y".into()),
+                        rhs: PreHirExpr::Const(42, u32_ty()),
+                    },
+                    PreHirStmt::Return(None),
+                ]
+                .into(),
+            }],
+            ..Default::default()
+        };
+
+        assert!(
+            apply_branch_prefix_hoist_pass(&mut func),
+            "y = 42 should be hoisted"
+        );
+        assert_eq!(func.body.len(), 2);
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } if name == "y"
+        ));
     }
 }
