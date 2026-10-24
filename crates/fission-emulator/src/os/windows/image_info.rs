@@ -57,6 +57,9 @@ pub fn load_pe_image(
 ) -> Result<PeImageInfo> {
     let inner = binary.inner();
     let is_64bit = inner.is_64bit;
+    if !is_64bit {
+        state.page_map.set_32bit();
+    }
     let image_base = inner.image_base;
     let entry = inner.entry_point;
 

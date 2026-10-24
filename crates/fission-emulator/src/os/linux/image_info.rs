@@ -178,6 +178,10 @@ pub fn load_elf_image(
         start_data = end_code;
     }
 
+    if !is_64bit {
+        state.page_map.set_32bit();
+    }
+
     // Program break: page after highest mapped image byte.
     let brk_base = page_align_up(max_end.max(image_base));
     state.page_map.set_brk_base(brk_base);
