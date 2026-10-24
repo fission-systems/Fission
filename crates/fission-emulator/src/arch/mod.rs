@@ -75,7 +75,7 @@ impl ArchInfo {
         }
     }
 
-    /// x86-32 (cdecl / stdcall)
+    /// x86-32 (cdecl)
     pub fn x86_32() -> Self {
         Self {
             name: "x86:LE:32:default",
@@ -85,6 +85,19 @@ impl ArchInfo {
             sp_reg: "esp",
             gp_regs: &["EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"],
             cc: Box::new(Cdecl32Cc),
+        }
+    }
+
+    /// x86-32, Windows (stdcall for Win32 APIs, cdecl for CRT)
+    pub fn x86_32_win() -> Self {
+        Self {
+            name: "x86:LE:32:default",
+            pointer_size: 4,
+            endian: Endianness::Little,
+            pc_reg: "eip",
+            sp_reg: "esp",
+            gp_regs: &["EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"],
+            cc: Box::new(Stdcall32Cc),
         }
     }
 
@@ -200,7 +213,9 @@ impl ArchInfo {
     /// The OS is detected from the binary format + machine type to pick the
     /// correct calling convention variant (Win64 vs. SysV for x86-64).
     pub fn from_language_id(lang_id: &str, binary: Option<&LoadedBinary>) -> Result<ArchInfo> {
-        let is_pe = binary.map(|b| b.format == "PE").unwrap_or(false);
+        let is_pe = binary
+            .map(|b| b.format.to_ascii_uppercase().starts_with("PE"))
+            .unwrap_or(false);
         let arch = match lang_id {
             s if s.contains("x86:LE:64") => {
                 // Use Win64 CC for PE files, SysV for ELF/Mach-O
@@ -210,7 +225,13 @@ impl ArchInfo {
                     ArchInfo::x86_64_sysv()
                 }
             }
-            s if s.contains("x86:LE:32") => ArchInfo::x86_32(),
+            s if s.contains("x86:LE:32") => {
+                if is_pe {
+                    ArchInfo::x86_32_win()
+                } else {
+                    ArchInfo::x86_32()
+                }
+            }
             s if s.contains("AARCH64") || s.contains("AArch64") => ArchInfo::aarch64(),
             s if s.contains("ARM:LE:32") || s.contains("ARM:BE:32") => ArchInfo::arm32(),
             s if s.contains("MIPS:BE:32") => ArchInfo::mips32be(),

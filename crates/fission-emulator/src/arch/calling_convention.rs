@@ -20,6 +20,12 @@ pub trait CallingConvention: Send + Sync {
     /// x86-64 Win64: offset = 0x28 + n * 8  (4 slots shadow space + retaddr)
     /// x86-64 SysV:  offset = 0x00 + n * 8  (no shadow space)
     fn stack_arg_offset(&self, n: usize) -> u64;
+
+    /// Extra stack bytes popped by the callee on return (e.g. x86-32 `stdcall` `ret N`).
+    /// Defaults to 0 for caller-cleanup conventions (`cdecl`, `SysV64`, `Win64`, RISC ABIs).
+    fn callee_pop_bytes(&self, _func_name: &str) -> u64 {
+        0
+    }
 }
 
 // --- Concrete implementations ---
@@ -91,6 +97,193 @@ impl CallingConvention for Stdcall32Cc {
     }
     fn stack_arg_offset(&self, n: usize) -> u64 {
         0x04 + n as u64 * 4
+    }
+    fn callee_pop_bytes(&self, func_name: &str) -> u64 {
+        win32_stdcall_pop_bytes(func_name)
+    }
+}
+
+/// Callee-cleaned stack byte count (`ret N`) for 32-bit Windows `__stdcall` APIs.
+/// Returns `0` for `cdecl` CRT routines (`malloc`, `printf`, `memcpy`, etc.) or zero-arg Win32 APIs.
+pub fn win32_stdcall_pop_bytes(func_name: &str) -> u64 {
+    let base = func_name
+        .rsplit_once('!')
+        .or_else(|| func_name.rsplit_once('.'))
+        .map(|(_, sym)| sym)
+        .unwrap_or(func_name);
+    if let Some((_, suffix)) = base.rsplit_once('@') {
+        if let Ok(bytes) = suffix.parse::<u64>() {
+            return bytes;
+        }
+    }
+    let clean = base.strip_prefix('_').unwrap_or(base);
+    match clean {
+        // 0 args (0 bytes)
+        "GetProcessHeap"
+        | "GetACP"
+        | "GetOEMCP"
+        | "AllocConsole"
+        | "FreeConsole"
+        | "GetCurrentProcess"
+        | "GetCurrentProcessId"
+        | "GetCurrentThread"
+        | "GetCurrentThreadId"
+        | "TlsAlloc"
+        | "GetLastError"
+        | "IsDebuggerPresent"
+        | "GetCommandLineA"
+        | "GetCommandLineW"
+        | "GetEnvironmentStrings"
+        | "GetEnvironmentStringsA"
+        | "GetEnvironmentStringsW"
+        | "GetTickCount"
+        | "GetTickCount64"
+        | "GetConsoleCP"
+        | "GetConsoleOutputCP" => 0,
+
+        // 1 arg (4 bytes)
+        "LoadLibraryA"
+        | "LoadLibraryW"
+        | "FreeLibrary"
+        | "GetStdHandle"
+        | "AttachConsole"
+        | "FlushFileBuffers"
+        | "SetEndOfFile"
+        | "GetStartupInfoA"
+        | "GetStartupInfoW"
+        | "IsProcessorFeaturePresent"
+        | "FlsAlloc"
+        | "FlsGetValue"
+        | "FlsFree"
+        | "InitializeConditionVariable"
+        | "WakeConditionVariable"
+        | "WakeAllConditionVariable"
+        | "GetSystemInfo"
+        | "GetNativeSystemInfo"
+        | "SetConsoleCP"
+        | "SetConsoleOutputCP"
+        | "CloseHandle"
+        | "TlsGetValue"
+        | "TlsFree"
+        | "InitializeCriticalSection"
+        | "EnterCriticalSection"
+        | "LeaveCriticalSection"
+        | "DeleteCriticalSection"
+        | "TryEnterCriticalSection"
+        | "InitializeSListHead"
+        | "InterlockedFlushSList"
+        | "InterlockedPopEntrySList"
+        | "SetLastError"
+        | "SetUnhandledExceptionFilter"
+        | "UnhandledExceptionFilter"
+        | "OutputDebugStringA"
+        | "OutputDebugStringW"
+        | "lstrlenA"
+        | "lstrlenW"
+        | "GetModuleHandleA"
+        | "GetModuleHandleW"
+        | "FreeEnvironmentStringsA"
+        | "FreeEnvironmentStringsW"
+        | "ExitProcess"
+        | "ExitThread"
+        | "Sleep"
+        | "GetSystemTimeAsFileTime"
+        | "GetSystemTimePreciseAsFileTime"
+        | "GetSystemTime"
+        | "GetLocalTime"
+        | "QueryPerformanceCounter"
+        | "QueryPerformanceFrequency"
+        | "EncodePointer"
+        | "DecodePointer"
+        | "DeleteFileA"
+        | "DeleteFileW"
+        | "IsValidCodePage"
+        | "RegCloseKey" => 4,
+
+        // 2 args (8 bytes)
+        "GetProcAddress"
+        | "GetConsoleMode"
+        | "SetConsoleMode"
+        | "GetFileSize"
+        | "GetFileSizeEx"
+        | "FlsSetValue"
+        | "SetConsoleCtrlHandler"
+        | "SystemTimeToFileTime"
+        | "GetConsoleScreenBufferInfo"
+        | "SetConsoleTextAttribute"
+        | "WaitForSingleObject"
+        | "TlsSetValue"
+        | "InitializeCriticalSectionAndSpinCount"
+        | "InterlockedPushEntrySList"
+        | "CheckRemoteDebuggerPresent"
+        | "lstrcpyA"
+        | "lstrcpyW"
+        | "lstrcmpA"
+        | "lstrcmpW"
+        | "lstrcmpiA"
+        | "lstrcmpiW"
+        | "lstrcatA"
+        | "lstrcatW"
+        | "RtlZeroMemory"
+        | "TerminateProcess"
+        | "GetSystemDirectoryA"
+        | "GetSystemDirectoryW"
+        | "GetWindowsDirectoryA"
+        | "GetWindowsDirectoryW"
+        | "GetCPInfo" => 8,
+
+        // 3 args (12 bytes)
+        "LoadLibraryExA"
+        | "LoadLibraryExW"
+        | "VirtualFree"
+        | "VirtualQuery"
+        | "HeapCreate"
+        | "HeapAlloc"
+        | "RtlAllocateHeap"
+        | "HeapFree"
+        | "RtlFreeHeap"
+        | "HeapSize"
+        | "WaitForSingleObjectEx"
+        | "InitializeCriticalSectionEx"
+        | "lstrcpynA"
+        | "lstrcpynW"
+        | "RtlMoveMemory"
+        | "RtlCompareMemory"
+        | "GetModuleHandleExA"
+        | "GetModuleHandleExW"
+        | "GetModuleFileNameA"
+        | "GetModuleFileNameW"
+        | "GetEnvironmentVariableA"
+        | "GetEnvironmentVariableW"
+        | "SetFilePointer" => 12,
+
+        // 4 args (16 bytes)
+        "VirtualAlloc" | "VirtualProtect" | "VirtualFreeEx" | "HeapReAlloc"
+        | "RtlReAllocateHeap" | "MessageBoxA" | "MessageBoxW" => 16,
+
+        // 5 args / 20 bytes
+        "VirtualAllocEx" | "WriteConsoleA" | "WriteConsoleW" | "WriteFile" | "ReadConsoleA"
+        | "ReadConsoleW" | "ReadFile" | "SetFilePointerEx" | "GetStringTypeW" | "RegOpenKeyExA"
+        | "RegOpenKeyExW" => 20,
+
+        // 6 args (24 bytes)
+        "CreateThread"
+        | "MultiByteToWideChar"
+        | "LCMapStringA"
+        | "LCMapStringW"
+        | "RegQueryValueExA"
+        | "RegQueryValueExW" => 24,
+
+        // 7 args (28 bytes)
+        "CreateFileA" | "CreateFileW" => 28,
+
+        // 8 args (32 bytes)
+        "WideCharToMultiByte" => 32,
+
+        // 9 args (36 bytes)
+        "LCMapStringEx" => 36,
+
+        _ => 0,
     }
 }
 
@@ -174,4 +367,48 @@ pub(crate) fn le_bytes_to_u64(bytes: &[u8]) -> u64 {
         val |= (b as u64) << (i * 8);
     }
     val
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arch::ArchInfo;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+
+    #[test]
+    fn stdcall32_callee_pop_bytes_matches_win32_abi_and_keeps_crt_cdecl_zero() {
+        let cc = Stdcall32Cc;
+        assert_eq!(cc.callee_pop_bytes("GetLastError"), 0);
+        assert_eq!(cc.callee_pop_bytes("GetStdHandle"), 4);
+        assert_eq!(cc.callee_pop_bytes("GetProcAddress"), 8);
+        assert_eq!(cc.callee_pop_bytes("HeapAlloc"), 12);
+        assert_eq!(cc.callee_pop_bytes("VirtualAlloc"), 16);
+        assert_eq!(cc.callee_pop_bytes("WriteFile"), 20);
+        assert_eq!(cc.callee_pop_bytes("CreateFileA"), 28);
+        assert_eq!(cc.callee_pop_bytes("WideCharToMultiByte"), 32);
+        assert_eq!(cc.callee_pop_bytes("_CustomApi@24"), 24);
+        assert_eq!(cc.callee_pop_bytes("KERNEL32.dll!VirtualProtect"), 16);
+        // CRT functions are cdecl on 32-bit Windows (caller cleans up)
+        assert_eq!(cc.callee_pop_bytes("malloc"), 0);
+        assert_eq!(cc.callee_pop_bytes("printf"), 0);
+        assert_eq!(cc.callee_pop_bytes("memcpy"), 0);
+    }
+
+    #[test]
+    fn from_language_id_selects_stdcall32_for_pe_and_cdecl32_for_elf() {
+        let pe = LoadedBinaryBuilder::new("app.exe".into(), DataBuffer::Heap(Vec::new()))
+            .format("PE")
+            .build()
+            .expect("pe");
+        let elf = LoadedBinaryBuilder::new("app.elf".into(), DataBuffer::Heap(Vec::new()))
+            .format("ELF")
+            .build()
+            .expect("elf");
+
+        let win_arch = ArchInfo::from_language_id("x86:LE:32:default", Some(&pe)).unwrap();
+        let elf_arch = ArchInfo::from_language_id("x86:LE:32:default", Some(&elf)).unwrap();
+
+        assert_eq!(win_arch.cc.callee_pop_bytes("VirtualAlloc"), 16);
+        assert_eq!(elf_arch.cc.callee_pop_bytes("VirtualAlloc"), 0);
+    }
 }
