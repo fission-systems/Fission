@@ -755,7 +755,23 @@ impl SimProcedure for SysRtSigreturn {
 pub struct SysIoctl;
 impl SimProcedure for SysIoctl {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        tracing::debug!("sys_ioctl (stub -> 0)");
+        let fd = emu.syscall_arg(0) as i32;
+        let cmd = emu.syscall_arg(1);
+        tracing::debug!("sys_ioctl(fd={}, cmd=0x{:X})", fd, cmd);
+        // TCGETS (0x5401) and TIOCGWINSZ (0x5413) query terminal properties.
+        // Returning -ENOTTY (-25) ensures isatty() reports false for simulated pipes/files
+        // and tools do not divide by zero on uninitialized terminal dimensions.
+        const TCGETS: u64 = 0x5401;
+        const TIOCGWINSZ: u64 = 0x5413;
+        const TCSETS: u64 = 0x5402;
+        const TCSETSW: u64 = 0x5403;
+        const TCSETSF: u64 = 0x5404;
+
+        if matches!(cmd, TCGETS | TIOCGWINSZ | TCSETS | TCSETSW | TCSETSF) {
+            emu.set_syscall_return((-25i64) as u64)?; // -ENOTTY
+            return Ok(HleResult::Continue);
+        }
+
         emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
@@ -764,6 +780,19 @@ impl SimProcedure for SysIoctl {
 pub struct SysFutex;
 impl SimProcedure for SysFutex {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let uaddr = emu.syscall_arg(0);
+        let op = emu.syscall_arg(1) & 0x7f;
+        let val = emu.syscall_arg(2);
+        // Support FUTEX_WAIT (0) and FUTEX_WAIT_BITSET (9) value check
+        if (op == 0 || op == 9) && uaddr != 0 {
+            if let Ok(bytes) = emu.state.read_space(emu.state.ram_space(), uaddr, 4) {
+                let current = u32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]));
+                if current as u64 != (val & 0xffff_ffff) {
+                    emu.set_syscall_return((-11i64) as u64)?; // -EAGAIN
+                    return Ok(HleResult::Continue);
+                }
+            }
+        }
         tracing::warn!("sys_futex bypassed the Linux guest-task scheduler");
         emu.set_syscall_return((-38i64) as u64)?;
         Ok(HleResult::Continue)
@@ -814,6 +843,31 @@ impl SimProcedure for SysSetTidAddress {
 pub struct SysPrlimit64;
 impl SimProcedure for SysPrlimit64 {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let pid = emu.syscall_arg(0) as i32;
+        let resource = emu.syscall_arg(1) as u32;
+        let _new_limit = emu.syscall_arg(2);
+        let old_limit = emu.syscall_arg(3);
+
+        if pid != 0 && pid != -1 && pid != 1000 && pid != emu.current_tid as i32 {
+            emu.set_syscall_return((-3i64) as u64)?; // -ESRCH
+            return Ok(HleResult::Continue);
+        }
+        if resource >= 16 {
+            emu.set_syscall_return((-22i64) as u64)?; // -EINVAL
+            return Ok(HleResult::Continue);
+        }
+
+        if old_limit != 0 {
+            let (cur, max) = match resource {
+                3 => (8 * 1024 * 1024, u64::MAX), // RLIMIT_STACK (8 MiB)
+                7 => (1024, 1048576),             // RLIMIT_NOFILE
+                _ => (u64::MAX, u64::MAX),
+            };
+            let mut buf = [0u8; 16];
+            buf[..8].copy_from_slice(&cur.to_le_bytes());
+            buf[8..].copy_from_slice(&max.to_le_bytes());
+            ram_write(emu, old_limit, &buf)?;
+        }
         emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
