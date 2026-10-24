@@ -226,35 +226,17 @@ impl MachoLoader {
             let fs_end = (fs_offset as usize).saturating_add(fs_size as usize);
             if fs_end <= bytes.len() {
                 let fs_data = &bytes[fs_offset as usize..fs_end];
-                let mut current_addr = image_base; // first entry is absolute VA
-                let mut i = 0usize;
+                let starts_base = if text_segment_vmaddr != 0 {
+                    text_segment_vmaddr
+                } else {
+                    image_base
+                };
                 let mut new_count = 0usize;
                 let mut known_addresses: HashSet<u64> =
                     functions_info.iter().map(|f| f.address).collect();
-                while i < fs_data.len() {
-                    // Decode one ULEB128 value
-                    let mut delta: u64 = 0;
-                    let mut shift = 0u64;
-                    let mut consumed = 0usize;
-                    loop {
-                        if i + consumed >= fs_data.len() {
-                            break;
-                        }
-                        let b = fs_data[i + consumed];
-                        consumed += 1;
-                        delta |= ((b & 0x7f) as u64) << shift;
-                        shift += 7;
-                        if b & 0x80 == 0 {
-                            break;
-                        }
-                    }
-                    i += consumed;
-                    if delta == 0 {
-                        break; // terminator
-                    }
-                    current_addr = current_addr.wrapping_add(delta);
+                for current_addr in decode_macho_function_starts(fs_data, starts_base) {
                     // Only add if not already known
-                    if !known_addresses.contains(&current_addr) && current_addr > image_base {
+                    if !known_addresses.contains(&current_addr) && current_addr > starts_base {
                         known_addresses.insert(current_addr);
                         functions_info.push(FunctionInfo {
                             name: String::new(),
@@ -1480,9 +1462,45 @@ fn select_fat_slice(bytes: &[u8]) -> Option<std::ops::Range<usize>> {
         .map(|slice| slice.offset..slice.offset + slice.size)
 }
 
+fn decode_macho_function_starts(fs_data: &[u8], base_addr: u64) -> Vec<u64> {
+    let mut addresses = Vec::new();
+    let mut current_addr = base_addr;
+    let mut i = 0usize;
+    while i < fs_data.len() {
+        let mut delta: u64 = 0;
+        let mut shift = 0u32;
+        let mut consumed = 0usize;
+        let mut completed = false;
+        while i + consumed < fs_data.len() {
+            let b = fs_data[i + consumed];
+            consumed += 1;
+            if shift < 64 {
+                delta |= u64::from(b & 0x7f) << shift;
+            }
+            shift += 7;
+            if b & 0x80 == 0 {
+                completed = true;
+                break;
+            }
+            if shift >= 70 {
+                break;
+            }
+        }
+        if !completed || delta == 0 {
+            break;
+        }
+        i += consumed;
+        current_addr = current_addr.wrapping_add(delta);
+        addresses.push(current_addr);
+    }
+    addresses
+}
+
 #[cfg(test)]
 mod universal_tests {
-    use super::{select_fat_slice, universal_slice_range, universal_slices};
+    use super::{
+        decode_macho_function_starts, select_fat_slice, universal_slice_range, universal_slices,
+    };
     use fission_core::constants::binary_format::{
         MACHO_CPU_TYPE_ARM64, MACHO_CPU_TYPE_X86_64, MACHO_FAT_MAGIC,
     };
@@ -1568,5 +1586,21 @@ mod universal_tests {
         );
         assert!(universal_slice_range(&bytes, "ppc").is_none());
         assert!(universal_slice_range(b"thin file", "arm64").is_none());
+    }
+
+    #[test]
+    fn decode_macho_function_starts_rejects_oversized_and_truncated_uleb128() {
+        // 12 continuation bytes (0x80) followed by 0x01 must not panic on shift overflow
+        let oversized = [
+            0x80u8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01,
+        ];
+        assert!(decode_macho_function_starts(&oversized, 0x100000000).is_empty());
+
+        // Truncated continuation byte at end of buffer must not be ingested
+        let truncated = [0x10u8, 0x81];
+        assert_eq!(
+            decode_macho_function_starts(&truncated, 0x100000000),
+            vec![0x100000010]
+        );
     }
 }
