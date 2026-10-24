@@ -54,15 +54,18 @@ impl EnumGroup {
     /// Try to resolve a combined flags value (e.g., MEM_COMMIT | MEM_RESERVE)
     pub fn resolve_flags(&self, value: u64) -> Option<String> {
         if value == 0 {
+            if let Some(zero_name) = self.get_name(0) {
+                return Some(zero_name.to_string());
+            }
             return Some("0".to_string());
         }
 
         let mut remaining = value;
         let mut parts: Vec<&str> = Vec::new();
 
-        // Sort by value descending to match larger flags first
+        // Sort by value descending to match larger flags first, secondary by name for determinism
         let mut sorted_values: Vec<_> = self.values.iter().collect();
-        sorted_values.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted_values.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.as_str().cmp(b.0.as_str())));
 
         for (name, v) in &sorted_values {
             if *v != 0 && (remaining & *v) == *v {
@@ -576,5 +579,23 @@ mod tests {
             db.resolve_in_group("GENERIC_ACCESS", 0xC0000000),
             Some("GENERIC_READ | GENERIC_WRITE".to_string())
         );
+    }
+
+    #[test]
+    fn resolve_flags_returns_named_zero_constant_if_present() {
+        let group = EnumGroup::new(
+            "TEST_FLAGS",
+            &[
+                ("FILE_SHARE_NONE", 0),
+                ("FILE_SHARE_READ", 1),
+                ("FILE_SHARE_WRITE", 2),
+            ],
+        );
+
+        assert_eq!(group.resolve_flags(0), Some("FILE_SHARE_NONE".to_string()));
+        assert_eq!(group.resolve_flags(1), Some("FILE_SHARE_READ".to_string()));
+
+        let unnamed_group = EnumGroup::new("UNNAMED_FLAGS", &[]);
+        assert_eq!(unnamed_group.resolve_flags(0), Some("0".to_string()));
     }
 }
