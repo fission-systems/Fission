@@ -266,7 +266,7 @@ impl CircleRange {
         if lo == hi {
             Self::top(self.bits)
         } else {
-            Self::interval(lo, hi.wrapping_add(1) & mask, self.bits)
+            Self::interval(lo, hi, self.bits)
         }
     }
 
@@ -467,5 +467,13 @@ mod tests {
         assert_eq!(previous.widen(&CircleRange::bottom(8)), CircleRange::top(8));
         assert_eq!(CircleRange::bottom(8).widen(&previous), previous);
         assert_eq!(previous.widen(&CircleRange::top(8)), CircleRange::top(8));
+    }
+
+    #[test]
+    fn add_and_sub_singletons_preserve_exact_sum_and_diff() {
+        let a = CircleRange::singleton(10, 32);
+        let b = CircleRange::singleton(3, 32);
+        assert_eq!(a.add(&b), CircleRange::singleton(13, 32));
+        assert_eq!(a.sub(&b), CircleRange::singleton(7, 32));
     }
 }
