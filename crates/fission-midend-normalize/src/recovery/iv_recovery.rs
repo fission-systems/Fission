@@ -183,12 +183,7 @@ fn recover_break_continue_in_body(
         {
             if else_body.is_empty() {
                 if let [PreHirStmt::Goto(lbl)] = then_body.as_slice() {
-                    if after_labels.contains(lbl) {
-                        // Only replace if this is the only goto to this label.
-                        goto_counts.get(lbl).copied().unwrap_or(0) == 1
-                    } else {
-                        false
-                    }
+                    after_labels.contains(lbl)
                 } else {
                     false
                 }
@@ -208,7 +203,7 @@ fn recover_break_continue_in_body(
             {
                 if else_body.is_empty() {
                     if let [PreHirStmt::Goto(lbl)] = then_body.as_slice() {
-                        head_labels.contains(lbl) && goto_counts.get(lbl).copied().unwrap_or(0) == 1
+                        head_labels.contains(lbl)
                     } else {
                         false
                     }
@@ -3661,6 +3656,45 @@ mod tests {
             .expect("inner for");
         assert!(inner.0 && inner.1 && inner.2);
         assert_eq!(inner.3, 1);
+    }
+
+    #[test]
+    fn recovers_multiple_breaks_in_loop() {
+        let mut func = PreHirFunction {
+            name: "test_multi_break".to_string(),
+            body: vec![
+                PreHirStmt::While {
+                    cond: PreHirExpr::Const(1, NirType::Bool),
+                    body: vec![
+                        PreHirStmt::If {
+                            cond: PreHirExpr::Var("cond1".to_string()),
+                            then_body: vec![PreHirStmt::Goto("loop_end".to_string())].into(),
+                            else_body: vec![].into(),
+                        },
+                        PreHirStmt::If {
+                            cond: PreHirExpr::Var("cond2".to_string()),
+                            then_body: vec![PreHirStmt::Goto("loop_end".to_string())].into(),
+                            else_body: vec![].into(),
+                        },
+                    ]
+                    .into(),
+                },
+                PreHirStmt::Label("loop_end".to_string()),
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_break_continue_pass(&mut func));
+        let PreHirStmt::While { body, .. } = &func.body[0] else {
+            panic!("expected While");
+        };
+        for stmt in body.iter() {
+            let PreHirStmt::If { then_body, .. } = stmt else {
+                panic!("expected If");
+            };
+            assert_eq!(then_body.as_slice(), &[PreHirStmt::Break]);
+        }
     }
 }
 
