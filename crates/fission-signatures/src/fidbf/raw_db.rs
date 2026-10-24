@@ -242,6 +242,7 @@ impl<'a> RawDbHandle<'a> {
         let key_count = usize::try_from(read_i32(data, 1)?).map_err(|_| {
             FidbfParseError::MalformedRawFidDatabase("negative var leaf key count".to_string())
         })?;
+        let mut entries = Vec::with_capacity(key_count);
         let mut offset = 13usize;
         for _ in 0..key_count {
             let key = read_i64(data, offset)?;
@@ -249,14 +250,29 @@ impl<'a> RawDbHandle<'a> {
                 FidbfParseError::MalformedRawFidDatabase("negative record offset".to_string())
             })?;
             let indirect = checked_slice(data, offset + 12, 1)?[0] != 0;
+            entries.push((key, record_offset, indirect));
+            offset += 13;
+        }
+        for (idx, &(key, record_offset, indirect)) in entries.iter().enumerate() {
+            let record_end = if idx == 0 {
+                data.len()
+            } else {
+                entries[idx - 1].1
+            };
+            if record_offset > record_end {
+                return Err(FidbfParseError::MalformedRawFidDatabase(format!(
+                    "var leaf record offset {record_offset} exceeds end {record_end}"
+                )));
+            }
+            let record_len = record_end - record_offset;
             let record_bytes = if indirect {
-                let chained_id = read_i32(data, record_offset)?;
+                let slice = checked_slice(data, record_offset, record_len)?;
+                let chained_id = read_i32(slice, 0)?;
                 self.read_chained_buffer(chained_id)?
             } else {
-                checked_slice(data, record_offset, data.len() - record_offset)?.to_vec()
+                checked_slice(data, record_offset, record_len)?.to_vec()
             };
             out.push(decode_record(key, schema, &record_bytes)?);
-            offset += 13;
         }
         Ok(())
     }
@@ -287,6 +303,10 @@ impl<'a> RawDbHandle<'a> {
     }
 
     fn read_chained_buffer(&self, buffer_id: i32) -> Result<Vec<u8>, FidbfParseError> {
+        const DATA_BASE_OFFSET_NONINDEXED: usize = 5;
+        const DATA_BASE_OFFSET_INDEXED: usize = 1;
+        const INDEX_BASE_OFFSET: usize = 9;
+
         let first = self.read_buffer(buffer_id)?;
         match node_type(first.data)? {
             NODE_CHAINED_BUFFER_DATA => {
@@ -297,15 +317,89 @@ impl<'a> RawDbHandle<'a> {
                         "negative chained buffer length".to_string(),
                     )
                 })?;
-                let mut bytes = checked_slice(first.data, 5, len)?.to_vec();
+                let mut bytes =
+                    checked_slice(first.data, DATA_BASE_OFFSET_NONINDEXED, len)?.to_vec();
                 if use_xor {
                     xor_chained_data(&mut bytes, 0);
                 }
                 Ok(bytes)
             }
-            NODE_CHAINED_BUFFER_INDEX => Err(FidbfParseError::UnsupportedRawFidDatabase(
-                "indexed chained DB buffers are not supported by FID reader v1".to_string(),
-            )),
+            NODE_CHAINED_BUFFER_INDEX => {
+                let len_field = read_i32(first.data, 1)?;
+                let use_xor = len_field < 0;
+                let total_len = usize::try_from(len_field & i32::MAX).map_err(|_| {
+                    FidbfParseError::MalformedRawFidDatabase(
+                        "negative indexed chained buffer length".to_string(),
+                    )
+                })?;
+                let max_data_per_buffer = self.buffer_size.saturating_sub(DATA_BASE_OFFSET_INDEXED);
+                let indexes_per_buffer = self.buffer_size.saturating_sub(INDEX_BASE_OFFSET) / 4;
+                if max_data_per_buffer == 0 || indexes_per_buffer == 0 {
+                    return Err(FidbfParseError::MalformedRawFidDatabase(
+                        "buffer size too small for indexed chained buffer".to_string(),
+                    ));
+                }
+
+                let mut out = Vec::with_capacity(total_len);
+                let mut current_index_id = buffer_id;
+                let mut visited_index = HashSet::new();
+
+                while out.len() < total_len {
+                    if !visited_index.insert(current_index_id) {
+                        return Err(FidbfParseError::MalformedRawFidDatabase(format!(
+                            "cycle in chained buffer index chain at buffer {current_index_id}"
+                        )));
+                    }
+                    let index_buf = self.read_buffer(current_index_id)?;
+                    let idx_ty = node_type(index_buf.data)?;
+                    if idx_ty != NODE_CHAINED_BUFFER_INDEX {
+                        return Err(FidbfParseError::MalformedRawFidDatabase(format!(
+                            "expected chained buffer index node {NODE_CHAINED_BUFFER_INDEX}, got {idx_ty}"
+                        )));
+                    }
+                    let next_index_id = read_i32(index_buf.data, 5)?;
+
+                    for slot in 0..indexes_per_buffer {
+                        if out.len() >= total_len {
+                            break;
+                        }
+                        let entry_offset = INDEX_BASE_OFFSET + slot * 4;
+                        let data_buffer_id = read_i32(index_buf.data, entry_offset)?;
+                        let chunk_offset = out.len();
+                        let take = (total_len - chunk_offset).min(max_data_per_buffer);
+                        if data_buffer_id < 0 {
+                            out.resize(chunk_offset + take, 0);
+                        } else {
+                            let data_buf = self.read_buffer(data_buffer_id)?;
+                            let data_ty = node_type(data_buf.data)?;
+                            if data_ty != NODE_CHAINED_BUFFER_DATA {
+                                return Err(FidbfParseError::MalformedRawFidDatabase(format!(
+                                    "chained index referenced non-data buffer {data_buffer_id} of type {data_ty}"
+                                )));
+                            }
+                            let mut chunk =
+                                checked_slice(data_buf.data, DATA_BASE_OFFSET_INDEXED, take)?
+                                    .to_vec();
+                            if use_xor {
+                                xor_chained_data(&mut chunk, chunk_offset);
+                            }
+                            out.extend_from_slice(&chunk);
+                        }
+                    }
+
+                    if out.len() < total_len {
+                        if next_index_id < 0 {
+                            return Err(FidbfParseError::MalformedRawFidDatabase(
+                                "indexed chained buffer ended before reading full payload"
+                                    .to_string(),
+                            ));
+                        }
+                        current_index_id = next_index_id;
+                    }
+                }
+
+                Ok(out)
+            }
             other => Err(FidbfParseError::MalformedRawFidDatabase(format!(
                 "invalid chained buffer node type {other}"
             ))),
@@ -475,5 +569,112 @@ fn xor_chained_data(bytes: &mut [u8], buffer_offset: usize) {
     ];
     for (idx, byte) in bytes.iter_mut().enumerate() {
         *byte ^= XOR_MASK_BYTES[(buffer_offset + idx) % XOR_MASK_BYTES.len()];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_block(bytes: &mut [u8], block_size: usize, buffer_id: i32, payload: &[u8]) {
+        let block_index = (buffer_id as usize) + 1;
+        let offset = block_index * block_size;
+        bytes[offset] = 0;
+        bytes[offset + 1..offset + 5].copy_from_slice(&buffer_id.to_be_bytes());
+        bytes[offset + BLOCK_PREFIX_SIZE..offset + BLOCK_PREFIX_SIZE + payload.len()]
+            .copy_from_slice(payload);
+    }
+
+    #[test]
+    fn read_chained_buffer_decodes_indexed_multi_buffer_xor_payload() {
+        // block_size = 32 -> buffer_size = 27
+        // max_data_per_buffer = 26, indexes_per_buffer = (27 - 9) / 4 = 4
+        let block_size = 32usize;
+        let buffer_size = block_size - BLOCK_PREFIX_SIZE;
+        let max_data = buffer_size - 1;
+        let mut file_bytes = vec![0u8; block_size * 5];
+
+        // Header in block 0
+        file_bytes[0..8].copy_from_slice(&LOCAL_BUFFER_FILE_MAGIC.to_be_bytes());
+        file_bytes[16..20].copy_from_slice(&LOCAL_BUFFER_FILE_VERSION.to_be_bytes());
+        file_bytes[20..24].copy_from_slice(&(block_size as i32).to_be_bytes());
+
+        let expected: Vec<u8> = (0u8..40)
+            .map(|i| i.wrapping_mul(7).wrapping_add(3))
+            .collect();
+        let mut chunk0 = expected[..max_data].to_vec();
+        xor_chained_data(&mut chunk0, 0);
+        let mut chunk1 = expected[max_data..].to_vec();
+        xor_chained_data(&mut chunk1, max_data);
+
+        // Buffer 0: NODE_CHAINED_BUFFER_INDEX (8), length = 40 | 0x8000_0000 (XOR), next_id = -1, ids = [1, 2]
+        let mut idx_payload = vec![0u8; buffer_size];
+        idx_payload[0] = NODE_CHAINED_BUFFER_INDEX;
+        idx_payload[1..5].copy_from_slice(&((expected.len() as i32) | i32::MIN).to_be_bytes());
+        idx_payload[5..9].copy_from_slice(&(-1i32).to_be_bytes());
+        idx_payload[9..13].copy_from_slice(&1i32.to_be_bytes());
+        idx_payload[13..17].copy_from_slice(&2i32.to_be_bytes());
+        write_block(&mut file_bytes, block_size, 0, &idx_payload);
+
+        // Buffer 1: NODE_CHAINED_BUFFER_DATA (9)
+        let mut data0 = vec![0u8; buffer_size];
+        data0[0] = NODE_CHAINED_BUFFER_DATA;
+        data0[1..1 + chunk0.len()].copy_from_slice(&chunk0);
+        write_block(&mut file_bytes, block_size, 1, &data0);
+
+        // Buffer 2: NODE_CHAINED_BUFFER_DATA (9)
+        let mut data1 = vec![0u8; buffer_size];
+        data1[0] = NODE_CHAINED_BUFFER_DATA;
+        data1[1..1 + chunk1.len()].copy_from_slice(&chunk1);
+        write_block(&mut file_bytes, block_size, 2, &data1);
+
+        let handle = RawDbHandle::open(&file_bytes).expect("open synthetic raw db");
+        let actual = handle
+            .read_chained_buffer(0)
+            .expect("read indexed chained buffer");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn collect_var_leaf_isolates_sibling_record_extents() {
+        let block_size = 32usize;
+        let mut file_bytes = vec![0u8; block_size * 2];
+        file_bytes[0..8].copy_from_slice(&LOCAL_BUFFER_FILE_MAGIC.to_be_bytes());
+        file_bytes[16..20].copy_from_slice(&LOCAL_BUFFER_FILE_VERSION.to_be_bytes());
+        file_bytes[20..24].copy_from_slice(&(block_size as i32).to_be_bytes());
+        write_block(&mut file_bytes, block_size, 0, &[0u8; 27]);
+        let handle = RawDbHandle::open(&file_bytes).expect("open synthetic raw db");
+
+        let schema = RawSchema {
+            version: 1,
+            key_type: RawFieldType::Long,
+            field_types: vec![RawFieldType::Binary],
+            field_names: vec!["Blob".to_string()],
+        };
+
+        // Leaf buffer with 2 entries:
+        // Header (13 bytes): node_type = 1, key_count = 2 at offset 1..5
+        // Entry 0 (offset 13..26): key = 10, record_offset = 47, indirect = 0 (6 bytes: len=2, [0xaa, 0xbb])
+        // Entry 1 (offset 26..39): key = 20, record_offset = 39, indirect = 0 (8 bytes: corrupt len=10 that would bleed into Entry 0 if not bounded at 47)
+        let mut leaf = vec![0u8; 53];
+        leaf[0] = NODE_LONGKEY_VAR_REC;
+        leaf[1..5].copy_from_slice(&2i32.to_be_bytes());
+        // Entry 0
+        leaf[13..21].copy_from_slice(&10i64.to_be_bytes());
+        leaf[21..25].copy_from_slice(&47i32.to_be_bytes());
+        leaf[25] = 0;
+        leaf[47..51].copy_from_slice(&2i32.to_be_bytes());
+        leaf[51..53].copy_from_slice(&[0xaa, 0xbb]);
+        // Entry 1 (corrupt length 10 > 47 - 39 - 4 = 4)
+        leaf[26..34].copy_from_slice(&20i64.to_be_bytes());
+        leaf[34..38].copy_from_slice(&39i32.to_be_bytes());
+        leaf[38] = 0;
+        leaf[39..43].copy_from_slice(&10i32.to_be_bytes());
+
+        let mut out = Vec::new();
+        let err = handle
+            .collect_var_leaf(&leaf, &schema, &mut out)
+            .expect_err("entry 1 overflowing into entry 0 must be rejected");
+        assert!(matches!(err, FidbfParseError::MalformedRawFidDatabase(_)));
     }
 }
