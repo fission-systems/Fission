@@ -515,15 +515,17 @@ impl FactStore {
         address: u64,
         instruction_limit: usize,
     ) -> Option<Arc<DecodedPcodeFunction>> {
-        if let Some(cached) = self.get_cached_decoded_function(address) {
-            return Some(cached);
-        }
         let address_state = frontend.normalize_low_bit_code_address(address);
         let context_override = crate::analysis::decode_context_for_address(
             binary,
             frontend,
             address_state.context_override,
         );
+        if let Some(cached) =
+            self.get_cached_decoded_function_with_context(address, context_override)
+        {
+            return Some(cached);
+        }
         let max_bytes = function_max_bytes(binary, address_state.address, 4096);
         let bytes = binary.view_bytes(address_state.address, max_bytes)?;
         let memory_context = decode_memory_context_for(binary, address_state.address, max_bytes);
@@ -538,7 +540,7 @@ impl FactStore {
                 )
                 .ok()?,
         );
-        self.cache_decoded_function_if_complete(address, &decoded);
+        self.cache_decoded_function_if_complete_with_context(address, context_override, &decoded);
         Some(decoded)
     }
 
@@ -768,7 +770,11 @@ impl FactStore {
                 // for the exact safety argument. Caching regardless of
                 // whether a FID signature match is ultimately found below:
                 // the decode itself is equally reusable either way.
-                self.cache_decoded_function_if_complete(func.address, &decoded);
+                self.cache_decoded_function_if_complete_with_context(
+                    func.address,
+                    context_override,
+                    &decoded,
+                );
                 if std::env::var_os("FISSION_FID_DIAG").is_some() {
                     let elapsed = diag_start.elapsed();
                     if elapsed.as_millis() > 200 {
@@ -902,6 +908,15 @@ impl FactStore {
         self.decode_cache.get(address)
     }
 
+    pub fn get_cached_decoded_function_with_context(
+        &self,
+        address: u64,
+        context_override: Option<fission_sleigh::runtime::PackedContextOverride>,
+    ) -> Option<Arc<DecodedPcodeFunction>> {
+        self.decode_cache
+            .get_with_context(address, context_override)
+    }
+
     /// Caches `decoded` for `address` if (and only if) it reached
     /// `DecodeStopReason::TerminalControlFlow` -- see
     /// `get_cached_decoded_function` for why that's the safety bar for
@@ -912,6 +927,16 @@ impl FactStore {
         decoded: &Arc<DecodedPcodeFunction>,
     ) {
         self.decode_cache.insert_if_complete(address, decoded);
+    }
+
+    pub fn cache_decoded_function_if_complete_with_context(
+        &self,
+        address: u64,
+        context_override: Option<fission_sleigh::runtime::PackedContextOverride>,
+        decoded: &Arc<DecodedPcodeFunction>,
+    ) {
+        self.decode_cache
+            .insert_if_complete_with_context(address, context_override, decoded);
     }
 
     pub fn ingest_name_fact(&mut self, address: u64, name: String, provenance: FactProvenance) {

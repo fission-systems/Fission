@@ -1548,7 +1548,7 @@ impl RuntimeSleighFrontend {
                             bytes.len(),
                             fallthrough,
                         );
-                    } else {
+                    } else if stop_reason != DecodeStopReason::IndirectBranchHalt {
                         stop_reason = DecodeStopReason::TerminalControlFlow;
                     }
                 }
@@ -1562,7 +1562,7 @@ impl RuntimeSleighFrontend {
                                 fallthrough,
                             );
                         } else {
-                            stop_reason = DecodeStopReason::TerminalControlFlow;
+                            stop_reason = DecodeStopReason::IndirectBranchHalt;
                         }
                     } else if let Some(branch_target) =
                         ins_ops.last().and_then(|op| op.inputs.first())
