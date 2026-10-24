@@ -577,7 +577,7 @@ fn build_inventory_candidate_entry_rust(
     let mut recovery_outcome = None;
     let mut recovery_source_signature = None;
     let mut recovery_structuring_mode = Some("normal".to_string());
-    let recovery_goto_count_before = None;
+    let mut recovery_goto_count_before = None;
     let mut recovery_goto_count_after = None;
     let mut recovery_hint_surface_before = None;
     let mut recovery_hint_surface_after = None;
@@ -625,8 +625,21 @@ fn build_inventory_candidate_entry_rust(
                         .map(str::to_string)
                         .or(recovery_structuring_mode);
                     if recovery_strategy_attempted.is_some() {
+                        recovery_goto_count_before =
+                            nir_build_stats.as_ref().map(|s| s.fas_virtual_goto_count);
                         recovery_goto_count_after = preview_code.as_deref().map(preview_goto_count);
-                        recovery_hint_surface_before = Some(0);
+                        let baseline_hints = fact_store
+                            .function_facts_snapshot(func.address)
+                            .structuring_hints
+                            .map(|h| {
+                                h.param_names.len()
+                                    + h.param_type_names.len()
+                                    + h.stack_local_names.len()
+                                    + h.stack_local_type_names.len()
+                                    + if h.return_type_name.is_some() { 1 } else { 0 }
+                            })
+                            .unwrap_or(0);
+                        recovery_hint_surface_before = Some(baseline_hints);
                         recovery_hint_surface_after =
                             Some(explicit_hint_surface_count(preview_hint_stats));
                     }
@@ -836,7 +849,7 @@ pub(crate) fn emit_function_facts_inventory(
         fs::create_dir_all(parent)?;
     }
     fs::write(output_jsonl, b"")?;
-    let mut writer = OpenOptions::new().append(true).open(output_jsonl)?;
+    let mut writer = std::io::BufWriter::new(OpenOptions::new().append(true).open(output_jsonl)?);
 
     let mut summary = FunctionFactsInventorySummary {
         binary: binary_name.clone(),
@@ -875,6 +888,7 @@ pub(crate) fn emit_function_facts_inventory(
         write_inventory_summary(summary_json, &summary)?;
     }
 
+    writer.flush()?;
     write_inventory_summary(summary_json, &summary)?;
     Ok(())
 }
