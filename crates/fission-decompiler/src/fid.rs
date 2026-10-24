@@ -11,7 +11,8 @@
 
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::midend::cspec::{RegisterModel, register_model_for_language};
-use fission_signatures::fidbf::{FidbfDatabase, FidbfMatch, parse_all_fidbf_for_arch};
+use fission_signatures::fid::{FidDatabase, FidDatabaseSet};
+use fission_signatures::fidbf::{FidRelationContext, FidbfMatch, parse_all_fidbf_for_arch};
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 use fission_static::analysis::control_flow_facts::decode_memory_context_for;
 
@@ -47,8 +48,25 @@ pub struct FidIdentification {
 /// out by `identify_by_hashes`' scoring gate the same way any other
 /// coincidental collision would be. Call once per binary and reuse across
 /// functions -- this is not cheap enough to call per function.
-pub fn load_fid_databases(binary: &LoadedBinary) -> Vec<FidbfDatabase> {
-    let (databases, _errors) = parse_all_fidbf_for_arch(binary.is_64bit);
+pub fn load_fid_databases(binary: &LoadedBinary) -> Vec<FidDatabase> {
+    let compiler_id = binary.get_ghidra_compiler_id();
+    let processor = binary.architecture.as_ref().map(|a| a.processor.as_str());
+    let db_set = FidDatabaseSet::discover_for_load_spec(
+        binary.sleigh_language_id(),
+        compiler_id.as_deref(),
+        Some(&binary.format),
+        binary.is_64bit,
+        processor,
+    );
+    let mut databases = db_set.databases;
+    if databases.is_empty() {
+        let (fallback, _errors) = parse_all_fidbf_for_arch(binary.is_64bit);
+        databases.extend(
+            fallback
+                .into_iter()
+                .map(|d| FidDatabase::Eager(Box::new(d))),
+        );
+    }
     databases
 }
 
@@ -58,14 +76,14 @@ pub struct FidIdentifier<'a> {
     binary: &'a LoadedBinary,
     lifter: RuntimeSleighFrontend,
     register_model: std::sync::Arc<RegisterModel>,
-    databases: &'a [FidbfDatabase],
+    databases: &'a [FidDatabase],
 }
 
 impl<'a> FidIdentifier<'a> {
     /// Returns `None` if the binary has no usable load spec, no register
     /// model for its language, or no compiled SLEIGH frontend -- any of
     /// which make FID identification impossible for this binary.
-    pub fn new(binary: &'a LoadedBinary, databases: &'a [FidbfDatabase]) -> Option<Self> {
+    pub fn new(binary: &'a LoadedBinary, databases: &'a [FidDatabase]) -> Option<Self> {
         let load_spec = binary.load_spec()?;
         let register_model = register_model_for_language(load_spec.pair.language_id.as_str())?;
         let lifter = RuntimeSleighFrontend::new_for_load_spec(load_spec).ok()?;
@@ -126,12 +144,27 @@ impl<'a> FidIdentifier<'a> {
     /// or decode failure) or hashes but doesn't clear the acceptance
     /// threshold against every loaded database.
     pub fn identify(&self, address: u64) -> Option<FidIdentification> {
+        self.identify_with_relations(address, None)
+    }
+
+    /// Identify the function at `address` taking into account caller/callee relation context.
+    pub fn identify_with_relations(
+        &self,
+        address: u64,
+        relation_context: Option<FidRelationContext<'_>>,
+    ) -> Option<FidIdentification> {
         let (code_unit_count, full_hash, specific_hash) = self.hashes(address)?;
+
+        let empty = FidRelationContext {
+            children: &[],
+            parents: &[],
+        };
+        let context = relation_context.unwrap_or(empty);
 
         let best: Option<FidbfMatch> = self
             .databases
             .iter()
-            .flat_map(|db| db.identify_by_hashes(full_hash, specific_hash))
+            .flat_map(|db| db.identify_by_hashes_with_relations(full_hash, specific_hash, context))
             .max_by(|a, b| a.score.total_cmp(&b.score));
 
         best.map(|m| FidIdentification {
@@ -142,5 +175,64 @@ impl<'a> FidIdentifier<'a> {
             code_unit_count,
             specific_matched: m.specific_matched,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+    use fission_signatures::fidbf::{FidbfDatabase, FidbfFunction};
+
+    #[test]
+    fn load_fid_databases_loads_without_panic() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let databases = load_fid_databases(&binary);
+        let _ = databases.len();
+    }
+
+    #[test]
+    fn fid_database_eager_metadata_and_scoring() {
+        let dummy_db = FidbfDatabase::new(
+            "test.fidbf".to_string(),
+            vec![],
+            vec![FidbfFunction {
+                key: 1,
+                library_id: 0,
+                name: "test_fn".to_string(),
+                full_hash: 0x1234,
+                specific_hash: 0x5678,
+                code_unit_size: 50,
+                entry_point: 0x1000,
+                has_terminator: true,
+                specific_hash_additional_size: 0,
+                domain_path: String::new(),
+                flags: 0,
+                auto_pass: true,
+                auto_fail: false,
+                force_specific: false,
+                force_relation: false,
+            }],
+            vec![],
+        );
+        let fid_dbs = vec![FidDatabase::Eager(Box::new(dummy_db))];
+        assert_eq!(fid_dbs.len(), 1);
+        assert_eq!(fid_dbs[0].len(), 1);
+        assert_eq!(fid_dbs[0].source_path(), "test.fidbf");
+
+        let matches = fid_dbs[0].identify_by_hashes_with_relations(
+            0x1234,
+            0x5678,
+            FidRelationContext {
+                children: &[],
+                parents: &[],
+            },
+        );
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "test_fn");
     }
 }

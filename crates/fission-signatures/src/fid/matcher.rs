@@ -52,6 +52,17 @@ impl FidDatabase {
             Self::Eager(db) => &db.source_path,
         }
     }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Lazy(db) => db.len(),
+            Self::Eager(db) => db.functions.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl std::fmt::Debug for FidDatabase {
