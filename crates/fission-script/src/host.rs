@@ -24,6 +24,33 @@ impl BinaryHost {
         format!("0x{:x}", self.0.image_base)
     }
 
+    pub fn entry_point(&mut self) -> String {
+        format!("0x{:x}", self.0.entry_point)
+    }
+
+    pub fn read_bytes(&mut self, address: i64, size: i64) -> rhai::Array {
+        let size = size.clamp(0, 8192) as usize;
+        let addr = address as u64;
+        let mut result = rhai::Array::new();
+        let slice = self.0.data.as_slice();
+        for sec in &self.0.sections {
+            if addr >= sec.virtual_address
+                && addr < sec.virtual_address.saturating_add(sec.virtual_size)
+            {
+                let offset = (addr - sec.virtual_address) as usize;
+                let file_offset = sec.file_offset as usize + offset;
+                if file_offset < slice.len() {
+                    let avail = (slice.len() - file_offset).min(size);
+                    for &b in &slice[file_offset..file_offset + avail] {
+                        result.push(Dynamic::from(b as i64));
+                    }
+                }
+                break;
+            }
+        }
+        result
+    }
+
     pub fn is_64bit(&mut self) -> bool {
         self.0.is_64bit
     }
@@ -69,13 +96,15 @@ pub fn register_binary(engine: &mut Engine) -> Result<(), ScriptError> {
         .register_fn("path", BinaryHost::path)
         .register_fn("format", BinaryHost::format)
         .register_fn("image_base", BinaryHost::image_base)
+        .register_fn("entry_point", BinaryHost::entry_point)
         .register_fn("is_64bit", BinaryHost::is_64bit)
         .register_fn("functions", BinaryHost::functions)
         .register_fn("imports", BinaryHost::imports)
         .register_fn("exports", BinaryHost::exports)
         .register_fn("sections", BinaryHost::sections)
         .register_fn("strings", BinaryHost::strings_default)
-        .register_fn("strings", BinaryHost::strings_with_min_len);
+        .register_fn("strings", BinaryHost::strings_with_min_len)
+        .register_fn("read_bytes", BinaryHost::read_bytes);
 
     Ok(())
 }

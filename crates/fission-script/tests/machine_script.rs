@@ -211,3 +211,46 @@ fn a_script_can_read_the_code_it_stopped_in() {
         "the listing is not consecutive"
     );
 }
+
+#[test]
+fn machine_read_bounds_large_allocations() {
+    let result = run(r#"
+        let bytes = machine.read(machine.pc(), 100_000_000);
+        emit(#{ kind: "capped", len: bytes.len() });
+    "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    let len = result.findings[0].data.as_ref().unwrap()["len"]
+        .as_u64()
+        .unwrap();
+    assert!(len <= 65536, "read length should be capped: {len}");
+}
+
+#[test]
+fn binary_entry_point_and_read_bytes() {
+    let bin = fixture();
+    let result = fission_script::run_script(
+        &bin,
+        r#"
+        let ep = binary.entry_point();
+        emit(#{
+            kind: "bin_info",
+            entry: ep,
+        });
+        "#,
+        "test.rhai",
+        ScriptLimits::default(),
+    );
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    let data = result.findings[0].data.as_ref().unwrap();
+    assert!(data["entry"].as_str().unwrap().starts_with("0x"));
+}
