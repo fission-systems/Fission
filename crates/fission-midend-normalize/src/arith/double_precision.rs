@@ -3,9 +3,10 @@ use crate::prelude::*; // For accessing normalizer helpers
 
 pub fn apply_double_precision_reconstruction_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
+    let is_big_endian = func.is_big_endian();
 
     // Phase 1: Collapse contiguous loads and stores in the function body
-    if collapse_contiguous_mem_ops(&mut func.body, &mut func.locals) {
+    if collapse_contiguous_mem_ops(&mut func.body, &mut func.locals, is_big_endian) {
         changed = true;
     }
 
@@ -765,9 +766,10 @@ fn match_lo_shr_mix(
 
 // ── Contiguous Loads & Stores collapsing ───────────────────────────────────
 
-fn collapse_contiguous_mem_ops(
+pub fn collapse_contiguous_mem_ops(
     stmts: &mut Vec<PreHirStmt>,
     locals: &mut Vec<PreHirBinding>,
+    is_big_endian: bool,
 ) -> bool {
     let mut changed = false;
 
@@ -781,6 +783,7 @@ fn collapse_contiguous_mem_ops(
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     locals,
+                    is_big_endian,
                 );
             }
             PreHirStmt::If {
@@ -791,10 +794,12 @@ fn collapse_contiguous_mem_ops(
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                     locals,
+                    is_big_endian,
                 );
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                     locals,
+                    is_big_endian,
                 );
             }
             PreHirStmt::Switch { cases, default, .. } => {
@@ -802,11 +807,13 @@ fn collapse_contiguous_mem_ops(
                     changed |= collapse_contiguous_mem_ops(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         locals,
+                        is_big_endian,
                     );
                 }
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                     locals,
+                    is_big_endian,
                 );
             }
             _ => {}
@@ -820,124 +827,153 @@ fn collapse_contiguous_mem_ops(
         if i + 1 < stmts.len() {
             if let (
                 PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var(lo_var),
-                    rhs:
-                        PreHirExpr::Load {
-                            ptr: lo_ptr,
-                            ty: lo_ty,
-                        },
+                    lhs: PreHirLValue::Var(var1),
+                    rhs: PreHirExpr::Load { ptr: ptr1, ty: ty1 },
                 },
                 PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var(hi_var),
-                    rhs:
-                        PreHirExpr::Load {
-                            ptr: hi_ptr,
-                            ty: hi_ty,
-                        },
+                    lhs: PreHirLValue::Var(var2),
+                    rhs: PreHirExpr::Load { ptr: ptr2, ty: ty2 },
                 },
             ) = (&stmts[i], &stmts[i + 1])
             {
-                if is_32bit_int(lo_ty) && is_32bit_int(hi_ty) && is_ptr_offset_by_4(hi_ptr, lo_ptr)
-                {
-                    // Contiguous load!
-                    let temp_64_name = format!("uVar_dp_{}", locals.len());
-                    locals.push(PreHirBinding {
-                        name: temp_64_name.clone(),
-                        ty: NirType::Int {
-                            bits: 64,
-                            signed: false,
-                        },
-                        surface_type_name: None,
-                        origin: None,
-                        initializer: None,
-                    });
+                if is_32bit_int(ty1) && is_32bit_int(ty2) {
+                    let layout = if is_ptr_offset_by_4(ptr2, ptr1) {
+                        Some((
+                            ptr1.clone(),
+                            var1.clone(),
+                            ty1.clone(),
+                            var2.clone(),
+                            ty2.clone(),
+                        ))
+                    } else if is_ptr_offset_by_4(ptr1, ptr2) {
+                        Some((
+                            ptr2.clone(),
+                            var2.clone(),
+                            ty2.clone(),
+                            var1.clone(),
+                            ty1.clone(),
+                        ))
+                    } else {
+                        None
+                    };
 
-                    // Add: temp_64 = load(lo_ptr)
-                    new_stmts.push(PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(temp_64_name.clone()),
-                        rhs: PreHirExpr::Load {
-                            ptr: lo_ptr.clone(),
+                    if let Some((base_ptr, off0_var, off0_ty, off4_var, off4_ty)) = layout {
+                        // Contiguous load!
+                        let temp_64_name = format!("uVar_dp_{}", locals.len());
+                        locals.push(PreHirBinding {
+                            name: temp_64_name.clone(),
                             ty: NirType::Int {
                                 bits: 64,
                                 signed: false,
                             },
-                        },
-                    });
-                    // lo_var = cast(temp_64)
-                    new_stmts.push(PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(lo_var.clone()),
-                        rhs: PreHirExpr::Cast {
-                            ty: lo_ty.clone(),
-                            expr: Box::new(PreHirExpr::Var(temp_64_name.clone())),
-                        },
-                    });
-                    // hi_var = cast(temp_64 >> 32)
-                    new_stmts.push(PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(hi_var.clone()),
-                        rhs: PreHirExpr::Cast {
-                            ty: hi_ty.clone(),
-                            expr: Box::new(PreHirExpr::Binary {
-                                op: PreHirBinaryOp::Shr,
-                                lhs: Box::new(PreHirExpr::Var(temp_64_name.clone())),
-                                rhs: Box::new(PreHirExpr::Const(
-                                    32,
-                                    NirType::Int {
-                                        bits: 32,
-                                        signed: false,
-                                    },
-                                )),
-                                ty: NirType::Int {
-                                    bits: 64,
-                                    signed: false,
-                                },
-                            }),
-                        },
-                    });
+                            surface_type_name: None,
+                            origin: None,
+                            initializer: None,
+                        });
 
-                    changed = true;
-                    i += 2;
-                    continue;
-                }
-            }
-
-            // Contiguous stores collapsing
-            // *ptr = cast(val_64)
-            // *(ptr + 4) = cast(val_64 >> 32)
-            if let (
-                PreHirStmt::Assign {
-                    lhs:
-                        PreHirLValue::Deref {
-                            ptr: lo_ptr,
-                            ty: lo_ty,
-                        },
-                    rhs: lo_val,
-                },
-                PreHirStmt::Assign {
-                    lhs:
-                        PreHirLValue::Deref {
-                            ptr: hi_ptr,
-                            ty: hi_ty,
-                        },
-                    rhs: hi_val,
-                },
-            ) = (&stmts[i], &stmts[i + 1])
-            {
-                if is_32bit_int(lo_ty) && is_32bit_int(hi_ty) && is_ptr_offset_by_4(hi_ptr, lo_ptr)
-                {
-                    if let Some(val_64) = match_split_stores(lo_val, hi_val) {
+                        // Add: temp_64 = load(base_ptr)
                         new_stmts.push(PreHirStmt::Assign {
-                            lhs: PreHirLValue::Deref {
-                                ptr: lo_ptr.clone(),
+                            lhs: PreHirLValue::Var(temp_64_name.clone()),
+                            rhs: PreHirExpr::Load {
+                                ptr: base_ptr,
                                 ty: NirType::Int {
                                     bits: 64,
                                     signed: false,
                                 },
                             },
-                            rhs: val_64,
                         });
+
+                        // In Little-Endian:
+                        // off0_var is LSW = cast(temp_64)
+                        // off4_var is MSW = cast(temp_64 >> 32)
+                        // In Big-Endian:
+                        // off0_var is MSW = cast(temp_64 >> 32)
+                        // off4_var is LSW = cast(temp_64)
+                        let (lsw_var, lsw_ty, msw_var, msw_ty) = if is_big_endian {
+                            (off4_var, off4_ty, off0_var, off0_ty)
+                        } else {
+                            (off0_var, off0_ty, off4_var, off4_ty)
+                        };
+
+                        new_stmts.push(PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var(lsw_var),
+                            rhs: PreHirExpr::Cast {
+                                ty: lsw_ty,
+                                expr: Box::new(PreHirExpr::Var(temp_64_name.clone())),
+                            },
+                        });
+                        new_stmts.push(PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var(msw_var),
+                            rhs: PreHirExpr::Cast {
+                                ty: msw_ty,
+                                expr: Box::new(PreHirExpr::Binary {
+                                    op: PreHirBinaryOp::Shr,
+                                    lhs: Box::new(PreHirExpr::Var(temp_64_name.clone())),
+                                    rhs: Box::new(PreHirExpr::Const(
+                                        32,
+                                        NirType::Int {
+                                            bits: 32,
+                                            signed: false,
+                                        },
+                                    )),
+                                    ty: NirType::Int {
+                                        bits: 64,
+                                        signed: false,
+                                    },
+                                }),
+                            },
+                        });
+
                         changed = true;
                         i += 2;
                         continue;
+                    }
+                }
+            }
+
+            // Contiguous stores collapsing
+            if let (
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref { ptr: ptr1, ty: ty1 },
+                    rhs: val1,
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref { ptr: ptr2, ty: ty2 },
+                    rhs: val2,
+                },
+            ) = (&stmts[i], &stmts[i + 1])
+            {
+                if is_32bit_int(ty1) && is_32bit_int(ty2) {
+                    let layout = if is_ptr_offset_by_4(ptr2, ptr1) {
+                        Some((ptr1.clone(), val1, val2))
+                    } else if is_ptr_offset_by_4(ptr1, ptr2) {
+                        Some((ptr2.clone(), val2, val1))
+                    } else {
+                        None
+                    };
+
+                    if let Some((base_ptr, off0_val, off4_val)) = layout {
+                        let (lsw_val, msw_val) = if is_big_endian {
+                            (off4_val, off0_val)
+                        } else {
+                            (off0_val, off4_val)
+                        };
+
+                        if let Some(val_64) = match_split_stores(lsw_val, msw_val) {
+                            new_stmts.push(PreHirStmt::Assign {
+                                lhs: PreHirLValue::Deref {
+                                    ptr: base_ptr,
+                                    ty: NirType::Int {
+                                        bits: 64,
+                                        signed: false,
+                                    },
+                                },
+                                rhs: val_64,
+                            });
+                            changed = true;
+                            i += 2;
+                            continue;
+                        }
                     }
                 }
             }
@@ -996,4 +1032,311 @@ fn match_split_stores(lo_val: &PreHirExpr, hi_val: &PreHirExpr) -> Option<PreHir
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_contiguous_loads_little_endian() {
+        let base_ptr = PreHirExpr::Var("ptr".to_string());
+        let hi_ptr = PreHirExpr::PtrOffset {
+            base: Box::new(base_ptr.clone()),
+            offset: 4,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+
+        let mut stmts = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("lo".to_string()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(base_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("hi".to_string()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(hi_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+            },
+        ];
+        let mut locals = Vec::new();
+        assert!(collapse_contiguous_mem_ops(&mut stmts, &mut locals, false));
+        assert_eq!(stmts.len(), 3);
+        match &stmts[1] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast { expr, .. },
+            } => {
+                assert_eq!(name, "lo");
+                assert!(matches!(**expr, PreHirExpr::Var(_)));
+            }
+            _ => panic!("unexpected stmt[1]: {:?}", stmts[1]),
+        }
+        match &stmts[2] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast { expr, .. },
+            } => {
+                assert_eq!(name, "hi");
+                assert!(matches!(
+                    **expr,
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shr,
+                        ..
+                    }
+                ));
+            }
+            _ => panic!("unexpected stmt[2]: {:?}", stmts[2]),
+        }
+    }
+
+    #[test]
+    fn test_contiguous_loads_big_endian() {
+        let base_ptr = PreHirExpr::Var("ptr".to_string());
+        let hi_ptr = PreHirExpr::PtrOffset {
+            base: Box::new(base_ptr.clone()),
+            offset: 4,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+
+        // In Big-Endian, offset 0 is MSW and offset 4 is LSW.
+        let mut stmts = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("msw".to_string()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(base_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("lsw".to_string()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(hi_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+            },
+        ];
+        let mut locals = Vec::new();
+        assert!(collapse_contiguous_mem_ops(&mut stmts, &mut locals, true));
+        assert_eq!(stmts.len(), 3);
+        match &stmts[1] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast { expr, .. },
+            } => {
+                assert_eq!(name, "lsw");
+                assert!(matches!(**expr, PreHirExpr::Var(_)));
+            }
+            _ => panic!("unexpected stmt[1]: {:?}", stmts[1]),
+        }
+        match &stmts[2] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast { expr, .. },
+            } => {
+                assert_eq!(name, "msw");
+                assert!(matches!(
+                    **expr,
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shr,
+                        ..
+                    }
+                ));
+            }
+            _ => panic!("unexpected stmt[2]: {:?}", stmts[2]),
+        }
+    }
+
+    #[test]
+    fn test_contiguous_stores_big_endian() {
+        let base_ptr = PreHirExpr::Var("ptr".to_string());
+        let hi_ptr = PreHirExpr::PtrOffset {
+            base: Box::new(base_ptr.clone()),
+            offset: 4,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let val_64 = PreHirExpr::Var("val64".to_string());
+
+        // In Big-Endian: *(ptr + 0) = val >> 32 (MSW), *(ptr + 4) = val (LSW)
+        let mut stmts = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(base_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shr,
+                    lhs: Box::new(val_64.clone()),
+                    rhs: Box::new(PreHirExpr::Const(32, u32_ty.clone())),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(hi_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+                rhs: val_64.clone(),
+            },
+        ];
+        let mut locals = Vec::new();
+        assert!(collapse_contiguous_mem_ops(&mut stmts, &mut locals, true));
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ptr, ty },
+                rhs,
+            } => {
+                assert_eq!(ptr.as_ref(), &base_ptr);
+                assert_eq!(
+                    ty,
+                    &NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    }
+                );
+                assert_eq!(rhs, &val_64);
+            }
+            _ => panic!("unexpected stmt: {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn test_contiguous_stores_little_endian() {
+        let base_ptr = PreHirExpr::Var("ptr".to_string());
+        let hi_ptr = PreHirExpr::PtrOffset {
+            base: Box::new(base_ptr.clone()),
+            offset: 4,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let val_64 = PreHirExpr::Var("val64".to_string());
+
+        // In Little-Endian: *(ptr + 0) = val (LSW), *(ptr + 4) = val >> 32 (MSW)
+        let mut stmts = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(base_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+                rhs: val_64.clone(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(hi_ptr.clone()),
+                    ty: u32_ty.clone(),
+                },
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shr,
+                    lhs: Box::new(val_64.clone()),
+                    rhs: Box::new(PreHirExpr::Const(32, u32_ty.clone())),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                },
+            },
+        ];
+        let mut locals = Vec::new();
+        assert!(collapse_contiguous_mem_ops(&mut stmts, &mut locals, false));
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ptr, ty },
+                rhs,
+            } => {
+                assert_eq!(ptr.as_ref(), &base_ptr);
+                assert_eq!(
+                    ty,
+                    &NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    }
+                );
+                assert_eq!(rhs, &val_64);
+            }
+            _ => panic!("unexpected stmt: {:?}", stmts[0]),
+        }
+    }
+
+    #[test]
+    fn test_apply_pass_powerpc_big_endian() {
+        let base_ptr = PreHirExpr::Var("ptr".to_string());
+        let hi_ptr = PreHirExpr::PtrOffset {
+            base: Box::new(base_ptr.clone()),
+            offset: 4,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+
+        let mut func = PreHirFunction {
+            calling_convention: fission_core::CallingConvention::PowerPc32,
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("msw".to_string()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(base_ptr.clone()),
+                        ty: u32_ty.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("lsw".to_string()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(hi_ptr.clone()),
+                        ty: u32_ty.clone(),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_double_precision_reconstruction_pass(&mut func));
+        assert_eq!(func.body.len(), 3);
+        match &func.body[1] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast { expr, .. },
+            } => {
+                assert_eq!(name, "lsw");
+                assert!(matches!(**expr, PreHirExpr::Var(_)));
+            }
+            _ => panic!("unexpected stmt[1]: {:?}", func.body[1]),
+        }
+        match &func.body[2] {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast { expr, .. },
+            } => {
+                assert_eq!(name, "msw");
+                assert!(matches!(
+                    **expr,
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shr,
+                        ..
+                    }
+                ));
+            }
+            _ => panic!("unexpected stmt[2]: {:?}", func.body[2]),
+        }
+    }
 }
