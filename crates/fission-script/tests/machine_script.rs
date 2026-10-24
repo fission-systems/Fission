@@ -211,3 +211,36 @@ fn a_script_can_read_the_code_it_stopped_in() {
         "the listing is not consecutive"
     );
 }
+
+/// Instructions placed immediately adjacent to an unmapped page boundary
+/// must disassemble successfully without triggering speculative window
+/// unmapped page faults.
+#[test]
+fn disasm_near_unmapped_page_boundary_succeeds_without_page_fault() {
+    // 0x140005000 is mapped (.idata, 4096 bytes: 0x140005000..0x140006000),
+    // 0x140006000 is unmapped. Disassemble near the trailing edge of .idata
+    // (16 bytes before the boundary at 0x140005ff0).
+    let result = run(r#"
+        let target = 0x140005ff0;
+        // Request 10 instructions (which would speculatively require 160 bytes and
+        // cross 144 bytes into unmapped 0x140006000).
+        let insns = machine.disasm(target, 10);
+        emit(#{
+            kind: "boundary_disasm",
+            count: insns.len(),
+            first_addr: insns[0].address,
+        });
+        "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    let d = result.findings[0].data.as_ref().expect("data");
+    assert!(
+        d["count"].as_i64().unwrap() > 0,
+        "must decode instructions up to the boundary"
+    );
+    assert_eq!(d["first_addr"], serde_json::json!(0x140005ff0i64));
+}
