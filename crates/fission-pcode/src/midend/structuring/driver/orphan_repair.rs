@@ -149,4 +149,82 @@ mod tests {
             "the target terminator must remain attached to the repaired block: {repaired:?}"
         );
     }
+
+    #[test]
+    fn try_repair_orphan_gotos_handles_switch_terminator() {
+        let target = PcodeBasicBlock {
+            index: 1,
+            start_address: 0x1010,
+            successors: vec![2, 3],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::BranchInd,
+                address: 0x1010,
+                output: None,
+                inputs: vec![Varnode {
+                    space_id: 2,
+                    offset: 0,
+                    size: 8,
+                    is_constant: false,
+                    constant_val: 0,
+                }],
+                asm_mnemonic: Some("jmp rax".to_string()),
+            }],
+        };
+        let block2 = PcodeBasicBlock {
+            index: 2,
+            start_address: 0x1020,
+            successors: Vec::new(),
+            ops: vec![PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Return,
+                address: 0x1020,
+                output: None,
+                inputs: vec![Varnode::constant(0, 8)],
+                asm_mnemonic: Some("ret".to_string()),
+            }],
+        };
+        let block3 = PcodeBasicBlock {
+            index: 3,
+            start_address: 0x1030,
+            successors: Vec::new(),
+            ops: vec![PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Return,
+                address: 0x1030,
+                output: None,
+                inputs: vec![Varnode::constant(1, 8)],
+                asm_mnemonic: Some("ret".to_string()),
+            }],
+        };
+        let function = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: Vec::new(),
+                },
+                target,
+                block2,
+                block3,
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&function, &options, None);
+        let body = vec![PreHirStmt::Goto("block_1010".to_string())];
+
+        let repaired = try_repair_orphan_gotos(&mut builder, body);
+        assert!(
+            repaired.is_some(),
+            "orphan repair must not abort on switch terminator"
+        );
+        let repaired = repaired.unwrap();
+        assert!(
+            repaired
+                .iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::Switch { .. })),
+            "target block switch must be emitted in repaired body: {repaired:?}"
+        );
+    }
 }
