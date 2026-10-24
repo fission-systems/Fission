@@ -86,6 +86,14 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 live.clear();
                 continue;
             }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue
+            | PreHirStmt::Return(_) => {
+                live.clear();
+                continue;
+            }
             _ => {}
         }
 
@@ -206,10 +214,10 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &PreHirExpr) -> Option<PreHirExpr
     if !matches!(op, PreHirBinaryOp::Mod | PreHirBinaryOp::Div) {
         return None;
     }
-    let low = extract_cdq_low_from_wide_dividend(lhs)?;
+    let (low, min_bits) = extract_cdq_low_from_wide_dividend(lhs)?;
     let bits = match expr_type(&low) {
-        NirType::Int { bits, .. } => bits.max(32),
-        _ => 32,
+        NirType::Int { bits, .. } => bits.max(min_bits),
+        _ => min_bits,
     };
     let signed_ty = NirType::Int { bits, signed: true };
     Some(PreHirExpr::Binary {
@@ -226,7 +234,7 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &PreHirExpr) -> Option<PreHirExpr
     })
 }
 
-fn extract_cdq_low_from_wide_dividend(expr: &PreHirExpr) -> Option<PreHirExpr> {
+fn extract_cdq_low_from_wide_dividend(expr: &PreHirExpr) -> Option<(PreHirExpr, u32)> {
     let expr = strip_casts(expr);
     // (hi << k) | lo
     let PreHirExpr::Binary {
@@ -269,7 +277,7 @@ fn extract_cdq_low_from_wide_dividend(expr: &PreHirExpr) -> Option<PreHirExpr> {
     // hi should be sign-related to low: SAR(low, …) or cast of SAR.
     let hi = strip_casts(hi_expr);
     if expr_is_sign_fill_of(&hi, &low, *shift_amt) {
-        return Some(low);
+        return Some((low, *shift_amt as u32));
     }
     None
 }
@@ -310,8 +318,8 @@ pub fn recognize_compiler_runtime_division(expr: &PreHirExpr) -> Option<PreHirEx
         return None;
     };
     let (op, signed) = match target.as_str() {
-        "__aeabi_uidiv" | "__aeabi_uidivmod" => (PreHirBinaryOp::Div, false),
-        "__aeabi_idiv" | "__aeabi_idivmod" => (PreHirBinaryOp::Div, true),
+        "__aeabi_uidiv" => (PreHirBinaryOp::Div, false),
+        "__aeabi_idiv" => (PreHirBinaryOp::Div, true),
         _ => return None,
     };
     if args.len() < 2 {
@@ -747,13 +755,37 @@ pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> 
     }
 
     let mut is_signed_shift = false;
-    if let PreHirExpr::Binary { op, lhs, rhs, .. } = current {
+    while let PreHirExpr::Binary { op, lhs, rhs, .. } = current {
         if matches!(op, PreHirBinaryOp::Shr | PreHirBinaryOp::Sar) {
             if let PreHirExpr::Const(shift_amt, _) = rhs.as_ref() {
+                if *shift_amt < 0 || *shift_amt > 127 {
+                    break;
+                }
                 n += *shift_amt as u32;
-                is_signed_shift = matches!(op, PreHirBinaryOp::Sar);
+                if matches!(op, PreHirBinaryOp::Sar) {
+                    is_signed_shift = true;
+                }
                 current = lhs.as_ref();
+                if let PreHirExpr::Cast { ty, expr: inner } = current {
+                    if let Some(bits) = int_type_bits(ty) {
+                        if ext_ty_bits.is_none() {
+                            ext_ty_bits = Some(bits);
+                        }
+                        current = inner.as_ref();
+                    }
+                }
+                continue;
             }
+        }
+        break;
+    }
+
+    if let PreHirExpr::Cast { ty, expr: inner } = current {
+        if let Some(bits) = int_type_bits(ty) {
+            if ext_ty_bits.is_none() {
+                ext_ty_bits = Some(bits);
+            }
+            current = inner.as_ref();
         }
     }
 
@@ -787,79 +819,80 @@ pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> 
             let mut x_val = x_ext;
             let mut is_sext = false;
 
-            if let PreHirExpr::Cast {
-                ty: cast_ty,
-                expr: original_x,
-            } = x_ext
-            {
+            while let PreHirExpr::Cast { expr: inner, .. } = x_val {
                 if let NirType::Int {
                     bits: orig_bits,
                     signed,
-                } = expr_type(original_x.as_ref())
+                } = expr_type(inner.as_ref())
                 {
                     x_size_bits = Some(orig_bits);
                     is_sext = signed;
                 }
-                x_val = original_x.as_ref();
-            } else if let NirType::Int {
-                bits: orig_bits,
-                signed,
-            } = expr_type(x_ext)
-            {
-                x_size_bits = Some(orig_bits);
-                is_sext = signed;
+                x_val = inner.as_ref();
+            }
+            if x_size_bits.is_none() {
+                if let NirType::Int {
+                    bits: orig_bits,
+                    signed,
+                } = expr_type(x_val)
+                {
+                    x_size_bits = Some(orig_bits);
+                    is_sext = signed;
+                }
             }
 
-            if let Some(x_bits) = x_size_bits {
-                if n <= 127 && x_bits <= 64 && y_128 > 1 {
-                    let y_minus_1 = y_128 - 1;
-                    let power = 1u128 << n;
-                    let mut q = power / y_minus_1;
-                    let mut r = power % y_minus_1;
+            let x_bits = x_size_bits.unwrap_or_else(|| {
+                if n <= 64 && y_128 <= u32::MAX as u128 {
+                    32
+                } else {
+                    64
+                }
+            });
 
-                    if q <= u64::MAX as u128 && y_minus_1 >= q {
-                        let mut diff = 0;
-                        if r >= q {
-                            q += 1;
-                            r = r.wrapping_sub(y_minus_1).wrapping_add(q);
-                            if r >= q {
-                                // invalid magic
-                            } else {
-                                diff = q;
-                            }
+            let is_signed = is_signed_shift || is_sext;
+            let min_shift = if is_signed {
+                x_bits.saturating_sub(1)
+            } else {
+                x_bits
+            };
+            if n >= min_shift && n <= 127 && x_bits <= 64 && y_128 > 1 {
+                let power = 1u128 << n;
+                let d_cand = (power + y_128 - 1) / y_128;
+                if d_cand >= 1 && d_cand <= u64::MAX as u128 {
+                    let matches_m = (power + d_cand - 1) / d_cand == y_128;
+                    let max_allowed_err = if is_signed {
+                        1u128 << (n - x_bits + 1)
+                    } else {
+                        1u128 << (n - x_bits)
+                    };
+                    let rem = (y_128 * d_cand).checked_sub(power);
+                    let valid_err = rem.is_some_and(|r| r <= max_allowed_err);
+                    if matches_m && valid_err {
+                        let divisor = d_cand as u64;
+                        let target_ty = if expr_type(x_val) != NirType::Unknown {
+                            expr_type(x_val)
                         } else {
-                            diff = 0;
-                        }
-
-                        let mut maxx = if x_bits == 64 { 0 } else { 1u128 << x_bits };
-                        maxx = maxx.wrapping_sub(1);
-                        diff += q.saturating_sub(r);
-
-                        if diff != 0 {
-                            let tmp = power / diff;
-                            if tmp > maxx {
-                                let divisor = q as u64;
-                                let _out_bits = ext_ty_bits.unwrap_or(x_bits);
-                                // Return the recovered division
-                                let div = PreHirExpr::Binary {
-                                    op: PreHirBinaryOp::Div,
-                                    lhs: Box::new(x_val.clone()),
-                                    rhs: Box::new(PreHirExpr::Const(
-                                        divisor as i64,
-                                        expr_type(x_val),
-                                    )),
-                                    ty: expr_type(x_val),
-                                };
-                                return Some(if expr_type(expr) == expr_type(x_val) {
-                                    div
-                                } else {
-                                    PreHirExpr::Cast {
-                                        ty: expr_type(expr),
-                                        expr: Box::new(div),
-                                    }
-                                });
+                            NirType::Int {
+                                bits: x_bits,
+                                signed: is_signed,
                             }
-                        }
+                        };
+                        let div = PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Div,
+                            lhs: Box::new(x_val.clone()),
+                            rhs: Box::new(PreHirExpr::Const(divisor as i64, target_ty.clone())),
+                            ty: target_ty.clone(),
+                        };
+                        return Some(
+                            if expr_type(expr) == target_ty || expr_type(expr) == NirType::Unknown {
+                                div
+                            } else {
+                                PreHirExpr::Cast {
+                                    ty: expr_type(expr),
+                                    expr: Box::new(div),
+                                }
+                            },
+                        );
                     }
                 }
             }
@@ -944,6 +977,165 @@ mod tests {
         };
 
         assert!(recognize_magic_number_division(&expr).is_none());
+    }
+
+    #[test]
+    fn rejects_arm_eabi_divmod_runtime_helpers() {
+        let uidivmod = PreHirExpr::Call {
+            target: "__aeabi_uidivmod".to_string(),
+            args: vec![var("numerator"), var("denominator")],
+            ty: NirType::Unknown,
+        };
+        assert!(recognize_compiler_runtime_division(&uidivmod).is_none());
+
+        let idivmod = PreHirExpr::Call {
+            target: "__aeabi_idivmod".to_string(),
+            args: vec![var("numerator"), var("denominator")],
+            ty: NirType::Unknown,
+        };
+        assert!(recognize_compiler_runtime_division(&idivmod).is_none());
+    }
+
+    #[test]
+    fn magic_number_division_recovers_unsigned_div_3_5_10() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+
+        // / 3: ((x * 0xAAAA_AAAB) >> 32) >> 1
+        let mul3 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: u64_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0xAAAA_AAAB_u32 as i64, u64_ty.clone())),
+            ty: u64_ty.clone(),
+        };
+        let shift3 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(mul3),
+                rhs: Box::new(PreHirExpr::Const(32, u32_ty.clone())),
+                ty: u64_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(1, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        let div3 = recognize_magic_number_division(&shift3).expect("recover / 3");
+        assert_eq!(
+            div3,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                rhs: Box::new(PreHirExpr::Const(3, u32_ty.clone())),
+                ty: u32_ty.clone(),
+            }
+        );
+
+        // / 5: ((x * 0xCCCC_CCCD) >> 32) >> 2
+        let mul5 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: u64_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0xCCCC_CCCD_u32 as i64, u64_ty.clone())),
+            ty: u64_ty.clone(),
+        };
+        let shift5 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(mul5),
+                rhs: Box::new(PreHirExpr::Const(32, u32_ty.clone())),
+                ty: u64_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(2, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        let div5 = recognize_magic_number_division(&shift5).expect("recover / 5");
+        assert_eq!(
+            div5,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                rhs: Box::new(PreHirExpr::Const(5, u32_ty.clone())),
+                ty: u32_ty.clone(),
+            }
+        );
+
+        // / 10: ((x * 0xCCCC_CCCD) >> 35)
+        let mul10 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: u64_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0xCCCC_CCCD_u32 as i64, u64_ty.clone())),
+            ty: u64_ty.clone(),
+        };
+        let shift10 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(mul10),
+            rhs: Box::new(PreHirExpr::Const(35, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        let div10 = recognize_magic_number_division(&shift10).expect("recover / 10");
+        assert_eq!(
+            div10,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                rhs: Box::new(PreHirExpr::Const(10, u32_ty.clone())),
+                ty: u32_ty.clone(),
+            }
+        );
+    }
+
+    #[test]
+    fn magic_number_division_recovers_signed_div_3() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+
+        // / 3: ((x * 0x5555_5556) >> 32) with Sar
+        let mul3 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: i64_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0x5555_5556_i64, i64_ty.clone())),
+            ty: i64_ty.clone(),
+        };
+        let shift3 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(mul3),
+            rhs: Box::new(PreHirExpr::Const(32, i32_ty.clone())),
+            ty: i32_ty.clone(),
+        };
+        let div3 = recognize_magic_number_division(&shift3).expect("recover signed / 3");
+        assert_eq!(
+            div3,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                rhs: Box::new(PreHirExpr::Const(3, i32_ty.clone())),
+                ty: i32_ty.clone(),
+            }
+        );
     }
 }
 
@@ -1204,5 +1396,139 @@ mod cdq_tests {
             collapse_cdq_style_signed_mod_div(&mod_vars(wide, "y")).is_none(),
             "bare copy/var high half must not collapse as CDQ"
         );
+    }
+
+    #[test]
+    fn stmt_collapse_clears_live_set_across_label_and_goto() {
+        // t = wide(a); label L1; x = t % d
+        let mut stmts = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".into()),
+                rhs: cdq_wide("a"),
+            },
+            PreHirStmt::Label("L1".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".into()),
+                rhs: mod_vars(PreHirExpr::Var("t".into()), "d"),
+            },
+        ];
+        let _ = collapse_cdq_signed_mod_in_stmts(&mut stmts);
+        match &stmts[2] {
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary { lhs, .. },
+                ..
+            } => {
+                assert!(
+                    matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == "t"),
+                    "Label must clear linear live set; got {lhs:?}"
+                );
+            }
+            other => panic!("unexpected stmt: {other:?}"),
+        }
+
+        // t = wide(a); goto L2; x = t % d
+        let mut stmts_goto = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".into()),
+                rhs: cdq_wide("a"),
+            },
+            PreHirStmt::Goto("L2".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".into()),
+                rhs: mod_vars(PreHirExpr::Var("t".into()), "d"),
+            },
+        ];
+        let _ = collapse_cdq_signed_mod_in_stmts(&mut stmts_goto);
+        match &stmts_goto[2] {
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary { lhs, .. },
+                ..
+            } => {
+                assert!(
+                    matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == "t"),
+                    "Goto must clear linear live set; got {lhs:?}"
+                );
+            }
+            other => panic!("unexpected stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cqo_64_bit_mod_preserves_64_bit_width() {
+        let x = PreHirExpr::Var("param_10".into());
+        let sar = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 128,
+                    signed: true,
+                },
+                expr: Box::new(x.clone()),
+            }),
+            rhs: Box::new(PreHirExpr::Const(64, i32_ty())),
+            ty: NirType::Int {
+                bits: 128,
+                signed: true,
+            },
+        };
+        let hi = PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: 128,
+                signed: false,
+            },
+            expr: Box::new(sar),
+        };
+        let wide = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(hi),
+                rhs: Box::new(PreHirExpr::Const(64, i32_ty())),
+                ty: NirType::Int {
+                    bits: 128,
+                    signed: false,
+                },
+            }),
+            rhs: Box::new(PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 128,
+                    signed: false,
+                },
+                expr: Box::new(x),
+            }),
+            ty: NirType::Int {
+                bits: 128,
+                signed: false,
+            },
+        };
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mod,
+            lhs: Box::new(wide),
+            rhs: Box::new(PreHirExpr::Var("param_18".into())),
+            ty: NirType::Int {
+                bits: 128,
+                signed: false,
+            },
+        };
+        let out = collapse_cdq_style_signed_mod_div(&expr).expect("collapse 64-bit");
+        match out {
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mod,
+                lhs,
+                rhs,
+                ty,
+            } => {
+                assert_eq!(
+                    ty,
+                    NirType::Int {
+                        bits: 64,
+                        signed: true
+                    }
+                );
+                assert!(matches!(strip_casts(&lhs), PreHirExpr::Var(n) if n == "param_10"));
+                assert!(matches!(strip_casts(&rhs), PreHirExpr::Var(n) if n == "param_18"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 }
