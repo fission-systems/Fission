@@ -328,7 +328,8 @@ fn build_nir_call_prototype_summaries(
     call_target_refs: &HashMap<u64, CallTargetRef>,
     binary: &LoadedBinary,
 ) -> HashMap<String, NirCallPrototypeSummary> {
-    let mut summaries = build_nir_import_call_prototype_summaries(call_target_refs);
+    let mut summaries =
+        build_nir_import_call_prototype_summaries(call_target_refs, binary.is_64bit);
 
     // Signatures somebody chose, first and unconditionally. A caller reads
     // these to declare and type its calls, so without them a typed callee is
@@ -511,6 +512,7 @@ fn merge_fact_store_call_prototype_hints(
 
 fn build_nir_import_call_prototype_summaries(
     call_target_refs: &HashMap<u64, CallTargetRef>,
+    is_64bit: bool,
 ) -> HashMap<String, NirCallPrototypeSummary> {
     let mut summaries = HashMap::new();
     for target_ref in call_target_refs.values() {
@@ -518,23 +520,24 @@ fn build_nir_import_call_prototype_summaries(
             continue;
         }
         let signature = SIGNATURE_RESOURCES
-            .api_signature(&target_ref.symbol)
+            .api_signature_for_bitness(&target_ref.symbol, is_64bit)
             .or_else(|| {
                 symbol_for_win_api_database_lookup(&target_ref.symbol)
-                    .and_then(|name| SIGNATURE_RESOURCES.api_signature(name))
+                    .and_then(|name| SIGNATURE_RESOURCES.api_signature_for_bitness(name, is_64bit))
             });
         let Some(signature) = signature else {
             continue;
         };
         let arity = signature.params.len();
+        let is_variadic =
+            signature.is_variadic || is_known_variadic_runtime_symbol(&target_ref.symbol);
         summaries.insert(
             target_ref.symbol.clone(),
             NirCallPrototypeSummary {
                 min_arity: arity,
                 max_arity: arity,
-                locked_exact_arity: (!is_known_variadic_runtime_symbol(&target_ref.symbol))
-                    .then_some(arity),
-                variadic_fixed_arity: None,
+                locked_exact_arity: (!is_variadic).then_some(arity),
+                variadic_fixed_arity: is_variadic.then_some(arity),
                 returns_void: signature.return_type.trim().eq_ignore_ascii_case("void"),
                 param_pointer_pointees: vec![None; arity],
                 param_surface_type_names: vec![None; arity],
@@ -2767,9 +2770,10 @@ mod tests {
             ),
         ]);
 
-        let summaries = build_nir_import_call_prototype_summaries(&call_targets);
+        let summaries = build_nir_import_call_prototype_summaries(&call_targets, true);
         assert_eq!(summaries["fstat"].locked_exact_arity, Some(2));
         assert_eq!(summaries["printf"].locked_exact_arity, None);
+        assert_eq!(summaries["printf"].variadic_fixed_arity, Some(1));
     }
 
     #[test]
@@ -2785,7 +2789,7 @@ mod tests {
             },
         )]);
 
-        assert!(build_nir_import_call_prototype_summaries(&call_targets).is_empty());
+        assert!(build_nir_import_call_prototype_summaries(&call_targets, true).is_empty());
     }
 
     fn raw_hir_calling(callee_name: &str, arg_count: usize) -> fission_pcode::PreHirFunction {

@@ -10,12 +10,14 @@ pub static SIGNATURE_RESOURCES: LazyLock<SignatureResourceProvider> =
 #[derive(Debug)]
 pub struct SignatureResourceProvider {
     api_types: Result<ApiTypeDatabase, ApiTypeError>,
+    api_types_32: Result<ApiTypeDatabase, ApiTypeError>,
 }
 
 impl SignatureResourceProvider {
     pub fn detect() -> Self {
         Self {
-            api_types: ApiTypeDatabase::from_utils_signatures(),
+            api_types: ApiTypeDatabase::from_utils_signatures_for_bitness(true),
+            api_types_32: ApiTypeDatabase::from_utils_signatures_for_bitness(false),
         }
     }
 
@@ -23,8 +25,21 @@ impl SignatureResourceProvider {
         self.api_types.as_ref().map(ApiTypeDatabase::iter)
     }
 
-    pub fn api_signature(&self, name: &str) -> Option<&ApiSignature> {
-        self.api_types.as_ref().ok()?.get(name)
+    pub fn api_signature(&'static self, name: &str) -> Option<&'static ApiSignature> {
+        self.api_signature_for_bitness(name, true)
+    }
+
+    pub fn api_signature_for_bitness(
+        &'static self,
+        name: &str,
+        is_64bit: bool,
+    ) -> Option<&'static ApiSignature> {
+        let db = if is_64bit {
+            self.api_types.as_ref().ok()?
+        } else {
+            self.api_types_32.as_ref().ok()?
+        };
+        db.get(name)
     }
 
     pub fn api_signatures_json(&self) -> Option<String> {
