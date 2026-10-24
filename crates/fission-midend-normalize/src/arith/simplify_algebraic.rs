@@ -4,6 +4,7 @@
 //! - `x - (-c)`  -> `x + c`
 //! - `x + x`     -> `x * 2`
 
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 
 /// The constant's value read at the width its type declares, when that
@@ -114,7 +115,7 @@ pub fn simplify_double_add(expr: &PreHirExpr) -> Option<PreHirExpr> {
             lhs,
             rhs,
             ty,
-        } if lhs == rhs => Some(PreHirExpr::Binary {
+        } if lhs == rhs && !expr_has_side_effects(lhs) => Some(PreHirExpr::Binary {
             op: PreHirBinaryOp::Mul,
             lhs: lhs.clone(),
             rhs: Box::new(PreHirExpr::Const(2, ty.clone())),
@@ -162,7 +163,7 @@ pub fn simplify_factor_common_mul(expr: &PreHirExpr) -> Option<PreHirExpr> {
 
     // rhs is lhs * c
     if let Some((common, c, cty)) = match_mul_const(rhs, lhs) {
-        if c != i64::MAX {
+        if c != i64::MAX && !expr_has_side_effects(&common) {
             return Some(PreHirExpr::Binary {
                 op: PreHirBinaryOp::Mul,
                 lhs: common,
@@ -174,7 +175,7 @@ pub fn simplify_factor_common_mul(expr: &PreHirExpr) -> Option<PreHirExpr> {
 
     // lhs is rhs * c
     if let Some((common, c, cty)) = match_mul_const(lhs, rhs) {
-        if c != i64::MAX {
+        if c != i64::MAX && !expr_has_side_effects(&common) {
             return Some(PreHirExpr::Binary {
                 op: PreHirBinaryOp::Mul,
                 lhs: common,
@@ -329,7 +330,7 @@ pub fn simplify_collect_mul_terms(expr: &PreHirExpr) -> Option<PreHirExpr> {
             let (factor_lhs, c_lhs, cty_lhs) = extract_factor(lhs)?;
             let (factor_rhs, c_rhs, _) = extract_factor(rhs)?;
 
-            if factor_lhs == factor_rhs {
+            if factor_lhs == factor_rhs && !expr_has_side_effects(&factor_lhs) {
                 if let PreHirExpr::Binary {
                     op: PreHirBinaryOp::Mul,
                     ..
@@ -377,7 +378,7 @@ pub fn simplify_distribute_common_factor(expr: &PreHirExpr) -> Option<PreHirExpr
 
     let (factor_lhs, c_lhs, cty) = extract_mul_factor(lhs)?;
     let (factor_rhs, c_rhs, _) = extract_mul_factor(rhs)?;
-    if factor_lhs != factor_rhs {
+    if factor_lhs != factor_rhs || expr_has_side_effects(&factor_lhs) {
         return None;
     }
     let new_c = c_lhs.checked_add(c_rhs)?;

@@ -221,7 +221,21 @@ pub fn recognize_concat_zext_or(expr: &PreHirExpr) -> Option<PreHirExpr> {
     if wide_ty != lo_wide_ty {
         return None;
     }
-    if hi_src != lo_src {
+    let (hi_source, hi_shift_amt) = match &hi_src {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let PreHirExpr::Const(s, _) = rhs.as_ref() else {
+                return None;
+            };
+            (lhs.as_ref(), *s)
+        }
+        _ => return None,
+    };
+    if hi_shift_amt != *n || hi_source != &lo_src {
         return None;
     }
     let Some(total_bits) = int_type_bits(ty) else {
@@ -231,11 +245,11 @@ pub fn recognize_concat_zext_or(expr: &PreHirExpr) -> Option<PreHirExpr> {
         return None;
     };
     if wide_bits >= total_bits {
-        return Some(hi_src.clone());
+        return Some(lo_src);
     }
     Some(PreHirExpr::Cast {
         ty: ty.clone(),
-        expr: Box::new(hi_src.clone()),
+        expr: Box::new(lo_src),
     })
 }
 
@@ -260,6 +274,11 @@ pub fn recognize_piece2_zext_sext(expr: &PreHirExpr) -> Option<PreHirExpr> {
     // Piece2Zext only — do not collapse signed extension chains (Piece2Sext is separate).
     if outer_signed || inner_signed || outer_bits <= inner_bits {
         return None;
+    }
+    if let Some((source_bits, source_signed)) = scalar_cast_signature(&expr_type(source)) {
+        if source_signed || inner_bits < source_bits {
+            return None;
+        }
     }
     if !source_is_scalarish(&expr_type(source)) {
         return None;
@@ -372,5 +391,46 @@ mod tests {
                 expr: Box::new(var("x")),
             }
         );
+    }
+
+    #[test]
+    fn piece2_zext_does_not_drop_narrowing_truncation() {
+        let x_u64 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(var("x")),
+            rhs: Box::new(PreHirExpr::Const(1, u64_ty())),
+            ty: u64_ty(),
+        };
+        // Cast(u64, Cast(u32, x_u64)) should NOT collapse to Cast(u64, x_u64)
+        let expr = PreHirExpr::Cast {
+            ty: u64_ty(),
+            expr: Box::new(PreHirExpr::Cast {
+                ty: u32_ty(),
+                expr: Box::new(x_u64),
+            }),
+        };
+        assert!(recognize_piece2_zext_sext(&expr).is_none());
+    }
+
+    #[test]
+    fn concat_zext_or_rejects_duplicate_lower_half() {
+        // (Cast(u64, x) << 32) | Cast(u64, x)
+        let x = var("x");
+        let cast_x = PreHirExpr::Cast {
+            ty: u64_ty(),
+            expr: Box::new(x),
+        };
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(cast_x.clone()),
+                rhs: Box::new(PreHirExpr::Const(32, u32_ty())),
+                ty: u64_ty(),
+            }),
+            rhs: Box::new(cast_x),
+            ty: u64_ty(),
+        };
+        assert!(recognize_concat_zext_or(&expr).is_none());
     }
 }

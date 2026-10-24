@@ -1,4 +1,5 @@
 use super::util::is_zero_const;
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 
 /// Simplifies bitwise-OR comparisons with zero:
@@ -31,9 +32,11 @@ fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr);
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) => {
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+            changed |= simplify_expr(cond);
             changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::For {
@@ -202,34 +205,36 @@ fn simplify_expr(expr: &mut PreHirExpr) -> bool {
             }
         }
         if let Some((then_is_zero, cond, then_expr, else_expr, other)) = target {
-            let new_then = if then_is_zero {
-                other.clone()
-            } else {
-                Box::new(PreHirExpr::Binary {
-                    op: PreHirBinaryOp::Or,
-                    lhs: then_expr,
-                    rhs: other.clone(),
+            if !expr_has_side_effects(&other) && !expr_has_side_effects(&cond) {
+                let new_then = if then_is_zero {
+                    other.clone()
+                } else {
+                    Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        lhs: then_expr,
+                        rhs: other.clone(),
+                        ty: ty.clone(),
+                    })
+                };
+                let new_else = if then_is_zero {
+                    Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        lhs: else_expr,
+                        rhs: other,
+                        ty: ty.clone(),
+                    })
+                } else {
+                    other
+                };
+                *expr = PreHirExpr::Select {
+                    cond,
+                    then_expr: new_then,
+                    else_expr: new_else,
                     ty: ty.clone(),
-                })
-            };
-            let new_else = if then_is_zero {
-                Box::new(PreHirExpr::Binary {
-                    op: PreHirBinaryOp::Or,
-                    lhs: else_expr,
-                    rhs: other,
-                    ty: ty.clone(),
-                })
-            } else {
-                other
-            };
-            *expr = PreHirExpr::Select {
-                cond,
-                then_expr: new_then,
-                else_expr: new_else,
-                ty: ty.clone(),
-            };
-            changed = true;
-            simplify_expr(expr);
+                };
+                changed = true;
+                simplify_expr(expr);
+            }
         }
     }
 

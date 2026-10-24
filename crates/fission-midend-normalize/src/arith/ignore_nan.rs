@@ -256,7 +256,8 @@ fn visit_expr(expr: &mut PreHirExpr) -> bool {
         | PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
-        | PreHirExpr::AggregateCopy { src: inner, .. } => {
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= visit_expr(inner);
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
@@ -367,6 +368,9 @@ fn visit_stmt(stmt: &mut PreHirStmt) -> bool {
                     changed |= visit_expr(base);
                     changed |= visit_expr(index);
                 }
+                PreHirLValue::FieldAccess { base, .. } => {
+                    changed |= visit_expr(base);
+                }
                 _ => {}
             }
         }
@@ -376,10 +380,32 @@ fn visit_stmt(stmt: &mut PreHirStmt) -> bool {
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= visit_expr(va_list);
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. }
-        | PreHirStmt::For { body, .. } => {
+        PreHirStmt::Block(body) => {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
+                changed |= visit_stmt(s);
+            }
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+            changed |= visit_expr(cond);
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
+                changed |= visit_stmt(s);
+            }
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(i) = init {
+                changed |= visit_stmt(i.as_mut());
+            }
+            if let Some(c) = cond {
+                changed |= visit_expr(c);
+            }
+            if let Some(u) = update {
+                changed |= visit_stmt(u.as_mut());
+            }
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= visit_stmt(s);
             }

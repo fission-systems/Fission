@@ -10,21 +10,103 @@ pub fn apply_double_precision_reconstruction_pass(func: &mut PreHirFunction) -> 
     }
 
     // Phase 2: Build definition map of single-assignment variables
+    let mut def_counts = HashMap::default();
+    count_defs_recursive(&func.body, &mut def_counts);
     let mut defs = HashMap::default();
-    collect_single_defs(&func.body, &mut defs);
 
     // Phase 3: Recursively rewrite Or-Shift reconstruction expressions
-    if rewrite_recombine_exprs(&mut func.body, &defs) {
+    if rewrite_recombine_exprs(&mut func.body, &mut defs, &def_counts) {
         changed = true;
     }
 
     changed
 }
 
-fn collect_single_defs(stmts: &[PreHirStmt], defs: &mut HashMap<String, PreHirExpr>) {
-    let mut def_counts = HashMap::default();
-    count_defs_recursive(stmts, &mut def_counts);
-    collect_defs_recursive(stmts, &def_counts, defs);
+fn expr_reads_var(expr: &PreHirExpr, name: &str) -> bool {
+    match expr {
+        PreHirExpr::Var(n) => n == name,
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => expr_reads_var(inner, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            expr_reads_var(lhs, name) || expr_reads_var(rhs, name)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().any(|a| expr_reads_var(a, name)),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_reads_var(cond, name)
+                || expr_reads_var(then_expr, name)
+                || expr_reads_var(else_expr, name)
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            expr_reads_var(base, name) || expr_reads_var(index, name)
+        }
+        _ => false,
+    }
+}
+
+fn expr_reads_memory(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Load { .. } | PreHirExpr::Call { .. } => true,
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => expr_reads_memory(inner),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_reads_memory(lhs) || expr_reads_memory(rhs),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_reads_memory(cond) || expr_reads_memory(then_expr) || expr_reads_memory(else_expr)
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            expr_reads_memory(base) || expr_reads_memory(index)
+        }
+        _ => false,
+    }
+}
+
+fn collect_written_vars(stmts: &[PreHirStmt], written: &mut crate::HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, .. } => {
+                if let PreHirLValue::Var(name) = lhs {
+                    written.insert(name.clone());
+                }
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
+                collect_written_vars(body, written);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_written_vars(then_body, written);
+                collect_written_vars(else_body, written);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_written_vars(&case.body, written);
+                }
+                collect_written_vars(default, written);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn count_defs_recursive(stmts: &[PreHirStmt], counts: &mut HashMap<String, usize>) {
@@ -61,68 +143,109 @@ fn count_defs_recursive(stmts: &[PreHirStmt], counts: &mut HashMap<String, usize
     }
 }
 
-fn collect_defs_recursive(
-    stmts: &[PreHirStmt],
-    counts: &HashMap<String, usize>,
-    defs: &mut HashMap<String, PreHirExpr>,
-) {
-    for stmt in stmts {
-        match stmt {
-            PreHirStmt::Assign {
-                lhs: PreHirLValue::Var(name),
-                rhs,
-            } => {
-                if counts.get(name).copied().unwrap_or(0) == 1 {
-                    defs.insert(name.clone(), rhs.clone());
-                }
-            }
-            PreHirStmt::Block(body)
-            | PreHirStmt::While { body, .. }
-            | PreHirStmt::DoWhile { body, .. }
-            | PreHirStmt::For { body, .. } => {
-                collect_defs_recursive(body, counts, defs);
-            }
-            PreHirStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                collect_defs_recursive(then_body, counts, defs);
-                collect_defs_recursive(else_body, counts, defs);
-            }
-            PreHirStmt::Switch { cases, default, .. } => {
-                for case in cases {
-                    collect_defs_recursive(&case.body, counts, defs);
-                }
-                collect_defs_recursive(default, counts, defs);
-            }
-            _ => {}
-        }
-    }
-}
-
 // ── Expression Rewriting ──────────────────────────────────────────────────
 
-fn rewrite_recombine_exprs(stmts: &mut [PreHirStmt], defs: &HashMap<String, PreHirExpr>) -> bool {
+fn rewrite_recombine_exprs(
+    stmts: &mut [PreHirStmt],
+    defs: &mut HashMap<String, PreHirExpr>,
+    counts: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign { lhs, rhs } => {
                 changed |= rewrite_lvalue(lhs, defs);
                 changed |= rewrite_expr(rhs, defs);
+                match lhs {
+                    PreHirLValue::Var(name) => {
+                        defs.retain(|_, expr| !expr_reads_var(expr, name));
+                        defs.remove(name);
+                        if counts.get(name).copied().unwrap_or(0) == 1 {
+                            defs.insert(name.clone(), rhs.clone());
+                        }
+                    }
+                    PreHirLValue::Deref { .. }
+                    | PreHirLValue::Index { .. }
+                    | PreHirLValue::FieldAccess { .. } => {
+                        defs.retain(|_, expr| !expr_reads_memory(expr));
+                    }
+                }
+                if expr_reads_memory(rhs) {
+                    defs.retain(|_, expr| !expr_reads_memory(expr));
+                }
+            }
+            PreHirStmt::Expr(expr) => {
+                changed |= rewrite_expr(expr, defs);
+                if expr_reads_memory(expr) {
+                    defs.retain(|_, expr| !expr_reads_memory(expr));
+                }
+            }
+            PreHirStmt::Return(Some(expr)) => {
+                changed |= rewrite_expr(expr, defs);
             }
             PreHirStmt::VaStart { va_list, .. } => {
                 changed |= rewrite_expr(va_list, defs);
             }
-            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-                changed |= rewrite_expr(expr, defs);
+            PreHirStmt::Block(body) => {
+                changed |= rewrite_recombine_exprs(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    defs,
+                    counts,
+                );
             }
-            PreHirStmt::Block(body)
-            | PreHirStmt::While { body, .. }
-            | PreHirStmt::DoWhile { body, .. }
-            | PreHirStmt::For { body, .. } => {
-                changed |=
-                    rewrite_recombine_exprs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defs);
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+                let mut written = crate::HashSet::default();
+                collect_written_vars(body, &mut written);
+                for v in &written {
+                    defs.retain(|_, expr| !expr_reads_var(expr, v));
+                    defs.remove(v);
+                }
+                changed |= rewrite_expr(cond, defs);
+                let mut loop_defs = defs.clone();
+                changed |= rewrite_recombine_exprs(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    &mut loop_defs,
+                    counts,
+                );
+                for v in &written {
+                    defs.retain(|_, expr| !expr_reads_var(expr, v));
+                    defs.remove(v);
+                }
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(i) = init {
+                    changed |= rewrite_stmt(i.as_mut(), defs, counts);
+                }
+                let mut written = crate::HashSet::default();
+                if let Some(u) = update {
+                    collect_written_vars(std::slice::from_ref(u.as_ref()), &mut written);
+                }
+                collect_written_vars(body, &mut written);
+                for v in &written {
+                    defs.retain(|_, expr| !expr_reads_var(expr, v));
+                    defs.remove(v);
+                }
+                if let Some(c) = cond {
+                    changed |= rewrite_expr(c, defs);
+                }
+                if let Some(u) = update {
+                    changed |= rewrite_stmt(u.as_mut(), defs, counts);
+                }
+                let mut loop_defs = defs.clone();
+                changed |= rewrite_recombine_exprs(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    &mut loop_defs,
+                    counts,
+                );
+                for v in &written {
+                    defs.retain(|_, expr| !expr_reads_var(expr, v));
+                    defs.remove(v);
+                }
             }
             PreHirStmt::Switch {
                 expr,
@@ -130,16 +253,27 @@ fn rewrite_recombine_exprs(stmts: &mut [PreHirStmt], defs: &HashMap<String, PreH
                 default,
             } => {
                 changed |= rewrite_expr(expr, defs);
-                for case in cases {
+                let mut written = crate::HashSet::default();
+                for case in cases.iter_mut() {
+                    collect_written_vars(&case.body, &mut written);
+                    let mut case_defs = defs.clone();
                     changed |= rewrite_recombine_exprs(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
-                        defs,
+                        &mut case_defs,
+                        counts,
                     );
                 }
+                collect_written_vars(default, &mut written);
+                let mut def_defs = defs.clone();
                 changed |= rewrite_recombine_exprs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
-                    defs,
+                    &mut def_defs,
+                    counts,
                 );
+                for v in &written {
+                    defs.retain(|_, expr| !expr_reads_var(expr, v));
+                    defs.remove(v);
+                }
             }
             PreHirStmt::If {
                 cond,
@@ -147,19 +281,38 @@ fn rewrite_recombine_exprs(stmts: &mut [PreHirStmt], defs: &HashMap<String, PreH
                 else_body,
             } => {
                 changed |= rewrite_expr(cond, defs);
+                let mut then_defs = defs.clone();
+                let mut else_defs = defs.clone();
                 changed |= rewrite_recombine_exprs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
-                    defs,
+                    &mut then_defs,
+                    counts,
                 );
                 changed |= rewrite_recombine_exprs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
-                    defs,
+                    &mut else_defs,
+                    counts,
                 );
+                let mut written = crate::HashSet::default();
+                collect_written_vars(then_body, &mut written);
+                collect_written_vars(else_body, &mut written);
+                for v in &written {
+                    defs.retain(|_, expr| !expr_reads_var(expr, v));
+                    defs.remove(v);
+                }
             }
             _ => {}
         }
     }
     changed
+}
+
+fn rewrite_stmt(
+    stmt: &mut PreHirStmt,
+    defs: &mut HashMap<String, PreHirExpr>,
+    counts: &HashMap<String, usize>,
+) -> bool {
+    rewrite_recombine_exprs(std::slice::from_mut(stmt), defs, counts)
 }
 
 fn rewrite_lvalue(lval: &mut PreHirLValue, defs: &HashMap<String, PreHirExpr>) -> bool {
@@ -559,6 +712,20 @@ fn is_carry_of(
     lo_name: &str,
     defs: &HashMap<String, PreHirExpr>,
 ) -> bool {
+    is_carry_of_depth(carry_expr, lo1, lo2, lo_name, defs, 0)
+}
+
+fn is_carry_of_depth(
+    carry_expr: &PreHirExpr,
+    lo1: &PreHirExpr,
+    lo2: &PreHirExpr,
+    lo_name: &str,
+    defs: &HashMap<String, PreHirExpr>,
+    depth: usize,
+) -> bool {
+    if depth > 8 {
+        return false;
+    }
     let expr = strip_casts(carry_expr);
     if let PreHirExpr::Binary {
         op: PreHirBinaryOp::Lt | PreHirBinaryOp::SLt,
@@ -586,7 +753,7 @@ fn is_carry_of(
     }
     if let PreHirExpr::Var(name) = expr {
         if let Some(def) = defs.get(name) {
-            return is_carry_of(def, lo1, lo2, lo_name, defs);
+            return is_carry_of_depth(def, lo1, lo2, lo_name, defs, depth + 1);
         }
     }
     false
@@ -626,6 +793,20 @@ fn is_borrow_of(
     lo_name: &str,
     defs: &HashMap<String, PreHirExpr>,
 ) -> bool {
+    is_borrow_of_depth(borrow_expr, lo1, lo2, lo_name, defs, 0)
+}
+
+fn is_borrow_of_depth(
+    borrow_expr: &PreHirExpr,
+    lo1: &PreHirExpr,
+    lo2: &PreHirExpr,
+    lo_name: &str,
+    defs: &HashMap<String, PreHirExpr>,
+    depth: usize,
+) -> bool {
+    if depth > 8 {
+        return false;
+    }
     let expr = strip_casts(borrow_expr);
     if let PreHirExpr::Binary {
         op: PreHirBinaryOp::Lt | PreHirBinaryOp::SLt,
@@ -651,7 +832,7 @@ fn is_borrow_of(
     }
     if let PreHirExpr::Var(name) = expr {
         if let Some(def) = defs.get(name) {
-            return is_borrow_of(def, lo1, lo2, lo_name, defs);
+            return is_borrow_of_depth(def, lo1, lo2, lo_name, defs, depth + 1);
         }
     }
     false
@@ -990,10 +1171,52 @@ fn match_split_stores(lo_val: &PreHirExpr, hi_val: &PreHirExpr) -> Option<PreHir
     } = hi_inner
     {
         if let PreHirExpr::Const(32, _) = shift.as_ref() {
-            if get_var_name(lo_inner) == get_var_name(hi_src) {
+            let lo_name = get_var_name(lo_inner);
+            let hi_name = get_var_name(hi_src);
+            if lo_name.is_some() && lo_name == hi_name {
                 return Some(hi_src.as_ref().clone());
             }
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn match_split_stores_rejects_non_var_expressions() {
+        let lo_val = PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Var("p".to_string())),
+            ty: u32_ty(),
+        };
+        let hi_val = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("q".to_string())),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(32, u32_ty())),
+            ty: u32_ty(),
+        };
+        assert!(match_split_stores(&lo_val, &hi_val).is_none());
+    }
+
+    #[test]
+    fn is_carry_of_handles_cyclic_defs_without_stack_overflow() {
+        let mut defs = HashMap::default();
+        defs.insert("x".to_string(), PreHirExpr::Var("x".to_string()));
+        let carry_expr = PreHirExpr::Var("x".to_string());
+        let lo1 = PreHirExpr::Var("a".to_string());
+        let lo2 = PreHirExpr::Var("b".to_string());
+        assert!(!is_carry_of(&carry_expr, &lo1, &lo2, "lo", &defs));
+    }
 }
