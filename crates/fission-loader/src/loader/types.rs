@@ -416,6 +416,8 @@ pub struct LoadedBinaryInner {
     pub rich_header_records: Option<Vec<RichHeaderRecord>>,
     /// ELF symbol versioning (address -> version name).
     pub symbol_versions: std::collections::HashMap<u64, String>,
+    /// ELF symbol versioning by symbol name (symbol name -> version name).
+    pub symbol_version_names: std::collections::HashMap<String, String>,
     /// COFF/PE label addresses (for example MingW `.l_startw`) used as CFG block leaders.
     pub cfg_label_leaders: Vec<u64>,
 }
@@ -648,6 +650,7 @@ pub struct LoadedBinaryBuilder {
     relocations: Vec<RelocationEntry>,
     rich_header_records: Option<Vec<RichHeaderRecord>>,
     symbol_versions: std::collections::HashMap<u64, String>,
+    symbol_version_names: std::collections::HashMap<String, String>,
     inferred_types: Vec<InferredTypeInfo>,
     cfg_label_leaders: Vec<u64>,
 }
