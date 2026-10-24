@@ -102,7 +102,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
     address: u64,
     name: &str,
     enforce_auto_gate: bool,
-    _timeout_ms: Option<u64>,
+    timeout_ms: Option<u64>,
     mut decomp_ctx: crate::context::DecompContext<'bin>,
     base_options: NirRenderOptions,
     region_linearize_structuring: bool,
@@ -130,6 +130,15 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
     let max_rounds = 3;
 
     for round in 0..max_rounds {
+        if let Some(timeout) = timeout_ms {
+            if render_start.elapsed() >= std::time::Duration::from_millis(timeout) {
+                nir_diag_stage(address, "render_preview_timeout", render_start);
+                return Err(format!(
+                    "nir_timeout: Fission NIR direct render timed out after {timeout}ms at round {}",
+                    round + 1
+                ));
+            }
+        }
         decomp_ctx.begin_round();
         decomp_ctx.refine_type_context(pcode);
 
@@ -147,6 +156,15 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
         })) {
             Ok(Ok(output)) => {
                 if decomp_ctx.hints_changed() && round < max_rounds - 1 {
+                    if let Some(timeout) = timeout_ms {
+                        if render_start.elapsed() >= std::time::Duration::from_millis(timeout) {
+                            nir_diag_stage(address, "render_preview_timeout", render_start);
+                            return Err(format!(
+                                "nir_timeout: Fission NIR direct render timed out after {timeout}ms before feedback round {}",
+                                round + 2
+                            ));
+                        }
+                    }
                     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
                         eprintln!(
                             "[PREVIEW-DIAG] fn=0x{address:x} round={} hints_changed, triggering feedback loop",
@@ -399,8 +417,65 @@ pub(crate) fn render_nir_from_json_with_type_context(
         }
     }
 
+    if let Some(timeout) = timeout_ms {
+        if parse_start.elapsed() >= std::time::Duration::from_millis(timeout) {
+            nir_diag_stage(address, "render_preview_timeout", parse_start);
+            return Err(format!(
+                "nir_timeout: Fission NIR render timed out after {timeout}ms before in-process render"
+            ));
+        }
+    }
+
     match render_nir_request(&request) {
         Ok(result) => Ok(Some(result)),
         Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_core::architecture::{
+        BinaryLoadSpec, CompilerSpecId, GhidraLanguageId, LanguageCompilerSpecPair,
+    };
+    use fission_loader::loader::types::{DataBuffer, LoadedBinaryBuilder};
+
+    #[test]
+    fn render_nir_from_pcode_with_decomp_context_enforces_timeout() {
+        let load_spec = BinaryLoadSpec {
+            format: "ELF".to_string(),
+            image_base: 0x1000,
+            pair: LanguageCompilerSpecPair {
+                language_id: GhidraLanguageId("x86:LE:64:default".to_string()),
+                compiler_spec_id: CompilerSpecId("default".to_string()),
+            },
+            preferred: true,
+            source: "test".to_string(),
+        };
+        let binary =
+            LoadedBinaryBuilder::new("test_bin".to_string(), DataBuffer::Heap(vec![0u8; 0x1000]))
+                .load_spec(load_spec)
+                .build()
+                .expect("build");
+        let fact_store = FactStore::default();
+        let decomp_ctx = crate::context::DecompContext::from_facts(&binary, fact_store, 0x1000);
+        let pcode = PcodeFunction { blocks: Vec::new() };
+
+        let result = render_nir_from_pcode_with_decomp_context(
+            &pcode,
+            &binary,
+            0x1000,
+            "test_fn",
+            false,
+            Some(0),
+            decomp_ctx,
+            NirRenderOptions::default(),
+            false,
+            false,
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("nir_timeout"), "{err}");
     }
 }

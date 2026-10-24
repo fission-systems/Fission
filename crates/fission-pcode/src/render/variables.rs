@@ -24,7 +24,7 @@ pub struct RecoveredVariable {
     /// register-resident local, which have no slot to name.
     pub stack_offset: Option<i64>,
     pub size: Option<u32>,
-    /// `"arg"` or `"stack"`.
+    /// `"arg"`, `"stack"`, or `"reg"`.
     pub kind: &'static str,
     /// Position in the ABI argument order, for an argument.
     pub arg_index: Option<usize>,
@@ -108,7 +108,12 @@ pub(crate) fn recovered_variables_with_instruction_addresses(
         out.push(describe(binding, "arg", Some(arg_index), pointer_size));
     }
     for binding in &func.locals {
-        let mut variable = describe(binding, "stack", None, pointer_size);
+        let kind = if frame_offset(binding.origin).is_some() {
+            "stack"
+        } else {
+            "reg"
+        };
+        let mut variable = describe(binding, kind, None, pointer_size);
         if let Some(addresses) = addresses_by_name.get(&binding.name) {
             variable.addresses.clone_from(addresses);
         }
@@ -209,6 +214,35 @@ mod tests {
             serde_json::to_value(&variables[0]).unwrap()["addresses"],
             serde_json::json!([0x1000, 0x1004])
         );
+    }
+
+    #[test]
+    fn local_variable_kind_distinguishes_stack_from_register() {
+        let mut function = HirFunction::default();
+        function.locals.push(NirBinding {
+            name: "stack_var".to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-8)),
+            initializer: None,
+        });
+        function.locals.push(NirBinding {
+            name: "reg_var".to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        });
+
+        let variables = recovered_variables(&function);
+        assert_eq!(variables[0].kind, "stack");
+        assert_eq!(variables[1].kind, "reg");
     }
 
     #[test]

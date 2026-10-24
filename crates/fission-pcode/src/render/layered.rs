@@ -2450,6 +2450,70 @@ mod global_decl_tests {
     }
 
     #[test]
+    fn recover_global_symbol_accesses_does_not_rewrite_advancing_pointer_value() {
+        let mut hir = HirFunction {
+            name: "loop_global_alias".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![NirBinding {
+                name: "ptr".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                })),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("ptr".to_string()),
+                    rhs: HirExpr::Const(
+                        0x2000,
+                        NirType::Ptr(Box::new(NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        })),
+                    ),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Binary {
+                        op: fission_midend_core::HirBinaryOp::Lt,
+                        lhs: Box::new(HirExpr::Var("ptr".to_string())),
+                        rhs: Box::new(HirExpr::Const(0x3000, NirType::Unknown)),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![
+                        HirStmt::Expr(HirExpr::Call {
+                            target: "process".to_string(),
+                            args: vec![HirExpr::Var("ptr".to_string())],
+                            ty: NirType::Unknown,
+                        }),
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("ptr".to_string()),
+                            rhs: HirExpr::Binary {
+                                op: fission_midend_core::HirBinaryOp::Add,
+                                lhs: Box::new(HirExpr::Var("ptr".to_string())),
+                                rhs: Box::new(HirExpr::Const(4, NirType::Unknown)),
+                                ty: NirType::Unknown,
+                            },
+                        },
+                    ],
+                },
+            ],
+            ..HirFunction::default()
+        };
+        let options = preview_options_with_global("math_sink");
+
+        crate::render::recover_global_symbol_accesses(&mut hir, &options);
+        let rendered = render_hir_function_with_global_decls(&hir, &options);
+
+        assert!(rendered.contains("process(ptr);"), "{rendered}");
+        assert!(!rendered.contains("process(&math_sink);"), "{rendered}");
+    }
+
+    #[test]
     fn render_hir_skips_non_identifier_global_names() {
         let hir = HirFunction {
             name: "string_user".to_string(),
