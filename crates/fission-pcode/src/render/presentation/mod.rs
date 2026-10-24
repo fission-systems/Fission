@@ -4023,4 +4023,91 @@ mod tests {
             func.body
         );
     }
+
+    #[test]
+    fn goto_recovery_empty_fallthrough_does_not_conditionalize_following_code() {
+        let i32 = int_ty(32, true);
+        let mut func = HirFunction {
+            name: "empty_fallthrough".into(),
+            params: vec![param("c")],
+            locals: vec![local("x")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("c".into()),
+                    then_body: vec![HirStmt::Goto("Ljoin".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Label("Ljoin".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(42, i32.clone()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            !func.body.iter().any(|s| matches!(s, HirStmt::If { .. })),
+            "unconditional join after empty fallthrough must not be wrapped in If: {:?}",
+            func.body
+        );
+        assert!(
+            func.body
+                .iter()
+                .any(|s| matches!(s, HirStmt::Return(Some(_)))),
+            "unconditional return must remain at top level: {:?}",
+            func.body
+        );
+    }
+
+    #[test]
+    fn goto_recovery_while_preserves_lcond_when_externally_referenced() {
+        let i32 = int_ty(32, true);
+        let mut func = HirFunction {
+            name: "external_lcond_ref".into(),
+            params: vec![param("skip"), param("cond")],
+            locals: vec![local("x")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("skip".into()),
+                    then_body: vec![HirStmt::Goto("Lcond".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(1, i32.clone()),
+                },
+                HirStmt::Goto("Lcond".into()),
+                HirStmt::Label("Lbody".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("x".into())),
+                        rhs: Box::new(HirExpr::Const(1, i32.clone())),
+                        ty: i32.clone(),
+                    },
+                },
+                HirStmt::Label("Lcond".into()),
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".into()),
+                    then_body: vec![HirStmt::Goto("Lbody".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            func.body
+                .iter()
+                .any(|s| matches!(s, HirStmt::Label(l) if l == "Lcond")),
+            "Label(Lcond) must not be consumed while an external goto Lcond remains: {:?}",
+            func.body
+        );
+    }
 }
