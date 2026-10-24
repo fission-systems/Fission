@@ -244,3 +244,26 @@ pub(super) fn disassemble_function(
     }
     Ok(())
 }
+
+/// Convert disassembled instruction tuples into canonical `DisasmResponse`.
+pub fn to_disasm_response(
+    instructions: &[(u64, String, String, String)],
+) -> fission_analysis_protocol::DisasmResponse {
+    let rows = instructions
+        .iter()
+        .map(
+            |(ip, bytes, text, note)| fission_analysis_protocol::DisasmRow {
+                address: *ip,
+                bytes_hex: bytes.clone(),
+                text: text.clone(),
+                target_addr: None,
+                refers_to: if note.is_empty() {
+                    None
+                } else {
+                    Some(note.clone())
+                },
+            },
+        )
+        .collect();
+    fission_analysis_protocol::DisasmResponse { rows }
+}

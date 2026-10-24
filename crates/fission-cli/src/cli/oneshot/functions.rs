@@ -1,8 +1,44 @@
+use fission_analysis_protocol::{FnEntry, FunctionsResponse};
+use fission_loader::loader::FunctionInfo;
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::function_view::{
     canonical_functions_sorted, discovered_functions_sorted,
 };
 use std::io::{self, Write};
+
+pub fn function_info_to_fn_entry(f: &FunctionInfo) -> FnEntry {
+    FnEntry {
+        addr: f.address,
+        name: f.name.clone(),
+        is_import: f.is_import,
+        is_export: f.is_export,
+        is_thunk: f.is_thunk_like,
+        size: f.size,
+        calling_convention: None,
+        return_type: None,
+        parameter_types: Vec::new(),
+        symbol_source: f.origin.clone(),
+    }
+}
+
+pub fn build_functions_response(
+    binary: &LoadedBinary,
+    include_nonuser_functions: bool,
+) -> FunctionsResponse {
+    let functions = if include_nonuser_functions {
+        discovered_functions_sorted(binary)
+    } else {
+        canonical_functions_sorted(binary)
+    };
+    let entries = functions
+        .into_iter()
+        .map(function_info_to_fn_entry)
+        .collect();
+    FunctionsResponse {
+        functions: entries,
+        analyzing: false,
+    }
+}
 
 pub(super) fn print_function_list(
     binary: &LoadedBinary,

@@ -66,6 +66,42 @@ impl DecompileResult {
             hint_stats,
         }
     }
+
+    pub fn to_protocol_response(&self) -> fission_analysis_protocol::DecompileResponse {
+        let fell_back = self.code.is_none();
+        let reason = if fell_back {
+            Some("decompilation produced no output".to_string())
+        } else {
+            None
+        };
+        let pseudocode = self.code.clone().unwrap_or_default();
+        let mut warnings = Vec::new();
+        let mut duration_ms = 0;
+        if let Some(stats) = &self.build_stats {
+            duration_ms = stats.build_duration_ms as u64;
+            if stats.fas_virtual_goto_count > 0 {
+                warnings.push(format!(
+                    "Output contains {} FAS virtualized goto statements",
+                    stats.fas_virtual_goto_count
+                ));
+            }
+        }
+        fission_analysis_protocol::DecompileResponse {
+            pseudocode,
+            nir: None,
+            fell_back,
+            reason,
+            warnings,
+            duration_ms,
+            line_map: Vec::new(),
+        }
+    }
+}
+
+impl From<&DecompileResult> for fission_analysis_protocol::DecompileResponse {
+    fn from(result: &DecompileResult) -> Self {
+        result.to_protocol_response()
+    }
 }
 
 pub fn decompile_prebuilt_pcode(
