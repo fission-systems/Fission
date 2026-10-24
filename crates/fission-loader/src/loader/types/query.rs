@@ -306,15 +306,30 @@ impl LoadedBinary {
 
     /// Create a memory-mapped representation of the binary for the decompiler.
     pub fn get_memory_mapped_data(&self) -> Vec<u8> {
+        let binary_data = self.inner().data.as_slice();
+        if self.sections.is_empty() {
+            return binary_data.to_vec();
+        }
+
+        let min_va = self
+            .sections
+            .iter()
+            .map(|s| s.virtual_address)
+            .min()
+            .unwrap_or(self.image_base)
+            .min(self.image_base);
         let max_va_end = self
             .sections
             .iter()
-            .map(|s| s.virtual_address + s.virtual_size)
+            .filter_map(|s| {
+                s.virtual_address
+                    .checked_add(std::cmp::max(s.virtual_size, s.file_size))
+            })
             .max()
-            .unwrap_or(0);
+            .unwrap_or(min_va);
 
-        let mut mapped = vec![0u8; (max_va_end - self.image_base) as usize];
-        let binary_data = self.inner().data.as_slice();
+        let total_size = usize::try_from(max_va_end.saturating_sub(min_va)).unwrap_or(0);
+        let mut mapped = vec![0u8; total_size];
 
         for section in &self.sections {
             if section.file_size == 0 || section.file_offset as usize >= binary_data.len() {
@@ -322,12 +337,23 @@ impl LoadedBinary {
             }
 
             let start = section.file_offset as usize;
-            let end = std::cmp::min(start + section.file_size as usize, binary_data.len());
+            let end = std::cmp::min(
+                start.saturating_add(section.file_size as usize),
+                binary_data.len(),
+            );
             let size = end - start;
 
-            let dest_start = (section.virtual_address - self.image_base) as usize;
-            if dest_start + size <= mapped.len() {
-                mapped[dest_start..dest_start + size].copy_from_slice(&binary_data[start..end]);
+            let Some(dest_start) = section
+                .virtual_address
+                .checked_sub(min_va)
+                .and_then(|v| usize::try_from(v).ok())
+            else {
+                continue;
+            };
+            if let Some(dest_end) = dest_start.checked_add(size)
+                && dest_end <= mapped.len()
+            {
+                mapped[dest_start..dest_end].copy_from_slice(&binary_data[start..end]);
             }
         }
         mapped
@@ -438,5 +464,39 @@ mod tests {
         assert_eq!(big.read_u16(0x1000).unwrap(), 0x1234);
         assert_eq!(big.read_u32(0x1000).unwrap(), 0x1234_5678);
         assert_eq!(big.read_ptr(0x1000).unwrap(), 0x1234_5678);
+    }
+
+    #[test]
+    fn get_memory_mapped_data_handles_empty_sections_and_zero_virtual_size() {
+        let raw_binary = LoadedBinaryBuilder::new(
+            "raw.bin".to_string(),
+            DataBuffer::Heap(vec![0xaa, 0xbb, 0xcc]),
+        )
+        .image_base(0x400000)
+        .build()
+        .expect("raw binary");
+        assert_eq!(raw_binary.get_memory_mapped_data(), vec![0xaa, 0xbb, 0xcc]);
+
+        let coff_like = LoadedBinaryBuilder::new(
+            "coff.obj".to_string(),
+            DataBuffer::Heap(vec![0x11, 0x22, 0x33, 0x44]),
+        )
+        .image_base(0x2000)
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x2000,
+            virtual_size: 0,
+            file_offset: 0,
+            file_size: 4,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("coff binary");
+        assert_eq!(
+            coff_like.get_memory_mapped_data(),
+            vec![0x11, 0x22, 0x33, 0x44]
+        );
     }
 }
