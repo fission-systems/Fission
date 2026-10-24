@@ -19,13 +19,19 @@ pub fn apply_type_constraint_propagation(func: &mut PreHirFunction) -> bool {
     // 2. Scan the body to collect constraints from memory/pointer accesses
     // and assignments (dataflow edges)
     let mut field_accesses = HashMap::<String, HashMap<u32, NirType>>::default();
+    let mut pointer_bases = HashSet::<String>::default();
     let mut assignments = Vec::new(); // Pairs of (lhs_var, rhs_expr)
     let mut whole_aggregate_store_values = HashSet::default();
 
-    collect_constraints(&func.body, &mut field_accesses, &mut assignments);
+    collect_constraints(
+        &func.body,
+        &mut field_accesses,
+        &mut pointer_bases,
+        &mut assignments,
+    );
     collect_whole_aggregate_store_values(&func.body, &mut whole_aggregate_store_values);
 
-    // Initial upgrade of variables to Ptr(Aggregate) if they have field accesses
+    // Initial upgrade of variables to Aggregate or Ptr(Aggregate) if they have field accesses
     for (var_name, fields) in &field_accesses {
         let current_ty = var_types.get(var_name).cloned().unwrap_or(NirType::Unknown);
         if let NirType::Unknown = current_ty {
@@ -43,10 +49,15 @@ pub fn apply_type_constraint_propagation(func: &mut PreHirFunction) -> bool {
             }
             struct_fields.sort_by_key(|f| f.offset);
 
-            let new_ty = NirType::Ptr(Box::new(NirType::Aggregate {
+            let agg = NirType::Aggregate {
                 size: max_offset,
                 fields: struct_fields,
-            }));
+            };
+            let new_ty = if pointer_bases.contains(var_name) {
+                NirType::Ptr(Box::new(agg))
+            } else {
+                agg
+            };
             var_types.insert(var_name.clone(), new_ty);
             changed = true;
         }
@@ -319,6 +330,7 @@ fn type_byte_size(ty: &NirType) -> Option<u32> {
 fn collect_constraints(
     stmts: &[PreHirStmt],
     field_accesses: &mut HashMap<String, HashMap<u32, NirType>>,
+    pointer_bases: &mut HashSet<String>,
     assignments: &mut Vec<(String, PreHirExpr)>,
 ) {
     for stmt in stmts {
@@ -327,22 +339,22 @@ fn collect_constraints(
                 if let PreHirLValue::Var(lhs_name) = lhs {
                     assignments.push((lhs_name.clone(), rhs.clone()));
                 }
-                collect_constraints_expr(rhs, field_accesses);
-                collect_constraints_lvalue(lhs, field_accesses);
+                collect_constraints_expr(rhs, field_accesses, pointer_bases);
+                collect_constraints_lvalue(lhs, field_accesses, pointer_bases);
             }
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-                collect_constraints_expr(expr, field_accesses);
+                collect_constraints_expr(expr, field_accesses, pointer_bases);
             }
             PreHirStmt::Block(body) => {
-                collect_constraints(body, field_accesses, assignments);
+                collect_constraints(body, field_accesses, pointer_bases, assignments);
             }
             PreHirStmt::While { cond, body } => {
-                collect_constraints_expr(cond, field_accesses);
-                collect_constraints(body, field_accesses, assignments);
+                collect_constraints_expr(cond, field_accesses, pointer_bases);
+                collect_constraints(body, field_accesses, pointer_bases, assignments);
             }
             PreHirStmt::DoWhile { body, cond } => {
-                collect_constraints(body, field_accesses, assignments);
-                collect_constraints_expr(cond, field_accesses);
+                collect_constraints(body, field_accesses, pointer_bases, assignments);
+                collect_constraints_expr(cond, field_accesses, pointer_bases);
             }
             PreHirStmt::For {
                 init,
@@ -354,40 +366,42 @@ fn collect_constraints(
                     collect_constraints(
                         std::slice::from_ref(init_stmt.as_ref()),
                         field_accesses,
+                        pointer_bases,
                         assignments,
                     );
                 }
                 if let Some(cond_expr) = cond {
-                    collect_constraints_expr(cond_expr, field_accesses);
+                    collect_constraints_expr(cond_expr, field_accesses, pointer_bases);
                 }
                 if let Some(update_stmt) = update {
                     collect_constraints(
                         std::slice::from_ref(update_stmt.as_ref()),
                         field_accesses,
+                        pointer_bases,
                         assignments,
                     );
                 }
-                collect_constraints(body, field_accesses, assignments);
+                collect_constraints(body, field_accesses, pointer_bases, assignments);
             }
             PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                collect_constraints_expr(cond, field_accesses);
-                collect_constraints(then_body, field_accesses, assignments);
-                collect_constraints(else_body, field_accesses, assignments);
+                collect_constraints_expr(cond, field_accesses, pointer_bases);
+                collect_constraints(then_body, field_accesses, pointer_bases, assignments);
+                collect_constraints(else_body, field_accesses, pointer_bases, assignments);
             }
             PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                collect_constraints_expr(expr, field_accesses);
+                collect_constraints_expr(expr, field_accesses, pointer_bases);
                 for case in cases {
-                    collect_constraints(&case.body, field_accesses, assignments);
+                    collect_constraints(&case.body, field_accesses, pointer_bases, assignments);
                 }
-                collect_constraints(default, field_accesses, assignments);
+                collect_constraints(default, field_accesses, pointer_bases, assignments);
             }
             _ => {}
         }
@@ -468,26 +482,30 @@ fn collect_whole_aggregate_store_values(stmts: &[PreHirStmt], out: &mut HashSet<
 fn collect_constraints_lvalue(
     lhs: &PreHirLValue,
     field_accesses: &mut HashMap<String, HashMap<u32, NirType>>,
+    pointer_bases: &mut HashSet<String>,
 ) {
     match lhs {
         PreHirLValue::Deref { ptr, ty } => {
             if let PreHirExpr::PtrOffset { base, offset } = ptr.as_ref() {
                 if let PreHirExpr::Var(base_name) = base.as_ref() {
+                    pointer_bases.insert(base_name.clone());
                     field_accesses
                         .entry(base_name.clone())
                         .or_default()
                         .insert(*offset as u32, ty.clone());
                 }
+            } else if let PreHirExpr::Var(base_name) = ptr.as_ref() {
+                pointer_bases.insert(base_name.clone());
             }
-            collect_constraints_expr(ptr, field_accesses);
+            collect_constraints_expr(ptr, field_accesses, pointer_bases);
         }
         PreHirLValue::Index {
             base,
             index,
             elem_ty: _,
         } => {
-            collect_constraints_expr(base, field_accesses);
-            collect_constraints_expr(index, field_accesses);
+            collect_constraints_expr(base, field_accesses, pointer_bases);
+            collect_constraints_expr(index, field_accesses, pointer_bases);
         }
         PreHirLValue::FieldAccess {
             base, offset, ty, ..
@@ -498,7 +516,7 @@ fn collect_constraints_lvalue(
                     .or_default()
                     .insert(*offset, ty.clone());
             }
-            collect_constraints_expr(base, field_accesses);
+            collect_constraints_expr(base, field_accesses, pointer_bases);
         }
         PreHirLValue::Var(_) => {}
     }
@@ -507,28 +525,37 @@ fn collect_constraints_lvalue(
 fn collect_constraints_expr(
     expr: &PreHirExpr,
     field_accesses: &mut HashMap<String, HashMap<u32, NirType>>,
+    pointer_bases: &mut HashSet<String>,
 ) {
     match expr {
         PreHirExpr::Load { ptr, ty } => {
             if let PreHirExpr::PtrOffset { base, offset } = ptr.as_ref() {
                 if let PreHirExpr::Var(base_name) = base.as_ref() {
+                    pointer_bases.insert(base_name.clone());
                     field_accesses
                         .entry(base_name.clone())
                         .or_default()
                         .insert(*offset as u32, ty.clone());
                 }
+            } else if let PreHirExpr::Var(base_name) = ptr.as_ref() {
+                pointer_bases.insert(base_name.clone());
             }
-            collect_constraints_expr(ptr, field_accesses);
+            collect_constraints_expr(ptr, field_accesses, pointer_bases);
+        }
+        PreHirExpr::PtrOffset { base, .. } => {
+            if let PreHirExpr::Var(base_name) = base.as_ref() {
+                pointer_bases.insert(base_name.clone());
+            }
+            collect_constraints_expr(base, field_accesses, pointer_bases);
         }
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
-        | PreHirExpr::PtrOffset { base: expr, .. }
         | PreHirExpr::AggregateCopy { src: expr, .. } => {
-            collect_constraints_expr(expr, field_accesses);
+            collect_constraints_expr(expr, field_accesses, pointer_bases);
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            collect_constraints_expr(lhs, field_accesses);
-            collect_constraints_expr(rhs, field_accesses);
+            collect_constraints_expr(lhs, field_accesses, pointer_bases);
+            collect_constraints_expr(rhs, field_accesses, pointer_bases);
         }
         PreHirExpr::Select {
             cond,
@@ -536,18 +563,18 @@ fn collect_constraints_expr(
             else_expr,
             ..
         } => {
-            collect_constraints_expr(cond, field_accesses);
-            collect_constraints_expr(then_expr, field_accesses);
-            collect_constraints_expr(else_expr, field_accesses);
+            collect_constraints_expr(cond, field_accesses, pointer_bases);
+            collect_constraints_expr(then_expr, field_accesses, pointer_bases);
+            collect_constraints_expr(else_expr, field_accesses, pointer_bases);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                collect_constraints_expr(arg, field_accesses);
+                collect_constraints_expr(arg, field_accesses, pointer_bases);
             }
         }
         PreHirExpr::Index { base, index, .. } => {
-            collect_constraints_expr(base, field_accesses);
-            collect_constraints_expr(index, field_accesses);
+            collect_constraints_expr(base, field_accesses, pointer_bases);
+            collect_constraints_expr(index, field_accesses, pointer_bases);
         }
         PreHirExpr::FieldAccess {
             base, offset, ty, ..
@@ -558,7 +585,7 @@ fn collect_constraints_expr(
                     .or_default()
                     .insert(*offset, ty.clone());
             }
-            collect_constraints_expr(base, field_accesses);
+            collect_constraints_expr(base, field_accesses, pointer_bases);
         }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -1372,6 +1399,65 @@ mod tests {
         };
         assert!(
             matches!(base.as_ref(), PreHirExpr::Cast { ty: NirType::Ptr(inner), .. } if matches!(inner.as_ref(), NirType::Aggregate { .. }))
+        );
+    }
+
+    #[test]
+    fn local_struct_value_with_field_access_is_not_typed_as_pointer() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            locals: vec![binding("pt", NirType::Unknown)],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::FieldAccess {
+                    base: Box::new(PreHirExpr::Var("pt".to_owned())),
+                    field_name: "field_0".to_owned(),
+                    offset: 0,
+                    ty: u32_ty.clone(),
+                },
+                rhs: PreHirExpr::Const(42, u32_ty),
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_type_constraint_propagation(&mut func));
+        let pt_ty = &func.locals.iter().find(|l| l.name == "pt").unwrap().ty;
+        assert!(
+            matches!(pt_ty, NirType::Aggregate { size: 4, .. }),
+            "value struct accessed via field access directly must be Aggregate, not Ptr(Aggregate): got {:?}",
+            pt_ty
+        );
+    }
+
+    #[test]
+    fn pointer_struct_with_deref_offset_is_typed_as_pointer() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            locals: vec![binding("p", NirType::Unknown)],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("p".to_owned())),
+                        offset: 4,
+                    }),
+                    ty: u32_ty.clone(),
+                },
+                rhs: PreHirExpr::Const(42, u32_ty),
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_type_constraint_propagation(&mut func));
+        let p_ty = &func.locals.iter().find(|l| l.name == "p").unwrap().ty;
+        assert!(
+            matches!(p_ty, NirType::Ptr(inner) if matches!(**inner, NirType::Aggregate { .. })),
+            "pointer struct accessed via deref must be Ptr(Aggregate): got {:?}",
+            p_ty
         );
     }
 }
