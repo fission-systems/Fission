@@ -358,9 +358,10 @@ impl OsEnvironment for LinuxEnv {
             }
         }
 
-        // After main returns into our synthetic stub: exit code is in RAX.
+        // After main returns into our synthetic stub: exit code is in the ABI return register.
         if func_name == "__fission_post_main_exit" {
-            let code = emu.read_register_u64("RAX").unwrap_or(0) as u32;
+            let ret_reg = syscall_conv::SyscallAbi::for_arch(&emu.arch).result;
+            let code = emu.read_register_u64(ret_reg).unwrap_or(0) as u32;
             tracing::info!("post-main exit stub: code={}", code);
             return Ok(HleResult::Halt(code));
         }
