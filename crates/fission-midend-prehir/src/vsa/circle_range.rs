@@ -266,7 +266,7 @@ impl CircleRange {
         if lo == hi {
             Self::top(self.bits)
         } else {
-            Self::interval(lo, hi.wrapping_add(1) & mask, self.bits)
+            Self::interval(lo, hi, self.bits)
         }
     }
 
@@ -467,5 +467,12 @@ mod tests {
         assert_eq!(previous.widen(&CircleRange::bottom(8)), CircleRange::top(8));
         assert_eq!(CircleRange::bottom(8).widen(&previous), previous);
         assert_eq!(previous.widen(&CircleRange::top(8)), CircleRange::top(8));
+    }
+
+    #[test]
+    fn add_singletons_produces_singleton() {
+        let a = CircleRange::singleton(10, 32);
+        let b = CircleRange::singleton(20, 32);
+        assert_eq!(a.add(&b), CircleRange::singleton(30, 32));
     }
 }
