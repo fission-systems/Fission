@@ -43,7 +43,7 @@ Next boundaries: call origins in complex headers/initializers and multiple-call 
 ## Reproduction inputs and retained evidence
 
 Dataset: [frozen C++ qualification revision](https://huggingface.co/datasets/sjkim1127/decbench-cpp-qualification/tree/07dd95dbe6214b8a78fc1e4a55961ab515986489).
-The compact evidence in `call-provenance-200.json` preserves input hashes, exact
+The compact evidence in `call-provenance-200.jsonl` preserves input hashes, exact
 requested addresses, output hashes and native-call PCs for each image. Its source
 addresses are diagnostic evidence only and are not used by production rules.
 The exact same stripped bytes and address lists were supplied to both builds.
