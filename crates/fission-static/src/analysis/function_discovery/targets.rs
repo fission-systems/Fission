@@ -11,7 +11,7 @@ pub(crate) fn normalize_target(binary: &LoadedBinary, target: u64) -> u64 {
     }
 }
 
-fn same_section(binary: &LoadedBinary, addr1: u64, addr2: u64) -> bool {
+pub(crate) fn same_section(binary: &LoadedBinary, addr1: u64, addr2: u64) -> bool {
     if binary.sections.is_empty() {
         return false;
     }
