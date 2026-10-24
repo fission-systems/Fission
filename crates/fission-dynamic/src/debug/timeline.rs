@@ -183,13 +183,10 @@ impl Timeline {
     pub fn seek_to(&mut self, step_index: u64) -> SeekResult {
         match &mut self.backend {
             Backend::Internal(rec) => {
-                if rec.snapshot_count() == 0 {
-                    return SeekResult::Empty;
-                }
-
-                let snapshots = rec.snapshots();
-                let min_step = snapshots.first().map(|s| s.step_index).unwrap_or(0);
-                let max_step = snapshots.last().map(|s| s.step_index).unwrap_or(0);
+                let (min_step, max_step) = match rec.step_range() {
+                    Some(range) => range,
+                    None => return SeekResult::Empty,
+                };
 
                 if step_index < min_step || step_index > max_step {
                     return SeekResult::OutOfBounds {
@@ -270,7 +267,7 @@ impl Timeline {
 
     pub fn seek_start(&mut self) -> SeekResult {
         let target = match &self.backend {
-            Backend::Internal(rec) => rec.snapshots().first().map(|s| s.step_index),
+            Backend::Internal(rec) => rec.first_snapshot().map(|s| s.step_index),
             #[cfg(target_os = "linux")]
             Backend::RR(_) => Some(0),
         };
@@ -284,7 +281,7 @@ impl Timeline {
 
     pub fn seek_end(&mut self) -> SeekResult {
         let target = match &self.backend {
-            Backend::Internal(rec) => rec.snapshots().last().map(|s| s.step_index),
+            Backend::Internal(rec) => rec.latest_snapshot().map(|s| s.step_index),
             #[cfg(target_os = "linux")]
             Backend::RR(rr) => Some(rr.step_count() as u64),
         };
@@ -310,15 +307,7 @@ impl Timeline {
 
     pub fn step_range(&self) -> Option<(u64, u64)> {
         match &self.backend {
-            Backend::Internal(rec) => {
-                let snapshots = rec.snapshots();
-                if snapshots.is_empty() {
-                    return None;
-                }
-                let min = snapshots.first().map(|s| s.step_index).unwrap_or(0);
-                let max = snapshots.last().map(|s| s.step_index).unwrap_or(0);
-                Some((min, max))
-            }
+            Backend::Internal(rec) => rec.step_range(),
             #[cfg(target_os = "linux")]
             Backend::RR(rr) => rr.timeline_range(),
         }
@@ -430,5 +419,26 @@ mod tests {
         } else {
             panic!("Forward failed");
         }
+
+        if let SeekResult::Success(snap) = timeline.seek_start() {
+            assert_eq!(snap.step_index, 0);
+        } else {
+            panic!("seek_start failed");
+        }
+
+        if let SeekResult::Success(snap) = timeline.seek_end() {
+            assert_eq!(snap.step_index, 4);
+        } else {
+            panic!("seek_end failed");
+        }
+    }
+
+    #[test]
+    fn test_empty_timeline_range_and_seek() {
+        let mut timeline = Timeline::new();
+        assert_eq!(timeline.step_range(), None);
+        assert!(matches!(timeline.seek_start(), SeekResult::Empty));
+        assert!(matches!(timeline.seek_end(), SeekResult::Empty));
+        assert!(matches!(timeline.seek_to(0), SeekResult::Empty));
     }
 }

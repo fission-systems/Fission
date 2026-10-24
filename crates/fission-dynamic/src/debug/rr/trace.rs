@@ -2,6 +2,7 @@
 //!
 //! Provides recording and replay of program execution using rr.
 
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -27,6 +28,62 @@ pub enum RRState {
     Paused,
     /// Process has terminated
     Terminated,
+}
+
+/// Target architecture supported by RR
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RRArch {
+    X86_64,
+    X86,
+    Aarch64,
+}
+
+impl Default for RRArch {
+    fn default() -> Self {
+        Self::X86_64
+    }
+}
+
+/// Parse architecture name returned by GDB
+pub fn parse_gdb_architecture(val: &str) -> Option<RRArch> {
+    let lower = val.to_ascii_lowercase();
+    if lower.contains("aarch64") || lower.contains("arm64") {
+        Some(RRArch::Aarch64)
+    } else if lower.contains("x86-64") || lower.contains("x86_64") || lower.contains("amd64") {
+        Some(RRArch::X86_64)
+    } else if lower.contains("i386") || lower.contains("i686") || lower.contains("x86") {
+        Some(RRArch::X86)
+    } else {
+        None
+    }
+}
+
+/// Candidate directories where RR traces or trace folders may be stored.
+fn trace_search_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(dir) = std::env::var("_RR_TRACE_DIR") {
+        let p = PathBuf::from(dir);
+        if !roots.contains(&p) {
+            roots.push(p);
+        }
+    }
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        let p = PathBuf::from(xdg).join("rr");
+        if !roots.contains(&p) {
+            roots.push(p);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let p1 = PathBuf::from(&home).join(".local/share/rr");
+        if !roots.contains(&p1) {
+            roots.push(p1);
+        }
+        let p2 = PathBuf::from(&home).join(".rr");
+        if !roots.contains(&p2) {
+            roots.push(p2);
+        }
+    }
+    roots
 }
 
 /// Information about an RR trace
@@ -66,6 +123,8 @@ pub struct RRDebugger {
     token_counter: u32,
     /// Persistent reader for GDB/MI stdout
     gdb_reader: Option<BufReader<std::process::ChildStdout>>,
+    /// Target architecture
+    arch: RRArch,
 }
 
 impl std::fmt::Debug for RRDebugger {
@@ -75,6 +134,7 @@ impl std::fmt::Debug for RRDebugger {
             .field("state", &self.state)
             .field("current_position", &self.current_position)
             .field("max_position", &self.max_position)
+            .field("arch", &self.arch)
             .finish()
     }
 }
@@ -92,7 +152,18 @@ impl RRDebugger {
             last_registers: RegisterState::default(),
             token_counter: 0,
             gdb_reader: None,
+            arch: RRArch::default(),
         }
+    }
+
+    /// Get the target architecture
+    pub fn arch(&self) -> RRArch {
+        self.arch
+    }
+
+    /// Set the target architecture
+    pub fn set_arch(&mut self, arch: RRArch) {
+        self.arch = arch;
     }
 
     /// Check if rr is available on this system
@@ -115,18 +186,46 @@ impl RRDebugger {
 
     /// Get the path to the latest RR trace
     pub fn latest_trace() -> Option<PathBuf> {
-        let home = std::env::var("HOME").ok()?;
-        let latest = PathBuf::from(home).join(".rr").join("latest-trace");
-        if latest.exists() { Some(latest) } else { None }
+        for root in trace_search_roots() {
+            let latest = root.join("latest-trace");
+            if latest.exists() {
+                return Some(latest);
+            }
+            if root.is_dir() && (root.join("version").exists() || root.join("events").exists()) {
+                return Some(root);
+            }
+        }
+        None
     }
 
     /// List all available traces
     pub fn list_traces() -> Vec<TraceInfo> {
         let mut traces = Vec::new();
+        let mut seen = HashSet::new();
 
-        if let Ok(home) = std::env::var("HOME") {
-            let rr_dir = PathBuf::from(home).join(".rr");
-            if let Ok(entries) = std::fs::read_dir(&rr_dir) {
+        for root in trace_search_roots() {
+            if !root.is_dir() {
+                continue;
+            }
+
+            if (root.join("version").exists() || root.join("events").exists())
+                && seen.insert(root.clone())
+            {
+                let name = root
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                traces.push(TraceInfo {
+                    path: root.clone(),
+                    binary_name: name,
+                    event_count: 0,
+                    timestamp: String::new(),
+                });
+            }
+
+            if let Ok(entries) = std::fs::read_dir(&root) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
@@ -141,12 +240,14 @@ impl RRDebugger {
                             continue;
                         }
 
-                        traces.push(TraceInfo {
-                            path: path.clone(),
-                            binary_name: name,
-                            event_count: 0, // Would need to parse trace
-                            timestamp: String::new(),
-                        });
+                        if seen.insert(path.clone()) {
+                            traces.push(TraceInfo {
+                                path,
+                                binary_name: name,
+                                event_count: 0, // Would need to parse trace
+                                timestamp: String::new(),
+                            });
+                        }
                     }
                 }
             }
@@ -205,6 +306,7 @@ impl RRDebugger {
 
         self.send_command("set confirm off")?;
         self.send_command("set pagination off")?;
+        self.detect_target_arch();
 
         Ok(())
     }
@@ -290,8 +392,36 @@ impl RRDebugger {
         }
     }
 
+    /// Detect target architecture from GDB session
+    pub fn detect_target_arch(&mut self) {
+        if let Ok(responses) = self.send_command("-gdb-show architecture") {
+            for resp in responses {
+                if let MiResponse::Result { results, .. } = resp {
+                    if let Some(MiValue::Const(val)) = results.get("value") {
+                        if let Some(arch) = parse_gdb_architecture(val) {
+                            self.arch = arch;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Ok(responses) = self.send_command("-data-evaluate-expression \"sizeof(void*)\"") {
+            for resp in responses {
+                if let MiResponse::Result { results, .. } = resp {
+                    if let Some(MiValue::Const(val)) = results.get("value") {
+                        if val.trim() == "4" && self.arch == RRArch::X86_64 {
+                            self.arch = RRArch::X86;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Parse register state from GDB/MI response
-    fn parse_registers(
+    pub fn parse_registers(
         &self,
         results: &std::collections::HashMap<String, MiValue>,
     ) -> RegisterState {
@@ -314,11 +444,16 @@ impl RRDebugger {
                         }
                     });
 
-                    if let (Some(n), Some(v)) = (num, val)
-                        && let Some(name) = fission_ttd::x86_64_register_name(n)
-                    {
+                    let name = match (num, self.arch) {
+                        (Some(n), RRArch::X86_64) => fission_ttd::x86_64_register_name(n),
+                        (Some(n), RRArch::X86) => fission_ttd::x86_register_name(n),
+                        (Some(n), RRArch::Aarch64) => fission_ttd::aarch64_register_name(n),
+                        _ => None,
+                    };
+
+                    if let (Some(name), Some(v)) = (name, val) {
                         state.set(name, v);
-                        if name == "RIP" {
+                        if name == "RIP" || name == "EIP" || name == "PC" {
                             state.pc = v;
                         }
                     }
@@ -498,6 +633,7 @@ impl TimeTravelDebugger for RRDebugger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_rr_availability() {
@@ -509,5 +645,119 @@ mod tests {
     fn test_rr_new() {
         let rr = RRDebugger::new();
         assert_eq!(rr.state(), RRState::Disconnected);
+        assert_eq!(rr.arch(), RRArch::X86_64);
+    }
+
+    #[test]
+    fn test_parse_gdb_architecture() {
+        assert_eq!(parse_gdb_architecture("i386:x86-64"), Some(RRArch::X86_64));
+        assert_eq!(parse_gdb_architecture("i386"), Some(RRArch::X86));
+        assert_eq!(parse_gdb_architecture("i686"), Some(RRArch::X86));
+        assert_eq!(parse_gdb_architecture("aarch64"), Some(RRArch::Aarch64));
+        assert_eq!(parse_gdb_architecture("arm64"), Some(RRArch::Aarch64));
+    }
+
+    #[test]
+    fn test_parse_registers_x86_64() {
+        let mut rr = RRDebugger::new();
+        rr.set_arch(RRArch::X86_64);
+
+        let mut map = HashMap::new();
+        let regs = vec![
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("0".to_string()));
+                m.insert("value".to_string(), MiValue::Const("0x1234".to_string()));
+                m
+            }),
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("16".to_string()));
+                m.insert("value".to_string(), MiValue::Const("0x401000".to_string()));
+                m
+            }),
+        ];
+        map.insert("register-values".to_string(), MiValue::List(regs));
+
+        let state = rr.parse_registers(&map);
+        assert_eq!(state.get("RAX"), Some(0x1234));
+        assert_eq!(state.get("RIP"), Some(0x401000));
+        assert_eq!(state.pc, 0x401000);
+    }
+
+    #[test]
+    fn test_parse_registers_x86_32() {
+        let mut rr = RRDebugger::new();
+        rr.set_arch(RRArch::X86);
+
+        let mut map = HashMap::new();
+        let regs = vec![
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("0".to_string()));
+                m.insert("value".to_string(), MiValue::Const("0x1111".to_string()));
+                m
+            }),
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("4".to_string()));
+                m.insert(
+                    "value".to_string(),
+                    MiValue::Const("0xffffd000".to_string()),
+                );
+                m
+            }),
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("8".to_string()));
+                m.insert("value".to_string(), MiValue::Const("0x8048000".to_string()));
+                m
+            }),
+        ];
+        map.insert("register-values".to_string(), MiValue::List(regs));
+
+        let state = rr.parse_registers(&map);
+        assert_eq!(state.get("EAX"), Some(0x1111));
+        assert_eq!(state.get("ESP"), Some(0xffffd000));
+        assert_eq!(state.get("EIP"), Some(0x8048000));
+        assert_eq!(state.pc, 0x8048000);
+    }
+
+    #[test]
+    fn test_parse_registers_aarch64() {
+        let mut rr = RRDebugger::new();
+        rr.set_arch(RRArch::Aarch64);
+
+        let mut map = HashMap::new();
+        let regs = vec![
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("0".to_string()));
+                m.insert("value".to_string(), MiValue::Const("0xaaaa".to_string()));
+                m
+            }),
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("31".to_string()));
+                m.insert(
+                    "value".to_string(),
+                    MiValue::Const("0x7ffffff0".to_string()),
+                );
+                m
+            }),
+            MiValue::Tuple({
+                let mut m = HashMap::new();
+                m.insert("number".to_string(), MiValue::Const("32".to_string()));
+                m.insert("value".to_string(), MiValue::Const("0x400080".to_string()));
+                m
+            }),
+        ];
+        map.insert("register-values".to_string(), MiValue::List(regs));
+
+        let state = rr.parse_registers(&map);
+        assert_eq!(state.get("X0"), Some(0xaaaa));
+        assert_eq!(state.get("SP"), Some(0x7ffffff0));
+        assert_eq!(state.get("PC"), Some(0x400080));
+        assert_eq!(state.pc, 0x400080);
     }
 }
