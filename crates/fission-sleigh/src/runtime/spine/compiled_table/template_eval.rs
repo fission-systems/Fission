@@ -280,7 +280,8 @@ pub(super) struct CompiledTableEmitter<'c> {
     built_operands: std::collections::BTreeSet<usize>,
     /// Exported varnodes produced by BUILD subconstructors. Ghidra templates
     /// reference these through negative handle indices in parent templates.
-    exported_build_varnodes: std::collections::BTreeMap<i64, Varnode>,
+    /// Scoped by (state_key, handle_key) to prevent clobbering by nested subconstructors.
+    exported_build_varnodes: std::collections::BTreeMap<(usize, i64), Varnode>,
     /// Index of the unique (temporary) address space, derived from `.sla` metadata.
     unique_space_index: u64,
     /// Mapping from space index to space reference, derived from `.sla` metadata.
@@ -889,6 +890,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 let saved_emit = self.emitter.emit_context();
                 let saved_labels = std::mem::take(&mut self.label_positions);
                 let saved_built = std::mem::take(&mut self.built_operands);
+                let saved_exported = std::mem::take(&mut self.exported_build_varnodes);
                 self.emitter.set_emit_context(target_pc, unique_seed);
                 self.crossbuild_depth += 1;
                 let emit_result = (|| -> Result<()> {
@@ -903,6 +905,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     Ok(())
                 })();
                 self.crossbuild_depth -= 1;
+                self.exported_build_varnodes = saved_exported;
                 self.built_operands = saved_built;
                 self.label_positions = saved_labels;
                 self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
@@ -946,6 +949,7 @@ impl<'c> CompiledTableEmitter<'c> {
                         let saved_emit = self.emitter.emit_context();
                         let saved_labels = std::mem::take(&mut self.label_positions);
                         let saved_built = std::mem::take(&mut self.built_operands);
+                        let saved_exported = std::mem::take(&mut self.exported_build_varnodes);
                         self.emitter.set_emit_context(slot_pc, unique_seed);
                         let inner = (|| -> Result<()> {
                             for cop in &slot_state.constructor_template.ops {
@@ -953,6 +957,7 @@ impl<'c> CompiledTableEmitter<'c> {
                             }
                             Ok(())
                         })();
+                        self.exported_build_varnodes = saved_exported;
                         self.built_operands = saved_built;
                         self.label_positions = saved_labels;
                         self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
@@ -1035,7 +1040,9 @@ impl<'c> CompiledTableEmitter<'c> {
                 let tpl = CompiledVarnodeTpl::HandleTpl(Box::new(export_tpl.clone()));
                 if let Ok(varnode) = self.resolve_varnode_tpl(&tpl, child) {
                     let handle_key = exported_build_handle_key(operand_index)?;
-                    self.exported_build_varnodes.insert(handle_key, varnode);
+                    let state_key = state as *const RuntimeConstructState as usize;
+                    self.exported_build_varnodes
+                        .insert((state_key, handle_key), varnode);
                 }
             }
             Ok(())
@@ -1426,9 +1433,17 @@ impl<'c> CompiledTableEmitter<'c> {
         {
             return Ok(None);
         }
+        let state_key = state as *const RuntimeConstructState as usize;
         let varnode = self
             .exported_build_varnodes
-            .get(&handle_index)
+            .get(&(state_key, handle_index))
+            .or_else(|| {
+                self.exported_build_varnodes
+                    .iter()
+                    .rev()
+                    .find(|((_, idx), _)| *idx == handle_index)
+                    .map(|(_, v)| v)
+            })
             .cloned()
             .ok_or_else(|| anyhow!("exported BUILD handle {handle_index} is missing"))?;
         let _ = (size, state);
