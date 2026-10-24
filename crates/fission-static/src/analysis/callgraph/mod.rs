@@ -6,9 +6,10 @@
 
 use rustc_hash::FxHashMap;
 
-use fission_loader::loader::FunctionInfo;
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_signatures::CallGraphView;
 
+use super::external_symbol::ExternalSymbolIndex;
 use super::xref_index::{XrefIndex, XrefKind, resolve_enclosing_function};
 use super::xrefs::{XrefDatabase, XrefType};
 
@@ -32,20 +33,118 @@ pub struct CallGraph {
 /// instead of making the graph responsible for a second name table.
 pub struct NamedCallGraphView<'a> {
     graph: &'a CallGraph,
-    functions: &'a [FunctionInfo],
+    names: FxHashMap<u64, &'a str>,
+    external_symbols: Option<&'a ExternalSymbolIndex>,
 }
 
 impl<'a> NamedCallGraphView<'a> {
     pub fn new(graph: &'a CallGraph, functions: &'a [FunctionInfo]) -> Self {
-        Self { graph, functions }
+        Self::with_externals(graph, functions, None)
     }
 
-    fn name_at(&self, address: u64) -> Option<&str> {
-        self.functions
-            .iter()
-            .find(|function| function.address == address)
-            .map(|function| function.name.as_str())
-            .filter(|name| !name.is_empty())
+    pub fn with_externals(
+        graph: &'a CallGraph,
+        functions: &'a [FunctionInfo],
+        external_symbols: Option<&'a ExternalSymbolIndex>,
+    ) -> Self {
+        let mut names = FxHashMap::default();
+        names.reserve(functions.len());
+        for function in functions {
+            if !function.name.is_empty() {
+                names.insert(function.address, function.name.as_str());
+            }
+        }
+        Self {
+            graph,
+            names,
+            external_symbols,
+        }
+    }
+
+    pub fn from_binary(
+        graph: &'a CallGraph,
+        binary: &'a LoadedBinary,
+        external_symbols: Option<&'a ExternalSymbolIndex>,
+    ) -> Self {
+        let mut names = FxHashMap::default();
+        names.reserve(
+            binary.functions.len()
+                + binary.iat_symbols.len()
+                + binary.global_symbols.len()
+                + binary.relocation_symbols.len(),
+        );
+        for function in &binary.functions {
+            if !function.name.is_empty() {
+                names.insert(function.address, function.name.as_str());
+            }
+        }
+        for (&va, name) in &binary.iat_symbols {
+            if !name.is_empty() {
+                names.entry(va).or_insert(name.as_str());
+            }
+        }
+        for (&va, name) in &binary.global_symbols {
+            if !name.is_empty() {
+                names.entry(va).or_insert(name.as_str());
+            }
+        }
+        for (&va, name) in &binary.relocation_symbols {
+            if !name.is_empty() {
+                names.entry(va).or_insert(name.as_str());
+            }
+        }
+        Self {
+            graph,
+            names,
+            external_symbols,
+        }
+    }
+
+    pub fn name_at(&self, address: u64) -> Option<&str> {
+        if let Some(&name) = self.names.get(&address) {
+            return Some(name);
+        }
+        if let Some(ext) = self.external_symbols {
+            if let Some(identity) = ext.identity_for_va(address) {
+                if !identity.symbol_key.is_empty() {
+                    return Some(identity.symbol_key.as_str());
+                }
+            }
+        }
+        None
+    }
+
+    fn matches_name(&self, address: u64, name: &str) -> bool {
+        if let Some(target) = self.name_at(address) {
+            if target == name {
+                return true;
+            }
+            if let Some((_, sym)) = target.split_once('!') {
+                if sym.trim() == name {
+                    return true;
+                }
+            }
+            if let Some(sym) = target.strip_prefix("__imp_") {
+                let trimmed = sym.strip_prefix('_').unwrap_or(sym);
+                if trimmed == name {
+                    return true;
+                }
+            }
+            if target.strip_prefix('_') == Some(name) || name.strip_prefix('_') == Some(target) {
+                return true;
+            }
+        }
+        if let Some(ext) = self.external_symbols {
+            if let Some(id) = ext.identity_for_va(address) {
+                if id.symbol_key == name
+                    || id.symbol_key.strip_prefix('_') == Some(name)
+                    || name.strip_prefix('_') == Some(id.symbol_key.as_str())
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -54,14 +153,14 @@ impl CallGraphView for NamedCallGraphView<'_> {
         self.graph
             .callees_of(function)
             .iter()
-            .any(|edge| self.name_at(edge.addr) == Some(name))
+            .any(|edge| self.matches_name(edge.addr, name))
     }
 
     fn has_caller_named(&self, function: u64, name: &str) -> bool {
         self.graph
             .callers_of(function)
             .iter()
-            .any(|edge| self.name_at(edge.addr) == Some(name))
+            .any(|edge| self.matches_name(edge.addr, name))
     }
 }
 
@@ -297,5 +396,38 @@ mod tests {
         let validation = fission_signatures::validate_relation(&signature, 0x1000, &view);
         assert!(validation.passed);
         assert_eq!(validation.matched_callees, vec!["callee"]);
+    }
+
+    #[test]
+    fn named_callgraph_view_resolves_external_import_callees() {
+        let mut db = XrefDatabase::new();
+        // Call from 0x1004 inside function at 0x1000 to external IAT slot 0x3000
+        db.add_xref(Xref {
+            from_addr: 0x1004,
+            to_addr: 0x3000,
+            xref_type: XrefType::Call,
+            operand_index: OPERAND_INDEX_MNEMONIC,
+            sleigh_kind: None,
+            flow_kind: Some(DecodedFlowKind::Call),
+        });
+
+        let functions = sample_functions();
+        let g = CallGraph::build_from_xrefs(&functions, &db, 0x40);
+
+        let binary = fission_loader::loader::LoadedBinaryBuilder::new(
+            "test_bin".to_string(),
+            fission_loader::loader::DataBuffer::Heap(vec![0u8; 0x1000]),
+        )
+        .add_iat_symbol(0x3000, "msvcrt.dll!malloc".to_string())
+        .build()
+        .expect("build binary");
+
+        let view = NamedCallGraphView::from_binary(&g, &binary, None);
+        assert!(view.has_callee_named(0x1000, "malloc"));
+        assert!(view.has_callee_named(0x1000, "msvcrt.dll!malloc"));
+
+        let ext = crate::analysis::external_symbol::build_external_symbol_index(&binary);
+        let view_with_ext = NamedCallGraphView::with_externals(&g, &functions, Some(&ext));
+        assert!(view_with_ext.has_callee_named(0x1000, "malloc"));
     }
 }
