@@ -334,6 +334,7 @@ pub fn discover_functions_with_runtime(
             &mut validation_cache,
             Some(&all_references),
         );
+        all_references.extend(data_refs.iter().copied());
         data_refs.retain(|&addr| !tracker.is_overlap(addr));
         if discovery_diag_enabled() {
             eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
@@ -981,11 +982,12 @@ impl InstructionBoundaryTracker {
     }
 }
 
-fn validate_after_condition(
+pub(crate) fn validate_after_condition(
     binary: &LoadedBinary,
     addr: u64,
     cond: &str,
     executable_ranges: &[(u64, u64)],
+    global_references: Option<&std::collections::HashSet<u64>>,
 ) -> bool {
     if addr == 0 {
         return false;
@@ -993,7 +995,10 @@ fn validate_after_condition(
     let prev_addr = addr - 1;
 
     match cond {
-        "defined" => super::ranges::is_in_executable_ranges(prev_addr, executable_ranges),
+        "defined" => {
+            let at_section_start = executable_ranges.iter().any(|&(start, _)| addr == start);
+            at_section_start || super::ranges::is_in_executable_ranges(prev_addr, executable_ranges)
+        }
         "data" => {
             if !super::ranges::is_in_executable_ranges(prev_addr, executable_ranges) {
                 return true;
@@ -1006,15 +1011,55 @@ fn validate_after_condition(
                 }
             }
             if let Some(bytes) = binary.view_bytes(prev_addr, 1) {
-                if bytes[0] == 0x00 {
+                if matches!(bytes[0], 0x00 | 0x90 | 0xcc) {
                     return true;
                 }
             }
             false
         }
+        "ptr" => {
+            global_references.is_some_and(|refs| refs.contains(&addr))
+                || binary.relocations.iter().any(|reloc| {
+                    let target = reloc.addend as u64;
+                    target != 0
+                        && crate::analysis::function_discovery::targets::normalize_target(
+                            binary, target,
+                        ) == addr
+                })
+        }
         "function" => is_strict_boundary(binary, None, addr),
         _ => true,
     }
+}
+
+fn validate_contiguous_instructions(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    addr: u64,
+    min_instructions: usize,
+    executable_ranges: &[(u64, u64)],
+) -> bool {
+    let decode_context = image_decode_context(binary, frontend);
+    let mut ip = addr;
+    for _ in 0..min_instructions {
+        if !super::ranges::is_in_executable_ranges(ip, executable_ranges) {
+            return false;
+        }
+        let Some(bytes) = binary.view_bytes(ip, 15) else {
+            return false;
+        };
+        let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, decode_context) else {
+            return false;
+        };
+        if inst.length == 0
+            || inst.mnemonic.is_empty()
+            || inst.mnemonic.eq_ignore_ascii_case("invalid")
+        {
+            return false;
+        }
+        ip = ip.saturating_add(inst.length as u64);
+    }
+    true
 }
 
 /// Scan binary executable sections using Ghidra XML static patterns.
@@ -1055,8 +1100,8 @@ fn scan_ghidra_patterns(
         }
     }
 
-    // Phase 1: raw byte scan — collect (addr, Option<usize>) where value is the minimum valid_code_min
-    let mut raw_hits: std::collections::HashMap<u64, Option<usize>> =
+    // Phase 1: raw byte scan — collect (addr, (Option<usize>, bool)) where value is (min valid_code_min, requires_contiguous)
+    let mut raw_hits: std::collections::HashMap<u64, (Option<usize>, bool)> =
         std::collections::HashMap::new();
 
     // Build AhoCorasick automaton for the first contiguous block of fixed bytes
@@ -1118,7 +1163,7 @@ fn scan_ghidra_patterns(
         };
         let base = section.virtual_address;
 
-        let section_hits: Vec<(u64, Option<usize>)> = ac
+        let section_hits: Vec<(u64, Option<usize>, bool)> = ac
             .find_overlapping_iter(bytes)
             .map(|mat| {
                 let offset = mat.start();
@@ -1128,7 +1173,7 @@ fn scan_ghidra_patterns(
             })
             .collect::<Vec<_>>()
             .into_par_iter()
-            .filter_map(|(offset, ac_idx, addr)| {
+            .filter_map(|(_offset, ac_idx, addr)| {
                 if !is_in_executable_ranges(addr, executable_ranges) {
                     return None;
                 }
@@ -1139,7 +1184,13 @@ fn scan_ghidra_patterns(
                             let pat = &patterns[i];
                             let boundary_ok = if pat.pre_bytes.is_empty() {
                                 if let Some(cond) = &pat.after_cond {
-                                    validate_after_condition(binary, addr, cond, executable_ranges)
+                                    validate_after_condition(
+                                        binary,
+                                        addr,
+                                        cond,
+                                        executable_ranges,
+                                        global_references,
+                                    )
                                 } else {
                                     is_strict_boundary(binary, Some(frontend), addr)
                                 }
@@ -1148,7 +1199,7 @@ fn scan_ghidra_patterns(
                             };
 
                             if boundary_ok {
-                                return Some((addr, pat.valid_code_min));
+                                return Some((addr, pat.valid_code_min, pat.contiguous));
                             }
                         }
                     }
@@ -1158,7 +1209,7 @@ fn scan_ghidra_patterns(
             .collect();
 
         // Sequential fallback for patterns that start with wildcard
-        let wildcard_hits: Vec<(u64, Option<usize>)> = (0..bytes.len())
+        let wildcard_hits: Vec<(u64, Option<usize>, bool)> = (0..bytes.len())
             .into_par_iter()
             .filter_map(|offset| {
                 if wildcard_start.is_empty() {
@@ -1174,7 +1225,13 @@ fn scan_ghidra_patterns(
                         let pat = &patterns[i];
                         let boundary_ok = if pat.pre_bytes.is_empty() {
                             if let Some(cond) = &pat.after_cond {
-                                validate_after_condition(binary, addr, cond, executable_ranges)
+                                validate_after_condition(
+                                    binary,
+                                    addr,
+                                    cond,
+                                    executable_ranges,
+                                    global_references,
+                                )
                             } else {
                                 is_strict_boundary(binary, Some(frontend), addr)
                             }
@@ -1183,7 +1240,7 @@ fn scan_ghidra_patterns(
                         };
 
                         if boundary_ok {
-                            return Some((addr, pat.valid_code_min));
+                            return Some((addr, pat.valid_code_min, pat.contiguous));
                         }
                     }
                 }
@@ -1191,11 +1248,12 @@ fn scan_ghidra_patterns(
             })
             .collect();
 
-        for (addr, min_val) in section_hits.into_iter().chain(wildcard_hits) {
-            let entry = raw_hits.entry(addr).or_insert(None);
+        for (addr, min_val, contiguous) in section_hits.into_iter().chain(wildcard_hits) {
+            let entry = raw_hits.entry(addr).or_insert((None, contiguous));
             if let Some(min) = min_val {
-                *entry = Some(entry.map_or(min, |v| v.min(min)));
+                entry.0 = Some(entry.0.map_or(min, |v| v.min(min)));
             }
+            entry.1 &= contiguous;
         }
     }
 
@@ -1209,11 +1267,22 @@ fn scan_ghidra_patterns(
     // Phase 2: SLEIGH validation — once per unique address
     let mut hits: Vec<u64> = raw_hits
         .into_par_iter()
-        .filter_map(|(addr, valid_code_min)| {
+        .filter_map(|(addr, (valid_code_min, contiguous))| {
             if tracker.is_offcut(addr) {
                 return None;
             }
             let min_inst = valid_code_min.unwrap_or(3);
+            if contiguous
+                && !validate_contiguous_instructions(
+                    binary,
+                    frontend,
+                    addr,
+                    min_inst,
+                    executable_ranges,
+                )
+            {
+                return None;
+            }
             let mut local_cache = std::collections::HashMap::new();
             if validate_subroutine_candidate(
                 binary,
