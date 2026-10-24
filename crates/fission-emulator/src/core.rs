@@ -227,6 +227,8 @@ pub struct Emulator {
     pub callother_result: u64,
     /// First memory fault raised by a compiled JIT block, if any.
     pub(crate) memory_fault: Option<String>,
+    /// Execution deadline, after which run loops halt with `RunOutcome::Interrupted`.
+    pub deadline: Option<std::time::Instant>,
 }
 
 /// Max guest instructions per translation block.
@@ -463,6 +465,7 @@ impl Emulator {
             current_tid: 1000,
             callother_result: 0,
             memory_fault: None,
+            deadline: None,
         };
 
         // Default SP if no ELF image_info applied yet (Windows / bare-metal).
@@ -1258,6 +1261,15 @@ impl Emulator {
 
     pub fn with_max_inst(mut self, max: Option<u64>) -> Self {
         self.max_inst = max;
+        self
+    }
+
+    pub fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        self.deadline = deadline;
+    }
+
+    pub fn with_deadline(mut self, deadline: Option<std::time::Instant>) -> Self {
+        self.deadline = deadline;
         self
     }
 
@@ -2263,6 +2275,12 @@ impl Emulator {
             if IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::warn!("Execution interrupted by Ctrl+C (SIGINT). Halting safely.");
                 break RunOutcome::Interrupted;
+            }
+            if let Some(deadline) = self.deadline {
+                if std::time::Instant::now() >= deadline {
+                    tracing::warn!("Execution deadline exceeded. Halting safely.");
+                    break RunOutcome::Interrupted;
+                }
             }
             if let Some(target) = stop_pc {
                 if self.pc == target {

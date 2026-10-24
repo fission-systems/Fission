@@ -170,4 +170,51 @@ mod tests {
         );
         assert_eq!(out.status, ScriptRunStatus::Timeout, "{out:?}");
     }
+
+    #[test]
+    fn run_script_respects_max_output_bytes() {
+        let bin = prepare_binary_for_script(test_binary());
+        let limits = ScriptLimits {
+            max_output_bytes: 200,
+            ..ScriptLimits::default()
+        };
+        let src = r#"
+            for i in 0..100 {
+                emit(#{"kind": "note", "message": "payload data message"});
+            }
+        "#;
+        let out = run_script(&bin, src, "bytes_limit.rhai", limits);
+        assert!(!out.findings.is_empty());
+        assert!(out.findings.len() < 100);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.message.contains("max_output_bytes")),
+            "{:?}",
+            out.diagnostics
+        );
+    }
+
+    #[cfg(feature = "emulator")]
+    #[test]
+    fn machine_launch_failure_reported_as_runtime_error() {
+        let bin = test_binary();
+        let limits = ScriptLimits::default();
+        let src = "let x = 1;";
+        let out = run_script_with(
+            &bin,
+            src,
+            "launch_err.rhai",
+            limits,
+            ScriptOptions { machine: true },
+        );
+        assert_eq!(out.status, ScriptRunStatus::Error);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.message.starts_with("failed to initialize machine: ")),
+            "diagnostics was: {:?}",
+            out.diagnostics
+        );
+    }
 }
