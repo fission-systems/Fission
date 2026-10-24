@@ -56,51 +56,28 @@ impl SignatureDatabase {
         self.first_byte_index.clear();
         self.wildcard_signatures.clear();
         for (idx, sig) in self.signatures.iter().enumerate() {
-            // Find the first non-wildcard byte in the pattern
-            if let Some(&Some(first_byte)) = sig.pattern.first() {
-                self.first_byte_index
-                    .entry(first_byte)
-                    .or_insert_with(Vec::new)
-                    .push(idx);
-            } else if sig.pattern.first() == Some(&None) {
-                // Signature starts with wildcard
+            if let Some(first_byte) = sig.pattern.first() {
+                if first_byte.is_exact() {
+                    self.first_byte_index
+                        .entry(first_byte.value)
+                        .or_insert_with(Vec::new)
+                        .push(idx);
+                } else {
+                    self.wildcard_signatures.push(idx);
+                }
+            } else {
+                // Empty pattern must also be indexed as a wildcard candidate
                 self.wildcard_signatures.push(idx);
             }
         }
     }
 
-    /// Try to match a function's bytes against known signatures
+    /// Try to match a function's bytes against known signatures.
     ///
-    /// Performance: Uses first-byte index to reduce candidates from ~150 to typically 1-10,
-    /// providing significant speedup for large binaries with many functions.
+    /// When multiple signatures match, returns the most specific match
+    /// (highest constrained bit/byte count, then highest confidence).
     pub fn identify(&self, bytes: &[u8]) -> Option<&FunctionSignature> {
-        if bytes.is_empty() {
-            return None;
-        }
-
-        let first_byte = bytes[0];
-
-        // Use the index to only check signatures that start with the same first byte
-        if let Some(indices) = self.first_byte_index.get(&first_byte) {
-            for &idx in indices {
-                if let Some(sig) = self.signatures.get(idx) {
-                    if sig.matches(bytes) {
-                        return Some(sig);
-                    }
-                }
-            }
-        }
-
-        // Check signatures that start with wildcards (pre-indexed, no full scan needed)
-        for &idx in &self.wildcard_signatures {
-            if let Some(sig) = self.signatures.get(idx) {
-                if sig.matches(bytes) {
-                    return Some(sig);
-                }
-            }
-        }
-
-        None
+        self.find_all_matches(bytes).into_iter().next()
     }
 
     /// Try to match a function's bytes with call graph relation validation
@@ -134,11 +111,23 @@ impl SignatureDatabase {
         None
     }
 
-    /// Find all byte-pattern matches (internal helper)
+    /// Find all byte-pattern matches (ranked by specificity and confidence descending)
     fn find_all_matches(&self, bytes: &[u8]) -> Vec<&FunctionSignature> {
         let mut matches = Vec::new();
 
         if bytes.is_empty() {
+            for &idx in &self.wildcard_signatures {
+                if let Some(sig) = self.signatures.get(idx) {
+                    if sig.matches(bytes) {
+                        matches.push(sig);
+                    }
+                }
+            }
+            matches.sort_by(|a, b| {
+                b.specificity()
+                    .cmp(&a.specificity())
+                    .then_with(|| b.confidence.cmp(&a.confidence))
+            });
             return matches;
         }
 
@@ -162,6 +151,13 @@ impl SignatureDatabase {
             }
         }
 
+        // Rank by specificity (constrained bits) descending, then by confidence descending
+        matches.sort_by(|a, b| {
+            b.specificity()
+                .cmp(&a.specificity())
+                .then_with(|| b.confidence.cmp(&a.confidence))
+        });
+
         matches
     }
 
@@ -173,14 +169,16 @@ impl SignatureDatabase {
     /// Add a custom signature
     pub fn add_signature(&mut self, sig: FunctionSignature) {
         let idx = self.signatures.len();
-        // Update index if signature has a non-wildcard first byte
-        if let Some(&Some(first_byte)) = sig.pattern.first() {
-            self.first_byte_index
-                .entry(first_byte)
-                .or_insert_with(Vec::new)
-                .push(idx);
-        } else if sig.pattern.first() == Some(&None) {
-            // Wildcard signature
+        if let Some(first_byte) = sig.pattern.first() {
+            if first_byte.is_exact() {
+                self.first_byte_index
+                    .entry(first_byte.value)
+                    .or_insert_with(Vec::new)
+                    .push(idx);
+            } else {
+                self.wildcard_signatures.push(idx);
+            }
+        } else {
             self.wildcard_signatures.push(idx);
         }
         self.signatures.push(sig);
@@ -233,15 +231,131 @@ impl Default for SignatureDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signature::SignatureParseError;
 
     #[test]
     fn test_pattern_match() {
-        let sig = FunctionSignature::from_hex("test", "55 8B EC ?? 6A");
+        let sig = FunctionSignature::from_hex("test", "55 8B EC ?? 6A").with_min_size(5);
 
         assert!(sig.matches(&[0x55, 0x8B, 0xEC, 0x00, 0x6A]));
         assert!(sig.matches(&[0x55, 0x8B, 0xEC, 0xFF, 0x6A])); // wildcard
         assert!(!sig.matches(&[0x55, 0x8B, 0xED, 0x00, 0x6A])); // wrong byte
-        assert!(!sig.matches(&[0x55, 0x8B])); // too short
+        assert!(!sig.matches(&[0x55, 0x8B])); // too short (< 5)
+    }
+
+    #[test]
+    fn test_matches_enforces_min_size() {
+        let sig = FunctionSignature::from_hex("prologue", "55 8B EC").with_min_size(16);
+        // 8 bytes matches pattern prefix, but fails min_size (8 < 16)
+        let short_thunk = [0x55, 0x8B, 0xEC, 0x90, 0x90, 0x90, 0x90, 0x90];
+        assert_eq!(short_thunk.len(), 8);
+        assert!(!sig.matches(&short_thunk));
+
+        // 16 bytes matches min_size and pattern
+        let mut full_func = [0x90u8; 16];
+        full_func[..3].copy_from_slice(&[0x55, 0x8B, 0xEC]);
+        assert!(sig.matches(&full_func));
+    }
+
+    #[test]
+    fn test_identify_ranks_by_specificity_and_confidence() {
+        let mut db = SignatureDatabase {
+            signatures: Vec::new(),
+            first_byte_index: HashMap::new(),
+            wildcard_signatures: Vec::new(),
+        };
+
+        // Short loose signature
+        let sig_generic = FunctionSignature::from_hex("loose_func", "55 8B EC")
+            .with_min_size(3)
+            .with_confidence(100);
+
+        // Specific signature with more constrained bytes
+        let sig_specific = FunctionSignature::from_hex("specific_func", "55 8B EC 83 EC 20")
+            .with_min_size(6)
+            .with_confidence(90);
+
+        db.add_signature(sig_generic);
+        db.add_signature(sig_specific);
+
+        let input = [0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x20, 0x48, 0x89];
+        let matched = db.identify(&input).expect("expected match");
+        assert_eq!(matched.name, "specific_func");
+
+        // When specificities are equal, confidence breaks tie
+        let mut db2 = SignatureDatabase {
+            signatures: Vec::new(),
+            first_byte_index: HashMap::new(),
+            wildcard_signatures: Vec::new(),
+        };
+        let sig_low_conf = FunctionSignature::from_hex("low_conf", "55 8B EC")
+            .with_min_size(3)
+            .with_confidence(80);
+        let sig_high_conf = FunctionSignature::from_hex("high_conf", "55 8B EC")
+            .with_min_size(3)
+            .with_confidence(95);
+
+        db2.add_signature(sig_low_conf);
+        db2.add_signature(sig_high_conf);
+
+        let matched2 = db2.identify(&input).expect("expected match");
+        assert_eq!(matched2.name, "high_conf");
+    }
+
+    #[test]
+    fn test_empty_pattern_indexed_and_matched() {
+        let mut db = SignatureDatabase {
+            signatures: Vec::new(),
+            first_byte_index: HashMap::new(),
+            wildcard_signatures: Vec::new(),
+        };
+
+        let empty_sig = FunctionSignature {
+            name: "empty_pattern".to_string(),
+            pattern: Vec::new(),
+            min_size: 4,
+            params: Vec::new(),
+            ret_type: String::new(),
+            library: None,
+            expected_callees: Vec::new(),
+            expected_callers: Vec::new(),
+            force_relation: false,
+            confidence: 50,
+        };
+
+        db.add_signature(empty_sig);
+        assert_eq!(db.wildcard_signatures.len(), 1);
+
+        assert!(!db.identify(&[0x90, 0x90]).is_some()); // too short (< 4)
+        let matched = db
+            .identify(&[0x90, 0x90, 0x90, 0x90])
+            .expect("should match empty pattern");
+        assert_eq!(matched.name, "empty_pattern");
+    }
+
+    #[test]
+    fn test_try_from_hex_rejects_malformed_tokens() {
+        assert!(matches!(
+            FunctionSignature::try_from_hex("bad", "55 8B ? 00"),
+            Err(SignatureParseError::InvalidToken { token, position: 2 }) if token == "?"
+        ));
+
+        assert!(matches!(
+            FunctionSignature::try_from_hex("bad", "0x55 8B EC"),
+            Err(SignatureParseError::InvalidToken { token, position: 0 }) if token == "0x55"
+        ));
+
+        assert!(matches!(
+            FunctionSignature::try_from_hex("bad", "55 ZZ EC"),
+            Err(SignatureParseError::InvalidToken { token, position: 1 }) if token == "ZZ"
+        ));
+
+        assert!(matches!(
+            FunctionSignature::try_from_hex("bad", "55 ??? EC"),
+            Err(SignatureParseError::InvalidToken { token, position: 1 }) if token == "???"
+        ));
+
+        assert!(FunctionSignature::try_from_hex("good", "55 8b EC ?? 00").is_ok());
     }
 
     #[test]

@@ -8,13 +8,14 @@ use fission_core::resources::ResourceProvider;
 use serde::Deserialize;
 use std::fs;
 
-use super::signature::FunctionSignature;
+use super::signature::{FunctionSignature, PatternByte, SignatureParseError};
 
 /// CRT pattern format: `{ "name": "...", "library": "...", "pattern": "hex...", "mask": "hex..." }`.
 ///
 /// Mask byte semantics:
 /// - `FF` → fixed: use the pattern byte
 /// - `00` or `??` → wildcard: any byte matches
+/// - Partial mask (e.g. `F0`, `0F`) → bitwise mask: `(byte & mask) == (value & mask)`
 #[derive(Deserialize)]
 struct JsonCrtSignature {
     name: String,
@@ -23,35 +24,61 @@ struct JsonCrtSignature {
     mask: String,
 }
 
-/// Convert a CRT-format `pattern` + `mask` pair into a `Vec<Option<u8>>` pattern.
+/// Convert a CRT-format `pattern` + `mask` pair into a `Vec<PatternByte>` pattern.
 ///
 /// Rules:
+/// - Pattern and mask must have matching token counts.
 /// - Pattern token `??` → wildcard
 /// - Mask token `00` or `??` → wildcard  
-/// - Otherwise → `Some(pattern_byte)`
-fn crt_pattern_to_vec(pattern: &str, mask: &str) -> Vec<Option<u8>> {
+/// - Partial or full hex mask → `PatternByte::new(pattern_byte, mask_byte)`
+pub fn try_crt_pattern_to_vec(
+    pattern: &str,
+    mask: &str,
+) -> Result<Vec<PatternByte>, SignatureParseError> {
     let pat_tokens: Vec<&str> = pattern.split_whitespace().collect();
     let mask_tokens: Vec<&str> = mask.split_whitespace().collect();
 
-    pat_tokens
-        .iter()
-        .enumerate()
-        .map(|(i, pat)| {
-            // If pattern itself is wildcard, always wildcard.
-            if *pat == "??" {
-                return None;
-            }
-            // Check mask: if mask token is wildcard/zero, treat as wildcard.
-            if let Some(m) = mask_tokens.get(i) {
-                let m = m.trim();
-                if m == "??" || m == "00" {
-                    return None;
-                }
-            }
-            // Otherwise parse as fixed byte.
-            u8::from_str_radix(pat.trim(), 16).ok()
-        })
-        .collect()
+    if pat_tokens.len() != mask_tokens.len() {
+        return Err(SignatureParseError::LengthMismatch {
+            pattern_tokens: pat_tokens.len(),
+            mask_tokens: mask_tokens.len(),
+        });
+    }
+
+    let mut result = Vec::with_capacity(pat_tokens.len());
+    for (i, (&pat, &m)) in pat_tokens.iter().zip(mask_tokens.iter()).enumerate() {
+        if pat == "??" {
+            result.push(PatternByte::wildcard());
+            continue;
+        }
+
+        let pat_byte =
+            u8::from_str_radix(pat.trim(), 16).map_err(|_| SignatureParseError::InvalidToken {
+                token: pat.to_string(),
+                position: i,
+            })?;
+
+        let m_trim = m.trim();
+        let mask_byte = if m_trim == "??" || m_trim == "00" {
+            0x00
+        } else {
+            u8::from_str_radix(m_trim, 16).map_err(|_| SignatureParseError::InvalidMaskToken {
+                token: m.to_string(),
+                position: i,
+            })?
+        };
+
+        result.push(PatternByte::new(pat_byte, mask_byte));
+    }
+
+    Ok(result)
+}
+
+/// Convert a CRT-format `pattern` + `mask` pair into a `Vec<PatternByte>` pattern, panicking on invalid syntax.
+#[allow(dead_code)]
+pub fn crt_pattern_to_vec(pattern: &str, mask: &str) -> Vec<PatternByte> {
+    try_crt_pattern_to_vec(pattern, mask)
+        .unwrap_or_else(|e| panic!("invalid CRT pattern/mask pair: {e}"))
 }
 
 /// Load MSVC/CRT pattern signatures from the resolved patterns corpus.
@@ -68,7 +95,13 @@ pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
     let crt_items: Vec<JsonCrtSignature> = serde_json::from_str(&crt_json)
         .unwrap_or_else(|e| panic!("Failed to parse {}: {e}", path.display()));
     for item in crt_items {
-        let pattern = crt_pattern_to_vec(&item.pattern, &item.mask);
+        let pattern = match try_crt_pattern_to_vec(&item.pattern, &item.mask) {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("Skipping invalid CRT signature {}: {e}", item.name);
+                continue;
+            }
+        };
         let library = (!item.library.is_empty()).then_some(item.library);
         let sig = FunctionSignature {
             name: item.name,
@@ -96,12 +129,12 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                Some(0x4C),
-                Some(0x8B),
-                Some(0xDC),
-                Some(0x48),
-                Some(0x83),
-                Some(0xEC)
+                PatternByte::exact(0x4C),
+                PatternByte::exact(0x8B),
+                PatternByte::exact(0xDC),
+                PatternByte::exact(0x48),
+                PatternByte::exact(0x83),
+                PatternByte::exact(0xEC)
             ]
         );
     }
@@ -110,15 +143,47 @@ mod tests {
     fn crt_pattern_with_mask_wildcard() {
         // mask "??" means wildcard
         let result = crt_pattern_to_vec("48 83 EC 28 48 85 C9", "FF FF FF ?? FF FF FF");
-        assert_eq!(result[3], None, "mask wildcard should be None");
-        assert_eq!(result[0], Some(0x48));
+        assert!(result[3].is_wildcard(), "mask wildcard should be wildcard");
+        assert_eq!(result[0], PatternByte::exact(0x48));
     }
 
     #[test]
     fn crt_pattern_with_pat_wildcard() {
         // pattern "??" means wildcard regardless of mask
         let result = crt_pattern_to_vec("48 85 C9 74 ?? 48 83 EC", "FF FF FF FF ?? FF FF FF");
-        assert_eq!(result[4], None, "pattern wildcard should be None");
+        assert!(
+            result[4].is_wildcard(),
+            "pattern wildcard should be wildcard"
+        );
+    }
+
+    #[test]
+    fn crt_pattern_preserves_partial_bitmasks() {
+        let result = crt_pattern_to_vec("48 89 C0", "FF F0 0F");
+        assert_eq!(result[0], PatternByte::exact(0x48));
+        assert_eq!(result[1], PatternByte::new(0x89, 0xF0));
+        assert_eq!(result[2], PatternByte::new(0xC0, 0x0F));
+
+        // Test matching
+        assert!(result[1].matches(0x89));
+        assert!(result[1].matches(0x80));
+        assert!(result[1].matches(0x8F));
+        assert!(!result[1].matches(0x90));
+    }
+
+    #[test]
+    fn crt_pattern_length_mismatch_fails() {
+        let err = try_crt_pattern_to_vec("48 89 C0", "FF FF").unwrap_err();
+        match err {
+            SignatureParseError::LengthMismatch {
+                pattern_tokens,
+                mask_tokens,
+            } => {
+                assert_eq!(pattern_tokens, 3);
+                assert_eq!(mask_tokens, 2);
+            }
+            _ => panic!("unexpected error: {err:?}"),
+        }
     }
 
     #[test]
