@@ -397,7 +397,12 @@ impl Builder {
         // Mark defs whose variable escaped.
         for def in &mut self.defs {
             if let AliasKey::Partition(key) = &def.key {
-                let base = key.base_object.trim_start_matches('&');
+                let base = key
+                    .base_object
+                    .strip_prefix("&local ")
+                    .or_else(|| key.base_object.strip_prefix("&global "))
+                    .or_else(|| key.base_object.strip_prefix('&'))
+                    .unwrap_or(&key.base_object);
                 def.may_escape = !key.is_heritage_promotable() || self.escaped.contains(base);
             }
         }

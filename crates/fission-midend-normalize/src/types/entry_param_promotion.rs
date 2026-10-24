@@ -793,6 +793,9 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
         if lhs_name.starts_with("param_") {
             continue;
         }
+        if !func.locals.iter().any(|b| &b.name == lhs_name) {
+            continue;
+        }
         // Whole-body renaming is valid only for a stable entry snapshot.
         // Later writes belong to another lifetime even if the name still
         // denotes the same physical spill/register storage.
