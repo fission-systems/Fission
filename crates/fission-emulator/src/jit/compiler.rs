@@ -1946,16 +1946,13 @@ impl JitCompiler {
                     let cond_vn = &op.inputs[1];
                     let cond = load_vn!(cond_vn);
 
-                    // Symbolic gate: if condition is tainted, stop TB for manager fork.
-                    {
-                        // Absolute guest target when dest is a RAM/code address;
-                        // relative p-code indices have no guest VA — fall back to
-                        // fallthrough so the concrete path still has a resume PC.
-                        let taken_addr = if dest.space_id == 0 || dest.is_constant {
-                            fallthrough_pc
-                        } else {
-                            dest.offset
-                        };
+                    let is_rel = dest.space_id == 0 || dest.is_constant;
+
+                    // Symbolic gate: only for inter-instruction conditional branches!
+                    // Intra-instruction relative branches (e.g. CMOV or internal flags) do not branch to guest PCs;
+                    // gating on them would clamp both outcomes to fallthrough_pc and abort the instruction prematurely.
+                    if !is_rel {
+                        let taken_addr = dest.offset;
                         let not_taken_addr = fallthrough_pc;
                         let csp = builder.ins().iconst(
                             types::I64,

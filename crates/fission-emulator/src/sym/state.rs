@@ -14,6 +14,10 @@ pub struct SimState {
     pub history: SimStateHistory,
     /// Copy-on-Write memory context.
     pub machine_state: MachineState,
+    /// Virtual File System snapshot.
+    pub vfs: Option<crate::os::vfs::SimVFS>,
+    /// Mock standard input buffer snapshot.
+    pub stdin_buffer: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for SimState {
@@ -39,7 +43,19 @@ impl SimState {
             pc,
             history: SimStateHistory::default(),
             machine_state,
+            vfs: None,
+            stdin_buffer: None,
         }
+    }
+
+    pub fn with_environment(
+        mut self,
+        vfs: crate::os::vfs::SimVFS,
+        stdin_buffer: Option<Vec<u8>>,
+    ) -> Self {
+        self.vfs = Some(vfs);
+        self.stdin_buffer = stdin_buffer;
+        self
     }
 
     pub fn with_constraint(
@@ -49,11 +65,26 @@ impl SimState {
         next_pc: u64,
         machine_state: MachineState,
     ) -> Self {
-        let mut new_state = self.clone(); // Clones history
+        let mut new_state = self.clone(); // Clones history, vfs, stdin_buffer
         new_state.history.constraints.push(constraint);
         new_state.step_index = next_step;
         new_state.pc = next_pc;
         new_state.machine_state = machine_state;
+        new_state
+    }
+
+    pub fn with_constraint_and_env(
+        &self,
+        constraint: SymExpr,
+        next_step: u64,
+        next_pc: u64,
+        machine_state: MachineState,
+        vfs: crate::os::vfs::SimVFS,
+        stdin_buffer: Option<Vec<u8>>,
+    ) -> Self {
+        let mut new_state = self.with_constraint(constraint, next_step, next_pc, machine_state);
+        new_state.vfs = Some(vfs);
+        new_state.stdin_buffer = stdin_buffer;
         new_state
     }
 }
