@@ -220,7 +220,24 @@ fn loop_variant_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
                 loop_variant_stmt(s, out);
             }
         }
-        PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => {}
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            for s in body.iter() {
+                loop_variant_stmt(s, out);
+            }
+        }
+        PreHirStmt::For {
+            init, body, update, ..
+        } => {
+            if let Some(s) = init {
+                loop_variant_stmt(s, out);
+            }
+            for s in body.iter() {
+                loop_variant_stmt(s, out);
+            }
+            if let Some(s) = update {
+                loop_variant_stmt(s, out);
+            }
+        }
         _ => {}
     }
 }
@@ -830,6 +847,59 @@ mod tests {
         assert_eq!(then_body.len(), 1);
         assert_eq!(else_body.len(), 1);
     }
+
+    #[test]
+    fn sccp_loop_variant_vars_includes_nested_loops() {
+        let nested_body = vec![PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(100, int(32)),
+            }]
+            .into(),
+        }];
+        let mut out = HashSet::default();
+        for s in &nested_body {
+            loop_variant_stmt(s, &mut out);
+        }
+        assert!(out.contains("x"), "x must be recognized as loop-variant");
+    }
+
+    #[test]
+    fn sccp_does_not_prune_switch_case_with_goto_target() {
+        let mut func = PreHirFunction {
+            name: "test_switch_goto".to_string(),
+            body: vec![
+                PreHirStmt::Goto("label_case_2".to_string()),
+                PreHirStmt::Switch {
+                    expr: PreHirExpr::Const(1, int(32)),
+                    cases: vec![
+                        PreHirSwitchCase {
+                            values: vec![1],
+                            body: vec![PreHirStmt::Return(None)].into(),
+                        },
+                        PreHirSwitchCase {
+                            values: vec![2],
+                            body: vec![
+                                PreHirStmt::Label("label_case_2".to_string()),
+                                PreHirStmt::Return(None),
+                            ]
+                            .into(),
+                        },
+                    ],
+                    default: vec![].into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+        // Case 2 must NOT be deleted because it defines a label targeted by a goto!
+        let PreHirStmt::Switch { cases, .. } = &func.body[1] else {
+            panic!("switch must not be pruned to single block when unreached case has goto target");
+        };
+        assert_eq!(cases.len(), 2);
+    }
 }
 
 fn eval_truth(expr: &PreHirExpr, env: &ConstEnv) -> Option<bool> {
@@ -1127,8 +1197,12 @@ fn sccp_stmt(
                     let discarded_have_side_effects = cases
                         .iter()
                         .filter(|case| !case.values.iter().any(|x| *x == v))
-                        .any(|case| stmt_list_has_side_effects(&case.body))
-                        || stmt_list_has_side_effects(default);
+                        .any(|case| {
+                            stmt_list_has_side_effects(&case.body)
+                                || branch_defines_goto_target(&case.body, goto_targets)
+                        })
+                        || stmt_list_has_side_effects(default)
+                        || branch_defines_goto_target(default, goto_targets);
                     if !discarded_have_side_effects {
                         let blk = taken.unwrap_or_else(|| {
                             std::mem::take(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default))
