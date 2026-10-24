@@ -340,11 +340,39 @@ pub fn resolve_enclosing_function(
         Ok(i) => i,
         Err(i) => i.checked_sub(1)?,
     };
-    let func = &functions[idx];
+
+    let entry_addr = functions[idx].address;
+    let mut best_idx = idx;
+    let mut best_size = functions[idx].size;
+
+    let mut i = idx;
+    while i > 0 && functions[i - 1].address == entry_addr {
+        i -= 1;
+        if functions[i].size > best_size {
+            best_size = functions[i].size;
+            best_idx = i;
+        }
+    }
+    let mut j = idx + 1;
+    while j < functions.len() && functions[j].address == entry_addr {
+        if functions[j].size > best_size {
+            best_size = functions[j].size;
+            best_idx = j;
+        }
+        j += 1;
+    }
+
+    let func = &functions[best_idx];
     let size = if func.size > 0 {
         func.size
     } else {
-        fallback_range
+        const MAX_UNSIZED_EXTENT: u64 = 0x10_0000; // 1 MB
+        let extent = if j < functions.len() {
+            functions[j].address.saturating_sub(func.address)
+        } else {
+            fallback_range.max(MAX_UNSIZED_EXTENT)
+        };
+        extent.min(MAX_UNSIZED_EXTENT)
     };
     let end = func.address.saturating_add(size);
     if addr >= func.address && addr < end {
