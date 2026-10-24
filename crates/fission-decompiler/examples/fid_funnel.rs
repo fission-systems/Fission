@@ -13,8 +13,10 @@
 //! on its own, which is how to ask whether a particular database in the
 //! bundle holds anything for this binary at all.
 
-use fission_decompiler::fid::{FidIdentifier, load_fid_databases};
+use fission_decompiler::fid::FidIdentifier;
+use fission_signatures::fid::FidDatabase;
 use fission_signatures::fidbf::FID_ACCEPT_THRESHOLD;
+use fission_signatures::fidbf::parse_all_fidbf_for_arch;
 
 fn main() {
     let path = match std::env::args().nth(1) {
@@ -28,7 +30,7 @@ fn main() {
     let binary =
         fission_loader::loader::LoadedBinary::from_file(&path).expect("load the binary under test");
 
-    let databases = load_fid_databases(&binary);
+    let (databases, _) = parse_all_fidbf_for_arch(binary.is_64bit);
     let total_entries: usize = databases.iter().map(|d| d.functions.len()).sum();
     println!(
         "databases loaded: {} ({} signature entries)",
@@ -39,7 +41,12 @@ fn main() {
         println!("  {:<52} {:>8} entries", db.source_path, db.functions.len());
     }
 
-    let identifier = FidIdentifier::new(&binary, &databases).expect("FID is available here");
+    let fid_dbs: Vec<FidDatabase> = databases
+        .iter()
+        .cloned()
+        .map(|d| FidDatabase::Eager(Box::new(d)))
+        .collect();
+    let identifier = FidIdentifier::new(&binary, &fid_dbs).expect("FID is available here");
 
     let mut considered = 0usize;
     let mut hashed = 0usize;

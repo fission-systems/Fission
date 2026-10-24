@@ -586,6 +586,14 @@ impl LazyFidDatabase {
         &self.source_path
     }
 
+    pub fn len(&self) -> usize {
+        self.functions.record_count() as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Whether the database carries any library row at all.
     ///
     /// `libraries` is read once on open, so an empty vector means the `.lib`
