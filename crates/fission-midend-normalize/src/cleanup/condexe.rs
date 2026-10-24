@@ -481,8 +481,23 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
                     ty: NirType::Unknown, // type resolved by downstream normalization
                 };
 
-                // Replace all uses of lhs_var below with the select expression
+                // Replace uses of lhs_var below with the select expression,
+                // stopping as soon as a statement that assigns to lhs_var is encountered.
                 for s in stmts[idx + 1..].iter_mut() {
+                    let assigns = stmt_assigns_var(s, &lhs_var);
+                    if let PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var(name),
+                        rhs,
+                    } = s
+                    {
+                        if name == &lhs_var {
+                            replace_var_in_expr(rhs, &lhs_var, &select_expr);
+                            break;
+                        }
+                    }
+                    if assigns {
+                        break;
+                    }
                     replace_var_in_stmt(s, &lhs_var, &select_expr);
                 }
 
@@ -504,7 +519,7 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
 /// Returns `(cond, lhs_var, val_in_then, val_in_else)` if the pattern matches:
 /// - Both `then_body` and `else_body` have exactly one statement.
 /// - Both are assignments to the same simple variable `lhs_var`.
-/// - The assigned values are pure expressions (no side effects).
+/// - The condition and assigned values are pure expressions (no side effects).
 fn extract_diamond_phi(stmt: &PreHirStmt) -> Option<(PreHirExpr, String, PreHirExpr, PreHirExpr)> {
     let PreHirStmt::If {
         cond,
@@ -528,8 +543,11 @@ fn extract_diamond_phi(stmt: &PreHirStmt) -> Option<(PreHirExpr, String, PreHirE
         return None;
     }
 
-    // Both RHS must be side-effect-free
-    if expr_has_side_effects(then_rhs) || expr_has_side_effects(else_rhs) {
+    // Condition and both RHS must be side-effect-free
+    if expr_has_side_effects(cond)
+        || expr_has_side_effects(then_rhs)
+        || expr_has_side_effects(else_rhs)
+    {
         return None;
     }
 
