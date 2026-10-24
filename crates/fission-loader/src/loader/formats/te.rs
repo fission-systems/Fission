@@ -23,9 +23,13 @@ impl<'a> TeLoaderImpl<'a> {
         for section in self.sections {
             let section_va = section.virtual_address;
             let section_rva = (section_va - image_base) as u32;
-            let section_size = section.virtual_size as u32;
+            let section_size = if section.virtual_size > 0 {
+                section.virtual_size
+            } else {
+                section.file_size
+            } as u32;
 
-            if rva >= section_rva && rva < section_rva + section_size {
+            if rva >= section_rva && rva < section_rva.saturating_add(section_size) {
                 let delta = rva - section_rva;
                 if u64::from(delta) >= section.file_size {
                     return None;
@@ -34,8 +38,9 @@ impl<'a> TeLoaderImpl<'a> {
             }
         }
 
-        // Header fallback
-        if rva < 0x1000 {
+        // Header fallback: only within the 40-byte TE header and 40*N section headers
+        let max_header_size = 40 + (self.sections.len() as u64 * 40);
+        if (rva as u64) < max_header_size {
             return Some(rva as u64);
         }
 
@@ -66,6 +71,7 @@ impl<'a> TeLoaderImpl<'a> {
     ) -> Result<Vec<crate::loader::types::RelocationEntry>> {
         let mut offset = self
             .rva_to_file_offset(dir_rva, image_base)
+            .or_else(|| (self.data.len() as u64).checked_sub(dir_size as u64))
             .ok_or(err!(loader, "Invalid Reloc Dir RVA"))?;
         let end_offset = offset.saturating_add(dir_size as u64);
         let mut relocs = Vec::new();
@@ -666,5 +672,42 @@ mod tests {
         };
 
         assert_eq!(loader.rva_to_file_offset(0x1050, 0x400000), None);
+    }
+
+    #[test]
+    fn te_rva_to_file_offset_bounds_header_fallback_and_recovers_stripped_reloc_section() {
+        let sections = [SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 0,
+            file_offset: 80,
+            file_size: 0x80,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        }];
+        let mut data = vec![0u8; 256];
+        // Append a 12-byte relocation block at the end of the file (offset 244..256)
+        data[244..248].copy_from_slice(&0x1000u32.to_le_bytes()); // page_rva
+        data[248..252].copy_from_slice(&12u32.to_le_bytes()); // block_size
+        let entry = (3u16 << 12) | 0x24;
+        data[252..254].copy_from_slice(&entry.to_le_bytes());
+
+        let loader = TeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            stripped_size: 120,
+        };
+
+        // RVA 0x200 is outside the 80-byte TE + 1 section header region and not in .text
+        assert_eq!(loader.rva_to_file_offset(0x200, 0x400000), None);
+        // Zero virtual_size section falls back to file_size
+        assert_eq!(loader.rva_to_file_offset(0x1010, 0x400000), Some(96));
+        // Reloc dir RVA 0x2000 (stripped .reloc section) resolves from end of file
+        let relocs = loader
+            .parse_relocations(0x2000, 12, 0x400000)
+            .expect("parse stripped reloc dir");
+        assert_eq!(relocs.len(), 1);
+        assert_eq!(relocs[0].address, 0x401024);
     }
 }
