@@ -120,6 +120,8 @@ pub struct WindowsDebugger {
     pub(crate) pending_continue_status: Option<NTSTATUS>,
     /// Active hardware breakpoints: address → DR slot index (0-3).
     pub(crate) hw_breakpoints: std::collections::BTreeMap<u64, u8>,
+    #[cfg(test)]
+    pub(crate) test_memory: Option<std::collections::BTreeMap<u64, u8>>,
 }
 
 impl WindowsDebugger {
@@ -136,6 +138,18 @@ impl WindowsDebugger {
             is_wow64: None,
             pending_continue_status: None,
             hw_breakpoints: std::collections::BTreeMap::new(),
+            #[cfg(test)]
+            test_memory: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_memory(&mut self, addr: u64, bytes: &[u8]) {
+        let mem = self
+            .test_memory
+            .get_or_insert_with(std::collections::BTreeMap::new);
+        for (i, &b) in bytes.iter().enumerate() {
+            mem.insert(addr.wrapping_add(i as u64), b);
         }
     }
 
@@ -1518,5 +1532,178 @@ mod tests {
             result.is_ok(),
             "native debugger attach/detach path failed: {result:?}"
         );
+    }
+
+    #[test]
+    fn pe_imports_32bit_ordinal_flag_does_not_abort_enumeration() {
+        let mut dbg = WindowsDebugger::new();
+        let base = 0x10000u64;
+
+        // DOS header
+        let mut dos = [0u8; 64];
+        dos[60..64].copy_from_slice(&0x40u32.to_le_bytes()); // e_lfanew = 0x40
+        dbg.set_test_memory(base, &dos);
+
+        // PE signature
+        dbg.set_test_memory(base + 0x40, b"PE\0\0");
+
+        // COFF header (20 bytes at 0x44): machine = 0x014c (i386), size_optional = 224
+        let mut coff = [0u8; 20];
+        coff[0..2].copy_from_slice(&0x014cu16.to_le_bytes());
+        coff[16..18].copy_from_slice(&224u16.to_le_bytes());
+        dbg.set_test_memory(base + 0x44, &coff);
+
+        // Optional header starts at 0x58.
+        // DataDirectory offset for 32-bit = 0x58 + 96 = 0xB8.
+        // DataDirectory[1] (Imports) is at 0xB8 + 8 = 0xC0.
+        // import_rva = 0x2000, size = 40
+        dbg.set_test_memory(base + 0xC0, &0x2000u32.to_le_bytes());
+        dbg.set_test_memory(base + 0xC4, &40u32.to_le_bytes());
+
+        // Import Directory at 0x12000:
+        // desc 0: orig_first_thunk = 0x3000, name_rva = 0x2500, first_thunk = 0x4000
+        let mut desc = [0u8; 40];
+        desc[0..4].copy_from_slice(&0x3000u32.to_le_bytes());
+        desc[12..16].copy_from_slice(&0x2500u32.to_le_bytes());
+        desc[16..20].copy_from_slice(&0x4000u32.to_le_bytes());
+        // Remaining 20 bytes are zero (null descriptor terminator)
+        dbg.set_test_memory(base + 0x2000, &desc);
+
+        // DLL name at 0x12500
+        dbg.set_test_memory(base + 0x2500, b"ws2_32.dll\0");
+
+        // Thunk table at 0x13000:
+        // Thunk 0: 0x80000001 (IMAGE_ORDINAL_FLAG32 | ordinal 1)
+        // Thunk 1: 0x00005000 (Name import)
+        // Thunk 2: 0 (terminator)
+        dbg.set_test_memory(base + 0x3000, &0x80000001u32.to_le_bytes());
+        dbg.set_test_memory(base + 0x3004, &0x00005000u32.to_le_bytes());
+        dbg.set_test_memory(base + 0x3008, &0u32.to_le_bytes());
+
+        // Hint/Name entry at 0x15000: hint = 0, name = "socket\0"
+        let mut hint_name = vec![0u8, 0];
+        hint_name.extend_from_slice(b"socket\0");
+        dbg.set_test_memory(base + 0x5000, &hint_name);
+
+        let imports = dbg
+            .get_module_imports(base)
+            .expect("parse 32-bit PE imports");
+        assert_eq!(imports.len(), 2);
+
+        // Thunk 0: ordinal import
+        assert_eq!(imports[0].module, "ws2_32.dll");
+        assert_eq!(imports[0].ordinal, Some(1));
+        assert_eq!(imports[0].name, None);
+        assert_eq!(imports[0].address, base + 0x4000);
+
+        // Thunk 1: name import
+        assert_eq!(imports[1].module, "ws2_32.dll");
+        assert_eq!(imports[1].ordinal, None);
+        assert_eq!(imports[1].name.as_deref(), Some("socket"));
+        assert_eq!(imports[1].address, base + 0x4004);
+    }
+
+    #[test]
+    fn pe_exports_base_ordinal_and_ordinal_only_and_forwarders() {
+        let mut dbg = WindowsDebugger::new();
+        let base = 0x140000000u64;
+
+        // DOS header
+        let mut dos = [0u8; 64];
+        dos[60..64].copy_from_slice(&0x40u32.to_le_bytes());
+        dbg.set_test_memory(base, &dos);
+
+        // PE signature
+        dbg.set_test_memory(base + 0x40, b"PE\0\0");
+
+        // COFF header: machine = 0x8664, size_optional = 240
+        let mut coff = [0u8; 20];
+        coff[0..2].copy_from_slice(&0x8664u16.to_le_bytes());
+        coff[16..18].copy_from_slice(&240u16.to_le_bytes());
+        dbg.set_test_memory(base + 0x44, &coff);
+
+        // Optional header starts at 0x58.
+        // DataDirectory offset for 64-bit = 0x58 + 112 = 0xC8.
+        // DataDirectory[0] (Exports) is at 0xC8.
+        // export_rva = 0x2000, export_size = 0x100
+        dbg.set_test_memory(base + 0xC8, &0x2000u32.to_le_bytes());
+        dbg.set_test_memory(base + 0xCC, &0x100u32.to_le_bytes());
+
+        // Export Directory Table at 0x140002000 (40 bytes):
+        // Base = 100 (offset 16)
+        // NumberOfFunctions = 3 (offset 20)
+        // NumberOfNames = 1 (offset 24)
+        // AddressOfFunctions = 0x3000 (offset 28)
+        // AddressOfNames = 0x3100 (offset 32)
+        // AddressOfNameOrdinals = 0x3200 (offset 36)
+        let mut ed = [0u8; 40];
+        ed[16..20].copy_from_slice(&100u32.to_le_bytes());
+        ed[20..24].copy_from_slice(&3u32.to_le_bytes());
+        ed[24..28].copy_from_slice(&1u32.to_le_bytes());
+        ed[28..32].copy_from_slice(&0x3000u32.to_le_bytes());
+        ed[32..36].copy_from_slice(&0x3100u32.to_le_bytes());
+        ed[36..40].copy_from_slice(&0x3200u32.to_le_bytes());
+        dbg.set_test_memory(base + 0x2000, &ed);
+
+        // AddressOfFunctions at 0x3000 (3 entries, 4 bytes each):
+        // func 0: RVA 0x4000 (code)
+        // func 1: RVA 0x4040 (code, ordinal-only)
+        // func 2: RVA 0x2050 (inside [0x2000, 0x2100) -> forwarder)
+        dbg.set_test_memory(base + 0x3000, &0x4000u32.to_le_bytes());
+        dbg.set_test_memory(base + 0x3004, &0x4040u32.to_le_bytes());
+        dbg.set_test_memory(base + 0x3008, &0x2050u32.to_le_bytes());
+
+        // Forwarder string at 0x2050
+        dbg.set_test_memory(base + 0x2050, b"NTDLL.RtlAllocateHeap\0");
+
+        // AddressOfNames at 0x3100 (1 entry):
+        // name 0: RVA 0x3300 ("ExportedFunc\0")
+        dbg.set_test_memory(base + 0x3100, &0x3300u32.to_le_bytes());
+        dbg.set_test_memory(base + 0x3300, b"ExportedFunc\0");
+
+        // AddressOfNameOrdinals at 0x3200 (1 entry, 2 bytes):
+        // Maps name 0 to func_idx 0
+        dbg.set_test_memory(base + 0x3200, &0u16.to_le_bytes());
+
+        let exports = dbg
+            .get_module_exports(base)
+            .expect("parse 64-bit PE exports");
+        assert_eq!(exports.len(), 3);
+
+        // Func 0: named export, ordinal = Base (100) + 0 = 100
+        assert_eq!(exports[0].name, "ExportedFunc");
+        assert_eq!(exports[0].ordinal, Some(100));
+        assert_eq!(exports[0].address, base + 0x4000);
+
+        // Func 1: ordinal-only export, ordinal = Base (100) + 1 = 101
+        assert_eq!(exports[1].name, "");
+        assert_eq!(exports[1].ordinal, Some(101));
+        assert_eq!(exports[1].address, base + 0x4040);
+
+        // Func 2: forwarder export, ordinal = Base (100) + 2 = 102
+        // Since NTDLL is not in loaded modules, address is 0 (not pointing to ASCII forwarder string!)
+        assert_eq!(exports[2].ordinal, Some(102));
+        assert_eq!(exports[2].address, 0);
+    }
+
+    #[test]
+    fn step_out_finds_frame_return_address() {
+        let mut dbg = WindowsDebugger::new();
+        dbg.is_wow64 = Some(true);
+
+        // 32-bit WOW64: EBP points to saved frame, [EBP + 4] has return address
+        let mut regs = RegisterState::at(0x401050);
+        regs.set("ESP", 0x1000);
+        regs.set("EBP", 0x1020);
+
+        // At [EBP + 4] = 0x1024, return address = 0x402000
+        dbg.set_test_memory(0x1024, &0x402000u32.to_le_bytes());
+        // Map target memory so memory check passes
+        dbg.set_test_memory(0x402000, &[0x90]);
+
+        let ret_addr = dbg
+            .find_return_address(1, &regs)
+            .expect("find return address");
+        assert_eq!(ret_addr, 0x402000);
     }
 }
