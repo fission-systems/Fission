@@ -1737,7 +1737,7 @@ pub fn lower_loop_body_subgraph(
         .map(|lb| {
             lb.all_exits
                 .iter()
-                .filter_map(|&exit| Some(host.block_start_address(exit)))
+                .filter_map(|&exit| Some(host.block_target_key(exit)))
                 .collect()
         })
         .filter(|exits: &HashSet<u64>| !exits.is_empty())
@@ -1789,7 +1789,7 @@ pub fn lower_loop_body_subgraph(
     {
         let body_addrs: HashSet<u64> = body_set
             .iter()
-            .map(|&bi| host.block_start_address(bi))
+            .map(|&bi| host.block_target_key(bi))
             .collect();
         for &bi in body_set.iter() {
             // (a) Cached terminator branch targets (no re-lowering).
@@ -1803,7 +1803,7 @@ pub fn lower_loop_body_subgraph(
             // (b) Raw CFG successors inside the body set.
             for &succ_idx in &host.successors()[bi] {
                 if body_set.contains(&succ_idx) {
-                    force_labels.insert(host.block_start_address(succ_idx));
+                    force_labels.insert(host.block_target_key(succ_idx));
                 }
             }
         }
@@ -1964,6 +1964,16 @@ pub fn lower_loop_body_subgraph(
                     if is_break {
                         host.bump_loop_multi_exit_break();
                     }
+                    if let Some(ft) = false_target {
+                        if Some(ft) != next_addr {
+                            if let Some(target_idx) = host.find_block_index_by_address(ft) {
+                                if body_set.contains(&target_idx) {
+                                    force_labels.insert(ft);
+                                }
+                            }
+                            result_stmts.push(PreHirStmt::Goto(block_label(ft)));
+                        }
+                    }
                 } else if false_is_break && !true_is_break {
                     // `if (!cond) break;` then continue with true arm
                     let false_target = false_target.expect("false break target");
@@ -1977,18 +1987,44 @@ pub fn lower_loop_body_subgraph(
                     if is_break {
                         host.bump_loop_multi_exit_break();
                     }
+                    if Some(true_target) != next_addr {
+                        if let Some(target_idx) = host.find_block_index_by_address(true_target) {
+                            if body_set.contains(&target_idx) {
+                                force_labels.insert(true_target);
+                            }
+                        }
+                        result_stmts.push(PreHirStmt::Goto(block_label(true_target)));
+                    }
                 } else if true_is_continue && !false_is_continue {
                     result_stmts.push(PreHirStmt::If {
                         cond,
                         then_body: std::rc::Rc::new(vec![PreHirStmt::Continue]),
                         else_body: std::rc::Rc::new(Vec::new()),
                     });
+                    if let Some(ft) = false_target {
+                        if Some(ft) != next_addr {
+                            if let Some(target_idx) = host.find_block_index_by_address(ft) {
+                                if body_set.contains(&target_idx) {
+                                    force_labels.insert(ft);
+                                }
+                            }
+                            result_stmts.push(PreHirStmt::Goto(block_label(ft)));
+                        }
+                    }
                 } else if false_is_continue && !true_is_continue {
                     result_stmts.push(PreHirStmt::If {
                         cond: negate_expr(cond),
                         then_body: std::rc::Rc::new(vec![PreHirStmt::Continue]),
                         else_body: std::rc::Rc::new(Vec::new()),
                     });
+                    if Some(true_target) != next_addr {
+                        if let Some(target_idx) = host.find_block_index_by_address(true_target) {
+                            if body_set.contains(&target_idx) {
+                                force_labels.insert(true_target);
+                            }
+                        }
+                        result_stmts.push(PreHirStmt::Goto(block_label(true_target)));
+                    }
                 } else {
                     // General conditional: emit as if/goto like build_multiblock_body fallback
                     let then_body: Vec<PreHirStmt> = if next_addr == Some(true_target) {

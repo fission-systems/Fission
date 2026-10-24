@@ -5,7 +5,7 @@ use crate::helpers::block_label;
 use crate::host::StructuringHost;
 use crate::linear_types::LoweredTerminator;
 use fission_midend_core::ir::MlilPreviewError;
-use fission_midend_prehir::PreHirStmt;
+use fission_midend_prehir::{PreHirStmt, PreHirSwitchCase};
 
 /// Resolve a block index from a structured `block_<addr>` label.
 pub fn find_block_index_by_label(host: &impl StructuringHost, label: &str) -> Option<usize> {
@@ -92,8 +92,37 @@ pub fn emit_orphan_target_block(
         } => {
             stmts.push(host.emit_unsupported_control_surface(evidence, target_expr));
         }
-        LoweredTerminator::Switch { .. } => {
-            return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+        LoweredTerminator::Switch {
+            expr,
+            targets,
+            default_target,
+            min_val,
+            proof,
+        } => {
+            let (case_values, _used_proof_payload) = crate::helpers::recovered_switch_case_values(
+                &targets,
+                default_target,
+                min_val,
+                proof.as_ref(),
+            );
+            let cases = case_values
+                .into_iter()
+                .map(|(value, target)| PreHirSwitchCase {
+                    values: vec![value],
+                    body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(target))]),
+                })
+                .collect();
+            stmts.push(PreHirStmt::Switch {
+                expr,
+                cases,
+                default: std::rc::Rc::new(
+                    default_target
+                        .map(block_label)
+                        .map(PreHirStmt::Goto)
+                        .into_iter()
+                        .collect(),
+                ),
+            });
         }
     }
     Ok(stmts)
@@ -128,8 +157,12 @@ pub fn try_repair_orphan_gotos(
 
         let mut repaired_any = false;
         for label in orphans {
-            let block_idx = find_block_index_by_label(host, &label)?;
-            let fragment = emit_orphan_target_block(host, block_idx).ok()?;
+            let Some(block_idx) = find_block_index_by_label(host, &label) else {
+                continue;
+            };
+            let Ok(fragment) = emit_orphan_target_block(host, block_idx) else {
+                continue;
+            };
             body.extend(fragment);
             repaired_any = true;
         }
