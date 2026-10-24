@@ -113,6 +113,11 @@ impl PreHirFunction {
             callee_summaries: self.callee_summaries,
         }
     }
+
+    /// Whether this function targets a Big-Endian architecture.
+    pub fn is_big_endian(&self) -> bool {
+        self.calling_convention.is_big_endian()
+    }
 }
 
 fn dir_binding_to_nir_binding(binding: PreHirBinding) -> NirBinding {

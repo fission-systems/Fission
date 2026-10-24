@@ -60,4 +60,12 @@ impl CallingConvention {
             CallingConvention::X86_32 => Some(0x10),
         }
     }
+
+    /// Whether this calling convention represents a Big-Endian target architecture.
+    pub fn is_big_endian(self) -> bool {
+        matches!(
+            self,
+            CallingConvention::PowerPc32 | CallingConvention::PowerPc64
+        )
+    }
 }
