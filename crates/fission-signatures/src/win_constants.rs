@@ -24,10 +24,18 @@ pub struct EnumGroup {
 
 impl EnumGroup {
     pub fn new(name: &str, values: &[(&str, u64)]) -> Self {
+        Self::new_with_flags(name, values, true)
+    }
+
+    pub fn new_enum(name: &str, values: &[(&str, u64)]) -> Self {
+        Self::new_with_flags(name, values, false)
+    }
+
+    pub fn new_with_flags(name: &str, values: &[(&str, u64)], flags: bool) -> Self {
         Self {
             name: name.to_string(),
             values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(),
-            flags: true,
+            flags,
         }
     }
 
@@ -185,7 +193,7 @@ impl WinConstantsDb {
     }
 
     pub fn resolve_in_group(&self, group_name: &str, value: u64) -> Option<String> {
-        self.groups.get(group_name)?.resolve_flags(value)
+        self.groups.get(group_name)?.resolve(value)
     }
 
     fn add_group(&mut self, group: EnumGroup) {
@@ -250,7 +258,7 @@ impl WinConstantsDb {
         ));
 
         // FILE_CREATE - CreateFile dwCreationDisposition parameter
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "FILE_CREATE",
             &[
                 ("CREATE_NEW", 1),
@@ -340,7 +348,7 @@ impl WinConstantsDb {
         ));
 
         // WH_HOOK - SetWindowsHookEx idHook parameter
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "WH_HOOK",
             &[
                 ("WH_MSGFILTER", -1_i32 as u64),
@@ -393,7 +401,7 @@ impl WinConstantsDb {
         ));
 
         // REG_TYPE - Registry value types
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "REG_TYPE",
             &[
                 ("REG_NONE", 0),
@@ -409,7 +417,7 @@ impl WinConstantsDb {
         ));
 
         // WAIT - WaitForSingleObject return values
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "WAIT",
             &[
                 ("WAIT_OBJECT_0", 0x00000000),
@@ -449,7 +457,7 @@ impl WinConstantsDb {
         ));
 
         // SW_SHOW - ShowWindow nCmdShow parameter
-        self.add_group(EnumGroup::new(
+        self.add_group(EnumGroup::new_enum(
             "SW_SHOW",
             &[
                 ("SW_HIDE", 0),
@@ -576,5 +584,35 @@ mod tests {
             db.resolve_in_group("GENERIC_ACCESS", 0xC0000000),
             Some("GENERIC_READ | GENERIC_WRITE".to_string())
         );
+    }
+
+    #[test]
+    fn test_cardinal_enums_do_not_decompose() {
+        let db = WinConstantsDb::new();
+        assert_eq!(
+            db.resolve_in_group("FILE_CREATE", 2),
+            Some("CREATE_ALWAYS".to_string())
+        );
+        // 6 is 2 | 4 (CREATE_ALWAYS | OPEN_ALWAYS); cardinal enum must NOT decompose
+        assert_eq!(db.resolve_in_group("FILE_CREATE", 6), None);
+
+        assert_eq!(
+            db.resolve_in_group("SW_SHOW", 5),
+            Some("SW_SHOW".to_string())
+        );
+        // 12 is 4 | 8; cardinal enum must NOT decompose into bitwise OR
+        assert_eq!(db.resolve_in_group("SW_SHOW", 12), None);
+
+        assert_eq!(
+            db.resolve_in_group("REG_TYPE", 4),
+            Some("REG_DWORD".to_string())
+        );
+        // 6 is explicitly REG_LINK, not REG_EXPAND_SZ | REG_DWORD
+        assert_eq!(
+            db.resolve_in_group("REG_TYPE", 6),
+            Some("REG_LINK".to_string())
+        );
+        // 8 is not a member and must NOT decompose
+        assert_eq!(db.resolve_in_group("REG_TYPE", 8), None);
     }
 }
