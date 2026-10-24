@@ -107,6 +107,27 @@ pub trait ExecutionBackend: Send {
     /// Read memory from the target process
     fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>>;
 
+    /// Read memory from the target process up to `size` bytes.
+    ///
+    /// If an unmapped or unreadable boundary is encountered before `size` bytes,
+    /// returns the contiguous bytes available up to that boundary. Returns an error
+    /// only if zero bytes could be read.
+    fn read_memory_partial(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        match self.read_memory(address, size) {
+            Ok(bytes) => Ok(bytes),
+            Err(e) => {
+                let page_size = 4096usize;
+                let page_offset = (address as usize) % page_size;
+                let in_first_page = page_size - page_offset;
+                if size > in_first_page {
+                    self.read_memory(address, in_first_page).map_err(|_| e)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
     /// Write memory to the target process
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()>;
 

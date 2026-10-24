@@ -485,6 +485,25 @@ impl ExecutionBackend for EmulatorBackend {
             .map_err(|e| fission_core::err!(debug, "Memory read failed at 0x{:x}: {}", address, e))
     }
 
+    fn read_memory_partial(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        let Some(emu) = &self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        use fission_emulator::pcode::page_map::AccessKind;
+        let available = emu.state.page_map.readable_extent(address, size);
+        if available == 0 {
+            emu.state
+                .page_map
+                .check_range(address, 1, AccessKind::Read)
+                .map_err(|e| {
+                    fission_core::err!(debug, "Cannot access memory at 0x{:x}: {}", address, e)
+                })?;
+        }
+        emu.state
+            .read_space_readonly(emu.state.ram_space(), address, available)
+            .map_err(|e| fission_core::err!(debug, "Memory read failed at 0x{:x}: {}", address, e))
+    }
+
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
         let Some(emu) = &mut self.emulator else {
             return Err(fission_core::err!(debug, "Emulator not running"));

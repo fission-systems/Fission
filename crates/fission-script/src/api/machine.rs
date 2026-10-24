@@ -314,7 +314,7 @@ impl MachineHost {
         let count = count.clamp(1, 4096) as usize;
         // Long enough for `count` instructions of any length this decodes.
         let window = (count * 16).min(64 * 1024);
-        let bytes = self.read_bytes(address as u64, window)?;
+        let bytes = self.read_bytes_partial(address as u64, window)?;
         self.with_session("disassemble", |s| {
             let Some(decoder) = s.decoder.as_ref() else {
                 return Err(fail(
@@ -354,9 +354,9 @@ impl MachineHost {
         self.disasm(pc, count)
     }
 
-    fn read_bytes(&mut self, address: u64, size: usize) -> ScriptResult<Vec<u8>> {
+    fn read_bytes_partial(&mut self, address: u64, size: usize) -> ScriptResult<Vec<u8>> {
         self.with("read memory", |b| {
-            b.read_memory(address, size).map_err(fail)
+            b.read_memory_partial(address, size).map_err(fail)
         })
     }
 
