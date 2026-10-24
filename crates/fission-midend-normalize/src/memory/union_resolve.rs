@@ -142,6 +142,14 @@ fn is_target_access(expr: &PreHirExpr, binding_name: &str, target_offset: i64) -
     }
 }
 
+fn is_target_base(expr: &PreHirExpr, binding_name: &str) -> bool {
+    match expr {
+        PreHirExpr::Var(name) => name == binding_name,
+        PreHirExpr::Cast { expr, .. } => is_target_base(expr, binding_name),
+        _ => false,
+    }
+}
+
 fn collect_accesses_in_stmts(
     stmts: &[PreHirStmt],
     binding_name: &str,
@@ -161,21 +169,40 @@ fn collect_accesses_in_stmt(
 ) {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
-            if let PreHirLValue::Deref { ptr, ty } = lhs {
-                if is_target_access(ptr, binding_name, target_offset) {
-                    let mut contexts = Vec::new();
-                    contexts.push(AccessContext::StoreRhs {
-                        rhs_ty: expr_type(rhs),
-                    });
-                    out.push(AccessInfo {
-                        access_ty: ty.clone(),
-                        contexts,
-                    });
+            match lhs {
+                PreHirLValue::Deref { ptr, ty } => {
+                    if is_target_access(ptr, binding_name, target_offset) {
+                        let mut contexts = Vec::new();
+                        contexts.push(AccessContext::StoreRhs {
+                            rhs_ty: expr_type(rhs),
+                        });
+                        out.push(AccessInfo {
+                            access_ty: ty.clone(),
+                            contexts,
+                        });
+                    }
+                    collect_accesses_in_expr(ptr, binding_name, target_offset, out, &[]);
                 }
-                collect_accesses_in_expr(ptr, binding_name, target_offset, out, &[]);
-            } else if let PreHirLValue::Index { base, index, .. } = lhs {
-                collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
-                collect_accesses_in_expr(index, binding_name, target_offset, out, &[]);
+                PreHirLValue::FieldAccess {
+                    base, offset, ty, ..
+                } => {
+                    if is_target_base(base, binding_name) && i64::from(*offset) == target_offset {
+                        let mut contexts = Vec::new();
+                        contexts.push(AccessContext::StoreRhs {
+                            rhs_ty: expr_type(rhs),
+                        });
+                        out.push(AccessInfo {
+                            access_ty: ty.clone(),
+                            contexts,
+                        });
+                    }
+                    collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
+                }
+                PreHirLValue::Index { base, index, .. } => {
+                    collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
+                    collect_accesses_in_expr(index, binding_name, target_offset, out, &[]);
+                }
+                _ => {}
             }
             collect_accesses_in_expr(rhs, binding_name, target_offset, out, &[]);
         }
@@ -293,6 +320,19 @@ fn collect_accesses_in_expr(
         PreHirExpr::PtrOffset { base, .. } => {
             collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
         }
+        PreHirExpr::FieldAccess {
+            base, offset, ty, ..
+        } => {
+            if is_target_base(base, binding_name) && i64::from(*offset) == target_offset {
+                let mut contexts = parent_contexts.to_vec();
+                contexts.push(AccessContext::LoadParent);
+                out.push(AccessInfo {
+                    access_ty: ty.clone(),
+                    contexts,
+                });
+            }
+            collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
+        }
         PreHirExpr::Index { base, index, .. } => {
             collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
             collect_accesses_in_expr(index, binding_name, target_offset, out, &[]);
@@ -378,15 +418,7 @@ fn score_candidate_type(candidate: &NirType, accesses: &[AccessInfo]) -> i32 {
                     _ => {}
                 },
                 AccessContext::Call { target, .. } => {
-                    let target_lower = target.to_lowercase();
-                    let is_float_fn = target_lower.contains("sqrt")
-                        || target_lower.contains("sin")
-                        || target_lower.contains("cos")
-                        || target_lower.contains("tan")
-                        || target_lower.contains("pow")
-                        || target_lower.contains("floor")
-                        || target_lower.contains("ceil")
-                        || target_lower.contains("abs");
+                    let is_float_fn = is_float_math_function(target);
 
                     match candidate {
                         NirType::Float { .. } => {
@@ -421,4 +453,153 @@ fn score_candidate_type(candidate: &NirType, accesses: &[AccessInfo]) -> i32 {
     }
 
     score
+}
+
+fn is_float_math_function(target: &str) -> bool {
+    let name = target.trim_start_matches('_');
+    let name = name.strip_prefix("std::").unwrap_or(name);
+    let name = name.strip_prefix("imp_").unwrap_or(name);
+    let name = name.split('@').next().unwrap_or(name);
+    let name_lower = name.to_ascii_lowercase();
+    matches!(
+        name_lower.as_str(),
+        "sqrt"
+            | "sqrtf"
+            | "sqrtl"
+            | "sin"
+            | "sinf"
+            | "sinl"
+            | "cos"
+            | "cosf"
+            | "cosl"
+            | "tan"
+            | "tanf"
+            | "tanl"
+            | "asin"
+            | "asinf"
+            | "asinl"
+            | "acos"
+            | "acosf"
+            | "acosl"
+            | "atan"
+            | "atanf"
+            | "atanl"
+            | "atan2"
+            | "atan2f"
+            | "atan2l"
+            | "sinh"
+            | "sinhf"
+            | "sinhl"
+            | "cosh"
+            | "coshf"
+            | "coshl"
+            | "tanh"
+            | "tanhf"
+            | "tanhl"
+            | "exp"
+            | "expf"
+            | "expl"
+            | "log"
+            | "logf"
+            | "logl"
+            | "log10"
+            | "log10f"
+            | "log10l"
+            | "pow"
+            | "powf"
+            | "powl"
+            | "floor"
+            | "floorf"
+            | "floorl"
+            | "ceil"
+            | "ceilf"
+            | "ceill"
+            | "fabs"
+            | "fabsf"
+            | "fabsl"
+            | "round"
+            | "roundf"
+            | "roundl"
+            | "trunc"
+            | "truncf"
+            | "truncl"
+            | "fmod"
+            | "fmodf"
+            | "fmodl"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn float_math_function_exact_matching() {
+        assert!(is_float_math_function("sqrt"));
+        assert!(is_float_math_function("sqrtf"));
+        assert!(is_float_math_function("fabs"));
+        assert!(is_float_math_function("fabsf"));
+        assert!(is_float_math_function("__imp_cos"));
+        assert!(is_float_math_function("pow@16"));
+
+        // Integer abs and non-math substring collisions must return false
+        assert!(!is_float_math_function("abs"));
+        assert!(!is_float_math_function("tabs"));
+        assert!(!is_float_math_function("cosine_dist"));
+        assert!(!is_float_math_function("power_state"));
+    }
+
+    #[test]
+    fn field_access_resolves_union_type() {
+        let fields = vec![fission_midend_core::StructField {
+            offset: 0,
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            name: "field_0".to_string(),
+        }];
+
+        let struct_ty = NirType::Aggregate {
+            size: 4,
+            fields: fields.clone(),
+        };
+
+        // Call to sqrt(st->field_0)
+        let body = vec![PreHirStmt::Expr(PreHirExpr::Call {
+            target: "sqrtf".to_string(),
+            args: vec![PreHirExpr::FieldAccess {
+                base: Box::new(PreHirExpr::Var("st".to_string())),
+                field_name: "field_0".to_string(),
+                offset: 0,
+                ty: NirType::Float { bits: 32 },
+            }],
+            ty: NirType::Float { bits: 32 },
+        })];
+
+        let mut func = PreHirFunction {
+            name: "test_fn".to_string(),
+            is_64bit: true,
+            params: vec![PreHirBinding {
+                name: "st".to_string(),
+                ty: NirType::Ptr(Box::new(struct_ty)),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body,
+            ..Default::default()
+        };
+
+        assert!(apply_union_resolve_pass(&mut func));
+        if let NirType::Ptr(inner) = &func.params[0].ty {
+            if let NirType::Aggregate { fields, .. } = inner.as_ref() {
+                assert_eq!(fields[0].ty, NirType::Float { bits: 32 });
+            } else {
+                panic!("expected Aggregate");
+            }
+        } else {
+            panic!("expected Ptr");
+        }
+    }
 }
