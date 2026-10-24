@@ -461,41 +461,45 @@ macro_rules! define_lower_sym {
                     env.insert(p.name.clone(), v.clone());
                 }
                 for l in locals {
-                    let bits = width_of(&l.ty).clamp(1, 64);
-                    let v = match &l.initializer {
-                        Some(init) => eval_expr(init, &env)?,
-                        None => SymExpr::Const { val: 0, size: bits },
-                    };
-                    env.insert(l.name.clone(), v);
+                    if let Some(init) = &l.initializer {
+                        let v = eval_expr(init, &env)?;
+                        env.insert(l.name.clone(), v);
+                    }
                 }
                 let mut budget = 0usize;
                 let leaves = exec_from(body, 0, SymExpr::Const { val: 1, size: 1 }, env, &mut budget)?;
 
-                let mut result: Option<SymExpr> = None;
-                for leaf in leaves.into_iter().rev() {
-                    let value = match leaf.kind {
-                        LeafKind::Return(Some(v)) => v,
+                let mut return_leaves: Vec<(SymExpr, SymExpr)> = Vec::new();
+                let mut has_incomplete_return = false;
+                for leaf in leaves {
+                    match leaf.kind {
+                        LeafKind::Return(Some(v)) => {
+                            return_leaves.push((leaf.path_cond, v));
+                        }
                         LeafKind::Fallthrough(_) | LeafKind::Return(None) => {
-                            // Falls off the end / bare `return;` without a
-                            // value on this path -- can't contribute a
-                            // return-value leaf; skip rather than fail the
-                            // whole function (matches the concrete tier's
-                            // `Flow::Normal => Ok(None)` treatment: a real
-                            // divergence here would already show up as a
-                            // `diff_prehir_hir`/`check_ground_truth` finding
-                            // on the concrete tier).
-                            continue;
+                            has_incomplete_return = true;
                         }
                         LeafKind::UnresolvedGoto(label, _) => {
                             bail!("lower_sym: goto '{label}' never resolved to a label in this function")
                         }
-                    };
-                    result = Some(match result {
-                        None => value,
-                        Some(acc) => SymExpr::Ite { cond: Box::new(leaf.path_cond), t: Box::new(value), f: Box::new(acc) },
-                    });
+                    }
                 }
-                result.ok_or_else(|| anyhow::anyhow!("lower_sym: no path through the function returns a value"))
+                if return_leaves.is_empty() {
+                    bail!("lower_sym: no path through the function returns a value");
+                }
+                if has_incomplete_return {
+                    bail!("lower_sym: function has incomplete return paths (fallthrough or void return)");
+                }
+                let mut iter = return_leaves.into_iter().rev();
+                let (_, mut acc) = iter.next().expect("non-empty return_leaves");
+                for (cond, value) in iter {
+                    acc = SymExpr::Ite {
+                        cond: Box::new(cond),
+                        t: Box::new(value),
+                        f: Box::new(acc),
+                    };
+                }
+                Ok(acc)
             }
         }
     };
