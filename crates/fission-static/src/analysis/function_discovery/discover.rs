@@ -1,8 +1,8 @@
 use fission_loader::{FunctionCandidateInfo, FunctionInfo, LoadedBinary};
 use fission_signatures::load_ghidra_patterns;
-use fission_sleigh::runtime::DecodedFlowKind;
 use fission_sleigh::runtime::{
-    PackedContextOverride, RuntimeFrontendStatus, RuntimeSleighFrontend,
+    DecodedFlowKind, DecodedReferenceKind, PackedContextOverride, RuntimeFrontendStatus,
+    RuntimeSleighFrontend,
 };
 
 use super::ranges::{executable_ranges, is_in_executable_ranges, runtime_load_spec_for};
@@ -813,8 +813,49 @@ fn collect_section_targets_resync(
     decoded_count
 }
 
-struct InstructionBoundaryTracker {
-    boundaries: Vec<(u64, u64)>,
+pub(crate) fn is_target_no_return(binary: &LoadedBinary, target: u64) -> bool {
+    let fmt = fission_core::core::ghidra_no_return::binary_format_to_ghidra_format(&binary.format);
+    let Some(fmt) = fmt else {
+        return false;
+    };
+    let comp = binary.get_ghidra_compiler_id();
+    let idx = fission_core::core::ghidra_no_return::ghidra_no_return_index();
+
+    if let Some((name, lib)) =
+        crate::analysis::control_flow_facts::resolve_call_target_name(binary, target)
+    {
+        if idx.is_no_return(fmt, comp.as_deref(), lib, &name) {
+            return true;
+        }
+    }
+    false
+}
+
+fn merge_intervals(mut intervals: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+    if intervals.is_empty() {
+        return intervals;
+    }
+    intervals.sort_unstable_by_key(|&(start, _)| start);
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(intervals.len());
+    for (start, end) in intervals {
+        if start >= end {
+            continue;
+        }
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+    merged
+}
+
+pub(crate) struct InstructionBoundaryTracker {
+    instruction_starts: Vec<u64>,
+    intervals: Vec<(u64, u64)>,
+    known_functions: std::collections::HashSet<u64>,
 }
 
 impl InstructionBoundaryTracker {
@@ -826,31 +867,28 @@ impl InstructionBoundaryTracker {
         use rayon::prelude::*;
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr))
+            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known_functions))
             .collect();
 
-        let mut tracker = Self { boundaries };
-        tracker.boundaries.sort_unstable_by_key(|&(start, _)| start);
-        tracker.boundaries.dedup_by_key(|&mut (start, _)| start);
-        tracker
+        let mut instruction_starts: Vec<u64> = boundaries.iter().map(|&(s, _)| s).collect();
+        instruction_starts.sort_unstable();
+        instruction_starts.dedup();
+
+        let intervals = merge_intervals(boundaries);
+
+        Self {
+            instruction_starts,
+            intervals,
+            known_functions: known_functions.clone(),
+        }
     }
 
     /// Register a batch of newly-accepted candidates in one pass instead of
     /// one `add_function` call each. Each address's CFG walk only ever
-    /// *reads* `binary`/`frontend`, never `self` (see
-    /// `walk_function_boundaries`), so the walks themselves are independent
-    /// and safe to run in parallel; the only genuinely shared-state part is
-    /// merging the results in, which this now does once per batch instead
-    /// of once per address.
-    ///
-    /// This is why a scanner stage calling `add_function` once per accepted
-    /// candidate in a plain sequential loop was the actual bottleneck for
-    /// large candidate batches (Balanced profile in particular): each call
-    /// re-sorted and re-deduped the *entire* accumulated `boundaries`
-    /// list -- O(n log n) on a list that only grows -- so a stage adding a
-    /// few thousand candidates paid that full-list sort a few thousand
-    /// times over. One sort at the end of the batch is the same net
-    /// bookkeeping this loop always needed, just done once.
+    /// *reads* `binary`/`frontend`/`known_functions`, never `self`, so the
+    /// walks themselves are independent and safe to run in parallel; the only
+    /// genuinely shared-state part is merging the results in, which this now
+    /// does once per batch instead of once per address.
     fn add_functions_batch(
         &mut self,
         binary: &LoadedBinary,
@@ -860,29 +898,82 @@ impl InstructionBoundaryTracker {
         if addrs.is_empty() {
             return;
         }
+        self.known_functions.extend(addrs.iter().copied());
         use rayon::prelude::*;
+        let known = &self.known_functions;
         let new_boundaries: Vec<(u64, u64)> = addrs
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr))
+            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known))
             .collect();
-        self.boundaries.extend(new_boundaries);
-        self.boundaries.sort_unstable_by_key(|&(start, _)| start);
-        self.boundaries.dedup_by_key(|&mut (start, _)| start);
+
+        let new_starts: Vec<u64> = new_boundaries.iter().map(|&(s, _)| s).collect();
+        self.instruction_starts.extend(new_starts);
+        self.instruction_starts.sort_unstable();
+        self.instruction_starts.dedup();
+
+        let mut all_intervals = std::mem::take(&mut self.intervals);
+        all_intervals.extend(new_boundaries);
+        self.intervals = merge_intervals(all_intervals);
+    }
+
+    pub(crate) fn is_overlap(&self, addr: u64) -> bool {
+        match self.intervals.binary_search_by(|&(start, end)| {
+            if addr < start {
+                std::cmp::Ordering::Greater
+            } else if addr >= end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        }) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    pub(crate) fn is_in_body(&self, addr: u64) -> bool {
+        self.instruction_starts.binary_search(&addr).is_ok()
+    }
+
+    pub(crate) fn is_offcut(&self, addr: u64) -> bool {
+        self.is_overlap(addr) && !self.is_in_body(addr)
+    }
+}
+
+#[cfg(test)]
+impl InstructionBoundaryTracker {
+    pub(crate) fn from_raw_boundaries(
+        boundaries: Vec<(u64, u64)>,
+        known_functions: std::collections::HashSet<u64>,
+    ) -> Self {
+        let mut instruction_starts: Vec<u64> = boundaries.iter().map(|&(s, _)| s).collect();
+        instruction_starts.sort_unstable();
+        instruction_starts.dedup();
+        let intervals = merge_intervals(boundaries);
+        Self {
+            instruction_starts,
+            intervals,
+            known_functions,
+        }
+    }
+
+    pub(crate) fn intervals(&self) -> &[(u64, u64)] {
+        &self.intervals
+    }
+
+    pub(crate) fn instruction_starts(&self) -> &[u64] {
+        &self.instruction_starts
     }
 }
 
 /// The actual CFG-following instruction-boundary walk used by both
 /// [`InstructionBoundaryTracker::build`] and
-/// [`InstructionBoundaryTracker::add_functions_batch`], factored out
-/// because it never reads tracker state (only `binary`/`frontend`) --
-/// every call is independent, which is what lets `add_functions_batch`
-/// run a whole batch of these in parallel and merge once instead of
-/// merging (and re-sorting the whole accumulated list) after every single
-/// one.
-fn walk_function_boundaries(
+/// [`InstructionBoundaryTracker::add_functions_batch`].
+pub(crate) fn walk_function_boundaries(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
     addr: u64,
+    known_functions: &std::collections::HashSet<u64>,
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
     {
@@ -892,6 +983,12 @@ fn walk_function_boundaries(
 
         while let Some(curr) = worklist.pop() {
             if visited.contains(&curr) {
+                continue;
+            }
+            if curr != addr
+                && (known_functions.contains(&curr)
+                    || binary.function_addr_index.contains_key(&curr))
+            {
                 continue;
             }
 
@@ -926,16 +1023,80 @@ fn walk_function_boundaries(
                         break;
                     }
                     DecodedFlowKind::Jump => {
-                        // Do not trace unconditional jumps to avoid enveloping tail call targets
-                        break;
-                    }
-                    DecodedFlowKind::ConditionalJump => {
-                        if let Some(target) = inst.direct_target {
+                        let jump_target = inst.direct_target.or_else(|| {
+                            inst.references.iter().find_map(|r| match r.kind {
+                                DecodedReferenceKind::BranchTarget
+                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                                _ => None,
+                            })
+                        });
+                        if let Some(target) = jump_target {
                             let norm_target =
                                 crate::analysis::function_discovery::targets::normalize_target(
                                     binary, target,
                                 );
-                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges) {
+                            let in_same_section = binary.sections.is_empty()
+                                || crate::analysis::function_discovery::targets::same_section(
+                                    binary,
+                                    ip,
+                                    norm_target,
+                                );
+                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges)
+                                && !known_functions.contains(&norm_target)
+                                && !binary.function_addr_index.contains_key(&norm_target)
+                                && in_same_section
+                            {
+                                worklist.push(norm_target);
+                            }
+                        }
+                        break;
+                    }
+                    DecodedFlowKind::Call => {
+                        let call_target = inst.direct_target.or_else(|| {
+                            inst.references.iter().find_map(|r| match r.kind {
+                                DecodedReferenceKind::CallTarget
+                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                                _ => None,
+                            })
+                        });
+                        let is_noreturn = if let Some(target) = call_target {
+                            let norm_target =
+                                crate::analysis::function_discovery::targets::normalize_target(
+                                    binary, target,
+                                );
+                            is_target_no_return(binary, norm_target)
+                        } else {
+                            false
+                        };
+                        if is_noreturn {
+                            break;
+                        }
+                        ip += inst.length as u64;
+                    }
+                    DecodedFlowKind::ConditionalJump => {
+                        let jump_target = inst.direct_target.or_else(|| {
+                            inst.references.iter().find_map(|r| match r.kind {
+                                DecodedReferenceKind::BranchTarget
+                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                                _ => None,
+                            })
+                        });
+                        if let Some(target) = jump_target {
+                            let norm_target =
+                                crate::analysis::function_discovery::targets::normalize_target(
+                                    binary, target,
+                                );
+                            let in_same_section = binary.sections.is_empty()
+                                || crate::analysis::function_discovery::targets::same_section(
+                                    binary,
+                                    ip,
+                                    norm_target,
+                                );
+                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges)
+                                && !known_functions.contains(&norm_target)
+                                && !binary.function_addr_index.contains_key(&norm_target)
+                                && in_same_section
+                            {
                                 worklist.push(norm_target);
                             }
                         }
@@ -952,33 +1113,6 @@ fn walk_function_boundaries(
         }
     }
     boundaries
-}
-
-impl InstructionBoundaryTracker {
-    fn is_overlap(&self, addr: u64) -> bool {
-        self.is_in_body(addr) || self.is_offcut(addr)
-    }
-
-    fn is_in_body(&self, addr: u64) -> bool {
-        self.boundaries
-            .binary_search_by_key(&addr, |&(start, _)| start)
-            .is_ok()
-    }
-
-    fn is_offcut(&self, addr: u64) -> bool {
-        match self.boundaries.binary_search_by(|&(start, end)| {
-            if addr <= start {
-                std::cmp::Ordering::Greater
-            } else if addr >= end {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        }) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
-    }
 }
 
 fn validate_after_condition(
@@ -2091,35 +2225,26 @@ pub(crate) fn validate_subroutine_candidate(
                         adds_info = true;
                         if inst.flow_kind == DecodedFlowKind::Call {
                             has_call_to_valid = true;
+                        }
+                    }
+                }
 
-                            // [G7] noReturn CALL handling
-                            let mut is_noreturn = false;
-                            let mut name = None;
-                            let mut lib = None;
-                            if let Some(&idx) = binary.function_addr_index.get(&norm_target) {
-                                if let Some(f) = binary.functions.get(idx) {
-                                    name = Some(f.name.as_str());
-                                    lib = f.external_library.as_deref();
-                                }
-                            }
-                            if name.is_none() {
-                                if let Some(n) = binary.iat_symbols.get(&norm_target) {
-                                    name = Some(n.as_str());
-                                } else if let Some(n) = binary.global_symbols.get(&norm_target) {
-                                    name = Some(n.as_str());
-                                }
-                            }
-                            if let Some(n) = name {
-                                let fmt = fission_core::core::ghidra_no_return::binary_format_to_ghidra_format(&binary.format).unwrap_or("");
-                                let comp = binary.get_ghidra_compiler_id();
-                                let idx =
-                                    fission_core::core::ghidra_no_return::ghidra_no_return_index();
-                                is_noreturn = idx.is_no_return(fmt, comp.as_deref(), lib, n);
-                            }
-                            if is_noreturn {
-                                did_terminate = true;
-                                break;
-                            }
+                if inst.flow_kind == DecodedFlowKind::Call {
+                    let call_target = inst.direct_target.or_else(|| {
+                        inst.references.iter().find_map(|r| match r.kind {
+                            DecodedReferenceKind::CallTarget
+                            | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                            _ => None,
+                        })
+                    });
+                    if let Some(target) = call_target {
+                        let norm_target =
+                            crate::analysis::function_discovery::targets::normalize_target(
+                                binary, target,
+                            );
+                        if is_target_no_return(binary, norm_target) {
+                            did_terminate = true;
+                            break;
                         }
                     }
                 }
