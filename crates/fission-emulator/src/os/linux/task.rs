@@ -25,7 +25,9 @@ const ETIMEDOUT: i64 = 110;
 
 const FUTEX_WAIT: u64 = 0;
 const FUTEX_WAKE: u64 = 1;
+const FUTEX_WAIT_BITSET: u64 = 9;
 const FUTEX_PRIVATE_FLAG: u64 = 0x80;
+const FUTEX_CLOCK_REALTIME: u64 = 0x100;
 const FUTEX_CMD_MASK: u64 = 0x7f;
 
 const CLONE_VM: u64 = 0x0000_0100;
@@ -265,15 +267,21 @@ impl LinuxTaskScheduler {
         let command = raw_op & FUTEX_CMD_MASK;
         let value = emu.syscall_arg(2);
 
-        if raw_op & !(FUTEX_CMD_MASK | FUTEX_PRIVATE_FLAG) != 0 {
+        if raw_op & !(FUTEX_CMD_MASK | FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) != 0 {
             return set_errno(emu, ENOSYS);
         }
         if address == 0 || address & 3 != 0 {
             return set_errno(emu, EINVAL);
         }
-        if command != FUTEX_WAIT && command != FUTEX_WAKE {
+        if command != FUTEX_WAIT && command != FUTEX_WAKE && command != FUTEX_WAIT_BITSET {
             tracing::warn!("Unsupported Linux futex command: {}", command);
             return set_errno(emu, ENOSYS);
+        }
+        if command == FUTEX_WAIT_BITSET {
+            let bitset = emu.syscall_arg(5);
+            if bitset == 0 {
+                return set_errno(emu, EINVAL);
+            }
         }
         let current = match emu.state.read_space(emu.state.ram_space(), address, 4) {
             Ok(bytes) => read_guest_u32(emu, bytes.try_into().unwrap_or([0; 4])),
@@ -281,7 +289,7 @@ impl LinuxTaskScheduler {
         };
 
         match command {
-            FUTEX_WAIT => {
+            FUTEX_WAIT | FUTEX_WAIT_BITSET => {
                 if u64::from(current) != (value & u64::from(u32::MAX)) {
                     return set_errno(emu, EAGAIN);
                 }
@@ -792,6 +800,35 @@ mod tests {
         assert_eq!(read_syscall_result(&mut emu), -EAGAIN);
 
         assert!(matches!(
+            dispatch_syscall(
+                &env,
+                &mut emu,
+                202,
+                [
+                    futex,
+                    FUTEX_PRIVATE_FLAG | FUTEX_WAIT_BITSET,
+                    0,
+                    0,
+                    0,
+                    0xFFFF_FFFF
+                ]
+            ),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -EAGAIN);
+
+        assert!(matches!(
+            dispatch_syscall(
+                &env,
+                &mut emu,
+                202,
+                [futex, FUTEX_PRIVATE_FLAG | FUTEX_WAIT_BITSET, 0, 0, 0, 0]
+            ),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -EINVAL);
+
+        assert!(matches!(
             dispatch_syscall(&env, &mut emu, 202, [futex, 2, 1, 0, 0, 0]),
             HleResult::Continue
         ));
@@ -1009,5 +1046,83 @@ mod tests {
         ));
         assert_eq!(read_syscall_result(&mut emu), -EINTR);
         assert_ne!(emu.signals.pending & (1 << 9), 0);
+    }
+
+    #[test]
+    fn sys_ioctl_reports_enotty_for_terminal_query_commands() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+
+        // TCGETS (0x5401)
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 16, [0, 0x5401, 0x1000, 0, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -25); // -ENOTTY
+
+        // TIOCGWINSZ (0x5413)
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 16, [1, 0x5413, 0x1000, 0, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -25); // -ENOTTY
+
+        // Other generic ioctl stub returns 0
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 16, [0, 0x1234, 0x1000, 0, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), 0);
+    }
+
+    #[test]
+    fn sys_prlimit64_populates_stack_and_nofile_limits() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let out_buf = guest_bytes(&mut emu, &[0u8; 16]);
+
+        // RLIMIT_STACK (3)
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 302, [0, 3, 0, out_buf, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        let bytes = emu
+            .state
+            .read_space(emu.state.ram_space(), out_buf, 16)
+            .unwrap();
+        let cur = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+        let max = u64::from_le_bytes(bytes[8..].try_into().unwrap());
+        assert_eq!(cur, 8 * 1024 * 1024);
+        assert_eq!(max, u64::MAX);
+
+        // RLIMIT_NOFILE (7)
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 302, [0, 7, 0, out_buf, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        let bytes = emu
+            .state
+            .read_space(emu.state.ram_space(), out_buf, 16)
+            .unwrap();
+        let cur = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+        let max = u64::from_le_bytes(bytes[8..].try_into().unwrap());
+        assert_eq!(cur, 1024);
+        assert_eq!(max, 1048576);
+
+        // Invalid resource >= 16 -> -EINVAL (-22)
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 302, [0, 16, 0, out_buf, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -22);
+
+        // Invalid pid -> -ESRCH (-3)
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 302, [99999, 3, 0, out_buf, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -3);
     }
 }
