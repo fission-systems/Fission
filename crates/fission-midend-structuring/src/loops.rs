@@ -990,7 +990,7 @@ fn try_lower_while_impl(
         let Some(lowered_body) = (if structure_body_members {
             lower_loop_body_via_sese(host, &body_set, body_start_idx, exit_idx, idx)?
         } else {
-            lower_loop_body_subgraph(host, &body_set, body_start_idx, Some(exit_idx), idx)?
+            lower_loop_body_subgraph(host, &body_set, body_start_idx, Some(exit_idx), idx, idx)?
         }) else {
             return Ok(None);
         };
@@ -1311,7 +1311,8 @@ pub fn try_lower_multiblock_dowhile(
         );
     }
 
-    let Some(lowered) = lower_loop_body_subgraph(host, &body_set, idx, Some(exit_idx), idx)? else {
+    let Some(lowered) = lower_loop_body_subgraph(host, &body_set, idx, Some(exit_idx), idx, idx)?
+    else {
         return Ok(None);
     };
 
@@ -1577,8 +1578,14 @@ pub fn try_lower_for(
         // Empty body (tight counter loop)
         Vec::new()
     } else {
-        let Some(lowered) =
-            lower_loop_body_subgraph(host, &body_blocks, body_start_idx, Some(exit_idx), idx)?
+        let Some(lowered) = lower_loop_body_subgraph(
+            host,
+            &body_blocks,
+            body_start_idx,
+            Some(exit_idx),
+            idx,
+            latch_idx,
+        )?
         else {
             return Ok(None);
         };
@@ -1678,9 +1685,10 @@ fn finalize_loop_body_control(
     mut body: Vec<PreHirStmt>,
     break_idx: Option<usize>,
     head_idx: usize,
+    continue_idx: usize,
 ) -> Vec<PreHirStmt> {
-    let head_addr = host.block_target_key(head_idx);
-    let continue_labels = std::iter::once(block_label(head_addr)).collect();
+    let continue_addr = host.block_target_key(continue_idx);
+    let continue_labels = std::iter::once(block_label(continue_addr)).collect();
     let break_addr = break_idx.map(|idx| host.block_target_key(idx));
     let break_labels: std::collections::HashSet<String> = host
         .get_loop_body(head_idx)
@@ -1707,7 +1715,7 @@ fn finalize_loop_body_control(
 }
 
 /// Lower all blocks in `body_set` (the loop body excluding the head) into a HIR statement
-/// sequence, treating jumps to `break_idx` as `Break` and jumps to `head_idx` as `Continue`.
+/// sequence, treating jumps to `break_idx` as `Break` and jumps to `continue_idx` as `Continue`.
 ///
 /// Algorithm (based on natural loop structure):
 /// 1. Process body blocks in sorted index order (forward dominance order for reducible CFGs).
@@ -1722,6 +1730,7 @@ pub fn lower_loop_body_subgraph(
     start_idx: usize,
     break_idx: Option<usize>,
     head_idx: usize,
+    continue_idx: usize,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
     if structuring_total_work_budget_exceeded(host) {
         return Ok(None);
@@ -1750,6 +1759,7 @@ pub fn lower_loop_body_subgraph(
         .unwrap_or_else(|| break_idx.into_iter().collect());
 
     let head_addr: u64 = host.block_target_key(head_idx);
+    let continue_addr: u64 = host.block_target_key(continue_idx);
 
     let targeted = host.collect_jump_targets()?;
 
@@ -1854,6 +1864,7 @@ pub fn lower_loop_body_subgraph(
                                 result_stmts,
                                 break_idx,
                                 head_idx,
+                                continue_idx,
                             )));
                         }
                         tombstone_range(idx, skip_to, &mut consumed_blocks);
@@ -1903,7 +1914,7 @@ pub fn lower_loop_body_subgraph(
                         host.bump_loop_multi_exit_break();
                     }
                     result_stmts.push(exit_stmt);
-                } else if target == head_addr {
+                } else if target == continue_addr {
                     result_stmts.push(PreHirStmt::Continue);
                 } else if host.next_block_address(idx) != Some(target) {
                     // Track this target as requiring a label if it is in the body.
@@ -1926,8 +1937,8 @@ pub fn lower_loop_body_subgraph(
                 let true_is_break = break_addrs.contains(&true_target);
                 let false_is_break =
                     false_target.is_some_and(|target| break_addrs.contains(&target));
-                let true_is_continue = true_target == head_addr;
-                let false_is_continue = false_target == Some(head_addr);
+                let true_is_continue = true_target == continue_addr;
+                let false_is_continue = false_target == Some(continue_addr);
 
                 if true_is_break && false_is_continue {
                     let exit_stmt = lower_loop_exit_stmt(host, idx, true_target)?;
@@ -2064,6 +2075,7 @@ pub fn lower_loop_body_subgraph(
         result_stmts,
         break_idx,
         head_idx,
+        continue_idx,
     )))
 }
 
@@ -2100,6 +2112,7 @@ pub fn try_lower_multiblock_infloop(
         host, &body_set, idx,  // start at the loop head
         None, // no break exit — truly infinite
         idx,  // head for continue detection
+        idx,  // continue target
     )?
     else {
         return Ok(None);
