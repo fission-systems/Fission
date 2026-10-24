@@ -395,3 +395,80 @@ fn aggressive_instruction_finder_does_not_run_under_balanced_or_conservative() {
         "Balanced must not run the riskier AIF-style scanner -- only Aggressive should"
     );
 }
+
+#[test]
+fn validate_after_condition_handles_section_start_defined_ptr_and_padding() {
+    use super::discover::validate_after_condition;
+
+    let mut bytes = vec![0x00; 0x100];
+    bytes[0x10] = 0x90; // NOP padding before 0x401011
+    bytes[0x20] = 0xcc; // INT3 padding before 0x401021
+    bytes[0x30] = 0x55; // non-padding code byte before 0x401031
+    let binary = LoadedBinaryBuilder::new("after.bin".to_string(), DataBuffer::Heap(bytes))
+        .format("PE")
+        .image_base(0x400000)
+        .entry_point(0x401000)
+        .arch_spec("x86:LE:64:default")
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 0x100,
+            file_offset: 0,
+            file_size: 0x100,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("synthetic binary");
+    let exec_ranges = executable_ranges(&binary);
+    let mut refs = std::collections::HashSet::new();
+    refs.insert(0x401050);
+
+    // `after="defined"` must accept the start of an executable section
+    assert!(validate_after_condition(
+        &binary,
+        0x401000,
+        "defined",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    // `after="ptr"` requires a pointer/reference targeting `addr`
+    assert!(validate_after_condition(
+        &binary,
+        0x401050,
+        "ptr",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    assert!(!validate_after_condition(
+        &binary,
+        0x401054,
+        "ptr",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    // `after="data"` accepts 0x00, 0x90, and 0xcc alignment padding
+    assert!(validate_after_condition(
+        &binary,
+        0x401011,
+        "data",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    assert!(validate_after_condition(
+        &binary,
+        0x401021,
+        "data",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    assert!(!validate_after_condition(
+        &binary,
+        0x401031,
+        "data",
+        &exec_ranges,
+        Some(&refs)
+    ));
+}

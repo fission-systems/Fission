@@ -20,6 +20,9 @@ pub struct GhidraFuncPattern {
     pub label: Option<String>,
     pub after_cond: Option<String>,
     pub valid_code_min: Option<usize>,
+    pub valid_code_max: Option<usize>,
+    pub contiguous: bool,
+    pub is_thunk: bool,
 }
 
 impl GhidraFuncPattern {
@@ -213,6 +216,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
     let mut pp_has_funcstart = false;
     let mut pp_after_cond: Option<String> = None;
     let mut pp_valid_code_min: Option<usize> = None;
+    let mut pp_valid_code_max: Option<usize> = None;
+    let mut pp_contiguous = false;
+    let mut pp_is_thunk = false;
 
     // standalone <pattern> accumulator
     let mut sp_pre: Vec<Option<u8>> = Vec::new();
@@ -220,6 +226,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
     let mut sp_label: Option<String> = None;
     let mut sp_after_cond: Option<String> = None;
     let mut sp_valid_code_min: Option<usize> = None;
+    let mut sp_valid_code_max: Option<usize> = None;
+    let mut sp_contiguous = false;
+    let mut sp_is_thunk = false;
     let mut sp_has_funcstart = false;
     let mut sp_star_found = false; // whether we parsed pre*post inline
 
@@ -252,6 +261,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         pp_has_funcstart = false;
                         pp_after_cond = None;
                         pp_valid_code_min = None;
+                        pp_valid_code_max = None;
+                        pp_contiguous = false;
+                        pp_is_thunk = false;
                     }
                     "prepatterns" if ctx == Ctx::PatternPairs => {
                         ctx = Ctx::PrePatterns;
@@ -266,6 +278,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         sp_label = None;
                         sp_after_cond = None;
                         sp_valid_code_min = None;
+                        sp_valid_code_max = None;
+                        sp_contiguous = false;
+                        sp_is_thunk = false;
                         sp_has_funcstart = false;
                         sp_star_found = false;
                     }
@@ -297,6 +312,25 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                     .ok()
                                     .and_then(|s| s.parse::<usize>().ok())
                             });
+                        let validcodemax = e
+                            .attributes()
+                            .filter_map(|a| a.ok())
+                            .find(|a| a.key.as_ref() == b"validcodemax")
+                            .and_then(|a| {
+                                std::str::from_utf8(a.value.as_ref())
+                                    .ok()
+                                    .and_then(|s| s.parse::<usize>().ok())
+                            });
+                        let contiguous = e
+                            .attributes()
+                            .filter_map(|a| a.ok())
+                            .find(|a| a.key.as_ref() == b"contiguous")
+                            .is_some_and(|a| a.value.as_ref().eq_ignore_ascii_case(b"true"));
+                        let thunk = e
+                            .attributes()
+                            .filter_map(|a| a.ok())
+                            .find(|a| a.key.as_ref() == b"thunk")
+                            .is_some_and(|a| a.value.as_ref().eq_ignore_ascii_case(b"true"));
 
                         match ctx {
                             Ctx::PostPatterns => {
@@ -306,6 +340,15 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                 }
                                 if validcode.is_some() {
                                     pp_valid_code_min = validcode;
+                                }
+                                if validcodemax.is_some() {
+                                    pp_valid_code_max = validcodemax;
+                                }
+                                if contiguous {
+                                    pp_contiguous = true;
+                                }
+                                if thunk {
+                                    pp_is_thunk = true;
                                 }
                             }
                             Ctx::StandalonePattern => {
@@ -318,6 +361,15 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                 }
                                 if validcode.is_some() {
                                     sp_valid_code_min = validcode;
+                                }
+                                if validcodemax.is_some() {
+                                    sp_valid_code_max = validcodemax;
+                                }
+                                if contiguous {
+                                    sp_contiguous = true;
+                                }
+                                if thunk {
+                                    sp_is_thunk = true;
                                 }
                             }
                             _ => {}
@@ -353,6 +405,25 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                     .ok()
                                     .and_then(|s| s.parse::<usize>().ok())
                             });
+                        let validcodemax = e
+                            .attributes()
+                            .filter_map(|a| a.ok())
+                            .find(|a| a.key.as_ref() == b"validcodemax")
+                            .and_then(|a| {
+                                std::str::from_utf8(a.value.as_ref())
+                                    .ok()
+                                    .and_then(|s| s.parse::<usize>().ok())
+                            });
+                        let contiguous = e
+                            .attributes()
+                            .filter_map(|a| a.ok())
+                            .find(|a| a.key.as_ref() == b"contiguous")
+                            .is_some_and(|a| a.value.as_ref().eq_ignore_ascii_case(b"true"));
+                        let thunk = e
+                            .attributes()
+                            .filter_map(|a| a.ok())
+                            .find(|a| a.key.as_ref() == b"thunk")
+                            .is_some_and(|a| a.value.as_ref().eq_ignore_ascii_case(b"true"));
 
                         match ctx {
                             Ctx::PostPatterns => {
@@ -362,6 +433,15 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                 }
                                 if validcode.is_some() {
                                     pp_valid_code_min = validcode;
+                                }
+                                if validcodemax.is_some() {
+                                    pp_valid_code_max = validcodemax;
+                                }
+                                if contiguous {
+                                    pp_contiguous = true;
+                                }
+                                if thunk {
+                                    pp_is_thunk = true;
                                 }
                             }
                             Ctx::StandalonePattern => {
@@ -374,6 +454,15 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                 }
                                 if validcode.is_some() {
                                     sp_valid_code_min = validcode;
+                                }
+                                if validcodemax.is_some() {
+                                    sp_valid_code_max = validcodemax;
+                                }
+                                if contiguous {
+                                    sp_contiguous = true;
+                                }
+                                if thunk {
+                                    sp_is_thunk = true;
                                 }
                             }
                             _ => {}
@@ -435,6 +524,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                         label: None,
                                         after_cond: pp_after_cond.clone(),
                                         valid_code_min: pp_valid_code_min,
+                                        valid_code_max: pp_valid_code_max,
+                                        contiguous: pp_contiguous,
+                                        is_thunk: pp_is_thunk,
                                     });
                                 }
                             } else {
@@ -446,6 +538,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                             label: None,
                                             after_cond: pp_after_cond.clone(),
                                             valid_code_min: pp_valid_code_min,
+                                            valid_code_max: pp_valid_code_max,
+                                            contiguous: pp_contiguous,
+                                            is_thunk: pp_is_thunk,
                                         });
                                     }
                                 }
@@ -457,6 +552,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         pp_has_funcstart = false;
                         pp_after_cond = None;
                         pp_valid_code_min = None;
+                        pp_valid_code_max = None;
+                        pp_contiguous = false;
+                        pp_is_thunk = false;
                     }
                     "prepatterns" if ctx == Ctx::PrePatterns => {
                         ctx = Ctx::PatternPairs;
@@ -479,6 +577,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                 label: sp_label.take(),
                                 after_cond: sp_after_cond.take(),
                                 valid_code_min: sp_valid_code_min.take(),
+                                valid_code_max: sp_valid_code_max.take(),
+                                contiguous: sp_contiguous,
+                                is_thunk: sp_is_thunk,
                             });
                         }
                         ctx = Ctx::Root;
@@ -487,6 +588,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         sp_label = None;
                         sp_after_cond = None;
                         sp_valid_code_min = None;
+                        sp_valid_code_max = None;
+                        sp_contiguous = false;
+                        sp_is_thunk = false;
                         sp_has_funcstart = false;
                         sp_star_found = false;
                     }
@@ -610,11 +714,31 @@ mod tests {
             label: None,
             after_cond: None,
             valid_code_min: None,
+            valid_code_max: None,
+            contiguous: false,
+            is_thunk: false,
         };
         let data = vec![0xcc, 0x48, 0x83, 0xec];
         assert!(pat.matches(&data, 0x1000, 0x1001));
         assert!(!pat.matches(&data, 0x1000, 0x1000));
         assert!(!pat.matches(&data, 0x1000, 0x1002));
+    }
+
+    #[test]
+    fn test_parse_funcstart_extended_attributes() {
+        let xml = r#"<patternlist>
+          <pattern>
+            <data>0xe92d4010</data>
+            <funcstart after="ptr" validcode="10" validcodemax="20" contiguous="true" thunk="true"/>
+          </pattern>
+        </patternlist>"#;
+        let pats = parse_ghidra_pattern_xml(xml).unwrap();
+        assert_eq!(pats.len(), 1);
+        assert_eq!(pats[0].after_cond.as_deref(), Some("ptr"));
+        assert_eq!(pats[0].valid_code_min, Some(10));
+        assert_eq!(pats[0].valid_code_max, Some(20));
+        assert!(pats[0].contiguous);
+        assert!(pats[0].is_thunk);
     }
 
     #[test]
