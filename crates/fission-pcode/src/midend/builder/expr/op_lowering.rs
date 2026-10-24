@@ -958,7 +958,8 @@ impl<'a> PreviewBuilder<'a> {
         signed: bool,
     ) -> PreHirExpr {
         let source_type = if let PreHirExpr::Var(name) = &expr {
-            self.temps
+            let direct = self
+                .temps
                 .get(name)
                 .or_else(|| self.params.values().find(|binding| binding.name == *name))
                 .map(|binding| binding.ty.clone())
@@ -967,8 +968,51 @@ impl<'a> PreviewBuilder<'a> {
                         .values()
                         .find(|binding| binding.name == *name)
                         .map(|binding| binding.ty.clone())
-                })
-                .unwrap_or(NirType::Unknown)
+                });
+            if let Some(ty) = direct {
+                if matches!(ty, NirType::Ptr(_)) {
+                    ty
+                } else if let Some(carrier_ty) = crate::arch::x86::x86_gpr_family_index(name)
+                    .and_then(|idx| {
+                        const GPR64: [&str; 16] = [
+                            "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9",
+                            "r10", "r11", "r12", "r13", "r14", "r15",
+                        ];
+                        let carrier = *GPR64.get(idx)?;
+                        if carrier != name {
+                            self.temps
+                                .get(carrier)
+                                .or_else(|| {
+                                    self.params.values().find(|binding| binding.name == carrier)
+                                })
+                                .map(|b| b.ty.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    && matches!(carrier_ty, NirType::Ptr(_))
+                {
+                    carrier_ty
+                } else {
+                    ty
+                }
+            } else {
+                crate::arch::x86::x86_gpr_family_index(name)
+                    .and_then(|idx| {
+                        const GPR64: [&str; 16] = [
+                            "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9",
+                            "r10", "r11", "r12", "r13", "r14", "r15",
+                        ];
+                        let carrier = *GPR64.get(idx)?;
+                        self.temps
+                            .get(carrier)
+                            .or_else(|| {
+                                self.params.values().find(|binding| binding.name == carrier)
+                            })
+                            .map(|b| b.ty.clone())
+                    })
+                    .unwrap_or(NirType::Unknown)
+            }
         } else {
             expr_type(&expr)
         };

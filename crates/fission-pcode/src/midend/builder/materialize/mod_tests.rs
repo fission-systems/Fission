@@ -1609,7 +1609,7 @@ fn conditional_loop_exit_accumulator_merge_uses_external_seed_binding() {
 
 #[test]
 fn stack_home_accumulator_store_uses_seeded_live_gpr_binding() {
-    let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x14, 4);
+    let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 4);
     let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
     let rsp_addr = register(UNIQUE_SPACE_ID, 0x200, 8);
     let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
