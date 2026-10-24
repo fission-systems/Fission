@@ -13,6 +13,7 @@ pub struct SimFile {
     pub name: String,
     pub content: Vec<u8>,
     pub cursor: usize,
+    pub eof: bool,
     /// Optional host path for re-open / diagnostics.
     pub host_path: Option<PathBuf>,
 }
@@ -23,6 +24,7 @@ impl SimFile {
             name: name.into(),
             content,
             cursor: 0,
+            eof: false,
             host_path: None,
         }
     }
@@ -35,6 +37,12 @@ impl SimFile {
     pub fn read(&mut self, count: usize) -> Vec<u8> {
         let remaining = self.content.len().saturating_sub(self.cursor);
         let to_read = std::cmp::min(count, remaining);
+        if count > 0 && to_read < count {
+            self.eof = true;
+        }
+        if to_read == 0 {
+            return Vec::new();
+        }
         let start = self.cursor;
         let end = start + to_read;
         self.cursor = end;
@@ -53,7 +61,12 @@ impl SimFile {
     }
 
     pub fn seek(&mut self, offset: usize) {
-        self.cursor = offset.min(self.content.len());
+        self.cursor = offset;
+        self.eof = false;
+    }
+
+    pub fn clear_eof(&mut self) {
+        self.eof = false;
     }
 
     pub fn size(&self) -> usize {

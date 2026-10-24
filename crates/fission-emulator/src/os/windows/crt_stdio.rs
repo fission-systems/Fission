@@ -549,7 +549,23 @@ pub fn dispatch(emu: &mut Emulator, globals: &CrtGlobals, name: &str) -> Result<
         "setvbuf" | "setbuf" => {
             emu.write_return_val(0)?;
         }
-        "ferror" | "clearerr" => {
+        "clearerr" => {
+            let stream = emu.read_arg(0).unwrap_or(0);
+            if let Some(fd) = globals.stream_index(stream) {
+                if let Some(file) = emu.vfs.files.get_mut(&fd) {
+                    file.clear_eof();
+                }
+            }
+            emu.write_return_val(0)?;
+        }
+        "rewind" => {
+            let stream = emu.read_arg(0).unwrap_or(0);
+            if let Some(fd) = globals.stream_index(stream) {
+                let _ = emu.vfs.seek(fd, 0);
+            }
+            emu.write_return_val(0)?;
+        }
+        "ferror" => {
             emu.write_return_val(0)?;
         }
         _ => return Ok(false),
@@ -623,7 +639,13 @@ pub fn fread(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
 
     let wanted = size.saturating_mul(count).min(0x100_0000) as usize;
     let bytes = if fd == 0 {
-        emu.guest_stdin(wanted)
+        let b = emu.guest_stdin(wanted);
+        if wanted > 0 && b.len() < wanted {
+            if let Some(file) = emu.vfs.files.get_mut(&0) {
+                file.eof = true;
+            }
+        }
+        b
     } else {
         emu.vfs.read(fd, wanted).unwrap_or_default()
     };
@@ -729,10 +751,17 @@ pub fn fputc(emu: &mut Emulator, globals: &CrtGlobals, to_stdout: bool) -> Resul
 pub fn fgetc(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
     let stream = emu.read_arg(0).unwrap_or(0);
     let Some(fd) = globals.stream_index(stream) else {
+        set_errno(emu, globals, 9)?; // EBADF
         return emu.write_return_val(u64::MAX);
     };
     let bytes = if fd == 0 {
-        emu.guest_stdin(1)
+        let b = emu.guest_stdin(1);
+        if b.is_empty() {
+            if let Some(file) = emu.vfs.files.get_mut(&0) {
+                file.eof = true;
+            }
+        }
+        b
     } else {
         emu.vfs.read(fd, 1).unwrap_or_default()
     };
@@ -748,6 +777,7 @@ pub fn fgets(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
     let size = emu.read_arg(1).unwrap_or(0) as usize;
     let stream = emu.read_arg(2).unwrap_or(0);
     let Some(fd) = globals.stream_index(stream) else {
+        set_errno(emu, globals, 9)?; // EBADF
         return emu.write_return_val(0);
     };
     if buffer == 0 || size < 2 {
@@ -757,7 +787,13 @@ pub fn fgets(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
     let mut line = Vec::new();
     while line.len() + 1 < size {
         let byte = if fd == 0 {
-            emu.guest_stdin(1)
+            let b = emu.guest_stdin(1);
+            if b.is_empty() {
+                if let Some(file) = emu.vfs.files.get_mut(&0) {
+                    file.eof = true;
+                }
+            }
+            b
         } else {
             emu.vfs.read(fd, 1).unwrap_or_default()
         };
@@ -776,48 +812,59 @@ pub fn fgets(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
     emu.write_return_val(buffer)
 }
 
-/// `feof(FILE*)` -- the cursor has reached the end.
+/// `feof(FILE*)` -- the end-of-file indicator is set on failed/partial read past EOF.
 pub fn feof(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
     let stream = emu.read_arg(0).unwrap_or(0);
-    let at_end = globals
+    let is_eof = globals
         .stream_index(stream)
-        .and_then(|fd| {
-            let size = emu.vfs.file_size(fd)?;
-            let cursor = emu.vfs.files.get(&fd)?.cursor;
-            Some(cursor >= size)
-        })
+        .and_then(|fd| emu.vfs.files.get(&fd).map(|file| file.eof))
         .unwrap_or(false);
-    emu.write_return_val(u64::from(at_end))
+    emu.write_return_val(u64::from(is_eof))
 }
 
 /// `ftell(FILE*)`.
 pub fn ftell(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
     let stream = emu.read_arg(0).unwrap_or(0);
-    let cursor = globals
-        .stream_index(stream)
-        .and_then(|fd| emu.vfs.files.get(&fd).map(|file| file.cursor as u64))
-        .unwrap_or(0);
-    emu.write_return_val(cursor)
+    let Some(fd) = globals.stream_index(stream) else {
+        set_errno(emu, globals, 9)?; // EBADF
+        return emu.write_return_val(u64::MAX);
+    };
+    let Some(file) = emu.vfs.files.get(&fd) else {
+        set_errno(emu, globals, 9)?; // EBADF
+        return emu.write_return_val(u64::MAX);
+    };
+    emu.write_return_val(file.cursor as u64)
 }
 
 /// `fseek(FILE*, offset, origin)`.
 pub fn fseek(emu: &mut Emulator, globals: &CrtGlobals) -> Result<()> {
+    const SEEK_SET: u64 = 0;
     const SEEK_CUR: u64 = 1;
     const SEEK_END: u64 = 2;
     let stream = emu.read_arg(0).unwrap_or(0);
     let offset = emu.read_arg(1).unwrap_or(0) as i64;
     let origin = emu.read_arg(2).unwrap_or(0);
     let Some(fd) = globals.stream_index(stream) else {
+        set_errno(emu, globals, 9)?; // EBADF
         return emu.write_return_val(u64::MAX);
     };
+    if origin > SEEK_END {
+        set_errno(emu, globals, 22)?; // EINVAL
+        return emu.write_return_val(u64::MAX);
+    }
     let size = emu.vfs.file_size(fd).unwrap_or(0) as i64;
     let cursor = emu.vfs.files.get(&fd).map(|f| f.cursor as i64).unwrap_or(0);
     let base = match origin {
+        SEEK_SET => 0,
         SEEK_CUR => cursor,
         SEEK_END => size,
-        _ => 0,
+        _ => unreachable!(),
     };
-    let target = (base + offset).clamp(0, size) as usize;
-    let _ = emu.vfs.seek(fd, target);
+    let target = base + offset;
+    if target < 0 {
+        set_errno(emu, globals, 22)?; // EINVAL
+        return emu.write_return_val(u64::MAX);
+    }
+    let _ = emu.vfs.seek(fd, target as usize);
     emu.write_return_val(0)
 }
