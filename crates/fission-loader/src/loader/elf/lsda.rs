@@ -56,10 +56,10 @@ pub fn analyze_eh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
         return out;
     };
 
-    let endian = if binary.arch_spec.contains("BE") {
-        RunTimeEndian::Big
-    } else {
+    let endian = if binary.is_little_endian() {
         RunTimeEndian::Little
+    } else {
+        RunTimeEndian::Big
     };
     let eh_frame = EhFrame::new(eh_frame_data, endian);
     let mut bases = BaseAddresses::default().set_eh_frame(eh_frame_sec.virtual_address);
