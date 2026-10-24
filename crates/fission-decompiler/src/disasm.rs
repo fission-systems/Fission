@@ -8,7 +8,8 @@
 //! `/api/disasm/:session/:addr` handler can share one implementation instead
 //! of the CLI reimplementing it and the server not having it at all.
 
-use fission_core::PAGE_SIZE;
+use crate::pipeline::rust_sleigh::RustSleighDecompileConfig;
+use crate::pipeline::rust_sleigh::bounds::{clamp_to_available_execution, next_function_distance};
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::packed_context::PackedContextOverride;
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
@@ -71,6 +72,32 @@ pub fn raw_pcode_function(
     lift_function(binary, addr).map(|lifted| lifted.function)
 }
 
+/// Compute the bounded `(max_bytes, instruction_limit)` window for `lift_function`.
+fn compute_lift_window(
+    binary: &LoadedBinary,
+    func_start: u64,
+    function_size: usize,
+) -> (usize, usize) {
+    let config = RustSleighDecompileConfig::cli_defaults();
+    let max_bytes_limit = config.decode_max_bytes_cap.max(1);
+    let fallback_default_bytes = config.default_decode_bytes.max(1).min(max_bytes_limit);
+    let max_bytes = if function_size > 0 {
+        function_size.min(max_bytes_limit)
+    } else {
+        next_function_distance(binary, func_start)
+            .map(|dist| dist.min(max_bytes_limit))
+            .unwrap_or(fallback_default_bytes)
+    }
+    .max(1);
+    let max_bytes = clamp_to_available_execution(binary, func_start, max_bytes).max(1);
+    let instruction_limit = config
+        .instruction_budget_default
+        .max(max_bytes.min(config.instruction_budget_cap.max(1)))
+        .max(1)
+        .min(config.instruction_budget_cap.max(1));
+    (max_bytes, instruction_limit)
+}
+
 /// The lift both public entry points share: locate the function, size the
 /// decode window, resolve the Thumb-image context, and lift.
 fn lift_function(
@@ -81,41 +108,86 @@ fn lift_function(
         .function_at(addr)
         .ok_or_else(|| format!("No function found at address 0x{addr:x}"))?;
     let func_start = func.address;
-    let mut func_size = func.size;
-    if func_size == 0 {
-        func_size = binary
-            .functions
-            .iter()
-            .filter(|f| f.address > func_start)
-            .map(|f| f.address)
-            .min()
-            .map(|next_addr| next_addr - func_start)
-            .unwrap_or(PAGE_SIZE as u64);
-    }
-    let max_bytes = usize::try_from(func_size).unwrap_or(PAGE_SIZE).max(1);
+    let function_size = usize::try_from(func.size).unwrap_or(0);
+    let (max_bytes, instruction_limit) = compute_lift_window(binary, func_start, function_size);
 
     let frontend = runtime_frontend_for_binary(binary)?;
     let address_state = frontend.normalize_low_bit_code_address(func_start);
     let decode_addr = address_state.address;
     let context_override =
         decode_context_for_address(binary, &frontend, address_state.context_override);
-    let max_bytes = binary
-        .available_execution_bytes(decode_addr)
-        .map(|available| max_bytes.min(available).max(1))
-        .unwrap_or(max_bytes.max(1));
     let bytes = binary
         .view_bytes(decode_addr, max_bytes)
         .ok_or_else(|| format!("unable to read bytes at 0x{decode_addr:x}"))?;
-    let memory_context = decode_memory_context_for(binary, decode_addr, max_bytes);
-    let lifted = frontend
-        .lift_raw_pcode_function_with_context_and_memory_context(
+    let mut memory_context = decode_memory_context_for(binary, decode_addr, max_bytes);
+    let lift_contract = DecodeContract::decomp_function(instruction_limit);
+    let mut result = frontend.lift_raw_pcode_function_with_context_and_memory_context(
+        bytes,
+        decode_addr,
+        lift_contract,
+        &memory_context,
+        context_override,
+    );
+    let mut last_good = result.as_ref().ok().cloned();
+    let mut discovered_edges: std::collections::BTreeMap<u64, Vec<u64>> = Default::default();
+    let little_endian = binary.is_little_endian();
+    const MAX_DECODE_ROUNDS: usize = 8;
+    for _ in 0..MAX_DECODE_ROUNDS {
+        let Ok(lifted) = result.as_ref() else {
+            break;
+        };
+        let discovered = fission_sleigh::runtime::resolve_indirect_branch_targets(
+            &lifted.function,
+            decode_addr,
+            bytes,
+            &memory_context,
+            little_endian,
+        );
+        let fresh: Vec<u64> = discovered
+            .values()
+            .flatten()
+            .copied()
+            .filter(|target| !memory_context.additional_decode_entries.contains(target))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for (source, targets) in discovered {
+            discovered_edges.entry(source).or_default().extend(targets);
+        }
+        if fresh.is_empty() {
+            break;
+        }
+        memory_context.additional_decode_entries.extend(fresh);
+        let next = frontend.lift_raw_pcode_function_with_context_and_memory_context(
             bytes,
             decode_addr,
-            DecodeContract::strict_function(max_bytes),
+            lift_contract,
             &memory_context,
             context_override,
-        )
-        .map_err(|e| e.to_string())?;
+        );
+        if let Ok(better) = &next {
+            last_good = Some(better.clone());
+        }
+        result = next;
+    }
+    if !discovered_edges.is_empty() {
+        if let Ok(lifted) = &mut result {
+            fission_sleigh::runtime::attach_inferred_indirect_edges(
+                &mut lifted.function,
+                &discovered_edges,
+            );
+        }
+        if let Some(good) = &mut last_good {
+            fission_sleigh::runtime::attach_inferred_indirect_edges(
+                &mut good.function,
+                &discovered_edges,
+            );
+        }
+    }
+    let lifted = match result {
+        Ok(lifted) => lifted,
+        Err(err) => last_good.ok_or_else(|| err.to_string())?,
+    };
 
     Ok(lifted)
 }
@@ -349,5 +421,74 @@ mod adrp_pair_tests {
         let pages = pages_after(&["mov RBP,RSP", "sub RSP,0x78"]);
         assert!(pages.is_empty());
         assert_eq!(adrp_pair_target("add RAX, RDX, #0x10", &pages), None);
+    }
+
+    #[test]
+    fn compute_lift_window_decouples_instruction_limit_and_clamps_cross_section_and_thumb() {
+        use super::compute_lift_window;
+        use fission_core::architecture::{
+            BinaryLoadSpec, CompilerSpecId, GhidraLanguageId, LanguageCompilerSpecPair,
+        };
+        use fission_loader::loader::types::{
+            DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo,
+        };
+
+        let load_spec = BinaryLoadSpec {
+            format: "ELF".to_string(),
+            image_base: 0x8000000,
+            pair: LanguageCompilerSpecPair {
+                language_id: GhidraLanguageId("ARM:LE:32:v8".to_string()),
+                compiler_spec_id: CompilerSpecId("default".to_string()),
+            },
+            preferred: true,
+            source: "test".to_string(),
+        };
+
+        let binary =
+            LoadedBinaryBuilder::new("test.elf".to_string(), DataBuffer::Heap(vec![0u8; 0x2000]))
+                .load_spec(load_spec)
+                .image_base(0x8000000)
+                .is_64bit(false)
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x8000000,
+                    virtual_size: 0x100,
+                    file_offset: 0,
+                    file_size: 0x100,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                // Aligned symbol and Thumb-tagged alias for the same function:
+                .add_function(FunctionInfo {
+                    name: "thumb_fn_aligned".to_string(),
+                    address: 0x8000010,
+                    ..Default::default()
+                })
+                .add_function(FunctionInfo {
+                    name: "thumb_fn".to_string(),
+                    address: 0x8000011,
+                    ..Default::default()
+                })
+                // Far symbol in another section (1 MB away):
+                .add_function(FunctionInfo {
+                    name: "far_sym".to_string(),
+                    address: 0x8100000,
+                    ..Default::default()
+                })
+                .build()
+                .expect("build");
+
+        // 1. Small explicit size (16 bytes) still gets at least instruction_budget_default (512),
+        //    not a 16-instruction limit.
+        let (small_bytes, small_insts) = compute_lift_window(&binary, 0x8000010, 16);
+        assert_eq!(small_bytes, 16);
+        assert!(small_insts >= 512);
+
+        // 2. Zero size skips the +1 Thumb alias at 0x8000011 and clamps to the end of `.text`
+        //    (0x8000100 - 0x8000010 = 0xf0), never inflating across sections to 0x8100000.
+        let (unknown_bytes, unknown_insts) = compute_lift_window(&binary, 0x8000010, 0);
+        assert_eq!(unknown_bytes, 0xf0);
+        assert!(unknown_insts >= 512 && unknown_insts <= 4096);
     }
 }
