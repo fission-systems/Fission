@@ -9,14 +9,14 @@
 use super::budget::hir_shape;
 use super::concept::GhidraActionConcept;
 use super::gates::body_exceeds_early_cleanup_budget;
-use super::pass::{Pass, PassCtx, PassOutcome, run_pass_logged};
+use super::pass::{Pass, PassCtx, PassOutcome, norm_trace_hash};
 use crate::ir::PreHirFunction;
 
 /// A structural cleanup block, admission-gated the same way
 /// `run_cleanup_block` in normalize's legacy driver is: skipped (with
 /// `wave_stats::add_cleanup_budget_skips` telemetry) once the body already
 /// exceeds the early-cleanup stmt/block budget, otherwise run once and
-/// reported `Changed` iff the stmt/local shape moved.
+/// reported `Changed` iff the stmt/local shape or body content moved.
 pub struct CleanupPass {
     pub name: &'static str,
     pub concept: GhidraActionConcept,
@@ -38,9 +38,13 @@ impl Pass for CleanupPass {
             return PassOutcome::Unchanged;
         }
         let (before_stmts, before_locals) = hir_shape(ctx.func);
+        let before_hash = norm_trace_hash(ctx.func);
         (self.block)(ctx.func);
         let (after_stmts, after_locals) = hir_shape(ctx.func);
-        PassOutcome::from_bool(before_stmts != after_stmts || before_locals != after_locals)
+        let changed = before_stmts != after_stmts
+            || before_locals != after_locals
+            || before_hash != norm_trace_hash(ctx.func);
+        PassOutcome::from_bool(changed)
     }
 }
 
@@ -62,7 +66,7 @@ pub fn cleanup_pass(
 ///
 /// `cond` is run un-wrapped (the enclosing `ActionGroup` already logs the
 /// whole `GatedFollowupPass` under `cond`'s name via `run_pass_logged`); each
-/// `then` step is logged individually, matching the original call sites.
+/// `then` step is executed directly, preventing double-counting of telemetry.
 pub struct GatedFollowupPass {
     pub cond: Box<dyn Pass>,
     pub then: Vec<Box<dyn Pass>>,
@@ -81,7 +85,7 @@ impl Pass for GatedFollowupPass {
         let cond_changed = self.cond.run(ctx).changed();
         if cond_changed {
             for step in &self.then {
-                run_pass_logged(ctx, step.as_ref());
+                step.run(ctx);
             }
         }
         PassOutcome::from_bool(cond_changed)
@@ -134,4 +138,45 @@ pub fn admission_gated(
         on_skip,
         inner,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{PreHirExpr, PreHirLValue, PreHirStmt};
+
+    #[test]
+    fn cleanup_pass_detects_in_place_mutation_with_constant_counts() {
+        fn rewrite_constant(func: &mut PreHirFunction) {
+            if let Some(PreHirStmt::Assign { rhs, .. }) = func.body.first_mut() {
+                *rhs = PreHirExpr::Const(42, crate::ir::NirType::Bool);
+            }
+        }
+
+        let pass = CleanupPass {
+            name: "test_cleanup",
+            concept: GhidraActionConcept::Normalize,
+            block: rewrite_constant,
+        };
+
+        let mut func = PreHirFunction {
+            name: "test_fn".to_string(),
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(1, crate::ir::NirType::Bool),
+            }],
+            ..Default::default()
+        };
+
+        let mut ctx = PassCtx {
+            func: &mut func,
+            perf: false,
+            diag: false,
+            stats: None,
+            decomp_facts: None,
+        };
+
+        let outcome = pass.run(&mut ctx);
+        assert_eq!(outcome, PassOutcome::Changed);
+    }
 }

@@ -18,6 +18,7 @@ use crate::ir::{PreHirFunction, PreHirStmt};
 use fission_midend_core::wave_stats::{
     add_dispatcher_shape_recoveries, add_indirect_target_set_refinements,
 };
+use std::collections::HashSet;
 
 /// Apply VSA-based switch refinement to a function's body.
 ///
@@ -26,8 +27,10 @@ pub fn apply_jump_resolver_pass(func: &mut PreHirFunction) -> bool {
     if jump_resolver_candidate_count(&func.body) == 0 {
         return false;
     }
+    let mut targets = HashSet::new();
+    collect_goto_targets(&func.body, &mut targets);
     let env = solve(func);
-    refine_stmts(&mut func.body, &env)
+    refine_stmts(&mut func.body, &env, &targets)
 }
 
 pub fn jump_resolver_candidate_count(stmts: &[PreHirStmt]) -> usize {
@@ -68,11 +71,133 @@ pub fn jump_resolver_candidate_count(stmts: &[PreHirStmt]) -> usize {
     stmts.iter().map(count_stmt).sum()
 }
 
-fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv) -> bool {
+fn collect_goto_targets(stmts: &[PreHirStmt], targets: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Goto(target) => {
+                targets.insert(target.clone());
+            }
+            PreHirStmt::Block(body) => collect_goto_targets(body, targets),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_goto_targets(then_body, targets);
+                collect_goto_targets(else_body, targets);
+            }
+            PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+                collect_goto_targets(body, targets);
+            }
+            PreHirStmt::For {
+                init, body, update, ..
+            } => {
+                if let Some(s) = init {
+                    collect_goto_targets(std::slice::from_ref(s.as_ref()), targets);
+                }
+                collect_goto_targets(body, targets);
+                if let Some(s) = update {
+                    collect_goto_targets(std::slice::from_ref(s.as_ref()), targets);
+                }
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for c in cases {
+                    collect_goto_targets(&c.body, targets);
+                }
+                collect_goto_targets(default, targets);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn contains_referenced_label(stmts: &[PreHirStmt], targets: &HashSet<String>) -> bool {
+    if targets.is_empty() {
+        return false;
+    }
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Label(name) if targets.contains(name) => return true,
+            PreHirStmt::Block(body) => {
+                if contains_referenced_label(body, targets) {
+                    return true;
+                }
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if contains_referenced_label(then_body, targets)
+                    || contains_referenced_label(else_body, targets)
+                {
+                    return true;
+                }
+            }
+            PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+                if contains_referenced_label(body, targets) {
+                    return true;
+                }
+            }
+            PreHirStmt::For {
+                init, body, update, ..
+            } => {
+                if let Some(s) = init {
+                    if contains_referenced_label(std::slice::from_ref(s.as_ref()), targets) {
+                        return true;
+                    }
+                }
+                if contains_referenced_label(body, targets) {
+                    return true;
+                }
+                if let Some(s) = update {
+                    if contains_referenced_label(std::slice::from_ref(s.as_ref()), targets) {
+                        return true;
+                    }
+                }
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for c in cases {
+                    if contains_referenced_label(&c.body, targets) {
+                        return true;
+                    }
+                }
+                if contains_referenced_label(default, targets) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn strip_switch_breaks(stmts: &mut Vec<PreHirStmt>) {
+    while let Some(last) = stmts.last() {
+        match last {
+            PreHirStmt::Break => {
+                stmts.pop();
+            }
+            PreHirStmt::Block(inner) => {
+                let mut inner_vec = std::rc::Rc::unwrap_or_clone(inner.clone());
+                strip_switch_breaks(&mut inner_vec);
+                if inner_vec.is_empty() {
+                    stmts.pop();
+                } else {
+                    *stmts.last_mut().unwrap() = PreHirStmt::Block(std::rc::Rc::new(inner_vec));
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+}
+
+fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv, targets: &HashSet<String>) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
-        if refine_stmt(&mut stmts[i], env) {
+        if refine_stmt(&mut stmts[i], env, targets) {
             changed = true;
         }
         // If the stmt was reduced to a singleton-constant switch,
@@ -86,17 +211,25 @@ fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv) -> bool {
             let range = eval_expr(expr, env);
             if let Some(v) = range.singleton_value() {
                 let v_signed = v as i64;
-                // Find the matching case.
-                let replacement = cases
+                let matching_case = cases.iter().find(|c| c.values.contains(&v_signed));
+                let other_branches_have_label = cases
                     .iter()
-                    .find(|c| c.values.contains(&v_signed))
-                    .map(|c| c.body.clone())
-                    .unwrap_or_else(|| default.clone());
-                stmts.splice(i..=i, std::rc::Rc::unwrap_or_clone(replacement));
-                add_dispatcher_shape_recoveries(1);
-                changed = true;
-                // Don't advance i — the replacement stmts need processing.
-                continue;
+                    .filter(|c| !c.values.contains(&v_signed))
+                    .any(|c| contains_referenced_label(&c.body, targets))
+                    || (matching_case.is_some() && contains_referenced_label(default, targets));
+                if !other_branches_have_label {
+                    // Find the matching case.
+                    let replacement = matching_case
+                        .map(|c| c.body.clone())
+                        .unwrap_or_else(|| default.clone());
+                    let mut replacement_stmts = std::rc::Rc::unwrap_or_clone(replacement);
+                    strip_switch_breaks(&mut replacement_stmts);
+                    stmts.splice(i..=i, replacement_stmts);
+                    add_dispatcher_shape_recoveries(1);
+                    changed = true;
+                    // Don't advance i — the replacement stmts need processing.
+                    continue;
+                }
             }
         }
         i += 1;
@@ -104,7 +237,7 @@ fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv) -> bool {
     changed
 }
 
-fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
+fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv, targets: &HashSet<String>) -> bool {
     match stmt {
         PreHirStmt::Switch {
             expr,
@@ -115,11 +248,11 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
 
             // Recurse into case bodies.
             for case in cases.iter_mut() {
-                if refine_stmts(std::rc::Rc::make_mut(&mut case.body), env) {
+                if refine_stmts(std::rc::Rc::make_mut(&mut case.body), env, targets) {
                     changed = true;
                 }
             }
-            if refine_stmts(std::rc::Rc::make_mut(default), env) {
+            if refine_stmts(std::rc::Rc::make_mut(default), env, targets) {
                 changed = true;
             }
 
@@ -129,6 +262,9 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
             if !range.is_top() && !range.is_bottom() {
                 let before = cases.len();
                 cases.retain(|c| {
+                    if contains_referenced_label(&c.body, targets) {
+                        return true;
+                    }
                     c.values.iter().any(|&v| {
                         let v_u = v as u64;
                         // Check if v_u is in range [lo, hi).
@@ -160,46 +296,137 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
             else_body,
             cond,
         } => {
-            let mut changed = refine_stmts(std::rc::Rc::make_mut(then_body), env);
-            if refine_stmts(std::rc::Rc::make_mut(else_body), env) {
+            let mut changed = refine_stmts(std::rc::Rc::make_mut(then_body), env, targets);
+            if refine_stmts(std::rc::Rc::make_mut(else_body), env, targets) {
                 changed = true;
             }
 
             // Constant condition elimination.
             let range = eval_expr(cond, env);
             if let Some(v) = range.singleton_value() {
-                let replacement = if v != 0 {
-                    std::rc::Rc::make_mut(then_body)
-                        .drain(..)
-                        .collect::<Vec<_>>()
+                let (active, dead) = if v != 0 {
+                    (then_body, else_body)
                 } else {
-                    std::rc::Rc::make_mut(else_body)
-                        .drain(..)
-                        .collect::<Vec<_>>()
+                    (else_body, then_body)
                 };
-                *stmt = PreHirStmt::Block(std::rc::Rc::new(replacement));
-                return true;
+                if !contains_referenced_label(dead, targets) {
+                    let replacement = std::rc::Rc::make_mut(active).drain(..).collect::<Vec<_>>();
+                    *stmt = PreHirStmt::Block(std::rc::Rc::new(replacement));
+                    return true;
+                }
             }
             changed
         }
         PreHirStmt::While { body, cond } => {
-            let changed = refine_stmts(std::rc::Rc::make_mut(body), env);
+            let changed = refine_stmts(std::rc::Rc::make_mut(body), env, targets);
             // If condition is provably false, remove the loop.
             let range = eval_expr(cond, env);
             if range.singleton_value() == Some(0) {
-                *stmt = PreHirStmt::Block(std::rc::Rc::new(vec![]));
-                return true;
+                if !contains_referenced_label(body, targets) {
+                    *stmt = PreHirStmt::Block(std::rc::Rc::new(vec![]));
+                    return true;
+                }
             }
             changed
         }
-        PreHirStmt::DoWhile { body, cond: _ } => refine_stmts(std::rc::Rc::make_mut(body), env),
+        PreHirStmt::DoWhile { body, cond: _ } => {
+            refine_stmts(std::rc::Rc::make_mut(body), env, targets)
+        }
         PreHirStmt::For {
             init: _,
             body,
             update: _,
             ..
-        } => refine_stmts(std::rc::Rc::make_mut(body), env),
-        PreHirStmt::Block(stmts) => refine_stmts(std::rc::Rc::make_mut(stmts), env),
+        } => refine_stmts(std::rc::Rc::make_mut(body), env, targets),
+        PreHirStmt::Block(stmts) => refine_stmts(std::rc::Rc::make_mut(stmts), env, targets),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{
+        NirType, PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt,
+        PreHirSwitchCase,
+    };
+    use std::rc::Rc;
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn jump_resolver_strips_switch_breaks_on_inline() {
+        let mut func = PreHirFunction {
+            name: "test_switch_break".to_string(),
+            params: vec![],
+            locals: vec![
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: Some(PreHirExpr::Const(1, u32_ty())),
+                },
+                PreHirBinding {
+                    name: "y".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![PreHirStmt::Switch {
+                expr: PreHirExpr::Var("x".to_string()),
+                cases: vec![PreHirSwitchCase {
+                    values: vec![1],
+                    body: Rc::new(vec![
+                        PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("y".to_string()),
+                            rhs: PreHirExpr::Const(42, u32_ty()),
+                        },
+                        PreHirStmt::Break,
+                    ]),
+                }],
+                default: Rc::new(vec![PreHirStmt::Break]),
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_jump_resolver_pass(&mut func));
+        assert_eq!(func.body.len(), 1);
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } if name == "y"
+        ));
+    }
+
+    #[test]
+    fn jump_resolver_preserves_referenced_labels_in_if_and_switch() {
+        let mut func = PreHirFunction {
+            name: "test_labels".to_string(),
+            params: vec![],
+            locals: vec![],
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Const(0, u32_ty()),
+                    then_body: Rc::new(vec![PreHirStmt::Label("alive_target".to_string())]),
+                    else_body: Rc::new(vec![]),
+                },
+                PreHirStmt::Goto("alive_target".to_string()),
+            ],
+            ..Default::default()
+        };
+
+        // When dead branch contains referenced label, condition folding must not delete it
+        apply_jump_resolver_pass(&mut func);
+        assert!(matches!(&func.body[0], PreHirStmt::If { .. }));
     }
 }
