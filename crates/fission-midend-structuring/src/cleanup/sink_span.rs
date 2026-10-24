@@ -43,12 +43,19 @@ pub fn sink_spans_into_if_arms(
     mut body: Vec<PreHirStmt>,
     protected: &HashSet<String>,
 ) -> (Vec<PreHirStmt>, usize) {
-    let refs = collect_referenced_label_counts(&body);
-    let mut definitions = HashMap::default();
-    collect_defined_label_counts_in(&body, &mut definitions);
-    let mut sunk = 0usize;
-    sink_in_place(&mut body, protected, &refs, &definitions, &mut sunk);
-    (body, sunk)
+    let mut total_sunk = 0usize;
+    loop {
+        let refs = collect_referenced_label_counts(&body);
+        let mut definitions = HashMap::default();
+        collect_defined_label_counts_in(&body, &mut definitions);
+        let mut sunk = false;
+        sink_in_place(&mut body, protected, &refs, &definitions, &mut sunk);
+        if !sunk {
+            break;
+        }
+        total_sunk += 1;
+    }
+    (body, total_sunk)
 }
 
 fn sink_in_place(
@@ -56,7 +63,7 @@ fn sink_in_place(
     protected: &HashSet<String>,
     refs: &HashMap<String, usize>,
     definitions: &HashMap<String, usize>,
-    sunk: &mut usize,
+    sunk: &mut bool,
 ) {
     let mut idx = 0usize;
     while idx < stmts.len() {
@@ -69,16 +76,45 @@ fn sink_in_place(
                     if span_is_duplicable(&stmts[idx + 1..label_idx]) {
                         let span: Vec<PreHirStmt> = stmts.drain(idx + 1..label_idx).collect();
                         sink_into(&mut stmts[idx], span);
-                        *sunk += 1;
+                        *sunk = true;
+                        return;
                     }
                 }
             }
         }
         for seq in child_sequences_mut(&mut stmts[idx]) {
             sink_in_place(seq, protected, refs, definitions, sunk);
+            if *sunk {
+                return;
+            }
         }
         idx += 1;
     }
+}
+
+fn statement_terminates(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Return(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+            true
+        }
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => sequence_terminates(then_body) && sequence_terminates(else_body),
+        PreHirStmt::Block(inner) => sequence_terminates(inner),
+        PreHirStmt::Switch { cases, default, .. } => {
+            !default.is_empty()
+                && sequence_terminates(default)
+                && !cases.is_empty()
+                && cases.iter().all(|c| sequence_terminates(&c.body))
+        }
+        _ => false,
+    }
+}
+
+fn sequence_terminates(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(statement_terminates)
 }
 
 /// The label an `if`'s then-arm ends by jumping to.
@@ -86,6 +122,12 @@ fn trailing_then_guard(stmt: &PreHirStmt) -> Option<String> {
     let PreHirStmt::If { then_body, .. } = stmt else {
         return None;
     };
+    if then_body.is_empty() {
+        return None;
+    }
+    if sequence_terminates(&then_body[..then_body.len() - 1]) {
+        return None;
+    }
     let PreHirStmt::If {
         then_body: inner,
         else_body: inner_else,
@@ -103,7 +145,7 @@ fn trailing_then_guard(stmt: &PreHirStmt) -> Option<String> {
     }
 }
 
-/// Invert the trailing guard over `span`, and give the else-arm its own copy.
+/// Invert the trailing guard over `span`, and give the else-arm its own copy if it falls through.
 fn sink_into(stmt: &mut PreHirStmt, span: Vec<PreHirStmt>) {
     let PreHirStmt::If {
         then_body,
@@ -123,8 +165,10 @@ fn sink_into(stmt: &mut PreHirStmt, span: Vec<PreHirStmt>) {
         then_body: std::rc::Rc::new(span.clone()),
         else_body: std::rc::Rc::new(Vec::new()),
     };
-    // Failing the outer condition also used to reach the span.
-    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).extend(span);
+    // Failing the outer condition also used to reach the span, unless the else arm terminates.
+    if !sequence_terminates(else_body) {
+        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).extend(span);
+    }
 }
 
 fn forward_label_index(stmts: &[PreHirStmt], from: usize, target: &str) -> Option<usize> {
@@ -140,6 +184,7 @@ fn forward_label_index(stmts: &[PreHirStmt], from: usize, target: &str) -> Optio
 ///
 /// No labels: it is about to exist in two places, and a jump to it could only
 /// reach one. No `Break`/`Continue`: the copies land at different loop depths.
+/// No `Goto`/`Return`: control transfers should not be duplicated into both arms.
 fn span_is_duplicable(span: &[PreHirStmt]) -> bool {
     let mut total = 0usize;
     for stmt in span {
@@ -156,7 +201,11 @@ fn span_is_duplicable(span: &[PreHirStmt]) -> bool {
 
 fn no_rebinding_control(stmt: &PreHirStmt) -> bool {
     match stmt {
-        PreHirStmt::Label(_) | PreHirStmt::Break | PreHirStmt::Continue => false,
+        PreHirStmt::Label(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(_) => false,
         PreHirStmt::If {
             then_body,
             else_body,
@@ -167,28 +216,12 @@ fn no_rebinding_control(stmt: &PreHirStmt) -> bool {
         PreHirStmt::Block(inner) => inner.iter().all(no_rebinding_control),
         PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
-        | PreHirStmt::For { body, .. } => body.iter().all(no_label),
+        | PreHirStmt::For { body, .. } => body.iter().all(no_rebinding_control),
         PreHirStmt::Switch { cases, default, .. } => {
-            cases.iter().all(|c| c.body.iter().all(no_label)) && default.iter().all(no_label)
-        }
-        _ => true,
-    }
-}
-
-fn no_label(stmt: &PreHirStmt) -> bool {
-    match stmt {
-        PreHirStmt::Label(_) => false,
-        PreHirStmt::If {
-            then_body,
-            else_body,
-            ..
-        } => then_body.iter().all(no_label) && else_body.iter().all(no_label),
-        PreHirStmt::Block(inner) => inner.iter().all(no_label),
-        PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. }
-        | PreHirStmt::For { body, .. } => body.iter().all(no_label),
-        PreHirStmt::Switch { cases, default, .. } => {
-            cases.iter().all(|c| c.body.iter().all(no_label)) && default.iter().all(no_label)
+            cases
+                .iter()
+                .all(|c| c.body.iter().all(no_rebinding_control))
+                && default.iter().all(no_rebinding_control)
         }
         _ => true,
     }
@@ -365,6 +398,56 @@ mod tests {
         let body = vec![
             outer(vec![guard("L")], Vec::new()),
             PreHirStmt::Break,
+            PreHirStmt::Label("L".into()),
+        ];
+        let (_, n) = sink_spans_into_if_arms(body, &HashSet::default());
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn terminating_else_arm_does_not_receive_span() {
+        let body = vec![
+            outer(vec![guard("L")], vec![PreHirStmt::Return(None)]),
+            assign("span"),
+            PreHirStmt::Label("L".into()),
+        ];
+        let (out, n) = sink_spans_into_if_arms(body, &HashSet::default());
+        assert_eq!(n, 1);
+        let [PreHirStmt::If { else_body, .. }, _] = &out[..] else {
+            panic!("expected if followed by label");
+        };
+        // The terminating else arm must NOT receive span
+        assert_eq!(else_body.len(), 1);
+        assert!(matches!(else_body[0], PreHirStmt::Return(None)));
+    }
+
+    #[test]
+    fn goto_in_span_is_refused() {
+        let body = vec![
+            outer(vec![guard("L")], Vec::new()),
+            PreHirStmt::Goto("other".into()),
+            PreHirStmt::Label("L".into()),
+        ];
+        let (_, n) = sink_spans_into_if_arms(body, &HashSet::default());
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn return_in_span_is_refused() {
+        let body = vec![
+            outer(vec![guard("L")], Vec::new()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Label("L".into()),
+        ];
+        let (_, n) = sink_spans_into_if_arms(body, &HashSet::default());
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn then_body_with_prior_terminator_does_not_sink() {
+        let body = vec![
+            outer(vec![PreHirStmt::Return(None), guard("L")], Vec::new()),
+            assign("span"),
             PreHirStmt::Label("L".into()),
         ];
         let (_, n) = sink_spans_into_if_arms(body, &HashSet::default());
