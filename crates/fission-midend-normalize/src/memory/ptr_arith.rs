@@ -640,28 +640,64 @@ impl AddTreeState {
             };
         }
 
-        for (idx, stride) in &self.non_multiples {
-            let term = PreHirExpr::Binary {
-                op: PreHirBinaryOp::Mul,
-                lhs: Box::new(idx.clone()),
-                rhs: Box::new(PreHirExpr::Const(*stride, NirType::Unknown)),
-                ty: NirType::Unknown,
+        if (!self.non_multiples.is_empty() || !self.other_terms.is_empty()) && self.elem_size > 1 {
+            let byte_ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+                bits: 8,
+                signed: false,
+            }));
+            base = PreHirExpr::Cast {
+                ty: byte_ptr_ty.clone(),
+                expr: Box::new(base),
             };
-            base = PreHirExpr::Binary {
-                op: PreHirBinaryOp::Add,
-                lhs: Box::new(base),
-                rhs: Box::new(term),
+            for (idx, stride) in &self.non_multiples {
+                let term = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(idx.clone()),
+                    rhs: Box::new(PreHirExpr::Const(*stride, NirType::Unknown)),
+                    ty: NirType::Unknown,
+                };
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(term),
+                    ty: byte_ptr_ty.clone(),
+                };
+            }
+            for other in &self.other_terms {
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(other.clone()),
+                    ty: byte_ptr_ty.clone(),
+                };
+            }
+            base = PreHirExpr::Cast {
                 ty: self.ptr_ty.clone(),
+                expr: Box::new(base),
             };
-        }
-
-        for other in &self.other_terms {
-            base = PreHirExpr::Binary {
-                op: PreHirBinaryOp::Add,
-                lhs: Box::new(base),
-                rhs: Box::new(other.clone()),
-                ty: self.ptr_ty.clone(),
-            };
+        } else {
+            for (idx, stride) in &self.non_multiples {
+                let term = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(idx.clone()),
+                    rhs: Box::new(PreHirExpr::Const(*stride, NirType::Unknown)),
+                    ty: NirType::Unknown,
+                };
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(term),
+                    ty: self.ptr_ty.clone(),
+                };
+            }
+            for other in &self.other_terms {
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(other.clone()),
+                    ty: self.ptr_ty.clone(),
+                };
+            }
         }
 
         if self.non_mult_const != 0 {
@@ -928,25 +964,9 @@ fn try_recover_ptr_arith(
             return Some(typed_ptr_expr.clone());
         }
         // Byte-cast form `(uint8_t *)p + k` (or Cast-wrapped base + k): k is
-        // usually bytes. When k is a positive sub-element residual on a
-        // multi-byte pointee (e.g. int* pair field index written as +1),
-        // rescale to element*size so PtrOffset stays byte-correct for the
-        // printer.
+        // in bytes. PtrOffset is also in bytes, so emit exact unscaled byte offset.
         if from_byte_cast {
-            if let Some(elem_size) = type_byte_size(&elem_ty, pointer_layout).filter(|&sz| sz > 1) {
-                let elem_size_i = i64::try_from(elem_size).ok()?;
-                let byte_offset = if offset > 0 && offset < elem_size_i {
-                    offset.checked_mul(elem_size_i)?
-                } else {
-                    offset
-                };
-                if byte_offset != 0 {
-                    return Some(PreHirExpr::PtrOffset {
-                        base: Box::new(typed_ptr_expr.clone()),
-                        offset: byte_offset,
-                    });
-                }
-            } else if offset != 0 {
+            if offset != 0 {
                 return Some(PreHirExpr::PtrOffset {
                     base: Box::new(typed_ptr_expr.clone()),
                     offset,
@@ -3424,9 +3444,9 @@ mod tests {
     }
 
     #[test]
-    fn byte_cast_sub_element_const_rescales_to_pointee_size() {
-        // `(uint8_t *)(int *p) + 1` with multi-byte pointee → PtrOffset(+4)
-        // (Pair/KV second-field mis-scale class).
+    fn byte_cast_sub_element_const_preserves_unscaled_byte_offset() {
+        // `(uint8_t *)(int *p) + 1` with multi-byte pointee → PtrOffset(+1)
+        // (Byte offsets on byte-cast pointers are preserved unscaled).
         let p_ty = NirType::Ptr(Box::new(NirType::Int {
             bits: 32,
             signed: true,
@@ -3472,10 +3492,10 @@ mod tests {
         assert!(super::apply_ptr_arith_recovery_pass(&mut func));
         match &func.body[0] {
             PreHirStmt::Assign {
-                rhs: PreHirExpr::PtrOffset { offset: 4, .. },
+                rhs: PreHirExpr::PtrOffset { offset: 1, .. },
                 ..
             } => {}
-            other => panic!("expected PtrOffset(+4), got {other:?}"),
+            other => panic!("expected PtrOffset(+1), got {other:?}"),
         }
     }
 
