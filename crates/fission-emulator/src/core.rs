@@ -289,6 +289,7 @@ impl Emulator {
         os: Box<dyn OsEnvironment>,
     ) -> Result<Self> {
         let pc = binary.inner().entry_point;
+        state.page_map.set_64bit(binary.inner().is_64bit);
 
         // Patch imports (IAT/PLT/MMIO) before execution starts. Only after
         // that does the environment know how wide this process is, and so
