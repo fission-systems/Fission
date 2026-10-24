@@ -149,4 +149,190 @@ mod tests {
             "the target terminator must remain attached to the repaired block: {repaired:?}"
         );
     }
+
+    #[test]
+    fn try_repair_orphan_gotos_supports_switch_terminator_target() {
+        use fission_midend_structuring::linear_types::LoweredTerminator;
+
+        let function = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![2, 3],
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: Vec::new(),
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 3,
+                    start_address: 0x1030,
+                    successors: Vec::new(),
+                    ops: Vec::new(),
+                },
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&function, &options, None);
+        builder.terminator_cache.insert(
+            1,
+            LoweredTerminator::Switch {
+                expr: PreHirExpr::Var("sel".to_string()),
+                targets: vec![0x1020],
+                default_target: Some(0x1030),
+                min_val: 0,
+                proof: None,
+            },
+        );
+
+        let body = vec![PreHirStmt::Goto("block_1010".to_string())];
+        assert!(has_orphan_goto_labels(&body));
+
+        let repaired = try_repair_orphan_gotos(&mut builder, body).expect("repair switch orphan");
+        assert!(
+            repaired
+                .iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::Switch { .. })),
+            "the repaired block must contain the LoweredTerminator::Switch: {repaired:?}"
+        );
+        assert!(!has_orphan_goto_labels(&repaired));
+    }
+
+    #[test]
+    fn lower_loop_body_subgraph_cond_break_preserves_non_fallthrough_target() {
+        use fission_midend_structuring::linear_types::LoweredTerminator;
+        use fission_midend_structuring::lower_loop_body_subgraph;
+        use rustc_hash::FxHashSet;
+
+        let function = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![3, 2],
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: vec![0],
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 3,
+                    start_address: 0x1030,
+                    successors: Vec::new(),
+                    ops: Vec::new(),
+                },
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&function, &options, None);
+        // Block 1 ends in Cond { true_target: 0x1030 (exit/break), false_target: Some(0x1025) }
+        // where 0x1025 != next_addr (which is 0x1020)
+        builder.terminator_cache.insert(
+            1,
+            LoweredTerminator::Cond {
+                cond: PreHirExpr::Var("break_cond".to_string()),
+                true_target: 0x1030,
+                false_target: Some(0x1025),
+            },
+        );
+
+        let body_set: FxHashSet<usize> = [0, 1, 2].into_iter().collect();
+        let stmts = lower_loop_body_subgraph(&mut builder, &body_set, 0, Some(3), 0)
+            .expect("lowered")
+            .expect("body");
+
+        // The if statement for block 1 must preserve the non-fallthrough false arm in else_body
+        let cond_if = stmts
+            .iter()
+            .find(|stmt| matches!(stmt, PreHirStmt::If { .. }))
+            .expect("if stmt");
+        let PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = cond_if
+        else {
+            unreachable!()
+        };
+        assert!(then_body.iter().any(|s| matches!(s, PreHirStmt::Break)));
+        assert!(
+            else_body
+                .iter()
+                .any(|s| matches!(s, PreHirStmt::Goto(lbl) if lbl == "block_1025")),
+            "expected Goto(block_1025) in else_body: {else_body:?}"
+        );
+    }
+
+    #[test]
+    fn lower_loop_body_subgraph_uses_target_key_for_virtual_blocks() {
+        use fission_midend_structuring::linear_types::LoweredTerminator;
+        use fission_midend_structuring::lower_loop_body_subgraph;
+        use rustc_hash::FxHashSet;
+
+        let function = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![2],
+                    ops: Vec::new(),
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: Vec::new(),
+                    ops: Vec::new(),
+                },
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&function, &options, None);
+        // Simulate a virtual duplicated block for block 1 with synthetic target key
+        let virtual_key = 0x1010 | (1u64 << 48); // with duplicate tag
+        builder.block_target_keys[1] = virtual_key;
+
+        // Block 0 branches to virtual block 1
+        builder
+            .terminator_cache
+            .insert(0, LoweredTerminator::Goto(virtual_key));
+
+        let body_set: FxHashSet<usize> = [0, 1].into_iter().collect();
+        let stmts = lower_loop_body_subgraph(&mut builder, &body_set, 0, Some(2), 0)
+            .expect("lowered")
+            .expect("body");
+
+        // The virtual block label must be emitted because force_labels matched block_target_key
+        let expected_label = fission_midend_structuring::helpers::block_label(virtual_key);
+        assert!(
+            stmts
+                .iter()
+                .any(|s| matches!(s, PreHirStmt::Label(lbl) if lbl == &expected_label)),
+            "expected label {expected_label} in lowered statements: {stmts:?}"
+        );
+    }
 }
