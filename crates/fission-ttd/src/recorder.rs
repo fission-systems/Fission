@@ -168,6 +168,18 @@ impl TTDRecorder {
         self.snapshots.back()
     }
 
+    /// Get the first snapshot
+    pub fn first_snapshot(&self) -> Option<&ExecutionSnapshot> {
+        self.snapshots.front()
+    }
+
+    /// Get the step range (min_step, max_step) covered by recorded snapshots
+    pub fn step_range(&self) -> Option<(u64, u64)> {
+        let first = self.snapshots.front()?.step_index;
+        let last = self.snapshots.back()?.step_index;
+        Some((first, last))
+    }
+
     /// Get all snapshots as borrowed references
     pub fn snapshots(&self) -> Vec<&ExecutionSnapshot> {
         self.snapshots.iter().collect()
