@@ -90,7 +90,7 @@ pub(super) fn parse_imports(
                     resolve_ordinal_name(&dll_name, ordinal)
                         .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
-                    let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
+                    let name_rva = (raw_thunk & 0xFFFFFFFF) as u32;
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
                     if name_offset != 0 {
                         let name = loader.read_string_at(name_offset + 2);
@@ -225,7 +225,13 @@ pub(super) fn parse_delay_imports(
                     resolve_ordinal_name(&dll_name, ordinal)
                         .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
-                    let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
+                    let name_rva = if is_rva {
+                        (raw_thunk & 0xFFFFFFFF) as u32
+                    } else if raw_thunk >= image_base {
+                        (raw_thunk - image_base) as u32
+                    } else {
+                        (raw_thunk & 0xFFFFFFFF) as u32
+                    };
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
                     if name_offset != 0 {
                         let name = loader.read_string_at(name_offset + 2);
