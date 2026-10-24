@@ -58,7 +58,8 @@ pub struct OrdinalDatabase {
     /// and the eagerly built map they replace was never freed either. Bounded
     /// by the DLLs a binary actually imports from, which is a handful of the
     /// 1,393 in the table.
-    resolved: std::sync::Arc<std::sync::Mutex<HashMap<String, &'static HashMap<u32, String>>>>,
+    resolved:
+        std::sync::Arc<std::sync::Mutex<HashMap<String, Option<&'static HashMap<u32, String>>>>>,
 }
 
 static ORDINAL_CACHE: std::sync::OnceLock<Result<OrdinalDatabase, OrdinalError>> =
@@ -146,10 +147,11 @@ impl OrdinalDatabase {
 
     /// The ordinal table for one DLL, decoded on first use.
     fn table_for(&self, dll: &str) -> Option<&'static HashMap<u32, String>> {
-        if let Ok(cache) = self.resolved.lock()
-            && let Some(hit) = cache.get(dll)
         {
-            return Some(*hit);
+            let cache = self.resolved.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(hit) = cache.get(dll) {
+                return *hit;
+            }
         }
         let mut table = HashMap::new();
         // Primary first, then the secondary fills gaps it left. `entry().or_insert`
@@ -166,14 +168,17 @@ impl OrdinalDatabase {
                 }
             }
         }
+        let mut cache = self.resolved.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(hit) = cache.get(dll) {
+            return *hit;
+        }
         if table.is_empty() {
+            cache.insert(dll.to_string(), None);
             return None;
         }
         let table: &'static HashMap<u32, String> = Box::leak(Box::new(table));
-        if let Ok(mut cache) = self.resolved.lock() {
-            cache.insert(dll.to_string(), table);
-        }
-        return Some(table);
+        cache.insert(dll.to_string(), Some(table));
+        Some(table)
     }
 
     /// Resolve `dll_name` (any case, `.dll` suffix optional) + ordinal to an
@@ -215,6 +220,62 @@ mod tests {
         );
         assert_eq!(db.resolve("mssign32.dll", 1), Some("DllUnregisterServer"));
         assert_eq!(db.resolve("not_a_real_dll_xyz.dll", 1), None);
+    }
+
+    #[test]
+    fn negative_caching_caches_misses() {
+        let db = OrdinalDatabase::try_new().expect("load ordinal corpus");
+        let dll = "non_existent_dummy_dll_12345.dll";
+        assert_eq!(db.resolve(dll, 1), None);
+
+        // Verify that the negative result is cached in `resolved`
+        let cache = db.resolved.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(
+            cache.get(dll),
+            Some(&None),
+            "negative lookup should be cached as None"
+        );
+    }
+
+    #[test]
+    fn poisoned_mutex_recovery() {
+        let db = OrdinalDatabase::try_new().expect("load ordinal corpus");
+        let resolved = db.resolved.clone();
+
+        // Intentionally poison the mutex
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = resolved.lock().unwrap();
+            panic!("poisoning mutex for test");
+        }));
+
+        assert!(resolved.is_poisoned(), "mutex must be poisoned");
+
+        // Resolution of a known DLL and an unknown DLL should both succeed without panicking
+        assert_eq!(db.resolve("ws2_32.dll", 1), Some("accept"));
+        assert_eq!(db.resolve("still_non_existent_dll_9876.dll", 1), None);
+    }
+
+    #[test]
+    fn concurrent_resolution_race() {
+        let db = OrdinalDatabase::try_new().expect("load ordinal corpus");
+        let mut handles = Vec::new();
+
+        for i in 0..8 {
+            let db_clone = db.clone();
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..50 {
+                    assert_eq!(db_clone.resolve("ws2_32.dll", 1), Some("accept"));
+                    assert_eq!(
+                        db_clone.resolve(&format!("concurrent_unknown_{i}.dll"), 1),
+                        None
+                    );
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().expect("thread join");
+        }
     }
 }
 
