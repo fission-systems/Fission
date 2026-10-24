@@ -273,6 +273,38 @@ pub struct Project {
     pub history: EditHistory,
 }
 
+/// Detailed report of decisions applied to a binary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ProjectApplyReport {
+    pub names_applied: usize,
+    pub signatures_applied: usize,
+    pub comments_applied: usize,
+    pub breakpoints_applied: usize,
+    pub watchpoints_applied: usize,
+}
+
+impl ProjectApplyReport {
+    pub fn total_applied(&self) -> usize {
+        self.names_applied
+            + self.signatures_applied
+            + self.comments_applied
+            + self.breakpoints_applied
+            + self.watchpoints_applied
+    }
+}
+
+impl PartialEq<usize> for ProjectApplyReport {
+    fn eq(&self, other: &usize) -> bool {
+        self.total_applied() == *other
+    }
+}
+
+impl PartialEq<ProjectApplyReport> for usize {
+    fn eq(&self, other: &ProjectApplyReport) -> bool {
+        *self == other.total_applied()
+    }
+}
+
 impl Project {
     /// An empty project bound to `binary`.
     pub fn for_binary(binary: &LoadedBinary) -> Self {
@@ -352,23 +384,55 @@ impl Project {
     /// Refuses a binary it was not made for. A project applied to the wrong
     /// file would rename whatever happened to live at those addresses, and
     /// the result would look like analysis.
-    pub fn apply(&self, binary: &mut LoadedBinary) -> Result<usize, ProjectError> {
+    pub fn apply(&self, binary: &mut LoadedBinary) -> Result<ProjectApplyReport, ProjectError> {
         if !self.matches(binary) {
             return Err(ProjectError::WrongBinary {
                 expected: self.binary_hash.clone(),
                 actual: binary.hash.clone(),
             });
         }
-        if self.names.is_empty() && self.signatures.is_empty() {
-            return Ok(0);
+        if self.names.is_empty()
+            && self.signatures.is_empty()
+            && self.comments.is_empty()
+            && self.breakpoints.is_empty()
+            && self.watchpoints.is_empty()
+        {
+            return Ok(ProjectApplyReport::default());
         }
 
         let inner = binary.inner_mut();
-        let mut applied = 0usize;
-        for function in inner.functions.iter_mut() {
-            if let Some(name) = self.names.get(&function.address) {
+        let mut report = ProjectApplyReport::default();
+
+        for (address, name) in &self.names {
+            if let Some(&index) = inner.function_addr_index.get(address) {
+                inner.functions[index].name = name.clone();
+                report.names_applied += 1;
+            } else if let Some(function) =
+                inner.functions.iter_mut().find(|f| f.address == *address)
+            {
                 function.name = name.clone();
-                applied += 1;
+                report.names_applied += 1;
+            } else {
+                // Address is not currently indexed as a function.
+                // Insert a synthesized FunctionInfo placeholder and register it in global_symbols
+                // so the user's chosen label is never dropped.
+                inner
+                    .functions
+                    .push(fission_loader::loader::types::FunctionInfo {
+                        name: name.clone(),
+                        address: *address,
+                        size: 0,
+                        is_export: false,
+                        is_import: false,
+                        origin: Some("project".to_string()),
+                        kind: Some("code".to_string()),
+                        source_section: None,
+                        external_library: None,
+                        is_thunk_like: false,
+                        thunk_target: None,
+                    });
+                inner.global_symbols.insert(*address, name.clone());
+                report.names_applied += 1;
             }
         }
 
@@ -387,18 +451,50 @@ impl Project {
                     param_names: signature.params.iter().map(|p| p.name.clone()).collect(),
                 },
             );
-            applied += 1;
+            report.signatures_applied += 1;
         }
-        // The name index maps names to positions, so it is stale the moment a
-        // name changes. Rebuilt rather than patched: a half-updated index is
-        // harder to notice than a rebuilt one is to pay for.
+
+        for (address, comment) in &self.comments {
+            inner.user_comments.insert(*address, comment.text.clone());
+            report.comments_applied += 1;
+        }
+
+        for &addr in &self.breakpoints {
+            if !inner.user_breakpoints.contains(&addr) {
+                inner.user_breakpoints.push(addr);
+                report.breakpoints_applied += 1;
+            }
+        }
+
+        for w in &self.watchpoints {
+            let wp = fission_loader::loader::types::UserWatchpoint {
+                address: w.address,
+                size: w.size,
+                on_read: w.on_read,
+                on_write: w.on_write,
+            };
+            if !inner.user_watchpoints.contains(&wp) {
+                inner.user_watchpoints.push(wp);
+                report.watchpoints_applied += 1;
+            }
+        }
+
+        // The name and address indexes map to positions, so they are stale the moment a
+        // name or function is added. Rebuilt rather than patched.
+        inner.function_addr_index = inner
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (f.address, i))
+            .collect();
         inner.function_name_index = inner
             .functions
             .iter()
             .enumerate()
             .map(|(i, f)| (f.name.clone(), i))
             .collect();
-        Ok(applied)
+
+        Ok(report)
     }
 
     /// Name the function entered at `address`. Returns the previous name.
@@ -642,6 +738,58 @@ mod tests {
         });
         assert_eq!(project.watchpoints.len(), 1);
         assert_eq!(project.watchpoints[0].size, 64);
+    }
+
+    #[test]
+    fn apply_ingests_comments_breakpoints_and_watchpoints_when_names_are_empty() {
+        let mut b = binary("abc123");
+        let mut project = Project::for_binary(&b);
+        project.set_comment(0x401230, "important entry point");
+        project.add_breakpoint(0x401230);
+        project.add_watchpoint(Watch {
+            address: 0x405000,
+            size: 4,
+            on_read: true,
+            on_write: true,
+        });
+
+        let report = project.apply(&mut b).expect("apply");
+        assert_eq!(report.names_applied, 0);
+        assert_eq!(report.comments_applied, 1);
+        assert_eq!(report.breakpoints_applied, 1);
+        assert_eq!(report.watchpoints_applied, 1);
+        assert_eq!(report.total_applied(), 3);
+
+        assert_eq!(
+            b.user_comments.get(&0x401230).map(String::as_str),
+            Some("important entry point")
+        );
+        assert_eq!(b.user_breakpoints, vec![0x401230]);
+        assert_eq!(b.user_watchpoints.len(), 1);
+        assert_eq!(b.user_watchpoints[0].address, 0x405000);
+    }
+
+    #[test]
+    fn apply_handles_unindexed_function_rename() {
+        let mut b = binary("abc123");
+        let mut project = Project::for_binary(&b);
+        // 0x409999 is not in b.functions
+        project.set_name(0x409999, "discovered_helper");
+
+        let report = project.apply(&mut b).expect("apply");
+        assert_eq!(report.names_applied, 1);
+        assert_eq!(report.total_applied(), 1);
+
+        // Name is present in functions and global_symbols
+        let f = b.functions.iter().find(|f| f.address == 0x409999);
+        assert!(f.is_some(), "synthesized function placeholder should exist");
+        assert_eq!(f.unwrap().name, "discovered_helper");
+        assert_eq!(
+            b.global_symbols.get(&0x409999).map(String::as_str),
+            Some("discovered_helper")
+        );
+        assert!(b.function_name_index.contains_key("discovered_helper"));
+        assert!(b.function_addr_index.contains_key(&0x409999));
     }
 }
 
