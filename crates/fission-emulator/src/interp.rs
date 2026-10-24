@@ -202,6 +202,9 @@ impl Emulator {
             }
 
             self.apply_taint_to_op_with_snapshot(op, control_mem, taint_snapshot.as_ref());
+            if matches!(self.shadow_mode, crate::observe::ShadowMode::Symbolic) {
+                self.apply_symbolic_shadow_to_op(op);
+            }
 
             match step {
                 StepResult::Next => idx += 1,
@@ -222,10 +225,21 @@ impl Emulator {
                 }
                 StepResult::CBranch {
                     condition_val,
-                    condition_node: _,
+                    condition_node,
                     true_rel_idx,
                     true_addr,
                 } => {
+                    let mut stopped_at_fallthrough = None;
+                    let cond_node = condition_node.or_else(|| {
+                        let cond_vn = &op.inputs[1];
+                        if cond_vn.is_constant {
+                            None
+                        } else {
+                            self.state
+                                .get_shadow_memory(cond_vn.space_id, cond_vn.offset)
+                        }
+                    });
+
                     if let Some(taken_pc) = true_addr {
                         let branch_pc = self.pc;
                         if let Some(fallthrough_pc) = instruction_fallthroughs.get(&branch_pc) {
@@ -237,7 +251,38 @@ impl Emulator {
                                 taken_pc,
                                 *fallthrough_pc,
                             );
+
+                            if let Some(node) = cond_node {
+                                let alt_addr = if condition_val {
+                                    *fallthrough_pc
+                                } else {
+                                    taken_pc
+                                };
+                                self.sym_events.push(crate::core::SymBranch {
+                                    step_index: self.inst_count,
+                                    pc: branch_pc,
+                                    condition_val_taken: condition_val,
+                                    condition_node: Some(node),
+                                    alt_rel_idx: None,
+                                    alt_addr: Some(alt_addr),
+                                });
+                                if self.concolic_stop_on_branch {
+                                    self.sym_stop_requested = true;
+                                    tracing::debug!(
+                                        "Interpreter concolic gate STOP: node={} taken={} pc=0x{:X}",
+                                        node,
+                                        condition_val,
+                                        branch_pc
+                                    );
+                                    if !condition_val {
+                                        stopped_at_fallthrough = Some(*fallthrough_pc);
+                                    }
+                                }
+                            }
                         }
+                    }
+                    if let Some(ft) = stopped_at_fallthrough {
+                        return Ok(InterpExit::FallThrough(ft));
                     }
                     if !condition_val {
                         idx += 1;
@@ -321,6 +366,172 @@ impl Emulator {
         }
 
         Ok(InterpExit::FallThrough(fallthrough))
+    }
+
+    pub(crate) fn apply_symbolic_shadow_to_op(&mut self, op: &fission_pcode::ir::PcodeOp) {
+        use crate::jit::callbacks::{
+            SymBinOpKind, SymUnOpKind, jit_shadow_binop, jit_shadow_copy, jit_shadow_load,
+            jit_shadow_store, jit_shadow_unop,
+        };
+
+        let emu_ptr = self as *mut Emulator;
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                if let Some(out) = &op.output {
+                    if !out.is_constant && !op.inputs.is_empty() {
+                        let in0 = &op.inputs[0];
+                        jit_shadow_copy(
+                            emu_ptr,
+                            out.space_id,
+                            out.offset,
+                            out.size as u64,
+                            if in0.is_constant { 0 } else { in0.space_id },
+                            if in0.is_constant { 0 } else { in0.offset },
+                        );
+                    }
+                }
+            }
+            PcodeOpcode::Load => {
+                if let Some(out) = &op.output {
+                    if !out.is_constant && op.inputs.len() >= 2 {
+                        let space_id = op.inputs[0].constant_val as u64;
+                        let in1 = &op.inputs[1];
+                        let addr = self.varnode_value(in1);
+                        jit_shadow_load(
+                            emu_ptr,
+                            out.space_id,
+                            out.offset,
+                            out.size as u64,
+                            space_id,
+                            addr,
+                            if in1.is_constant { 0 } else { in1.space_id },
+                            if in1.is_constant { 0 } else { in1.offset },
+                            in1.size as u64,
+                        );
+                    }
+                }
+            }
+            PcodeOpcode::Store => {
+                if op.inputs.len() >= 3 {
+                    let space_id = op.inputs[0].constant_val as u64;
+                    let in1 = &op.inputs[1];
+                    let in2 = &op.inputs[2];
+                    let addr = self.varnode_value(in1);
+                    jit_shadow_store(
+                        emu_ptr,
+                        space_id,
+                        addr,
+                        if in1.is_constant { 0 } else { in1.space_id },
+                        if in1.is_constant { 0 } else { in1.offset },
+                        if in2.is_constant { 0 } else { in2.space_id },
+                        if in2.is_constant { 0 } else { in2.offset },
+                        in2.size as u64,
+                        in1.size as u64,
+                    );
+                }
+            }
+            PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::FloatAdd
+            | PcodeOpcode::FloatSub
+            | PcodeOpcode::FloatMult
+            | PcodeOpcode::FloatDiv
+            | PcodeOpcode::FloatEqual
+            | PcodeOpcode::FloatNotEqual
+            | PcodeOpcode::FloatLess
+            | PcodeOpcode::FloatLessEqual => {
+                if let Some(out) = &op.output {
+                    if !out.is_constant && op.inputs.len() >= 2 {
+                        let in0 = &op.inputs[0];
+                        let in1 = &op.inputs[1];
+                        let a_val = self.varnode_value(in0);
+                        let b_val = self.varnode_value(in1);
+                        let kind = match op.opcode {
+                            PcodeOpcode::IntAdd => SymBinOpKind::Add as u32,
+                            PcodeOpcode::IntSub => SymBinOpKind::Sub as u32,
+                            PcodeOpcode::IntMult => SymBinOpKind::Mul as u32,
+                            PcodeOpcode::IntAnd => SymBinOpKind::And as u32,
+                            PcodeOpcode::IntOr => SymBinOpKind::Or as u32,
+                            PcodeOpcode::IntXor => SymBinOpKind::Xor as u32,
+                            PcodeOpcode::IntEqual => SymBinOpKind::Eq as u32,
+                            PcodeOpcode::IntNotEqual => SymBinOpKind::Neq as u32,
+                            PcodeOpcode::IntLess => SymBinOpKind::Ult as u32,
+                            PcodeOpcode::IntLessEqual => SymBinOpKind::Ule as u32,
+                            PcodeOpcode::IntSLess => SymBinOpKind::Slt as u32,
+                            PcodeOpcode::IntSLessEqual => SymBinOpKind::Sle as u32,
+                            PcodeOpcode::FloatAdd => SymBinOpKind::FloatAdd as u32,
+                            PcodeOpcode::FloatSub => SymBinOpKind::FloatSub as u32,
+                            PcodeOpcode::FloatMult => SymBinOpKind::FloatMul as u32,
+                            PcodeOpcode::FloatDiv => SymBinOpKind::FloatDiv as u32,
+                            PcodeOpcode::FloatEqual => SymBinOpKind::FloatEq as u32,
+                            PcodeOpcode::FloatNotEqual => SymBinOpKind::FloatNeq as u32,
+                            PcodeOpcode::FloatLess => SymBinOpKind::FloatLt as u32,
+                            PcodeOpcode::FloatLessEqual => SymBinOpKind::FloatLe as u32,
+                            _ => unreachable!(),
+                        };
+                        jit_shadow_binop(
+                            emu_ptr,
+                            out.space_id,
+                            out.offset,
+                            out.size as u64,
+                            if in0.is_constant { 0 } else { in0.space_id },
+                            if in0.is_constant { 0 } else { in0.offset },
+                            a_val,
+                            if in0.is_constant { 8 } else { in0.size as u64 },
+                            if in1.is_constant { 0 } else { in1.space_id },
+                            if in1.is_constant { 0 } else { in1.offset },
+                            b_val,
+                            if in1.is_constant { 8 } else { in1.size as u64 },
+                            kind,
+                        );
+                    }
+                }
+            }
+            PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::BoolNegate
+            | PcodeOpcode::FloatNeg
+            | PcodeOpcode::FloatAbs
+            | PcodeOpcode::FloatSqrt => {
+                if let Some(out) = &op.output {
+                    if !out.is_constant && !op.inputs.is_empty() {
+                        let in0 = &op.inputs[0];
+                        let a_val = self.varnode_value(in0);
+                        let kind = match op.opcode {
+                            PcodeOpcode::IntNegate => SymUnOpKind::Not as u32,
+                            PcodeOpcode::Int2Comp => SymUnOpKind::Neg as u32,
+                            PcodeOpcode::BoolNegate => SymUnOpKind::BoolNot as u32,
+                            PcodeOpcode::FloatNeg => SymUnOpKind::FloatNeg as u32,
+                            PcodeOpcode::FloatAbs => SymUnOpKind::FloatAbs as u32,
+                            PcodeOpcode::FloatSqrt => SymUnOpKind::FloatSqrt as u32,
+                            _ => unreachable!(),
+                        };
+                        jit_shadow_unop(
+                            emu_ptr,
+                            out.space_id,
+                            out.offset,
+                            out.size as u64,
+                            if in0.is_constant { 0 } else { in0.space_id },
+                            if in0.is_constant { 0 } else { in0.offset },
+                            a_val,
+                            if in0.is_constant { 8 } else { in0.size as u64 },
+                            kind,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 

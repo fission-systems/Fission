@@ -23,7 +23,8 @@ impl SimulationManager {
     /// Convenience constructor for CLI use: creates an initial state from the emulator's current PC.
     pub fn new(emu: Emulator) -> Self {
         let machine_state = emu.state.clone();
-        let initial_state = SimState::new(emu.inst_count, emu.pc, machine_state);
+        let initial_state = SimState::new(emu.inst_count, emu.pc, machine_state)
+            .with_environment(emu.vfs.clone(), emu.stdin_buffer.clone());
         Self::with_initial_state(emu, initial_state)
     }
 
@@ -58,6 +59,7 @@ impl SimulationManager {
 
     pub fn use_technique(&mut self, mut tech: Box<dyn ExplorationTechnique>) {
         tech.setup(&mut self.stashes);
+        tech.setup_emulator(&mut self.emu);
         self.techniques.push(tech);
     }
 
@@ -98,6 +100,12 @@ impl SimulationManager {
             self.emu.state = state.machine_state.clone();
             self.emu.pc = state.pc;
             self.emu.inst_count = state.step_index;
+            if let Some(ref vfs) = state.vfs {
+                self.emu.vfs = vfs.clone();
+            }
+            if state.stdin_buffer.is_some() {
+                self.emu.stdin_buffer = state.stdin_buffer.clone();
+            }
 
             // Run until the next symbolic branch or halt (Phase D gate).
             self.emu.sym_events.clear();
@@ -107,40 +115,39 @@ impl SimulationManager {
             // Clear stop so subsequent forks can run again.
             self.emu.sym_stop_requested = false;
 
+            let current_vfs = self.emu.vfs.clone();
+            let current_stdin = self.emu.stdin_buffer.clone();
+
             if run_result.is_err() {
-                next_deadended.push(SimState::new(
-                    self.emu.inst_count,
-                    self.emu.pc,
-                    self.emu.state.clone(),
-                ));
+                next_deadended.push(
+                    SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_environment(current_vfs, current_stdin),
+                );
                 continue;
             }
 
             let branches = std::mem::take(&mut self.emu.sym_events);
             if branches.is_empty() {
-                next_deadended.push(SimState::new(
-                    self.emu.inst_count,
-                    self.emu.pc,
-                    self.emu.state.clone(),
-                ));
+                next_deadended.push(
+                    SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_environment(current_vfs, current_stdin),
+                );
                 continue;
             }
 
             let branch = branches.into_iter().next().unwrap();
             let Some(cond_node) = branch.condition_node else {
-                next_deadended.push(SimState::new(
-                    self.emu.inst_count,
-                    self.emu.pc,
-                    self.emu.state.clone(),
-                ));
+                next_deadended.push(
+                    SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_environment(current_vfs, current_stdin),
+                );
                 continue;
             };
             let Some(cond_expr) = self.emu.solver.nodes.get(&cond_node).cloned() else {
-                next_deadended.push(SimState::new(
-                    self.emu.inst_count,
-                    self.emu.pc,
-                    self.emu.state.clone(),
-                ));
+                next_deadended.push(
+                    SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_environment(current_vfs, current_stdin),
+                );
                 continue;
             };
 
@@ -161,9 +168,22 @@ impl SimulationManager {
                 (false_expr, true_expr)
             };
 
-            let concrete_state =
-                state.with_constraint(concrete_constraint, step, concrete_pc, fork_ms.clone());
-            let alt_state = state.with_constraint(alt_constraint, step, alt_pc, fork_ms);
+            let concrete_state = state.with_constraint_and_env(
+                concrete_constraint,
+                step,
+                concrete_pc,
+                fork_ms.clone(),
+                current_vfs.clone(),
+                current_stdin.clone(),
+            );
+            let alt_state = state.with_constraint_and_env(
+                alt_constraint,
+                step,
+                alt_pc,
+                fork_ms,
+                current_vfs,
+                current_stdin,
+            );
 
             // Path-SAT prune with panic isolation (solver hardened for OOB assigns).
             for st in [concrete_state, alt_state] {
