@@ -45,7 +45,9 @@ struct Session {
     /// language has no compiled SLEIGH frontend, which `disasm` then says
     /// rather than returning an empty listing.
     decoder: Option<Box<dyn InstructionDecoder>>,
+    binary: Option<fission_loader::loader::LoadedBinary>,
     pending: Vec<DebugEvent>,
+    deadline: Option<std::time::Instant>,
 }
 
 impl Session {
@@ -94,8 +96,18 @@ impl MachineHost {
         Self(Arc::new(Mutex::new(Session {
             backend,
             decoder,
+            binary: Some(binary.clone()),
             pending: Vec::new(),
+            deadline: None,
         })))
+    }
+
+    /// Set an execution deadline for machine execution operations.
+    pub fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        if let Ok(mut guard) = self.0.lock() {
+            guard.backend.set_deadline(deadline);
+            guard.deadline = deadline;
+        }
     }
 
     /// Take the machine back out.
@@ -119,9 +131,19 @@ impl MachineHost {
             .0
             .lock()
             .map_err(|_| fail(format!("the machine is poisoned; cannot {what}")))?;
+        if let Some(deadline) = guard.deadline {
+            if std::time::Instant::now() >= deadline {
+                return Err(fail("script exceeded max_runtime_ms"));
+            }
+        }
         let out = f(guard.backend.as_mut());
         // Whatever running produced, kept for whoever asks.
         guard.pump();
+        if let Some(deadline) = guard.deadline {
+            if std::time::Instant::now() >= deadline {
+                return Err(fail("script exceeded max_runtime_ms"));
+            }
+        }
         out
     }
 
@@ -261,7 +283,10 @@ impl MachineHost {
     pub fn set_reg(&mut self, name: String, value: i64) -> ScriptResult<()> {
         self.with("write a register", |b| {
             let mut regs = b.fetch_registers(THREAD).map_err(fail)?;
-            if regs.get(&name).is_none() {
+            if name.eq_ignore_ascii_case("pc") || name.eq_ignore_ascii_case("rip") {
+                regs.pc = value as u64;
+            }
+            if regs.get(&name).is_none() && !name.eq_ignore_ascii_case("pc") {
                 return Err(fail(format!("this machine has no register {name}")));
             }
             regs.set(&name, value as u64);
@@ -313,8 +338,25 @@ impl MachineHost {
     pub fn disasm(&mut self, address: i64, count: i64) -> ScriptResult<Array> {
         let count = count.clamp(1, 4096) as usize;
         // Long enough for `count` instructions of any length this decodes.
-        let window = (count * 16).min(64 * 1024);
-        let bytes = self.read_bytes(address as u64, window)?;
+        let mut window = (count * 16).min(64 * 1024);
+        let address_u64 = address as u64;
+
+        if let Ok(guard) = self.0.lock() {
+            if let Some(binary) = &guard.binary {
+                if let Some(sec) = binary.section_containing_for_execution(address_u64) {
+                    let avail = (sec.virtual_address + sec.virtual_size).saturating_sub(address_u64)
+                        as usize;
+                    if avail == 0 {
+                        return Err(fail(format!(
+                            "address 0x{address:x} is beyond section bounds"
+                        )));
+                    }
+                    window = window.min(avail);
+                }
+            }
+        }
+
+        let bytes = self.read_bytes_bounded(address_u64, window)?;
         self.with_session("disassemble", |s| {
             let Some(decoder) = s.decoder.as_ref() else {
                 return Err(fail(
@@ -354,9 +396,25 @@ impl MachineHost {
         self.disasm(pc, count)
     }
 
-    fn read_bytes(&mut self, address: u64, size: usize) -> ScriptResult<Vec<u8>> {
+    fn read_bytes_bounded(&mut self, address: u64, mut window: usize) -> ScriptResult<Vec<u8>> {
         self.with("read memory", |b| {
-            b.read_memory(address, size).map_err(fail)
+            while window > 0 {
+                match b.read_memory(address, window) {
+                    Ok(bytes) => return Ok(bytes),
+                    Err(e) => {
+                        if window == 1 {
+                            return Err(fail(e));
+                        }
+                        let page_rem = (4096 - (address % 4096)) as usize;
+                        if window > page_rem && page_rem > 0 {
+                            window = page_rem;
+                        } else {
+                            window = window / 2;
+                        }
+                    }
+                }
+            }
+            Err(fail(format!("could not read memory at 0x{address:x}")))
         })
     }
 

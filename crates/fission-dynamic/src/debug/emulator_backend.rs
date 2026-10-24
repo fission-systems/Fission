@@ -32,6 +32,8 @@ pub struct EmulatorBackend {
     /// How much of the guest's standard output has already been reported as
     /// an `OutputString` event.
     stdout_reported: usize,
+    /// Execution deadline for bounded emulator runs.
+    deadline: Option<std::time::Instant>,
 }
 
 impl EmulatorBackend {
@@ -42,6 +44,7 @@ impl EmulatorBackend {
             last_outcome: None,
             events: std::collections::VecDeque::new(),
             stdout_reported: 0,
+            deadline: None,
         }
     }
 
@@ -226,6 +229,13 @@ impl ExecutionBackend for EmulatorBackend {
 
     fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
         self.timeline = Some(timeline);
+    }
+
+    fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        self.deadline = deadline;
+        if let Some(emu) = &mut self.emulator {
+            emu.set_deadline(deadline);
+        }
     }
 
     fn enumerate_processes() -> Vec<ProcessInfo> {
@@ -592,6 +602,9 @@ impl ExecutionBackend for EmulatorBackend {
             Err(elf) => emu
                 .apply_linux_image(elf)
                 .map_err(|e| fission_core::err!(debug, "ELF image failed: {}", e))?,
+        }
+        if let Some(deadline) = self.deadline {
+            emu.set_deadline(Some(deadline));
         }
         self.emulator = Some(emu);
         if let Some(timeline) = &self.timeline {
