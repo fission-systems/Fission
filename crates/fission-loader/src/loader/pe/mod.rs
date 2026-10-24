@@ -2020,6 +2020,135 @@ mod tests {
         assert_eq!(dp.is_import, false);
         assert_eq!(dp.kind, Some("delay_proxy".to_string()));
     }
+
+    #[test]
+    fn pe64_import_preserves_bit_31_in_name_rva() {
+        let mut data = vec![0u8; 4096];
+
+        // DOS Header
+        data[0] = 0x4D;
+        data[1] = 0x5A; // MZ
+        data[0x3C] = 0x80; // e_lfanew = 0x80
+
+        // PE Header (at 0x80)
+        data[0x80] = 0x50;
+        data[0x81] = 0x45; // PE\0\0
+
+        // File Header (at 0x84)
+        data[0x84] = 0x64;
+        data[0x85] = 0x86; // Machine = 0x8664 (x86_64)
+        data[0x86] = 0x01; // NumberOfSections = 1
+        data[0x94] = 0xF0; // SizeOfOptionalHeader = 240 (0xF0 for PE32+)
+
+        // Optional Header (at 0x98)
+        data[0x98] = 0x0B;
+        data[0x99] = 0x02; // Magic = 0x20B (PE32+)
+        // ImageBase (at 0x98 + 24 = 0xB0)
+        data[0xB0..0xB8].copy_from_slice(&0x140000000u64.to_le_bytes());
+        // Data Directories (16 entries at 0x98 + 112 = 0x108)
+        data[0x104] = 16; // NumberOfRvaAndSizes
+
+        // Import Directory (Index 1) at 0x108 + 8 = 0x110
+        // virtual_address = 0x8000_0000, size = 40 (2 descriptors)
+        data[0x110..0x114].copy_from_slice(&0x8000_0000u32.to_le_bytes());
+        data[0x114..0x118].copy_from_slice(&40u32.to_le_bytes());
+
+        // Section Headers (at 0x80 + 4 + 20 + 240 = 0x188)
+        let sec = 0x188;
+        data[sec..sec + 6].copy_from_slice(b".rdata");
+        data[sec + 8..sec + 12].copy_from_slice(&0x1000u32.to_le_bytes()); // virtual_size = 0x1000
+        data[sec + 12..sec + 16].copy_from_slice(&0x8000_0000u32.to_le_bytes()); // virtual_address = 0x8000_0000
+        data[sec + 16..sec + 20].copy_from_slice(&0x1000u32.to_le_bytes()); // size_of_raw_data = 0x1000
+        data[sec + 20..sec + 24].copy_from_slice(&0x400u32.to_le_bytes()); // pointer_to_raw_data = 0x400
+        data[sec + 36..sec + 40].copy_from_slice(&0x40000040u32.to_le_bytes()); // Read | Initialized
+
+        // Section data at file offset 0x400 corresponds to RVA 0x8000_0000:
+        // Import Descriptor at RVA 0x8000_0000 (offset 0x400):
+        // original_first_thunk = 0x8000_0040 (offset 0x440)
+        data[0x400..0x404].copy_from_slice(&0x8000_0040u32.to_le_bytes());
+        // name RVA = 0x8000_0060 (offset 0x460)
+        data[0x40C..0x410].copy_from_slice(&0x8000_0060u32.to_le_bytes());
+        // first_thunk = 0x8000_0080 (offset 0x480)
+        data[0x410..0x414].copy_from_slice(&0x8000_0080u32.to_le_bytes());
+        // Descriptor 1 (null terminator) at 0x414..0x428 is all zeroes.
+
+        // DLL name at RVA 0x8000_0060 (offset 0x460)
+        data[0x460..0x46c].copy_from_slice(b"highdll.dll\0");
+
+        // Original First Thunk at RVA 0x8000_0040 (offset 0x440):
+        // Entry 0 points to IMAGE_IMPORT_BY_NAME at RVA 0x8000_00A0 (offset 0x4A0)
+        // Bit 31 is 1! Bit 63 is 0 (not ordinal).
+        data[0x440..0x448].copy_from_slice(&0x0000_0000_8000_00A0u64.to_le_bytes());
+
+        // First Thunk at RVA 0x8000_0080 (offset 0x480):
+        data[0x480..0x488].copy_from_slice(&0x0000_0000_8000_00A0u64.to_le_bytes());
+
+        // Name record at RVA 0x8000_00A0 (offset 0x4A0):
+        // Hint = 0x0000, Name = "HighRvaFunc\0"
+        data[0x4A0..0x4A2].copy_from_slice(&0u16.to_le_bytes());
+        data[0x4A2..0x4AE].copy_from_slice(b"HighRvaFunc\0");
+
+        let bin = PeLoader::parse(DataBuffer::Heap(data), "high_rva.exe".to_string())
+            .expect("PE64 with high RVA import should parse");
+
+        let high_func = bin
+            .functions
+            .iter()
+            .find(|f| f.name == "highdll.dll!HighRvaFunc");
+        assert!(
+            high_func.is_some(),
+            "HighRvaFunc import with bit 31 set should be recovered"
+        );
+        let hf = high_func.unwrap();
+        assert_eq!(hf.address, 0x140000000 + 0x8000_0080);
+        assert!(hf.is_import);
+    }
+
+    #[test]
+    fn pe_import_unterminated_descriptors_capped() {
+        let mut data = vec![0u8; 16384];
+
+        // DOS Header
+        data[0] = 0x4D;
+        data[1] = 0x5A; // MZ
+        data[0x3C] = 0x80; // e_lfanew = 0x80
+
+        // PE Header (at 0x80)
+        data[0x80] = 0x50;
+        data[0x81] = 0x45; // PE\0\0
+
+        // File Header (at 0x84)
+        data[0x84] = 0x4C;
+        data[0x85] = 0x01; // x86
+        data[0x86] = 0x01; // 1 section
+        data[0x94] = 0xE0; // SizeOfOptionalHeader = 224
+
+        // Optional Header
+        data[0x98] = 0x0B;
+        data[0x99] = 0x01; // PE32
+        data[0xB4..0xB8].copy_from_slice(&0x400000u32.to_le_bytes()); // ImageBase
+        data[0xF4] = 16; // NumberOfRvaAndSizes
+
+        // Import Directory (Index 1) at 0x98 + 96 + 8 = 0x100
+        data[0x100..0x104].copy_from_slice(&0x1000u32.to_le_bytes());
+        data[0x104..0x108].copy_from_slice(&0x2000u32.to_le_bytes());
+
+        // Section Header at 0x178
+        let sec = 0x178;
+        data[sec..sec + 5].copy_from_slice(b".data");
+        data[sec + 8..sec + 12].copy_from_slice(&0x2000u32.to_le_bytes()); // virtual_size
+        data[sec + 12..sec + 16].copy_from_slice(&0x1000u32.to_le_bytes()); // virtual_address
+        data[sec + 16..sec + 20].copy_from_slice(&0x2000u32.to_le_bytes()); // raw_size
+        data[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes()); // pointer_to_raw_data
+        data[sec + 36..sec + 40].copy_from_slice(&0xC0000040u32.to_le_bytes()); // RW
+
+        // The section file bytes are filled with 0x11, so import descriptors are never zeroed.
+        data[0x200..0x2200].fill(0x11);
+
+        // It should cleanly terminate without infinite looping or OOMing.
+        let result = PeLoader::parse(DataBuffer::Heap(data), "unterminated.exe".to_string());
+        assert!(result.is_ok());
+    }
 }
 
 #[cfg(test)]

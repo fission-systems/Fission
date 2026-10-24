@@ -1,5 +1,8 @@
 use super::*;
 
+const MAX_IMPORT_DESCRIPTORS: usize = 4096;
+const MAX_IMPORT_ENTRIES: u64 = 65_536;
+
 /// Resolve a PE ordinal-only import to its real exported name via the
 /// bundled DLL ordinal corpus (`fission_signatures::OrdinalDatabase`, sourced
 /// from RetDec's vendored ordinal tables). Returns `None` when the DLL/
@@ -27,8 +30,13 @@ pub(super) fn parse_imports(
     let mut symbol_map = std::collections::HashMap::new();
 
     let mut descriptor_offset = offset;
+    let mut desc_count = 0;
 
     loop {
+        if desc_count >= MAX_IMPORT_DESCRIPTORS {
+            break;
+        }
+        desc_count += 1;
         let desc = loader
             .read_import_descriptor(descriptor_offset)
             .unwrap_or(ImportDescriptor {
@@ -68,6 +76,9 @@ pub(super) fn parse_imports(
         if thunk_offset != 0 {
             let mut idx = 0;
             loop {
+                if idx >= MAX_IMPORT_ENTRIES {
+                    break;
+                }
                 let thunk_entry_offset = thunk_offset + (idx * if loader.is_64bit { 8 } else { 4 });
                 let raw_thunk = if loader.is_64bit {
                     loader.read_u64(thunk_entry_offset).unwrap_or(0)
@@ -90,7 +101,11 @@ pub(super) fn parse_imports(
                     resolve_ordinal_name(&dll_name, ordinal)
                         .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
-                    let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
+                    let name_rva = if loader.is_64bit {
+                        (raw_thunk & 0xFFFF_FFFF) as u32
+                    } else {
+                        (raw_thunk & 0x7FFF_FFFF) as u32
+                    };
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
                     if name_offset != 0 {
                         let name = loader.read_string_at(name_offset + 2);
@@ -149,8 +164,13 @@ pub(super) fn parse_delay_imports(
     let mut delay_proxies = Vec::new();
 
     let mut descriptor_offset = offset;
+    let mut desc_count = 0;
 
     loop {
+        if desc_count >= MAX_IMPORT_DESCRIPTORS {
+            break;
+        }
+        desc_count += 1;
         let gr_attrs = loader.read_u32(descriptor_offset).unwrap_or(0);
         let rva_dll_name = loader.read_u32(descriptor_offset + 4).unwrap_or(0);
         let rva_iat = loader.read_u32(descriptor_offset + 12).unwrap_or(0);
@@ -203,6 +223,9 @@ pub(super) fn parse_delay_imports(
         if thunk_offset != 0 {
             let mut idx = 0;
             loop {
+                if idx >= MAX_IMPORT_ENTRIES {
+                    break;
+                }
                 let thunk_entry_offset = thunk_offset + (idx * if loader.is_64bit { 8 } else { 4 });
                 let raw_thunk = if loader.is_64bit {
                     loader.read_u64(thunk_entry_offset).unwrap_or(0)
@@ -225,7 +248,11 @@ pub(super) fn parse_delay_imports(
                     resolve_ordinal_name(&dll_name, ordinal)
                         .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
-                    let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
+                    let name_rva = if loader.is_64bit {
+                        (raw_thunk & 0xFFFF_FFFF) as u32
+                    } else {
+                        (raw_thunk & 0x7FFF_FFFF) as u32
+                    };
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
                     if name_offset != 0 {
                         let name = loader.read_string_at(name_offset + 2);
