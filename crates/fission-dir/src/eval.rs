@@ -243,24 +243,30 @@ macro_rules! define_interp {
                 }
             }
 
-            /// The address expression and width a store targets, or `None`
-            /// for a plain variable.
-            ///
-            /// An `Index` or `FieldAccess` target is the same address
-            /// arithmetic `eval_expr` already does for the reading side, so it
-            /// is expressed by reusing those forms rather than repeating the
-            /// stride and offset rules -- two copies of that arithmetic
-            /// drifting apart would corrupt exactly the comparison this crate
-            /// makes.
-            fn store_target(lhs: &$LValue) -> Option<(&$Expr, u32)> {
+            /// The address and width a store targets, or `None` for a plain variable.
+            fn eval_store_target(lhs: &$LValue, env: &mut Env) -> Result<Option<(u64, u32)>> {
                 match lhs {
-                    $LValue::Var(_) => None,
-                    $LValue::Deref { ptr, ty } => Some((ptr, width_of(ty))),
-                    // `base`/`index` and `base`/`offset` are carried by the
-                    // lvalue itself, so the address cannot be handed back as a
-                    // single borrowed expression; those stay unsupported until
-                    // there is a reason to widen this.
-                    _ => None,
+                    $LValue::Var(_) => Ok(None),
+                    $LValue::Deref { ptr, ty } => {
+                        let addr = eval_expr(ptr, env)? as u64;
+                        Ok(Some((addr, width_of(ty))))
+                    }
+                    $LValue::Index {
+                        base,
+                        index,
+                        elem_ty,
+                    } => {
+                        let stride = bytes_for(width_of(elem_ty)) as i64;
+                        let i = eval_expr(index, env)?;
+                        let base_addr = eval_expr(base, env)?;
+                        let addr = base_addr.wrapping_add(i.wrapping_mul(stride)) as u64;
+                        Ok(Some((addr, width_of(elem_ty))))
+                    }
+                    $LValue::FieldAccess { base, offset, ty, .. } => {
+                        let base_addr = eval_expr(base, env)?;
+                        let addr = base_addr.wrapping_add(*offset as i64) as u64;
+                        Ok(Some((addr, width_of(ty))))
+                    }
                 }
             }
 
@@ -510,8 +516,7 @@ macro_rules! define_interp {
                     $Stmt::Assign { lhs, rhs } => {
                         // Stores go to memory; only a plain variable falls
                         // through to the environment below.
-                        if let Some((addr_expr, bits)) = store_target(lhs) {
-                            let addr = eval_expr(addr_expr, env)? as u64;
+                        if let Some((addr, bits)) = eval_store_target(lhs, env)? {
                             let v = eval_expr(rhs, env)?;
                             env.mem.write(addr, bits, v);
                             return Ok(Flow::Normal);
@@ -790,7 +795,7 @@ macro_rules! define_interp {
                     // machine, rather than the "cannot check this" it is. The
                     // same default could equally have made a wrong body agree.
                     if let Some(init) = &l.initializer {
-                        let v = eval_expr(init, &env)?;
+                        let v = normalize(eval_expr(init, &env)?, &l.ty);
                         env.values.insert(l.name.clone(), v);
                     }
                 }
@@ -849,3 +854,138 @@ pub use prehir::free_names as prehir_free_names;
 pub use prehir::interpret as interpret_prehir;
 pub use prehir::interpret_with_memory as interpret_prehir_with_memory;
 pub use prehir::interpret_with_state as interpret_prehir_with_state;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_midend_core::ir::{HirExpr, HirLValue, HirStmt, NirBinding, NirType};
+
+    #[test]
+    fn local_initializer_is_normalized_to_declared_type() {
+        // A local initialized with 0xff into a signed 8-bit integer must normalize to -1.
+        let locals = vec![NirBinding {
+            name: "x".to_string(),
+            ty: NirType::Int {
+                bits: 8,
+                signed: true,
+            },
+            surface_type_name: None,
+            origin: None,
+            initializer: Some(HirExpr::Const(
+                0xff,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+        }];
+        let body = vec![HirStmt::Return(Some(HirExpr::Var("x".to_string())))];
+        let val = interpret_hir(&body, &[], &locals, &[]).expect("interpret");
+        assert_eq!(val, Some(-1));
+    }
+
+    #[test]
+    fn store_target_handles_index_lvalue() {
+        // Allocate an address (e.g. 0x1000) into a local pointer `base`.
+        // Perform `base[2] = 42` (where elem_ty is 32-bit int, stride = 4, target addr = 0x1008).
+        // Then read back `base[2]`.
+        let locals = vec![NirBinding {
+            name: "base".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: true,
+            })),
+            surface_type_name: None,
+            origin: None,
+            initializer: Some(HirExpr::Const(
+                0x1000,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+        }];
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Index {
+                    base: Box::new(HirExpr::Var("base".to_string())),
+                    index: Box::new(HirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    )),
+                    elem_ty: elem_ty.clone(),
+                },
+                rhs: HirExpr::Const(42, elem_ty.clone()),
+            },
+            HirStmt::Return(Some(HirExpr::Load {
+                ptr: Box::new(HirExpr::Index {
+                    base: Box::new(HirExpr::Var("base".to_string())),
+                    index: Box::new(HirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    )),
+                    elem_ty: elem_ty.clone(),
+                }),
+                ty: elem_ty,
+            })),
+        ];
+        let val = interpret_hir(&body, &[], &locals, &[]).expect("interpret");
+        assert_eq!(val, Some(42));
+    }
+
+    #[test]
+    fn store_target_handles_field_access_lvalue() {
+        // Allocate address 0x2000 into a local pointer `st`.
+        // Perform `st.field = 99` at offset 16 (where ty is 64-bit int, target addr = 0x2010).
+        // Then read back `st.field`.
+        let locals = vec![NirBinding {
+            name: "st".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: None,
+            initializer: Some(HirExpr::Const(
+                0x2000,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+        }];
+        let ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::FieldAccess {
+                    base: Box::new(HirExpr::Var("st".to_string())),
+                    field_name: "field".to_string(),
+                    offset: 16,
+                    ty: ty.clone(),
+                },
+                rhs: HirExpr::Const(99, ty.clone()),
+            },
+            HirStmt::Return(Some(HirExpr::Load {
+                ptr: Box::new(HirExpr::FieldAccess {
+                    base: Box::new(HirExpr::Var("st".to_string())),
+                    field_name: "field".to_string(),
+                    offset: 16,
+                    ty: ty.clone(),
+                }),
+                ty,
+            })),
+        ];
+        let val = interpret_hir(&body, &[], &locals, &[]).expect("interpret");
+        assert_eq!(val, Some(99));
+    }
+}

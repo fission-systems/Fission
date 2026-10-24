@@ -52,6 +52,25 @@ pub fn check_ground_truth(
     hir: &HirFunction,
     samples: &[Vec<i64>],
 ) -> VerifyOutcome {
+    // The calling convention model only covers integer registers. A floating-point
+    // return or argument passes through vector/x87 registers which are not modeled
+    // in the integer calling convention harness.
+    if matches!(hir.return_type, NirType::Float { .. })
+        || hir
+            .params
+            .iter()
+            .any(|p| matches!(p.ty, NirType::Float { .. }))
+        || matches!(prehir.return_type, NirType::Float { .. })
+        || prehir
+            .params
+            .iter()
+            .any(|p| matches!(p.ty, NirType::Float { .. }))
+    {
+        return VerifyOutcome::Unsupported(UnsupportedReason::Construct(
+            "floating-point ABI in ground-truth",
+        ));
+    }
+
     // Give any pointer parameter something real to point at, in both
     // memories at once. Without it a boundary-value sweep hands a pointer the
     // integers 0/1/-1: all but null fault the call, and null returns before
