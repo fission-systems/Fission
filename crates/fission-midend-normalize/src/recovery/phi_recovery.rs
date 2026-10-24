@@ -412,6 +412,124 @@ mod tests {
         assert!(!copy_propagation_pass(&mut func));
         assert_eq!(func, before);
     }
+
+    #[test]
+    fn join_coalescing_rejects_heterogeneous_types() {
+        let mut func = PreHirFunction {
+            name: "test_heterogeneous_join".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "var_ptr".to_string(),
+                    ty: NirType::Ptr(Box::new(int(32))),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "var_bool".to_string(),
+                    ty: NirType::Bool,
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("cond".to_string()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("var_ptr".to_string()),
+                        rhs: PreHirExpr::Const(0, int(64)),
+                    }]
+                    .into(),
+                    else_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("var_bool".to_string()),
+                        rhs: PreHirExpr::Const(1, NirType::Bool),
+                    }]
+                    .into(),
+                },
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        let before = func.clone();
+        assert!(!join_coalescing_pass(&mut func));
+        assert_eq!(func, before);
+    }
+
+    #[test]
+    fn join_coalescing_enforces_one_to_one_matching() {
+        let mut func = PreHirFunction {
+            name: "test_join_one_to_one".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "a".to_string(),
+                    ty: int(32),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "b".to_string(),
+                    ty: int(32),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "c".to_string(),
+                    ty: int(32),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("cond".to_string()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("a".to_string()),
+                        rhs: PreHirExpr::Const(10, int(32)),
+                    }]
+                    .into(),
+                    else_body: vec![
+                        PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("b".to_string()),
+                            rhs: PreHirExpr::Const(20, int(32)),
+                        },
+                        PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("c".to_string()),
+                            rhs: PreHirExpr::Const(30, int(32)),
+                        },
+                    ]
+                    .into(),
+                },
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        join_coalescing_pass(&mut func);
+        let PreHirStmt::If { else_body, .. } = &func.body[0] else {
+            panic!("expected if");
+        };
+        let assigned: Vec<String> = else_body
+            .iter()
+            .filter_map(|s| match s {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(v),
+                    ..
+                } => Some(v.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_ne!(
+            assigned[0], assigned[1],
+            "N-to-1 coalescing occurred: {assigned:?}"
+        );
+    }
 }
 
 fn count_preserved_copyprop_candidates(
@@ -1474,9 +1592,16 @@ pub fn join_coalescing_pass(func: &mut PreHirFunction) -> bool {
         return false;
     }
 
+    let var_types: HashMap<String, NirType> = func
+        .locals
+        .iter()
+        .chain(func.params.iter())
+        .map(|b| (b.name.clone(), b.ty.clone()))
+        .collect();
+
     let map = DefUseMap::build(&func.body);
     let mut rename_map: HashMap<String, String> = HashMap::default();
-    collect_join_renames(&func.body, &temp_names, &map, &mut rename_map);
+    collect_join_renames(&func.body, &temp_names, &var_types, &map, &mut rename_map);
 
     if rename_map.is_empty() {
         return false;
@@ -1499,6 +1624,7 @@ pub fn join_coalescing_pass(func: &mut PreHirFunction) -> bool {
 fn collect_join_renames(
     stmts: &[PreHirStmt],
     temp_names: &HashSet<String>,
+    var_types: &HashMap<String, NirType>,
     map: &DefUseMap,
     rename_map: &mut HashMap<String, String>,
 ) {
@@ -1510,72 +1636,85 @@ fn collect_join_renames(
                 ..
             } if !then_body.is_empty() && !else_body.is_empty() => {
                 // Find the last assignments in each branch.
-                let then_assigns = last_assigns(then_body, temp_names);
-                let else_assigns = last_assigns(else_body, temp_names);
+                let then_assigns = last_assigns(then_body, temp_names, var_types);
+                let else_assigns = last_assigns(else_body, temp_names, var_types);
+
+                let mut matched_then: HashSet<String> = HashSet::default();
+                let mut matched_else: HashSet<String> = HashSet::default();
 
                 // For each (then_var, else_var) pair where both are pure temps
-                // with the same type and else_var only ever appears in the
-                // else-branch after this point (not used independently
-                // elsewhere), we can coalesce: rename else_var → then_var.
+                // with the exact same NirType and else_var only ever appears in the
+                // else-branch after this point (not used independently elsewhere),
+                // coalesce 1-to-1: rename else_var → then_var.
                 for (then_var, then_ty) in &then_assigns {
+                    if matched_then.contains(then_var) {
+                        continue;
+                    }
                     for (else_var, else_ty) in &else_assigns {
+                        if matched_else.contains(else_var) {
+                            continue;
+                        }
                         if then_var == else_var {
                             continue;
                         }
-                        if then_ty != else_ty {
+                        if then_ty != else_ty || *then_ty == NirType::Unknown {
                             continue;
                         }
-                        // Only coalesce if else_var is NOT used outside the
-                        // else-branch (other than in subsequent stmts where
-                        // then_var is also used — this is an approximation).
+                        if rename_map.contains_key(else_var)
+                            || rename_map.values().any(|v| v == else_var)
+                        {
+                            continue;
+                        }
                         let else_uses_total =
                             map.use_count.get(else_var.as_str()).copied().unwrap_or(0);
                         let else_uses_after = count_uses_after(stmts, idx + 1, else_var);
-                        // If all remaining uses of else_var are in the
-                        // statements that follow this If (not inside the
-                        // else-branch itself), they can be replaced by
-                        // then_var.  The else-branch use is the definition
-                        // site (assignment), which is not counted in use_count.
                         let else_uses_in_branch = else_uses_total.saturating_sub(else_uses_after);
                         if else_uses_in_branch == 0 {
                             rename_map.insert(else_var.clone(), then_var.clone());
+                            matched_then.insert(then_var.clone());
+                            matched_else.insert(else_var.clone());
+                            break;
                         }
                     }
                 }
 
                 // Recurse into branches.
-                collect_join_renames(then_body, temp_names, map, rename_map);
-                collect_join_renames(else_body, temp_names, map, rename_map);
+                collect_join_renames(then_body, temp_names, var_types, map, rename_map);
+                collect_join_renames(else_body, temp_names, var_types, map, rename_map);
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_join_renames(then_body, temp_names, map, rename_map);
-                collect_join_renames(else_body, temp_names, map, rename_map);
+                collect_join_renames(then_body, temp_names, var_types, map, rename_map);
+                collect_join_renames(else_body, temp_names, var_types, map, rename_map);
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                collect_join_renames(body, temp_names, map, rename_map);
+                collect_join_renames(body, temp_names, var_types, map, rename_map);
             }
             PreHirStmt::For { init: _, body, .. } => {
-                collect_join_renames(body, temp_names, map, rename_map);
+                collect_join_renames(body, temp_names, var_types, map, rename_map);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_join_renames(&case.body, temp_names, map, rename_map);
+                    collect_join_renames(&case.body, temp_names, var_types, map, rename_map);
                 }
-                collect_join_renames(default, temp_names, map, rename_map);
+                collect_join_renames(default, temp_names, var_types, map, rename_map);
             }
             _ => {}
         }
     }
 }
 
-/// Return (name, type_repr) pairs for the LAST assignment to each pure temp
+/// Return (name, NirType) pairs for the LAST assignment to each pure temp
 /// within a flat statement list.
-fn last_assigns(stmts: &[PreHirStmt], temp_names: &HashSet<String>) -> Vec<(String, String)> {
-    let mut seen: HashMap<String, String> = HashMap::default();
+fn last_assigns(
+    stmts: &[PreHirStmt],
+    temp_names: &HashSet<String>,
+    var_types: &HashMap<String, NirType>,
+) -> Vec<(String, NirType)> {
+    let mut seen: HashMap<String, NirType> = HashMap::default();
     for stmt in stmts {
         if let PreHirStmt::Assign {
             lhs: PreHirLValue::Var(name),
@@ -1583,25 +1722,15 @@ fn last_assigns(stmts: &[PreHirStmt], temp_names: &HashSet<String>) -> Vec<(Stri
         } = stmt
         {
             if temp_names.contains(name.as_str()) {
-                seen.insert(name.clone(), type_repr(rhs));
+                let ty = var_types
+                    .get(name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| expr_type(rhs));
+                seen.insert(name.clone(), ty);
             }
         }
     }
     seen.into_iter().collect()
-}
-
-/// Quick structural type fingerprint for an expression (used to gate
-/// coalescing by compatible assignment shapes).
-fn type_repr(expr: &PreHirExpr) -> String {
-    match expr {
-        PreHirExpr::Const(_, ty) | PreHirExpr::Cast { ty, .. } => format!("{ty:?}"),
-        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
-            "var".to_string()
-        }
-        PreHirExpr::Binary { ty, .. } | PreHirExpr::Unary { ty, .. } => format!("{ty:?}"),
-        PreHirExpr::Load { ty, .. } => format!("load_{ty:?}"),
-        _ => "other".to_string(),
-    }
 }
 
 /// Count uses of `name` in stmts[start_idx..].
