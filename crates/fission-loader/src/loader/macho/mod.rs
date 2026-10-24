@@ -857,6 +857,45 @@ fn insert_macho_global_symbol(
     }
 }
 
+const MACHO_R_SCATTERED: u32 = 0x8000_0000;
+const MACHO_GENERIC_RELOC_PAIR: u8 = 1;
+const MACHO_GENERIC_RELOC_SECTDIFF: u8 = 2;
+const MACHO_GENERIC_RELOC_LOCAL_SECTDIFF: u8 = 3;
+const MACHO_ARM_RELOC_HALF: u8 = 8;
+const MACHO_ARM_RELOC_HALF_SECTDIFF: u8 = 9;
+const MACHO_X86_64_RELOC_SUBTRACTOR: u8 = 5;
+
+fn is_macho_paired_reloc_type(r_type: u8, is_64bit: bool) -> bool {
+    if is_64bit {
+        r_type == MACHO_X86_64_RELOC_SUBTRACTOR
+    } else {
+        matches!(
+            r_type,
+            MACHO_GENERIC_RELOC_SECTDIFF
+                | MACHO_GENERIC_RELOC_LOCAL_SECTDIFF
+                | MACHO_ARM_RELOC_HALF
+                | MACHO_ARM_RELOC_HALF_SECTDIFF
+        )
+    }
+}
+
+fn decode_macho_relocation_info(r_info: u32, endian: Endian) -> (u32, bool, u8) {
+    match endian {
+        Endian::Little => {
+            let r_symbolnum = r_info & 0x00ff_ffff;
+            let r_extern = ((r_info >> 27) & 1) != 0;
+            let r_type = ((r_info >> 28) & 0x0f) as u8;
+            (r_symbolnum, r_extern, r_type)
+        }
+        Endian::Big => {
+            let r_symbolnum = (r_info >> 8) & 0x00ff_ffff;
+            let r_extern = ((r_info >> 4) & 1) != 0;
+            let r_type = (r_info & 0x0f) as u8;
+            (r_symbolnum, r_extern, r_type)
+        }
+    }
+}
+
 fn parse_macho_relocation_symbols_64(
     data: &[u8],
     symtab: &SymtabCommand,
@@ -869,6 +908,7 @@ fn parse_macho_relocation_symbols_64(
         symtab,
         endian,
         sections,
+        true,
         MachoLoader::get_symbol_name,
         out,
     );
@@ -886,6 +926,7 @@ fn parse_macho_relocation_symbols_32(
         symtab,
         endian,
         sections,
+        false,
         MachoLoader::get_symbol_name_32,
         out,
     );
@@ -896,6 +937,7 @@ fn parse_macho_relocation_symbols<F>(
     symtab: &SymtabCommand,
     endian: Endian,
     sections: &[MachoSectionRelocInfo],
+    is_64bit: bool,
     symbol_name: F,
     out: &mut HashMap<u64, String>,
 ) where
@@ -914,25 +956,46 @@ fn parse_macho_relocation_symbols<F>(
         if reloc_count == 0 || reloc_end > data.len() {
             continue;
         }
-        for index in 0..reloc_count {
+        let mut index = 0usize;
+        while index < reloc_count {
             let offset = reloc_start + index * 8;
             let Ok(r_address) = reader.u32(offset) else {
+                index += 1;
                 continue;
             };
+            if (r_address & MACHO_R_SCATTERED) != 0 {
+                let _sect_offset = r_address & 0x00ff_ffff;
+                let r_type = ((r_address >> 24) & 0x0f) as u8;
+                index += if is_macho_paired_reloc_type(r_type, is_64bit) {
+                    2
+                } else {
+                    1
+                };
+                continue;
+            }
             let Ok(r_info) = reader.u32(offset + 4) else {
+                index += 1;
                 continue;
             };
-            let r_symbolnum = r_info & 0x00ff_ffff;
-            let r_extern = ((r_info >> 27) & 1) != 0;
-            if !r_extern || r_symbolnum >= symtab.nsyms {
+            let (r_symbolnum, r_extern, r_type) = decode_macho_relocation_info(r_info, endian);
+            let step = if is_macho_paired_reloc_type(r_type, is_64bit) {
+                2
+            } else {
+                1
+            };
+            if (!is_64bit && r_type == MACHO_GENERIC_RELOC_PAIR)
+                || !r_extern
+                || r_symbolnum >= symtab.nsyms
+            {
+                index += step;
                 continue;
             }
             let name = symbol_name(data, symtab, r_symbolnum, endian);
-            if name.is_empty() {
-                continue;
+            if !name.is_empty() {
+                let reloc_addr = macho_relocation_site(section, u64::from(r_address));
+                out.entry(reloc_addr).or_insert(name);
             }
-            let reloc_addr = macho_relocation_site(section, u64::from(r_address));
-            out.entry(reloc_addr).or_insert(name);
+            index += step;
         }
     }
 }
@@ -1010,8 +1073,8 @@ mod tests {
     use super::{
         MachoLoader, MachoSectionRelocInfo, infer_macho_function_sizes, macho_section_file_size,
         macho_section_has_instructions, macho_segment_is_readable, macho_thread_state_layout,
-        normalize_macho_symbol_name, parse_macho_relocation_symbols_64,
-        parse_macho_thread_entry_point,
+        normalize_macho_symbol_name, parse_macho_relocation_symbols_32,
+        parse_macho_relocation_symbols_64, parse_macho_thread_entry_point,
     };
     use crate::loader::macho::schema::{LC_UNIXTHREAD, SymtabCommand};
     use crate::loader::reader::{ByteReader, Endian};
@@ -1250,6 +1313,99 @@ mod tests {
             relocations.get(&0x94).map(String::as_str),
             Some("llvm_smoke_sink")
         );
+    }
+
+    #[test]
+    fn macho_relocations_handle_scattered_paired_and_big_endian_entries() {
+        // 1. 32-bit Little-Endian with scattered SECTDIFF pair + normal external relocation
+        let mut data32 = Vec::new();
+        // Nlist32 (12 bytes): n_strx=1, n_type=0x0f, n_sect=1, n_desc=0, n_value=0x100
+        data32.extend_from_slice(&1u32.to_le_bytes());
+        data32.push(0x0f);
+        data32.push(1);
+        data32.extend_from_slice(&0u16.to_le_bytes());
+        data32.extend_from_slice(&0x100u32.to_le_bytes());
+
+        let reloff = data32.len() as u32;
+        // Entry 0: scattered SECTDIFF (r_scattered=1, r_type=2, offset=0x10), r_value with bit 27 set
+        data32.extend_from_slice(&(0x8000_0010u32 | (2u32 << 24)).to_le_bytes());
+        data32.extend_from_slice(&(1u32 << 27).to_le_bytes());
+        // Entry 1: PAIR for entry 0 whose second word looks like r_extern=1, r_symbolnum=0 if not skipped
+        data32.extend_from_slice(&0x20u32.to_le_bytes());
+        data32.extend_from_slice(&((1u32 << 27) | (1u32 << 28)).to_le_bytes());
+        // Entry 2: valid external relocation at offset 0x40 -> symbol 0 ("_target_fn")
+        data32.extend_from_slice(&0x40u32.to_le_bytes());
+        data32.extend_from_slice(&(1u32 << 27).to_le_bytes());
+
+        let stroff = data32.len() as u32;
+        data32.extend_from_slice(b"\0_target_fn\0");
+
+        let symtab32 = SymtabCommand {
+            cmd: 0,
+            cmdsize: 0,
+            symoff: 0,
+            nsyms: 1,
+            stroff,
+            strsize: (data32.len() as u32).saturating_sub(stroff),
+        };
+        let sections32 = [MachoSectionRelocInfo {
+            virtual_address: 0x1000,
+            virtual_size: 0x100,
+            reloff,
+            nreloc: 3,
+        }];
+        let mut relocs32 = HashMap::new();
+        parse_macho_relocation_symbols_32(
+            &data32,
+            &symtab32,
+            Endian::Little,
+            &sections32,
+            &mut relocs32,
+        );
+        assert_eq!(relocs32.len(), 1, "{relocs32:?}");
+        assert_eq!(relocs32.get(&0x1040).map(String::as_str), Some("target_fn"));
+
+        // 2. 32-bit Big-Endian (PowerPC) external relocation bitfield packing
+        let mut data_be = Vec::new();
+        // Symbol 0 (dummy), Symbol 1 ("_ppc_ext")
+        for (n_strx, n_value) in [(0u32, 0u32), (1u32, 0x200u32)] {
+            data_be.extend_from_slice(&n_strx.to_be_bytes());
+            data_be.push(0x0f);
+            data_be.push(1);
+            data_be.extend_from_slice(&0u16.to_be_bytes());
+            data_be.extend_from_slice(&n_value.to_be_bytes());
+        }
+        let reloff_be = data_be.len() as u32;
+        // Big-endian r_info: r_symbolnum = 1 (bits 8..31), r_extern = 1 (bit 4), r_type = 0 (bits 0..3)
+        let r_info_be = (1u32 << 8) | (1u32 << 4);
+        data_be.extend_from_slice(&0x58u32.to_be_bytes());
+        data_be.extend_from_slice(&r_info_be.to_be_bytes());
+        let stroff_be = data_be.len() as u32;
+        data_be.extend_from_slice(b"\0_ppc_ext\0");
+
+        let symtab_be = SymtabCommand {
+            cmd: 0,
+            cmdsize: 0,
+            symoff: 0,
+            nsyms: 2,
+            stroff: stroff_be,
+            strsize: (data_be.len() as u32).saturating_sub(stroff_be),
+        };
+        let sections_be = [MachoSectionRelocInfo {
+            virtual_address: 0x2000,
+            virtual_size: 0x100,
+            reloff: reloff_be,
+            nreloc: 1,
+        }];
+        let mut relocs_be = HashMap::new();
+        parse_macho_relocation_symbols_32(
+            &data_be,
+            &symtab_be,
+            Endian::Big,
+            &sections_be,
+            &mut relocs_be,
+        );
+        assert_eq!(relocs_be.get(&0x2058).map(String::as_str), Some("ppc_ext"));
     }
 
     #[test]
