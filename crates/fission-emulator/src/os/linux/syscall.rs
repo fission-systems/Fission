@@ -621,10 +621,16 @@ impl SimProcedure for SysRtSigaction {
         let signum = emu.syscall_arg(0) as i32;
         let act = emu.syscall_arg(1);
         let oldact = emu.syscall_arg(2);
+        let sigsetsize = emu.syscall_arg(3);
+
+        if sigsetsize != 8 {
+            emu.set_syscall_return((-22i64) as u64)?; // EINVAL
+            return Ok(HleResult::Continue);
+        }
 
         if oldact != 0 {
             // Linux kernel_sigaction layout (x86-64, simplified):
-            // sa_handler @0 (8), sa_flags @8 (8), sa_restorer @16 (8), sa_mask @24
+            // sa_handler @0 (8), sa_flags @8 (8), sa_restorer @16 (8), sa_mask @24 (8)
             let prev = emu.signals.action(signum);
             let mut buf = [0u8; 32];
             let handler = match prev {
@@ -639,27 +645,42 @@ impl SimProcedure for SysRtSigaction {
                 0
             };
             buf[8..16].copy_from_slice(&flags.to_le_bytes());
+            let mask = if signum > 0 && (signum as usize) <= crate::os::linux::signal::NSIG {
+                emu.signals.masks[signum as usize]
+            } else {
+                0
+            };
+            buf[24..32].copy_from_slice(&mask.to_le_bytes());
             ram_write(emu, oldact, &buf)?;
         }
 
         if act != 0 {
-            let raw = ram_read(emu, act, 16).unwrap_or_else(|_| vec![0; 16]);
+            let raw = ram_read(emu, act, 32).unwrap_or_else(|_| vec![0; 32]);
             let handler = u64::from_le_bytes(raw[0..8].try_into().unwrap_or([0; 8]));
             let flags = u64::from_le_bytes(raw[8..16].try_into().unwrap_or([0; 8]));
+            let mask = if raw.len() >= 32 {
+                u64::from_le_bytes(raw[24..32].try_into().unwrap_or([0; 8]))
+            } else {
+                0
+            };
             let action = match handler {
                 0 => SigAction::Default,
                 1 => SigAction::Ignore,
                 h => SigAction::Handler(h),
             };
-            if !emu.signals.set_action(signum, action, flags) {
+            if !emu
+                .signals
+                .set_action_with_mask(signum, action, flags, mask)
+            {
                 emu.set_syscall_return((-22i64) as u64)?; // EINVAL
                 return Ok(HleResult::Continue);
             }
             tracing::info!(
-                "sys_rt_sigaction(sig={}, handler=0x{:X}, flags=0x{:X})",
+                "sys_rt_sigaction(sig={}, handler=0x{:X}, flags=0x{:X}, mask=0x{:X})",
                 signum,
                 handler,
-                flags
+                flags,
+                mask
             );
         }
         emu.set_syscall_return(0)?;
@@ -674,6 +695,12 @@ impl SimProcedure for SysRtSigprocmask {
         let how = emu.syscall_arg(0);
         let set = emu.syscall_arg(1);
         let oldset = emu.syscall_arg(2);
+        let sigsetsize = emu.syscall_arg(3);
+
+        if sigsetsize != 8 {
+            emu.set_syscall_return((-22i64) as u64)?; // EINVAL
+            return Ok(HleResult::Continue);
+        }
 
         if oldset != 0 {
             let mask = emu.signals.blocked_mask();
