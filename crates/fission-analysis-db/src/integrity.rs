@@ -1,6 +1,6 @@
-use super::{FactConfidence, FactSource, FunctionId, MemoryBlockId, ProgramSnapshot};
+use super::{FactConfidence, FactSource, FunctionId, MemoryBlockId, ProgramSnapshot, SymbolId};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -164,12 +164,19 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
                 });
             continue;
         };
-        let contains_entry = block.start <= function.entry
-            && block
-                .start
-                .checked_add(block.size)
-                .is_some_and(|end| function.entry < end);
-        if !contains_entry {
+        let block_end = block.start.checked_add(block.size);
+        let contains_function = block.start <= function.entry
+            && block_end.is_some_and(|end| {
+                if function.size == 0 {
+                    function.entry < end
+                } else {
+                    function
+                        .entry
+                        .checked_add(function.size)
+                        .is_some_and(|func_end| func_end <= end)
+                }
+            });
+        if !contains_function {
             report
                 .issues
                 .push(SnapshotIntegrityIssue::FunctionOutsideMemoryBlock {
@@ -178,6 +185,7 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
                 });
         }
     }
+    let symbol_ids: HashSet<SymbolId> = snapshot.symbols.iter().map(|s| s.id).collect();
     for (index, symbol) in snapshot.symbols.iter().enumerate() {
         validate_id(&mut report, SnapshotTable::Symbols, index, symbol.id.0);
         if let Some(size) = symbol.size {
@@ -205,11 +213,7 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
             u64::from(relocation.size),
         );
         if let Some(symbol_id) = relocation.symbol {
-            let valid_symbol_id = usize::try_from(symbol_id.0)
-                .ok()
-                .and_then(|index| snapshot.symbols.get(index))
-                .is_some_and(|symbol| symbol.id == symbol_id);
-            if valid_symbol_id {
+            if symbol_ids.contains(&symbol_id) {
                 continue;
             }
             report
