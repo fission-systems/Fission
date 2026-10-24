@@ -287,7 +287,7 @@ fn eliminate_redundant_var_assigns_recurses_into_nested_block() {
 }
 
 #[test]
-fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
+fn cast_elision_removes_self_widening_assignment() {
     let mut func = PreHirFunction {
         name: "test_self_widening_cast".to_string(),
         int_param_offsets: Vec::new(),
@@ -312,12 +312,10 @@ fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
     };
 
     assert!(cast_elision_pass(&mut func));
+    assert_eq!(func.body.len(), 1);
     assert_eq!(
         func.body[0],
-        PreHirStmt::Assign {
-            lhs: PreHirLValue::Var("uVar84".to_string()),
-            rhs: PreHirExpr::Var("uVar84".to_string()),
-        }
+        PreHirStmt::Return(Some(PreHirExpr::Var("uVar84".to_string()))),
     );
 }
 
@@ -649,6 +647,10 @@ fn recover_guarded_loop_tail_accumulator_return_rewrites_stale_temp_return() {
             lhs: PreHirLValue::Var("count".to_string()),
             rhs: PreHirExpr::Const(0, int(32)),
         },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("bit".to_string()),
+            rhs: PreHirExpr::Const(0, int(32)),
+        },
         PreHirStmt::If {
             cond: PreHirExpr::Var("value".to_string()),
             then_body: vec![PreHirStmt::Goto("loop_body".to_string())].into(),
@@ -686,16 +688,16 @@ fn recover_guarded_loop_tail_accumulator_return_rewrites_stale_temp_return() {
     ];
 
     assert!(recover_guarded_loop_tail_accumulator_returns(&mut stmts));
-    assert_eq!(stmts.len(), 3);
+    assert_eq!(stmts.len(), 4);
     assert!(
-        matches!(&stmts[1], PreHirStmt::While { cond: PreHirExpr::Var(name), .. } if name == "value")
+        matches!(&stmts[2], PreHirStmt::While { cond: PreHirExpr::Var(name), .. } if name == "value")
     );
-    let PreHirStmt::While { body, .. } = &stmts[1] else {
+    let PreHirStmt::While { body, .. } = &stmts[2] else {
         panic!("expected while");
     };
     assert_eq!(body.len(), 3);
     assert!(matches!(
-        &stmts[2],
+        &stmts[3],
         PreHirStmt::Return(Some(PreHirExpr::Var(name))) if name == "count"
     ));
 }
@@ -705,6 +707,10 @@ fn recover_guarded_loop_tail_accumulator_return_rejects_without_cond_update() {
     let mut stmts = vec![
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("count".to_string()),
+            rhs: PreHirExpr::Const(0, int(32)),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("bit".to_string()),
             rhs: PreHirExpr::Const(0, int(32)),
         },
         PreHirStmt::If {
@@ -735,6 +741,250 @@ fn recover_guarded_loop_tail_accumulator_return_rejects_without_cond_update() {
     ];
 
     assert!(!recover_guarded_loop_tail_accumulator_returns(&mut stmts));
+}
+
+#[test]
+fn rewrite_found_path_break_preserves_switch_and_inner_loop_breaks() {
+    let mut stmts = vec![
+        PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![
+                PreHirStmt::Switch {
+                    expr: PreHirExpr::Var("tag".to_string()),
+                    cases: vec![PreHirSwitchCase {
+                        values: vec![1],
+                        body: vec![
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var("result".to_string()),
+                                rhs: PreHirExpr::Var("val".to_string()),
+                            },
+                            PreHirStmt::Break,
+                        ]
+                        .into(),
+                    }],
+                    default: Vec::new().into(),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Var("inner_cond".to_string()),
+                    body: vec![
+                        PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("inner_res".to_string()),
+                            rhs: PreHirExpr::Var("inner_val".to_string()),
+                        },
+                        PreHirStmt::Break,
+                    ]
+                    .into(),
+                },
+            ]
+            .into(),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Const(-1, int(32)))),
+    ];
+
+    assert!(!rewrite_found_path_break_to_return(&mut stmts));
+    let PreHirStmt::While { body, .. } = &stmts[0] else {
+        panic!("expected while");
+    };
+    let PreHirStmt::Switch { cases, .. } = &body[0] else {
+        panic!("expected switch");
+    };
+    assert!(matches!(cases[0].body.last(), Some(PreHirStmt::Break)));
+    let PreHirStmt::While { body: inner, .. } = &body[1] else {
+        panic!("expected inner while");
+    };
+    assert!(matches!(inner.last(), Some(PreHirStmt::Break)));
+}
+
+#[test]
+fn recover_guarded_loop_tail_preserves_label_with_other_incoming_jumps() {
+    let mut stmts = vec![
+        PreHirStmt::Goto("loop_body".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("count".to_string()),
+            rhs: PreHirExpr::Const(0, int(32)),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("bit".to_string()),
+            rhs: PreHirExpr::Const(0, int(32)),
+        },
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("value".to_string()),
+            then_body: vec![PreHirStmt::Goto("loop_body".to_string())].into(),
+            else_body: Vec::new().into(),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("bit".to_string()))),
+        PreHirStmt::Label("loop_body".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("bit".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
+                lhs: Box::new(PreHirExpr::Var("value".to_string())),
+                rhs: Box::new(PreHirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("count".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("count".to_string())),
+                rhs: Box::new(PreHirExpr::Var("bit".to_string())),
+                ty: int(32),
+            },
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("value".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(PreHirExpr::Var("value".to_string())),
+                rhs: Box::new(PreHirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        },
+    ];
+
+    assert!(recover_guarded_loop_tail_accumulator_returns(&mut stmts));
+    assert!(
+        stmts
+            .iter()
+            .any(|s| matches!(s, PreHirStmt::Label(l) if l == "loop_body"))
+    );
+}
+
+#[test]
+fn recover_guarded_loop_tail_rejects_mismatched_stale_temp() {
+    let mut stmts = vec![
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("count".to_string()),
+            rhs: PreHirExpr::Const(0, int(32)),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("bit".to_string()),
+            rhs: PreHirExpr::Const(999, int(32)),
+        },
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("value".to_string()),
+            then_body: vec![PreHirStmt::Goto("loop_body".to_string())].into(),
+            else_body: Vec::new().into(),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("bit".to_string()))),
+        PreHirStmt::Label("loop_body".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("bit".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
+                lhs: Box::new(PreHirExpr::Var("value".to_string())),
+                rhs: Box::new(PreHirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("count".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("count".to_string())),
+                rhs: Box::new(PreHirExpr::Var("bit".to_string())),
+                ty: int(32),
+            },
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("value".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(PreHirExpr::Var("value".to_string())),
+                rhs: Box::new(PreHirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        },
+    ];
+
+    assert!(!recover_guarded_loop_tail_accumulator_returns(&mut stmts));
+}
+
+#[test]
+fn iblock_phi_elimination_rejects_side_effecting_condition() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    let mut stmts = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Call {
+                target: "has_flag".to_string(),
+                args: Vec::new(),
+                ty: NirType::Bool,
+            },
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(1, int(32)),
+            }]
+            .into(),
+            else_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(2, int(32)),
+            }]
+            .into(),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+
+    // Side-effecting condition must not be duplicated into select phi
+    assert!(!apply_iblock_phi_elimination(&mut stmts));
+    assert_eq!(stmts.len(), 2);
+    assert!(matches!(&stmts[0], PreHirStmt::If { .. }));
+}
+
+#[test]
+fn iblock_phi_elimination_stops_substitution_at_reassignment() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    let mut stmts = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(1, int(32)),
+            }]
+            .into(),
+            else_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(2, int(32)),
+            }]
+            .into(),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("y".to_string()),
+            rhs: PreHirExpr::Var("x".to_string()),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
+            rhs: PreHirExpr::Const(100, int(32)),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+
+    assert!(apply_iblock_phi_elimination(&mut stmts));
+    // Diamond if is eliminated; stmts.len() becomes 3: y = select, x = 100, return x
+    assert_eq!(stmts.len(), 3);
+    // y should receive the select expression
+    assert!(matches!(
+        &stmts[0],
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(y),
+            rhs: PreHirExpr::Select { .. },
+        } if y == "y"
+    ));
+    // x = 100 remains
+    assert!(matches!(
+        &stmts[1],
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(x),
+            rhs: PreHirExpr::Const(100, _),
+        } if x == "x"
+    ));
+    // return x must NOT be corrupted with the select expression!
+    assert!(matches!(
+        &stmts[2],
+        PreHirStmt::Return(Some(PreHirExpr::Var(x))) if x == "x"
+    ));
 }
 
 #[test]
