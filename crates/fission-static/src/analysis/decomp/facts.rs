@@ -1831,6 +1831,9 @@ mod tests {
             cfg_label_leaders: Vec::new(),
             loader_symbols: Vec::new(),
             user_signatures: Default::default(),
+            user_comments: Default::default(),
+            user_breakpoints: Vec::new(),
+            user_watchpoints: Vec::new(),
         };
         let binary = LoadedBinary::from_inner(inner);
         let store = FactStore::from_binary(&binary);

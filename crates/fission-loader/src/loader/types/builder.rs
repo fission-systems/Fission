@@ -321,6 +321,9 @@ impl LoadedBinaryBuilder {
             loader_symbols,
             // Empty unless an analysis database supplies them after load.
             user_signatures: std::collections::HashMap::new(),
+            user_comments: std::collections::HashMap::new(),
+            user_breakpoints: Vec::new(),
+            user_watchpoints: Vec::new(),
             relocation_symbols,
             function_addr_index,
             function_name_index,
