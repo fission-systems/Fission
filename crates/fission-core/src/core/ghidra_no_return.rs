@@ -38,17 +38,7 @@ pub fn ghidra_no_return_index() -> &'static GhidraNoReturnIndex {
 }
 
 fn ghidra_data_root() -> std::path::PathBuf {
-    if let Some(path) = std::env::var_os("FISSION_GHIDRA_DATA_DIR") {
-        return std::path::PathBuf::from(path);
-    }
-    // Resolve from this crate's manifest directory: crates/fission-core → repo root
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf()
-        .join("utils")
-        .join("ghidra-data")
+    crate::core::resource_roots::find_ghidra_data_root()
 }
 
 /// Maps `LoadedBinary.format` (as returned by the loader) to the matching
@@ -519,13 +509,7 @@ mod tests {
     /// if the workspace root is accessible at compile time).
     #[test]
     fn test_is_no_return_pe_exit_process_real_data() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .unwrap()
-            .to_path_buf()
-            .join("utils")
-            .join("ghidra-data");
+        let root = crate::core::resource_roots::find_ghidra_data_root();
         if !root.exists() {
             return;
         }
