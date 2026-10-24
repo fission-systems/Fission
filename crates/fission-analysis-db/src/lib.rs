@@ -522,9 +522,13 @@ fn build_functions(
 ) -> Vec<FunctionRecord> {
     let mut sorted = functions.to_vec();
     sorted.retain(|function| {
-        !function.is_import
-            || block_intervals
-                .any_containing(function.address, |index| blocks[index].permissions.execute)
+        if function.is_import {
+            block_intervals.any_containing(function.address, |_| true) || blocks.is_empty()
+        } else {
+            !block_intervals.any_containing(function.address, |_| true)
+                || block_intervals
+                    .any_containing(function.address, |index| blocks[index].permissions.execute)
+        }
     });
     sorted.sort_by(|left, right| {
         left.address
@@ -948,7 +952,7 @@ mod tests {
     }
 
     #[test]
-    fn non_executable_import_slots_are_symbols_not_functions() {
+    fn non_executable_import_slots_populate_import_functions_and_symbols() {
         let binary = LoadedBinaryBuilder::new("imports.exe".into(), DataBuffer::Heap(vec![0; 16]))
             .format("PE")
             .image_base(0x1000)
@@ -967,7 +971,9 @@ mod tests {
                 name: "example.dll!imported".into(),
                 address: 0x3010,
                 is_import: true,
+                origin: Some("pe-import-table".into()),
                 kind: Some("import".into()),
+                external_library: Some("example.dll".into()),
                 ..FunctionInfo::default()
             })
             .add_iat_symbol(0x3010, "example.dll!imported".into())
@@ -975,7 +981,13 @@ mod tests {
             .expect("fixture should build");
 
         let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
-        assert!(snapshot.functions.is_empty());
+        let imported = snapshot
+            .function_at(0x3010)
+            .expect("IAT import function should be retained in snapshot");
+        assert_eq!(imported.kind, FunctionKind::Import);
+        assert!(imported.is_import);
+        assert_eq!(imported.external_library.as_deref(), Some("example.dll"));
+        assert_eq!(imported.provenance.source, FactSource::ImportTable);
         assert!(
             snapshot
                 .symbols
