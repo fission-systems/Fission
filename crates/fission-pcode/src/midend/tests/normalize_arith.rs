@@ -703,6 +703,7 @@ fn normalize_full_mask_and_wrapper() {
 fn flag_intrinsics_zero_fold_to_false() {
     for target in ["__carry", "__scarry", "__sborrow"] {
         let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Call {
+            origin: None,
             target: target.to_string(),
             args: vec![
                 PreHirExpr::Var("x".to_string()),
@@ -724,6 +725,7 @@ fn flag_intrinsics_zero_fold_to_false() {
 #[test]
 fn carry_intrinsic_constant_canonicalizes_to_unsigned_compare() {
     let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Call {
+        origin: None,
         target: "__carry".to_string(),
         args: vec![
             PreHirExpr::Var("uVar1".to_string()),
@@ -748,6 +750,7 @@ fn sborrow_compare_canonicalizes_to_signed_less_than() {
     let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Binary {
         op: PreHirBinaryOp::Ne,
         lhs: Box::new(PreHirExpr::Call {
+            origin: None,
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
@@ -785,6 +788,7 @@ fn sborrow_compare_canonicalizes_to_signed_less_equal() {
     let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Binary {
         op: PreHirBinaryOp::Eq,
         lhs: Box::new(PreHirExpr::Call {
+            origin: None,
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
@@ -818,6 +822,7 @@ fn sborrow_compare_canonicalizes_to_signed_less_equal() {
 #[test]
 fn carry_intrinsic_with_non_constant_rhs_is_preserved() {
     let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Call {
+        origin: None,
         target: "__carry".to_string(),
         args: vec![
             PreHirExpr::Var("x".to_string()),
@@ -836,6 +841,7 @@ fn sborrow_compare_non_matching_shape_is_preserved() {
     let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Binary {
         op: PreHirBinaryOp::Ne,
         lhs: Box::new(PreHirExpr::Call {
+            origin: None,
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
@@ -888,6 +894,7 @@ fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("xVar1".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__scarry".to_string(),
                     args: vec![
                         PreHirExpr::Var("eax".to_string()),
@@ -1133,6 +1140,7 @@ fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
             ty: NirType::Bool,
         }),
         rhs: Box::new(PreHirExpr::Call {
+            origin: None,
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
@@ -1362,11 +1370,13 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
 
     // Use opaque calls so constant-folding can't trivially eliminate the temps.
     let call_f = || PreHirExpr::Call {
+        origin: None,
         target: "f".to_string(),
         args: vec![],
         ty: u32_ty.clone(),
     };
     let call_g = || PreHirExpr::Call {
+        origin: None,
         target: "g".to_string(),
         args: vec![],
         ty: u32_ty.clone(),
@@ -2409,7 +2419,10 @@ fn normalize_float_sign_simplifies_manipulations() {
     let PreHirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
         panic!();
     };
-    if let PreHirExpr::Call { target, args, ty } = rhs1 {
+    if let PreHirExpr::Call {
+        target, args, ty, ..
+    } = rhs1
+    {
         assert_eq!(target, "fabsf");
         assert_eq!(args.len(), 1);
         assert_eq!(args[0], PreHirExpr::Var("f32_var".to_string()));
@@ -2434,7 +2447,10 @@ fn normalize_float_sign_simplifies_manipulations() {
     let PreHirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
         panic!();
     };
-    if let PreHirExpr::Call { target, args, ty } = rhs3 {
+    if let PreHirExpr::Call {
+        target, args, ty, ..
+    } = rhs3
+    {
         assert_eq!(target, "fabs");
         assert_eq!(args.len(), 1);
         assert_eq!(args[0], PreHirExpr::Var("f64_var".to_string()));
@@ -2514,6 +2530,7 @@ fn normalize_ignore_nan_simplifies_comparisons() {
                     lhs: Box::new(PreHirExpr::Unary {
                         op: PreHirUnaryOp::Not,
                         expr: Box::new(PreHirExpr::Call {
+                            origin: None,
                             target: "__isnan".to_string(),
                             args: vec![PreHirExpr::Var("f32_var".to_string())],
                             ty: bool_ty.clone(),
@@ -2535,6 +2552,7 @@ fn normalize_ignore_nan_simplifies_comparisons() {
                 rhs: PreHirExpr::Binary {
                     op: PreHirBinaryOp::LogicalOr,
                     lhs: Box::new(PreHirExpr::Call {
+                        origin: None,
                         target: "__isnan".to_string(),
                         args: vec![PreHirExpr::Var("f32_var".to_string())],
                         ty: bool_ty.clone(),
@@ -2558,6 +2576,7 @@ fn normalize_ignore_nan_simplifies_comparisons() {
                         lhs: Box::new(PreHirExpr::Unary {
                             op: PreHirUnaryOp::Not,
                             expr: Box::new(PreHirExpr::Call {
+                                origin: None,
                                 target: "__isnan".to_string(),
                                 args: vec![PreHirExpr::Var("f32_var".to_string())],
                                 ty: bool_ty.clone(),
@@ -2567,6 +2586,7 @@ fn normalize_ignore_nan_simplifies_comparisons() {
                         rhs: Box::new(PreHirExpr::Unary {
                             op: PreHirUnaryOp::Not,
                             expr: Box::new(PreHirExpr::Call {
+                                origin: None,
                                 target: "__isnan".to_string(),
                                 args: vec![PreHirExpr::Var("f64_var".to_string())],
                                 ty: bool_ty.clone(),
@@ -2789,6 +2809,7 @@ fn normalize_conditional_const_write_invalidates_range() {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("x".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "ext".to_string(),
                     args: vec![],
                     ty: i32_ty,

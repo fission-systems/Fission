@@ -1509,6 +1509,7 @@ mod tests {
             body: vec![assign(
                 "cf",
                 PreHirExpr::Call {
+                    origin: None,
                     target: "observe_machine_state".to_string(),
                     args: Vec::new(),
                     ty: NirType::Bool,

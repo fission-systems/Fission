@@ -132,6 +132,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+                origin: None,
                 target: "sub_140010000".to_string(),
                 args: vec![PreHirExpr::Var("param_1".to_string())],
                 ty: NirType::Unknown,

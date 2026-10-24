@@ -645,6 +645,7 @@ mod tests {
     #[test]
     fn invariants_flag_call_duplication() {
         let call = HirExpr::Call {
+            origin: None,
             target: "side".into(),
             args: vec![],
             ty: int_ty(32, true),

@@ -224,7 +224,10 @@ fn deindirect_in_expr(
     }
 
     // 2. Try to resolve __fission_callind_opaque in the current expression.
-    if let PreHirExpr::Call { target, args, ty } = expr {
+    if let PreHirExpr::Call {
+        target, args, ty, ..
+    } = expr
+    {
         if target == "__fission_callind_opaque" && !args.is_empty() {
             let fn_ptr = &args[0];
             if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol)
@@ -232,6 +235,7 @@ fn deindirect_in_expr(
                 // Found a static direct target symbol. Re-write the call!
                 let remaining_args = args[1..].to_vec();
                 *expr = PreHirExpr::Call {
+                    origin: None,
                     target: resolved_symbol,
                     args: remaining_args,
                     ty: ty.clone(),

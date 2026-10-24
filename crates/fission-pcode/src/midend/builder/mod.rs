@@ -996,6 +996,7 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(resolved_target) = self.resolve_address_like_call_target_name(target_name)
         {
             return PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: resolved_target,
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -1016,12 +1017,14 @@ impl<'a> PreviewBuilder<'a> {
                 .indirect_control
                 .indirect_surface_preserved_count += 1;
             return PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: pseudo_target.to_string(),
                 args: target_expr.into_iter().collect(),
                 ty: NirType::Unknown,
             });
         }
         PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "__fission_indirect_cf_unsupported".to_string(),
             args: Vec::new(),
             ty: NirType::Unknown,
