@@ -53,6 +53,9 @@ const SHF_ALLOC: u64 = 0x2;
 const SHF_EXECINSTR: u64 = 0x4;
 const SHT_NOBITS: u32 = 8;
 const SHN_UNDEF: u16 = 0;
+const _SHN_LORESERVE: u16 = 0xff00;
+const SHN_XINDEX: u16 = 0xffff;
+const PN_XNUM: u16 = 0xffff;
 const STT_NOTYPE: u8 = 0;
 const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
@@ -221,7 +224,8 @@ impl ElfLoader {
         let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
-        let phdrs = read_program_headers_64(bytes, &header, endian);
+        let ext_nums = resolve_extended_numbers_64(bytes, &header, endian);
+        let phdrs = read_program_headers_64(bytes, &header, ext_nums.phnum, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_64(&phdrs).unwrap_or(u64::MAX)
         } else {
@@ -229,14 +233,14 @@ impl ElfLoader {
         };
 
         // Parse Sections
-        if header.shoff != 0 && header.shnum > 0 {
-            let mut shdrs = Vec::new();
+        if header.shoff != 0 && ext_nums.shnum > 0 {
+            let mut shdrs = Vec::with_capacity(ext_nums.shnum);
             let section_header_size = if header.shentsize > 0 {
                 header.shentsize as usize
             } else {
                 Elf64Shdr::SIZE
             };
-            for index in 0..header.shnum as usize {
+            for index in 0..ext_nums.shnum {
                 let offset = header
                     .shoff
                     .saturating_add((index * section_header_size) as u64)
@@ -251,7 +255,7 @@ impl ElfLoader {
             };
 
             // Get String Table for Section Names
-            let strtab_idx = header.shstrndx as usize;
+            let strtab_idx = ext_nums.shstrndx;
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
@@ -424,12 +428,19 @@ impl ElfLoader {
             relocs = parse_relocations_64(bytes_patched, &shdrs, &section_addresses, endian);
             let ver_names = parse_gnu_versions_64(bytes_patched, &shdrs, endian);
             symbol_versions = map_symbol_versions_64(bytes_patched, &shdrs, endian, &ver_names);
-        } else if !is_relocatable {
+        }
+
+        if sections_info.is_empty() && !is_relocatable {
             sections_info.extend(load_segments_as_sections_64(&phdrs));
         }
 
         if image_base == u64::MAX {
-            image_base = 0;
+            image_base = sections_info
+                .iter()
+                .map(|s| s.virtual_address)
+                .filter(|&a| a != 0)
+                .min()
+                .unwrap_or(0);
         }
         let (architecture, load_spec) = select_elf_load_spec(
             header.machine,
@@ -477,9 +488,9 @@ impl ElfLoader {
             true,
             image_base,
             header.phoff,
-            header.phnum,
+            ext_nums.phnum,
             header.shoff,
-            header.shnum,
+            ext_nums.shnum,
         );
         global_symbols.extend(header_symbols);
 
@@ -522,7 +533,8 @@ impl ElfLoader {
         let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
-        let phdrs = read_program_headers_32(bytes, &header, endian);
+        let ext_nums = resolve_extended_numbers_32(bytes, &header, endian);
+        let phdrs = read_program_headers_32(bytes, &header, ext_nums.phnum, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_32(&phdrs).unwrap_or(u64::MAX)
         } else {
@@ -530,14 +542,14 @@ impl ElfLoader {
         };
 
         // Parse Sections
-        if header.shoff != 0 && header.shnum > 0 {
-            let mut shdrs = Vec::new();
+        if header.shoff != 0 && ext_nums.shnum > 0 {
+            let mut shdrs = Vec::with_capacity(ext_nums.shnum);
             let section_header_size = if header.shentsize > 0 {
                 header.shentsize as usize
             } else {
                 Elf32Shdr::SIZE
             };
-            for index in 0..header.shnum as usize {
+            for index in 0..ext_nums.shnum {
                 let offset = header
                     .shoff
                     .saturating_add((index * section_header_size) as u32)
@@ -552,7 +564,7 @@ impl ElfLoader {
             };
 
             // Get String Table for Section Names
-            let strtab_idx = header.shstrndx as usize;
+            let strtab_idx = ext_nums.shstrndx;
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
@@ -699,12 +711,19 @@ impl ElfLoader {
             relocs = parse_relocations_32(bytes_patched, &shdrs, &section_addresses, endian);
             let ver_names = parse_gnu_versions_32(bytes_patched, &shdrs, endian);
             symbol_versions = map_symbol_versions_32(bytes_patched, &shdrs, endian, &ver_names);
-        } else if !is_relocatable {
+        }
+
+        if sections_info.is_empty() && !is_relocatable {
             sections_info.extend(load_segments_as_sections_32(&phdrs));
         }
 
         if image_base == u64::MAX {
-            image_base = 0;
+            image_base = sections_info
+                .iter()
+                .map(|s| s.virtual_address)
+                .filter(|&a| a != 0)
+                .min()
+                .unwrap_or(0);
         }
         let (architecture, load_spec) = select_elf_load_spec(
             header.machine,
@@ -752,9 +771,9 @@ impl ElfLoader {
             false,
             image_base,
             header.phoff as u64,
-            header.phnum,
+            ext_nums.phnum,
             header.shoff as u64,
-            header.shnum,
+            ext_nums.shnum,
         );
         global_symbols.extend(header_symbols);
 
@@ -1551,12 +1570,95 @@ fn is_elf_mapping_symbol(name: &str) -> bool {
             .is_some()
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ElfExtendedNumbers {
+    phnum: usize,
+    shnum: usize,
+    shstrndx: usize,
+}
+
+fn resolve_extended_numbers_64(
+    bytes: &[u8],
+    header: &Elf64Header,
+    endian: Endian,
+) -> ElfExtendedNumbers {
+    let mut phnum = header.phnum as usize;
+    let mut shnum = header.shnum as usize;
+    let mut shstrndx = header.shstrndx as usize;
+
+    if header.shoff != 0 {
+        let reader = ByteReader::new(bytes, endian);
+        if let Ok(shdr0) = Elf64Shdr::parse(&reader, header.shoff as usize) {
+            if shnum == 0 && shdr0.sh_size > 0 {
+                shnum = shdr0.sh_size as usize;
+            }
+            if header.shstrndx == SHN_XINDEX {
+                shstrndx = shdr0.sh_link as usize;
+            }
+            if header.phnum == PN_XNUM {
+                phnum = shdr0.sh_info as usize;
+            }
+        }
+    }
+
+    ElfExtendedNumbers {
+        phnum,
+        shnum,
+        shstrndx,
+    }
+}
+
+fn resolve_extended_numbers_32(
+    bytes: &[u8],
+    header: &Elf32Header,
+    endian: Endian,
+) -> ElfExtendedNumbers {
+    let mut phnum = header.phnum as usize;
+    let mut shnum = header.shnum as usize;
+    let mut shstrndx = header.shstrndx as usize;
+
+    if header.shoff != 0 {
+        let reader = ByteReader::new(bytes, endian);
+        if let Ok(shdr0) = Elf32Shdr::parse(&reader, header.shoff as usize) {
+            if shnum == 0 && shdr0.sh_size > 0 {
+                shnum = shdr0.sh_size as usize;
+            }
+            if header.shstrndx == SHN_XINDEX {
+                shstrndx = shdr0.sh_link as usize;
+            }
+            if header.phnum == PN_XNUM {
+                phnum = shdr0.sh_info as usize;
+            }
+        }
+    }
+
+    ElfExtendedNumbers {
+        phnum,
+        shnum,
+        shstrndx,
+    }
+}
+
 fn read_load_segments_64<R: Read + Seek>(
     reader: &mut R,
     header: &Elf64Header,
     endian: Endian,
 ) -> Result<Vec<ElfLoadSegment>> {
     if header.phoff == 0 || header.phnum == 0 {
+        return Ok(Vec::new());
+    }
+    let mut phnum = header.phnum as u64;
+    if header.phnum == PN_XNUM && header.shoff != 0 {
+        if reader.seek(SeekFrom::Start(header.shoff)).is_ok() {
+            let mut shdr0_bytes = [0; Elf64Shdr::SIZE];
+            if reader.read_exact(&mut shdr0_bytes).is_ok() {
+                if let Ok(shdr0) = Elf64Shdr::parse(&ByteReader::new(&shdr0_bytes, endian), 0) {
+                    phnum = shdr0.sh_info as u64;
+                }
+            }
+        }
+    }
+    if phnum == 0 {
         return Ok(Vec::new());
     }
     let entry_size = if header.phentsize == 0 {
@@ -1569,7 +1671,7 @@ fn read_load_segments_64<R: Read + Seek>(
     }
 
     let mut segments = Vec::new();
-    for index in 0..header.phnum as u64 {
+    for index in 0..phnum {
         let offset = header
             .phoff
             .checked_add(
@@ -1606,6 +1708,20 @@ fn read_load_segments_32<R: Read + Seek>(
     if header.phoff == 0 || header.phnum == 0 {
         return Ok(Vec::new());
     }
+    let mut phnum = header.phnum as u64;
+    if header.phnum == PN_XNUM && header.shoff != 0 {
+        if reader.seek(SeekFrom::Start(header.shoff as u64)).is_ok() {
+            let mut shdr0_bytes = [0; Elf32Shdr::SIZE];
+            if reader.read_exact(&mut shdr0_bytes).is_ok() {
+                if let Ok(shdr0) = Elf32Shdr::parse(&ByteReader::new(&shdr0_bytes, endian), 0) {
+                    phnum = shdr0.sh_info as u64;
+                }
+            }
+        }
+    }
+    if phnum == 0 {
+        return Ok(Vec::new());
+    }
     let entry_size = if header.phentsize == 0 {
         Elf32Phdr::SIZE
     } else {
@@ -1616,7 +1732,7 @@ fn read_load_segments_32<R: Read + Seek>(
     }
 
     let mut segments = Vec::new();
-    for index in 0..header.phnum as u64 {
+    for index in 0..phnum {
         let offset = (header.phoff as u64)
             .checked_add(
                 index
@@ -1644,8 +1760,13 @@ fn read_load_segments_32<R: Read + Seek>(
     Ok(segments)
 }
 
-fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -> Vec<Elf64Phdr> {
-    if header.phoff == 0 || header.phnum == 0 {
+fn read_program_headers_64(
+    bytes: &[u8],
+    header: &Elf64Header,
+    phnum: usize,
+    endian: Endian,
+) -> Vec<Elf64Phdr> {
+    if header.phoff == 0 || phnum == 0 {
         return Vec::new();
     }
     let reader = ByteReader::new(bytes, endian);
@@ -1654,7 +1775,7 @@ fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -
     } else {
         Elf64Phdr::SIZE
     };
-    (0..header.phnum)
+    (0..phnum)
         .filter_map(|index| {
             let offset = header
                 .phoff
@@ -1664,8 +1785,13 @@ fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -
         .collect()
 }
 
-fn read_program_headers_32(bytes: &[u8], header: &Elf32Header, endian: Endian) -> Vec<Elf32Phdr> {
-    if header.phoff == 0 || header.phnum == 0 {
+fn read_program_headers_32(
+    bytes: &[u8],
+    header: &Elf32Header,
+    phnum: usize,
+    endian: Endian,
+) -> Vec<Elf32Phdr> {
+    if header.phoff == 0 || phnum == 0 {
         return Vec::new();
     }
     let reader = ByteReader::new(bytes, endian);
@@ -1674,11 +1800,10 @@ fn read_program_headers_32(bytes: &[u8], header: &Elf32Header, endian: Endian) -
     } else {
         Elf32Phdr::SIZE
     };
-    (0..header.phnum)
+    (0..phnum)
         .filter_map(|index| {
-            let offset = header
-                .phoff
-                .saturating_add(index as u32 * entry_size as u32) as usize;
+            let offset =
+                (header.phoff as u64).saturating_add(index as u64 * entry_size as u64) as usize;
             Elf32Phdr::parse(&reader, offset).ok()
         })
         .collect()
@@ -1776,9 +1901,9 @@ fn generate_elf_header_types(
     is_64bit: bool,
     image_base: u64,
     phoff: u64,
-    phnum: u16,
+    phnum: usize,
     shoff: u64,
-    shnum: u16,
+    shnum: usize,
 ) -> (
     Vec<crate::loader::types::InferredTypeInfo>,
     std::collections::HashMap<u64, String>,
@@ -2106,7 +2231,7 @@ fn generate_elf_header_types(
             mangled_name: phdr_name.to_string(),
             kind: "struct".to_string(),
             fields: phdr_fields,
-            size: phdr_size * phnum as u32,
+            size: (phdr_size as usize).saturating_mul(phnum) as u32,
             metadata_address: phdr_va,
         });
     }
@@ -2248,7 +2373,7 @@ fn generate_elf_header_types(
             mangled_name: shdr_name.to_string(),
             kind: "struct".to_string(),
             fields: shdr_fields,
-            size: shdr_size * shnum as u32,
+            size: (shdr_size as usize).saturating_mul(shnum) as u32,
             metadata_address: shdr_va,
         });
     }
@@ -3351,5 +3476,172 @@ mod tests {
             plt_puts.address > 0x1000,
             "PLT stub address should be a real guest VA"
         );
+    }
+
+    #[test]
+    fn elf64_extended_numbering_shnum_zero_and_shstrndx_xindex() {
+        let mut data = vec![0u8; 1024];
+        // 1. Identification
+        data[0..4].copy_from_slice(b"\x7fELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little-endian
+        data[6] = 1; // Version
+        data[7] = 0; // System V ABI
+
+        // 2. ELF Header
+        data[16..18].copy_from_slice(&2u16.to_le_bytes()); // ET_EXEC
+        data[18..20].copy_from_slice(&62u16.to_le_bytes()); // EM_X86_64
+        data[20..24].copy_from_slice(&1u32.to_le_bytes()); // Version 1
+        data[24..32].copy_from_slice(&0x401000u64.to_le_bytes()); // entry
+        data[32..40].copy_from_slice(&0u64.to_le_bytes()); // phoff
+        data[40..48].copy_from_slice(&64u64.to_le_bytes()); // shoff = 64
+        data[48..52].copy_from_slice(&0u32.to_le_bytes()); // flags
+        data[52..54].copy_from_slice(&64u16.to_le_bytes()); // ehsize
+        data[54..56].copy_from_slice(&56u16.to_le_bytes()); // phentsize
+        data[56..58].copy_from_slice(&0u16.to_le_bytes()); // phnum
+        data[58..60].copy_from_slice(&64u16.to_le_bytes()); // shentsize = 64
+        data[60..62].copy_from_slice(&0u16.to_le_bytes()); // e_shnum = 0 (extended numbering!)
+        data[62..64].copy_from_slice(&SHN_XINDEX.to_le_bytes()); // e_shstrndx = 0xffff (extended numbering!)
+
+        // Section 0 (NULL) at offset 64:
+        // sh_size = 3 (real section count), sh_link = 2 (real shstrndx)
+        data[64 + 32..64 + 40].copy_from_slice(&3u64.to_le_bytes()); // sh_size
+        data[64 + 40..64 + 44].copy_from_slice(&2u32.to_le_bytes()); // sh_link
+
+        // Section 1 (.text) at offset 128:
+        data[128..132].copy_from_slice(&1u32.to_le_bytes()); // sh_name = 1
+        data[132..136].copy_from_slice(&1u32.to_le_bytes()); // SHT_PROGBITS
+        data[136..144].copy_from_slice(&(SHF_ALLOC | SHF_EXECINSTR).to_le_bytes()); // flags
+        data[144..152].copy_from_slice(&0x401000u64.to_le_bytes()); // sh_addr
+        data[152..160].copy_from_slice(&0x200u64.to_le_bytes()); // sh_offset
+        data[160..168].copy_from_slice(&0x100u64.to_le_bytes()); // sh_size
+
+        // Section 2 (.shstrtab) at offset 192:
+        data[192..196].copy_from_slice(&7u32.to_le_bytes()); // sh_name = 7
+        data[196..200].copy_from_slice(&3u32.to_le_bytes()); // SHT_STRTAB
+        data[192 + 24..192 + 32].copy_from_slice(&0x300u64.to_le_bytes()); // sh_offset = 0x300
+        data[192 + 32..192 + 40].copy_from_slice(&32u64.to_le_bytes()); // sh_size = 32
+
+        // String table at 0x300: "\0.text\0.shstrtab\0" (17 bytes)
+        data[0x300..0x311].copy_from_slice(b"\0.text\0.shstrtab\0");
+
+        let binary = ElfLoader::parse(DataBuffer::Heap(data), "test_ext_shnum".to_string())
+            .expect("parse ELF with extended section numbering");
+        assert_eq!(binary.sections.len(), 3);
+        let text_sec = binary
+            .sections
+            .iter()
+            .find(|s| s.name == ".text")
+            .expect("found .text section");
+        assert_eq!(text_sec.virtual_address, 0x401000);
+        assert!(text_sec.is_executable);
+        assert!(binary.sections.iter().any(|s| s.name == ".shstrtab"));
+    }
+
+    #[test]
+    fn elf64_extended_numbering_pn_xnum() {
+        let mut data = vec![0u8; 1024];
+        // 1. Identification
+        data[0..4].copy_from_slice(b"\x7fELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little-endian
+        data[6] = 1; // Version
+        data[7] = 0; // System V ABI
+
+        // 2. ELF Header
+        data[16..18].copy_from_slice(&2u16.to_le_bytes()); // ET_EXEC
+        data[18..20].copy_from_slice(&62u16.to_le_bytes()); // EM_X86_64
+        data[20..24].copy_from_slice(&1u32.to_le_bytes()); // Version 1
+        data[24..32].copy_from_slice(&0x400000u64.to_le_bytes()); // entry
+        data[32..40].copy_from_slice(&64u64.to_le_bytes()); // phoff = 64
+        data[40..48].copy_from_slice(&120u64.to_le_bytes()); // shoff = 120 (64 + 56)
+        data[52..54].copy_from_slice(&64u16.to_le_bytes()); // ehsize
+        data[54..56].copy_from_slice(&56u16.to_le_bytes()); // phentsize = 56
+        data[56..58].copy_from_slice(&PN_XNUM.to_le_bytes()); // e_phnum = 0xffff (PN_XNUM!)
+        data[58..60].copy_from_slice(&64u16.to_le_bytes()); // shentsize = 64
+        data[60..62].copy_from_slice(&1u16.to_le_bytes()); // e_shnum = 1
+        data[62..64].copy_from_slice(&0u16.to_le_bytes()); // e_shstrndx = 0
+
+        // Program Header 0 at offset 64: PT_LOAD
+        data[64..68].copy_from_slice(&1u32.to_le_bytes()); // p_type = PT_LOAD
+        data[68..72].copy_from_slice(&5u32.to_le_bytes()); // p_flags = R + X
+        data[72..80].copy_from_slice(&0u64.to_le_bytes()); // p_offset = 0
+        data[80..88].copy_from_slice(&0x400000u64.to_le_bytes()); // p_vaddr
+        data[96..104].copy_from_slice(&0x1000u64.to_le_bytes()); // p_filesz
+        data[104..112].copy_from_slice(&0x1000u64.to_le_bytes()); // p_memsz
+
+        // Section Header 0 at offset 120:
+        // sh_info = 1 (real phnum = 1!)
+        data[120 + 44..120 + 48].copy_from_slice(&1u32.to_le_bytes()); // sh_info
+
+        let segments = ElfLoader::load_segments(&data).expect("load segments with PN_XNUM");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].virtual_address, 0x400000);
+        assert_eq!(segments[0].memory_size, 0x1000);
+
+        let binary = ElfLoader::parse(DataBuffer::Heap(data), "test_ext_phnum".to_string())
+            .expect("parse ELF with PN_XNUM");
+        assert_eq!(binary.image_base, 0x400000);
+    }
+
+    #[test]
+    fn elf64_stripped_binary_synthesizes_sections_from_pt_load() {
+        let mut data = vec![0u8; 4096];
+        // 1. Identification
+        data[0..4].copy_from_slice(b"\x7fELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little-endian
+        data[6] = 1; // Version
+        data[7] = 0; // System V ABI
+
+        // 2. ELF Header
+        data[16..18].copy_from_slice(&2u16.to_le_bytes()); // ET_EXEC
+        data[18..20].copy_from_slice(&62u16.to_le_bytes()); // EM_X86_64
+        data[20..24].copy_from_slice(&1u32.to_le_bytes()); // Version 1
+        data[24..32].copy_from_slice(&0x401000u64.to_le_bytes()); // entry
+        data[32..40].copy_from_slice(&64u64.to_le_bytes()); // phoff = 64
+        data[40..48].copy_from_slice(&0u64.to_le_bytes()); // shoff = 0 (stripped! no section headers)
+        data[52..54].copy_from_slice(&64u16.to_le_bytes()); // ehsize
+        data[54..56].copy_from_slice(&56u16.to_le_bytes()); // phentsize = 56
+        data[56..58].copy_from_slice(&2u16.to_le_bytes()); // phnum = 2
+        data[58..60].copy_from_slice(&0u16.to_le_bytes()); // shentsize = 0
+        data[60..62].copy_from_slice(&0u16.to_le_bytes()); // shnum = 0
+        data[62..64].copy_from_slice(&0u16.to_le_bytes()); // shstrndx = 0
+
+        // Program Header 0 (PT_LOAD R+X) at offset 64:
+        data[64..68].copy_from_slice(&1u32.to_le_bytes()); // p_type = PT_LOAD
+        data[68..72].copy_from_slice(&5u32.to_le_bytes()); // p_flags = PF_R | PF_X (5)
+        data[72..80].copy_from_slice(&0u64.to_le_bytes()); // p_offset = 0
+        data[80..88].copy_from_slice(&0x400000u64.to_le_bytes()); // p_vaddr
+        data[96..104].copy_from_slice(&0x1000u64.to_le_bytes()); // p_filesz
+        data[104..112].copy_from_slice(&0x1000u64.to_le_bytes()); // p_memsz
+
+        // Program Header 1 (PT_LOAD R+W) at offset 120 (64 + 56):
+        data[120..124].copy_from_slice(&1u32.to_le_bytes()); // p_type = PT_LOAD
+        data[124..128].copy_from_slice(&6u32.to_le_bytes()); // p_flags = PF_R | PF_W (6)
+        data[128..136].copy_from_slice(&0x1000u64.to_le_bytes()); // p_offset
+        data[136..144].copy_from_slice(&0x402000u64.to_le_bytes()); // p_vaddr
+        data[152..160].copy_from_slice(&0x500u64.to_le_bytes()); // p_filesz
+        data[160..168].copy_from_slice(&0x800u64.to_le_bytes()); // p_memsz
+
+        let binary = ElfLoader::parse(DataBuffer::Heap(data), "test_stripped".to_string())
+            .expect("parse stripped ELF");
+        assert_eq!(binary.sections.len(), 2);
+        assert_eq!(binary.sections[0].name, "PT_LOAD_0");
+        assert_eq!(binary.sections[0].virtual_address, 0x400000);
+        assert_eq!(binary.sections[0].virtual_size, 0x1000);
+        assert!(binary.sections[0].is_readable);
+        assert!(binary.sections[0].is_executable);
+        assert!(!binary.sections[0].is_writable);
+
+        assert_eq!(binary.sections[1].name, "PT_LOAD_1");
+        assert_eq!(binary.sections[1].virtual_address, 0x402000);
+        assert_eq!(binary.sections[1].virtual_size, 0x800);
+        assert!(binary.sections[1].is_readable);
+        assert!(!binary.sections[1].is_executable);
+        assert!(binary.sections[1].is_writable);
+
+        assert_eq!(binary.image_base, 0x400000);
+        assert_eq!(binary.entry_point, 0x401000);
     }
 }
