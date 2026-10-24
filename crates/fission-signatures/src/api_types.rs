@@ -121,6 +121,8 @@ pub struct ApiSignature {
     pub name: String,
     pub return_type: String,
     pub params: Vec<ParamInfo>,
+    #[serde(default)]
+    pub is_variadic: bool,
 }
 
 /// Whether `name` denotes a runtime entry whose signature record contains
@@ -144,6 +146,14 @@ pub fn canonical_variadic_runtime_symbol(name: &str) -> String {
             continue;
         }
         if let Some(stripped) = symbol.strip_prefix("__mingw_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix("__isoc99_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix("isoc99_") {
             symbol = stripped.to_string();
             continue;
         }
@@ -215,6 +225,10 @@ pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
                 | "swscanf_s"
                 | "wsprintf"
                 | "wsprintfw"
+                | "wsprintfa"
+                | "wvsprintf"
+                | "wvsprintfa"
+                | "wvsprintfw"
                 | "scanf_s"
                 | "fscanf_s"
                 | "sscanf_s"
@@ -222,6 +236,16 @@ pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
                 | "snwprintf_s"
                 | "fwprintf_s"
                 | "wprintf_s"
+                | "open"
+                | "openat"
+                | "fcntl"
+                | "ioctl"
+                | "syscall"
+                | "syslog"
+                | "execl"
+                | "execle"
+                | "execlp"
+                | "sem_open"
         )
 }
 
@@ -252,11 +276,16 @@ fn parse_record(line: &str) -> Result<ApiSignature, String> {
         return Err("name and return type must be non-empty".to_string());
     }
     let mut params = Vec::new();
+    let mut is_variadic = false;
     let params_text = parts[2].trim();
     if !params_text.is_empty() && params_text != "void" {
         for param in params_text.split(',') {
             let param = param.trim();
-            if param.is_empty() || param == "..." {
+            if param.is_empty() {
+                continue;
+            }
+            if param == "..." {
+                is_variadic = true;
                 continue;
             }
             let Some((param_name, type_name)) = param.split_once(':') else {
@@ -273,6 +302,7 @@ fn parse_record(line: &str) -> Result<ApiSignature, String> {
         name: name.to_string(),
         return_type: return_type.to_string(),
         params,
+        is_variadic,
     })
 }
 
@@ -310,21 +340,32 @@ fn merge_candidates(candidates: Vec<ApiSignature>) -> Option<ApiSignature> {
     best
 }
 
-#[derive(Default)]
 pub struct ApiTypeDatabase {
     /// Records from sources that had no `.fpk`, merged eagerly.
     signatures: HashMap<String, ApiSignature>,
     /// Packed sources, in merge order, read one block at a time.
     packed: Vec<crate::fpk::FpkReader>,
-    /// Names already resolved against `packed`.
-    ///
-    /// Entries are `&'static` because the database itself is a process-lifetime
-    /// `LazyLock` -- the eager map it replaces was never freed either -- and
-    /// because `get` hands out references. Bounded by the number of distinct
-    /// names a run looks up, which is hundreds, not the 151,408 in the tables.
-    resolved: Mutex<HashMap<String, Option<&'static ApiSignature>>>,
+    /// Heap allocations owned by this database instance, freed on drop.
+    arena: Mutex<Vec<Box<ApiSignature>>>,
+    /// Names already resolved against `packed`. Pointers point to allocations in `arena`.
+    resolved: Mutex<HashMap<String, Option<*const ApiSignature>>>,
     /// Everything, materialised only if someone iterates.
     materialised: OnceLock<HashMap<String, ApiSignature>>,
+}
+
+unsafe impl Send for ApiTypeDatabase {}
+unsafe impl Sync for ApiTypeDatabase {}
+
+impl Default for ApiTypeDatabase {
+    fn default() -> Self {
+        Self {
+            signatures: HashMap::new(),
+            packed: Vec::new(),
+            arena: Mutex::new(Vec::new()),
+            resolved: Mutex::new(HashMap::new()),
+            materialised: OnceLock::new(),
+        }
+    }
 }
 
 impl std::fmt::Debug for ApiTypeDatabase {
@@ -341,6 +382,10 @@ impl std::fmt::Debug for ApiTypeDatabase {
 
 impl ApiTypeDatabase {
     pub fn from_utils_signatures() -> Result<Self, ApiTypeError> {
+        Self::from_utils_signatures_for_bitness(true)
+    }
+
+    pub fn from_utils_signatures_for_bitness(is_64bit: bool) -> Result<Self, ApiTypeError> {
         let mut db = Self::default();
         if let Some(path) = ResourceProvider::global().win_api_signatures_txt() {
             db.merge_path(&path)?;
@@ -351,11 +396,17 @@ impl ApiTypeDatabase {
         if let Some(path) = ResourceProvider::global().wdk_signatures_txt() {
             db.merge_path(&path)?;
         }
-        if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
-            db.merge_path(&path)?;
-        }
-        if let Some(path) = ResourceProvider::global().generic_clib_64_signatures_txt() {
-            db.merge_path(&path)?;
+        if is_64bit {
+            if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
+                db.merge_path(&path)?;
+            }
+            if let Some(path) = ResourceProvider::global().generic_clib_64_signatures_txt() {
+                db.merge_path(&path)?;
+            }
+        } else {
+            if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
+                db.merge_path(&path)?;
+            }
         }
         if let Some(path) = ResourceProvider::global().mac_osx_signatures_txt() {
             db.merge_path(&path)?;
@@ -420,9 +471,9 @@ impl ApiTypeDatabase {
             return self.signatures.get(name);
         }
         if let Ok(cache) = self.resolved.lock()
-            && let Some(hit) = cache.get(name)
+            && let Some(&hit) = cache.get(name)
         {
-            return *hit;
+            return hit.map(|ptr| unsafe { &*ptr });
         }
         let mut candidates: Vec<ApiSignature> = Vec::new();
         if let Some(eager) = self.signatures.get(name) {
@@ -445,13 +496,23 @@ impl ApiTypeDatabase {
                 break;
             }
         }
-        // Leaked so `get` can hand out a reference; see `resolved`.
-        let winner: Option<&'static ApiSignature> =
-            merge_candidates(candidates).map(|s| &*Box::leak(Box::new(s)));
-        if let Ok(mut cache) = self.resolved.lock() {
-            cache.insert(name.to_string(), winner);
+
+        let mut resolved = self.resolved.lock().ok()?;
+        if let Some(&hit) = resolved.get(name) {
+            return hit.map(|ptr| unsafe { &*ptr });
         }
-        winner
+        let ptr = if let Some(winner) = merge_candidates(candidates) {
+            let boxed = Box::new(winner);
+            let ptr: *const ApiSignature = &*boxed;
+            if let Ok(mut arena) = self.arena.lock() {
+                arena.push(boxed);
+            }
+            Some(ptr)
+        } else {
+            None
+        };
+        resolved.insert(name.to_string(), ptr);
+        ptr.map(|p| unsafe { &*p })
     }
 
     /// Everything the sources hold, merged. Only for callers that genuinely
@@ -530,6 +591,26 @@ mod tests {
         // 64-bit one merges second and must keep winning.
         let db = merged(&["size_t|int|void\n", "size_t|long long|void\n"]);
         assert_eq!(db.get("size_t").expect("size_t").return_type, "long long");
+    }
+
+    #[test]
+    fn parse_record_preserves_variadic_status() {
+        let sig = parse_record("wsprintfA|INT|pszDest:PSTR,pszFmt:PCSTR,...").expect("parse");
+        assert!(sig.is_variadic);
+        assert_eq!(sig.params.len(), 2);
+
+        let non_var = parse_record("puts|int|str:char*").expect("parse");
+        assert!(!non_var.is_variadic);
+    }
+
+    #[test]
+    fn posix_and_isoc99_variadic_symbols_are_recognized() {
+        assert!(is_known_variadic_runtime_symbol("open"));
+        assert!(is_known_variadic_runtime_symbol("fcntl"));
+        assert!(is_known_variadic_runtime_symbol("ioctl"));
+        assert!(is_known_variadic_runtime_symbol("__isoc99_scanf"));
+        assert!(is_known_variadic_runtime_symbol("isoc99_sscanf"));
+        assert!(is_known_variadic_runtime_symbol("wsprintfA"));
     }
 
     #[test]
