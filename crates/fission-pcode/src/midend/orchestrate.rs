@@ -184,33 +184,36 @@ fn render_mlil_preview_dual_layer_output(
         &readable_options,
         binary,
         type_context,
-        None,
+        reborrow_decomp_facts(&mut decomp_facts),
     );
-    let (mut output, hir) = match readable {
-        Ok(output) => {
-            let hir = output
+    let (hir, hir_mappings) = match readable {
+        Ok(readable_output) => {
+            let hir = readable_output
                 .layered
                 .as_ref()
                 .map(|layers| layers.hir.clone())
                 .unwrap_or_else(|| scored_layers.hir.clone());
-            (output, hir)
+            let hir_mappings = readable_output
+                .layered
+                .as_ref()
+                .map(|layers| layers.hir_line_mappings.clone())
+                .unwrap_or_default();
+            (hir, hir_mappings)
         }
-        Err(_) => (scored.clone(), scored_layers.hir.clone()),
+        Err(_) => (
+            scored_layers.hir.clone(),
+            scored_layers.hir_line_mappings.clone(),
+        ),
     };
     // Both surfaces are presented. The two modes differ in *structuring* --
     // which is the difference that exists -- not in whether they went
     // through the presentation pass. NIR remains the scored tree's
     // semantic-faithful print, while HIR comes from the jump-minimizing tree
     // and is allowed to optimize for readability.
-    let hir_mappings = output
-        .layered
-        .as_ref()
-        .map(|layers| layers.hir_line_mappings.clone())
-        .unwrap_or_default();
     let mut layered = stitch_dual_layers(&scored_layers, hir);
     layered.hir_line_mappings = hir_mappings;
-    output.code = scored.code;
-    output.layered = Some(layered.clone());
+    let mut output = scored;
+    output.layered = Some(layered);
     Ok(output)
 }
 
@@ -328,6 +331,7 @@ fn render_mlil_preview_with_binary_and_context_output(
         return Err(MlilPreviewError::UnsupportedPattern("invalid pcode shape"));
     }
 
+    let mut wave_guard = fission_midend_core::wave_stats::WaveStatsGuard::new();
     let build_start = Instant::now();
     if debug.preview_debug {
         eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
@@ -537,7 +541,7 @@ fn render_mlil_preview_with_binary_and_context_output(
     let hir_function = hir.clone();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
-    build_stats.merge_assign(&take_normalize_wave_stats());
+    build_stats.merge_assign(&wave_guard.take());
     // `discover_guarded_tail_candidates_for_stats` is a structuring-side stats
     // pass (re-runs guarded-tail promotion discovery for telemetry, doesn't
     // mutate `hir`) defined for `PreHirStmt` input -- convert back via
@@ -781,5 +785,32 @@ mod tests {
 
         assert_eq!(layered.nir, scored.nir);
         assert_eq!(layered.hir, "readable lane");
+    }
+
+    #[test]
+    fn wave_stats_guard_cleans_up_on_drop() {
+        use fission_midend_core::wave_stats::{
+            WaveStatsGuard, add_entry_param_promotions, take_normalize_wave_stats,
+        };
+
+        // Pollute state inside a scope that aborts/drops without taking
+        {
+            let _guard = WaveStatsGuard::new();
+            add_entry_param_promotions(42);
+        }
+
+        // Must be reset on drop
+        let leftover = take_normalize_wave_stats();
+        assert_eq!(leftover.entry_param_promotion_spill_rename_count, 0);
+
+        // When taken, stats are retained
+        {
+            let mut guard = WaveStatsGuard::new();
+            add_entry_param_promotions(7);
+            let stats = guard.take();
+            assert_eq!(stats.entry_param_promotion_spill_rename_count, 7);
+        }
+        let leftover2 = take_normalize_wave_stats();
+        assert_eq!(leftover2.entry_param_promotion_spill_rename_count, 0);
     }
 }

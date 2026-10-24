@@ -16,6 +16,38 @@ pub fn take_normalize_wave_stats() -> NirBuildStats {
     WAVE.with(|w| std::mem::take(&mut *w.borrow_mut()))
 }
 
+/// RAII guard that resets normalize wave stats on creation and ensures thread-local
+/// wave stats are never leaked across pipeline failures on drop.
+pub struct WaveStatsGuard {
+    active: bool,
+}
+
+impl WaveStatsGuard {
+    pub fn new() -> Self {
+        reset_normalize_wave_stats();
+        Self { active: true }
+    }
+
+    pub fn take(&mut self) -> NirBuildStats {
+        self.active = false;
+        take_normalize_wave_stats()
+    }
+}
+
+impl Default for WaveStatsGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for WaveStatsGuard {
+    fn drop(&mut self) {
+        if self.active {
+            reset_normalize_wave_stats();
+        }
+    }
+}
+
 pub fn add_entry_param_promotions(n: usize) {
     if n == 0 {
         return;
