@@ -734,20 +734,26 @@ impl SimProcedure for SysTkill {
 pub struct SysRtSigreturn;
 impl SimProcedure for SysRtSigreturn {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        if let Some(pc) = emu.signals.sigreturn() {
+        if let Some(frame) = emu.signals.pop_frame() {
+            let pc = frame.return_pc;
             tracing::info!("sys_rt_sigreturn → PC 0x{:X}", pc);
-            // Best-effort: pop the minimal frame we pushed at delivery.
-            let sp_reg = emu.arch.sp_reg;
-            if let Ok(sp) = emu.read_register_u64(sp_reg) {
-                let _ =
-                    emu.write_register_u64(sp_reg, sp.wrapping_add(emu.arch.pointer_size as u64));
+            if let Some(saved_regs) = frame.saved_registers {
+                emu.restore_thread_register_state(&saved_regs)?;
+            } else {
+                // Best-effort: pop the minimal frame we pushed at delivery.
+                let sp_reg = emu.arch.sp_reg;
+                if let Ok(sp) = emu.read_register_u64(sp_reg) {
+                    let _ = emu
+                        .write_register_u64(sp_reg, sp.wrapping_add(emu.arch.pointer_size as u64));
+                }
+                emu.set_syscall_return(0)?;
             }
             emu.pc = pc;
             emu.pc_override = Some(pc);
         } else {
             tracing::warn!("sys_rt_sigreturn with no saved frame");
+            emu.set_syscall_return(0)?;
         }
-        emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
 }
