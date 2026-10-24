@@ -7,19 +7,15 @@ use std::time::{Duration, Instant};
 
 const NIR_WORKER_BIN_NAME: &str = "fission_nir_worker";
 const LEGACY_PREVIEW_WORKER_BIN_NAME: &str = "fission_preview_worker";
-const NIR_WORKER_TIMEOUT_CAP_MS: u64 = 10_000;
-const NIR_WORKER_TIMEOUT_MARGIN_MS: u64 = 1_000;
 const NIR_WORKER_MIN_TIMEOUT_MS: u64 = 1_000;
 
 pub(crate) fn nir_worker_timeout_ms(timeout_ms: Option<u64>) -> u64 {
-    let configured = timeout_ms.unwrap_or_else(|| {
-        fission_core::config::Config::default()
-            .decompiler
-            .timeout_ms
-    });
-    configured
-        .saturating_sub(NIR_WORKER_TIMEOUT_MARGIN_MS)
-        .clamp(NIR_WORKER_MIN_TIMEOUT_MS, NIR_WORKER_TIMEOUT_CAP_MS)
+    let configured =
+        timeout_ms.unwrap_or_else(|| fission_core::config::CONFIG.decompiler.timeout_ms);
+    if configured == 0 {
+        return 0;
+    }
+    configured.max(NIR_WORKER_MIN_TIMEOUT_MS)
 }
 
 fn resolve_nir_worker_path() -> Option<std::path::PathBuf> {
@@ -154,7 +150,7 @@ pub(crate) fn execute_nir_worker_request(
             );
             break status;
         }
-        if start.elapsed() >= Duration::from_millis(timeout_ms) {
+        if timeout_ms > 0 && start.elapsed() >= Duration::from_millis(timeout_ms) {
             nir_diag_event(
                 request.address,
                 "worker_timeout",
