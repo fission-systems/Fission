@@ -558,9 +558,7 @@ impl<'a> PreviewBuilder<'a> {
         let file_offset = section.file_offset.checked_add(offset_in_section)? as usize;
         let bytes = binary.inner().data.as_slice();
         let raw = bytes.get(file_offset..file_offset.checked_add(size)?)?;
-        let is_big_endian = binary
-            .sleigh_language_id()
-            .is_some_and(|language_id| language_id.contains(":BE:"));
+        let is_big_endian = !binary.is_little_endian();
         match size {
             1 => raw.first().copied().map(u64::from),
             2 => {

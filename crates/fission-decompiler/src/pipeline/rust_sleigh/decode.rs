@@ -159,7 +159,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 decode_entry_address,
                 bytes,
                 &memory_context,
-                !binary.inner().arch_spec.contains("BE"),
+                binary.is_little_endian(),
             )
             .is_empty()
     });
@@ -269,7 +269,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
         // rather than the usual exit: a `switch` inside a `switch` converges
         // in three.
         const MAX_DECODE_ROUNDS: usize = 8;
-        let little_endian = !binary.inner().arch_spec.contains("BE");
+        let little_endian = binary.is_little_endian();
         for _ in 0..MAX_DECODE_ROUNDS {
             let Ok(lifted) = result.as_ref() else {
                 break;
