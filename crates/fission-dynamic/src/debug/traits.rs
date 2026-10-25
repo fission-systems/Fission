@@ -56,6 +56,9 @@ pub trait ExecutionBackend: Send {
     /// the owner of the public timeline value.
     fn set_timeline(&mut self, _timeline: Arc<Mutex<Timeline>>) {}
 
+    /// Set an execution deadline for bounded execution loops.
+    fn set_deadline(&mut self, _deadline: Option<std::time::Instant>) {}
+
     /// Enumerate running processes on the system
     fn enumerate_processes() -> Vec<ProcessInfo>
     where

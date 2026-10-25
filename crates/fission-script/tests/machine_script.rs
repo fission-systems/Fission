@@ -244,3 +244,65 @@ fn disasm_near_unmapped_page_boundary_succeeds_without_page_fault() {
     );
     assert_eq!(d["first_addr"], serde_json::json!(0x140005ff0i64));
 }
+
+
+#[test]
+fn machine_execution_respects_max_runtime_ms() {
+    let limits = ScriptLimits {
+        max_runtime_ms: 50,
+        max_operations: 0,
+        ..ScriptLimits::default()
+    };
+    let result = run_script_with(
+        &fixture(),
+        r#"
+        let entry = machine.pc();
+        while true {
+            machine.step();
+            machine.set_reg("RIP", entry);
+        }
+        "#,
+        "timeout_machine.rhai",
+        limits,
+        ScriptOptions { machine: true },
+    );
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Timeout,
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn disasm_near_section_boundary_does_not_bail_on_overread() {
+    let fix = fixture();
+    let sec = fix
+        .executable_section_containing(fix.inner().entry_point)
+        .or_else(|| fix.sections.iter().find(|s| s.is_executable))
+        .expect("executable section");
+    // Start 16 bytes before the end of the executable section
+    let near_end = (sec.virtual_address + sec.virtual_size).saturating_sub(16);
+    let src = format!(
+        r#"
+        let insns = machine.disasm(0x{:x}, 50);
+        emit(#{{ kind: "near_boundary", count: insns.len() }});
+        "#,
+        near_end
+    );
+    let result = run_script_with(
+        &fix,
+        &src,
+        "boundary.rhai",
+        ScriptLimits::default(),
+        ScriptOptions { machine: true },
+    );
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.findings.len(), 1);
+    assert_eq!(result.findings[0].kind, "near_boundary");
+}

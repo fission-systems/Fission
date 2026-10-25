@@ -186,10 +186,10 @@ fn finding_from_map(m: &Map) -> ScriptFinding {
     }
 }
 
-fn approximate_findings_payload_bytes(findings: &[ScriptFinding]) -> usize {
-    serde_json::to_string(findings)
+fn single_finding_payload_bytes(finding: &ScriptFinding) -> usize {
+    serde_json::to_string(finding)
         .map(|s| s.len())
-        .unwrap_or(findings.len() * 64)
+        .unwrap_or(64)
 }
 
 pub fn register_emit(
@@ -198,6 +198,7 @@ pub fn register_emit(
     limits: ScriptLimits,
     halted: Arc<Mutex<Option<String>>>,
 ) -> Result<(), ScriptError> {
+    let payload_bytes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     engine.register_fn("emit", move |m: Map| {
         let stopped = halted.lock().map(|h| h.is_some()).unwrap_or(true);
         if stopped {
@@ -218,14 +219,23 @@ pub fn register_emit(
             return;
         }
 
-        fs.push(finding);
+        let finding_bytes = single_finding_payload_bytes(&finding);
+        let needed = if fs.is_empty() {
+            2 + finding_bytes
+        } else {
+            1 + finding_bytes
+        };
 
-        if approximate_findings_payload_bytes(&fs) > limits.max_output_bytes {
-            fs.pop();
+        let current = payload_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        if current.saturating_add(needed) > limits.max_output_bytes {
             if let Ok(mut h) = halted.lock() {
                 *h = Some("script exceeded max_output_bytes limit".into());
             }
+            return;
         }
+
+        payload_bytes.fetch_add(needed, std::sync::atomic::Ordering::Relaxed);
+        fs.push(finding);
     });
 
     Ok(())
