@@ -1917,8 +1917,9 @@ impl Emulator {
     }
 
     /// Simulate a function return: restore PC from the return address
-    /// (link register or top of stack, depending on `arch.cc`).
-    pub fn simulate_return(&mut self) -> Result<()> {
+    /// (link register or top of stack, depending on `arch.cc`), and adjust SP
+    /// by `ptr_size + self.arch.cc.callee_pop_bytes(func_name)`.
+    pub fn simulate_return_for(&mut self, func_name: &str) -> Result<()> {
         let ptr_size = self.arch.pointer_size as usize;
         if let Some(lr) = self.arch.cc.return_addr_reg() {
             let ret_addr = self.read_register_u64(lr)?;
@@ -1930,9 +1931,21 @@ impl Emulator {
             let bytes = self.state.read_space(ram, sp, ptr_size)?;
             let ret_addr = crate::arch::calling_convention::le_bytes_to_u64(&bytes);
             self.pc = ret_addr;
-            self.write_register_u64(sp_reg, sp + ptr_size as u64)?;
+            let extra_pop = self.arch.cc.callee_pop_bytes(func_name);
+            self.write_register_u64(sp_reg, sp + ptr_size as u64 + extra_pop)?;
         }
         Ok(())
+    }
+
+    /// Simulate a function return: restore PC from the return address
+    /// (link register or top of stack, depending on `arch.cc`).
+    pub fn simulate_return(&mut self) -> Result<()> {
+        let resolved = if self.pc >= self.magic_range.0 && self.pc < self.magic_range.1 {
+            self.os.resolve_stub(&self.binary, self.pc)
+        } else {
+            None
+        };
+        self.simulate_return_for(resolved.as_deref().unwrap_or(""))
     }
 
     // ── Execution ─────────────────────────────────────────────────────────────
@@ -2371,7 +2384,7 @@ impl Emulator {
                         break RunOutcome::ProcessExited;
                     }
                     HleResult::Continue => {
-                        self.simulate_return()?;
+                        self.simulate_return_for(&func_name)?;
                     }
                     HleResult::JumpTo(pc) => {
                         self.pc = pc;
