@@ -270,6 +270,28 @@ impl ApiSignature {
     }
 }
 
+fn split_parameters(text: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut start = 0;
+    let mut depth: u32 = 0;
+
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '(' | '[' | '<' => depth += 1,
+            ')' | ']' | '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                result.push(&text[start..idx]);
+                start = idx + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < text.len() {
+        result.push(&text[start..]);
+    }
+    result
+}
+
 /// One `name|return_type|param:type,...` record.
 fn parse_record(line: &str) -> Result<ApiSignature, String> {
     let parts: Vec<&str> = line.split('|').collect();
@@ -285,7 +307,7 @@ fn parse_record(line: &str) -> Result<ApiSignature, String> {
     let mut is_variadic = false;
     let params_text = parts[2].trim();
     if !params_text.is_empty() && params_text != "void" {
-        for param in params_text.split(',') {
+        for param in split_parameters(params_text) {
             let param = param.trim();
             if param.is_empty() {
                 continue;
@@ -825,5 +847,18 @@ mod tests {
         assert_eq!(fprintf_chk.params.len(), 3);
         assert_eq!(fprintf_chk.params[0].type_name, "FILE*");
         assert_eq!(fprintf_chk.params[2].type_name, "char*");
+    }
+
+    #[test]
+    fn parse_record_handles_function_pointer_callbacks_with_multiple_parameters() {
+        let line = "EnumWindows|BOOL|lpEnumFunc:BOOL (*)(HWND, LPARAM), lParam:LPARAM";
+        let sig = parse_record(line).expect("parse EnumWindows");
+        assert_eq!(sig.name, "EnumWindows");
+        assert_eq!(sig.return_type, "BOOL");
+        assert_eq!(sig.params.len(), 2);
+        assert_eq!(sig.params[0].name, "lpEnumFunc");
+        assert_eq!(sig.params[0].type_name, "BOOL (*)(HWND, LPARAM)");
+        assert_eq!(sig.params[1].name, "lParam");
+        assert_eq!(sig.params[1].type_name, "LPARAM");
     }
 }
