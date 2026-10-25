@@ -622,15 +622,28 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             ),
         );
     }
+    for (&address, name) in &binary.relocation_symbols {
+        rows.entry((address, SymbolKind::RelocationTarget, name.clone()))
+            .or_insert_with(|| {
+                (
+                    binary.global_symbol_sizes.get(&address).copied(),
+                    binary.symbol_versions.get(&address).cloned(),
+                    FactSource::RelocationTable,
+                )
+            });
+    }
     for symbol in &binary.loader_symbols {
-        let kind = match symbol.kind {
-            LoaderSymbolKind::CodeLabel => SymbolKind::Label,
-            LoaderSymbolKind::Data => SymbolKind::Data,
+        let (kind, size) = match symbol.kind {
+            LoaderSymbolKind::CodeLabel => (SymbolKind::Label, None),
+            LoaderSymbolKind::Data => (
+                SymbolKind::Data,
+                binary.global_symbol_sizes.get(&symbol.address).copied(),
+            ),
         };
         rows.insert(
             (symbol.address, kind, symbol.name.clone()),
             (
-                binary.global_symbol_sizes.get(&symbol.address).copied(),
+                size,
                 lookup_version(&symbol.name, &symbol.address),
                 FactSource::SymbolTable,
             ),
@@ -1014,6 +1027,7 @@ mod tests {
                 kind: LoaderSymbolKind::CodeLabel,
                 origin: "pe-coff-symbol-table".into(),
             }])
+            .add_global_symbol_sizes([(0x1020, 64)].into())
             .build()
             .expect("fixture should build");
 
@@ -1025,6 +1039,7 @@ mod tests {
             .expect("loader label should reach the canonical symbol table");
         assert_eq!(label.name, ".l_start");
         assert_eq!(label.kind, SymbolKind::Label);
+        assert_eq!(label.size, None);
         assert_eq!(label.provenance.source, FactSource::SymbolTable);
     }
 
@@ -1124,5 +1139,63 @@ mod tests {
             .expect("alias_v2 must exist");
         assert_eq!(alias2.address, 0x401000);
         assert_eq!(alias2.version.as_deref(), Some("VER_2.0"));
+    }
+
+    #[test]
+    fn snapshot_includes_relocation_symbols_and_links_relocations() {
+        let binary = LoadedBinaryBuilder::new("relocs.bin".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("ELF")
+            .image_base(0x1000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".got".into(),
+                virtual_address: 0x2000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_relocation_symbols([(0x2010, "external_printf".into())].into())
+            .add_relocations([RelocationEntry {
+                address: 0x2010,
+                r_type: 7,
+                size: 8,
+                addend: 0,
+                symbol_name: Some("external_printf".into()),
+            }])
+            .build()
+            .expect("fixture should build");
+
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let sym = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "external_printf")
+            .expect("relocation target symbol must be in snapshot.symbols");
+        assert_eq!(sym.address, 0x2010);
+        assert_eq!(sym.kind, SymbolKind::RelocationTarget);
+        assert_eq!(sym.provenance.source, FactSource::RelocationTable);
+
+        let reloc = &snapshot.relocations[0];
+        assert_eq!(reloc.symbol, Some(sym.id));
+        assert_eq!(reloc.symbol_name.as_deref(), Some("external_printf"));
+    }
+
+    #[test]
+    fn snapshot_integrity_detects_function_overflowing_memory_block() {
+        let mut snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
+        let block = &snapshot.memory_blocks[0];
+        let block_end = block.start + block.size;
+        snapshot.functions[0].entry = block_end - 10;
+        snapshot.functions[0].size = 50;
+
+        let report = snapshot.integrity_report();
+        assert!(!report.is_valid());
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::FunctionOutsideMemoryBlock { .. }
+        )));
     }
 }
