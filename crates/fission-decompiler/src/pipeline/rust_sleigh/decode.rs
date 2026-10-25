@@ -243,6 +243,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // appears. `additional_decode_entries` already seeds both the decode
     // worklist and the reachability pass, which is what makes the feedback a
     // few lines rather than a new pipeline.
+    let base_memory_context = memory_context.clone();
     let mut memory_context = memory_context;
     // The best decode any round of the fixed point produced, kept so a round
     // that fails cannot leave the function worse off than before it ran.
@@ -384,7 +385,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                     };
                     let variant_memory_context =
                         decode_memory_context(binary, variant_decode_entry_address, max_bytes);
-                    if let Ok(retry) = variant_lifter
+                    if let Ok(mut retry) = variant_lifter
                         .lift_raw_pcode_function_with_context_and_memory_context(
                             variant_bytes,
                             variant_decode_entry_address,
@@ -393,6 +394,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
                             variant_address_state.context_override,
                         )
                     {
+                        if !discovered_edges.is_empty() {
+                            fission_sleigh::runtime::attach_inferred_indirect_edges(
+                                &mut retry.function,
+                                &discovered_edges,
+                            );
+                        }
                         let template_source_counts = retry.template_source_counts.clone();
                         return Ok((
                             retry.function,
@@ -410,15 +417,21 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 }
 
                 if continue_past_indirect_branch {
-                    if let Ok(retry) = lifter
+                    if let Ok(mut retry) = lifter
                         .lift_raw_pcode_function_with_context_and_memory_context(
                             &bytes,
                             decode_entry_address,
                             DecodeContract::strict_function(instruction_limit),
-                            &memory_context,
+                            &base_memory_context,
                             initial_context_override,
                         )
                     {
+                        if !discovered_edges.is_empty() {
+                            fission_sleigh::runtime::attach_inferred_indirect_edges(
+                                &mut retry.function,
+                                &discovered_edges,
+                            );
+                        }
                         let template_source_counts = retry.template_source_counts.clone();
                         return Ok((
                             retry.function,
@@ -437,7 +450,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                     extract_safe_bytes_from_decode_error(&err_str, decode_entry_address)
                 {
                     if safe > 0 && safe < bytes.len() {
-                        if let Ok(retry) = lifter
+                        if let Ok(mut retry) = lifter
                             .lift_raw_pcode_function_with_context_and_memory_context(
                                 &bytes[..safe],
                                 decode_entry_address,
@@ -446,6 +459,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                 initial_context_override,
                             )
                         {
+                            if !discovered_edges.is_empty() {
+                                fission_sleigh::runtime::attach_inferred_indirect_edges(
+                                    &mut retry.function,
+                                    &discovered_edges,
+                                );
+                            }
                             let template_source_counts = retry.template_source_counts.clone();
                             return Ok((
                                 retry.function,
@@ -461,7 +480,13 @@ pub(crate) fn decode_rust_sleigh_pcode(
                         // path, so the fixed point's last good round is the
                         // fallback here too -- not only at the end of the
                         // outer error path.
-                        if let Some(fallback) = last_good {
+                        if let Some(mut fallback) = last_good {
+                            if !discovered_edges.is_empty() {
+                                fission_sleigh::runtime::attach_inferred_indirect_edges(
+                                    &mut fallback.function,
+                                    &discovered_edges,
+                                );
+                            }
                             let template_source_counts = fallback.template_source_counts.clone();
                             return Ok((
                                 fallback.function,
@@ -497,7 +522,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 // already decode in forced low-bit-code mode.
                 if initial_context_override.is_none()
                     && let Some(forced_override) = lifter.low_bit_code_mode_override()
-                    && let Ok(retry) = lifter
+                    && let Ok(mut retry) = lifter
                         .lift_raw_pcode_function_with_context_and_memory_context(
                             &bytes,
                             decode_entry_address,
@@ -506,6 +531,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
                             Some(forced_override),
                         )
                 {
+                    if !discovered_edges.is_empty() {
+                        fission_sleigh::runtime::attach_inferred_indirect_edges(
+                            &mut retry.function,
+                            &discovered_edges,
+                        );
+                    }
                     let template_source_counts = retry.template_source_counts.clone();
                     return Ok((
                         retry.function,
@@ -523,9 +554,15 @@ pub(crate) fn decode_rust_sleigh_pcode(
             // this function; returning it beats returning an error, and it is
             // exactly the function this call would have produced had the loop
             // stopped one round earlier.
-            if let Some(fallback) =
+            if let Some(mut fallback) =
                 last_good.or_else(|| cached_fallback.map(|cached| (*cached).clone()))
             {
+                if !discovered_edges.is_empty() {
+                    fission_sleigh::runtime::attach_inferred_indirect_edges(
+                        &mut fallback.function,
+                        &discovered_edges,
+                    );
+                }
                 let template_source_counts = fallback.template_source_counts.clone();
                 return Ok((
                     fallback.function,
