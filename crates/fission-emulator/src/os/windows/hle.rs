@@ -907,6 +907,13 @@ fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
             .map_region(lp_address, size, page_prot, true);
         lp_address
     };
+    if base == 0 {
+        // No free hole: VirtualAlloc fails with NULL / ERROR_NOT_ENOUGH_MEMORY.
+        tracing::warn!("VirtualAlloc(size=0x{size:X}) -> NULL");
+        emu.win_last_error = 8; // ERROR_NOT_ENOUGH_MEMORY
+        emu.write_return_val(0)?;
+        return Ok(());
+    }
     let fill = (size as usize).min(0x10_0000);
     let zeros = vec![0u8; fill];
     let _ = emu.state.write_space(emu.state.ram_space(), base, &zeros);

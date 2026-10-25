@@ -162,6 +162,12 @@ impl SimProcedure for Mmap {
                 .map_region(addr, length.max(1), page_prot, true);
             page_align_down(addr)
         };
+        if base == 0 {
+            // No free hole: libc's mmap returns MAP_FAILED.
+            tracing::warn!("SimProcedure: mmap(len={length}) -> MAP_FAILED");
+            emu.write_return_val(u64::MAX)?;
+            return Ok(HleResult::Continue);
+        }
         let len = page_align_up(length.max(1));
         if !map_anon && fd >= 0 {
             let want = length.max(1) as usize;

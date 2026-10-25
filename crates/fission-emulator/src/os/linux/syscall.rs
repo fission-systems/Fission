@@ -328,6 +328,13 @@ impl SimProcedure for SysMmap {
                 .map_region(addr, length.max(1), page_prot, true);
             page_align_down(addr)
         };
+        if base == 0 {
+            // mmap_anon found no free hole; report it rather than handing the
+            // guest address 0 as a successful mapping.
+            tracing::warn!("sys_mmap(len={length}) -> -ENOMEM");
+            emu.set_syscall_return((-12i64) as u64)?; // -ENOMEM
+            return Ok(HleResult::Continue);
+        }
 
         let len = page_align_up(length.max(1));
         // File-backed mmap: copy from VFS fd when not MAP_ANONYMOUS.
