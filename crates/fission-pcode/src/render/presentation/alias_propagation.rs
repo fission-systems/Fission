@@ -32,11 +32,13 @@ pub(super) fn propagate_pure_var_aliases(
 
     // Collect x → y for single-def pure var copies. Resolve short chains.
     let mut copy_map: HashMap<String, String> = HashMap::new();
+    let mut used_before: HashSet<String> = HashSet::new();
     collect_pure_var_copies(
         &func.body,
         &stable_formal,
         &def_counts,
         globals,
+        &mut used_before,
         &mut copy_map,
     );
     if copy_map.is_empty() {
@@ -151,15 +153,75 @@ mod tests {
             HirStmt::Return(Some(HirExpr::Var(name))) if name == "param_1"
         ));
     }
+
+    #[test]
+    fn does_not_propagate_conditional_copy_inside_if() {
+        let mut func = HirFunction {
+            params: vec![binding("param_1"), binding("cond")],
+            locals: vec![binding("x")],
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".to_string()),
+                    then_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".to_string()),
+                        rhs: HirExpr::Var("param_1".to_string()),
+                    }],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!propagate_pure_var_aliases(&mut func, &HashSet::new()));
+        assert!(matches!(
+            &func.body[1],
+            HirStmt::Return(Some(HirExpr::Var(name))) if name == "x"
+        ));
+    }
+
+    #[test]
+    fn does_not_propagate_copy_when_var_used_before_definition() {
+        let mut func = HirFunction {
+            params: vec![binding("param_1")],
+            locals: vec![binding("x"), binding("y")],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("y".to_string()),
+                    rhs: HirExpr::Var("x".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Var("param_1".to_string()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("y".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!propagate_pure_var_aliases(&mut func, &HashSet::new()));
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(lhs),
+                rhs: HirExpr::Var(rhs),
+            } if lhs == "y" && rhs == "x"
+        ));
+    }
 }
 
+/// Collect single-def pure variable copies strictly from the top-level
+/// unconditional prefix of `stmts` before any branching, looping, or labels.
+/// Returns `true` if traversal may continue, or `false` once a control-flow
+/// construct is encountered.
 fn collect_pure_var_copies(
     stmts: &[HirStmt],
     formal: &HashSet<&str>,
     def_counts: &HashMap<String, usize>,
     globals: &HashSet<String>,
+    used_before: &mut HashSet<String>,
     out: &mut HashMap<String, String>,
-) {
+) -> bool {
     for stmt in stmts {
         match stmt {
             HirStmt::Assign {
@@ -170,54 +232,61 @@ fn collect_pure_var_copies(
                 // A global store is an observable effect, not a temporary
                 // copy that presentation may erase after substituting uses.
                 && !globals.contains(name.as_str())
-                && formal.contains(source.as_str())
+                && !used_before.contains(name.as_str())
+                && (formal.contains(source.as_str()) || out.contains_key(source.as_str()))
                 && def_counts.get(name.as_str()).copied().unwrap_or(0) == 1 =>
             {
-                // Source must be a formal: non-formal sources (eax/rax/temps)
-                // may be redefined after the copy.
+                // Source must be a stable formal (or a single-def chain rooted
+                // at a stable formal): non-formal sources (eax/rax/temps) may
+                // be redefined after the copy.
                 out.insert(name.clone(), source.clone());
+                used_before.insert(source.clone());
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                collect_pure_var_copies(body, formal, def_counts, globals, out)
+            HirStmt::Assign { lhs, rhs } => {
+                collect_used_vars_in_lvalue(lhs, used_before);
+                collect_free_vars_in_expr(rhs, used_before);
             }
-            HirStmt::If {
-                then_body,
-                else_body,
-                ..
+            HirStmt::Expr(expr) => {
+                collect_free_vars_in_expr(expr, used_before);
+            }
+            HirStmt::VaStart {
+                va_list,
+                last_named_param,
             } => {
-                collect_pure_var_copies(then_body, formal, def_counts, globals, out);
-                collect_pure_var_copies(else_body, formal, def_counts, globals, out);
+                collect_free_vars_in_expr(va_list, used_before);
+                used_before.insert(last_named_param.clone());
             }
-            HirStmt::For {
-                init, update, body, ..
-            } => {
-                if let Some(i) = init {
-                    collect_pure_var_copies(
-                        std::slice::from_ref(i.as_ref()),
-                        formal,
-                        def_counts,
-                        globals,
-                        out,
-                    );
+            HirStmt::Block(body) => {
+                if !collect_pure_var_copies(body, formal, def_counts, globals, used_before, out) {
+                    return false;
                 }
-                if let Some(u) = update {
-                    collect_pure_var_copies(
-                        std::slice::from_ref(u.as_ref()),
-                        formal,
-                        def_counts,
-                        globals,
-                        out,
-                    );
-                }
-                collect_pure_var_copies(body, formal, def_counts, globals, out);
             }
-            HirStmt::Switch { cases, default, .. } => {
-                for case in cases {
-                    collect_pure_var_copies(&case.body, formal, def_counts, globals, out);
-                }
-                collect_pure_var_copies(default, formal, def_counts, globals, out);
+            HirStmt::If { .. }
+            | HirStmt::While { .. }
+            | HirStmt::DoWhile { .. }
+            | HirStmt::For { .. }
+            | HirStmt::Switch { .. }
+            | HirStmt::Goto(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {
+                return false;
             }
-            _ => {}
+        }
+    }
+    true
+}
+
+fn collect_used_vars_in_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } | HirLValue::FieldAccess { base: ptr, .. } => {
+            collect_free_vars_in_expr(ptr, out);
+        }
+        HirLValue::Index { base, index, .. } => {
+            collect_free_vars_in_expr(base, out);
+            collect_free_vars_in_expr(index, out);
         }
     }
 }
