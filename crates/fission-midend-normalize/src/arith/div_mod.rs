@@ -913,6 +913,7 @@ mod tests {
     #[test]
     fn recognizes_arm_eabi_unsigned_division_helper() {
         let expr = PreHirExpr::Call {
+            origin: None,
             target: "__aeabi_uidiv".to_string(),
             args: vec![var("numerator"), var("denominator"), var("dead_r2")],
             ty: NirType::Unknown,

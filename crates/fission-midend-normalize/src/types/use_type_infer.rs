@@ -2079,6 +2079,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "produce_pointer".into(),
                         args: vec![],
                         ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -2127,6 +2128,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "pointer_result".into(),
                         args: vec![],
                         ty: pointer.clone(),
@@ -2184,6 +2186,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "unknown_result_a".into(),
                         args: vec![],
                         ty: NirType::Unknown,
@@ -2196,6 +2199,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "unknown_result_b".into(),
                         args: vec![],
                         ty: NirType::Unknown,
@@ -2785,6 +2789,7 @@ mod tests {
     #[test]
     fn unknown_call_only_value_returns_promote_native_word_return_type() {
         let body = vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+            origin: None,
             target: "param_1".to_owned(),
             args: vec![
                 PreHirExpr::Var("param_2".to_owned()),
@@ -2808,6 +2813,7 @@ mod tests {
     #[test]
     fn call_target_use_promotes_binding_to_pointer() {
         let body = vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+            origin: None,
             target: "((code *)param_1)".to_owned(),
             args: vec![
                 PreHirExpr::Var("param_2".to_owned()),
@@ -2856,6 +2862,7 @@ mod tests {
         let body = vec![PreHirStmt::If {
             cond: PreHirExpr::Var("flag".to_owned()),
             then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+                origin: None,
                 target: "param_1".to_owned(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -3143,6 +3150,7 @@ mod tests {
             surface_return_type_name: None,
             body: vec![
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "observe64".to_owned(),
                     args: vec![PreHirExpr::Var("param_1".to_owned())],
                     ty: NirType::Unknown,
@@ -3489,6 +3497,7 @@ mod tests {
         let mut body = qualifying_accumulator_body("x", "bptr");
         // A plain, unrecognized use of `x` elsewhere disqualifies it.
         body.push(PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "sink".to_owned(),
             args: vec![var("x")],
             ty: NirType::Unknown,

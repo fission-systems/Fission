@@ -3098,6 +3098,7 @@ fn loop_header_missing_merge_rejects_side_effect_rhs() {
     let options = crate::midend::builder::materialize::test_support::test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "may_call".to_string(),
         args: vec![PreHirExpr::Var("r14".to_string())],
         ty: int(32),
@@ -3146,6 +3147,7 @@ fn missing_merge_live_register_binding_rejects_call_or_aggregate_rhs() {
     let rhs = PreHirExpr::Binary {
         op: PreHirBinaryOp::Add,
         lhs: Box::new(PreHirExpr::Call {
+            origin: None,
             target: "__pcodeop_294".to_string(),
             args: vec![PreHirExpr::Var("reg".to_string())],
             ty: NirType::Aggregate {

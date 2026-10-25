@@ -324,7 +324,7 @@ macro_rules! define_interp {
                     $Expr::FieldAccess { base, offset, .. } => {
                         Ok((eval_expr(base, env)?).wrapping_add(*offset as i64))
                     }
-                    $Expr::Call { target, args, ty } => eval_builtin_call(target, args, ty, env),
+                    $Expr::Call { target, args, ty, .. } => eval_builtin_call(target, args, ty, env),
                     other => bail!(
                         "interp: unsupported expr {other:?} -- no memory/call model at the \
                          concrete tier, see module docs"

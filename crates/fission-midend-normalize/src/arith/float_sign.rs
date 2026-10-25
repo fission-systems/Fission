@@ -109,6 +109,7 @@ fn visit_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) -> bo
                     if matches_abs_mask(*val, bits) {
                         let fn_name = if bits == 32 { "fabsf" } else { "fabs" };
                         *expr = PreHirExpr::Call {
+                            origin: None,
                             target: fn_name.to_string(),
                             args: vec![inner],
                             ty: NirType::Float { bits },
@@ -122,6 +123,7 @@ fn visit_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) -> bo
                     if matches_abs_mask(*val, bits) {
                         let fn_name = if bits == 32 { "fabsf" } else { "fabs" };
                         *expr = PreHirExpr::Call {
+                            origin: None,
                             target: fn_name.to_string(),
                             args: vec![inner],
                             ty: NirType::Float { bits },

@@ -785,7 +785,13 @@ fn resolve_loop_header_expr(expr: &PreHirExpr, values: &HashMap<String, PreHirEx
             else_expr: Box::new(resolve_loop_header_expr(else_expr, values)),
             ty: ty.clone(),
         },
-        PreHirExpr::Call { target, args, ty } => PreHirExpr::Call {
+        PreHirExpr::Call {
+            target,
+            args,
+            ty,
+            origin,
+        } => PreHirExpr::Call {
+            origin: *origin,
             target: target.clone(),
             args: args
                 .iter()

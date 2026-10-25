@@ -399,6 +399,7 @@ mod tests {
             PreHirStmt::Goto("Lret".to_string()),
             PreHirStmt::Label("Lret".to_string()),
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "FUN_0x140001000".to_string(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -509,6 +510,7 @@ mod tests {
                 else_body: Vec::new().into(),
             },
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "FUN_0x140001000".to_string(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -696,6 +698,7 @@ mod tests {
             PreHirStmt::Return(None),
             PreHirStmt::Goto("L".to_string()),
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "FUN_0x140002000".to_string(),
                 args: Vec::new(),
                 ty: NirType::Unknown,

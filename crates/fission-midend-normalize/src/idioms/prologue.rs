@@ -1942,6 +1942,7 @@ mod tests {
                     spill_assign("local_6", PreHirExpr::Var("param_2".to_owned())),
                 ])),
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "callee".to_owned(),
                     args: vec![PreHirExpr::Var("local_6".to_owned())],
                     ty: u64_ty(),

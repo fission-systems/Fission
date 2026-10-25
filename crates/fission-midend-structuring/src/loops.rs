@@ -486,7 +486,13 @@ fn substitute_var(expr: &PreHirExpr, name: &str, replacement: &PreHirExpr) -> Pr
             else_expr: Box::new(substitute_var(else_expr, name, replacement)),
             ty: ty.clone(),
         },
-        PreHirExpr::Call { target, args, ty } => PreHirExpr::Call {
+        PreHirExpr::Call {
+            target,
+            args,
+            ty,
+            origin,
+        } => PreHirExpr::Call {
+            origin: *origin,
             target: target.clone(),
             args: args
                 .iter()

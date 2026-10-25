@@ -147,6 +147,7 @@ mod unused_receiver_tests {
 
     fn side_effecting_call() -> PreHirExpr {
         PreHirExpr::Call {
+            origin: None,
             target: "setvbuf".to_string(),
             args: Vec::new(),
             ty: NirType::Int {
@@ -271,6 +272,7 @@ mod unused_receiver_tests {
             locals: vec![local],
             body: vec![
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "escape".to_string(),
                     args: vec![PreHirExpr::AddressOfLocal("local".to_string())],
                     ty: NirType::Unknown,
@@ -293,6 +295,7 @@ mod unused_receiver_tests {
             body: vec![PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("eax".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__fission_callind_opaque".to_string(),
                     args: vec![PreHirExpr::Const(
                         3,
@@ -770,6 +773,7 @@ mod variadic_arity_tests {
         let mut summaries = indexmap::IndexMap::new();
         summaries.insert("defined_helper".to_string(), summary(Some(1)));
         let mut stmts = vec![PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "defined_helper".to_string(),
             args: (0..4)
                 .map(|value| PreHirExpr::Const(value, NirType::Unknown))

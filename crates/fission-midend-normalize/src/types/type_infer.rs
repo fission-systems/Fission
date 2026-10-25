@@ -752,6 +752,7 @@ mod tests {
             make_assign(
                 "source",
                 PreHirExpr::Call {
+                    origin: None,
                     target: "produce_value".to_string(),
                     args: vec![],
                     ty: NirType::Int {
@@ -807,6 +808,7 @@ mod tests {
     fn scalar_zero_alias_lifetime_preserves_address_taken_source() {
         let mut func = zero_alias_lifetime_func(vec![
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "write_value".to_string(),
                 args: vec![PreHirExpr::AddressOfLocal("source".to_string())],
                 ty: NirType::Unknown,

@@ -103,6 +103,7 @@ fn win64_variadic_shape_trims_unused_tail_params() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "sub_1400c05e8".into(),
             args: vec![
                 PreHirExpr::Var("param_1".into()),
@@ -148,6 +149,7 @@ fn loongarch32_existing_param_local_becomes_function_param_before_self_call_prun
         return_type: int32.clone(),
         surface_return_type_name: None,
         body: vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+            origin: None,
             target: "recursive_fib".into(),
             args: vec![PreHirExpr::Var("param_1".into())],
             ty: int32,

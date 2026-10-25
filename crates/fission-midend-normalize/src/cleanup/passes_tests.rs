@@ -61,6 +61,7 @@ fn recursive_empty_if_cleanup_prunes_nested_pure_empty_guard() {
 fn recursive_empty_if_cleanup_preserves_side_effectful_empty_guard() {
     let mut stmts = vec![PreHirStmt::If {
         cond: PreHirExpr::Call {
+            origin: None,
             target: "unknown_predicate".to_string(),
             args: Vec::new(),
             ty: NirType::Bool,
@@ -1012,6 +1013,7 @@ fn eliminate_dead_temp_assigns_removes_unused_reg_flag_artifact() {
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("reg".to_string()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "__sborrow".to_string(),
                 args: vec![
                     PreHirExpr::Var("rsp".to_string()),
@@ -1036,6 +1038,7 @@ fn eliminate_dead_temp_assigns_keeps_used_reg_flag_artifact() {
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("reg".to_string()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "__sborrow".to_string(),
                 args: vec![
                     PreHirExpr::Var("rsp".to_string()),
@@ -1315,6 +1318,7 @@ fn prune_unused_temp_bindings_keeps_side_effect_assignment_target() {
         body: vec![PreHirStmt::Assign {
             lhs: PreHirLValue::Var("xVar30".to_string()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "__pcodeop_294".to_string(),
                 args: vec![],
                 ty: int(64),
@@ -1562,6 +1566,7 @@ fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("xVar0".to_string()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "__sborrow".to_string(),
                 args: vec![
                     PreHirExpr::Var("param_1".to_string()),
@@ -1835,6 +1840,7 @@ fn inline_loop_header_temp_keeps_side_effecting_call() {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("xVar90".to_string()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "next_item".to_string(),
                         args: Vec::new(),
                         ty: int(64),
@@ -1865,6 +1871,7 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("xVar0".to_string()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "unknown_helper".to_string(),
                 args: vec![PreHirExpr::Var("param_1".to_string())],
                 ty: int(32),
@@ -2220,6 +2227,7 @@ fn deindirect_resolves_const_address_to_symbol() {
         name: "test_deindirect_const".to_string(),
         int_param_offsets: Vec::new(),
         body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "__fission_callind_opaque".to_string(),
             args: vec![
                 PreHirExpr::Const(0x401000, int(64)),
@@ -2294,6 +2302,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
             initializer: Some(PreHirExpr::Const(0x401000, int(64))),
         }],
         body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "__fission_callind_opaque".to_string(),
             args: vec![PreHirExpr::Var("fn_ptr".to_string())],
             ty: NirType::Unknown,
@@ -2370,6 +2379,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
         name: "test_deindirect_iat_load".to_string(),
         int_param_offsets: Vec::new(),
         body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "__fission_callind_opaque".to_string(),
             args: vec![iat_load, PreHirExpr::Var("param_1".to_string())],
             ty: NirType::Unknown,
@@ -2403,6 +2413,7 @@ fn diagnostic_print_expr_renders_callind_opaque_call_shape() {
     use fission_midend_prehir::util::format_expr_key;
 
     let expr = PreHirExpr::Call {
+        origin: None,
         target: "__fission_callind_opaque".to_string(),
         args: vec![
             PreHirExpr::Var("fn_ptr".to_string()),

@@ -2718,6 +2718,7 @@ mod tests {
                     rhs: PreHirExpr::Var("xVar1".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "strlen".to_string(),
                     args: vec![PreHirExpr::Var("local_8".to_string())],
                     ty: uint64,
@@ -2869,6 +2870,7 @@ mod tests {
             .collect();
         fission_pcode::PreHirFunction {
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: callee_name.to_string(),
                 args,
                 ty: NirType::Unknown,

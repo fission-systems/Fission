@@ -452,6 +452,7 @@ mod tests {
             ),
         };
         let call = PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "callee".to_string(),
             args: vec![PreHirExpr::AddressOfLocal("local_18".to_string())],
             ty: NirType::Unknown,

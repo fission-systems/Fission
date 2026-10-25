@@ -1210,6 +1210,7 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("local_c".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "sub_401000".to_string(),
                     args: vec![],
                     ty: NirType::Int {

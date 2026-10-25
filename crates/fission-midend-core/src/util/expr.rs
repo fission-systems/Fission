@@ -78,6 +78,7 @@ mod tests {
 
     fn call(target: &str) -> HirExpr {
         HirExpr::Call {
+            origin: None,
             target: target.to_string(),
             args: vec![HirExpr::Const(
                 1,

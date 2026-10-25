@@ -91,6 +91,7 @@ fn low_cost_builder_inline_accepts_single_use_load_chain() {
 #[test]
 fn low_cost_builder_inline_rejects_calls() {
     let expr = PreHirExpr::Call {
+        origin: None,
         target: "helper".to_string(),
         args: vec![PreHirExpr::Var("param_1".to_string())],
         ty: int(32),
@@ -104,6 +105,7 @@ fn low_cost_builder_inline_rejects_calls() {
 #[test]
 fn low_cost_builder_inline_accepts_pcodeop_intrinsics() {
     let expr = PreHirExpr::Call {
+        origin: None,
         target: "__pcodeop_294".to_string(),
         args: vec![PreHirExpr::Var("param_1".to_string())],
         ty: int(32),
@@ -199,6 +201,7 @@ fn carry_intrinsic_consumers_are_predicate_consumers() {
 #[test]
 fn lzcnt_intrinsic_rhs_is_low_cost_builder_inline_candidate() {
     let expr = PreHirExpr::Call {
+        origin: None,
         target: "__lzcnt".to_string(),
         args: vec![PreHirExpr::Var("tmp_1".to_string())],
         ty: int(32),
@@ -604,6 +607,7 @@ fn single_consumer_call_rhs_proof_marks_known_pure_intrinsic() {
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "__popcount".to_string(),
         args: vec![PreHirExpr::Var("tmp_1".to_string())],
         ty: int(32),
@@ -655,6 +659,7 @@ fn single_consumer_call_rhs_proof_marks_preview_unsafe_internal_call() {
     );
     let builder = PreviewBuilder::new(&pcode, &options, Some(&type_context));
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "FUN_0x140043d30".to_string(),
         args: vec![PreHirExpr::Var("arg_1".to_string())],
         ty: int(32),
@@ -706,6 +711,7 @@ fn carry_intrinsic_predicate_proof_marks_boolor_branch_chain() {
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "__carry".to_string(),
         args: vec![
             PreHirExpr::Var("a".to_string()),
@@ -754,6 +760,7 @@ fn carry_intrinsic_predicate_proof_marks_compare_zero_chain() {
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "__scarry".to_string(),
         args: vec![
             PreHirExpr::Var("a".to_string()),
@@ -798,6 +805,7 @@ fn intrinsic_compare_only_proof_marks_sborrow_compare_zero() {
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "__sborrow".to_string(),
         args: vec![
             PreHirExpr::Var("a".to_string()),
@@ -840,6 +848,7 @@ fn intrinsic_compare_only_proof_marks_carry_compare_nonzero() {
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "__carry".to_string(),
         args: vec![
             PreHirExpr::Var("a".to_string()),
@@ -1188,6 +1197,7 @@ fn parity_chain_proof_marks_popcount_result_role() {
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
     let rhs = PreHirExpr::Call {
+        origin: None,
         target: "__popcount".into(),
         args: vec![PreHirExpr::Var("tmp_1".into())],
         ty: int(32),
@@ -1235,6 +1245,7 @@ fn parity_chain_proof_marks_intand_result_role() {
     let rhs = PreHirExpr::Binary {
         op: PreHirBinaryOp::And,
         lhs: Box::new(PreHirExpr::Call {
+            origin: None,
             target: "__popcount".into(),
             args: vec![PreHirExpr::Var("tmp_1".into())],
             ty: int(32),
@@ -1676,6 +1687,7 @@ fn alias_unsafe_unknown_subtyping_marks_allowed_consumer_but_non_low_cost_rhs() 
         None,
         &output,
         &PreHirExpr::Call {
+            origin: None,
             target: "helper".to_string(),
             args: vec![PreHirExpr::Var("tmp_1".to_string())],
             ty: int(32),
@@ -1937,6 +1949,7 @@ fn address_stable_required_expr_kind_recognizes_nested_call() {
     let expr = PreHirExpr::Binary {
         op: PreHirBinaryOp::Add,
         lhs: Box::new(PreHirExpr::Call {
+            origin: None,
             target: "sub_140001000".to_string(),
             args: vec![PreHirExpr::Var("param_1".to_string())],
             ty: NirType::Unknown,

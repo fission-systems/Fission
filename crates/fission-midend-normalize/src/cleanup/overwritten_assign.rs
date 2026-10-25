@@ -359,6 +359,7 @@ mod tests {
                 set(
                     "rax",
                     PreHirExpr::Call {
+                        origin: None,
                         target: "side_effect".to_string(),
                         args: Vec::new(),
                         ty: u32_ty(),

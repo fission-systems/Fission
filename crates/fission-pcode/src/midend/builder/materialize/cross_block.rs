@@ -1217,6 +1217,7 @@ impl<'a> PreviewBuilder<'a> {
             stmts.push(PreHirStmt::Assign {
                 lhs: PreHirLValue::Var(binding.name),
                 rhs: select_rhs.unwrap_or_else(|| PreHirExpr::Call {
+                    origin: None,
                     target: "__fission_merge2".to_string(),
                     args,
                     ty: type_from_size(pending.output.size, false),

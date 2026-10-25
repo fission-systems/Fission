@@ -174,6 +174,7 @@ mod line_mapping_tests {
             line_number: 3,
             addresses: vec![0x1000],
             defined_variables: vec!["value".into()],
+            call_site: None,
         };
         let original = "WARNING: detail\n{\nvalue = 3;\n}";
         let filtered = strip::strip_warnings(original);

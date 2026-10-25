@@ -32,6 +32,71 @@ pub struct RecoveredVariable {
     /// when the builder can trace the rendered name to one scalar SSA value.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub addresses: Vec<u64>,
+    /// Partial inference context, not a certificate of complete class layout.
+    /// This describes the existing NIR type without consulting debug or source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_shape: Option<RecoveredTypeShape>,
+}
+
+/// Known NIR storage shape. Aggregate fields are observations; unobserved
+/// fields, bases, padding, vptrs and total source-object size are not inferred.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecoveredTypeShape {
+    Unknown,
+    Bool,
+    Int {
+        bits: u32,
+        signed: bool,
+    },
+    Float {
+        bits: u32,
+    },
+    Pointer {
+        pointee: Box<RecoveredTypeShape>,
+    },
+    Aggregate {
+        observed_size: u32,
+        fields: Vec<RecoveredTypeField>,
+        layout_complete: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RecoveredTypeField {
+    pub byte_offset: u32,
+    pub name: String,
+    pub shape: RecoveredTypeShape,
+}
+
+fn type_shape(ty: &NirType, depth: usize) -> RecoveredTypeShape {
+    if depth >= 32 {
+        return RecoveredTypeShape::Unknown;
+    }
+    match ty {
+        NirType::Unknown => RecoveredTypeShape::Unknown,
+        NirType::Bool => RecoveredTypeShape::Bool,
+        NirType::Int { bits, signed } => RecoveredTypeShape::Int {
+            bits: *bits,
+            signed: *signed,
+        },
+        NirType::Float { bits } => RecoveredTypeShape::Float { bits: *bits },
+        NirType::Ptr(pointee) => RecoveredTypeShape::Pointer {
+            pointee: Box::new(type_shape(pointee, depth + 1)),
+        },
+        NirType::Aggregate { size, fields } => RecoveredTypeShape::Aggregate {
+            observed_size: *size,
+            layout_complete: false,
+            fields: fields
+                .iter()
+                .map(|f| RecoveredTypeField {
+                    byte_offset: f.offset,
+                    name: f.name.clone(),
+                    shape: type_shape(&f.ty, depth + 1),
+                })
+                .collect(),
+        },
+    }
 }
 
 /// Byte width of a type, where it has one.
@@ -77,6 +142,7 @@ fn describe(
         kind,
         arg_index,
         addresses: Vec::new(),
+        type_shape: (!matches!(binding.ty, NirType::Unknown)).then(|| type_shape(&binding.ty, 0)),
     }
 }
 
@@ -255,6 +321,7 @@ mod tests {
             kind: "stack",
             arg_index: None,
             addresses: Vec::new(),
+            type_shape: None,
         };
 
         assert!(
