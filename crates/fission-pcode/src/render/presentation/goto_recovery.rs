@@ -204,6 +204,15 @@ fn body_is_goto_recoverable(stmts: &[HirStmt]) -> bool {
 ///   if (cond) goto Lbody;
 /// ```
 pub(super) fn recover_while_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut global_goto_refs = HashMap::new();
+    collect_goto_ref_counts(stmts, &mut global_goto_refs);
+    recover_while_from_gotos_inner(stmts, &global_goto_refs)
+}
+
+fn recover_while_from_gotos_inner(
+    stmts: &mut Vec<HirStmt>,
+    global_goto_refs: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
@@ -211,21 +220,21 @@ pub(super) fn recover_while_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
             | HirStmt::While { body: b, .. }
             | HirStmt::DoWhile { body: b, .. }
             | HirStmt::For { body: b, .. } => {
-                changed |= recover_while_from_gotos(b);
+                changed |= recover_while_from_gotos_inner(b, global_goto_refs);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= recover_while_from_gotos(then_body);
-                changed |= recover_while_from_gotos(else_body);
+                changed |= recover_while_from_gotos_inner(then_body, global_goto_refs);
+                changed |= recover_while_from_gotos_inner(else_body, global_goto_refs);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= recover_while_from_gotos(&mut case.body);
+                    changed |= recover_while_from_gotos_inner(&mut case.body, global_goto_refs);
                 }
-                changed |= recover_while_from_gotos(default);
+                changed |= recover_while_from_gotos_inner(default, global_goto_refs);
             }
             _ => {}
         }
@@ -233,7 +242,7 @@ pub(super) fn recover_while_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
 
     let mut i = 0;
     while i < stmts.len() {
-        if try_recover_while_at(stmts, i) {
+        if try_recover_while_at(stmts, i, global_goto_refs) {
             changed = true;
             continue;
         }
@@ -242,7 +251,11 @@ pub(super) fn recover_while_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn try_recover_while_at(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
+fn try_recover_while_at(
+    stmts: &mut Vec<HirStmt>,
+    i: usize,
+    global_goto_refs: &HashMap<String, usize>,
+) -> bool {
     let HirStmt::Goto(lcond) = &stmts[i] else {
         return false;
     };
@@ -279,11 +292,8 @@ fn try_recover_while_at(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
     }
     let cond = cond.clone();
 
-    // Only this loop's back-edge should target Lbody (plus nothing else in range).
-    // Allow gotos to Lbody only from the condition if we are about to remove.
-    let goto_lbody = count_goto_refs(stmts, &lbody);
-    // The condition if contributes 1; any other ref blocks recovery.
-    if goto_lbody != 1 {
+    // Only this loop's back-edge should target Lbody across the entire function.
+    if global_goto_refs.get(&lbody).copied() != Some(1) || count_goto_refs(stmts, &lbody) != 1 {
         return false;
     }
 
@@ -293,6 +303,16 @@ fn try_recover_while_at(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
     }
     // No other labels inside body (would break linear while).
     if body.iter().any(|s| matches!(s, HirStmt::Label(_))) {
+        return false;
+    }
+
+    // Every goto targeting Lcond must be accounted for by either the header jump
+    // at `stmts[i]` or `continue` jumps inside `body`. Any external reference
+    // would be left dangling once `Label(Lcond)` is consumed.
+    let internal_lcond_refs = 1 + count_goto_refs(&body, &lcond);
+    if global_goto_refs.get(&lcond).copied() != Some(internal_lcond_refs)
+        || count_goto_refs(stmts, &lcond) != internal_lcond_refs
+    {
         return false;
     }
 
@@ -470,7 +490,7 @@ fn try_recover_if_else_at(
             HirStmt::Return(_) | HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue
         )
     });
-    if then_terminal || then_body.is_empty() {
+    if then_terminal {
         // Take else body as statements after label until next Label (exclusive) or end.
         let else_end = stmts[le_idx + 1..]
             .iter()
@@ -495,7 +515,8 @@ fn try_recover_if_else_at(
 
     // Pattern: if (C) goto Lskip; BODY; Label(Lskip);  (no else body — skip only)
     // → if (!C) { BODY }
-    if le_idx + 1 == stmts.len()
+    if fallthrough.is_empty()
+        || le_idx + 1 == stmts.len()
         || !matches!(&stmts[le_idx + 1], HirStmt::Label(_)) && count_goto_refs(stmts, &lelse) == 1
     {
         // If there is content after the label that is not exclusively the else of
@@ -515,6 +536,8 @@ fn try_recover_if_else_at(
                     then_body: fallthrough.to_vec(),
                     else_body: vec![],
                 });
+            } else if !super::expr_is_presentation_pure(&cond) {
+                rebuilt.push(HirStmt::Expr(cond));
             }
             // Keep label for fallthrough join if still needed by others; if single
             // ref (this if, now removed), drop label.
