@@ -124,14 +124,14 @@ pub fn duplicate_terminal_tails_within(
         gotoless_budget,
     );
     if candidates.is_empty() {
-        return (body, 0);
+        return (body, split);
     }
 
     let plans: HashMap<String, Vec<PreHirStmt>> = candidates.into_iter().collect();
     let mut removed = 0usize;
     replace_gotos_in_place(&mut body, &plans, &mut removed);
     if removed == 0 {
-        return (body, 0);
+        return (body, split);
     }
     // Drop an original only when nothing targets its label any more. The
     // reference count must be *recomputed*: a `Goto` sitting inside freshly
@@ -142,7 +142,7 @@ pub fn duplicate_terminal_tails_within(
     // behind it, so this pass owns the removal.
     let remaining = super::collect_referenced_label_counts(&body);
     drop_unreachable_tail_definitions(&mut body, &plans, protected, &remaining);
-    (body, removed)
+    (body, removed + split)
 }
 
 /// Walk every statement sequence looking for `Label(L)` followed by a
@@ -192,13 +192,13 @@ fn split_fallthrough_return_tails(
 
         let tail: Vec<PreHirStmt> = rest[idx + 1..].to_vec();
         let cost: usize = tail.iter().map(statement_count).sum();
+        let is_pure_return_tail = matches!(tail.as_slice(), [PreHirStmt::Return(_)]);
         let admissible = !tail.is_empty()
             && region_leaves(&tail)
             && region_is_relocatable(&tail, false)
             && cost <= MAX_TAIL_STMTS
             && cost <= *budget
-            // Both arms take a copy, so this is the refs >= 2 case above.
-            && region_free_reads(&tail) > 0;
+            && (is_pure_return_tail || region_free_reads(&tail) > 0);
         if !admissible {
             let stmt = std::mem::replace(&mut rest[idx], PreHirStmt::Break);
             out.push(recurse_split(stmt, budget, &mut split));
@@ -207,14 +207,13 @@ fn split_fallthrough_return_tails(
         }
 
         let host = std::mem::replace(&mut rest[idx], PreHirStmt::Break);
-        let Some(host) = append_tail_to_last_if(host, &tail) else {
-            out.push(recurse_split(
-                std::mem::replace(&mut rest[idx], PreHirStmt::Break),
-                budget,
-                &mut split,
-            ));
-            idx += 1;
-            continue;
+        let host = match append_tail_to_last_if(host, &tail) {
+            Ok(h) => h,
+            Err(original) => {
+                out.push(recurse_split(original, budget, &mut split));
+                idx += 1;
+                continue;
+            }
         };
         *budget = budget.saturating_sub(cost);
         split += 1;
@@ -245,7 +244,7 @@ fn last_if_is_splittable(stmt: &PreHirStmt) -> bool {
 }
 
 /// Append `tail` to both arms of the `if` [`last_if_is_splittable`] found.
-fn append_tail_to_last_if(stmt: PreHirStmt, tail: &[PreHirStmt]) -> Option<PreHirStmt> {
+fn append_tail_to_last_if(stmt: PreHirStmt, tail: &[PreHirStmt]) -> Result<PreHirStmt, PreHirStmt> {
     match stmt {
         PreHirStmt::If {
             cond,
@@ -256,7 +255,7 @@ fn append_tail_to_last_if(stmt: PreHirStmt, tail: &[PreHirStmt]) -> Option<PreHi
             then_next.extend(tail.iter().cloned());
             let mut else_next = else_body.as_ref().clone();
             else_next.extend(tail.iter().cloned());
-            Some(PreHirStmt::If {
+            Ok(PreHirStmt::If {
                 cond,
                 then_body: std::rc::Rc::new(then_next),
                 else_body: std::rc::Rc::new(else_next),
@@ -264,11 +263,18 @@ fn append_tail_to_last_if(stmt: PreHirStmt, tail: &[PreHirStmt]) -> Option<PreHi
         }
         PreHirStmt::Block(body) => {
             let mut inner = body.as_ref().clone();
-            let last = inner.pop()?;
-            inner.push(append_tail_to_last_if(last, tail)?);
-            Some(PreHirStmt::Block(std::rc::Rc::new(inner)))
+            let Some(last) = inner.pop() else {
+                return Err(PreHirStmt::Block(body));
+            };
+            match append_tail_to_last_if(last, tail) {
+                Ok(updated) => {
+                    inner.push(updated);
+                    Ok(PreHirStmt::Block(std::rc::Rc::new(inner)))
+                }
+                Err(_) => Err(PreHirStmt::Block(body)),
+            }
         }
-        _ => None,
+        other => Err(other),
     }
 }
 
@@ -950,5 +956,86 @@ mod tests {
             ] if first.as_slice() == [expr_stmt("x"), PreHirStmt::Return(Some(var("b")))]
                 && second.as_slice() == first.as_slice()
         ));
+    }
+
+    #[test]
+    fn splits_constant_and_void_fallthrough_return_tails_and_reports_split_count() {
+        use fission_midend_core::ir::NirType;
+
+        let const_zero = PreHirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        );
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![expr_stmt("a")].into(),
+                else_body: vec![expr_stmt("b")].into(),
+            },
+            PreHirStmt::Return(Some(const_zero.clone())),
+            PreHirStmt::Label("unused_or_other".into()),
+        ];
+        // Wait: tail must end in Return, so test without trailing label first,
+        // and also test when there is a referenced label so duplicate_terminal_tails_within
+        // traverses past `counts.is_empty()`.
+        let simple_body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![expr_stmt("a")].into(),
+                else_body: vec![expr_stmt("b")].into(),
+            },
+            PreHirStmt::Return(Some(const_zero.clone())),
+        ];
+        let (out, count) = duplicate_terminal_tails(simple_body, &HashSet::default());
+        assert_eq!(count, 1);
+        assert_eq!(
+            out,
+            vec![PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![expr_stmt("a"), PreHirStmt::Return(Some(const_zero.clone()))]
+                    .into(),
+                else_body: vec![expr_stmt("b"), PreHirStmt::Return(Some(const_zero))].into(),
+            }]
+        );
+        let _ = body;
+    }
+
+    #[test]
+    fn append_tail_to_last_if_fallback_preserves_original_stmt_without_injecting_break() {
+        // If `append_tail_to_last_if` returns `None` on a non-If/Block statement,
+        // it must return `None` without corrupting caller state, and `split_fallthrough_return_tails`
+        // must preserve all statements when recursion occurs.
+        assert_eq!(
+            append_tail_to_last_if(expr_stmt("keep_me"), &[PreHirStmt::Return(None)]),
+            Err(expr_stmt("keep_me"))
+        );
+
+        let body = vec![
+            PreHirStmt::While {
+                cond: var("w"),
+                body: vec![
+                    PreHirStmt::If {
+                        cond: var("c"),
+                        then_body: vec![expr_stmt("a")].into(),
+                        else_body: vec![expr_stmt("b")].into(),
+                    },
+                    PreHirStmt::Return(None),
+                ]
+                .into(),
+            },
+            PreHirStmt::Goto("nowhere".into()),
+        ];
+        let (out, count) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(
+            count, 1,
+            "split count must be preserved even when candidates.is_empty()"
+        );
+        assert!(
+            !out.iter().any(|s| matches!(s, PreHirStmt::Break)),
+            "must never inject top-level Break"
+        );
     }
 }
