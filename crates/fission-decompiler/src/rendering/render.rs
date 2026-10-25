@@ -413,13 +413,10 @@ pub(crate) fn render_nir_from_json_with_type_context(
             Err(err) if err == "nir worker unavailable" => {
                 nir_diag_event(address, "worker_unavailable", "falling back to in-process");
             }
-            Err(err) => {
-                nir_diag_event(
-                    address,
-                    "worker_failed",
-                    format!("{err}; falling back to in-process"),
-                );
-            }
+            // A timed-out or crashed worker is exactly the case the worker
+            // isolates; re-running the same request in-process would hang or
+            // crash the host instead.
+            Err(err) => return Err(err),
         }
     }
 
