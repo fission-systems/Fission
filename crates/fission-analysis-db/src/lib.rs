@@ -574,6 +574,18 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
 
     let mut rows: BTreeMap<SymbolKey, SymbolFacts> = BTreeMap::new();
 
+    let lookup_version = |name: &str, addr: &u64| {
+        binary
+            .symbol_version_names
+            .get(name)
+            .or_else(|| {
+                let bare = name.split('@').next().unwrap_or(name);
+                binary.symbol_version_names.get(bare)
+            })
+            .or_else(|| binary.symbol_versions.get(addr))
+            .cloned()
+    };
+
     for function in functions {
         if function.name.is_empty() {
             continue;
@@ -589,7 +601,7 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             (function.entry, kind, function.name.clone()),
             (
                 (function.size != 0).then_some(function.size),
-                binary.symbol_versions.get(&function.entry).cloned(),
+                lookup_version(&function.name, &function.entry),
                 function.provenance.source,
             ),
         );
@@ -597,11 +609,7 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
     for (address, name) in &binary.iat_symbols {
         rows.insert(
             (*address, SymbolKind::Import, name.clone()),
-            (
-                None,
-                binary.symbol_versions.get(address).cloned(),
-                FactSource::ImportTable,
-            ),
+            (None, lookup_version(name, address), FactSource::ImportTable),
         );
     }
     for (address, name) in &binary.global_symbols {
@@ -609,7 +617,7 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             (*address, SymbolKind::Data, name.clone()),
             (
                 binary.global_symbol_sizes.get(address).copied(),
-                binary.symbol_versions.get(address).cloned(),
+                lookup_version(name, address),
                 FactSource::SymbolTable,
             ),
         );
@@ -623,7 +631,7 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             (symbol.address, kind, symbol.name.clone()),
             (
                 binary.global_symbol_sizes.get(&symbol.address).copied(),
-                binary.symbol_versions.get(&symbol.address).cloned(),
+                lookup_version(&symbol.name, &symbol.address),
                 FactSource::SymbolTable,
             ),
         );
@@ -1055,5 +1063,66 @@ mod tests {
         );
         assert_eq!(headers.provenance.source, FactSource::Loader);
         assert_eq!(snapshot.memory_blocks[1].name, ".text");
+    }
+
+    #[test]
+    fn imported_and_aliased_symbols_retain_correct_version_strings() {
+        let mut ver_names = std::collections::HashMap::new();
+        ver_names.insert("puts".to_string(), "GLIBC_2.2.5".to_string());
+        ver_names.insert("puts@GLIBC_2.2.5".to_string(), "GLIBC_2.2.5".to_string());
+        ver_names.insert("alias_v1".to_string(), "VER_1.0".to_string());
+        ver_names.insert("alias_v2".to_string(), "VER_2.0".to_string());
+
+        let binary =
+            LoadedBinaryBuilder::new("elf_version_test.bin".into(), DataBuffer::Heap(vec![0; 16]))
+                .format("ELF")
+                .image_base(0x400000)
+                .is_64bit(true)
+                .add_iat_symbol(0x404018, "puts".into())
+                .add_function(FunctionInfo {
+                    name: "alias_v1".into(),
+                    address: 0x401000,
+                    size: 32,
+                    is_export: true,
+                    ..FunctionInfo::default()
+                })
+                .add_function(FunctionInfo {
+                    name: "alias_v2".into(),
+                    address: 0x401000,
+                    size: 32,
+                    is_export: true,
+                    ..FunctionInfo::default()
+                })
+                .add_symbol_version_names(ver_names)
+                .build()
+                .expect("binary should build");
+
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+
+        // 1. IAT symbol (puts at GOT slot 0x404018) should have version GLIBC_2.2.5
+        let puts_sym = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "puts")
+            .expect("puts symbol must exist");
+        assert_eq!(puts_sym.kind, SymbolKind::Import);
+        assert_eq!(puts_sym.version.as_deref(), Some("GLIBC_2.2.5"));
+
+        // 2. Aliased functions sharing address 0x401000 should retain distinct versions
+        let alias1 = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "alias_v1")
+            .expect("alias_v1 must exist");
+        assert_eq!(alias1.address, 0x401000);
+        assert_eq!(alias1.version.as_deref(), Some("VER_1.0"));
+
+        let alias2 = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "alias_v2")
+            .expect("alias_v2 must exist");
+        assert_eq!(alias2.address, 0x401000);
+        assert_eq!(alias2.version.as_deref(), Some("VER_2.0"));
     }
 }

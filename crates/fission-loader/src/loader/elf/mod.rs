@@ -225,6 +225,7 @@ impl ElfLoader {
         let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
+        let mut symbol_version_names = HashMap::new();
         let ext_nums = resolve_extended_numbers_64(bytes, &header, endian);
         let phdrs = read_program_headers_64(bytes, &header, ext_nums.phnum, endian);
         let mut image_base = if !is_relocatable {
@@ -429,7 +430,15 @@ impl ElfLoader {
             let bytes_patched = data.as_slice();
             relocs = parse_relocations_64(bytes_patched, &shdrs, &section_addresses, endian);
             let ver_names = parse_gnu_versions_64(bytes_patched, &shdrs, endian);
-            symbol_versions = map_symbol_versions_64(bytes_patched, &shdrs, endian, &ver_names);
+            let (mut sym_vers, sym_ver_names) =
+                map_symbol_versions_64(bytes_patched, &shdrs, endian, &ver_names);
+            for (addr, name) in &iat_symbols {
+                if let Some(ver) = sym_ver_names.get(name) {
+                    sym_vers.entry(*addr).or_insert_with(|| ver.clone());
+                }
+            }
+            symbol_versions = sym_vers;
+            symbol_version_names = sym_ver_names;
         }
 
         if sections_info.is_empty() && !is_relocatable {
@@ -512,6 +521,7 @@ impl ElfLoader {
             .add_inferred_types(header_types)
             .add_relocations(relocs)
             .add_symbol_versions(symbol_versions)
+            .add_symbol_version_names(symbol_version_names)
             .build()
     }
 
@@ -535,6 +545,7 @@ impl ElfLoader {
         let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
+        let mut symbol_version_names = HashMap::new();
         let ext_nums = resolve_extended_numbers_32(bytes, &header, endian);
         let phdrs = read_program_headers_32(bytes, &header, ext_nums.phnum, endian);
         let mut image_base = if !is_relocatable {
@@ -713,7 +724,15 @@ impl ElfLoader {
             let bytes_patched = data.as_slice();
             relocs = parse_relocations_32(bytes_patched, &shdrs, &section_addresses, endian);
             let ver_names = parse_gnu_versions_32(bytes_patched, &shdrs, endian);
-            symbol_versions = map_symbol_versions_32(bytes_patched, &shdrs, endian, &ver_names);
+            let (mut sym_vers, sym_ver_names) =
+                map_symbol_versions_32(bytes_patched, &shdrs, endian, &ver_names);
+            for (addr, name) in &iat_symbols {
+                if let Some(ver) = sym_ver_names.get(name) {
+                    sym_vers.entry(*addr).or_insert_with(|| ver.clone());
+                }
+            }
+            symbol_versions = sym_vers;
+            symbol_version_names = sym_ver_names;
         }
 
         if sections_info.is_empty() && !is_relocatable {
@@ -796,6 +815,7 @@ impl ElfLoader {
             .add_inferred_types(header_types)
             .add_relocations(relocs)
             .add_symbol_versions(symbol_versions)
+            .add_symbol_version_names(symbol_version_names)
             .build()
     }
 
@@ -2684,14 +2704,16 @@ fn map_symbol_versions_64(
     shdrs: &[Elf64Shdr],
     endian: Endian,
     ver_names: &HashMap<u32, String>,
-) -> HashMap<u64, String> {
+) -> (HashMap<u64, String>, HashMap<String, String>) {
     let reader = ByteReader::new(full_data, endian);
     let mut symbol_versions = HashMap::new();
+    let mut symbol_version_names = HashMap::new();
 
     for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6fffffff) {
         let Some(symtab_shdr) = shdrs.get(shdr.sh_link as usize) else {
             continue;
         };
+        let strtab = symbol_string_table_64(full_data, shdrs, symtab_shdr);
 
         let versym_offset = shdr.sh_offset as usize;
         let versym_count = (shdr.sh_size as usize) / 2;
@@ -2721,12 +2743,28 @@ fn map_symbol_versions_64(
                             }
                         }
                     }
+                    if let Some(strtab_data) = strtab {
+                        if let Some(name) =
+                            symbol_name_64(full_data, symtab_shdr, strtab_data, idx, endian)
+                        {
+                            let is_default = (ver_idx & 0x8000) == 0;
+                            let bare = name.split('@').next().unwrap_or(&name).to_string();
+                            symbol_version_names.insert(name.clone(), ver_name.clone());
+                            symbol_version_names
+                                .insert(format!("{bare}@{ver_name}"), ver_name.clone());
+                            symbol_version_names
+                                .insert(format!("{bare}@@{ver_name}"), ver_name.clone());
+                            if is_default || !symbol_version_names.contains_key(&bare) {
+                                symbol_version_names.insert(bare, ver_name.clone());
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    symbol_versions
+    (symbol_versions, symbol_version_names)
 }
 
 fn parse_gnu_versions_32(
@@ -2862,14 +2900,16 @@ fn map_symbol_versions_32(
     shdrs: &[Elf32Shdr],
     endian: Endian,
     ver_names: &HashMap<u32, String>,
-) -> HashMap<u64, String> {
+) -> (HashMap<u64, String>, HashMap<String, String>) {
     let reader = ByteReader::new(full_data, endian);
     let mut symbol_versions = HashMap::new();
+    let mut symbol_version_names = HashMap::new();
 
     for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6fffffff) {
         let Some(symtab_shdr) = shdrs.get(shdr.sh_link as usize) else {
             continue;
         };
+        let strtab = symbol_string_table_32(full_data, shdrs, symtab_shdr);
 
         let versym_offset = shdr.sh_offset as usize;
         let versym_count = (shdr.sh_size as usize) / 2;
@@ -2899,12 +2939,28 @@ fn map_symbol_versions_32(
                             }
                         }
                     }
+                    if let Some(strtab_data) = strtab {
+                        if let Some(name) =
+                            symbol_name_32(full_data, symtab_shdr, strtab_data, idx, endian)
+                        {
+                            let is_default = (ver_idx & 0x8000) == 0;
+                            let bare = name.split('@').next().unwrap_or(&name).to_string();
+                            symbol_version_names.insert(name.clone(), ver_name.clone());
+                            symbol_version_names
+                                .insert(format!("{bare}@{ver_name}"), ver_name.clone());
+                            symbol_version_names
+                                .insert(format!("{bare}@@{ver_name}"), ver_name.clone());
+                            if is_default || !symbol_version_names.contains_key(&bare) {
+                                symbol_version_names.insert(bare, ver_name.clone());
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    symbol_versions
+    (symbol_versions, symbol_version_names)
 }
 
 #[cfg(test)]
@@ -3967,6 +4023,30 @@ mod tests {
         assert_eq!(
             symbol_value_32(&data32, &symtab32, &[0], 0, Endian::Little),
             Some(0x1234_5678)
+        );
+    }
+
+    #[test]
+    fn dynamic_elf_populates_symbol_versions_for_imported_symbols() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_enum_test.elf");
+        if !path.is_file() {
+            return;
+        }
+        let bin = LoadedBinary::from_file(&path).expect("load dynamic ELF");
+        assert!(
+            !bin.inner().symbol_version_names.is_empty(),
+            "expected non-empty symbol_version_names for ELF with .gnu.version_r"
+        );
+        assert_eq!(
+            bin.inner().symbol_version_names.get("__libc_start_main"),
+            Some(&"GLIBC_2.34".to_string())
+        );
+        assert!(
+            bin.inner()
+                .symbol_versions
+                .values()
+                .any(|v| v == "GLIBC_2.34"),
+            "expected GOT slot address to map to GLIBC_2.34"
         );
     }
 }
