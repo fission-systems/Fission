@@ -3412,6 +3412,55 @@ mod tests {
                 ty: NirType::Bool,
             }
         );
+
+        // Tautology / contradiction when both select arms equal the compared constant:
+        // (cond ? 5 : 5) == 5 -> 1 (true), (cond ? 5 : 5) != 5 -> 0 (false).
+        let same_select = || HirExpr::Select {
+            cond: Box::new(HirExpr::Const(0, NirType::Bool)),
+            then_expr: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            else_expr: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            ty: int_ty(32, true),
+        };
+        let mut tautology = HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(same_select()),
+            rhs: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_conditions_in_expr(&mut tautology));
+        assert_eq!(tautology, HirExpr::Const(1, NirType::Bool));
+
+        let mut contradiction = HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs: Box::new(same_select()),
+            rhs: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_conditions_in_expr(&mut contradiction));
+        assert_eq!(contradiction, HirExpr::Const(0, NirType::Bool));
+    }
+
+    #[test]
+    fn condition_rewrite_preserves_bitwise_or_with_side_effects() {
+        let call_b = HirExpr::Call {
+            target: "query_state".into(),
+            args: Vec::new(),
+            ty: int_ty(32, false),
+        };
+        let mut expr = HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Or,
+                lhs: Box::new(HirExpr::Var("status".into())),
+                rhs: Box::new(call_b),
+                ty: int_ty(32, false),
+            }),
+            rhs: Box::new(HirExpr::Const(0, int_ty(32, false))),
+            ty: NirType::Bool,
+        };
+        let original = expr.clone();
+        assert!(!canonicalize_conditions_in_expr(&mut expr));
+        assert_eq!(expr, original);
     }
 
     #[test]
