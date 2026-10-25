@@ -2020,6 +2020,86 @@ mod tests {
         assert_eq!(dp.is_import, false);
         assert_eq!(dp.kind, Some("delay_proxy".to_string()));
     }
+
+    #[test]
+    fn pe_loader_parses_delay_imports_v1_va_based_descriptors() {
+        let mut data = vec![0u8; 0x1000];
+        // DOS Header
+        data[0x00] = b'M';
+        data[0x01] = b'Z';
+        data[0x3C] = 0x80; // e_lfanew = 0x80
+        // PE Signature
+        data[0x80] = b'P';
+        data[0x81] = b'E';
+        // COFF Header (20 bytes)
+        data[0x84] = 0x4C;
+        data[0x85] = 0x01; // Machine = 0x14C (x86)
+        data[0x86] = 1; // NumberOfSections = 1
+        data[0x94] = 0xE0; // SizeOfOptionalHeader = 224 (0xE0)
+
+        // Optional Header (at 0x98)
+        data[0x98] = 0x0B;
+        data[0x99] = 0x01; // Magic = 0x10B (PE32)
+        // ImageBase (at 0x98 + 28 = 0xB4)
+        data[0xB4] = 0x00;
+        data[0xB5] = 0x00;
+        data[0xB6] = 0x40; // ImageBase = 0x400000
+        // Data Directories (16 entries)
+        data[0xF4] = 16;
+
+        // Delay Load Import Table at 0x160: RVA = 0x1000, size = 64
+        data[0x160..0x164].copy_from_slice(&0x1000u32.to_le_bytes());
+        data[0x164..0x168].copy_from_slice(&64u32.to_le_bytes());
+
+        // Section Headers (at 0x178)
+        let section_offset = 0x178;
+        data[section_offset..section_offset + 5].copy_from_slice(b".text");
+        data[section_offset + 8..section_offset + 12].copy_from_slice(&0x1000u32.to_le_bytes());
+        data[section_offset + 12..section_offset + 16].copy_from_slice(&0x1000u32.to_le_bytes());
+        data[section_offset + 16..section_offset + 20].copy_from_slice(&0x1000u32.to_le_bytes());
+        data[section_offset + 20..section_offset + 24].copy_from_slice(&0x200u32.to_le_bytes());
+        data[section_offset + 36..section_offset + 40]
+            .copy_from_slice(&0x60000020u32.to_le_bytes());
+
+        // --- Delay Import Data in Section 1 (file offset 0x200) ---
+        // V1 Delay import descriptor: gr_attrs = 0 (VA based)
+        data[0x200..0x204].copy_from_slice(&0u32.to_le_bytes());
+        // rva_dll_name as VA = 0x401040 (0x400000 + 0x1040)
+        data[0x204..0x208].copy_from_slice(&0x401040u32.to_le_bytes());
+        // rva_iat as VA = 0x401060 (0x400000 + 0x1060)
+        data[0x20C..0x210].copy_from_slice(&0x401060u32.to_le_bytes());
+        // rva_int as VA = 0x401080 (0x400000 + 0x1080)
+        data[0x210..0x214].copy_from_slice(&0x401080u32.to_le_bytes());
+
+        // DLL name at file offset 0x240
+        data[0x240..0x24d].copy_from_slice(b"my_delay.dll\0");
+
+        // IAT at file offset 0x260
+        data[0x260..0x264].copy_from_slice(&0x10C0u32.to_le_bytes());
+
+        // INT at file offset 0x280: Entry 0 as VA = 0x4010A0 (0x400000 + 0x10A0)
+        data[0x280..0x284].copy_from_slice(&0x4010A0u32.to_le_bytes());
+
+        // Name Record at file offset 0x2A0: Hint = 0, Name = "DelayV1Func"
+        data[0x2A0..0x2A2].copy_from_slice(&0u16.to_le_bytes());
+        data[0x2A2..0x2Ae].copy_from_slice(b"DelayV1Func\0");
+
+        let result = PeLoader::parse(DataBuffer::Heap(data), "synthetic_delay_v1.exe".to_string());
+        assert!(result.is_ok());
+        let bin = result.unwrap();
+
+        let delay_func = bin
+            .functions
+            .iter()
+            .find(|f| f.name == "my_delay.dll!DelayV1Func");
+        assert!(
+            delay_func.is_some(),
+            "DelayV1Func import should be recovered"
+        );
+        let df = delay_func.unwrap();
+        assert_eq!(df.address, 0x401060);
+        assert!(df.is_import);
+    }
 }
 
 #[cfg(test)]

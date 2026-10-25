@@ -447,10 +447,9 @@ impl MachoLoader {
         for index in 0..nsyms {
             let offset = sym_off as usize + index as usize * Nlist64::SIZE;
             if let Ok(nlist) = Nlist64::parse(&reader, offset) {
-                // If n_type & N_STAB == 0 && (n_type & N_EXT)
-                // (n_type & N_TYPE) == N_SECT (0x0e)
-                let n_type = nlist.n_type & 0x0e;
-                if n_type == 0x0e {
+                // Exclude STABS debug symbols ((n_type & 0xe0) != 0).
+                // Only keep N_SECT symbols ((n_type & 0x0e) == 0x0e).
+                if (nlist.n_type & 0xe0) == 0 && (nlist.n_type & 0x0e) == 0x0e {
                     // Only keep symbols that belong to executable sections.
                     // n_sect is 1-based across all sections in Mach-O.
                     let sect_index = nlist.n_sect as usize;
@@ -478,7 +477,7 @@ impl MachoLoader {
                             name: final_name,
                             address: nlist.n_value,
                             size: 0,
-                            is_export: true,
+                            is_export: is_external,
                             is_import: false,
                             origin: Some("macho-symtab".to_string()),
                             kind: Some("code".to_string()),
@@ -614,8 +613,9 @@ impl MachoLoader {
             let Ok(nlist) = Nlist32::parse(&reader, offset) else {
                 break;
             };
-            let n_type = nlist.n_type & 0x0e;
-            if n_type != 0x0e {
+            // Exclude STABS debug symbols ((n_type & 0xe0) != 0).
+            // Only keep N_SECT symbols ((n_type & 0x0e) == 0x0e).
+            if (nlist.n_type & 0xe0) != 0 || (nlist.n_type & 0x0e) != 0x0e {
                 continue;
             }
             let sect_index = nlist.n_sect as usize;
@@ -638,7 +638,7 @@ impl MachoLoader {
                     name: final_name,
                     address: nlist.n_value as u64,
                     size: 0,
-                    is_export: true,
+                    is_export: is_external,
                     is_import: false,
                     origin: Some("macho-symtab".to_string()),
                     kind: Some("code".to_string()),
@@ -1281,6 +1281,53 @@ mod tests {
         assert_eq!(functions[0].size, 0x44);
         assert_eq!(functions[1].size, 0x58);
         assert_eq!(functions[2].size, 0);
+    }
+
+    #[test]
+    fn parse_symbols_64_distinguishes_exports_and_filters_stabs() {
+        let mut data = Vec::new();
+        let str_off = 100;
+
+        // Symbol 1: exported fn (n_type = 0x0f = N_SECT | N_EXT)
+        push_nlist64(&mut data, 1, 0x0f, 1, 0x1000);
+        // Symbol 2: local fn (n_type = 0x0e = N_SECT)
+        push_nlist64(&mut data, 14, 0x0e, 1, 0x2000);
+        // Symbol 3: STABS debug symbol (n_type = 0xee = 0xe0 | 0x0e)
+        push_nlist64(&mut data, 24, 0xee, 1, 0x3000);
+
+        data.resize(str_off, 0);
+        data.extend_from_slice(b"\0_exported_fn\0_local_fn\0_stab_sym\0");
+
+        let section_exec_map = vec![true];
+        let mut functions = Vec::new();
+        let mut global_symbols = HashMap::new();
+
+        let symtab = SymtabCommand {
+            cmd: 0,
+            cmdsize: 0,
+            symoff: 0,
+            nsyms: 3,
+            stroff: 100,
+            strsize: 40,
+        };
+
+        MachoLoader::parse_symbols_64(
+            &data,
+            &symtab,
+            Endian::Little,
+            &section_exec_map,
+            &mut functions,
+            &mut global_symbols,
+        );
+
+        assert_eq!(functions.len(), 2);
+        assert_eq!(functions[0].name, "exported_fn");
+        assert_eq!(functions[0].address, 0x1000);
+        assert!(functions[0].is_export);
+
+        assert_eq!(functions[1].name, "local_fn");
+        assert_eq!(functions[1].address, 0x2000);
+        assert!(!functions[1].is_export);
     }
 
     fn push_nlist64(data: &mut Vec<u8>, n_strx: u32, n_type: u8, n_sect: u8, n_value: u64) {
