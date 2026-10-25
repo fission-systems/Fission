@@ -16,7 +16,7 @@ mod relocation_patches;
 #[cfg(test)]
 use relocation_patches::{
     apply_arm_relocation_to_word, apply_loongarch_relocation_to_word,
-    apply_riscv_relocation_to_word, arm_branch_addend,
+    apply_riscv_relocation_to_word, arm_branch_addend, symbol_value_32, symbol_value_64,
 };
 use relocation_patches::{
     apply_u32_relocation_patches, apply_u64_relocation_patches, arm_relocation_patches_32,
@@ -56,6 +56,7 @@ const SHN_UNDEF: u16 = 0;
 const _SHN_LORESERVE: u16 = 0xff00;
 const SHN_XINDEX: u16 = 0xffff;
 const PN_XNUM: u16 = 0xffff;
+const SHN_ABS: u16 = 0xfff1;
 const STT_NOTYPE: u8 = 0;
 const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
@@ -864,7 +865,7 @@ impl ElfLoader {
             let externally_visible = binding == STB_GLOBAL || binding == STB_WEAK;
 
             if sym.st_shndx == SHN_UNDEF {
-                if is_dynamic_table
+                if (is_dynamic_table || is_relocatable)
                     && externally_visible
                     && (sym_type == STT_FUNC || sym_type == STT_NOTYPE)
                 {
@@ -878,7 +879,14 @@ impl ElfLoader {
                             size: 0,
                             is_export: false,
                             is_import: true,
-                            origin: Some("elf-dynsym".to_string()),
+                            origin: Some(
+                                if is_dynamic_table {
+                                    "elf-dynsym"
+                                } else {
+                                    "elf-symtab"
+                                }
+                                .to_string(),
+                            ),
                             kind: Some("undefined_external".to_string()),
                             source_section: None,
                             external_library: None,
@@ -896,7 +904,7 @@ impl ElfLoader {
                 .map(|shdr| (shdr.sh_flags & SHF_EXECINSTR) != 0)
                 .unwrap_or(false);
 
-            let raw_address = if is_relocatable {
+            let raw_address = if is_relocatable && sym.st_shndx != SHN_ABS {
                 section_addresses
                     .get(sym.st_shndx as usize)
                     .copied()
@@ -1016,7 +1024,7 @@ impl ElfLoader {
             let externally_visible = binding == STB_GLOBAL || binding == STB_WEAK;
 
             if sym.st_shndx == SHN_UNDEF {
-                if is_dynamic_table
+                if (is_dynamic_table || is_relocatable)
                     && externally_visible
                     && (sym_type == STT_FUNC || sym_type == STT_NOTYPE)
                 {
@@ -1030,7 +1038,14 @@ impl ElfLoader {
                             size: 0,
                             is_export: false,
                             is_import: true,
-                            origin: Some("elf-dynsym".to_string()),
+                            origin: Some(
+                                if is_dynamic_table {
+                                    "elf-dynsym"
+                                } else {
+                                    "elf-symtab"
+                                }
+                                .to_string(),
+                            ),
                             kind: Some("undefined_external".to_string()),
                             source_section: None,
                             external_library: None,
@@ -1048,7 +1063,7 @@ impl ElfLoader {
                 .map(|shdr| (shdr.sh_flags as u64 & SHF_EXECINSTR) != 0)
                 .unwrap_or(false);
 
-            let address = if is_relocatable {
+            let address = if is_relocatable && sym.st_shndx != SHN_ABS {
                 section_addresses
                     .get(sym.st_shndx as usize)
                     .copied()
@@ -3850,5 +3865,108 @@ mod tests {
         );
         assert_eq!(out32_exec.get(&0x0804_a010), Some(&"puts".to_string()));
         assert!(!out32_exec.contains_key(&0x1009_4010));
+    }
+
+    #[test]
+    fn symbol_value_resolves_shn_abs_and_relocatable_symtab_synthesizes_imports() {
+        let mut data = vec![0u8; 128];
+        // Symbol 0 (24 bytes): null
+        // Symbol 1 (offset 24, 24 bytes): st_name=1 ("printf"), st_info=(STB_GLOBAL<<4)|STT_FUNC, st_shndx=SHN_UNDEF
+        data[24..28].copy_from_slice(&1u32.to_le_bytes());
+        data[28] = (STB_GLOBAL << 4) | STT_FUNC;
+        data[30..32].copy_from_slice(&SHN_UNDEF.to_le_bytes());
+        // Symbol 2 (offset 48, 24 bytes): st_name=8 ("abs_sym"), st_info=(STB_GLOBAL<<4)|STT_NOTYPE, st_shndx=SHN_ABS, st_value=0xdead_beef
+        data[48..52].copy_from_slice(&8u32.to_le_bytes());
+        data[52] = (STB_GLOBAL << 4) | STT_NOTYPE;
+        data[54..56].copy_from_slice(&SHN_ABS.to_le_bytes());
+        data[56..64].copy_from_slice(&0xdead_beef_u64.to_le_bytes());
+
+        // String table at offset 72: "\0printf\0abs_sym\0"
+        let strtab_bytes = b"\0printf\0abs_sym\0";
+        data[72..72 + strtab_bytes.len()].copy_from_slice(strtab_bytes);
+
+        let symtab_shdr = Elf64Shdr {
+            sh_name: 0,
+            sh_type: SHT_SYMTAB,
+            sh_flags: 0,
+            sh_addr: 0,
+            sh_offset: 0,
+            sh_size: 72,
+            sh_link: 1,
+            sh_info: 0,
+            sh_addralign: 8,
+            sh_entsize: 24,
+        };
+        let strtab_shdr = Elf64Shdr {
+            sh_name: 0,
+            sh_type: 3,
+            sh_flags: 0,
+            sh_addr: 0,
+            sh_offset: 72,
+            sh_size: strtab_bytes.len() as u64,
+            sh_link: 0,
+            sh_info: 0,
+            sh_addralign: 1,
+            sh_entsize: 0,
+        };
+        let shdrs = vec![symtab_shdr, strtab_shdr];
+        let section_addresses = vec![0u64, 0u64];
+        let section_names = vec![".symtab".to_string(), ".strtab".to_string()];
+
+        assert_eq!(
+            symbol_value_64(&data, &shdrs[0], &section_addresses, 2, Endian::Little),
+            Some(0xdead_beef)
+        );
+
+        let mut funcs = Vec::new();
+        let mut addrs = HashSet::new();
+        let mut imports = HashSet::new();
+        let mut globals = HashMap::new();
+        let mut global_sizes = HashMap::new();
+        ElfLoader::parse_symbols_64(
+            &data,
+            0,
+            72,
+            24,
+            1,
+            &shdrs,
+            &section_addresses,
+            &section_names,
+            true,
+            false,
+            &mut funcs,
+            &mut addrs,
+            &mut imports,
+            &mut globals,
+            &mut global_sizes,
+            &HashMap::new(),
+            Endian::Little,
+        );
+        assert!(
+            funcs.iter().any(|f| f.is_import && f.name == "printf"),
+            "relocatable symtab should synthesize import FunctionInfo for undefined external function: {funcs:?}"
+        );
+
+        // Also check 32-bit SHN_ABS
+        let mut data32 = vec![0u8; 32];
+        // Elf32Sym at offset 0: st_name=0, st_value=0x1234_5678, st_size=0, st_info=0, st_other=0, st_shndx=SHN_ABS
+        data32[4..8].copy_from_slice(&0x1234_5678_u32.to_le_bytes());
+        data32[14..16].copy_from_slice(&SHN_ABS.to_le_bytes());
+        let symtab32 = Elf32Shdr {
+            sh_name: 0,
+            sh_type: SHT_SYMTAB,
+            sh_flags: 0,
+            sh_addr: 0,
+            sh_offset: 0,
+            sh_size: 16,
+            sh_link: 0,
+            sh_info: 0,
+            sh_addralign: 4,
+            sh_entsize: 16,
+        };
+        assert_eq!(
+            symbol_value_32(&data32, &symtab32, &[0], 0, Endian::Little),
+            Some(0x1234_5678)
+        );
     }
 }

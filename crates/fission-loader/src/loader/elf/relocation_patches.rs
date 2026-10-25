@@ -138,7 +138,7 @@ pub(super) fn riscv_relocation_patches_64(
     patches
 }
 
-fn symbol_value_64(
+pub(super) fn symbol_value_64(
     full_data: &[u8],
     symtab: &Elf64Shdr,
     section_addresses: &[u64],
@@ -158,6 +158,9 @@ fn symbol_value_64(
     let symbol = Elf64Sym::parse(&reader, offset).ok()?;
     if symbol.st_shndx == SHN_UNDEF {
         return None;
+    }
+    if symbol.st_shndx == SHN_ABS {
+        return Some(symbol.st_value);
     }
     let base = section_addresses.get(symbol.st_shndx as usize).copied()?;
     Some(base.saturating_add(symbol.st_value))
@@ -444,7 +447,7 @@ pub(super) fn arm_relocation_patches_32(
     patches
 }
 
-fn symbol_value_32(
+pub(super) fn symbol_value_32(
     full_data: &[u8],
     symtab: &Elf32Shdr,
     section_addresses: &[u64],
@@ -464,6 +467,9 @@ fn symbol_value_32(
     let symbol = Elf32Sym::parse(&reader, offset).ok()?;
     if symbol.st_shndx == SHN_UNDEF {
         return None;
+    }
+    if symbol.st_shndx == SHN_ABS {
+        return Some(symbol.st_value as u64);
     }
     let base = section_addresses.get(symbol.st_shndx as usize).copied()?;
     Some(base.saturating_add(symbol.st_value as u64))
