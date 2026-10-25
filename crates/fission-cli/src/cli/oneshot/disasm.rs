@@ -109,12 +109,24 @@ pub(super) fn disassemble(
         if file_offset + len <= data.len() {
             (&data[file_offset..file_offset + len], decode_addr)
         } else {
-            eprintln!("Error: Address 0x{:x} is outside file bounds", decode_addr);
-            std::process::exit(1);
+            let message = format!("Address 0x{decode_addr:x} is outside file bounds");
+            if json {
+                let mut stdout = io::stdout().lock();
+                let _ = writeln!(stdout, "{}", serde_json::json!({ "error": message }));
+            } else {
+                eprintln!("Error: {message}");
+            }
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, message));
         }
     } else {
-        eprintln!("Error: Address 0x{:x} not in any section", decode_addr);
-        std::process::exit(1);
+        let message = format!("Address 0x{decode_addr:x} not in any section");
+        if json {
+            let mut stdout = io::stdout().lock();
+            let _ = writeln!(stdout, "{}", serde_json::json!({ "error": message }));
+        } else {
+            eprintln!("Error: {message}");
+        }
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, message));
     };
 
     let context_override = fission_decompiler::disasm::decode_context_for_address(
@@ -243,4 +255,40 @@ pub(super) fn disassemble_function(
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_loader::loader::{BinaryLoadSpec, DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+    #[test]
+    fn disassemble_unmapped_address_returns_error_without_exit() {
+        let binary = LoadedBinaryBuilder::new("test.bin".into(), DataBuffer::Heap(vec![0x90; 16]))
+            .format("ELF")
+            .image_base(0x1000)
+            .load_spec(BinaryLoadSpec::new(
+                "ELF",
+                0x1000,
+                "x86:LE:64:default",
+                "gcc",
+                "synthetic-test",
+            ))
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x1000,
+                virtual_size: 16,
+                file_offset: 0,
+                file_size: 16,
+                is_readable: true,
+                is_writable: false,
+                is_executable: true,
+            })
+            .build()
+            .expect("build fixture");
+
+        let err = disassemble(&binary, binary.data.as_slice(), 0x9999, 10, true).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("not in any section"));
+    }
 }

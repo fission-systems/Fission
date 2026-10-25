@@ -39,6 +39,7 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
                 .map(|e| {
                     json!({
                         "addr": format!("0x{:x}", e.addr),
+                        "name": edge_label(binary, e.addr),
                         "count": e.count,
                     })
                 })
@@ -49,6 +50,7 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
                 .map(|e| {
                     json!({
                         "addr": format!("0x{:x}", e.addr),
+                        "name": edge_label(binary, e.addr),
                         "count": e.count,
                     })
                 })
@@ -143,5 +145,30 @@ fn edge_label(binary: &LoadedBinary, address: u64) -> String {
         // An edge can land on an import thunk or a block the discovery pass
         // never made a function of; those genuinely have no name to give.
         _ => "-".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_core::common::types::FunctionInfo;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+
+    #[test]
+    fn edge_label_resolves_known_function_names() {
+        let binary = LoadedBinaryBuilder::new("test.bin".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("TEST")
+            .image_base(0x1000)
+            .add_function(FunctionInfo {
+                name: "helper_func".into(),
+                address: 0x1000,
+                size: 16,
+                ..Default::default()
+            })
+            .build()
+            .expect("fixture");
+
+        assert_eq!(edge_label(&binary, 0x1000), "helper_func");
+        assert_eq!(edge_label(&binary, 0x9999), "-");
     }
 }
