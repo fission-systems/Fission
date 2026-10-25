@@ -50,16 +50,19 @@ enum TypeFlowEdge {
     },
     Load {
         pointer: String,
+        offset: i64,
         value: String,
         access_ty: NirType,
     },
     Store {
         pointer: String,
+        offset: i64,
         value: String,
         access_ty: NirType,
     },
     PointerAccess {
         pointer: String,
+        offset: i64,
         access_ty: NirType,
     },
     Cast {
@@ -292,31 +295,50 @@ impl TypeFlowSolver {
             }
             TypeFlowEdge::Load {
                 pointer,
+                offset,
                 value,
                 access_ty,
             }
             | TypeFlowEdge::Store {
                 pointer,
+                offset,
                 value,
                 access_ty,
             } => {
-                self.seed_storage_relation(pointer, value, access_ty);
+                if *offset == 0 {
+                    self.seed_storage_relation(pointer, value, access_ty);
+                }
                 let pointer_fact = self.fact(pointer);
                 let value_fact = self.fact(value);
-                if let NirType::Ptr(pointee) = pointer_fact.ty {
-                    self.refine(
-                        value,
-                        TypeFact {
-                            ty: pointee.as_ref().clone(),
-                            // A pointer declaration constrains the access
-                            // width, but a conflicting semantic value needs a
-                            // cast rather than having its own type overwritten.
-                            // Lock strength protects the pointer node only and
-                            // must not leak across the operation edge.
-                            strength: pointer_fact.strength.min(EvidenceStrength::Binding),
-                            locked: false,
-                        },
-                    );
+                if *offset == 0 {
+                    if let NirType::Ptr(ref pointee) = pointer_fact.ty {
+                        self.refine(
+                            value,
+                            TypeFact {
+                                ty: pointee.as_ref().clone(),
+                                // A pointer declaration constrains the access
+                                // width, but a conflicting semantic value needs a
+                                // cast rather than having its own type overwritten.
+                                // Lock strength protects the pointer node only and
+                                // must not leak across the operation edge.
+                                strength: pointer_fact.strength.min(EvidenceStrength::Binding),
+                                locked: false,
+                            },
+                        );
+                    }
+                } else if let NirType::Ptr(pointee) = &pointer_fact.ty {
+                    if let NirType::Aggregate { fields, .. } = pointee.as_ref() {
+                        if let Some(f) = fields.iter().find(|f| f.offset as i64 == *offset) {
+                            self.refine(
+                                value,
+                                TypeFact {
+                                    ty: f.ty.clone(),
+                                    strength: pointer_fact.strength.min(EvidenceStrength::Binding),
+                                    locked: false,
+                                },
+                            );
+                        }
+                    }
                 }
                 // `pointer == value` is the in-place pointer-chase idiom
                 // (`x = *x`, reusing one temp for both the address being
@@ -326,34 +348,50 @@ impl TypeFlowSolver {
                 // `Ptr(value_fact.ty)` re-derives "x is a pointer to its own
                 // prior type", which never converges: each solver pass adds
                 // one more `Ptr(...)` layer around the same node forever.
-                if pointer != value
+                if *offset == 0
+                    && pointer != value
                     && self.safe_for_backward_refine(pointer)
                     && value_fact.ty != NirType::Unknown
                     && type_bits(&value_fact.ty, self.pointer_bits)
                         == type_bits(access_ty, self.pointer_bits)
                 {
-                    self.refine(
-                        pointer,
-                        TypeFact {
-                            ty: NirType::Ptr(Box::new(value_fact.ty)),
-                            strength: value_fact.strength.max(EvidenceStrength::Semantic),
-                            locked: false,
-                        },
-                    );
+                    // Do not demote an aggregate pointer to a scalar pointer
+                    if !matches!(
+                        pointer_fact.ty,
+                        NirType::Ptr(ref p) if matches!(**p, NirType::Aggregate { .. })
+                    ) {
+                        self.refine(
+                            pointer,
+                            TypeFact {
+                                ty: NirType::Ptr(Box::new(value_fact.ty)),
+                                strength: value_fact.strength.max(EvidenceStrength::Semantic),
+                                locked: false,
+                            },
+                        );
+                    }
                 }
             }
-            TypeFlowEdge::PointerAccess { pointer, access_ty } => {
-                if !self.safe_for_backward_refine(pointer) {
-                    return;
+            TypeFlowEdge::PointerAccess {
+                pointer,
+                offset,
+                access_ty,
+            } => {
+                if *offset == 0 && self.safe_for_backward_refine(pointer) {
+                    let pointer_fact = self.fact(pointer);
+                    if !matches!(
+                        pointer_fact.ty,
+                        NirType::Ptr(ref p) if matches!(**p, NirType::Aggregate { .. })
+                    ) {
+                        self.refine(
+                            pointer,
+                            TypeFact {
+                                ty: NirType::Ptr(Box::new(access_ty.clone())),
+                                strength: EvidenceStrength::StorageWidth,
+                                locked: false,
+                            },
+                        );
+                    }
                 }
-                self.refine(
-                    pointer,
-                    TypeFact {
-                        ty: NirType::Ptr(Box::new(access_ty.clone())),
-                        strength: EvidenceStrength::StorageWidth,
-                        locked: false,
-                    },
-                );
             }
             TypeFlowEdge::CopyValue { output, ty } => {
                 if self.stable_locals.contains(output) {
@@ -526,11 +564,13 @@ fn direct_var(expr: &PreHirExpr) -> Option<&str> {
     }
 }
 
-fn direct_pointer_var(expr: &PreHirExpr) -> Option<&str> {
+fn direct_pointer_var_and_offset(expr: &PreHirExpr) -> Option<(&str, i64)> {
     match expr {
-        PreHirExpr::Var(name) => Some(name),
-        PreHirExpr::Cast { expr, .. } | PreHirExpr::PtrOffset { base: expr, .. } => {
-            direct_pointer_var(expr)
+        PreHirExpr::Var(name) => Some((name, 0)),
+        PreHirExpr::Cast { expr, .. } => direct_pointer_var_and_offset(expr),
+        PreHirExpr::PtrOffset { base, offset } => {
+            let (name, inner_offset) = direct_pointer_var_and_offset(base)?;
+            Some((name, inner_offset + offset))
         }
         _ => None,
     }
@@ -544,18 +584,20 @@ fn collect_assignment_edges(lhs: &PreHirLValue, rhs: &PreHirExpr, edges: &mut Ve
                 rhs: rhs_name.clone(),
             }),
             PreHirExpr::Load { ptr, ty } => {
-                if let Some(pointer) = direct_pointer_var(ptr) {
+                if let Some((pointer, offset)) = direct_pointer_var_and_offset(ptr) {
                     edges.push(TypeFlowEdge::Load {
                         pointer: pointer.to_owned(),
+                        offset,
                         value: lhs_name.clone(),
                         access_ty: ty.clone(),
                     });
                 }
             }
             PreHirExpr::Index { base, elem_ty, .. } => {
-                if let Some(pointer) = direct_pointer_var(base) {
+                if let Some((pointer, offset)) = direct_pointer_var_and_offset(base) {
                     edges.push(TypeFlowEdge::Load {
                         pointer: pointer.to_owned(),
+                        offset,
                         value: lhs_name.clone(),
                         access_ty: elem_ty.clone(),
                     });
@@ -601,32 +643,36 @@ fn collect_assignment_edges(lhs: &PreHirLValue, rhs: &PreHirExpr, edges: &mut Ve
             }
         },
         PreHirLValue::Deref { ptr, ty } => {
-            if let Some(pointer) = direct_pointer_var(ptr) {
+            if let Some((pointer, offset)) = direct_pointer_var_and_offset(ptr) {
                 if let Some(value) = direct_var(rhs) {
                     edges.push(TypeFlowEdge::Store {
                         pointer: pointer.to_owned(),
+                        offset,
                         value: value.to_owned(),
                         access_ty: ty.clone(),
                     });
                 } else {
                     edges.push(TypeFlowEdge::PointerAccess {
                         pointer: pointer.to_owned(),
+                        offset,
                         access_ty: ty.clone(),
                     });
                 }
             }
         }
         PreHirLValue::Index { base, elem_ty, .. } => {
-            if let Some(pointer) = direct_pointer_var(base) {
+            if let Some((pointer, offset)) = direct_pointer_var_and_offset(base) {
                 if let Some(value) = direct_var(rhs) {
                     edges.push(TypeFlowEdge::Store {
                         pointer: pointer.to_owned(),
+                        offset,
                         value: value.to_owned(),
                         access_ty: elem_ty.clone(),
                     });
                 } else {
                     edges.push(TypeFlowEdge::PointerAccess {
                         pointer: pointer.to_owned(),
+                        offset,
                         access_ty: elem_ty.clone(),
                     });
                 }
@@ -1664,5 +1710,58 @@ mod tests {
 
         assert!(!apply_type_flow_pass(&mut func));
         assert_eq!(func.params[0].ty, float_ptr);
+    }
+
+    #[test]
+    fn offset_load_does_not_demote_aggregate_pointer_to_scalar() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let struct_ty = NirType::Aggregate {
+            size: 32,
+            fields: vec![
+                StructField {
+                    offset: 0,
+                    ty: u32_ty.clone(),
+                    name: "field_0".into(),
+                },
+                StructField {
+                    offset: 16,
+                    ty: u32_ty.clone(),
+                    name: "field_10".into(),
+                },
+            ],
+        };
+        let struct_ptr = NirType::Ptr(Box::new(struct_ty));
+
+        let mut func = function(
+            vec![binding(
+                "ptr",
+                struct_ptr.clone(),
+                NirBindingOrigin::ParamIndex(0),
+            )],
+            vec![binding("val", NirType::Unknown, NirBindingOrigin::Temp)],
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("val".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("ptr".to_owned())),
+                        offset: 16,
+                    }),
+                    ty: u32_ty.clone(),
+                },
+            }],
+        );
+
+        apply_type_flow_pass(&mut func);
+        assert_eq!(
+            func.params[0].ty, struct_ptr,
+            "loading at offset 16 must not demote struct pointer to scalar u32*"
+        );
+        assert_eq!(
+            func.locals[0].ty, u32_ty,
+            "loaded value should inherit field type at offset 16"
+        );
     }
 }

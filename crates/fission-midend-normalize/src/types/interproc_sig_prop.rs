@@ -90,10 +90,6 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                     .param_pointer_contracts
                     .resize(arity, false);
             }
-            if arity == 0 && summary.effect_summary.escapes_args != Some(false) {
-                summary.effect_summary.escapes_args = Some(false);
-                summary.effect_summary.confidence = summary.effect_summary.confidence.max(96);
-            }
         })
         .or_insert_with(|| CallSummary {
             target: summary_seed(callee),
@@ -112,11 +108,11 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
             effect_summary: CallEffectSummary {
                 reads_memory: None,
                 writes_memory: None,
-                escapes_args: (arity == 0).then_some(false),
+                escapes_args: None,
                 regions: Vec::new(),
                 wrapper_class: WrapperClass::None,
                 wrapper_of: None,
-                confidence: if arity == 0 { 96 } else { 0 },
+                confidence: 0,
             },
         });
 }
@@ -447,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn interproc_summary_marks_zero_arity_as_non_escaping() {
+    fn interproc_summary_does_not_assume_zero_arity_is_non_escaping() {
         let mut func = PreHirFunction {
             variadic_fixed_arity: None,
             name: "caller".to_string(),
@@ -471,7 +467,7 @@ mod tests {
         };
         assert!(apply_interproc_callsite_arity_pass(&mut func));
         let summary = func.callee_summaries.get("FUN_0x140001000").unwrap();
-        assert_eq!(summary.effect_summary.escapes_args, Some(false));
+        assert_eq!(summary.effect_summary.escapes_args, None);
     }
 
     #[test]
