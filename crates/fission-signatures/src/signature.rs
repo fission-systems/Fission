@@ -2,13 +2,100 @@
 //!
 //! Represents a pattern for matching known functions
 
+/// Errors encountered when parsing function signatures or byte patterns.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SignatureParseError {
+    #[error("invalid pattern token '{token}' at position {position}")]
+    InvalidToken { token: String, position: usize },
+    #[error(
+        "token count mismatch: pattern has {pattern_tokens} tokens but mask has {mask_tokens} tokens"
+    )]
+    LengthMismatch {
+        pattern_tokens: usize,
+        mask_tokens: usize,
+    },
+    #[error("invalid mask token '{token}' at position {position}")]
+    InvalidMaskToken { token: String, position: usize },
+}
+
+/// A single byte in a signature pattern, supporting exact values, wildcards, and partial bitmasks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PatternByte {
+    /// Expected byte value (masked: `value & mask == value`)
+    pub value: u8,
+    /// Bitmask for matching (0xFF = exact byte, 0x00 = wildcard, intermediate = partial mask)
+    pub mask: u8,
+}
+
+impl PatternByte {
+    /// Create an exact expected byte pattern.
+    pub const fn exact(value: u8) -> Self {
+        Self { value, mask: 0xFF }
+    }
+
+    /// Create a wildcard pattern byte (matches any byte).
+    pub const fn wildcard() -> Self {
+        Self {
+            value: 0,
+            mask: 0x00,
+        }
+    }
+
+    /// Create a pattern byte with a partial or full bitmask.
+    pub const fn new(value: u8, mask: u8) -> Self {
+        Self {
+            value: value & mask,
+            mask,
+        }
+    }
+
+    /// Returns true if the given byte matches this pattern byte.
+    #[inline]
+    pub fn matches(&self, b: u8) -> bool {
+        (b & self.mask) == self.value
+    }
+
+    /// Returns true if this byte is a wildcard (mask == 0).
+    #[inline]
+    pub fn is_wildcard(&self) -> bool {
+        self.mask == 0
+    }
+
+    /// Returns true if this byte is an exact match (mask == 0xFF).
+    #[inline]
+    pub fn is_exact(&self) -> bool {
+        self.mask == 0xFF
+    }
+
+    /// Number of constrained bits in this pattern byte.
+    #[inline]
+    pub fn constrained_bits(&self) -> u32 {
+        self.mask.count_ones()
+    }
+}
+
+impl PartialEq<Option<u8>> for PatternByte {
+    fn eq(&self, other: &Option<u8>) -> bool {
+        match other {
+            None => self.is_wildcard(),
+            Some(b) => self.is_exact() && self.value == *b,
+        }
+    }
+}
+
+impl PartialEq<PatternByte> for Option<u8> {
+    fn eq(&self, other: &PatternByte) -> bool {
+        other == self
+    }
+}
+
 /// A function signature pattern for matching
 #[derive(Debug, Clone)]
 pub struct FunctionSignature {
     /// Short name of the function
     pub name: String,
-    /// Byte pattern (None = wildcard)
-    pub pattern: Vec<Option<u8>>,
+    /// Byte pattern
+    pub pattern: Vec<PatternByte>,
     /// Minimum function size
     pub min_size: usize,
     /// Parameter names (for annotation)
@@ -32,21 +119,31 @@ pub struct FunctionSignature {
 }
 
 impl FunctionSignature {
-    /// Create a new signature from a hex pattern string
-    /// Use ?? for wildcards, e.g., "55 8B EC ?? ?? 6A"
-    pub fn from_hex(name: &str, hex_pattern: &str) -> Self {
-        let pattern: Vec<Option<u8>> = hex_pattern
-            .split_whitespace()
-            .map(|s| {
-                if s == "??" {
-                    None
-                } else {
-                    u8::from_str_radix(s, 16).ok()
-                }
-            })
-            .collect();
+    /// Attempt to parse a signature from a hex pattern string.
+    ///
+    /// Valid tokens are two-digit hex bytes (e.g. `55`, `8b`, `EC`) or `??` for wildcards.
+    /// Returns `Err(SignatureParseError)` if any token is malformed.
+    pub fn try_from_hex(name: &str, hex_pattern: &str) -> Result<Self, SignatureParseError> {
+        let mut pattern = Vec::new();
+        for (pos, s) in hex_pattern.split_whitespace().enumerate() {
+            if s == "??" {
+                pattern.push(PatternByte::wildcard());
+            } else if s.len() == 2 && !s.starts_with("0x") && !s.starts_with("0X") {
+                let val =
+                    u8::from_str_radix(s, 16).map_err(|_| SignatureParseError::InvalidToken {
+                        token: s.to_string(),
+                        position: pos,
+                    })?;
+                pattern.push(PatternByte::exact(val));
+            } else {
+                return Err(SignatureParseError::InvalidToken {
+                    token: s.to_string(),
+                    position: pos,
+                });
+            }
+        }
 
-        Self {
+        Ok(Self {
             name: name.to_string(),
             pattern,
             min_size: 16,
@@ -57,7 +154,21 @@ impl FunctionSignature {
             expected_callers: Vec::new(),
             force_relation: false,
             confidence: 100,
-        }
+        })
+    }
+
+    /// Create a new signature from a hex pattern string.
+    /// Use ?? for wildcards, e.g., "55 8B EC ?? ?? 6A".
+    /// Panics if the hex pattern contains invalid tokens.
+    pub fn from_hex(name: &str, hex_pattern: &str) -> Self {
+        Self::try_from_hex(name, hex_pattern)
+            .unwrap_or_else(|e| panic!("invalid hex pattern for signature '{name}': {e}"))
+    }
+
+    /// Set minimum function size
+    pub fn with_min_size(mut self, min_size: usize) -> Self {
+        self.min_size = min_size;
+        self
     }
 
     /// Create a signature with expected callees for relation validation
@@ -84,17 +195,23 @@ impl FunctionSignature {
         self
     }
 
+    /// Calculate pattern specificity (total number of constrained bits)
+    pub fn specificity(&self) -> usize {
+        self.pattern
+            .iter()
+            .map(|b| b.constrained_bits() as usize)
+            .sum()
+    }
+
     /// Match pattern against bytes
     pub fn matches(&self, bytes: &[u8]) -> bool {
-        if bytes.len() < self.pattern.len() {
+        if bytes.len() < self.pattern.len() || bytes.len() < self.min_size {
             return false;
         }
 
-        for (i, &pat_byte) in self.pattern.iter().enumerate() {
-            if let Some(expected) = pat_byte {
-                if bytes[i] != expected {
-                    return false;
-                }
+        for (i, pat_byte) in self.pattern.iter().enumerate() {
+            if !pat_byte.matches(bytes[i]) {
+                return false;
             }
         }
         true
