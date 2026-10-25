@@ -38,31 +38,41 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
             rewrite_loads_in_expr(rhs, cache, &mut changed);
+            if expr_has_call(rhs) {
+                cache.clear();
+            }
             match lhs {
                 PreHirLValue::Deref { ptr, ty } => {
                     let key = alias_key_for_pointer_expr(ptr, nir_byte_size(ty));
                     if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                     {
-                        cache.remove(&key);
+                        cache.retain(|k, _| k.is_no_alias(&key));
+                    } else {
+                        cache.clear();
                     }
                 }
                 PreHirLValue::FieldAccess { base, ty, .. } => {
                     let key = alias_key_for_pointer_expr(base, nir_byte_size(ty));
                     if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                     {
-                        cache.remove(&key);
+                        cache.retain(|k, _| k.is_no_alias(&key));
+                    } else {
+                        cache.clear();
                     }
                 }
                 PreHirLValue::Index { base, elem_ty, .. } => {
                     let key = alias_key_for_pointer_expr(base, nir_byte_size(elem_ty));
                     if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                     {
-                        cache.remove(&key);
+                        cache.retain(|k, _| k.is_no_alias(&key));
+                    } else {
+                        cache.clear();
                     }
                 }
                 PreHirLValue::Var(name) => {
+                    cache.retain(|_, v| v != name);
                     if let PreHirExpr::Load { ptr, ty } = &*rhs {
-                        let key = alias_key_for_pointer_expr(ptr.as_ref(), nir_byte_size(&ty));
+                        let key = alias_key_for_pointer_expr(ptr.as_ref(), nir_byte_size(ty));
                         if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                         {
                             cache.insert(key, name.clone());
@@ -76,8 +86,13 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
         }
         PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => {
             rewrite_loads_in_expr(e, cache, &mut changed);
+            if expr_has_call(e) {
+                cache.clear();
+            }
         }
-        PreHirStmt::Return(None) => {}
+        PreHirStmt::Return(None) => {
+            cache.clear();
+        }
         PreHirStmt::If {
             cond,
             then_body,
@@ -94,8 +109,16 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
             }
             cache.clear();
         }
-        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+        PreHirStmt::While { cond, body } => {
             rewrite_loads_in_expr(cond, cache, &mut changed);
+            let mut inner = LoadCache::default();
+            if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner) {
+                changed = true;
+            }
+            cache.clear();
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            cache.clear();
             let mut inner = LoadCache::default();
             if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner) {
                 changed = true;
@@ -153,9 +176,35 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
                 changed = true;
             }
         }
-        PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {}
+        PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+            cache.clear();
+        }
     }
     changed
+}
+
+fn expr_has_call(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => expr_has_call(inner),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_has_call(lhs) || expr_has_call(rhs),
+        PreHirExpr::Index { base, index, .. } => expr_has_call(base) || expr_has_call(index),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => expr_has_call(cond) || expr_has_call(then_expr) || expr_has_call(else_expr),
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
+    }
 }
 
 fn rewrite_loads_in_expr(expr: &mut PreHirExpr, cache: &LoadCache, changed: &mut bool) {
@@ -209,5 +258,80 @@ fn rewrite_loads_in_expr(expr: &mut PreHirExpr, cache: &LoadCache, changed: &mut
         | PreHirExpr::AddressOfGlobal(_)
         | PreHirExpr::AddressOfLocal(_)
         | PreHirExpr::Const(_, _) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn invalidates_cache_when_cached_variable_is_reassigned() {
+        let mut func = PreHirFunction {
+            name: "rle_reassign".into(),
+            locals: vec![
+                PreHirBinding {
+                    name: "slot".into(),
+                    ty: NirType::Ptr(Box::new(u32_ty())),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::StackOffset(-0x10)),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "v".into(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "w".into(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("v".into()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("slot".into())),
+                        ty: u32_ty(),
+                    },
+                },
+                // v is reassigned with a different value
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("v".into()),
+                    rhs: PreHirExpr::Const(99, u32_ty()),
+                },
+                // Subsequent load of slot must NOT be replaced with v
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("w".into()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("slot".into())),
+                        ty: u32_ty(),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_redundant_load_elimination(&mut func);
+        // The third statement must remain a Load, not Var("v")
+        let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
+            panic!()
+        };
+        assert!(
+            matches!(rhs, PreHirExpr::Load { .. }),
+            "reassigned v must not be substituted for later load"
+        );
     }
 }

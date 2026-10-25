@@ -144,6 +144,7 @@ impl Builder {
     fn add_def(&mut self, key: AliasKey) -> usize {
         let id = self.alloc_id();
         let may_escape = matches!(key, AliasKey::Unknown);
+        self.reaching.retain(|k, _| k.is_no_alias(&key));
         self.reaching.insert(key.clone(), id);
         self.defs.push(MemDef {
             id,
@@ -157,10 +158,19 @@ impl Builder {
     fn add_use(&mut self, key: AliasKey) {
         let id = self.alloc_id();
         let reaching_def = self.reaching.get(&key).copied();
+        let mut matched_defs: Vec<usize> = Vec::new();
         if let Some(def_id) = reaching_def {
-            if let Some(def) = self.defs.iter_mut().find(|d| d.id == def_id) {
+            matched_defs.push(def_id);
+        }
+        for (k, def_id) in &self.reaching {
+            if !k.is_no_alias(&key) && !matched_defs.contains(def_id) {
+                matched_defs.push(*def_id);
+            }
+        }
+        for def_id in &matched_defs {
+            if let Some(def) = self.defs.iter_mut().find(|d| d.id == *def_id) {
                 def.use_count += 1;
-            } else if let Some(phi) = self.phis.iter_mut().find(|p| p.id == def_id) {
+            } else if let Some(phi) = self.phis.iter_mut().find(|p| p.id == *def_id) {
                 phi.use_count += 1;
             }
         }
@@ -354,6 +364,16 @@ impl Builder {
             }
             PreHirExpr::AggregateCopy { src, .. } => self.scan_expr_uses(src),
             PreHirExpr::FieldAccess { base, .. } => self.scan_expr_uses(base),
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.scan_expr_uses(cond);
+                self.scan_expr_uses(then_expr);
+                self.scan_expr_uses(else_expr);
+            }
             _ => {}
         }
     }

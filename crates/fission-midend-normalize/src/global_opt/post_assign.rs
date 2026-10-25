@@ -36,6 +36,7 @@ fn stabilize_stmt(stmt: &mut PreHirStmt, reps: &mut PureExprMap) -> bool {
         PreHirStmt::Assign { lhs, rhs } => {
             if let PreHirLValue::Var(name) = lhs {
                 invalidate_pure_map(reps, name);
+                invalidate_representative(reps, name);
                 if is_representable_expr(rhs) {
                     if let Some(key) = pure_expr_key(rhs) {
                         reps.insert(key, name.clone());
@@ -215,6 +216,10 @@ fn is_representable_expr(expr: &PreHirExpr) -> bool {
     ) && pure_expr_key(expr).is_some()
 }
 
+fn invalidate_representative(map: &mut PureExprMap, defined_var: &str) {
+    map.retain(|_, representative| representative != defined_var);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +321,46 @@ mod tests {
             panic!("expected binary condition");
         };
         assert_eq!(rhs.as_ref(), &var("i"));
+    }
+
+    #[test]
+    fn invalidates_representative_when_representative_var_is_reassigned() {
+        let mut func = PreHirFunction {
+            name: "test_post_assign_invalidation".to_string(),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("r".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(var("a")),
+                        rhs: Box::new(var("b")),
+                        ty: int(32),
+                    },
+                },
+                // r is reassigned
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("r".to_string()),
+                    rhs: PreHirExpr::Const(10, int(32)),
+                },
+                // if (a + b) must NOT be rewritten to if (r)
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(var("a")),
+                        rhs: Box::new(var("b")),
+                        ty: int(32),
+                    },
+                    then_body: vec![PreHirStmt::Return(None)].into(),
+                    else_body: vec![].into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_post_assign_value_representative_pass(&mut func);
+        let PreHirStmt::If { cond, .. } = &func.body[2] else {
+            panic!()
+        };
+        assert!(matches!(cond, PreHirExpr::Binary { .. }));
     }
 }

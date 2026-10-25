@@ -436,9 +436,22 @@ fn visit_stmt(
                 env.remove(name);
                 ranges.remove(name);
             }
+            invalidate_call_escaped_locals(rhs, env, ranges);
         }
-        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) => {
             changed |= substitute_expr(expr, env);
+            invalidate_call_escaped_locals(expr, env, ranges);
+        }
+        PreHirStmt::Return(expr) => {
+            if let Some(e) = expr {
+                changed |= substitute_expr(e, env);
+            }
+            env.clear();
+            ranges.clear();
+        }
+        PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+            env.clear();
+            ranges.clear();
         }
         PreHirStmt::Block(body) => {
             changed |= visit_stmts(
@@ -449,16 +462,16 @@ fn visit_stmt(
             );
         }
         PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
-            changed |= substitute_expr(cond, env);
-
             let mut loop_env = env.clone();
             let mut loop_ranges = ranges.clone();
             let mut written = HashSet::default();
             collect_written_vars(body, &mut written);
+            collect_written_vars_expr(cond, &mut written);
             for v in &written {
                 loop_env.remove(v);
                 loop_ranges.remove(v);
             }
+            changed |= substitute_expr(cond, &loop_env);
             changed |= visit_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 &mut loop_env,
@@ -482,6 +495,9 @@ fn visit_stmt(
             let mut written = HashSet::default();
             if let Some(i) = init {
                 collect_written_vars(std::slice::from_ref(i.as_ref()), &mut written);
+            }
+            if let Some(c) = cond {
+                collect_written_vars_expr(c, &mut written);
             }
             if let Some(u) = update {
                 collect_written_vars(std::slice::from_ref(u.as_ref()), &mut written);
@@ -612,7 +628,6 @@ fn visit_stmt(
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= substitute_expr(va_list, env);
         }
-        _ => {}
     }
     changed
 }
@@ -851,6 +866,7 @@ fn collect_written_vars_expr(expr: &PreHirExpr, written: &mut HashSet<String>) {
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
+                collect_escaped_call_locals(arg, written);
                 collect_written_vars_expr(arg, written);
             }
         }
@@ -869,5 +885,293 @@ fn collect_written_vars_expr(expr: &PreHirExpr, written: &mut HashSet<String>) {
             collect_written_vars_expr(index, written);
         }
         _ => {}
+    }
+}
+
+fn collect_escaped_call_locals(expr: &PreHirExpr, written: &mut HashSet<String>) {
+    match expr {
+        PreHirExpr::AddressOfLocal(name) => {
+            written.insert(name.clone());
+        }
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
+            collect_escaped_call_locals(inner, written);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_escaped_call_locals(lhs, written);
+            collect_escaped_call_locals(rhs, written);
+        }
+        _ => {}
+    }
+}
+
+fn invalidate_call_escaped_locals(
+    expr: &PreHirExpr,
+    env: &mut HashMap<String, PreHirExpr>,
+    ranges: &mut RangeEnv,
+) {
+    match expr {
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                invalidate_address_of_locals(arg, env, ranges);
+            }
+        }
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
+            invalidate_call_escaped_locals(inner, env, ranges);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            invalidate_call_escaped_locals(lhs, env, ranges);
+            invalidate_call_escaped_locals(rhs, env, ranges);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            invalidate_call_escaped_locals(cond, env, ranges);
+            invalidate_call_escaped_locals(then_expr, env, ranges);
+            invalidate_call_escaped_locals(else_expr, env, ranges);
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            invalidate_call_escaped_locals(base, env, ranges);
+            invalidate_call_escaped_locals(index, env, ranges);
+        }
+        _ => {}
+    }
+}
+
+fn invalidate_address_of_locals(
+    expr: &PreHirExpr,
+    env: &mut HashMap<String, PreHirExpr>,
+    ranges: &mut RangeEnv,
+) {
+    match expr {
+        PreHirExpr::AddressOfLocal(name) => {
+            env.remove(name);
+            ranges.remove(name);
+        }
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
+            invalidate_address_of_locals(inner, env, ranges);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            invalidate_address_of_locals(lhs, env, ranges);
+            invalidate_address_of_locals(rhs, env, ranges);
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn conditional_const_does_not_corrupt_while_condition_when_written_in_loop() {
+        let mut func = PreHirFunction {
+            name: "test_while_var".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "y".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(0, u32_ty())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![PreHirStmt::While {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Lt,
+                        lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(10, u32_ty())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("x".to_string()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                            rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
+                            ty: u32_ty(),
+                        },
+                    }]
+                    .into(),
+                }]
+                .into(),
+                else_body: vec![].into(),
+            }],
+            ..Default::default()
+        };
+
+        apply_conditional_const_pass(&mut func);
+
+        if let PreHirStmt::If { then_body, .. } = &func.body[0] {
+            if let PreHirStmt::While { cond, .. } = &then_body[0] {
+                if let PreHirExpr::Binary { lhs, .. } = cond {
+                    assert!(
+                        matches!(lhs.as_ref(), PreHirExpr::Var(name) if name == "x"),
+                        "While condition lhs should remain variable x, found: {:?}",
+                        lhs
+                    );
+                } else {
+                    panic!("Expected binary condition");
+                }
+            } else {
+                panic!("Expected While statement");
+            }
+        } else {
+            panic!("Expected If statement");
+        }
+    }
+
+    #[test]
+    fn conditional_const_clears_env_at_label() {
+        let mut func = PreHirFunction {
+            name: "test_label_clear".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "y".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(5, u32_ty())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    PreHirStmt::Label("target".to_string()),
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("y".to_string()),
+                        rhs: PreHirExpr::Var("x".to_string()),
+                    },
+                ]
+                .into(),
+                else_body: vec![].into(),
+            }],
+            ..Default::default()
+        };
+
+        apply_conditional_const_pass(&mut func);
+
+        if let PreHirStmt::If { then_body, .. } = &func.body[0] {
+            if let PreHirStmt::Assign { rhs, .. } = &then_body[1] {
+                assert!(
+                    matches!(rhs, PreHirExpr::Var(name) if name == "x"),
+                    "RHS should remain Var(x) after label, found: {:?}",
+                    rhs
+                );
+            } else {
+                panic!("Expected Assign statement");
+            }
+        }
+    }
+
+    #[test]
+    fn conditional_const_invalidates_escaped_locals_on_call() {
+        let mut func = PreHirFunction {
+            name: "test_call_escape".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "y".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(5, u32_ty())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    PreHirStmt::Expr(PreHirExpr::Call {
+                        target: "mutate".to_string(),
+                        args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
+                        ty: u32_ty(),
+                    }),
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("y".to_string()),
+                        rhs: PreHirExpr::Var("x".to_string()),
+                    },
+                ]
+                .into(),
+                else_body: vec![].into(),
+            }],
+            ..Default::default()
+        };
+
+        apply_conditional_const_pass(&mut func);
+
+        if let PreHirStmt::If { then_body, .. } = &func.body[0] {
+            if let PreHirStmt::Assign { rhs, .. } = &then_body[1] {
+                assert!(
+                    matches!(rhs, PreHirExpr::Var(name) if name == "x"),
+                    "RHS should remain Var(x) after call escaping &x, found: {:?}",
+                    rhs
+                );
+            } else {
+                panic!("Expected Assign statement");
+            }
+        }
     }
 }

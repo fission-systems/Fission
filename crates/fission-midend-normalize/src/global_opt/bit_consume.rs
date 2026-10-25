@@ -190,10 +190,16 @@ fn seed_stmt(
         PreHirStmt::Return(None) => {}
         PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Label(_) | PreHirStmt::Goto(_) => {}
         PreHirStmt::VaStart { va_list, .. } => seed_expr_fully(va_list, consumed),
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) => {
             collect_consumed_seeds(body, consumed, def_map, multi_def);
+        }
+        PreHirStmt::While { cond, body } => {
+            seed_expr_fully(cond, consumed);
+            collect_consumed_seeds(body, consumed, def_map, multi_def);
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            collect_consumed_seeds(body, consumed, def_map, multi_def);
+            seed_expr_fully(cond, consumed);
         }
         PreHirStmt::For {
             init,
@@ -505,16 +511,49 @@ fn backward_propagate_inner(expr: &PreHirExpr, out_consume: u64, result: &mut Ve
             backward_propagate_inner(rhs, full, result);
         }
 
-        // Loads, calls, constants: no variable propagation needed (no sub-variables)
+        PreHirExpr::Load { ptr, .. } => {
+            if out_consume != 0 {
+                backward_propagate_inner(ptr, u64::MAX, result);
+            }
+        }
+        PreHirExpr::PtrOffset { base, .. } => {
+            if out_consume != 0 {
+                backward_propagate_inner(base, u64::MAX, result);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            if out_consume != 0 {
+                backward_propagate_inner(base, u64::MAX, result);
+                backward_propagate_inner(index, u64::MAX, result);
+            }
+        }
+        PreHirExpr::Call { args, .. } => {
+            if out_consume != 0 {
+                for arg in args {
+                    backward_propagate_inner(arg, u64::MAX, result);
+                }
+            }
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            if out_consume != 0 {
+                backward_propagate_inner(cond, u64::MAX, result);
+                backward_propagate_inner(then_expr, out_consume, result);
+                backward_propagate_inner(else_expr, out_consume, result);
+            }
+        }
+        PreHirExpr::AggregateCopy { src, .. } => {
+            if out_consume != 0 {
+                backward_propagate_inner(src, out_consume, result);
+            }
+        }
         PreHirExpr::Const(_, _)
-        | PreHirExpr::Load { .. }
-        | PreHirExpr::Call { .. }
         | PreHirExpr::AddressOfGlobal(_)
-        | PreHirExpr::AddressOfLocal(_)
-        | PreHirExpr::PtrOffset { .. }
-        | PreHirExpr::AggregateCopy { .. }
-        | PreHirExpr::Index { .. }
-        | PreHirExpr::Select { .. } => {}
+        | PreHirExpr::AddressOfLocal(_) => {}
     }
 }
 
@@ -560,9 +599,7 @@ fn simplify_stmt(
             simplify_expr(expr, consumed, any_changed);
         }
         PreHirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) => {
             simplify_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 consumed,
@@ -570,6 +607,26 @@ fn simplify_stmt(
                 type_map,
                 any_changed,
             );
+        }
+        PreHirStmt::While { cond, body } => {
+            simplify_expr(cond, consumed, any_changed);
+            simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                consumed,
+                multi_def,
+                type_map,
+                any_changed,
+            );
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            simplify_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                consumed,
+                multi_def,
+                type_map,
+                any_changed,
+            );
+            simplify_expr(cond, consumed, any_changed);
         }
         PreHirStmt::For {
             init,
@@ -691,9 +748,14 @@ fn simplify_assign_rhs(
     // already exist in the source. A narrowing cast always changes the value.
     if let PreHirExpr::Cast { ty, expr: inner } = rhs {
         let source_ty = expr_type_with_bindings(inner, type_map);
-        let can_remove = type_width(ty)
-            .zip(type_width(&source_ty))
-            .is_some_and(|(target_bits, source_bits)| target_bits >= source_bits);
+        let same_signedness = match (&*ty, &source_ty) {
+            (NirType::Int { signed: t_s, .. }, NirType::Int { signed: s_s, .. }) => t_s == s_s,
+            _ => true,
+        };
+        let can_remove = same_signedness
+            && type_width(ty)
+                .zip(type_width(&source_ty))
+                .is_some_and(|(target_bits, source_bits)| target_bits >= source_bits);
         let source_mask = type_bitmask(&source_ty);
         if can_remove && source_mask != 0 && (out_consume & !source_mask) == 0 {
             // Consumer only needs bits within inner's natural width → remove cast
@@ -854,6 +916,42 @@ mod tests {
                 },
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn seeds_while_condition_variable_uses() {
+        let mut func = PreHirFunction {
+            name: "while_cond_used".into(),
+            locals: vec![PreHirBinding {
+                name: "cond_var".into(),
+                ty: uint(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            return_type: uint(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("cond_var".into()),
+                    rhs: PreHirExpr::Const(1, uint(32)),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Var("cond_var".into()),
+                    body: vec![PreHirStmt::Break].into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        // cond_var is read in while cond, so its assignment is not stripped or zeroed
+        apply_bit_consume_dead_code_pass(&mut func);
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } if name == "cond_var"
         ));
     }
 }
