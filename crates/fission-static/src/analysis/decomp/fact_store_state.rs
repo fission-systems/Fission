@@ -8,7 +8,9 @@
 
 use fission_core::CallingConvention;
 use fission_loader::loader::types::InferredTypeInfo;
-use fission_sleigh::runtime::{DecodeStopReason, DecodedPcodeFunction, PackedDecodedPcodeFunction};
+use fission_sleigh::runtime::{
+    DecodeStopReason, DecodedPcodeFunction, PackedContextOverride, PackedDecodedPcodeFunction,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
@@ -45,6 +47,12 @@ impl LearnedFactOverlay {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct DecodeCacheKey {
+    pub(super) address: u64,
+    pub(super) context_override: Option<PackedContextOverride>,
+}
+
 /// Shared completed raw-p-code decodes.
 ///
 /// This is deliberately not a fact overlay: it is derived runtime state whose
@@ -53,7 +61,7 @@ impl LearnedFactOverlay {
 /// facts struct.
 #[derive(Debug, Clone, Default)]
 pub(super) struct DecodeCache {
-    entries: Arc<Mutex<HashMap<u64, Arc<CachedDecode>>>>,
+    entries: Arc<Mutex<HashMap<DecodeCacheKey, Arc<CachedDecode>>>>,
 }
 
 #[derive(Debug)]
@@ -117,26 +125,71 @@ impl CachedDecode {
 
 impl DecodeCache {
     pub(super) fn get(&self, address: u64) -> Option<Arc<DecodedPcodeFunction>> {
+        let entry = {
+            let entries = self.entries.lock().ok()?;
+            let none_key = DecodeCacheKey {
+                address,
+                context_override: None,
+            };
+            if let Some(entry) = entries.get(&none_key) {
+                Arc::clone(entry)
+            } else {
+                let mut matched = entries
+                    .iter()
+                    .filter(|(k, _)| k.address == address)
+                    .map(|(_, v)| v);
+                let first = matched.next()?;
+                if matched.next().is_some() {
+                    return None;
+                }
+                Arc::clone(first)
+            }
+        };
+        entry.get()
+    }
+
+    pub(super) fn get_with_context(
+        &self,
+        address: u64,
+        context_override: Option<PackedContextOverride>,
+    ) -> Option<Arc<DecodedPcodeFunction>> {
         // Release the shared map before materializing this particular entry.
-        let entry = self.entries.lock().ok()?.get(&address).cloned()?;
+        let key = DecodeCacheKey {
+            address,
+            context_override,
+        };
+        let entry = self.entries.lock().ok()?.get(&key).cloned()?;
         entry.get()
     }
 
     pub(super) fn insert_if_complete(&self, address: u64, decoded: &Arc<DecodedPcodeFunction>) {
+        self.insert_if_complete_with_context(address, None, decoded);
+    }
+
+    pub(super) fn insert_if_complete_with_context(
+        &self,
+        address: u64,
+        context_override: Option<PackedContextOverride>,
+        decoded: &Arc<DecodedPcodeFunction>,
+    ) {
         if decoded.stop_reason != DecodeStopReason::TerminalControlFlow {
             return;
         }
+        let key = DecodeCacheKey {
+            address,
+            context_override,
+        };
         if self
             .entries
             .lock()
-            .is_ok_and(|entries| entries.contains_key(&address))
+            .is_ok_and(|entries| entries.contains_key(&key))
         {
             return;
         }
         // Encoding can be substantial; do it outside the global cache lock.
         let entry = Arc::new(CachedDecode::new(decoded));
         if let Ok(mut entries) = self.entries.lock() {
-            entries.entry(address).or_insert_with(|| Arc::clone(&entry));
+            entries.entry(key).or_insert_with(|| Arc::clone(&entry));
         }
     }
 }
@@ -182,7 +235,11 @@ mod tests {
         let expected = (*original).clone();
         let weak = Arc::downgrade(&original);
         cache.insert_if_complete(0x1000, &original);
-        let entry = cache.entries.lock().unwrap().get(&0x1000).cloned().unwrap();
+        let key = DecodeCacheKey {
+            address: 0x1000,
+            context_override: None,
+        };
+        let entry = cache.entries.lock().unwrap().get(&key).cloned().unwrap();
         assert!(matches!(
             *entry.storage.lock().unwrap(),
             DecodeStorage::Cold { .. }
@@ -228,6 +285,7 @@ mod tests {
     fn completed_decode_storage_ignores_incomplete_and_keeps_encoding_fallback() {
         let cache = DecodeCache::default();
         for reason in [
+            DecodeStopReason::IndirectBranchHalt,
             DecodeStopReason::InputExhausted,
             DecodeStopReason::InstructionLimit,
         ] {
@@ -242,6 +300,36 @@ mod tests {
             DecodeStorage::Hot(_)
         ));
         assert!(Arc::ptr_eq(&original, &fallback.get().unwrap()));
+    }
+
+    #[test]
+    fn decode_cache_isolates_different_context_overrides_at_same_address() {
+        let cache = DecodeCache::default();
+        let arm_ctx = Some(PackedContextOverride::new(0, 1));
+        let thumb_ctx = Some(PackedContextOverride::new(1, 1));
+        let mut arm_decoded = decoded(DecodeStopReason::TerminalControlFlow);
+        Arc::make_mut(&mut arm_decoded).decoded_instructions = 4;
+        let mut thumb_decoded = decoded(DecodeStopReason::TerminalControlFlow);
+        Arc::make_mut(&mut thumb_decoded).decoded_instructions = 8;
+
+        cache.insert_if_complete_with_context(0x1000, arm_ctx, &arm_decoded);
+        cache.insert_if_complete_with_context(0x1000, thumb_ctx, &thumb_decoded);
+
+        assert_eq!(
+            cache
+                .get_with_context(0x1000, arm_ctx)
+                .unwrap()
+                .decoded_instructions,
+            4
+        );
+        assert_eq!(
+            cache
+                .get_with_context(0x1000, thumb_ctx)
+                .unwrap()
+                .decoded_instructions,
+            8
+        );
+        assert!(cache.get(0x1000).is_none());
     }
 
     #[test]

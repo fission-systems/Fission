@@ -109,6 +109,7 @@ mod tests {
     fn packed_decode_round_trips_every_field_and_stop_reason() {
         for reason in [
             DecodeStopReason::TerminalControlFlow,
+            DecodeStopReason::IndirectBranchHalt,
             DecodeStopReason::InputExhausted,
             DecodeStopReason::InstructionLimit,
         ] {

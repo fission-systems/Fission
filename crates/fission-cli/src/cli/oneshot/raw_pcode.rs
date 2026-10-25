@@ -184,6 +184,7 @@ fn format_varnode(vn: &Varnode) -> String {
 pub(super) fn decode_stop_reason_label(reason: DecodeStopReason) -> &'static str {
     match reason {
         DecodeStopReason::TerminalControlFlow => "terminal_control_flow",
+        DecodeStopReason::IndirectBranchHalt => "indirect_branch_halt",
         DecodeStopReason::InputExhausted => "input_exhausted",
         DecodeStopReason::InstructionLimit => "instruction_limit",
     }
