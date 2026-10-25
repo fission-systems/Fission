@@ -213,27 +213,7 @@ fn finalize_edges(map: FxHashMap<u64, FxHashMap<u64, usize>>) -> FxHashMap<u64, 
 }
 
 fn find_function_addr(functions: &[FunctionInfo], addr: u64, fallback_range: u64) -> Option<u64> {
-    if functions.is_empty() {
-        return None;
-    }
-
-    let idx = match functions.binary_search_by_key(&addr, |func| func.address) {
-        Ok(index) => index,
-        Err(index) => index.checked_sub(1)?,
-    };
-
-    let func = &functions[idx];
-    let size = if func.size > 0 {
-        func.size
-    } else {
-        fallback_range
-    };
-    let end = func.address.saturating_add(size);
-    if addr >= func.address && addr < end {
-        Some(func.address)
-    } else {
-        None
-    }
+    resolve_enclosing_function(functions, addr, fallback_range)
 }
 
 #[cfg(test)]
@@ -297,5 +277,53 @@ mod tests {
         let validation = fission_signatures::validate_relation(&signature, 0x1000, &view);
         assert!(validation.passed);
         assert_eq!(validation.matched_callees, vec!["callee"]);
+    }
+
+    #[test]
+    fn find_function_addr_unsized_function_bounded_by_next_function() {
+        let functions = vec![
+            FunctionInfo {
+                name: "unsized_func".into(),
+                address: 0x1000,
+                size: 0,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            },
+            FunctionInfo {
+                name: "next_func".into(),
+                address: 0x1500,
+                size: 0x100,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            },
+        ];
+
+        // Address beyond 64-byte cap but within unsized function bounds
+        assert_eq!(find_function_addr(&functions, 0x1080, 0x40), Some(0x1000));
+        assert_eq!(find_function_addr(&functions, 0x14ff, 0x40), Some(0x1000));
+        // Address at next function
+        assert_eq!(find_function_addr(&functions, 0x1500, 0x40), Some(0x1500));
+    }
+
+    #[test]
+    fn find_function_addr_duplicate_entry_prefers_sized() {
+        let functions = vec![
+            FunctionInfo {
+                name: "unsized_dup".into(),
+                address: 0x1000,
+                size: 0,
+                ..Default::default()
+            },
+            FunctionInfo {
+                name: "sized_dup".into(),
+                address: 0x1000,
+                size: 0x200,
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(find_function_addr(&functions, 0x1100, 0x40), Some(0x1000));
     }
 }

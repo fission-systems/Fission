@@ -340,11 +340,40 @@ pub fn resolve_enclosing_function(
         Ok(i) => i,
         Err(i) => i.checked_sub(1)?,
     };
-    let func = &functions[idx];
+
+    // If duplicate entries exist at the same address, prefer the one with size > 0.
+    let mut best_idx = idx;
+    let mut cur = idx;
+    while cur > 0 && functions[cur - 1].address == functions[idx].address {
+        cur -= 1;
+        if functions[cur].size > functions[best_idx].size {
+            best_idx = cur;
+        }
+    }
+    cur = idx + 1;
+    while cur < functions.len() && functions[cur].address == functions[idx].address {
+        if functions[cur].size > functions[best_idx].size {
+            best_idx = cur;
+        }
+        cur += 1;
+    }
+
+    let func = &functions[best_idx];
+    const MAX_FUNCTION_EXTENT: u64 = 1024 * 1024; // 1 MB cap
     let size = if func.size > 0 {
         func.size
     } else {
-        fallback_range
+        let next_addr = functions[best_idx..]
+            .iter()
+            .find(|f| f.address > func.address)
+            .map(|f| f.address);
+        match next_addr {
+            Some(next) => next
+                .saturating_sub(func.address)
+                .min(MAX_FUNCTION_EXTENT)
+                .max(fallback_range),
+            None => fallback_range,
+        }
     };
     let end = func.address.saturating_add(size);
     if addr >= func.address && addr < end {
