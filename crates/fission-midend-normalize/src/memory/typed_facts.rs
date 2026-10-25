@@ -204,8 +204,9 @@ fn infer_struct_name_from_offsets(
 }
 
 fn allows_ambient_windows_struct_inference(func: &PreHirFunction) -> bool {
-    (func.is_64bit && func.calling_convention == CallingConvention::WindowsX64)
-        || (!func.is_64bit && func.calling_convention == CallingConvention::X86_32)
+    // `X86_32` also covers 32-bit Linux; without a target-OS fact the
+    // Windows struct catalog only applies to the Win64 ABI.
+    func.is_64bit && func.calling_convention == CallingConvention::WindowsX64
 }
 
 pub(super) fn inferred_aggregate_size(accesses: &BTreeMap<u32, TypedAccessFacts>) -> Option<u32> {
@@ -691,93 +692,5 @@ mod tests {
         let facts = inventory.objects.get("param_1").expect("object facts");
         assert_eq!(facts.resolved_struct_name, None);
         assert!(!inventory.store.surface_facts.contains_key("param_1"));
-    }
-
-    #[test]
-    fn typed_fact_inventory_resolves_ambient_windows_shapes_on_32bit_windows() {
-        let func = PreHirFunction {
-            name: "ambient_32bit_compressed_data_shape".to_string(),
-            int_param_offsets: Vec::new(),
-            params: vec![PreHirBinding {
-                name: "param_1".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Unknown)),
-                surface_type_name: None,
-                origin: Some(NirBindingOrigin::ParamIndex(0)),
-                initializer: None,
-            }],
-            body: vec![
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::PtrOffset {
-                        base: Box::new(PreHirExpr::Var("param_1".to_string())),
-                        offset: 0,
-                    }),
-                    ty: NirType::Int {
-                        bits: 16,
-                        signed: false,
-                    },
-                }),
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::PtrOffset {
-                        base: Box::new(PreHirExpr::Var("param_1".to_string())),
-                        offset: 2,
-                    }),
-                    ty: NirType::Int {
-                        bits: 8,
-                        signed: false,
-                    },
-                }),
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::PtrOffset {
-                        base: Box::new(PreHirExpr::Var("param_1".to_string())),
-                        offset: 3,
-                    }),
-                    ty: NirType::Int {
-                        bits: 8,
-                        signed: false,
-                    },
-                }),
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::PtrOffset {
-                        base: Box::new(PreHirExpr::Var("param_1".to_string())),
-                        offset: 4,
-                    }),
-                    ty: NirType::Int {
-                        bits: 8,
-                        signed: false,
-                    },
-                }),
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::PtrOffset {
-                        base: Box::new(PreHirExpr::Var("param_1".to_string())),
-                        offset: 5,
-                    }),
-                    ty: NirType::Int {
-                        bits: 8,
-                        signed: false,
-                    },
-                }),
-                PreHirStmt::Expr(PreHirExpr::Load {
-                    ptr: Box::new(PreHirExpr::PtrOffset {
-                        base: Box::new(PreHirExpr::Var("param_1".to_string())),
-                        offset: 6,
-                    }),
-                    ty: NirType::Int {
-                        bits: 16,
-                        signed: false,
-                    },
-                }),
-            ],
-            calling_convention: CallingConvention::X86_32,
-            is_64bit: false,
-            ..Default::default()
-        };
-
-        let inventory = collect_typed_fact_inventory(&func, false);
-        let facts = inventory.objects.get("param_1").expect("object facts");
-        assert_eq!(
-            facts.resolved_struct_name.as_deref(),
-            Some("COMPRESSED_DATA_INFO")
-        );
-        assert!(inventory.store.surface_facts.contains_key("param_1"));
     }
 }
