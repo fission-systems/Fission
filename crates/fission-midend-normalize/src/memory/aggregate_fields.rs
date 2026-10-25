@@ -325,7 +325,13 @@ fn assigned_var_names(stmts: &[PreHirStmt]) -> HashSet<String> {
 fn aggregate_alias_root(expr: &PreHirExpr) -> Option<(PreHirExpr, i64)> {
     match expr {
         PreHirExpr::Cast { expr, .. } => aggregate_alias_root(expr),
-        PreHirExpr::PtrOffset { base, offset } => Some(((**base).clone(), *offset)),
+        PreHirExpr::PtrOffset { base, offset } => {
+            if let Some((root, inner_offset)) = aggregate_alias_root(base) {
+                Some((root, inner_offset.checked_add(*offset)?))
+            } else {
+                Some(((**base).clone(), *offset))
+            }
+        }
         _ => None,
     }
 }
@@ -1330,5 +1336,21 @@ mod tests {
             names.contains("dwThreadId"),
             "expected dwThreadId field, got: {names:?}"
         );
+    }
+
+    #[test]
+    fn aggregate_alias_root_flattens_nested_ptr_offsets() {
+        let root_expr = PreHirExpr::Var("s".to_string());
+        let inner = PreHirExpr::PtrOffset {
+            base: Box::new(root_expr.clone()),
+            offset: 16,
+        };
+        let outer = PreHirExpr::PtrOffset {
+            base: Box::new(inner),
+            offset: 8,
+        };
+        let (resolved_root, total_offset) = super::aggregate_alias_root(&outer).expect("flatten");
+        assert_eq!(resolved_root, root_expr);
+        assert_eq!(total_offset, 24);
     }
 }

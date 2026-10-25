@@ -454,8 +454,25 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             op: PreHirBinaryOp::Add,
             lhs,
             rhs,
-            ..
+            ty,
         } => {
+            if let NirType::Ptr(elem_ty) = ty {
+                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                    let elem_sz_i = elem_sz as i64;
+                    if let PreHirExpr::Const(val, _) = rhs.as_ref() {
+                        collect_address_parts(lhs, parts, sign)?;
+                        let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
+                        parts.const_offset = parts.const_offset.checked_add(offset)?;
+                        return Some(());
+                    }
+                    if let PreHirExpr::Const(val, _) = lhs.as_ref() {
+                        collect_address_parts(rhs, parts, sign)?;
+                        let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
+                        parts.const_offset = parts.const_offset.checked_add(offset)?;
+                        return Some(());
+                    }
+                }
+            }
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, sign)
         }
@@ -463,8 +480,19 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
-            ..
+            ty,
         } => {
+            if let NirType::Ptr(elem_ty) = ty {
+                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                    let elem_sz_i = elem_sz as i64;
+                    if let PreHirExpr::Const(val, _) = rhs.as_ref() {
+                        collect_address_parts(lhs, parts, sign)?;
+                        let offset = val.checked_mul(elem_sz_i)?.checked_mul(-sign)?;
+                        parts.const_offset = parts.const_offset.checked_add(offset)?;
+                        return Some(());
+                    }
+                }
+            }
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, -sign)
         }
@@ -668,5 +696,24 @@ mod tests {
                 .expect("dynamic index should retain its strided access shape");
         assert_eq!(dynamic_access.const_offset, 0);
         assert_eq!(dynamic_access.stride, Some(4));
+    }
+
+    #[test]
+    fn parse_partitioned_access_scales_typed_pointer_binary_add_offset() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_u32_ty = NirType::Ptr(Box::new(u32_ty.clone()));
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("p".to_string())),
+            rhs: Box::new(PreHirExpr::Const(3, u32_ty.clone())),
+            ty: ptr_u32_ty.clone(),
+        };
+        let access = parse_partitioned_access(&expr, &u32_ty, MemoryAccessKind::Load)
+            .expect("should parse typed pointer add");
+        // 3 elements * 4 bytes/element = 12 bytes
+        assert_eq!(access.const_offset, 12);
     }
 }
