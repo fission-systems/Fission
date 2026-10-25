@@ -20,6 +20,9 @@ use crate::eval::{
 };
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
 
+/// Size of the scratch region allocated for each pointer parameter.
+const SCRATCH_REGION_SIZE: usize = 128;
+
 /// Bytes the scratch buffer is filled with.
 ///
 /// Zero, except the first four bytes of every sixteen. Zeros make any
@@ -28,10 +31,11 @@ use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
 /// call; the non-zero words give the arithmetic something to do so a body that
 /// reads a field is not just returning zero either.
 ///
-/// A heuristic about layout, deliberately a mild one, and it costs nothing if
-/// wrong -- both sides read the same bytes regardless.
-fn scratch_contents() -> Vec<u8> {
-    let mut bytes = vec![0u8; 256];
+/// Allocates disjoint 128-byte regions for each pointer parameter so multiple
+/// pointer arguments (e.g. memcpy, strcmp) do not artificially alias.
+fn scratch_contents(num_regions: usize) -> Vec<u8> {
+    let num_regions = num_regions.max(1);
+    let mut bytes = vec![0u8; num_regions * SCRATCH_REGION_SIZE];
     for (chunk, slot) in bytes.chunks_mut(16).enumerate() {
         slot[..4].copy_from_slice(&((chunk as u32) + 1).to_le_bytes());
     }
@@ -76,8 +80,13 @@ pub fn check_ground_truth(
     // integers 0/1/-1: all but null fault the call, and null returns before
     // the body does anything, so the function grounds on one degenerate sample
     // and its control flow is never exercised.
-    let scratch = if hir.params.iter().any(|p| matches!(p.ty, NirType::Ptr(_))) {
-        let contents = scratch_contents();
+    let num_ptrs = hir
+        .params
+        .iter()
+        .filter(|p| matches!(p.ty, NirType::Ptr(_)))
+        .count();
+    let scratch = if num_ptrs > 0 {
+        let contents = scratch_contents(num_ptrs);
         match harness.install_scratch(&contents) {
             Ok(addr) => Some((addr, contents)),
             Err(err) => {
@@ -110,13 +119,19 @@ pub fn check_ground_truth(
     let mut emulator_errors = 0usize;
 
     for args in samples {
-        // A pointer parameter takes the buffer's address rather than the
-        // sweep's integer, which would be an invalid address on both sides.
+        // A pointer parameter takes its disjoint buffer region address rather
+        // than the sweep's integer, preventing false buffer aliasing across
+        // multi-pointer arguments.
+        let mut ptr_idx = 0usize;
         let args: Vec<i64> = args
             .iter()
             .zip(&hir.params)
             .map(|(v, p)| match (&p.ty, &scratch) {
-                (NirType::Ptr(_), Some((addr, _))) => *addr as i64,
+                (NirType::Ptr(_), Some((addr, _))) => {
+                    let offset = (ptr_idx * SCRATCH_REGION_SIZE) as u64;
+                    ptr_idx += 1;
+                    addr.wrapping_add(offset) as i64
+                }
                 _ => *v,
             })
             .collect();

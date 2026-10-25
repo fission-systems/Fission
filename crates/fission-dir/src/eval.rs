@@ -704,6 +704,142 @@ macro_rules! define_interp {
                 interpret_inner(body, params, locals, args, image, bound)
             }
 
+            fn collect_expr_reads(expr: &$Expr, reads: &mut Vec<String>) {
+                match expr {
+                    $Expr::Var(name) => {
+                        if !name.is_empty() && !reads.contains(name) {
+                            reads.push(name.clone());
+                        }
+                    }
+                    $Expr::Unary { expr, .. } | $Expr::Cast { expr, .. } => {
+                        collect_expr_reads(expr, reads);
+                    }
+                    $Expr::Binary { lhs, rhs, .. } => {
+                        collect_expr_reads(lhs, reads);
+                        collect_expr_reads(rhs, reads);
+                    }
+                    $Expr::Select {
+                        cond,
+                        then_expr,
+                        else_expr,
+                        ..
+                    } => {
+                        collect_expr_reads(cond, reads);
+                        collect_expr_reads(then_expr, reads);
+                        collect_expr_reads(else_expr, reads);
+                    }
+                    $Expr::Call { args, .. } => {
+                        for arg in args {
+                            collect_expr_reads(arg, reads);
+                        }
+                    }
+                    $Expr::Load { ptr, .. } => {
+                        collect_expr_reads(ptr, reads);
+                    }
+                    $Expr::PtrOffset { base, .. } => {
+                        collect_expr_reads(base, reads);
+                    }
+                    $Expr::Index { base, index, .. } => {
+                        collect_expr_reads(base, reads);
+                        collect_expr_reads(index, reads);
+                    }
+                    $Expr::FieldAccess { base, .. } => {
+                        collect_expr_reads(base, reads);
+                    }
+                    $Expr::AggregateCopy { src, .. } => {
+                        collect_expr_reads(src, reads);
+                    }
+                    _ => {}
+                }
+            }
+
+            fn collect_stmt_names(
+                stmt: &$Stmt,
+                reads: &mut Vec<String>,
+                assigned: &mut Vec<String>,
+            ) {
+                match stmt {
+                    $Stmt::Assign { lhs, rhs } => {
+                        match lhs {
+                            $LValue::Var(name) => {
+                                if !name.is_empty() && !assigned.contains(name) {
+                                    assigned.push(name.clone());
+                                }
+                            }
+                            $LValue::Deref { ptr, .. } => {
+                                collect_expr_reads(ptr, reads);
+                            }
+                            $LValue::Index { base, index, .. } => {
+                                collect_expr_reads(base, reads);
+                                collect_expr_reads(index, reads);
+                            }
+                            $LValue::FieldAccess { base, .. } => {
+                                collect_expr_reads(base, reads);
+                            }
+                        }
+                        collect_expr_reads(rhs, reads);
+                    }
+                    $Stmt::Expr(e) => {
+                        collect_expr_reads(e, reads);
+                    }
+                    $Stmt::Block(stmts) => {
+                        for s in stmts.iter() {
+                            collect_stmt_names(s, reads, assigned);
+                        }
+                    }
+                    $Stmt::Switch { expr, cases, default } => {
+                        collect_expr_reads(expr, reads);
+                        for c in cases {
+                            for s in c.body.iter() {
+                                collect_stmt_names(s, reads, assigned);
+                            }
+                        }
+                        for s in default.iter() {
+                            collect_stmt_names(s, reads, assigned);
+                        }
+                    }
+                    $Stmt::If { cond, then_body, else_body } => {
+                        collect_expr_reads(cond, reads);
+                        for s in then_body.iter() {
+                            collect_stmt_names(s, reads, assigned);
+                        }
+                        for s in else_body.iter() {
+                            collect_stmt_names(s, reads, assigned);
+                        }
+                    }
+                    $Stmt::While { cond, body } => {
+                        collect_expr_reads(cond, reads);
+                        for s in body.iter() {
+                            collect_stmt_names(s, reads, assigned);
+                        }
+                    }
+                    $Stmt::DoWhile { body, cond } => {
+                        for s in body.iter() {
+                            collect_stmt_names(s, reads, assigned);
+                        }
+                        collect_expr_reads(cond, reads);
+                    }
+                    $Stmt::For { init, cond, update, body } => {
+                        if let Some(init) = init {
+                            collect_stmt_names(init, reads, assigned);
+                        }
+                        if let Some(cond) = cond {
+                            collect_expr_reads(cond, reads);
+                        }
+                        if let Some(update) = update {
+                            collect_stmt_names(update, reads, assigned);
+                        }
+                        for s in body.iter() {
+                            collect_stmt_names(s, reads, assigned);
+                        }
+                    }
+                    $Stmt::Return(Some(e)) => {
+                        collect_expr_reads(e, reads);
+                    }
+                    _ => {}
+                }
+            }
+
             /// Every name the body reads that nothing declares or assigns --
             /// the set worth asking the machine about.
             ///
@@ -711,24 +847,17 @@ macro_rules! define_interp {
             /// overwritten by the declaration, and one the machine does not
             /// recognise is dropped.
             pub fn free_names(func: &$Function) -> Vec<String> {
-                let rendered = format!("{:?}", func.body);
-                let mut out: Vec<String> = Vec::new();
-                let mut rest = rendered.as_str();
-                while let Some(i) = rest.find("Var(") {
-                    rest = &rest[i + 4..];
-                    let Some(start) = rest.find('"') else { break };
-                    let Some(end) = rest[start + 1..].find('"') else { break };
-                    let name = &rest[start + 1..start + 1 + end];
-                    if !name.is_empty() && !out.iter().any(|n| n == name) {
-                        out.push(name.to_string());
-                    }
-                    rest = &rest[start + 1 + end..];
+                let mut reads: Vec<String> = Vec::new();
+                let mut assigned: Vec<String> = Vec::new();
+                for stmt in &func.body {
+                    collect_stmt_names(stmt, &mut reads, &mut assigned);
                 }
-                out.retain(|n| {
-                    !func.params.iter().any(|p| &p.name == n)
+                reads.retain(|n| {
+                    !assigned.contains(n)
+                        && !func.params.iter().any(|p| &p.name == n)
                         && !func.locals.iter().any(|l| &l.name == n)
                 });
-                out
+                reads
             }
 
             /// Interpret `body` with `args` bound to `params` in order and
@@ -987,5 +1116,42 @@ mod tests {
         ];
         let val = interpret_hir(&body, &[], &locals, &[]).expect("interpret");
         assert_eq!(val, Some(99));
+    }
+}
+
+#[cfg(test)]
+mod free_names_tests {
+    use super::*;
+    use fission_midend_core::ir::{HirExpr, HirFunction, HirLValue, HirStmt, NirType};
+
+    #[test]
+    fn test_free_names_typed_ast_visitor() {
+        let func = HirFunction {
+            body: vec![
+                // Assigned local temporary: should NOT be in free_names
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar1".to_string()),
+                    rhs: HirExpr::Const(
+                        10,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    ),
+                },
+                // Read of free variable "RBX" (e.g. caller saved register)
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar2".to_string()),
+                    rhs: HirExpr::Var("RBX".to_string()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("uVar1".to_string()))),
+            ],
+            params: Vec::new(),
+            locals: Vec::new(),
+            ..Default::default()
+        };
+
+        let free = hir_free_names(&func);
+        assert_eq!(free, vec!["RBX".to_string()]);
     }
 }
