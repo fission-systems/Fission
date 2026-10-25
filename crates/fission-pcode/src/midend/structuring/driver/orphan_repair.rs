@@ -149,4 +149,76 @@ mod tests {
             "the target terminator must remain attached to the repaired block: {repaired:?}"
         );
     }
+
+    #[test]
+    fn orphan_repair_repairs_target_block_ending_in_switch() {
+        let block_switch = PcodeBasicBlock {
+            index: 1,
+            start_address: 0x1010,
+            successors: vec![2, 3],
+            ops: Vec::new(),
+        };
+        let block_case1 = PcodeBasicBlock {
+            index: 2,
+            start_address: 0x1020,
+            successors: Vec::new(),
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: 0x1020,
+                output: None,
+                inputs: vec![Varnode::constant(1, 8)],
+                asm_mnemonic: Some("ret".to_string()),
+            }],
+        };
+        let block_case2 = PcodeBasicBlock {
+            index: 3,
+            start_address: 0x1030,
+            successors: Vec::new(),
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: 0x1030,
+                output: None,
+                inputs: vec![Varnode::constant(2, 8)],
+                asm_mnemonic: Some("ret".to_string()),
+            }],
+        };
+        let function = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: Vec::new(),
+                },
+                block_switch,
+                block_case1,
+                block_case2,
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&function, &options, None);
+        builder.terminator_cache.insert(
+            1,
+            fission_midend_structuring::linear_types::LoweredTerminator::Switch {
+                expr: PreHirExpr::Var("selector".to_string()),
+                targets: vec![0x1020, 0x1030],
+                default_target: Some(0x1030),
+                min_val: 0,
+                proof: None,
+            },
+        );
+
+        let body = vec![PreHirStmt::Goto("block_1010".to_string())];
+        let repaired = try_repair_orphan_gotos(&mut builder, body)
+            .expect("orphan repair should succeed for block ending in switch");
+
+        assert!(
+            repaired
+                .iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::Switch { .. })),
+            "the repaired body must contain the switch: {repaired:?}"
+        );
+    }
 }

@@ -1,11 +1,11 @@
 //! Orphan-goto repair free functions (Ghidra `ruleBlockGoto` analog).
 
 use crate::cleanup::{finalize_structured_body, has_orphan_goto_labels, orphan_goto_labels};
-use crate::helpers::block_label;
+use crate::helpers::{block_label, recovered_switch_case_values};
 use crate::host::StructuringHost;
 use crate::linear_types::LoweredTerminator;
 use fission_midend_core::ir::MlilPreviewError;
-use fission_midend_prehir::PreHirStmt;
+use fission_midend_prehir::{PreHirStmt, PreHirSwitchCase};
 
 /// Resolve a block index from a structured `block_<addr>` label.
 pub fn find_block_index_by_label(host: &impl StructuringHost, label: &str) -> Option<usize> {
@@ -92,8 +92,33 @@ pub fn emit_orphan_target_block(
         } => {
             stmts.push(host.emit_unsupported_control_surface(evidence, target_expr));
         }
-        LoweredTerminator::Switch { .. } => {
-            return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+        LoweredTerminator::Switch {
+            expr,
+            targets,
+            default_target,
+            min_val,
+            proof,
+        } => {
+            let (case_values, _used_proof_payload) =
+                recovered_switch_case_values(&targets, default_target, min_val, proof.as_ref());
+            let cases = case_values
+                .into_iter()
+                .map(|(value, target)| PreHirSwitchCase {
+                    values: vec![value],
+                    body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(target))]),
+                })
+                .collect();
+            stmts.push(PreHirStmt::Switch {
+                expr,
+                cases,
+                default: std::rc::Rc::new(
+                    default_target
+                        .map(block_label)
+                        .map(PreHirStmt::Goto)
+                        .into_iter()
+                        .collect(),
+                ),
+            });
         }
     }
     Ok(stmts)
