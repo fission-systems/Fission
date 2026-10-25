@@ -20,6 +20,7 @@ default = []
 lru = "0.18"
 fission-core = { path = "../fission-core" }
 fission-analysis-db = { path = "../fission-analysis-db" }
+fission-analysis-protocol = { path = "../fission-analysis-protocol" }
 fission-loader = { path = "../fission-loader" }
 fission-pcode = { path = "../fission-pcode" }
 fission-midend-core = { path = "../fission-midend-core" }

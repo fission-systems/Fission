@@ -35,6 +35,30 @@ pub struct InstructionRow {
     pub refers_to: Option<String>,
 }
 
+impl From<InstructionRow> for fission_analysis_protocol::DisasmRow {
+    fn from(row: InstructionRow) -> Self {
+        Self {
+            address: row.address,
+            bytes_hex: row.bytes_hex,
+            text: row.text,
+            target_addr: row.target_addr,
+            refers_to: row.refers_to,
+        }
+    }
+}
+
+impl From<&InstructionRow> for fission_analysis_protocol::DisasmRow {
+    fn from(row: &InstructionRow) -> Self {
+        Self {
+            address: row.address,
+            bytes_hex: row.bytes_hex.clone(),
+            text: row.text.clone(),
+            target_addr: row.target_addr,
+            refers_to: row.refers_to.clone(),
+        }
+    }
+}
+
 /// The decode context for a bare address window, once a Thumb-only image is
 /// accounted for. Same reasoning as `thumb_image_context`, exposed for
 /// callers that decode a fixed instruction count rather than a whole

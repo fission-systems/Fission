@@ -32,9 +32,12 @@ mod strings;
 mod xrefs;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
+pub use callgraph::build_protocol_callgraph;
 use callgraph::run_callgraph;
+pub use disasm::to_disasm_response;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
+pub use functions::{build_functions_response, function_info_to_fn_entry};
 use hex::print_hex;
 use identify::run_identify;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};

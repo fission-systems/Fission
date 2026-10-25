@@ -32,6 +32,7 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
 
     if cli.json {
         let mut nodes = Vec::new();
+        let mut edges = Vec::new();
         for func in &functions {
             let callers: Vec<_> = graph
                 .callers_of(func.address)
@@ -48,6 +49,12 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
                 .callees_of(func.address)
                 .iter()
                 .map(|e| {
+                    edges.push(fission_analysis_protocol::CallGraphEdge {
+                        caller_addr: func.address,
+                        callee_addr: e.addr,
+                        call_site: 0,
+                        is_indirect: false,
+                    });
                     json!({
                         "addr": format!("0x{:x}", e.addr),
                         "name": edge_label(binary, e.addr),
@@ -68,6 +75,7 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
             "node_count": nodes.len(),
             "selected_function": cli.callgraph_function.map(|entry| format!("0x{entry:x}")),
             "nodes": nodes,
+            "edges": edges,
             "analysis": index.analysis,
         });
         let text = serde_json::to_string_pretty(&payload).context("serialize callgraph JSON")?;
@@ -131,6 +139,40 @@ pub(super) fn run_callgraph(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<
     }
 
     Ok(())
+}
+
+/// Convert static analysis callgraph into canonical `CallGraphResponse` protocol wire type.
+pub fn build_protocol_callgraph(
+    binary: &LoadedBinary,
+    graph: &CallGraph,
+) -> fission_analysis_protocol::CallGraphResponse {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    for func in &binary.functions {
+        let callers = graph.callers_of(func.address);
+        let callees = graph.callees_of(func.address);
+        nodes.push(fission_analysis_protocol::CallGraphNode {
+            address: func.address,
+            name: func.name.clone(),
+            caller_count: callers.len(),
+            callee_count: callees.len(),
+        });
+        for callee in callees {
+            edges.push(fission_analysis_protocol::CallGraphEdge {
+                caller_addr: func.address,
+                callee_addr: callee.addr,
+                call_site: 0,
+                is_indirect: false,
+            });
+        }
+    }
+
+    fission_analysis_protocol::CallGraphResponse {
+        nodes,
+        edges,
+        total_call_sites: graph.total_call_sites(),
+    }
 }
 
 /// What to call the function on the other end of an edge.
