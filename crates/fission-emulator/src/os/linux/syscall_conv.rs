@@ -47,6 +47,14 @@ const X86_64: SyscallAbi = SyscallAbi {
     generic_numbers: false,
 };
 
+/// 32-bit x86 (i386) Linux `int 0x80` convention (`arch/x86/entry/entry_32.S`).
+const X86_32: SyscallAbi = SyscallAbi {
+    number: "EAX",
+    args: ["EBX", "ECX", "EDX", "ESI", "EDI", "EBP"],
+    result: "EAX",
+    generic_numbers: false,
+};
+
 const AARCH64: SyscallAbi = SyscallAbi {
     number: "x8",
     args: ["x0", "x1", "x2", "x3", "x4", "x5"],
@@ -55,11 +63,12 @@ const AARCH64: SyscallAbi = SyscallAbi {
 };
 
 /// ARM 32-bit EABI. `r7` holds the number, and the result comes back in `r0`.
+/// Uses `arch/arm/tools/syscall.tbl`, not `asm-generic/unistd.h`.
 const ARM32: SyscallAbi = SyscallAbi {
     number: "r7",
     args: ["r0", "r1", "r2", "r3", "r4", "r5"],
     result: "r0",
-    generic_numbers: true,
+    generic_numbers: false,
 };
 
 impl SyscallAbi {
@@ -73,6 +82,8 @@ impl SyscallAbi {
             AARCH64
         } else if arch.name.starts_with("ARM") {
             ARM32
+        } else if arch.pointer_size == 4 || arch.name.starts_with("x86:LE:32") {
+            X86_32
         } else {
             X86_64
         }
@@ -80,6 +91,12 @@ impl SyscallAbi {
 
     /// This number, in the numbering the syscall registry is keyed on.
     pub fn canonical_number(&self, number: u64) -> Option<u64> {
+        if self.number == X86_32.number {
+            return x86_32_to_x86_64(number);
+        }
+        if self.number == ARM32.number {
+            return arm32_to_x86_64(number);
+        }
         if !self.generic_numbers {
             return Some(number);
         }
@@ -95,6 +112,99 @@ impl SyscallAbi {
         }
         generic_to_x86_64(number)
     }
+}
+
+/// 32-bit x86 (`arch/x86/entry/syscalls/syscall_32.tbl`) → x86-64 number.
+fn x86_32_to_x86_64(number: u64) -> Option<u64> {
+    Some(match number {
+        1 => 60,         // exit
+        3 => 0,          // read
+        4 => 1,          // write
+        5 => 2,          // open
+        6 => 3,          // close
+        13 => 201,       // time
+        19 => 8,         // lseek
+        20 => 39,        // getpid
+        24 | 199 => 102, // getuid / getuid32
+        33 => 21,        // access
+        37 => 62,        // kill
+        45 => 12,        // brk
+        47 | 200 => 104, // getgid / getgid32
+        49 | 201 => 107, // geteuid / geteuid32
+        50 | 202 => 108, // getegid / getegid32
+        54 => 16,        // ioctl
+        78 => 96,        // gettimeofday
+        90 | 192 => 9,   // mmap / mmap2
+        91 => 11,        // munmap
+        108 | 197 => 5,  // fstat / fstat64
+        116 => 99,       // sysinfo
+        119 | 173 => 15, // sigreturn / rt_sigreturn
+        120 => 56,       // clone
+        122 => 63,       // uname
+        125 => 10,       // mprotect
+        146 => 20,       // writev
+        158 => 24,       // sched_yield
+        174 => 13,       // rt_sigaction
+        175 => 14,       // rt_sigprocmask
+        224 => 186,      // gettid
+        238 => 200,      // tkill
+        240 => 202,      // futex
+        252 => 231,      // exit_group
+        258 => 218,      // set_tid_address
+        265 => 228,      // clock_gettime
+        295 => 257,      // openat
+        300 => 262,      // fstatat64
+        305 => 267,      // readlinkat
+        340 => 302,      // prlimit64
+        355 => 318,      // getrandom
+        _ => return None,
+    })
+}
+
+/// 32-bit ARM EABI (`arch/arm/tools/syscall.tbl`) → x86-64 number.
+fn arm32_to_x86_64(number: u64) -> Option<u64> {
+    Some(match number {
+        1 => 60,         // exit
+        3 => 0,          // read
+        4 => 1,          // write
+        5 => 2,          // open
+        6 => 3,          // close
+        19 => 8,         // lseek
+        20 => 39,        // getpid
+        24 | 199 => 102, // getuid / getuid32
+        33 => 21,        // access
+        37 => 62,        // kill
+        45 => 12,        // brk
+        47 | 200 => 104, // getgid / getgid32
+        49 | 201 => 107, // geteuid / geteuid32
+        50 | 202 => 108, // getegid / getegid32
+        54 => 16,        // ioctl
+        78 => 96,        // gettimeofday
+        91 => 11,        // munmap
+        108 | 197 => 5,  // fstat / fstat64
+        116 => 99,       // sysinfo
+        119 | 173 => 15, // sigreturn / rt_sigreturn
+        120 => 56,       // clone
+        122 => 63,       // uname
+        125 => 10,       // mprotect
+        146 => 20,       // writev
+        158 => 24,       // sched_yield
+        174 => 13,       // rt_sigaction
+        175 => 14,       // rt_sigprocmask
+        192 => 9,        // mmap2
+        224 => 186,      // gettid
+        238 => 200,      // tkill
+        240 => 202,      // futex
+        248 => 231,      // exit_group
+        256 => 218,      // set_tid_address
+        263 => 228,      // clock_gettime
+        322 => 257,      // openat
+        327 => 262,      // fstatat64
+        332 => 267,      // readlinkat
+        369 => 302,      // prlimit64
+        384 => 318,      // getrandom
+        _ => return None,
+    })
 }
 
 /// asm-generic number → the x86-64 number for the same syscall.
@@ -150,8 +260,44 @@ mod tests {
     #[test]
     fn each_architecture_gets_its_own_registers() {
         assert_eq!(SyscallAbi::for_arch(&ArchInfo::x86_64_sysv()).number, "RAX");
+        let x86_32 = SyscallAbi::for_arch(&ArchInfo::x86_32());
+        assert_eq!(x86_32.number, "EAX");
+        assert_eq!(x86_32.args, ["EBX", "ECX", "EDX", "ESI", "EDI", "EBP"]);
+        assert_eq!(x86_32.result, "EAX");
+        assert!(!x86_32.generic_numbers);
         assert_eq!(SyscallAbi::for_arch(&ArchInfo::aarch64()).number, "x8");
-        assert_eq!(SyscallAbi::for_arch(&ArchInfo::arm32()).number, "r7");
+        let arm32 = SyscallAbi::for_arch(&ArchInfo::arm32());
+        assert_eq!(arm32.number, "r7");
+        assert!(!arm32.generic_numbers);
+    }
+
+    #[test]
+    fn x86_32_and_arm32_translate_their_own_syscall_tables() {
+        let x86_32 = SyscallAbi::for_arch(&ArchInfo::x86_32());
+        assert_eq!(x86_32.canonical_number(1), Some(60)); // exit
+        assert_eq!(x86_32.canonical_number(3), Some(0)); // read
+        assert_eq!(x86_32.canonical_number(4), Some(1)); // write
+        assert_eq!(x86_32.canonical_number(5), Some(2)); // open
+        assert_eq!(x86_32.canonical_number(6), Some(3)); // close
+        assert_eq!(x86_32.canonical_number(45), Some(12)); // brk
+        assert_eq!(x86_32.canonical_number(192), Some(9)); // mmap2
+        assert_eq!(x86_32.canonical_number(252), Some(231)); // exit_group
+
+        let arm32 = SyscallAbi::for_arch(&ArchInfo::arm32());
+        assert_eq!(arm32.canonical_number(1), Some(60)); // exit
+        assert_eq!(arm32.canonical_number(3), Some(0)); // read
+        assert_eq!(arm32.canonical_number(4), Some(1)); // write
+        assert_eq!(arm32.canonical_number(5), Some(2)); // open
+        assert_eq!(arm32.canonical_number(6), Some(3)); // close
+        assert_eq!(arm32.canonical_number(45), Some(12)); // brk
+        assert_eq!(arm32.canonical_number(54), Some(16)); // ioctl
+        assert_eq!(arm32.canonical_number(192), Some(9)); // mmap2
+        assert_eq!(arm32.canonical_number(248), Some(231)); // exit_group
+        // ARM32 getppid (64), dup2 (63), setpgid (57), ftruncate (93) must not map to asm-generic write/read/close/exit
+        assert_eq!(arm32.canonical_number(64), None);
+        assert_eq!(arm32.canonical_number(63), None);
+        assert_eq!(arm32.canonical_number(57), None);
+        assert_eq!(arm32.canonical_number(93), None);
     }
 
     #[test]
