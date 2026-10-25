@@ -41,13 +41,26 @@ use crate::{HashMap, HashSet};
 /// x86 EFLAGS variable names produced by `arch::x86::unique_x86_register_name`.
 const FLAG_NAMES: &[&str] = &["cf", "pf", "af", "zf", "sf", "of"];
 
-fn is_flag_var(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    let prefix = lower.split(['.', '_', '#', '$']).next().unwrap_or(&lower);
+/// The flag register a variable names: the bare register (`zf`) or one of
+/// its SSA versions (`zf.1`). Anything else -- `of_count`, a DWARF local
+/// named `cy_index` -- is an ordinary variable.
+fn flag_family(name: &str) -> Option<&str> {
+    let (base, version) = match name.split_once('.') {
+        Some((base, version)) => (base, Some(version)),
+        None => (name, None),
+    };
+    if version.is_some_and(|v| v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
     matches!(
-        prefix,
+        base,
         "cf" | "pf" | "af" | "zf" | "sf" | "of" | "ng" | "zr" | "cy" | "ov"
     )
+    .then_some(base)
+}
+
+fn is_flag_var(name: &str) -> bool {
+    flag_family(name).is_some()
 }
 
 // ── Phase 1: Definition scan ──────────────────────────────────────────────────
@@ -202,12 +215,7 @@ fn extract_eq_args(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr)> {
 
 /// Check whether `expr` is `Var(flag)`.
 fn is_flag_expr(expr: &PreHirExpr, flag: &str) -> bool {
-    let PreHirExpr::Var(n) = expr else {
-        return false;
-    };
-    let lower = n.to_ascii_lowercase();
-    let prefix = lower.split(['.', '_', '#', '$']).next().unwrap_or(&lower);
-    prefix == flag
+    matches!(expr, PreHirExpr::Var(n) if flag_family(n) == Some(flag))
 }
 
 /// Check whether `expr` is `!Var(flag)`.
@@ -233,15 +241,20 @@ fn is_sf_ne_of(expr: &PreHirExpr) -> bool {
 }
 
 /// Lookup a flag variable in `defs` matching flag name prefix case-insensitively.
+/// The definition of `flag` (a full name, or a bare family such as `of`).
+/// A bare family resolves only when exactly one version of it is defined:
+/// with several, HashMap order would decide which one pairs with the
+/// condition, so the rewrite is refused instead.
 fn get_flag_def<'a>(defs: &'a HashMap<String, PreHirExpr>, flag: &str) -> Option<&'a PreHirExpr> {
-    for (k, v) in defs {
-        let lower = k.to_ascii_lowercase();
-        let prefix = lower.split(['.', '_', '#', '$']).next().unwrap_or(&lower);
-        if prefix == flag {
-            return Some(v);
-        }
+    if let Some(def) = defs.get(flag) {
+        return Some(def);
     }
-    None
+    let mut versions = defs
+        .iter()
+        .filter(|(name, _)| flag_family(name) == Some(flag))
+        .map(|(_, def)| def);
+    let only = versions.next()?;
+    versions.next().is_none().then_some(only)
 }
 
 /// Helper: build `Binary { op, lhs, rhs, ty: Bool }`.
@@ -1547,6 +1560,26 @@ mod tests {
             first_if_cond(&func),
             &bool_binary(PreHirBinaryOp::SLt, var("a"), var("b"))
         );
+    }
+
+    #[test]
+    fn flag_family_accepts_ssa_versions_only() {
+        assert_eq!(flag_family("of"), Some("of"));
+        assert_eq!(flag_family("of.12"), Some("of"));
+        assert_eq!(flag_family("of_count"), None);
+        assert_eq!(flag_family("cy_index"), None);
+        assert_eq!(flag_family("zf."), None);
+        assert_eq!(flag_family("zf.x"), None);
+    }
+
+    #[test]
+    fn get_flag_def_refuses_ambiguous_flag_versions() {
+        let mut defs = HashMap::default();
+        defs.insert("of.1".to_string(), var("a"));
+        assert_eq!(get_flag_def(&defs, "of"), Some(&var("a")));
+        defs.insert("of.2".to_string(), var("b"));
+        assert_eq!(get_flag_def(&defs, "of"), None);
+        assert_eq!(get_flag_def(&defs, "of.2"), Some(&var("b")));
     }
 
     #[test]
