@@ -41,6 +41,10 @@ pub mod resources {
     pub use crate::core::resources::*;
 }
 
+pub mod utils {
+    pub use crate::core::utils::*;
+}
+
 // Commonly used standalone utilities
 pub use crate::core::utils::{
     format_addr, normalize_named_type_identity, parse_address, sanitize_symbol_name,
