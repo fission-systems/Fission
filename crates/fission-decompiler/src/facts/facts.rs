@@ -861,10 +861,28 @@ fn collect_raw_call_arities(stmts: &[fission_pcode::PreHirStmt], out: &mut HashM
                 visit_expr(rhs, out);
             }
             PreHirStmt::VaStart { va_list, .. } => visit_expr(va_list, out),
-            PreHirStmt::Block(body)
-            | PreHirStmt::While { body, .. }
-            | PreHirStmt::DoWhile { body, .. }
-            | PreHirStmt::For { body, .. } => collect_raw_call_arities(body, out),
+            PreHirStmt::Block(body) => collect_raw_call_arities(body, out),
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+                visit_expr(cond, out);
+                collect_raw_call_arities(body, out);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(i) = init {
+                    collect_raw_call_arities(std::slice::from_ref(i.as_ref()), out);
+                }
+                if let Some(c) = cond {
+                    visit_expr(c, out);
+                }
+                if let Some(u) = update {
+                    collect_raw_call_arities(std::slice::from_ref(u.as_ref()), out);
+                }
+                collect_raw_call_arities(body, out);
+            }
             PreHirStmt::Switch {
                 expr,
                 cases,
@@ -923,11 +941,30 @@ pub(crate) fn record_interprocedural_arity_facts(
     }
     // Bounded by this one function's own direct call targets, not the
     // whole binary's call_target index.
-    let name_to_addr: HashMap<&str, u64> = type_context
-        .call_targets
-        .iter()
-        .map(|(addr, name)| (name.as_str(), *addr))
-        .collect();
+    let mut name_counts: HashMap<&str, usize> = HashMap::new();
+    for name in type_context.call_targets.values() {
+        *name_counts.entry(name.as_str()).or_default() += 1;
+    }
+    let mut name_to_addr: HashMap<&str, u64> = HashMap::new();
+    for (addr, name) in &type_context.call_targets {
+        if name_counts.get(name.as_str()).copied() == Some(1) {
+            name_to_addr.insert(name.as_str(), *addr);
+        }
+    }
+
+    let resolve_callee_addr = |callee_name: &str| -> Option<u64> {
+        if let Some(&addr) = name_to_addr.get(callee_name) {
+            return Some(addr);
+        }
+        if let Some(hex) = callee_name.strip_prefix("sub_") {
+            if let Ok(addr) = u64::from_str_radix(hex, 16) {
+                if type_context.call_targets.contains_key(&addr) {
+                    return Some(addr);
+                }
+            }
+        }
+        None
+    };
 
     for (callee_name, arity) in observed_arity {
         if arity == 0 {
@@ -936,8 +973,8 @@ pub(crate) fn record_interprocedural_arity_facts(
         if is_known_variadic_runtime_symbol(&callee_name) {
             continue; // an observed suffix is not a fixed-arity contract
         }
-        let Some(&callee_addr) = name_to_addr.get(callee_name.as_str()) else {
-            continue; // unresolved symbol (external import, indirect, etc.)
+        let Some(callee_addr) = resolve_callee_addr(callee_name.as_str()) else {
+            continue; // unresolved or ambiguous symbol (external import, indirect, etc.)
         };
         if callee_addr == self_address {
             continue; // recursive call carries no new arity info
@@ -1006,11 +1043,31 @@ pub fn seed_whole_program_call_arity_facts(binary: &LoadedBinary, fact_store: &m
     let mut options = crate::seed_nir_render_options(binary);
     apply_spec_overrides(binary, &mut options);
 
-    let name_to_addr: HashMap<&str, u64> = type_context
-        .call_targets
-        .iter()
-        .map(|(addr, name)| (name.as_str(), *addr))
-        .collect();
+    let mut binary_name_counts: HashMap<&str, usize> = HashMap::new();
+    for f in &binary.functions {
+        *binary_name_counts.entry(f.name.as_str()).or_default() += 1;
+    }
+
+    let mut name_to_addr: HashMap<&str, u64> = HashMap::new();
+    for (addr, name) in &type_context.call_targets {
+        if binary_name_counts.get(name.as_str()).copied() == Some(1) {
+            name_to_addr.insert(name.as_str(), *addr);
+        }
+    }
+
+    let resolve_callee_addr = |callee_name: &str| -> Option<u64> {
+        if let Some(&addr) = name_to_addr.get(callee_name) {
+            return Some(addr);
+        }
+        if let Some(hex) = callee_name.strip_prefix("sub_") {
+            if let Ok(addr) = u64::from_str_radix(hex, 16) {
+                if binary.function_at_exact(addr).is_some() {
+                    return Some(addr);
+                }
+            }
+        }
+        None
+    };
 
     let observations: Vec<(u64, HashMap<String, usize>)> = binary
         .functions
@@ -1053,8 +1110,8 @@ pub fn seed_whole_program_call_arity_facts(binary: &LoadedBinary, fact_store: &m
             if is_known_variadic_runtime_symbol(callee_name) {
                 continue; // preserve the API's declared prefix and variadic tail
             }
-            let Some(&callee_addr) = name_to_addr.get(callee_name.as_str()) else {
-                continue; // unresolved symbol (external import, indirect, etc.)
+            let Some(callee_addr) = resolve_callee_addr(callee_name.as_str()) else {
+                continue; // unresolved or ambiguous symbol (external import, indirect, same-named conflict, etc.)
             };
             if callee_addr == *caller_addr {
                 continue; // recursive call carries no new arity info
@@ -2490,13 +2547,13 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 mod tests {
     use super::{
         build_nir_call_param_rules, build_nir_call_result_facts,
-        build_nir_import_call_prototype_summaries, direct_callee_instruction_limit,
-        direct_callee_preview_options, direct_callee_stable_prefix_instruction_limit,
-        expose_preview_callsite_copy_sources, merge_nir_function_hints,
-        merge_preview_argument_register_writes, merge_preview_pointer_evidence,
-        record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
-        resolve_nir_struct_name, summarize_modified_argument_register_slots,
-        summarize_preview_callee_effects,
+        build_nir_import_call_prototype_summaries, collect_raw_call_arities,
+        direct_callee_instruction_limit, direct_callee_preview_options,
+        direct_callee_stable_prefix_instruction_limit, expose_preview_callsite_copy_sources,
+        merge_nir_function_hints, merge_preview_argument_register_writes,
+        merge_preview_pointer_evidence, record_interprocedural_arity_facts,
+        record_unambiguous_register_type_hint, resolve_nir_struct_name,
+        summarize_modified_argument_register_slots, summarize_preview_callee_effects,
     };
     use crate::{
         CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
@@ -3319,5 +3376,167 @@ mod tests {
         };
         let merged = merge_preview_argument_register_writes(&merged, unknown);
         assert_eq!(merged.modified_argument_register_slots, None);
+    }
+
+    #[test]
+    fn collect_raw_call_arities_collects_calls_in_loop_control_expressions() {
+        let mut arities = HashMap::new();
+        let stmts = vec![
+            PreHirStmt::While {
+                cond: PreHirExpr::Call {
+                    target: "has_next".into(),
+                    args: vec![PreHirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    )],
+                    ty: NirType::Bool,
+                },
+                body: std::rc::Rc::new(vec![]),
+            },
+            PreHirStmt::For {
+                init: Some(Box::new(PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "list_head".into(),
+                    args: vec![PreHirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    )],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }))),
+                cond: Some(PreHirExpr::Call {
+                    target: "list_valid".into(),
+                    args: vec![
+                        PreHirExpr::Const(
+                            1,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                        PreHirExpr::Const(
+                            2,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                    ],
+                    ty: NirType::Bool,
+                }),
+                update: Some(Box::new(PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "list_next".into(),
+                    args: vec![
+                        PreHirExpr::Const(
+                            1,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                        PreHirExpr::Const(
+                            2,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                        PreHirExpr::Const(
+                            3,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                    ],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }))),
+                body: std::rc::Rc::new(vec![]),
+            },
+        ];
+        collect_raw_call_arities(&stmts, &mut arities);
+        assert_eq!(arities.get("has_next"), Some(&1));
+        assert_eq!(arities.get("list_head"), Some(&1));
+        assert_eq!(arities.get("list_valid"), Some(&2));
+        assert_eq!(arities.get("list_next"), Some(&3));
+    }
+
+    #[test]
+    fn record_interprocedural_arity_facts_skips_ambiguous_same_named_targets() {
+        let mut fact_store = FactStore::default();
+        let mut call_targets = HashMap::new();
+        call_targets.insert(0x1000, "parse".to_string());
+        call_targets.insert(0x5000, "parse".to_string());
+        call_targets.insert(0x2000, "unique_fn".to_string());
+
+        let type_context = NirTypeContext {
+            call_targets,
+            ..Default::default()
+        };
+
+        let raw_hir = fission_pcode::PreHirFunction {
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "parse".into(),
+                    args: vec![
+                        PreHirExpr::Const(
+                            1,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                        PreHirExpr::Const(
+                            2,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                    ],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "unique_fn".into(),
+                    args: vec![PreHirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    )],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+            ],
+            ..Default::default()
+        };
+
+        record_interprocedural_arity_facts(&mut fact_store, &type_context, &raw_hir, 0x9000);
+
+        // Ambiguous "parse" must not be recorded on either address.
+        assert!(fact_store.structuring_hints(0x1000).is_none());
+        assert!(fact_store.structuring_hints(0x5000).is_none());
+
+        // Unique target "unique_fn" should be recorded with arity 1.
+        let hints = fact_store
+            .structuring_hints(0x2000)
+            .expect("hints for unique_fn");
+        assert_eq!(hints.param_names.len(), 1);
     }
 }
