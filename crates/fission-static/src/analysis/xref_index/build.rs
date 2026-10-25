@@ -257,7 +257,12 @@ impl XrefIndex {
         }
 
         for rec in &self.refs {
-            let src_fn = resolve_enclosing_function(&funcs, rec.source.address, fallback_range);
+            let src_fn = match rec.source.category {
+                XrefSourceCategory::Instruction { .. } => {
+                    resolve_enclosing_function(&funcs, rec.source.address, fallback_range)
+                }
+                _ => None,
+            };
             let tgt_va = rec.target.address;
             let tgt_fn =
                 tgt_va.and_then(|va| resolve_enclosing_function(&funcs, va, fallback_range));
@@ -285,16 +290,37 @@ impl XrefIndex {
                     if let Some(fa) = src_fn {
                         map.entry(fa).or_default().jumps_out.push(rec.id);
                     }
+                    if let Some(va) = tgt_va {
+                        if iat_addrs.contains(&va) {
+                            if let Some(fa) = src_fn {
+                                let v = map.entry(fa).or_default();
+                                if !v.imports_used.contains(&rec.id) {
+                                    v.imports_used.push(rec.id);
+                                }
+                            }
+                        }
+                    }
                 }
-                XrefKind::DataRead | XrefKind::DataWrite => {
+                XrefKind::DataRead => {
                     if let Some(fa) = src_fn {
                         if let Some(va) = tgt_va {
                             if string_addrs.contains(&va) {
                                 map.entry(fa).or_default().strings.push(rec.id);
                                 continue;
                             }
+                            if iat_addrs.contains(&va) {
+                                let v = map.entry(fa).or_default();
+                                if !v.imports_used.contains(&rec.id) {
+                                    v.imports_used.push(rec.id);
+                                }
+                            }
                         }
                         map.entry(fa).or_default().globals_read.push(rec.id);
+                    }
+                }
+                XrefKind::DataWrite => {
+                    if let Some(fa) = src_fn {
+                        map.entry(fa).or_default().globals_written.push(rec.id);
                     }
                 }
                 XrefKind::StringRef => {
@@ -304,7 +330,10 @@ impl XrefIndex {
                 }
                 XrefKind::ImportRef => {
                     if let Some(fa) = src_fn {
-                        map.entry(fa).or_default().imports_used.push(rec.id);
+                        let v = map.entry(fa).or_default();
+                        if !v.imports_used.contains(&rec.id) {
+                            v.imports_used.push(rec.id);
+                        }
                     }
                 }
                 _ => {}
@@ -375,12 +404,11 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
     };
 
     for (&slot_va, name) in binary.iat_symbols.iter() {
+        let section = section_containing_va(binary, slot_va).unwrap_or_else(|| "unknown".into());
         builder.push_record(
             XrefSource {
                 address: slot_va,
-                category: XrefSourceCategory::Instruction {
-                    enclosing_function: resolve_enclosing_function(&sorted_funcs, slot_va, 0x40),
-                },
+                category: XrefSourceCategory::Data { section },
             },
             XrefTarget {
                 address: Some(slot_va),
@@ -577,10 +605,11 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
     }
 }
 
-fn relocation_source_category(
+fn source_category_for_address(
     binary: &LoadedBinary,
     sorted_funcs: &[FunctionInfo],
     address: u64,
+    fallback_range: u64,
 ) -> XrefSourceCategory {
     if let Some(section) = binary.sections.iter().find(|section| {
         let end = section
@@ -596,8 +625,16 @@ fn relocation_source_category(
     }
 
     XrefSourceCategory::Instruction {
-        enclosing_function: resolve_enclosing_function(sorted_funcs, address, 0x40),
+        enclosing_function: resolve_enclosing_function(sorted_funcs, address, fallback_range),
     }
+}
+
+fn relocation_source_category(
+    binary: &LoadedBinary,
+    sorted_funcs: &[FunctionInfo],
+    address: u64,
+) -> XrefSourceCategory {
+    source_category_for_address(binary, sorted_funcs, address, 0x40)
 }
 
 /// Maps [`XrefDatabase`] rows into canonical records (`XrefSourceLayer::Disassembly`).
@@ -610,7 +647,7 @@ pub fn push_disassembly_layer(
     sorted.sort_by_key(|f| f.address);
 
     for x in db.iter() {
-        let enclosing_fn = resolve_enclosing_function(&sorted, x.from_addr, 0x100);
+        let category = source_category_for_address(binary, &sorted, x.from_addr, 0x100);
 
         let (kind, note_suffix) = match x.xref_type {
             XrefType::Call => (XrefKind::Call, "call"),
@@ -634,9 +671,7 @@ pub fn push_disassembly_layer(
         builder.push_record(
             XrefSource {
                 address: x.from_addr,
-                category: XrefSourceCategory::Instruction {
-                    enclosing_function: enclosing_fn,
-                },
+                category,
             },
             XrefTarget {
                 address: Some(x.to_addr),
@@ -1241,5 +1276,159 @@ mod tests {
                 && record.target.symbol.as_deref() == Some("legacy_target")
                 && record.evidence.relocation_kind.is_none()
         }));
+    }
+
+    #[test]
+    fn function_summaries_segregates_data_writes_and_recognizes_jump_and_data_iat_uses() {
+        use crate::analysis::xrefs::Xref;
+
+        let bin = LoadedBinaryBuilder::new("t.exe".to_string(), DataBuffer::Heap(vec![0u8; 512]))
+            .format("PE64")
+            .entry_point(0x140001000)
+            .image_base(0x140000000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x140001000,
+                virtual_size: 0x80,
+                file_offset: 0,
+                file_size: 0x80,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".rdata".to_string(),
+                virtual_address: 0x140001080,
+                virtual_size: 0x80,
+                file_offset: 0x80,
+                file_size: 0x80,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".data".to_string(),
+                virtual_address: 0x140001100,
+                virtual_size: 0x80,
+                file_offset: 0x100,
+                file_size: 0x80,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_iat_symbol(0x140001080, "KERNEL32.ExitProcess".into())
+            .add_iat_symbol(0x140001088, "KERNEL32.GetProcAddress".into())
+            .add_function(FunctionInfo {
+                name: "worker".into(),
+                address: 0x140001000,
+                size: 0x60,
+                ..Default::default()
+            })
+            .build()
+            .expect("build");
+
+        let mut db = XrefDatabase::new();
+        // Read global variable at 0x140001100
+        db.add_xref(Xref {
+            from_addr: 0x140001010,
+            to_addr: 0x140001100,
+            xref_type: XrefType::DataRead,
+            operand_index: 1,
+            sleigh_kind: None,
+            flow_kind: None,
+        });
+        // Write global variable at 0x140001108
+        db.add_xref(Xref {
+            from_addr: 0x140001020,
+            to_addr: 0x140001108,
+            xref_type: XrefType::DataWrite,
+            operand_index: 0,
+            sleigh_kind: None,
+            flow_kind: None,
+        });
+        // Tail-call jump to IAT slot 0x140001080
+        db.add_xref(Xref {
+            from_addr: 0x140001030,
+            to_addr: 0x140001080,
+            xref_type: XrefType::Jump,
+            operand_index: 0,
+            sleigh_kind: None,
+            flow_kind: None,
+        });
+        // Address load from IAT slot 0x140001088
+        db.add_xref(Xref {
+            from_addr: 0x140001040,
+            to_addr: 0x140001088,
+            xref_type: XrefType::DataRead,
+            operand_index: 1,
+            sleigh_kind: None,
+            flow_kind: None,
+        });
+        // Pointer sweep entry in .data (0x140001110) within 0x100 of function boundary
+        db.add_xref(Xref {
+            from_addr: 0x140001110,
+            to_addr: 0x140001120,
+            xref_type: XrefType::DataRead,
+            operand_index: -1,
+            sleigh_kind: None,
+            flow_kind: None,
+        });
+
+        let mut builder = XrefIndexBuilder::new();
+        push_loader_seeds(&mut builder, &bin);
+        push_disassembly_layer(&mut builder, &bin, &db);
+        let idx = builder.finish();
+
+        // IAT seeds must be categorized as Data, not Instruction
+        for iat_rec in idx.refs.iter().filter(|r| {
+            r.kind == XrefKind::ImportRef && r.evidence.layer == XrefSourceLayer::Loader
+        }) {
+            assert!(
+                matches!(iat_rec.source.category, XrefSourceCategory::Data { ref section } if section == ".rdata"),
+                "expected IAT seed category Data(.rdata), got {:?}",
+                iat_rec.source.category
+            );
+        }
+
+        // Pointer sweep in .data must be categorized as Data, not Instruction
+        let data_ptr_rec = idx
+            .refs
+            .iter()
+            .find(|r| r.source.address == 0x140001110)
+            .expect("pointer sweep record");
+        assert!(
+            matches!(data_ptr_rec.source.category, XrefSourceCategory::Data { ref section } if section == ".data"),
+            "expected pointer sweep category Data(.data), got {:?}",
+            data_ptr_rec.source.category
+        );
+
+        let fs = idx
+            .function_summary_for(&bin, 0x140001000, 0x200)
+            .expect("worker summary");
+
+        // globals_written has the DataWrite record (0x140001020 -> 0x140001108)
+        assert_eq!(fs.globals_written.len(), 1);
+        let written_rec = &idx.refs[fs.globals_written[0] as usize];
+        assert_eq!(written_rec.source.address, 0x140001020);
+        assert_eq!(written_rec.target.address, Some(0x140001108));
+
+        // globals_read has 0x140001010 and 0x140001040, NOT the DataWrite and NOT the .data pointer sweep
+        let read_sources: Vec<u64> = fs
+            .globals_read
+            .iter()
+            .map(|&id| idx.refs[id as usize].source.address)
+            .collect();
+        assert_eq!(read_sources, vec![0x140001010, 0x140001040]);
+
+        // imports_used includes both the tail-call Jump to 0x140001080 and DataRead of 0x140001088
+        let import_targets: Vec<Option<u64>> = fs
+            .imports_used
+            .iter()
+            .map(|&id| idx.refs[id as usize].target.address)
+            .collect();
+        assert!(import_targets.contains(&Some(0x140001080)));
+        assert!(import_targets.contains(&Some(0x140001088)));
+        assert_eq!(fs.imports_used.len(), 2);
     }
 }
