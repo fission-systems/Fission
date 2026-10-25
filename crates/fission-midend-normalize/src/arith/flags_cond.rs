@@ -1,4 +1,5 @@
 use super::util::*;
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 
 pub fn canonicalize_flag_intrinsics(expr: &PreHirExpr) -> Option<PreHirExpr> {
@@ -98,8 +99,8 @@ fn fold_signed_zero_or_negative(expr: &PreHirExpr) -> Option<PreHirExpr> {
         is_eq_zero_of(rhs.as_ref()),
         is_signed_lt_zero_of(rhs.as_ref()),
     ) {
-        (Some(x), None, None, Some(y)) if x == y => x,
-        (None, Some(x), Some(y), None) if x == y => x,
+        (Some(x), None, None, Some(y)) if x == y && !expr_has_side_effects(&x) => x,
+        (None, Some(x), Some(y), None) if x == y && !expr_has_side_effects(&x) => x,
         _ => return None,
     };
     let ty = expr_type(&x);
@@ -129,8 +130,8 @@ fn fold_signed_zero_or_positive(expr: &PreHirExpr) -> Option<PreHirExpr> {
         is_eq_zero_of(rhs.as_ref()),
         is_signed_gt_zero_of(rhs.as_ref()),
     ) {
-        (Some(x), None, None, Some(y)) if x == y => x,
-        (None, Some(x), Some(y), None) if x == y => x,
+        (Some(x), None, None, Some(y)) if x == y && !expr_has_side_effects(&x) => x,
+        (None, Some(x), Some(y), None) if x == y && !expr_has_side_effects(&x) => x,
         _ => return None,
     };
     let ty = expr_type(&x);
@@ -202,7 +203,10 @@ fn normalize_boolean_logic_core(expr: &PreHirExpr) -> Option<PreHirExpr> {
             lhs,
             rhs,
             ..
-        } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
+        } if lhs == rhs
+            && is_self_comparable_non_float_type(&expr_type(lhs))
+            && !expr_has_side_effects(lhs) =>
+        {
             Some(bool_true_expr())
         }
         PreHirExpr::Binary {
@@ -210,7 +214,10 @@ fn normalize_boolean_logic_core(expr: &PreHirExpr) -> Option<PreHirExpr> {
             lhs,
             rhs,
             ..
-        } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
+        } if lhs == rhs
+            && is_self_comparable_non_float_type(&expr_type(lhs))
+            && !expr_has_side_effects(lhs) =>
+        {
             Some(bool_false_expr())
         }
         PreHirExpr::Binary {
@@ -374,7 +381,7 @@ fn normalize_boolean_logic_core(expr: &PreHirExpr) -> Option<PreHirExpr> {
                 Some((**lhs).clone())
             } else if is_bool_false_expr(lhs) || is_bool_false_expr(rhs) {
                 Some(bool_false_expr())
-            } else if lhs == rhs {
+            } else if lhs == rhs && !expr_has_side_effects(lhs) {
                 Some((**lhs).clone())
             } else {
                 None
@@ -392,7 +399,7 @@ fn normalize_boolean_logic_core(expr: &PreHirExpr) -> Option<PreHirExpr> {
                 Some((**lhs).clone())
             } else if is_bool_true_expr(lhs) || is_bool_true_expr(rhs) {
                 Some(bool_true_expr())
-            } else if lhs == rhs {
+            } else if lhs == rhs && !expr_has_side_effects(lhs) {
                 Some((**lhs).clone())
             } else {
                 None

@@ -1,4 +1,5 @@
 use super::util::*;
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 
 pub fn collapse_zero_offset_cast(expr: &PreHirExpr) -> Option<PreHirExpr> {
@@ -75,7 +76,9 @@ pub fn cleanup_arithmetic_wrappers(expr: &PreHirExpr) -> Option<PreHirExpr> {
             lhs,
             rhs,
             ..
-        } if is_one_const(rhs.as_ref()) => Some(PreHirExpr::Const(0, expr_type(lhs))),
+        } if is_one_const(rhs.as_ref()) && !expr_has_side_effects(lhs) => {
+            Some(PreHirExpr::Const(0, expr_type(lhs)))
+        }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Shl,
             lhs,
@@ -123,19 +126,23 @@ pub fn cleanup_arithmetic_wrappers(expr: &PreHirExpr) -> Option<PreHirExpr> {
             lhs,
             rhs,
             ..
-        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => Some((**lhs).clone()),
+        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) && !expr_has_side_effects(lhs) => {
+            Some((**lhs).clone())
+        }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Or,
             lhs,
             rhs,
             ..
-        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => Some((**lhs).clone()),
+        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) && !expr_has_side_effects(lhs) => {
+            Some((**lhs).clone())
+        }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Xor,
             lhs,
             rhs,
             ..
-        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => {
+        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) && !expr_has_side_effects(lhs) => {
             Some(PreHirExpr::Const(0, expr_type(lhs)))
         }
         PreHirExpr::Binary {
@@ -220,7 +227,7 @@ pub fn simplify_subpiece_chain(expr: &PreHirExpr) -> Option<PreHirExpr> {
         return None;
     }
     let PreHirExpr::Binary {
-        op: PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
+        op: shift_op @ (PreHirBinaryOp::Shr | PreHirBinaryOp::Sar),
         lhs: inner_cast_expr,
         rhs: shift_const,
         ..
@@ -245,15 +252,22 @@ pub fn simplify_subpiece_chain(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let Some(mid_bits) = int_type_bits(mid_ty) else {
         return None;
     };
+    let is_signed = |ty: &NirType| matches!(ty, NirType::Int { signed: true, .. });
 
     // Rule 2: shift expels all real data → result is 0.
-    if *shift_amount >= i64::from(source_bits) && mid_bits >= source_bits {
+    // Only valid for logical shift on unsigned types; Sar or signed values preserve sign bits.
+    if *shift_op == PreHirBinaryOp::Shr
+        && !is_signed(mid_ty)
+        && !is_signed(&source_ty)
+        && *shift_amount >= i64::from(source_bits)
+        && mid_bits >= source_bits
+    {
         return Some(PreHirExpr::Const(0, outer_ty.clone()));
     }
 
     // Rule 1: inner cast is a non-narrowing zero-extension — it doesn't
     // change any bits that will end up in the final result.  Remove it.
-    if mid_bits >= source_bits {
+    if !is_signed(mid_ty) && !is_signed(&source_ty) && mid_bits >= source_bits {
         let outer_bits = int_type_bits(outer_ty).unwrap_or(0);
         // Preserve the shift result type as the wider of the two integer sizes.
         let shr_result_ty = if mid_bits >= outer_bits {
@@ -264,7 +278,7 @@ pub fn simplify_subpiece_chain(expr: &PreHirExpr) -> Option<PreHirExpr> {
         return Some(PreHirExpr::Cast {
             ty: outer_ty.clone(),
             expr: Box::new(PreHirExpr::Binary {
-                op: PreHirBinaryOp::Shr,
+                op: *shift_op,
                 lhs: source_expr.clone(),
                 rhs: shift_const.clone(),
                 ty: shr_result_ty,
@@ -337,5 +351,93 @@ impl IntoConstType for PreHirExpr {
                 signed: false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn i32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: true,
+        }
+    }
+
+    fn i64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: true,
+        }
+    }
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn u64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn simplify_subpiece_chain_does_not_fold_sar_to_zero() {
+        // Cast(i32, Sar(Cast(i64, x_i32), 32))
+        let x_i32 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Const(1, i32_ty())),
+            ty: i32_ty(),
+        };
+        let expr = PreHirExpr::Cast {
+            ty: i32_ty(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sar,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: i64_ty(),
+                    expr: Box::new(x_i32),
+                }),
+                rhs: Box::new(PreHirExpr::Const(32, u32_ty())),
+                ty: i64_ty(),
+            }),
+        };
+        // Sar on sign-extended i32 by 32 bits should NOT fold to Const(0, i32)
+        assert_ne!(
+            simplify_subpiece_chain(&expr),
+            Some(PreHirExpr::Const(0, i32_ty()))
+        );
+    }
+
+    #[test]
+    fn simplify_subpiece_chain_folds_unsigned_shr_to_zero() {
+        // Cast(u32, Shr(Cast(u64, x_u32), 32))
+        let x_u32 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
+            ty: u32_ty(),
+        };
+        let expr = PreHirExpr::Cast {
+            ty: u32_ty(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: u64_ty(),
+                    expr: Box::new(x_u32),
+                }),
+                rhs: Box::new(PreHirExpr::Const(32, u32_ty())),
+                ty: u64_ty(),
+            }),
+        };
+        assert_eq!(
+            simplify_subpiece_chain(&expr),
+            Some(PreHirExpr::Const(0, u32_ty()))
+        );
     }
 }
