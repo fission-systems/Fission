@@ -25,7 +25,10 @@ const ETIMEDOUT: i64 = 110;
 
 const FUTEX_WAIT: u64 = 0;
 const FUTEX_WAKE: u64 = 1;
+const FUTEX_WAIT_BITSET: u64 = 9;
+const FUTEX_WAKE_BITSET: u64 = 10;
 const FUTEX_PRIVATE_FLAG: u64 = 0x80;
+const FUTEX_CLOCK_REALTIME: u64 = 0x100;
 const FUTEX_CMD_MASK: u64 = 0x7f;
 
 const CLONE_VM: u64 = 0x0000_0100;
@@ -265,15 +268,23 @@ impl LinuxTaskScheduler {
         let command = raw_op & FUTEX_CMD_MASK;
         let value = emu.syscall_arg(2);
 
-        if raw_op & !(FUTEX_CMD_MASK | FUTEX_PRIVATE_FLAG) != 0 {
+        if raw_op & !(FUTEX_CMD_MASK | FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME) != 0 {
             return set_errno(emu, ENOSYS);
         }
         if address == 0 || address & 3 != 0 {
             return set_errno(emu, EINVAL);
         }
-        if command != FUTEX_WAIT && command != FUTEX_WAKE {
+        if command != FUTEX_WAIT
+            && command != FUTEX_WAKE
+            && command != FUTEX_WAIT_BITSET
+            && command != FUTEX_WAKE_BITSET
+        {
             tracing::warn!("Unsupported Linux futex command: {}", command);
             return set_errno(emu, ENOSYS);
+        }
+        if (command == FUTEX_WAIT_BITSET || command == FUTEX_WAKE_BITSET) && emu.syscall_arg(5) == 0
+        {
+            return set_errno(emu, EINVAL);
         }
         let current = match emu.state.read_space(emu.state.ram_space(), address, 4) {
             Ok(bytes) => read_guest_u32(emu, bytes.try_into().unwrap_or([0; 4])),
@@ -281,7 +292,7 @@ impl LinuxTaskScheduler {
         };
 
         match command {
-            FUTEX_WAIT => {
+            FUTEX_WAIT | FUTEX_WAIT_BITSET => {
                 if u64::from(current) != (value & u64::from(u32::MAX)) {
                     return set_errno(emu, EAGAIN);
                 }
@@ -317,7 +328,7 @@ impl LinuxTaskScheduler {
                 self.current_tid = None;
                 self.schedule_or_deadlock(emu)
             }
-            FUTEX_WAKE => {
+            FUTEX_WAKE | FUTEX_WAKE_BITSET => {
                 self.ensure_current(emu);
                 let maximum = usize::try_from(value).unwrap_or(usize::MAX);
                 let woken = self.wake_futex(address, maximum, 0, emu);
@@ -792,6 +803,53 @@ mod tests {
         assert_eq!(read_syscall_result(&mut emu), -EAGAIN);
 
         assert!(matches!(
+            dispatch_syscall(
+                &env,
+                &mut emu,
+                202,
+                [
+                    futex,
+                    FUTEX_PRIVATE_FLAG | FUTEX_WAIT_BITSET,
+                    0,
+                    0,
+                    0,
+                    0xffff_ffff
+                ]
+            ),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -EAGAIN);
+
+        assert!(matches!(
+            dispatch_syscall(
+                &env,
+                &mut emu,
+                202,
+                [futex, FUTEX_PRIVATE_FLAG | FUTEX_WAIT_BITSET, 1, 0, 0, 0]
+            ),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -EINVAL);
+
+        assert!(matches!(
+            dispatch_syscall(
+                &env,
+                &mut emu,
+                202,
+                [
+                    futex,
+                    FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME | FUTEX_WAIT_BITSET,
+                    0,
+                    0,
+                    0,
+                    0xffff_ffff
+                ]
+            ),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -EAGAIN);
+
+        assert!(matches!(
             dispatch_syscall(&env, &mut emu, 202, [futex, 2, 1, 0, 0, 0]),
             HleResult::Continue
         ));
@@ -807,6 +865,54 @@ mod tests {
             HleResult::Continue
         ));
         assert_eq!(read_syscall_result(&mut emu), -EFAULT);
+    }
+
+    #[test]
+    fn ioctl_tcgets_and_tiocgwinsz_return_enotty() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        const TCGETS: u64 = 0x5401;
+        const TIOCGWINSZ: u64 = 0x5413;
+
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 16, [1, TCGETS, 0x1000, 0, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -25);
+
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 16, [1, TIOCGWINSZ, 0x1000, 0, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -25);
+    }
+
+    #[test]
+    fn prlimit64_populates_old_limit() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let old_limit = emu.heap_alloc(16).expect("allocate rlimit");
+
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 302, [0, 3, 0, old_limit, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), 0);
+
+        let bytes = emu
+            .state
+            .read_space(emu.state.ram_space(), old_limit, 16)
+            .expect("read rlimit bytes");
+        let cur = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+        let max = u64::from_le_bytes(bytes[8..].try_into().unwrap());
+        assert_eq!(cur, 8 * 1024 * 1024);
+        assert_eq!(max, u64::MAX);
+
+        assert!(matches!(
+            dispatch_syscall(&env, &mut emu, 302, [0, 20, 0, old_limit, 0, 0]),
+            HleResult::Continue
+        ));
+        assert_eq!(read_syscall_result(&mut emu), -22);
     }
 
     #[test]
