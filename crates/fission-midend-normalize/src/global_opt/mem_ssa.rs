@@ -144,7 +144,6 @@ impl Builder {
     fn add_def(&mut self, key: AliasKey) -> usize {
         let id = self.alloc_id();
         let may_escape = matches!(key, AliasKey::Unknown);
-        self.reaching.retain(|k, _| k.is_no_alias(&key));
         self.reaching.insert(key.clone(), id);
         self.defs.push(MemDef {
             id,

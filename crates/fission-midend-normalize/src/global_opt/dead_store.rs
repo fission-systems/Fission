@@ -650,4 +650,41 @@ mod tests {
         };
         assert!(cases[0].body.is_empty());
     }
+
+    #[test]
+    fn review_may_alias_store_does_not_kill_reaching_definition() {
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let addr = PreHirExpr::Var("local_18".into());
+        let store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(addr.clone()),
+                ty: ty.clone(),
+            },
+            rhs: PreHirExpr::Const(7, ty.clone()),
+        };
+        let unknown_store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("p".into())),
+                ty: ty.clone(),
+            },
+            rhs: PreHirExpr::Const(9, ty.clone()),
+        };
+        let read = PreHirStmt::Return(Some(PreHirExpr::Load {
+            ptr: Box::new(addr),
+            ty,
+        }));
+        let mut func = base_func(
+            vec![store.clone(), unknown_store, read],
+            vec![ptr_binding("local_18")],
+        );
+        apply_dead_store_elimination(&mut func);
+        assert_eq!(
+            func.body.first(),
+            Some(&store),
+            "a may-alias store need not overwrite local_18; return must still read 7 when p differs"
+        );
+    }
 }

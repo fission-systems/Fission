@@ -381,7 +381,7 @@ mod tests {
                 },
             ],
             body: vec![PreHirStmt::Switch {
-                expr: PreHirExpr::Var("x".to_string()),
+                expr: PreHirExpr::Const(1, u32_ty()),
                 cases: vec![PreHirSwitchCase {
                     values: vec![1],
                     body: Rc::new(vec![
@@ -428,5 +428,64 @@ mod tests {
         // When dead branch contains referenced label, condition folding must not delete it
         apply_jump_resolver_pass(&mut func);
         assert!(matches!(&func.body[0], PreHirStmt::If { .. }));
+    }
+}
+
+#[cfg(test)]
+mod pr_review_regressions {
+    use super::*;
+    use crate::ir::{
+        NirType, PreHirBinaryOp, PreHirBinding, PreHirExpr, PreHirLValue, PreHirSwitchCase,
+    };
+    #[test]
+    fn review_bottom_seeding_must_not_enable_bool_width_comparison_misfold() {
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ret = |v| PreHirStmt::Return(Some(PreHirExpr::Const(v, ty.clone())));
+        let mut func = PreHirFunction {
+            locals: vec![PreHirBinding {
+                name: "x".into(),
+                ty: ty.clone(),
+                initializer: None,
+                surface_type_name: None,
+                origin: None,
+            }],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".into()),
+                    rhs: PreHirExpr::Const(1, ty.clone()),
+                },
+                PreHirStmt::Switch {
+                    expr: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SLt,
+                        lhs: Box::new(PreHirExpr::Var("x".into())),
+                        rhs: Box::new(PreHirExpr::Const(0, ty.clone())),
+                        ty: NirType::Bool,
+                    },
+                    cases: vec![
+                        PreHirSwitchCase {
+                            values: vec![0],
+                            body: vec![ret(11)].into(),
+                        },
+                        PreHirSwitchCase {
+                            values: vec![1],
+                            body: vec![ret(22)].into(),
+                        },
+                    ],
+                    default: vec![ret(33)].into(),
+                },
+            ],
+            ..Default::default()
+        };
+        apply_jump_resolver_pass(&mut func);
+        assert!(
+            !matches!(
+                &func.body[1],
+                PreHirStmt::Return(Some(PreHirExpr::Const(22, _)))
+            ),
+            "x=1; signed x<0 is false, but Bool width truncation selected the true arm"
+        );
     }
 }
