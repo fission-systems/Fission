@@ -532,10 +532,9 @@ impl NirRenderOptions {
             .iter()
             .filter(|section| section.is_readable || section.is_executable)
             .map(|section| {
-                (
-                    section.virtual_address,
-                    section.virtual_address + section.virtual_size as u64,
-                )
+                let size = std::cmp::max(section.virtual_size as u64, section.file_size as u64);
+                let end = section.virtual_address.saturating_add(size);
+                (section.virtual_address, end)
             })
             .collect();
 
@@ -1216,5 +1215,42 @@ mod loader_symbol_option_tests {
 
         let options = NirRenderOptions::from_loaded_binary(&binary);
         assert!(options.is_big_endian);
+    }
+
+    #[test]
+    fn zero_virtual_size_sections_use_file_size_for_section_intervals() {
+        use fission_loader::loader::SectionInfo;
+
+        let binary = LoadedBinaryBuilder::new("reloc.obj".into(), DataBuffer::Heap(vec![0u8; 512]))
+            .format("COFF Object")
+            .image_base(0x2000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x2000,
+                virtual_size: 0,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".rdata".into(),
+                virtual_address: 0x2100,
+                virtual_size: 0,
+                file_offset: 0x100,
+                file_size: 0x80,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("fixture should build");
+
+        let options = NirRenderOptions::from_loaded_binary(&binary);
+        assert!(options.is_mapped_global(0x2010));
+        assert!(options.is_mapped_global(0x2140));
+        assert_eq!(options.first_rodata_section_base(), Some(0x2100));
     }
 }
