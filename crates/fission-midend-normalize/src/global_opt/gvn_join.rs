@@ -142,7 +142,7 @@ mod tests {
             return_type: int(32),
             surface_return_type_name: None,
             body: vec![PreHirStmt::If {
-                cond: PreHirExpr::Call {
+                cond: PreHirExpr::Call { origin: None,
                     target: "has_side_effects".to_string(),
                     args: vec![],
                     ty: int(32),

@@ -1527,7 +1527,7 @@ mod tests {
             body: vec![
                 assign(
                     "of.1",
-                    PreHirExpr::Call {
+                    PreHirExpr::Call { origin: None,
                         target: "__overflow".to_string(),
                         args: vec![var("a"), var("b")],
                         ty: NirType::Bool,

@@ -809,7 +809,7 @@ mod variadic_arity_tests {
             "wsprintfA",
             "__isoc99_sscanf",
         ] {
-            let mut stmts = vec![PreHirStmt::Expr(PreHirExpr::Call {
+            let mut stmts = vec![PreHirStmt::Expr(PreHirExpr::Call { origin: None,
                 target: target.to_string(),
                 args: (0..4)
                     .map(|value| PreHirExpr::Const(value, NirType::Unknown))

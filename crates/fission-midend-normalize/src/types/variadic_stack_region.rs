@@ -288,7 +288,7 @@ mod tests {
             ],
             body: vec![PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("len".into()),
-                rhs: PreHirExpr::Call {
+                rhs: PreHirExpr::Call { origin: None,
                     target: "vsnprintf".into(),
                     args: vec![
                         PreHirExpr::Var("buf".into()),

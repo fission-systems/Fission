@@ -3449,7 +3449,7 @@ mod tests {
 
     #[test]
     fn condition_rewrite_preserves_bitwise_or_with_side_effects() {
-        let call_b = HirExpr::Call {
+        let call_b = HirExpr::Call { origin: None,
             target: "query_state".into(),
             args: Vec::new(),
             ty: int_ty(32, false),

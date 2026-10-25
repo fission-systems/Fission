@@ -1144,7 +1144,7 @@ mod tests {
                     ty: NirType::Bool,
                 },
                 then_body: vec![
-                    PreHirStmt::Expr(PreHirExpr::Call {
+                    PreHirStmt::Expr(PreHirExpr::Call { origin: None,
                         target: "mutate".to_string(),
                         args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
                         ty: u32_ty(),

@@ -2291,7 +2291,7 @@ mod tests {
 
     #[test]
     fn preserves_side_effects_when_removing_dead_callee_saved_assignment() {
-        let call_expr = PreHirExpr::Call {
+        let call_expr = PreHirExpr::Call { origin: None,
             target: "foo".to_owned(),
             args: vec![],
             ty: u64_ty(),

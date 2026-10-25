@@ -407,7 +407,7 @@ mod tests {
         // Indirect call to tmp_100 (unique space temporary varnode)
         let mut func = PreHirFunction {
             name: "test_tmp".to_string(),
-            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call { origin: None,
                 target: "__fission_callind_opaque".to_string(),
                 args: vec![PreHirExpr::Var("tmp_100".to_string())],
                 ty: NirType::Unknown,
@@ -423,7 +423,7 @@ mod tests {
         // Indirect call to DAT_00405000 (data section variable)
         let mut func_dat = PreHirFunction {
             name: "test_dat".to_string(),
-            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call { origin: None,
                 target: "__fission_callind_opaque".to_string(),
                 args: vec![PreHirExpr::Var("DAT_00405000".to_string())],
                 ty: NirType::Unknown,
@@ -467,7 +467,7 @@ mod tests {
                     lhs: PreHirLValue::Var("fn_ptr".to_string()),
                     rhs: PreHirExpr::Var("runtime_ptr".to_string()),
                 },
-                PreHirStmt::Expr(PreHirExpr::Call {
+                PreHirStmt::Expr(PreHirExpr::Call { origin: None,
                     target: "__fission_callind_opaque".to_string(),
                     args: vec![PreHirExpr::Var("fn_ptr".to_string())],
                     ty: NirType::Unknown,
@@ -488,7 +488,7 @@ mod tests {
         // Constant 0x500000 is NOT in callee_summaries; it must not synthesize sub_500000
         let mut func = PreHirFunction {
             name: "test_unverified".to_string(),
-            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call { origin: None,
                 target: "__fission_callind_opaque".to_string(),
                 args: vec![PreHirExpr::Const(
                     0x500000,
