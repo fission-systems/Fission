@@ -710,11 +710,11 @@ fn parse_optional_header_data(
     })
 }
 
-struct PeLoaderImpl<'a> {
-    data: &'a [u8],
-    sections: &'a [SectionInfo],
-    is_64bit: bool,
-    language_id: String,
+pub(super) struct PeLoaderImpl<'a> {
+    pub(super) data: &'a [u8],
+    pub(super) sections: &'a [SectionInfo],
+    pub(super) is_64bit: bool,
+    pub(super) language_id: String,
 }
 
 impl<'a> PeLoaderImpl<'a> {

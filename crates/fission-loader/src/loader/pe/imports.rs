@@ -12,6 +12,10 @@ fn resolve_ordinal_name(dll_name: &str, ordinal: u32) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Upper bound on the number of imported functions per descriptor to prevent
+/// memory exhaustion / infinite scanning on corrupted or malformed PE files.
+const MAX_IMPORT_ENTRIES: usize = 65_536;
+
 pub(super) fn parse_imports(
     loader: &PeLoaderImpl<'_>,
     dir_rva: u32,
@@ -66,9 +70,18 @@ pub(super) fn parse_imports(
         let iat_base_rva = desc.first_thunk;
 
         if thunk_offset != 0 {
+            let thunk_sec = loader.sections.iter().find(|s| {
+                thunk_offset >= s.file_offset && thunk_offset < s.file_offset + s.file_size
+            });
+            let entry_size: u64 = if loader.is_64bit { 8 } else { 4 };
             let mut idx = 0;
-            loop {
-                let thunk_entry_offset = thunk_offset + (idx * if loader.is_64bit { 8 } else { 4 });
+            while idx < MAX_IMPORT_ENTRIES {
+                let thunk_entry_offset = thunk_offset + (idx as u64 * entry_size);
+                if let Some(sec) = thunk_sec {
+                    if thunk_entry_offset + entry_size > sec.file_offset + sec.file_size {
+                        break;
+                    }
+                }
                 let raw_thunk = if loader.is_64bit {
                     loader.read_u64(thunk_entry_offset).unwrap_or(0)
                 } else {
@@ -90,7 +103,11 @@ pub(super) fn parse_imports(
                     resolve_ordinal_name(&dll_name, ordinal)
                         .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
-                    let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
+                    let name_rva = if loader.is_64bit {
+                        (raw_thunk & 0xFFFF_FFFF) as u32
+                    } else {
+                        (raw_thunk & 0x7FFF_FFFF) as u32
+                    };
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
                     if name_offset != 0 {
                         let name = loader.read_string_at(name_offset + 2);
@@ -105,8 +122,7 @@ pub(super) fn parse_imports(
                 };
 
                 let full_name = format!("{}!{}", dll_name, func_name);
-                let iat_addr =
-                    image_base + iat_base_rva as u64 + (idx * if loader.is_64bit { 8 } else { 4 });
+                let iat_addr = image_base + iat_base_rva as u64 + (idx as u64 * entry_size);
 
                 functions.push(crate::loader::types::FunctionInfo {
                     name: full_name.clone(),
@@ -201,9 +217,18 @@ pub(super) fn parse_delay_imports(
         let iat_base_rva = iat_rva;
 
         if thunk_offset != 0 {
+            let thunk_sec = loader.sections.iter().find(|s| {
+                thunk_offset >= s.file_offset && thunk_offset < s.file_offset + s.file_size
+            });
+            let entry_size: u64 = if loader.is_64bit { 8 } else { 4 };
             let mut idx = 0;
-            loop {
-                let thunk_entry_offset = thunk_offset + (idx * if loader.is_64bit { 8 } else { 4 });
+            while idx < MAX_IMPORT_ENTRIES {
+                let thunk_entry_offset = thunk_offset + (idx as u64 * entry_size);
+                if let Some(sec) = thunk_sec {
+                    if thunk_entry_offset + entry_size > sec.file_offset + sec.file_size {
+                        break;
+                    }
+                }
                 let raw_thunk = if loader.is_64bit {
                     loader.read_u64(thunk_entry_offset).unwrap_or(0)
                 } else {
@@ -225,7 +250,11 @@ pub(super) fn parse_delay_imports(
                     resolve_ordinal_name(&dll_name, ordinal)
                         .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
-                    let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
+                    let name_rva = if loader.is_64bit {
+                        (raw_thunk & 0xFFFF_FFFF) as u32
+                    } else {
+                        (raw_thunk & 0x7FFF_FFFF) as u32
+                    };
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
                     if name_offset != 0 {
                         let name = loader.read_string_at(name_offset + 2);
@@ -240,8 +269,7 @@ pub(super) fn parse_delay_imports(
                 };
 
                 let full_name = format!("{}!{}", dll_name, func_name);
-                let iat_addr =
-                    image_base + iat_base_rva as u64 + (idx * if loader.is_64bit { 8 } else { 4 });
+                let iat_addr = image_base + iat_base_rva as u64 + (idx as u64 * entry_size);
 
                 functions.push(crate::loader::types::FunctionInfo {
                     name: full_name.clone(),
@@ -260,8 +288,7 @@ pub(super) fn parse_delay_imports(
                 symbol_map.insert(iat_addr, full_name);
 
                 // Try to resolve the initial value in the IAT to create the delay load helper/proxy function
-                let iat_entry_rva =
-                    iat_base_rva + (idx * if loader.is_64bit { 8 } else { 4 }) as u32;
+                let iat_entry_rva = iat_base_rva + (idx as u64 * entry_size) as u32;
                 let iat_entry_offset = loader
                     .rva_to_file_offset(iat_entry_rva, image_base)
                     .unwrap_or(0);
@@ -309,7 +336,7 @@ pub(super) fn parse_delay_imports(
 
 #[cfg(test)]
 mod ordinal_resolution_tests {
-    use super::resolve_ordinal_name;
+    use super::*;
 
     #[test]
     fn resolves_known_dll_ordinal_to_real_name() {
@@ -322,5 +349,120 @@ mod ordinal_resolution_tests {
     #[test]
     fn falls_back_to_none_for_unknown_dll() {
         assert_eq!(resolve_ordinal_name("totally_made_up.dll", 1), None);
+    }
+
+    #[test]
+    fn parse_imports_preserves_bit_31_rva_for_pe64() {
+        use crate::loader::pe::PeLoaderImpl;
+        use crate::loader::types::SectionInfo;
+
+        let mut data = vec![0u8; 0x3000];
+        let image_base = 0x140000000u64;
+
+        // Import Directory at file offset 0x100 (RVA 0x100)
+        let dir_rva = 0x100u32;
+        // Descriptor:
+        // original_first_thunk (RVA 0x200) -> bytes 0x100..0x104
+        data[0x100..0x104].copy_from_slice(&0x200u32.to_le_bytes());
+        // name (RVA 0x300) -> bytes 0x10c..0x110
+        data[0x10c..0x110].copy_from_slice(&0x300u32.to_le_bytes());
+        // first_thunk (RVA 0x400) -> bytes 0x110..0x114
+        data[0x110..0x114].copy_from_slice(&0x400u32.to_le_bytes());
+        // Trailing null descriptor at 0x114..0x128 is zeros.
+
+        // DLL name at 0x300
+        data[0x300..0x30c].copy_from_slice(b"testdll.dll\0");
+
+        // ILT entry at 0x200 (RVA 0x200)
+        // High RVA with bit 31 set: 0x8000_1000. Bit 63 is 0 (not an ordinal import).
+        let raw_thunk: u64 = 0x0000_0000_8000_1000;
+        data[0x200..0x208].copy_from_slice(&raw_thunk.to_le_bytes());
+        // Terminating 0 thunk at 0x208..0x210 is zeros.
+
+        // Section ".rdata" containing the IMAGE_IMPORT_BY_NAME structure at RVA 0x8000_1000
+        // Section virtual_address = image_base + 0x8000_0000
+        let sec = SectionInfo {
+            name: ".rdata".to_string(),
+            virtual_address: image_base + 0x8000_0000,
+            virtual_size: 0x2000,
+            file_offset: 0x1000,
+            file_size: 0x2000,
+            is_readable: true,
+            is_writable: false,
+            is_executable: false,
+        };
+        let sections = vec![sec];
+
+        // IMAGE_IMPORT_BY_NAME: file_offset = 0x1000 + (0x8000_1000 - 0x8000_0000) = 0x2000
+        // Hint (2 bytes) + "CustomImport\0"
+        data[0x2000..0x2002].copy_from_slice(&0u16.to_le_bytes());
+        data[0x2002..0x200f].copy_from_slice(b"CustomImport\0");
+
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        let (functions, symbol_map) =
+            parse_imports(&loader, dir_rva, image_base).expect("parse imports");
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name, "testdll.dll!CustomImport");
+        let iat_addr = image_base + 0x400;
+        assert_eq!(
+            symbol_map.get(&iat_addr).map(String::as_str),
+            Some("testdll.dll!CustomImport")
+        );
+    }
+
+    #[test]
+    fn parse_imports_thunk_loop_terminates_at_section_boundary() {
+        use crate::loader::pe::PeLoaderImpl;
+        use crate::loader::types::SectionInfo;
+
+        let mut data = vec![0xFFu8; 0x2000]; // Fill with 0xFF so unterminated scans would read forever
+        let image_base = 0x140000000u64;
+
+        // Import Directory at file offset 0x100 (RVA 0x100)
+        let dir_rva = 0x100u32;
+        data[0x100..0x104].copy_from_slice(&0x200u32.to_le_bytes());
+        data[0x104..0x10c].fill(0);
+        data[0x10c..0x110].copy_from_slice(&0x300u32.to_le_bytes());
+        data[0x110..0x114].copy_from_slice(&0x400u32.to_le_bytes());
+        data[0x114..0x128].fill(0); // Null descriptor
+
+        // DLL name at 0x300
+        data[0x300..0x30c].copy_from_slice(b"testdll.dll\0");
+
+        // Section for ILT at RVA 0x200, file_offset = 0x200, file_size = 16 bytes (only 2 thunks!)
+        let sec_ilt = SectionInfo {
+            name: ".idata".to_string(),
+            virtual_address: image_base + 0x200,
+            virtual_size: 16,
+            file_offset: 0x200,
+            file_size: 16,
+            is_readable: true,
+            is_writable: false,
+            is_executable: false,
+        };
+
+        // Ordinal imports at 0x200 and 0x208 with bit 63 set
+        let ord1: u64 = 0x8000_0000_0000_0001;
+        let ord2: u64 = 0x8000_0000_0000_0002;
+        data[0x200..0x208].copy_from_slice(&ord1.to_le_bytes());
+        data[0x208..0x210].copy_from_slice(&ord2.to_le_bytes());
+        // At 0x210, data continues as 0xFF (no zero terminator!)
+
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &[sec_ilt],
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        let (functions, _) = parse_imports(&loader, dir_rva, image_base).expect("parse imports");
+        // Must have stopped at section boundary (exactly 2 entries), not scanning into the 0xFFs
+        assert_eq!(functions.len(), 2);
     }
 }
