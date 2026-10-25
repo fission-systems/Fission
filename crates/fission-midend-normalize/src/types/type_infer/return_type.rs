@@ -46,7 +46,22 @@ pub(super) fn rederive_return_type(
         return;
     }
 
-    // Prefer integer types over Ptr/Bool for disagreement resolution.
+    // If there are pointer candidates, prefer Ptr over Int/Bool for disagreement
+    // resolution (e.g. pointer return vs NULL/0 return).
+    let ptr_candidates: Vec<_> = candidates
+        .iter()
+        .filter(|t| matches!(t, NirType::Ptr(_)))
+        .collect();
+    if !ptr_candidates.is_empty() {
+        let best_ptr = ptr_candidates
+            .iter()
+            .find(|t| !matches!(t, NirType::Ptr(inner) if **inner == NirType::Unknown))
+            .unwrap_or(&ptr_candidates[0]);
+        *return_type = (*best_ptr).clone();
+        return;
+    }
+
+    // Prefer integer types over Bool for disagreement resolution.
     let int_candidates: Vec<_> = candidates
         .iter()
         .filter(|t| matches!(t, NirType::Int { .. }))
@@ -286,12 +301,20 @@ fn collect_return_types_stmt(
     match stmt {
         PreHirStmt::Return(Some(expr)) => {
             let ty = match expr {
-                PreHirExpr::Var(name)
-                | PreHirExpr::AddressOfGlobal(name)
-                | PreHirExpr::AddressOfLocal(name) => {
+                PreHirExpr::Var(name) => {
                     let mut visited = HashSet::default();
                     infer_type_for_binding(name, defs, known_binding_types, &mut visited)
                 }
+                PreHirExpr::AddressOfLocal(name) => {
+                    let mut visited = HashSet::default();
+                    let inner =
+                        infer_type_for_binding(name, defs, known_binding_types, &mut visited);
+                    NirType::Ptr(Box::new(inner))
+                }
+                PreHirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Int {
+                    bits: 8,
+                    signed: false,
+                })),
                 other => expr_type(other),
             };
             if ty != NirType::Unknown {
@@ -1002,6 +1025,35 @@ fn narrow_returned_temp_bindings(func: &mut PreHirFunction, narrowed_ty: &NirTyp
     }
 }
 
+fn has_genuine_narrow_return_evidence(
+    expr: &PreHirExpr,
+    target_bits: u32,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+) -> bool {
+    match expr {
+        PreHirExpr::Cast {
+            ty: NirType::Int { bits, .. },
+            ..
+        } if *bits == target_bits => true,
+        PreHirExpr::Load {
+            ty: NirType::Int { bits, .. },
+            ..
+        } if *bits == target_bits => true,
+        PreHirExpr::Var(name) => {
+            if let Some(NirType::Int { bits, .. }) = known_binding_types.get(name) {
+                if *bits == target_bits {
+                    return true;
+                }
+            }
+            let mut visited = HashSet::default();
+            let ty = infer_type_for_binding(name, defs, known_binding_types, &mut visited);
+            matches!(ty, NirType::Int { bits, .. } if bits == target_bits)
+        }
+        _ => false,
+    }
+}
+
 /// Lift sub-32 integer return types to ABI-width 32-bit integers.
 ///
 /// setcc/movzx evidence can leave `return_type = uchar`, which makes `return -1`
@@ -1024,8 +1076,10 @@ pub(super) fn promote_sub32_abi_return_width(
     if *bits >= 32 {
         return false;
     }
+    let target_bits = *bits;
     let mut rhss = Vec::new();
     collect_all_return_exprs(&func.body, &mut rhss);
+
     let signed_evidence = rhss.iter().any(|e| rhs_has_i32_sign_bit_evidence(e))
         || rhss.iter().any(|e| match e {
             PreHirExpr::Var(name)
@@ -1039,6 +1093,17 @@ pub(super) fn promote_sub32_abi_return_width(
             }
             _ => false,
         });
+
+    // If there is no 32-bit sign evidence and any return expression has genuine narrow
+    // evidence (explicit narrow cast, narrow load, or variable with genuine narrow type),
+    // preserve the narrow return type instead of flattening it to 32 bits.
+    if !signed_evidence
+        && rhss
+            .iter()
+            .any(|e| has_genuine_narrow_return_evidence(e, target_bits, defs, known_binding_types))
+    {
+        return false;
+    }
     let _ = (defs, known_binding_types);
     // setcc-derived uchar is almost always a zero/sign-extended machine-word
     // return; promote to signed i32 when Neg/-1 evidence exists, else unsigned i32.

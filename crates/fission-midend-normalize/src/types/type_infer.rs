@@ -336,6 +336,16 @@ mod tests {
         }
     }
 
+    fn make_typed_binding(name: &str, ty: NirType, origin: NirBindingOrigin) -> PreHirBinding {
+        PreHirBinding {
+            name: name.to_owned(),
+            ty,
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        }
+    }
+
     fn make_param(name: &str, ty: NirType) -> PreHirBinding {
         PreHirBinding {
             name: name.to_owned(),
@@ -2363,5 +2373,155 @@ mod tests {
                 .ty,
             NirType::Ptr(_)
         ));
+    }
+
+    #[test]
+    fn pointer_roles_scalar_load_does_not_promote_compare_peer() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let ptr_to_i32 = NirType::Ptr(Box::new(i32_ty.clone()));
+
+        let mut func = make_func(
+            vec![
+                make_typed_binding("y", i32_ty.clone(), NirBindingOrigin::Temp),
+                make_typed_binding("p", ptr_to_i32.clone(), NirBindingOrigin::Temp),
+            ],
+            vec![PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("p".into())),
+                        ty: i32_ty.clone(),
+                    }),
+                    rhs: Box::new(PreHirExpr::Var("y".into())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![].into(),
+                else_body: vec![].into(),
+            }],
+            NirType::Unknown,
+        );
+
+        super::apply_type_inference_pass(&mut func);
+
+        let y_ty = &func
+            .locals
+            .iter()
+            .find(|binding| binding.name == "y")
+            .unwrap()
+            .ty;
+        assert_eq!(
+            *y_ty, i32_ty,
+            "comparing *p == y where *p is int must not promote y to pointer"
+        );
+    }
+
+    #[test]
+    fn rederive_return_type_prefers_pointer_over_null_zero() {
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let mut func = make_func(
+            vec![make_typed_binding(
+                "p",
+                char_ptr.clone(),
+                NirBindingOrigin::Temp,
+            )],
+            vec![PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".into()),
+                then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("p".into())))].into(),
+                else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )))]
+                .into(),
+            }],
+            NirType::Unknown,
+        );
+        func.is_64bit = true;
+
+        super::apply_type_inference_pass(&mut func);
+
+        assert_eq!(
+            func.return_type, char_ptr,
+            "return consensus must prefer pointer over NULL zero constant"
+        );
+    }
+
+    #[test]
+    fn rederive_return_type_infers_address_of_local_and_global() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = make_func(
+            vec![make_typed_binding(
+                "local_var",
+                i32_ty.clone(),
+                NirBindingOrigin::StackOffset(4),
+            )],
+            vec![PreHirStmt::Return(Some(PreHirExpr::AddressOfLocal(
+                "local_var".into(),
+            )))],
+            NirType::Unknown,
+        );
+        super::apply_type_inference_pass(&mut func);
+        assert_eq!(
+            func.return_type,
+            NirType::Ptr(Box::new(i32_ty)),
+            "return &local_var must infer Ptr(local_ty)"
+        );
+
+        let mut func_global = make_func(
+            vec![],
+            vec![PreHirStmt::Return(Some(PreHirExpr::AddressOfGlobal(
+                "s_msg".into(),
+            )))],
+            NirType::Unknown,
+        );
+        super::apply_type_inference_pass(&mut func_global);
+        assert_eq!(
+            func_global.return_type,
+            NirType::Ptr(Box::new(NirType::Int {
+                bits: 8,
+                signed: false,
+            })),
+            "return s_msg must infer Ptr(u8)"
+        );
+    }
+
+    #[test]
+    fn preserve_genuine_sub32_return_type_from_load() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let ptr_to_u8 = NirType::Ptr(Box::new(u8_ty.clone()));
+
+        let mut func = make_func(
+            vec![make_typed_binding(
+                "ptr",
+                ptr_to_u8.clone(),
+                NirBindingOrigin::Temp,
+            )],
+            vec![PreHirStmt::Return(Some(PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("ptr".into())),
+                ty: u8_ty.clone(),
+            }))],
+            u8_ty.clone(),
+        );
+
+        super::apply_type_inference_pass(&mut func);
+
+        assert_eq!(
+            func.return_type, u8_ty,
+            "genuine narrow return from u8 load must not be promoted to 32 bits"
+        );
     }
 }

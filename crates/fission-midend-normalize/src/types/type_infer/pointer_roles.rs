@@ -1205,15 +1205,64 @@ fn pointer_type_of_expr(
             NirType::Ptr(_) => Some(ty.clone()),
             _ => None,
         }),
+        PreHirExpr::AddressOfGlobal(_) => Some(NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }))),
+        PreHirExpr::AddressOfLocal(name) => Some(NirType::Ptr(Box::new(
+            binding_types.get(name).cloned().unwrap_or(NirType::Unknown),
+        ))),
         PreHirExpr::Cast {
             ty: NirType::Ptr(_),
             ..
         } => Some(expr_type(expr)),
-        PreHirExpr::PtrOffset { base, .. }
-        | PreHirExpr::Load { ptr: base, .. }
-        | PreHirExpr::FieldAccess { base, .. }
-        | PreHirExpr::AggregateCopy { src: base, .. } => pointer_type_of_expr(base, binding_types),
-        PreHirExpr::Index { base, .. } => pointer_type_of_expr(base, binding_types),
+        PreHirExpr::PtrOffset { base, .. } => pointer_type_of_expr(base, binding_types),
+        PreHirExpr::Load { ptr: base, ty } => {
+            if matches!(ty, NirType::Ptr(_)) {
+                Some(ty.clone())
+            } else if let Some(NirType::Ptr(inner)) = pointer_type_of_expr(base, binding_types) {
+                if matches!(*inner, NirType::Ptr(_)) {
+                    Some(*inner)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        PreHirExpr::Index { base, elem_ty, .. } => {
+            if matches!(elem_ty, NirType::Ptr(_)) {
+                Some(elem_ty.clone())
+            } else if let Some(NirType::Ptr(inner)) = pointer_type_of_expr(base, binding_types) {
+                if matches!(*inner, NirType::Ptr(_)) {
+                    Some(*inner)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        PreHirExpr::FieldAccess { ty, .. } => {
+            if matches!(ty, NirType::Ptr(_)) {
+                Some(ty.clone())
+            } else {
+                None
+            }
+        }
+        PreHirExpr::Select {
+            then_expr,
+            else_expr,
+            ty,
+            ..
+        } => {
+            if matches!(ty, NirType::Ptr(_)) {
+                Some(ty.clone())
+            } else {
+                pointer_type_of_expr(then_expr, binding_types)
+                    .or_else(|| pointer_type_of_expr(else_expr, binding_types))
+            }
+        }
         _ => None,
     }
 }
