@@ -76,7 +76,12 @@ fn address_taken_locals(func: &PreHirFunction) -> HashSet<&str> {
             | PreHirExpr::PtrOffset { base: inner, .. }
             | PreHirExpr::FieldAccess { base: inner, .. }
             | PreHirExpr::AggregateCopy { src: inner, .. } => expr(inner, out),
-            PreHirExpr::Binary { lhs, rhs, .. } | PreHirExpr::Index { base: lhs, index: rhs, .. } => {
+            PreHirExpr::Binary { lhs, rhs, .. }
+            | PreHirExpr::Index {
+                base: lhs,
+                index: rhs,
+                ..
+            } => {
                 expr(lhs, out);
                 expr(rhs, out);
             }

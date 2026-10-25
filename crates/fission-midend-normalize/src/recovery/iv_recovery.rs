@@ -260,19 +260,18 @@ fn apply_break_continue_in_stmts(
         // where a `continue` lands. A do-while's `continue` evaluates the
         // condition first and a for's runs the update, so a jump back to the
         // label in front of either is not a continue.
-        let head_labels: HashSet<String> =
-            if matches!(stmts[loop_idx], PreHirStmt::While { .. }) {
-                stmts[..loop_idx]
-                    .iter()
-                    .rev()
-                    .map_while(|stmt| match stmt {
-                        PreHirStmt::Label(label) => Some(label.clone()),
-                        _ => None,
-                    })
-                    .collect()
-            } else {
-                HashSet::default()
-            };
+        let head_labels: HashSet<String> = if matches!(stmts[loop_idx], PreHirStmt::While { .. }) {
+            stmts[..loop_idx]
+                .iter()
+                .rev()
+                .map_while(|stmt| match stmt {
+                    PreHirStmt::Label(label) => Some(label.clone()),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            HashSet::default()
+        };
 
         let is_loop = matches!(
             &stmts[loop_idx],

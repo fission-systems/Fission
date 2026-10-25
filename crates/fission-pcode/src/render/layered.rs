@@ -2495,7 +2495,8 @@ mod global_decl_tests {
                         ty: NirType::Bool,
                     },
                     body: vec![
-                        HirStmt::Expr(HirExpr::Call { origin: None,
+                        HirStmt::Expr(HirExpr::Call {
+                            origin: None,
                             target: "process".to_string(),
                             args: vec![HirExpr::Var("ptr".to_string())],
                             ty: NirType::Unknown,

@@ -589,7 +589,9 @@ fn collect_address_parts(
             ty,
         } => {
             if let NirType::Ptr(elem_ty) = ty {
-                if let Some(elem_sz) = type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1) {
+                if let Some(elem_sz) =
+                    type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1)
+                {
                     let elem_sz_i = elem_sz as i64;
                     if let PreHirExpr::Const(val, _) = rhs.as_ref() {
                         collect_address_parts(lhs, parts, sign, pointer_bytes)?;
@@ -615,7 +617,9 @@ fn collect_address_parts(
             ty,
         } => {
             if let NirType::Ptr(elem_ty) = ty {
-                if let Some(elem_sz) = type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1) {
+                if let Some(elem_sz) =
+                    type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1)
+                {
                     let elem_sz_i = elem_sz as i64;
                     if let PreHirExpr::Const(val, _) = rhs.as_ref() {
                         collect_address_parts(lhs, parts, sign, pointer_bytes)?;

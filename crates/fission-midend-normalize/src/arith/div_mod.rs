@@ -990,14 +990,16 @@ mod tests {
 
     #[test]
     fn rejects_arm_eabi_divmod_runtime_helpers() {
-        let uidivmod = PreHirExpr::Call { origin: None,
+        let uidivmod = PreHirExpr::Call {
+            origin: None,
             target: "__aeabi_uidivmod".to_string(),
             args: vec![var("numerator"), var("denominator")],
             ty: NirType::Unknown,
         };
         assert!(recognize_compiler_runtime_division(&uidivmod).is_none());
 
-        let idivmod = PreHirExpr::Call { origin: None,
+        let idivmod = PreHirExpr::Call {
+            origin: None,
             target: "__aeabi_idivmod".to_string(),
             args: vec![var("numerator"), var("denominator")],
             ty: NirType::Unknown,

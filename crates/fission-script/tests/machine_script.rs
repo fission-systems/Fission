@@ -245,7 +245,6 @@ fn disasm_near_unmapped_page_boundary_succeeds_without_page_fault() {
     assert_eq!(d["first_addr"], serde_json::json!(0x140005ff0i64));
 }
 
-
 #[test]
 fn machine_execution_respects_max_runtime_ms() {
     let limits = ScriptLimits {

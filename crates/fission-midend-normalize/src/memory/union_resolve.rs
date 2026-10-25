@@ -566,7 +566,8 @@ mod tests {
         };
 
         // Call to sqrt(st->field_0)
-        let body = vec![PreHirStmt::Expr(PreHirExpr::Call { origin: None,
+        let body = vec![PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "sqrtf".to_string(),
             args: vec![PreHirExpr::FieldAccess {
                 base: Box::new(PreHirExpr::Var("st".to_string())),

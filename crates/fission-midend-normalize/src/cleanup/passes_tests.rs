@@ -908,7 +908,8 @@ fn iblock_phi_elimination_rejects_side_effecting_condition() {
 
     let mut stmts = vec![
         PreHirStmt::If {
-            cond: PreHirExpr::Call { origin: None,
+            cond: PreHirExpr::Call {
+                origin: None,
                 target: "has_flag".to_string(),
                 args: Vec::new(),
                 ty: NirType::Bool,

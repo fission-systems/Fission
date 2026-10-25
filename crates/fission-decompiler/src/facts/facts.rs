@@ -3385,7 +3385,8 @@ mod tests {
         let mut arities = HashMap::new();
         let stmts = vec![
             PreHirStmt::While {
-                cond: PreHirExpr::Call { origin: None,
+                cond: PreHirExpr::Call {
+                    origin: None,
                     target: "has_next".into(),
                     args: vec![PreHirExpr::Const(
                         1,
@@ -3399,7 +3400,8 @@ mod tests {
                 body: std::rc::Rc::new(vec![]),
             },
             PreHirStmt::For {
-                init: Some(Box::new(PreHirStmt::Expr(PreHirExpr::Call { origin: None,
+                init: Some(Box::new(PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "list_head".into(),
                     args: vec![PreHirExpr::Const(
                         1,
@@ -3413,7 +3415,8 @@ mod tests {
                         signed: false,
                     },
                 }))),
-                cond: Some(PreHirExpr::Call { origin: None,
+                cond: Some(PreHirExpr::Call {
+                    origin: None,
                     target: "list_valid".into(),
                     args: vec![
                         PreHirExpr::Const(
@@ -3433,7 +3436,8 @@ mod tests {
                     ],
                     ty: NirType::Bool,
                 }),
-                update: Some(Box::new(PreHirStmt::Expr(PreHirExpr::Call { origin: None,
+                update: Some(Box::new(PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "list_next".into(),
                     args: vec![
                         PreHirExpr::Const(
@@ -3488,7 +3492,8 @@ mod tests {
 
         let raw_hir = fission_pcode::PreHirFunction {
             body: vec![
-                PreHirStmt::Expr(PreHirExpr::Call { origin: None,
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "parse".into(),
                     args: vec![
                         PreHirExpr::Const(
@@ -3511,7 +3516,8 @@ mod tests {
                         signed: false,
                     },
                 }),
-                PreHirStmt::Expr(PreHirExpr::Call { origin: None,
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "unique_fn".into(),
                     args: vec![PreHirExpr::Const(
                         1,
