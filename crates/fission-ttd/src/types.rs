@@ -163,6 +163,44 @@ pub const X86_64_GP_REGISTERS: [&str; 16] = [
     "R14", "R15",
 ];
 
+/// The general-purpose registers on x86-32 in GDB numbering.
+pub const X86_GP_REGISTERS: [&str; 8] = ["EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI"];
+
+/// GDB's x86-32 register numbering: 0..=7 are GP registers, 8 is EIP, 9 is EFLAGS,
+/// 10..=15 are segment registers (CS, SS, DS, ES, FS, GS).
+pub fn x86_register_name(number: u32) -> Option<&'static str> {
+    match number {
+        0..=7 => Some(X86_GP_REGISTERS[number as usize]),
+        8 => Some("EIP"),
+        9 => Some("EFLAGS"),
+        10 => Some("CS"),
+        11 => Some("SS"),
+        12 => Some("DS"),
+        13 => Some("ES"),
+        14 => Some("FS"),
+        15 => Some("GS"),
+        _ => None,
+    }
+}
+
+/// The general-purpose 64-bit integer registers on aarch64 (X0..=X30).
+pub const AARCH64_GP_REGISTERS: [&str; 31] = [
+    "X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "X9", "X10", "X11", "X12", "X13", "X14",
+    "X15", "X16", "X17", "X18", "X19", "X20", "X21", "X22", "X23", "X24", "X25", "X26", "X27",
+    "X28", "X29", "X30",
+];
+
+/// GDB's aarch64 register numbering: 0..=30 are X0..X30, 31 is SP, 32 is PC, 33 is CPSR.
+pub fn aarch64_register_name(number: u32) -> Option<&'static str> {
+    match number {
+        0..=30 => Some(AARCH64_GP_REGISTERS[number as usize]),
+        31 => Some("SP"),
+        32 => Some("PC"),
+        33 => Some("CPSR"),
+        _ => None,
+    }
+}
+
 /// GDB's x86-64 register numbering, as it appears in `rr`'s MI register
 /// dumps: 0..=15 are [`X86_64_GP_REGISTERS`], 16 is the program counter and
 /// 17 the flags. Returns `None` for a number this does not name, rather than
@@ -224,5 +262,17 @@ mod tests {
         assert_eq!(x86_64_register_name(0), Some("RAX"));
         assert_eq!(x86_64_register_name(16), Some("RIP"));
         assert_eq!(x86_64_register_name(18), None);
+
+        assert_eq!(x86_register_name(0), Some("EAX"));
+        assert_eq!(x86_register_name(4), Some("ESP"));
+        assert_eq!(x86_register_name(5), Some("EBP"));
+        assert_eq!(x86_register_name(8), Some("EIP"));
+        assert_eq!(x86_register_name(16), None);
+
+        assert_eq!(aarch64_register_name(0), Some("X0"));
+        assert_eq!(aarch64_register_name(30), Some("X30"));
+        assert_eq!(aarch64_register_name(31), Some("SP"));
+        assert_eq!(aarch64_register_name(32), Some("PC"));
+        assert_eq!(aarch64_register_name(34), None);
     }
 }
