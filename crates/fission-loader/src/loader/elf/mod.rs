@@ -1626,6 +1626,20 @@ struct ElfExtendedNumbers {
     shstrndx: usize,
 }
 
+/// Number of `entsize`-byte table entries that fit between `offset` and the
+/// end of a `file_len`-byte file (`entsize` 0 falls back to `default_size`).
+fn table_entries_in_file(file_len: usize, offset: u64, entsize: u16, default_size: usize) -> usize {
+    let entry = if entsize == 0 {
+        default_size as u64
+    } else {
+        u64::from(entsize)
+    };
+    if entry == 0 {
+        return 0;
+    }
+    usize::try_from((file_len as u64).saturating_sub(offset) / entry).unwrap_or(usize::MAX)
+}
+
 fn resolve_extended_numbers_64(
     bytes: &[u8],
     header: &Elf64Header,
@@ -1649,6 +1663,22 @@ fn resolve_extended_numbers_64(
             }
         }
     }
+
+    // `sh_size`/`sh_info` of section 0 are 64/32-bit counts read from the
+    // file; bound them by the entries the file can actually hold so a corrupt
+    // count cannot drive a huge allocation or loop.
+    shnum = shnum.min(table_entries_in_file(
+        bytes.len(),
+        header.shoff as u64,
+        header.shentsize,
+        Elf64Shdr::SIZE,
+    ));
+    phnum = phnum.min(table_entries_in_file(
+        bytes.len(),
+        header.phoff as u64,
+        header.phentsize,
+        Elf64Phdr::SIZE,
+    ));
 
     ElfExtendedNumbers {
         phnum,
@@ -1680,6 +1710,22 @@ fn resolve_extended_numbers_32(
             }
         }
     }
+
+    // `sh_size`/`sh_info` of section 0 are 64/32-bit counts read from the
+    // file; bound them by the entries the file can actually hold so a corrupt
+    // count cannot drive a huge allocation or loop.
+    shnum = shnum.min(table_entries_in_file(
+        bytes.len(),
+        header.shoff as u64,
+        header.shentsize,
+        Elf32Shdr::SIZE,
+    ));
+    phnum = phnum.min(table_entries_in_file(
+        bytes.len(),
+        header.phoff as u64,
+        header.phentsize,
+        Elf32Phdr::SIZE,
+    ));
 
     ElfExtendedNumbers {
         phnum,
@@ -3621,6 +3667,29 @@ mod tests {
         assert_eq!(text_sec.virtual_address, 0x401000);
         assert!(text_sec.is_executable);
         assert!(binary.sections.iter().any(|s| s.name == ".shstrtab"));
+    }
+
+    #[test]
+    fn elf64_extended_numbering_bounds_corrupt_section_count_by_file_size() {
+        let mut data = vec![0u8; 1024];
+        data[0..4].copy_from_slice(b"\x7fELF");
+        data[4] = 2; // 64-bit
+        data[5] = 1; // Little-endian
+        data[6] = 1;
+        data[16..18].copy_from_slice(&2u16.to_le_bytes()); // ET_EXEC
+        data[18..20].copy_from_slice(&62u16.to_le_bytes()); // EM_X86_64
+        data[20..24].copy_from_slice(&1u32.to_le_bytes());
+        data[40..48].copy_from_slice(&64u64.to_le_bytes()); // shoff = 64
+        data[52..54].copy_from_slice(&64u16.to_le_bytes()); // ehsize
+        data[58..60].copy_from_slice(&64u16.to_le_bytes()); // shentsize
+        data[60..62].copy_from_slice(&0u16.to_le_bytes()); // e_shnum = 0 -> read sh0.sh_size
+        // sh0.sh_size claims 2^40 section headers in a 1 KiB file.
+        data[64 + 32..64 + 40].copy_from_slice(&(1u64 << 40).to_le_bytes());
+
+        let reader = ByteReader::new(&data, Endian::Little);
+        let header = Elf64Header::parse(&data, &reader).expect("ELF64 header");
+        let ext = resolve_extended_numbers_64(&data, &header, Endian::Little);
+        assert_eq!(ext.shnum, (1024 - 64) / 64);
     }
 
     #[test]
