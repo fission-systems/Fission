@@ -1067,3 +1067,101 @@ fn localeconv_describes_the_c_locale() {
         &[b'.', 0, 0, 0]
     );
 }
+
+#[test]
+fn virtual_query_64bit_struct_offsets_and_region_size() {
+    let mut emu = windows_emulator();
+    // Allocate 0x2000 bytes at 0x4000_0000 via VirtualAlloc
+    let base = call(
+        &mut emu,
+        "VirtualAlloc",
+        &[0x4000_0000, 0x2000, 0x1000, 0x04],
+    );
+    assert_eq!(base, 0x4000_0000);
+
+    // Call VirtualQuery on unaligned address 0x4000_0123
+    let mbi_buf = SCRATCH + 0x100;
+    let ret = call(&mut emu, "VirtualQuery", &[0x4000_0123, mbi_buf, 48]);
+    assert_eq!(ret, 48);
+
+    let bytes = read_back(&mut emu, mbi_buf, 48);
+    let base_address = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+    let alloc_base = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    let alloc_protect = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+    let region_size = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
+    let state = u32::from_le_bytes(bytes[32..36].try_into().unwrap());
+    let protect = u32::from_le_bytes(bytes[36..40].try_into().unwrap());
+    let mem_type = u32::from_le_bytes(bytes[40..44].try_into().unwrap());
+
+    assert_eq!(
+        base_address, 0x4000_0000,
+        "BaseAddress must be aligned to page"
+    );
+    assert_eq!(alloc_base, 0x4000_0000);
+    assert_eq!(alloc_protect, 0x04, "PAGE_READWRITE");
+    assert_eq!(region_size, 0x2000);
+    assert_eq!(state, 0x1000, "MEM_COMMIT");
+    assert_eq!(protect, 0x04, "PAGE_READWRITE");
+    assert_eq!(mem_type, 0x20000, "MEM_PRIVATE");
+}
+
+#[test]
+fn virtual_query_clamps_to_caller_buffer_length() {
+    let mut emu = windows_emulator();
+    let mbi_buf = SCRATCH + 0x200;
+    let ret = call(&mut emu, "VirtualQuery", &[SCRATCH, mbi_buf, 16]);
+    assert_eq!(ret, 16);
+}
+
+#[test]
+fn virtual_query_32bit_struct_offsets_and_size() {
+    let mut emu = windows_emulator();
+    emu.arch.pointer_size = 4;
+
+    let mbi_buf = SCRATCH + 0x300;
+    let ret = call(&mut emu, "VirtualQuery", &[SCRATCH + 0x50, mbi_buf, 28]);
+    assert_eq!(ret, 28);
+
+    let bytes = read_back(&mut emu, mbi_buf, 28);
+    let base_address = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    let alloc_base = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    let alloc_protect = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+    let region_size = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+    let state = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+    let protect = u32::from_le_bytes(bytes[20..24].try_into().unwrap());
+    let mem_type = u32::from_le_bytes(bytes[24..28].try_into().unwrap());
+
+    assert_eq!(base_address, SCRATCH as u32, "aligned page address");
+    assert_eq!(alloc_base, SCRATCH as u32);
+    assert_eq!(alloc_protect, 0x04, "PAGE_READWRITE");
+    assert_eq!(region_size, 0x4000);
+    assert_eq!(state, 0x1000, "MEM_COMMIT");
+    assert_eq!(protect, 0x04, "PAGE_READWRITE");
+    assert_eq!(mem_type, 0x20000, "MEM_PRIVATE");
+}
+
+#[test]
+fn virtual_free_mem_release_with_size_zero_unmaps_region() {
+    let mut emu = windows_emulator();
+    let alloc_addr = 0x5000_0000u64;
+    let base = call(
+        &mut emu,
+        "VirtualAlloc",
+        &[alloc_addr, 0x3000, 0x1000, 0x04],
+    );
+    assert_eq!(base, alloc_addr);
+    assert!(emu.state.page_map.is_mapped(alloc_addr));
+
+    // Free with MEM_RELEASE (0x8000) and dwSize = 0 per MSDN
+    let ret = call(&mut emu, "VirtualFree", &[alloc_addr, 0, 0x8000]);
+    assert_eq!(ret, 1);
+    assert!(!emu.state.page_map.is_mapped(alloc_addr));
+
+    // VirtualQuery on the released page should now report MEM_FREE
+    let mbi_buf = SCRATCH + 0x400;
+    let ret = call(&mut emu, "VirtualQuery", &[alloc_addr, mbi_buf, 48]);
+    assert_eq!(ret, 48);
+    let bytes = read_back(&mut emu, mbi_buf, 48);
+    let state = u32::from_le_bytes(bytes[32..36].try_into().unwrap());
+    assert_eq!(state, 0x10000, "MEM_FREE after release");
+}
