@@ -65,9 +65,9 @@ fn expr_uses_home_slot(expr: &PreHirExpr, home_slots: &HashMap<String, i64>) -> 
 
 fn call_tail_uses_home_slot(args: &[PreHirExpr], home_slots: &HashMap<String, i64>) -> bool {
     args.len() > 4
-        && args[4..].iter().any(|arg| {
-            expr_uses_home_slot(arg, home_slots) || matches!(arg, PreHirExpr::Load { .. })
-        })
+        && args[4..]
+            .iter()
+            .any(|arg| expr_uses_home_slot(arg, home_slots))
 }
 
 fn call_last_arg_is_va_region(args: &[PreHirExpr], home_slots: &HashMap<String, i64>) -> bool {
@@ -100,6 +100,9 @@ fn recover_in_stmt(
                 && call_tail_uses_home_slot(args, home_slots)
             {
                 *folds += 1;
+                if last_named_param.is_some() && call_last_arg_is_va_region(args, home_slots) {
+                    return true;
+                }
             }
             false
         }
@@ -171,17 +174,24 @@ fn recover_in_stmts(
     let mut changed = false;
     let mut idx = 0usize;
     while idx < stmts.len() {
+        let call_last_arg = match &stmts[idx] {
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => args.last().cloned(),
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Call { args, .. },
+                ..
+            } => args.last().cloned(),
+            _ => None,
+        };
         if recover_in_stmt(
             &mut stmts[idx],
             home_slots,
             last_named_param,
             folds,
             va_starts,
-        ) && let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &stmts[idx]
-            && let Some(last_param) = last_named_param
+        ) && let (Some(last_param), Some(last_arg)) = (last_named_param, call_last_arg)
         {
             let marker = PreHirStmt::VaStart {
-                va_list: args.last().cloned().unwrap_or(PreHirExpr::Var("va".into())),
+                va_list: last_arg,
                 last_named_param: last_param.to_string(),
             };
             let already_present = idx > 0
@@ -231,4 +241,113 @@ pub fn apply_variadic_stack_region_pass(func: &mut PreHirFunction) -> bool {
     add_variadic_stack_region_folds(folds);
     add_va_start_recoveries(va_starts);
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prelude::*;
+
+    #[test]
+    fn variadic_stack_region_recovers_va_start_for_assigned_calls() {
+        let mut func = PreHirFunction {
+            name: "test_va".into(),
+            is_64bit: true,
+            calling_convention: CallingConvention::WindowsX64,
+            params: vec![PreHirBinding {
+                name: "fmt".into(),
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 8,
+                    signed: false,
+                })),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                PreHirBinding {
+                    name: "home_28".into(),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::HomeSlot(0x28)),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "len".into(),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("len".into()),
+                rhs: PreHirExpr::Call {
+                    origin: None,
+                    target: "vsnprintf".into(),
+                    args: vec![
+                        PreHirExpr::Var("buf".into()),
+                        PreHirExpr::Const(
+                            100,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        ),
+                        PreHirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        ),
+                        PreHirExpr::Var("fmt".into()),
+                        PreHirExpr::Var("home_28".into()),
+                    ],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_variadic_stack_region_pass(&mut func));
+        assert!(matches!(
+            func.body.first(),
+            Some(PreHirStmt::VaStart {
+                last_named_param,
+                ..
+            }) if last_named_param == "fmt"
+        ));
+    }
+
+    #[test]
+    fn call_tail_uses_home_slot_does_not_match_arbitrary_loads() {
+        let home_slots = HashMap::default();
+        let args = vec![
+            PreHirExpr::Var("a".into()),
+            PreHirExpr::Var("b".into()),
+            PreHirExpr::Var("c".into()),
+            PreHirExpr::Var("d".into()),
+            PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("ptr".into())),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            },
+        ];
+        assert!(
+            !call_tail_uses_home_slot(&args, &home_slots),
+            "arbitrary load in 5th argument must not be misclassified as home slot use"
+        );
+    }
 }

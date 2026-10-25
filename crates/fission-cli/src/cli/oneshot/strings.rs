@@ -16,6 +16,7 @@ use std::io::{self, Write};
 /// One extracted string with whatever the loader can say about where it lives.
 struct FoundString {
     file_offset: usize,
+    byte_length: usize,
     text: String,
     /// The mapped address, when the offset falls inside a section's file image.
     ///
@@ -72,6 +73,9 @@ pub(super) fn print_strings(
         // buried in. A 2.5MB Go binary yields 15,844 strings and 330 of them
         // are read by code, and in address order those 330 are unfindable.
         strings.sort_by_key(|found| (found.referrers.is_empty(), found.address, found.file_offset));
+    } else {
+        // When --xrefs is not requested, order monotonically by virtual address (unmapped strings at end by file offset).
+        strings.sort_by_key(|found| (found.address.is_none(), found.address, found.file_offset));
     }
 
     if json {
@@ -209,7 +213,7 @@ fn referrer_label(binary: &LoadedBinary, address: u64) -> String {
 fn print_context(
     out: &mut impl Write,
     binary: &LoadedBinary,
-    data: &[u8],
+    _data: &[u8],
     strings: &[FoundString],
     json_out: bool,
 ) -> io::Result<()> {
@@ -221,18 +225,7 @@ fn print_context(
         .iter()
         .map(|found| {
             let context = found.address.filter(|_| !found.executable).map(|address| {
-                let terminated = found
-                    .file_offset
-                    .checked_add(found.text.len())
-                    .and_then(|offset| data.get(offset))
-                    .is_some_and(|byte| *byte == 0);
-                string_reference_context(
-                    binary,
-                    &index,
-                    &graph,
-                    address,
-                    found.text.len() as u64 + u64::from(terminated),
-                )
+                string_reference_context(binary, &index, &graph, address, found.byte_length as u64)
             });
             (found, context)
         })
@@ -367,68 +360,58 @@ fn relation_rows(
         .collect()
 }
 
-/// Printable ASCII runs of at least `min_len` bytes.
+/// Printable ASCII and UTF-16LE Unicode runs of at least `min_len` characters.
 fn scan(data: &[u8], min_len: usize) -> Vec<FoundString> {
-    let mut strings = Vec::with_capacity((data.len() / 1024).max(100));
-    let mut current: Vec<u8> = Vec::with_capacity(256);
-    let mut start = 0usize;
+    use fission_static::analysis::strings::extract_strings;
 
-    let flush = |current: &mut Vec<u8>, start: usize, strings: &mut Vec<FoundString>| {
-        if current.len() >= min_len {
-            // SAFETY: only bytes in 0x20..0x7f were pushed, all valid UTF-8.
-            let text = unsafe { String::from_utf8_unchecked(std::mem::take(current)) };
-            strings.push(FoundString {
-                file_offset: start,
-                text,
-                address: None,
-                section: None,
-                executable: false,
-                referrers: Vec::new(),
-            });
-        }
-        current.clear();
-    };
-
-    for (i, &byte) in data.iter().enumerate() {
-        if (0x20..0x7f).contains(&byte) {
-            if current.is_empty() {
-                start = i;
-            }
-            current.push(byte);
-        } else {
-            flush(&mut current, start, &mut strings);
-        }
+    let extracted = extract_strings(data, 0, min_len);
+    let mut strings = Vec::with_capacity(extracted.len());
+    for item in extracted {
+        strings.push(FoundString {
+            file_offset: item.address as usize,
+            byte_length: item.length,
+            text: item.content,
+            address: None,
+            section: None,
+            executable: false,
+            referrers: Vec::new(),
+        });
     }
-    flush(&mut current, start, &mut strings);
     strings
 }
 
 /// Map each string's file offset to the section that loads it, and its address.
 fn locate(binary: &LoadedBinary, strings: &mut [FoundString]) {
-    let mut sections: Vec<&SectionInfo> = binary
+    // Partition sections into addressable (loadable) and non-addressable (metadata/debug) sections.
+    // Addressable sections take precedence so an unallocated header or metadata section
+    // sharing file offsets does not mask a loadable section or assign a bogus 0x0 + delta virtual address.
+    let mapped_sections: Vec<&SectionInfo> = binary
         .sections
         .iter()
-        .filter(|section| section.file_size > 0)
+        .filter(|section| section.file_size > 0 && section.is_addressable())
         .collect();
-    sections.sort_by_key(|section| section.file_offset);
+
+    let unmapped_sections: Vec<&SectionInfo> = binary
+        .sections
+        .iter()
+        .filter(|section| section.file_size > 0 && !section.is_addressable())
+        .collect();
 
     for found in strings.iter_mut() {
         let offset = found.file_offset as u64;
-        let Ok(index) = sections.binary_search_by(|section| {
-            if offset < section.file_offset {
-                std::cmp::Ordering::Greater
-            } else if offset >= section.file_offset + section.file_size {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        }) else {
-            continue;
-        };
-        let section = sections[index];
-        found.section = Some(section.name.clone());
-        found.executable = section.is_executable;
-        found.address = Some(section.virtual_address + (offset - section.file_offset));
+        if let Some(section) = mapped_sections.iter().find(|section| {
+            offset >= section.file_offset && offset < section.file_offset + section.file_size
+        }) {
+            found.section = Some(section.name.clone());
+            found.executable = section.is_executable;
+            found.address = Some(section.virtual_address + (offset - section.file_offset));
+        } else if let Some(section) = unmapped_sections.iter().find(|section| {
+            offset >= section.file_offset && offset < section.file_offset + section.file_size
+        }) {
+            found.section = Some(section.name.clone());
+            found.executable = false;
+            found.address = None;
+        }
     }
 }
 
@@ -457,7 +440,7 @@ fn attach_referrers(binary: &LoadedBinary, strings: &mut [FoundString]) {
         if found.executable {
             continue;
         }
-        for offset in 0..=found.text.len() as u64 {
+        for offset in 0..found.byte_length as u64 {
             by_address.entry(address + offset).or_insert(index);
         }
     }
@@ -593,5 +576,71 @@ mod tests {
         // address the loader never reads.
         assert_eq!(found.address, None);
         assert_eq!(found.section, None);
+    }
+
+    #[test]
+    fn utf16le_strings_are_extracted() {
+        // "UnicodeString" in UTF-16LE
+        let utf16_bytes: Vec<u8> = "UnicodeString"
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        let mut data = vec![0u8; 0x100];
+        data[0x20..0x20 + utf16_bytes.len()].copy_from_slice(&utf16_bytes);
+
+        let strings = scan(&data, 4);
+        let found = strings
+            .iter()
+            .find(|s| s.text == "UnicodeString")
+            .expect("UTF-16LE string must be extracted");
+        assert_eq!(found.file_offset, 0x20);
+    }
+
+    #[test]
+    fn addressable_sections_take_precedence_over_unmapped_overlapping_sections() {
+        let mut data = vec![0u8; 0x400];
+        data[0x100..0x10d].copy_from_slice(b"mapped-string");
+
+        let binary =
+            LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(data.clone()))
+                .image_base(0x400000)
+                .entry_point(0x401000)
+                .is_64bit(true)
+                .format("ELF")
+                // Unmapped section sharing offset 0..0x200 (e.g. file header or debug table)
+                .add_section(SectionInfo {
+                    name: ".unmapped_header".to_string(),
+                    virtual_address: 0x0,
+                    virtual_size: 0x200,
+                    file_offset: 0,
+                    file_size: 0x200,
+                    is_executable: false,
+                    is_writable: false,
+                    is_readable: false,
+                })
+                // Mapped loadable section covering 0x100..0x300
+                .add_section(SectionInfo {
+                    name: ".rodata".to_string(),
+                    virtual_address: 0x402000,
+                    virtual_size: 0x200,
+                    file_offset: 0x100,
+                    file_size: 0x200,
+                    is_executable: false,
+                    is_writable: false,
+                    is_readable: true,
+                })
+                .build()
+                .expect("build test binary");
+
+        let mut strings = scan(&data, 6);
+        locate(&binary, &mut strings);
+        let found = strings
+            .iter()
+            .find(|s| s.text == "mapped-string")
+            .expect("string scanned");
+
+        // Must resolve to .rodata at 0x402000, not the unmapped header at 0x0 + 0x100
+        assert_eq!(found.section.as_deref(), Some(".rodata"));
+        assert_eq!(found.address, Some(0x402000));
     }
 }

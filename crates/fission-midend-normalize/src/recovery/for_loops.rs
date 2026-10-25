@@ -100,15 +100,30 @@ fn try_collapse_while_to_for_algorithmic(
         return None;
     }
 
+    let mut body_writes = HashSet::default();
+    collect_written_vars(&body, &mut body_writes);
+
     let mut update = None;
+    let mut update_var = None;
     if let Some(last) = body.last() {
         if is_var_modification(last, &vars) {
+            if let PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } = last
+            {
+                update_var = Some(name.clone());
+            }
             update = Some(body.pop().unwrap());
         }
     }
 
     // ALGORITHMIC UPWARD CODE MOTION CHECK:
     // Scan backwards strictly enforcing independence (dataflow preservation).
+    // The initializer MUST target the induction variable:
+    // - If update was extracted, init MUST match that same induction variable.
+    // - If update was not extracted, init MUST be a variable modified in the loop body (when multiple condition vars exist),
+    //   preventing invariant loop bounds (e.g. `n = 10` in `while (i < n)`) from being stolen as `init`.
     let mut inits = Vec::new();
     let mut consumed_idx = 0;
 
@@ -117,10 +132,31 @@ fn try_collapse_while_to_for_algorithmic(
         scan_idx -= 1;
         let prev_stmt = &stmts[scan_idx];
 
-        if is_var_modification(prev_stmt, &vars) {
-            inits.push(Box::new(prev_stmt.clone()));
-            consumed_idx += 1;
-            break;
+        if let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            ..
+        } = prev_stmt
+        {
+            if vars.contains(name) {
+                let is_iv = if let Some(ref iv) = update_var {
+                    name == iv
+                } else if vars.len() > 1 {
+                    body_writes.contains(name)
+                } else {
+                    true
+                };
+
+                if is_iv {
+                    inits.push(Box::new(prev_stmt.clone()));
+                    consumed_idx += 1;
+                    break;
+                } else {
+                    // Loop invariant limit or unrelated assignment: stop upward motion.
+                    break;
+                }
+            } else {
+                break;
+            }
         } else {
             // Block upward reach if the statement contains side effects, control flow, or reads our vars.
             // Since we do not have a robust dependency checker here, breaking early is the only sound algorithmic choice.
@@ -209,4 +245,172 @@ fn is_var_modification(stmt: &PreHirStmt, vars: &HashSet<String>) -> bool {
         return false;
     };
     vars.contains(name)
+}
+
+fn collect_written_vars(stmts: &[PreHirStmt], written: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } => {
+                written.insert(name.clone());
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
+                collect_written_vars(body, written);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_written_vars(then_body, written);
+                collect_written_vars(else_body, written);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_written_vars(&case.body, written);
+                }
+                collect_written_vars(default, written);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: true,
+        }
+    }
+
+    #[test]
+    fn for_loop_recovery_does_not_steal_invariant_bound_as_init() {
+        let mut func = PreHirFunction {
+            name: "test_invariant_bound".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "i".to_string(),
+                    ty: int_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "n".to_string(),
+                    ty: int_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            return_type: int_ty(),
+            body: vec![
+                // n = 10; (loop invariant bound)
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("n".to_string()),
+                    rhs: PreHirExpr::Const(10, int_ty()),
+                },
+                // while (i < n) { i = i + 1; }
+                PreHirStmt::While {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SLt,
+                        lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                        rhs: Box::new(PreHirExpr::Var("n".to_string())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                            rhs: Box::new(PreHirExpr::Const(1, int_ty())),
+                            ty: int_ty(),
+                        },
+                    }]
+                    .into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        // When only `n = 10` precedes `while (i < n)`, `n` must NOT be stolen as `init` for `for`.
+        let recovered = apply_for_loop_folding(&mut func.body);
+        assert!(recovered);
+        // It forms a for loop with update `i = i + 1`, BUT `init` must be None (not `n = 10`).
+        // `n = 10` remains intact before the loop!
+        assert_eq!(func.body.len(), 2);
+        assert!(matches!(
+            func.body[0],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(ref n),
+                ..
+            } if n == "n"
+        ));
+        let PreHirStmt::For { init, .. } = &func.body[1] else {
+            panic!("expected for loop");
+        };
+        assert!(
+            init.is_none(),
+            "loop invariant bound must not be stolen as init"
+        );
+    }
+
+    #[test]
+    fn for_loop_recovery_matches_matching_induction_var_init() {
+        let mut func = PreHirFunction {
+            name: "test_matching_iv".to_string(),
+            locals: vec![PreHirBinding {
+                name: "i".to_string(),
+                ty: int_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            return_type: int_ty(),
+            body: vec![
+                // i = 0;
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("i".to_string()),
+                    rhs: PreHirExpr::Const(0, int_ty()),
+                },
+                // while (i < 10) { i = i + 1; }
+                PreHirStmt::While {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SLt,
+                        lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(10, int_ty())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                            rhs: Box::new(PreHirExpr::Const(1, int_ty())),
+                            ty: int_ty(),
+                        },
+                    }]
+                    .into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let recovered = apply_for_loop_folding(&mut func.body);
+        assert!(recovered);
+        assert_eq!(func.body.len(), 1);
+        let PreHirStmt::For { init, .. } = &func.body[0] else {
+            panic!("expected for loop");
+        };
+        assert!(init.is_some(), "matching iv init should be folded");
+    }
 }

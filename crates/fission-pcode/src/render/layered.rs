@@ -103,6 +103,7 @@ mod layered_tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("value".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "external".into(),
                         args: vec![],
                         ty,
@@ -145,6 +146,7 @@ mod layered_tests {
         let hir = HirFunction {
             name: "caller".to_string(),
             body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
                 // Call-target recovery can reuse the C-safe address map.
                 target: symbol.clone(),
                 args: Vec::new(),
@@ -173,6 +175,7 @@ mod layered_tests {
                 signed: false,
             },
             body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
                 target: "__fission_branchind".to_string(),
                 args: vec![HirExpr::Var("callee".to_string())],
                 ty: NirType::Unknown,
@@ -257,6 +260,7 @@ mod layered_tests {
             name: "report_values".to_string(),
             params,
             body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
                 target: "fprintf".to_string(),
                 args,
                 ty: NirType::Int {
@@ -335,6 +339,7 @@ mod layered_tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("rax".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "fopen".into(),
                         args: vec![HirExpr::Var("path".into()), HirExpr::Const(0, char_ptr)],
                         ty: file_ptr.clone(),
@@ -345,6 +350,7 @@ mod layered_tests {
                     rhs: HirExpr::Var("rax".into()),
                 },
                 HirStmt::Expr(HirExpr::Call {
+                    origin: None,
                     target: "setvbuf".into(),
                     args: vec![
                         HirExpr::Var("rax".into()),
@@ -1043,7 +1049,9 @@ fn collect_called_externs_from_lvalue(lvalue: &HirLValue, out: &mut BTreeMap<Str
 
 fn collect_called_externs_from_expr(expr: &HirExpr, out: &mut BTreeMap<String, NirType>) {
     match expr {
-        HirExpr::Call { target, args, ty } => {
+        HirExpr::Call {
+            target, args, ty, ..
+        } => {
             if is_c_identifier(target) {
                 out.entry(target.clone()).or_insert_with(|| ty.clone());
             }
@@ -1192,7 +1200,9 @@ fn collect_opaque_pcodeop_stubs_from_expr(expr: &HirExpr, stubs: &mut BTreeMap<S
             collect_opaque_pcodeop_stubs_from_expr(lhs, stubs);
             collect_opaque_pcodeop_stubs_from_expr(rhs, stubs);
         }
-        HirExpr::Call { target, args, ty } => {
+        HirExpr::Call {
+            target, args, ty, ..
+        } => {
             if target.starts_with("__pcodeop_") {
                 let entry = stubs.entry(target.clone()).or_insert_with(|| ty.clone());
                 *entry = merge_opaque_pcodeop_return_type(entry, ty);
@@ -2450,6 +2460,71 @@ mod global_decl_tests {
     }
 
     #[test]
+    fn recover_global_symbol_accesses_does_not_rewrite_advancing_pointer_value() {
+        let mut hir = HirFunction {
+            name: "loop_global_alias".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![NirBinding {
+                name: "ptr".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                })),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("ptr".to_string()),
+                    rhs: HirExpr::Const(
+                        0x2000,
+                        NirType::Ptr(Box::new(NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        })),
+                    ),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Binary {
+                        op: fission_midend_core::HirBinaryOp::Lt,
+                        lhs: Box::new(HirExpr::Var("ptr".to_string())),
+                        rhs: Box::new(HirExpr::Const(0x3000, NirType::Unknown)),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![
+                        HirStmt::Expr(HirExpr::Call {
+                            origin: None,
+                            target: "process".to_string(),
+                            args: vec![HirExpr::Var("ptr".to_string())],
+                            ty: NirType::Unknown,
+                        }),
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("ptr".to_string()),
+                            rhs: HirExpr::Binary {
+                                op: fission_midend_core::HirBinaryOp::Add,
+                                lhs: Box::new(HirExpr::Var("ptr".to_string())),
+                                rhs: Box::new(HirExpr::Const(4, NirType::Unknown)),
+                                ty: NirType::Unknown,
+                            },
+                        },
+                    ],
+                },
+            ],
+            ..HirFunction::default()
+        };
+        let options = preview_options_with_global("math_sink");
+
+        crate::render::recover_global_symbol_accesses(&mut hir, &options);
+        let rendered = render_hir_function_with_global_decls(&hir, &options);
+
+        assert!(rendered.contains("process(ptr);"), "{rendered}");
+        assert!(!rendered.contains("process(&math_sink);"), "{rendered}");
+    }
+
+    #[test]
     fn render_hir_skips_non_identifier_global_names() {
         let hir = HirFunction {
             name: "string_user".to_string(),
@@ -2578,6 +2653,7 @@ mod global_decl_tests {
             body: vec![HirStmt::Assign {
                 lhs: HirLValue::Var("xVar30".to_string()),
                 rhs: HirExpr::Call {
+                    origin: None,
                     target: "__pcodeop_294".to_string(),
                     args: Vec::new(),
                     ty: NirType::Aggregate {

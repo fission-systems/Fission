@@ -1535,11 +1535,10 @@ fn shannon_entropy(bytes: &[u8]) -> f64 {
 const SIGNATURE_PARSER_VERSION: u32 = 2;
 
 fn loader_cache_dir() -> Option<PathBuf> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .map(|p| p.to_path_buf())?;
-    let cache_dir = root.join("target").join("fission-loader");
+    let cache_dir = fission_core::resource_roots::fission_cache_dir().or_else(|| {
+        fission_core::utils::find_workspace_root("FISSION_ROOT")
+            .map(|r| r.join("target").join("fission-loader"))
+    })?;
     let _ = fs::create_dir_all(&cache_dir);
     Some(cache_dir)
 }

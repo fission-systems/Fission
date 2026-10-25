@@ -31,6 +31,7 @@
 
 use crate::HashMap;
 use crate::prelude::*;
+use std::collections::HashSet;
 
 /// Traverse and statically resolve indirect calls in a function.
 ///
@@ -38,10 +39,19 @@ use crate::prelude::*;
 pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
 
-    // 1. Gather all local variable initializers representing constants or global symbol addresses.
-    // This allows resolving variables whose values are established at local definition sites.
+    // 1. Gather all variables that are assigned or mutated anywhere in the function body.
+    // If a variable is reassigned in the body, its declaration initializer cannot be trusted
+    // as an invariant value across indirect call sites.
+    let mut modified_vars = HashSet::new();
+    collect_assigned_vars(&func.body, &mut modified_vars);
+
+    // 2. Gather all local variable initializers representing constants or global symbol addresses
+    // for variables that are NEVER reassigned in the body.
     let mut const_initializers = HashMap::<String, PreHirExpr>::default();
     for local in &func.locals {
+        if modified_vars.contains(&local.name) {
+            continue;
+        }
         if let Some(initializer) = &local.initializer {
             match initializer {
                 PreHirExpr::Const(val, ty) => {
@@ -65,7 +75,7 @@ pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
         }
     }
 
-    // 2. Build address-to-symbol mapping from the callee summaries in the function context.
+    // 3. Build address-to-symbol mapping from the callee summaries in the function context.
     let mut addr_to_symbol = HashMap::<u64, String>::default();
     for (symbol, summary) in &func.callee_summaries {
         if let Some(addr) = summary.target.address {
@@ -73,12 +83,61 @@ pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
         }
     }
 
-    // 3. Recursively traverse and rewrite calls in function statements.
+    // 4. Recursively traverse and rewrite calls in function statements.
     for stmt in &mut func.body {
         changed |= deindirect_in_stmt(stmt, &const_initializers, &addr_to_symbol);
     }
 
     changed
+}
+
+fn collect_assigned_vars(stmts: &[PreHirStmt], modified: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, .. } => match lhs {
+                PreHirLValue::Var(name) => {
+                    modified.insert(name.clone());
+                }
+                PreHirLValue::FieldAccess { base, .. } => {
+                    if let PreHirExpr::Var(name) = base.as_ref() {
+                        modified.insert(name.clone());
+                    }
+                }
+                _ => {}
+            },
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                collect_assigned_vars(body, modified);
+            }
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(s) = init {
+                    collect_assigned_vars(std::slice::from_ref(s.as_ref()), modified);
+                }
+                if let Some(s) = update {
+                    collect_assigned_vars(std::slice::from_ref(s.as_ref()), modified);
+                }
+                collect_assigned_vars(body, modified);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_assigned_vars(then_body, modified);
+                collect_assigned_vars(else_body, modified);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_assigned_vars(&case.body, modified);
+                }
+                collect_assigned_vars(default, modified);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn deindirect_in_stmt(
@@ -224,7 +283,10 @@ fn deindirect_in_expr(
     }
 
     // 2. Try to resolve __fission_callind_opaque in the current expression.
-    if let PreHirExpr::Call { target, args, ty } = expr {
+    if let PreHirExpr::Call {
+        target, args, ty, ..
+    } = expr
+    {
         if target == "__fission_callind_opaque" && !args.is_empty() {
             let fn_ptr = &args[0];
             if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol)
@@ -232,6 +294,7 @@ fn deindirect_in_expr(
                 // Found a static direct target symbol. Re-write the call!
                 let remaining_args = args[1..].to_vec();
                 *expr = PreHirExpr::Call {
+                    origin: None,
                     target: resolved_symbol,
                     args: remaining_args,
                     ty: ty.clone(),
@@ -250,14 +313,11 @@ fn resolve_call_target(
     addr_to_symbol: &HashMap<u64, String>,
 ) -> Option<String> {
     match fn_ptr {
-        // Direct constant address.
+        // Direct constant address: must match a verified callee symbol in addr_to_symbol.
         PreHirExpr::Const(addr, _) => {
             let target_addr = *addr as u64;
             if let Some(symbol) = addr_to_symbol.get(&target_addr) {
                 return Some(symbol.clone());
-            }
-            if target_addr > 0 {
-                return Some(format!("sub_{:x}", target_addr));
             }
         }
         // Pointer cast const.
@@ -279,7 +339,9 @@ fn resolve_call_target(
                 }
             }
         }
-        // Local variable reference, trace to its definition initializer.
+        // Local variable reference, trace to its definition initializer if unmodified.
+        // Note: tmp_ and DAT_ names are never parsed as code addresses; temporary varnode
+        // offsets belong to the unique address space, and DAT_ variables reside in data sections.
         PreHirExpr::Var(var_name) => {
             if let Some(init_expr) = initializers.get(var_name) {
                 if let PreHirExpr::Var(next_var) = init_expr {
@@ -289,22 +351,164 @@ fn resolve_call_target(
                 }
                 return resolve_call_target(init_expr, initializers, addr_to_symbol);
             }
-            // Parse temporary register variables if they carry inline address hints in their names.
-            if let Some(addr) = parse_address_from_name(var_name) {
-                if let Some(symbol) = addr_to_symbol.get(&addr) {
-                    return Some(symbol.clone());
-                }
-                return Some(format!("sub_{:x}", addr));
-            }
         }
         _ => {}
     }
     None
 }
 
-fn parse_address_from_name(name: &str) -> Option<u64> {
-    let raw = name
-        .strip_prefix("tmp_")
-        .or_else(|| name.strip_prefix("DAT_"))?;
-    u64::from_str_radix(raw.trim_start_matches("0x"), 16).ok()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+
+    fn make_callee(name: &str, addr: u64) -> (String, CallSummary) {
+        (
+            name.to_string(),
+            CallSummary {
+                target: CallTargetRef {
+                    address: Some(addr),
+                    symbol: name.to_string(),
+                    provenance: CallTargetProvenance::Reference,
+                    edge_kind: CallEdgeKind::Reference,
+                    confidence: 128,
+                },
+                prototype: PrototypeSummary {
+                    variadic_fixed_arity: None,
+                    min_arity: 0,
+                    max_arity: 0,
+                    locked_exact_arity: None,
+                    returns_void: false,
+                    return_lattice: NirType::Unknown,
+                    param_lattices: vec![],
+                    param_surface_type_names: vec![],
+                    param_pointer_contracts: vec![],
+                    soundness: SummarySoundness::Optimistic,
+                },
+                effect_summary: CallEffectSummary {
+                    reads_memory: None,
+                    writes_memory: None,
+                    escapes_args: None,
+                    regions: Vec::new(),
+                    wrapper_class: WrapperClass::None,
+                    wrapper_of: None,
+                    confidence: 160,
+                },
+            },
+        )
+    }
+
+    #[test]
+    fn deindirect_ignores_tmp_varnodes_and_dat_variables() {
+        let mut summaries = IndexMap::new();
+        let (name, summary) = make_callee("sub_100", 0x100);
+        summaries.insert(name, summary);
+
+        // Indirect call to tmp_100 (unique space temporary varnode)
+        let mut func = PreHirFunction {
+            name: "test_tmp".to_string(),
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "__fission_callind_opaque".to_string(),
+                args: vec![PreHirExpr::Var("tmp_100".to_string())],
+                ty: NirType::Unknown,
+            })],
+            callee_summaries: summaries.clone(),
+            ..Default::default()
+        };
+        assert!(
+            !apply_deindirect_pass(&mut func),
+            "tmp_100 must not be treated as a code address"
+        );
+
+        // Indirect call to DAT_00405000 (data section variable)
+        let mut func_dat = PreHirFunction {
+            name: "test_dat".to_string(),
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "__fission_callind_opaque".to_string(),
+                args: vec![PreHirExpr::Var("DAT_00405000".to_string())],
+                ty: NirType::Unknown,
+            })],
+            callee_summaries: summaries,
+            ..Default::default()
+        };
+        assert!(
+            !apply_deindirect_pass(&mut func_dat),
+            "DAT_ variables must not be invoked directly as code"
+        );
+    }
+
+    #[test]
+    fn deindirect_ignores_reassigned_local_variable() {
+        let mut summaries = IndexMap::new();
+        let (name, summary) = make_callee("func_A", 0x401000);
+        summaries.insert(name, summary);
+
+        // fn_ptr is declared with initializer func_A (0x401000), but reassigned in body
+        let mut func = PreHirFunction {
+            name: "test_reassign".to_string(),
+            locals: vec![PreHirBinding {
+                name: "fn_ptr".to_string(),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+                surface_type_name: None,
+                origin: None,
+                initializer: Some(PreHirExpr::Const(
+                    0x401000,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+            }],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("fn_ptr".to_string()),
+                    rhs: PreHirExpr::Var("runtime_ptr".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "__fission_callind_opaque".to_string(),
+                    args: vec![PreHirExpr::Var("fn_ptr".to_string())],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            callee_summaries: summaries,
+            ..Default::default()
+        };
+
+        assert!(
+            !apply_deindirect_pass(&mut func),
+            "reassigned local variable must not be resolved using stale initializer"
+        );
+    }
+
+    #[test]
+    fn deindirect_does_not_synthesize_unverified_sub_address() {
+        // Constant 0x500000 is NOT in callee_summaries; it must not synthesize sub_500000
+        let mut func = PreHirFunction {
+            name: "test_unverified".to_string(),
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "__fission_callind_opaque".to_string(),
+                args: vec![PreHirExpr::Const(
+                    0x500000,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )],
+                ty: NirType::Unknown,
+            })],
+            ..Default::default()
+        };
+
+        assert!(
+            !apply_deindirect_pass(&mut func),
+            "unverified constant address must not be synthesized into sub_<addr>"
+        );
+    }
 }

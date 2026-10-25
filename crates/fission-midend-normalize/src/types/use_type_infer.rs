@@ -553,17 +553,19 @@ fn collect_pointer_assignment_base_constraints(
             ..
         } => {
             // ptr + integer = pointer. Only promote a Var base when the other
-            // side is a *numeric* offset (const / const arithmetic).
-            // Do not treat an integer cast of a bare variable as an offset; it
-            // can be an integerized pointer base.
-            if expr_is_numeric_offset_with_types(rhs.as_ref(), known_binding_types) {
+            // side is a *numeric* offset (const / const arithmetic / positive integer evidence).
+            // Do not emit bilateral constraints when neither operand is established as an offset.
+            let rhs_is_offset =
+                expr_has_positive_integer_offset_evidence(rhs.as_ref(), known_binding_types);
+            let lhs_is_offset =
+                expr_has_positive_integer_offset_evidence(lhs.as_ref(), known_binding_types);
+            if rhs_is_offset && !lhs_is_offset {
                 if let PreHirExpr::Var(name) = strip_casts_unary(lhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Ptr(pointee.as_ref().clone()));
                 }
-            }
-            if expr_is_numeric_offset_with_types(lhs.as_ref(), known_binding_types) {
+            } else if lhs_is_offset && !rhs_is_offset {
                 if let PreHirExpr::Var(name) = strip_casts_unary(rhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
@@ -630,12 +632,16 @@ fn expr_is_numeric_offset(expr: &PreHirExpr) -> bool {
     }
 }
 
-fn expr_is_numeric_offset_with_types(
+fn expr_has_positive_integer_offset_evidence(
     expr: &PreHirExpr,
     known_binding_types: &HashMap<String, NirType>,
 ) -> bool {
     match expr {
-        PreHirExpr::Var(name) => !matches!(known_binding_types.get(name), Some(NirType::Ptr(_))),
+        PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Var(name) => matches!(
+            known_binding_types.get(name),
+            Some(NirType::Int { .. } | NirType::Bool)
+        ),
         PreHirExpr::Cast {
             ty: NirType::Int { .. },
             expr: inner,
@@ -644,27 +650,26 @@ fn expr_is_numeric_offset_with_types(
                 known_binding_types.get(name),
                 Some(NirType::Int { .. } | NirType::Bool)
             ),
-            _ => expr_is_numeric_offset_with_types(inner, known_binding_types),
+            _ => expr_has_positive_integer_offset_evidence(inner, known_binding_types),
         },
         PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
-            expr_is_numeric_offset_with_types(expr, known_binding_types)
+            expr_has_positive_integer_offset_evidence(expr, known_binding_types)
         }
         PreHirExpr::Binary {
             op:
-                PreHirBinaryOp::Add
-                | PreHirBinaryOp::Sub
-                | PreHirBinaryOp::Mul
-                | PreHirBinaryOp::Shl
-                | PreHirBinaryOp::Shr
-                | PreHirBinaryOp::Sar,
+                PreHirBinaryOp::Mul | PreHirBinaryOp::Shl | PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
+            ..
+        } => true,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add | PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         } => {
-            expr_is_numeric_offset_with_types(lhs, known_binding_types)
-                && expr_is_numeric_offset_with_types(rhs, known_binding_types)
+            expr_has_positive_integer_offset_evidence(lhs, known_binding_types)
+                || expr_has_positive_integer_offset_evidence(rhs, known_binding_types)
         }
-        _ => expr_is_numeric_offset(expr),
+        _ => false,
     }
 }
 
@@ -2074,6 +2079,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "produce_pointer".into(),
                         args: vec![],
                         ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -2122,6 +2128,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "pointer_result".into(),
                         args: vec![],
                         ty: pointer.clone(),
@@ -2179,6 +2186,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "unknown_result_a".into(),
                         args: vec![],
                         ty: NirType::Unknown,
@@ -2191,6 +2199,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("carrier".into()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "unknown_result_b".into(),
                         args: vec![],
                         ty: NirType::Unknown,
@@ -2780,6 +2789,7 @@ mod tests {
     #[test]
     fn unknown_call_only_value_returns_promote_native_word_return_type() {
         let body = vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+            origin: None,
             target: "param_1".to_owned(),
             args: vec![
                 PreHirExpr::Var("param_2".to_owned()),
@@ -2803,6 +2813,7 @@ mod tests {
     #[test]
     fn call_target_use_promotes_binding_to_pointer() {
         let body = vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+            origin: None,
             target: "((code *)param_1)".to_owned(),
             args: vec![
                 PreHirExpr::Var("param_2".to_owned()),
@@ -2851,6 +2862,7 @@ mod tests {
         let body = vec![PreHirStmt::If {
             cond: PreHirExpr::Var("flag".to_owned()),
             then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Call {
+                origin: None,
                 target: "param_1".to_owned(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -3138,6 +3150,7 @@ mod tests {
             surface_return_type_name: None,
             body: vec![
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "observe64".to_owned(),
                     args: vec![PreHirExpr::Var("param_1".to_owned())],
                     ty: NirType::Unknown,
@@ -3484,6 +3497,7 @@ mod tests {
         let mut body = qualifying_accumulator_body("x", "bptr");
         // A plain, unrecognized use of `x` elsewhere disqualifies it.
         body.push(PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "sink".to_owned(),
             args: vec![var("x")],
             ty: NirType::Unknown,
@@ -3554,5 +3568,55 @@ mod tests {
             "z, embedded in x's update rhs, is still an ordinary (disallowed) use from z's own perspective"
         );
         assert_eq!(z_evidence.def_count, 0);
+    }
+
+    #[test]
+    fn no_bilateral_pointer_promotion_on_variable_addition() {
+        let mut constraints = HashMap::default();
+        let known_binding_types = HashMap::default();
+        let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: true,
+        }));
+
+        // ptr = a + b (neither has integer offset evidence)
+        let add_vars = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("a".into())),
+            rhs: Box::new(PreHirExpr::Var("b".into())),
+            ty: NirType::Unknown,
+        };
+        super::collect_pointer_assignment_base_constraints(
+            &add_vars,
+            &ptr_ty,
+            &known_binding_types,
+            &mut constraints,
+        );
+        assert!(
+            constraints.is_empty(),
+            "neither operand in unconstrained a + b should receive pointer promotion"
+        );
+
+        // ptr = a + 16 (16 is a numeric offset constant)
+        let add_const = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("a".into())),
+            rhs: Box::new(PreHirExpr::Const(
+                16,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Unknown,
+        };
+        super::collect_pointer_assignment_base_constraints(
+            &add_const,
+            &ptr_ty,
+            &known_binding_types,
+            &mut constraints,
+        );
+        assert!(constraints.contains_key("a"));
+        assert!(!constraints.contains_key("b"));
     }
 }

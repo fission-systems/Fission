@@ -814,7 +814,9 @@ fn apply_api_pointer_return_types_in_expr(
     pointer_bits: u32,
 ) -> bool {
     match expr {
-        PreHirExpr::Call { target, args, ty } => {
+        PreHirExpr::Call {
+            target, args, ty, ..
+        } => {
             let resolved = resolve_call_target_symbol_with_wrapper(target, summaries).0;
             let signature = api_signature_via_import_aliases(resolved)
                 .or_else(|| api_signature_via_import_aliases(target));
@@ -1033,6 +1035,7 @@ mod tests {
                 initializer: None,
             }],
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "strncpy".to_owned(),
                 args: vec![
                     PreHirExpr::AddressOfLocal("buffer".to_owned()),
@@ -1148,6 +1151,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("format_result".to_string()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "gettext".to_string(),
                         args: vec![PreHirExpr::AddressOfGlobal(
                             "\"name=%s count=%u\"".to_string(),
@@ -1160,6 +1164,7 @@ mod tests {
                     rhs: PreHirExpr::Var("param_name".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "error".to_string(),
                     args: vec![
                         PreHirExpr::Const(0, NirType::Unknown),
@@ -1211,6 +1216,7 @@ mod tests {
                     rhs: PreHirExpr::Var("param_1".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "sub_2000".to_string(),
                     args: vec![PreHirExpr::Var("alias".to_string())],
                     ty: NirType::Unknown,
@@ -1257,11 +1263,13 @@ mod tests {
             locals: vec![scalar],
             body: vec![
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "typed_target".to_string(),
                     args: vec![PreHirExpr::Var("scalar".to_string())],
                     ty: NirType::Unknown,
                 }),
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "typed_target".to_string(),
                     args: vec![PreHirExpr::AddressOfGlobal("buffer".to_string())],
                     ty: NirType::Unknown,
@@ -1412,6 +1420,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("rax".to_string()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "fopen".to_string(),
                         args: vec![
                             PreHirExpr::Var("path".to_string()),
@@ -1480,6 +1489,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("eax".to_string()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "fopen".to_string(),
                         args: vec![
                             PreHirExpr::Var("path".to_string()),
@@ -1497,6 +1507,7 @@ mod tests {
                     then_body: vec![PreHirStmt::Assign {
                         lhs: PreHirLValue::Var("eax".to_string()),
                         rhs: PreHirExpr::Call {
+                            origin: None,
                             target: "setvbuf".to_string(),
                             args: Vec::new(),
                             ty: NirType::Int {
@@ -1638,6 +1649,7 @@ mod tests {
                     },
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "setvbuf".to_string(),
                     args: vec![
                         PreHirExpr::Var("file_slot".to_string()),
@@ -1704,6 +1716,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "GetWindowRect".to_string(),
                 args: vec![
                     PreHirExpr::Var("param_1".to_string()),
@@ -1752,6 +1765,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "GetWindowRect".to_string(),
                 args: vec![
                     PreHirExpr::Var("param_1".to_string()),
@@ -1799,6 +1813,7 @@ mod tests {
                     rhs: PreHirExpr::Var("source".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "GetWindowRect".to_string(),
                     args: vec![
                         PreHirExpr::Var("window".to_string()),
@@ -1845,6 +1860,7 @@ mod tests {
                     rhs: PreHirExpr::Var("source".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "free".to_string(),
                     args: vec![PreHirExpr::Var("alias".to_string())],
                     ty: NirType::Unknown,
@@ -1888,6 +1904,7 @@ mod tests {
                     rhs: PreHirExpr::Var("source".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "GetWindowRect".to_string(),
                     args: vec![
                         PreHirExpr::Var("window".to_string()),
@@ -1922,6 +1939,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("rax".to_string()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "unknown_scalar".to_string(),
                         args: vec![],
                         ty: uint64.clone(),
@@ -1930,6 +1948,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("rax".to_string()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: "strchr".to_string(),
                         args: vec![
                             PreHirExpr::Var("text".to_string()),
@@ -1970,6 +1989,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "wrapper_foo".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -2043,6 +2063,7 @@ mod tests {
             surface_return_type_name: None,
             body: vec![
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "MessageBoxA".to_string(),
                     args: vec![
                         PreHirExpr::Const(0, NirType::Unknown),
@@ -2055,6 +2076,7 @@ mod tests {
                     ty: NirType::Unknown,
                 }),
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "unresolved_target".to_string(),
                     args: vec![
                         PreHirExpr::Const(0, NirType::Unknown),
@@ -2101,6 +2123,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "printf".to_string(),
                 args: vec![
                     PreHirExpr::Const(0, NirType::Unknown),
@@ -2235,6 +2258,7 @@ mod tests {
                     rhs: PreHirExpr::Var("param_2".to_string()),
                 },
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "printf".to_string(),
                     args: vec![
                         PreHirExpr::AddressOfGlobal("\"value=%d name=%s\\n\"".to_string()),
@@ -2274,8 +2298,8 @@ mod tests {
     }
 
     #[test]
-    fn printf_format_parser_does_not_guess_abi_dependent_long_width() {
-        let types = parse_printf_format_specifier_types("%u %lu %llu %s");
+    fn printf_format_parser_resolves_length_modifiers() {
+        let types = parse_printf_format_specifier_types("%u %lu %llu %s %zu %zd %td %jd", 64, 64);
         assert_eq!(
             types,
             vec![
@@ -2283,7 +2307,10 @@ mod tests {
                     bits: 32,
                     signed: false,
                 }),
-                None,
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
                 Some(NirType::Int {
                     bits: 64,
                     signed: false,
@@ -2292,6 +2319,65 @@ mod tests {
                     bits: 8,
                     signed: false,
                 }))),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: true,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: true,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: true,
+                }),
+            ]
+        );
+
+        // Win64 is LLP64: `long` stays 32-bit while `size_t` is pointer-sized.
+        let types_llp64 = parse_printf_format_specifier_types("%lu %zu", 64, 32);
+        assert_eq!(
+            types_llp64,
+            vec![
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
+            ]
+        );
+
+        let types_32 = parse_printf_format_specifier_types("%u %lu %llu %zu %zd", 32, 32);
+        assert_eq!(
+            types_32,
+            vec![
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: true,
+                }),
             ]
         );
     }
@@ -2361,6 +2447,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "fib".to_string(),
                 args: vec![
                     PreHirExpr::Const(1, NirType::Unknown),
@@ -2401,6 +2488,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "wrapper_message_box".to_string(),
                 args: vec![
                     PreHirExpr::Const(0, NirType::Unknown),
@@ -2485,6 +2573,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "recursive_fib".to_string(),
                 args: vec![
                     PreHirExpr::Const(0, NirType::Unknown),
@@ -2555,6 +2644,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "known_without_signature".to_string(),
                 args: vec![
                     PreHirExpr::Const(0, NirType::Unknown),

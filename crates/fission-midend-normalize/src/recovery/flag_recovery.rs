@@ -41,8 +41,26 @@ use crate::{HashMap, HashSet};
 /// x86 EFLAGS variable names produced by `arch::x86::unique_x86_register_name`.
 const FLAG_NAMES: &[&str] = &["cf", "pf", "af", "zf", "sf", "of"];
 
+/// The flag register a variable names: the bare register (`zf`) or one of
+/// its SSA versions (`zf.1`). Anything else -- `of_count`, a DWARF local
+/// named `cy_index` -- is an ordinary variable.
+fn flag_family(name: &str) -> Option<&str> {
+    let (base, version) = match name.split_once('.') {
+        Some((base, version)) => (base, Some(version)),
+        None => (name, None),
+    };
+    if version.is_some_and(|v| v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    matches!(
+        base,
+        "cf" | "pf" | "af" | "zf" | "sf" | "of" | "ng" | "zr" | "cy" | "ov"
+    )
+    .then_some(base)
+}
+
 fn is_flag_var(name: &str) -> bool {
-    matches!(name, "cf" | "pf" | "af" | "zf" | "sf" | "of")
+    flag_family(name).is_some()
 }
 
 // ── Phase 1: Definition scan ──────────────────────────────────────────────────
@@ -153,10 +171,12 @@ fn collect_defs_for(
 
 // ── Phase 2: Pattern extraction helpers ──────────────────────────────────────
 
-/// Extract `(a, b)` from `__sborrow(a, b)` or `__scarry(a, b)`.
+/// Extract `(a, b)` from `__sborrow(a, b)`, `__scarry(a, b)`, or `__overflow(a, b)`.
 fn extract_sborrow_args(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr)> {
     if let PreHirExpr::Call { target, args, .. } = expr {
-        if (target == "__sborrow" || target == "__scarry") && args.len() == 2 {
+        if (target == "__sborrow" || target == "__scarry" || target == "__overflow")
+            && args.len() >= 2
+        {
             return Some((args[0].clone(), args[1].clone()));
         }
     }
@@ -195,7 +215,7 @@ fn extract_eq_args(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr)> {
 
 /// Check whether `expr` is `Var(flag)`.
 fn is_flag_expr(expr: &PreHirExpr, flag: &str) -> bool {
-    matches!(expr, PreHirExpr::Var(n) if n == flag)
+    matches!(expr, PreHirExpr::Var(n) if flag_family(n) == Some(flag))
 }
 
 /// Check whether `expr` is `!Var(flag)`.
@@ -220,6 +240,23 @@ fn is_sf_ne_of(expr: &PreHirExpr) -> bool {
             || (is_flag_expr(lhs, "of") && is_flag_expr(rhs, "sf")))
 }
 
+/// Lookup a flag variable in `defs` matching flag name prefix case-insensitively.
+/// The definition of `flag` (a full name, or a bare family such as `of`).
+/// A bare family resolves only when exactly one version of it is defined:
+/// with several, HashMap order would decide which one pairs with the
+/// condition, so the rewrite is refused instead.
+fn get_flag_def<'a>(defs: &'a HashMap<String, PreHirExpr>, flag: &str) -> Option<&'a PreHirExpr> {
+    if let Some(def) = defs.get(flag) {
+        return Some(def);
+    }
+    let mut versions = defs
+        .iter()
+        .filter(|(name, _)| flag_family(name) == Some(flag))
+        .map(|(_, def)| def);
+    let only = versions.next()?;
+    versions.next().is_none().then_some(only)
+}
+
 /// Helper: build `Binary { op, lhs, rhs, ty: Bool }`.
 fn bool_binary(op: PreHirBinaryOp, lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
     PreHirExpr::Binary {
@@ -237,7 +274,7 @@ fn substitute_single_flags(
     defs: &HashMap<String, PreHirExpr>,
 ) -> Option<PreHirExpr> {
     match expr {
-        PreHirExpr::Var(name) if is_flag_var(name) => defs.get(name).cloned(),
+        PreHirExpr::Var(name) if is_flag_var(name) => get_flag_def(defs, name).cloned(),
         PreHirExpr::Unary {
             op,
             expr: inner,
@@ -274,7 +311,7 @@ pub(super) fn try_recover_flag_condition(
     // ── JL / JGE: signed SF != OF / SF == OF ──────────────────────────────
     // JL (signed less than): SF != OF → a < b (signed)
     if is_sf_ne_of(cond) {
-        if let Some(of_def) = defs.get("of") {
+        if let Some(of_def) = get_flag_def(defs, "of") {
             if let Some((a, b)) = extract_sborrow_args(of_def) {
                 return Some(bool_binary(PreHirBinaryOp::SLt, a, b));
             }
@@ -282,7 +319,7 @@ pub(super) fn try_recover_flag_condition(
     }
     // JGE (signed greater or equal): SF == OF → a >= b (signed) = !(a < b)
     if is_sf_eq_of(cond) {
-        if let Some(of_def) = defs.get("of") {
+        if let Some(of_def) = get_flag_def(defs, "of") {
             if let Some((a, b)) = extract_sborrow_args(of_def) {
                 return Some(PreHirExpr::Unary {
                     op: PreHirUnaryOp::Not,
@@ -307,7 +344,7 @@ pub(super) fn try_recover_flag_condition(
         if (is_flag_expr(lhs, "zf") && is_sf_ne_of(rhs))
             || (is_sf_ne_of(lhs) && is_flag_expr(rhs, "zf"))
         {
-            if let Some(of_def) = defs.get("of") {
+            if let Some(of_def) = get_flag_def(defs, "of") {
                 if let Some((a, b)) = extract_sborrow_args(of_def) {
                     return Some(bool_binary(PreHirBinaryOp::SLe, a, b));
                 }
@@ -317,7 +354,7 @@ pub(super) fn try_recover_flag_condition(
         if (is_flag_expr(lhs, "cf") && is_flag_expr(rhs, "zf"))
             || (is_flag_expr(lhs, "zf") && is_flag_expr(rhs, "cf"))
         {
-            if let Some(cf_def) = defs.get("cf") {
+            if let Some(cf_def) = get_flag_def(defs, "cf") {
                 if let Some((a, b)) = extract_lt_args(cf_def) {
                     return Some(bool_binary(PreHirBinaryOp::Le, a, b));
                 }
@@ -338,7 +375,7 @@ pub(super) fn try_recover_flag_condition(
         if (is_not_flag(lhs, "zf") && is_sf_eq_of(rhs))
             || (is_sf_eq_of(lhs) && is_not_flag(rhs, "zf"))
         {
-            if let Some(of_def) = defs.get("of") {
+            if let Some(of_def) = get_flag_def(defs, "of") {
                 if let Some((a, b)) = extract_sborrow_args(of_def) {
                     // a > b signed = b < a signed
                     return Some(bool_binary(PreHirBinaryOp::SLt, b, a));
@@ -349,7 +386,7 @@ pub(super) fn try_recover_flag_condition(
         if (is_not_flag(lhs, "cf") && is_not_flag(rhs, "zf"))
             || (is_not_flag(lhs, "zf") && is_not_flag(rhs, "cf"))
         {
-            if let Some(cf_def) = defs.get("cf") {
+            if let Some(cf_def) = get_flag_def(defs, "cf") {
                 if let Some((a, b)) = extract_lt_args(cf_def) {
                     // a > b unsigned = b < a
                     return Some(bool_binary(PreHirBinaryOp::Lt, b, a));
@@ -834,7 +871,7 @@ fn dead_flag_definition_sites(stmts: &[PreHirStmt]) -> HashSet<usize> {
         for index in (block.start..block.end).rev() {
             if let Some((name, rhs)) = flag_definition(&stmts[index]) {
                 if !live.contains(name) && !expr_has_side_effects(rhs) {
-                    dead.insert(std::ptr::from_ref(&stmts[index]) as usize);
+                    dead.insert(index);
                 }
                 live.remove(name);
             }
@@ -845,8 +882,13 @@ fn dead_flag_definition_sites(stmts: &[PreHirStmt]) -> HashSet<usize> {
 }
 
 fn remove_dead_sites(stmts: &mut Vec<PreHirStmt>, dead_sites: &HashSet<usize>, changed: &mut bool) {
-    stmts.retain(|stmt| {
-        let remove = dead_sites.contains(&(std::ptr::from_ref(stmt) as usize));
+    if dead_sites.is_empty() {
+        return;
+    }
+    let mut idx = 0;
+    stmts.retain(|_| {
+        let remove = dead_sites.contains(&idx);
+        idx += 1;
         *changed |= remove;
         !remove
     });
@@ -952,9 +994,8 @@ fn contains_goto_or_label(stmts: &[PreHirStmt]) -> bool {
     })
 }
 
-/// Recursively finds pure flag definitions that are dead given `live_out`
-/// (the flag names some code after `stmts` needs), recording their addresses
-/// into `dead`, and returns the live-in set for `stmts`.
+/// Recursively finds and prunes pure flag definitions that are dead given `live_out`
+/// (the flag names some code after `stmts` needs) in-place, returning the live-in set for `stmts`.
 ///
 /// This complements `dead_flag_definition_sites`, which only inspects
 /// `stmts`' own direct elements and treats any nested compound statement as
@@ -973,10 +1014,10 @@ fn contains_goto_or_label(stmts: &[PreHirStmt]) -> bool {
 /// narrower in scope than a full structured-CFG liveness engine, matching
 /// this pass's existing precedent of preferring a safe, bounded
 /// approximation over a proof this analysis can't cheaply make.
-fn dead_flag_sites_recursive(
-    stmts: &[PreHirStmt],
+fn prune_dead_flag_sites_recursive(
+    stmts: &mut Vec<PreHirStmt>,
     live_out: &HashSet<String>,
-    dead: &mut HashSet<usize>,
+    changed: &mut bool,
 ) -> HashSet<String> {
     if contains_goto_or_label(stmts) {
         let mut live_in = live_out.clone();
@@ -988,115 +1029,91 @@ fn dead_flag_sites_recursive(
         );
         return live_in;
     }
+
+    let mut is_dead = vec![false; stmts.len()];
     let mut live = live_out.clone();
-    for stmt in stmts.iter().rev() {
-        live = dead_flag_site_in_stmt(stmt, &live, dead);
-    }
-    live
-}
 
-fn dead_flag_site_in_stmt(
-    stmt: &PreHirStmt,
-    live_out: &HashSet<String>,
-    dead: &mut HashSet<usize>,
-) -> HashSet<String> {
-    if let Some((name, rhs)) = flag_definition(stmt) {
-        let mut live_in = live_out.clone();
-        if !live_out.contains(name) && !expr_has_side_effects(rhs) {
-            dead.insert(std::ptr::from_ref(stmt) as usize);
-        }
-        live_in.remove(name);
-        live_in.extend(flag_expr_uses(rhs));
-        return live_in;
-    }
-    match stmt {
-        PreHirStmt::Block(body) => dead_flag_sites_recursive(body, live_out, dead),
-        PreHirStmt::If {
-            cond,
-            then_body,
-            else_body,
-        } => {
-            let then_live = dead_flag_sites_recursive(then_body, live_out, dead);
-            let else_live = dead_flag_sites_recursive(else_body, live_out, dead);
-            let mut live_in: HashSet<String> = then_live.union(&else_live).cloned().collect();
-            live_in.extend(flag_expr_uses(cond));
-            live_in
-        }
-        PreHirStmt::Switch {
-            expr,
-            cases,
-            default,
-        } => {
-            let mut live_in = HashSet::default();
-            for case in cases {
-                live_in.extend(dead_flag_sites_recursive(&case.body, live_out, dead));
+    for i in (0..stmts.len()).rev() {
+        if let Some((name, rhs)) = flag_definition(&stmts[i]) {
+            if !live.contains(name) && !expr_has_side_effects(rhs) {
+                is_dead[i] = true;
+            } else {
+                live.remove(name);
+                live.extend(flag_expr_uses(rhs));
             }
-            live_in.extend(dead_flag_sites_recursive(default, live_out, dead));
-            live_in.extend(flag_expr_uses(expr));
-            live_in
+            continue;
         }
-        // Loops (and, defensively, anything else) stay opaque: fold in
-        // whatever this subtree conservatively uses without attempting to
-        // mark anything inside it dead.
-        _ => {
-            let mut live_in = live_out.clone();
-            live_in.extend(
-                LivenessTransfer::for_stmt(stmt)
-                    .uses_before_definition()
-                    .filter(|name| is_flag_var(name))
-                    .map(str::to_string),
-            );
-            live_in
-        }
-    }
-}
 
-fn remove_dead_sites_recursive(
-    stmts: &mut Vec<PreHirStmt>,
-    dead_sites: &HashSet<usize>,
-    changed: &mut bool,
-) {
-    for stmt in stmts.iter_mut() {
-        match stmt {
-            PreHirStmt::Block(body) => remove_dead_sites_recursive(
-                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
-                dead_sites,
-                changed,
-            ),
+        match &mut stmts[i] {
+            PreHirStmt::Block(body) => {
+                live = prune_dead_flag_sites_recursive(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    &live,
+                    changed,
+                );
+            }
             PreHirStmt::If {
+                cond,
                 then_body,
                 else_body,
-                ..
             } => {
-                remove_dead_sites_recursive(
+                let then_live = prune_dead_flag_sites_recursive(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
-                    dead_sites,
+                    &live,
                     changed,
                 );
-                remove_dead_sites_recursive(
+                let else_live = prune_dead_flag_sites_recursive(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
-                    dead_sites,
+                    &live,
                     changed,
                 );
+                let mut live_in: HashSet<String> = then_live.union(&else_live).cloned().collect();
+                live_in.extend(flag_expr_uses(cond));
+                live = live_in;
             }
-            PreHirStmt::Switch { cases, default, .. } => {
-                for case in cases.iter_mut() {
-                    remove_dead_sites_recursive(
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                let mut live_in = HashSet::default();
+                for case in cases {
+                    live_in.extend(prune_dead_flag_sites_recursive(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
-                        dead_sites,
+                        &live,
                         changed,
-                    );
+                    ));
                 }
-                remove_dead_sites_recursive(
+                live_in.extend(prune_dead_flag_sites_recursive(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
-                    dead_sites,
+                    &live,
                     changed,
+                ));
+                live_in.extend(flag_expr_uses(expr));
+                live = live_in;
+            }
+            _ => {
+                live.extend(
+                    LivenessTransfer::for_stmt(&stmts[i])
+                        .uses_before_definition()
+                        .filter(|name| is_flag_var(name))
+                        .map(str::to_string),
                 );
             }
-            _ => {}
         }
     }
-    remove_dead_sites(stmts, dead_sites, changed);
+
+    if is_dead.iter().any(|&d| d) {
+        let mut idx = 0;
+        stmts.retain(|_| {
+            let remove = is_dead[idx];
+            idx += 1;
+            !remove
+        });
+        *changed = true;
+    }
+
+    live
 }
 
 /// Remove pure x86 flag definitions using CFG liveness for unstructured HIR
@@ -1106,14 +1123,9 @@ fn remove_dead_flag_assigns(func: &mut PreHirFunction) {
     let mut changed = false;
     remove_dead_sites(&mut func.body, &dead_sites, &mut changed);
 
-    // Second, more precise pass: descends into Block/If/Switch bodies (see
-    // `dead_flag_sites_recursive`'s doc comment) to catch definitions the
-    // pass above can't see because they're nested one level down from
-    // `func.body`'s own top-level statements -- notably, inside the single
-    // wrapping `Block` almost every function body has.
-    let mut nested_dead_sites = HashSet::default();
-    dead_flag_sites_recursive(&func.body, &HashSet::default(), &mut nested_dead_sites);
-    remove_dead_sites_recursive(&mut func.body, &nested_dead_sites, &mut changed);
+    // Second, more precise pass: descends into Block/If/Switch bodies
+    // to prune dead flag definitions in-place without raw pointer hashing.
+    prune_dead_flag_sites_recursive(&mut func.body, &HashSet::default(), &mut changed);
 
     // Flag definitions form dependency chains (for example CF feeds ZF/PF).
     // Removing the terminal dead definition can expose its predecessors, so
@@ -1509,6 +1521,7 @@ mod tests {
             body: vec![assign(
                 "cf",
                 PreHirExpr::Call {
+                    origin: None,
                     target: "observe_machine_state".to_string(),
                     args: Vec::new(),
                     ty: NirType::Bool,
@@ -1519,5 +1532,71 @@ mod tests {
 
         assert!(!apply_dead_flag_cleanup_pass(&mut func));
         assert_eq!(flag_assign_count(&func.body), 1);
+    }
+
+    #[test]
+    fn flag_condition_recovery_handles_ssa_flags_and_overflow() {
+        let mut func = PreHirFunction {
+            body: vec![
+                assign(
+                    "of.1",
+                    PreHirExpr::Call {
+                        origin: None,
+                        target: "__overflow".to_string(),
+                        args: vec![var("a"), var("b")],
+                        ty: NirType::Bool,
+                    },
+                ),
+                PreHirStmt::If {
+                    cond: bool_binary(PreHirBinaryOp::Ne, var("sf.1"), var("of.1")),
+                    then_body: Vec::new().into(),
+                    else_body: Vec::new().into(),
+                },
+            ],
+            ..PreHirFunction::default()
+        };
+
+        assert!(apply_flag_recovery_pass(&mut func));
+        assert_eq!(
+            first_if_cond(&func),
+            &bool_binary(PreHirBinaryOp::SLt, var("a"), var("b"))
+        );
+    }
+
+    #[test]
+    fn flag_family_accepts_ssa_versions_only() {
+        assert_eq!(flag_family("of"), Some("of"));
+        assert_eq!(flag_family("of.12"), Some("of"));
+        assert_eq!(flag_family("of_count"), None);
+        assert_eq!(flag_family("cy_index"), None);
+        assert_eq!(flag_family("zf."), None);
+        assert_eq!(flag_family("zf.x"), None);
+    }
+
+    #[test]
+    fn get_flag_def_refuses_ambiguous_flag_versions() {
+        let mut defs = HashMap::default();
+        defs.insert("of.1".to_string(), var("a"));
+        assert_eq!(get_flag_def(&defs, "of"), Some(&var("a")));
+        defs.insert("of.2".to_string(), var("b"));
+        assert_eq!(get_flag_def(&defs, "of"), None);
+        assert_eq!(get_flag_def(&defs, "of.2"), Some(&var("b")));
+    }
+
+    #[test]
+    fn dead_flag_cleanup_removes_dead_definition_in_nested_block() {
+        let mut func = PreHirFunction {
+            body: vec![PreHirStmt::Block(
+                vec![
+                    assign("zf.1", eq(var("x"), var("y"))),
+                    PreHirStmt::Return(Some(int(0))),
+                ]
+                .into(),
+            )],
+            ..PreHirFunction::default()
+        };
+
+        assert!(apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 0);
     }
 }

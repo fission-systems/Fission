@@ -35,6 +35,70 @@ impl LineTrace<'_> {
             line_number,
             addresses: vec![*address],
             defined_variables: vec![name.to_string()],
+            call_site: None,
+        });
+    }
+    fn call(&self, expr: &HirExpr, out: &str) {
+        fn collect(
+            expr: &HirExpr,
+            sites: &mut Vec<Option<fission_midend_core::ir::CallOrigin>>,
+            depth: usize,
+        ) {
+            if depth > MAX_PRINT_EXPR_DEPTH {
+                sites.push(None);
+                return;
+            }
+            match expr {
+                HirExpr::Call { origin, args, .. } => {
+                    sites.push(*origin);
+                    for arg in args {
+                        collect(arg, sites, depth + 1);
+                    }
+                }
+                HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                    collect(expr, sites, depth + 1)
+                }
+                HirExpr::Load { ptr, .. } => collect(ptr, sites, depth + 1),
+                HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                    collect(base, sites, depth + 1)
+                }
+                HirExpr::Binary { lhs, rhs, .. } => {
+                    collect(lhs, sites, depth + 1);
+                    collect(rhs, sites, depth + 1);
+                }
+                HirExpr::Index { base, index, .. } => {
+                    collect(base, sites, depth + 1);
+                    collect(index, sites, depth + 1);
+                }
+                HirExpr::Select {
+                    cond,
+                    then_expr,
+                    else_expr,
+                    ..
+                } => {
+                    collect(cond, sites, depth + 1);
+                    collect(then_expr, sites, depth + 1);
+                    collect(else_expr, sites, depth + 1);
+                }
+                HirExpr::AggregateCopy { src, .. } => collect(src, sites, depth + 1),
+                _ => {}
+            }
+        }
+        let mut sites = Vec::new();
+        collect(expr, &mut sites, 0);
+        let [Some(site)] = sites.as_slice() else {
+            return;
+        };
+        let mut state = self.state.borrow_mut();
+        let delta = out[state.0..].bytes().filter(|b| *b == b'\n').count();
+        state.0 = out.len();
+        state.1 += delta;
+        let line_number = state.1 + 1;
+        state.2.push(super::RecoveredLineMapping {
+            line_number,
+            addresses: vec![site.instruction_address],
+            defined_variables: Vec::new(),
+            call_site: Some(*site),
         });
     }
 }
@@ -1171,7 +1235,9 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             let else_expr = print_expr_prec(else_expr, prec, depth + 1);
             (format!("{cond} ? {then_expr} : {else_expr}"), prec)
         }
-        HirExpr::Call { target, args, ty } => {
+        HirExpr::Call {
+            target, args, ty, ..
+        } => {
             if target == "__fission_callind_opaque" && !args.is_empty() {
                 let fn_ptr = print_expr_prec(&args[0], 0, depth + 1);
                 let remaining_args = args[1..]
@@ -1863,7 +1929,9 @@ fn print_expr_prec_ctx(
             let else_expr = print_expr_prec_ctx(else_expr, prec, depth + 1, ctx);
             (format!("{cond} ? {then_expr} : {else_expr}"), prec)
         }
-        HirExpr::Call { target, args, ty } => {
+        HirExpr::Call {
+            target, args, ty, ..
+        } => {
             if target == "__fission_callind_opaque" && !args.is_empty() {
                 let fn_ptr = print_expr_prec_ctx(&args[0], 0, depth + 1, ctx);
                 // `args[0]` is the callee, so the real arguments start at 1 and
@@ -2312,6 +2380,18 @@ fn print_stmt_with_indent_ctx(
             trace.definition(name, out);
         }
     }
+    // Only simple statement lines with one call and no memory LHS claim
+    // a call origin. Headers and nested/multiple calls deliberately abstain.
+    if let Some(trace) = ctx.line_trace {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } => trace.call(rhs, out),
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => trace.call(expr, out),
+            _ => {}
+        }
+    }
     match stmt {
         HirStmt::Assign { .. }
         | HirStmt::VaStart { .. }
@@ -2523,6 +2603,7 @@ pub fn render_contracted_wrapper_summary(
         ..HirFunction::default()
     };
     hir.body = vec![HirStmt::Return(Some(HirExpr::Call {
+        origin: None,
         target,
         args: Vec::new(),
         ty: NirType::Unknown,
@@ -2711,6 +2792,7 @@ mod tests {
             return_type: u64_ty(),
             has_unknown_arity_prototype: true,
             body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
                 target: "__fission_branchind".to_string(),
                 args: vec![HirExpr::Var("callee".to_string())],
                 ty: NirType::Unknown,
@@ -2746,6 +2828,7 @@ mod tests {
     #[test]
     fn opaque_indirect_call_uses_c11_nonprototype_function_pointer() {
         let expr = HirExpr::Call {
+            origin: None,
             target: "__fission_callind_opaque".to_string(),
             args: vec![
                 HirExpr::Var("callee".to_string()),
@@ -2771,6 +2854,7 @@ mod tests {
         let hir = HirFunction {
             name: "helper.part.0".to_string(),
             body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
                 target: "helper.part.0".to_string(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -2794,6 +2878,7 @@ mod tests {
         let hir = HirFunction {
             name: symbol.clone(),
             body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
                 target: symbol.clone(),
                 args: Vec::new(),
                 ty: NirType::Unknown,

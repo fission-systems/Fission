@@ -227,6 +227,8 @@ pub struct Emulator {
     pub callother_result: u64,
     /// First memory fault raised by a compiled JIT block, if any.
     pub(crate) memory_fault: Option<String>,
+    /// Execution deadline, after which run loops halt with `RunOutcome::Interrupted`.
+    pub deadline: Option<std::time::Instant>,
 }
 
 /// Max guest instructions per translation block.
@@ -289,6 +291,7 @@ impl Emulator {
         os: Box<dyn OsEnvironment>,
     ) -> Result<Self> {
         let pc = binary.inner().entry_point;
+        state.page_map.set_64bit(binary.inner().is_64bit);
 
         // Patch imports (IAT/PLT/MMIO) before execution starts. Only after
         // that does the environment know how wide this process is, and so
@@ -463,6 +466,7 @@ impl Emulator {
             current_tid: 1000,
             callother_result: 0,
             memory_fault: None,
+            deadline: None,
         };
 
         // Default SP if no ELF image_info applied yet (Windows / bare-metal).
@@ -724,12 +728,17 @@ impl Emulator {
                     handler,
                     old_pc
                 );
-                // Minimal frame: push old PC so a cooperative handler can return via stack,
-                // and set PC to the handler. Full ucontext is future work.
+                let saved_regs = self.register_state_at(old_pc);
+                self.signals.set_current_frame_registers(saved_regs);
+
+                // Honor the 128-byte System V AMD64 red zone and 16-byte stack alignment
+                // before pushing the return address for the handler frame.
                 let sp_reg = self.arch.sp_reg;
                 let ptr_size = self.arch.pointer_size as u64;
                 if let Ok(sp) = self.read_register_u64(sp_reg) {
-                    let new_sp = sp.saturating_sub(ptr_size);
+                    let red_zone = if ptr_size == 8 { 128 } else { 0 };
+                    let aligned_sp = sp.saturating_sub(red_zone) & !0xF;
+                    let new_sp = aligned_sp.saturating_sub(ptr_size);
                     let _ = self.write_register_u64(sp_reg, new_sp);
                     let ram = self.state.ram_space();
                     if ptr_size == 8 {
@@ -1258,6 +1267,15 @@ impl Emulator {
 
     pub fn with_max_inst(mut self, max: Option<u64>) -> Self {
         self.max_inst = max;
+        self
+    }
+
+    pub fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        self.deadline = deadline;
+    }
+
+    pub fn with_deadline(mut self, deadline: Option<std::time::Instant>) -> Self {
+        self.deadline = deadline;
         self
     }
 
@@ -1911,8 +1929,9 @@ impl Emulator {
     }
 
     /// Simulate a function return: restore PC from the return address
-    /// (link register or top of stack, depending on `arch.cc`).
-    pub fn simulate_return(&mut self) -> Result<()> {
+    /// (link register or top of stack, depending on `arch.cc`), and adjust SP
+    /// by `ptr_size + self.arch.cc.callee_pop_bytes(func_name)`.
+    pub fn simulate_return_for(&mut self, func_name: &str) -> Result<()> {
         let ptr_size = self.arch.pointer_size as usize;
         if let Some(lr) = self.arch.cc.return_addr_reg() {
             let ret_addr = self.read_register_u64(lr)?;
@@ -1924,9 +1943,21 @@ impl Emulator {
             let bytes = self.state.read_space(ram, sp, ptr_size)?;
             let ret_addr = crate::arch::calling_convention::le_bytes_to_u64(&bytes);
             self.pc = ret_addr;
-            self.write_register_u64(sp_reg, sp + ptr_size as u64)?;
+            let extra_pop = self.arch.cc.callee_pop_bytes(func_name);
+            self.write_register_u64(sp_reg, sp + ptr_size as u64 + extra_pop)?;
         }
         Ok(())
+    }
+
+    /// Simulate a function return: restore PC from the return address
+    /// (link register or top of stack, depending on `arch.cc`).
+    pub fn simulate_return(&mut self) -> Result<()> {
+        let resolved = if self.pc >= self.magic_range.0 && self.pc < self.magic_range.1 {
+            self.os.resolve_stub(&self.binary, self.pc)
+        } else {
+            None
+        };
+        self.simulate_return_for(resolved.as_deref().unwrap_or(""))
     }
 
     // ── Execution ─────────────────────────────────────────────────────────────
@@ -2264,6 +2295,12 @@ impl Emulator {
                 tracing::warn!("Execution interrupted by Ctrl+C (SIGINT). Halting safely.");
                 break RunOutcome::Interrupted;
             }
+            if let Some(deadline) = self.deadline {
+                if std::time::Instant::now() >= deadline {
+                    tracing::warn!("Execution deadline exceeded. Halting safely.");
+                    break RunOutcome::Interrupted;
+                }
+            }
             if let Some(target) = stop_pc {
                 if self.pc == target {
                     break RunOutcome::Returned;
@@ -2365,7 +2402,7 @@ impl Emulator {
                         break RunOutcome::ProcessExited;
                     }
                     HleResult::Continue => {
-                        self.simulate_return()?;
+                        self.simulate_return_for(&func_name)?;
                     }
                     HleResult::JumpTo(pc) => {
                         self.pc = pc;

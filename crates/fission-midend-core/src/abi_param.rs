@@ -72,8 +72,35 @@ impl AbiState {
         self
     }
 
+    pub fn default_param_offsets(abi: CallingConvention, _pointer_size: u32) -> &'static [u64] {
+        match abi {
+            CallingConvention::WindowsX64 => &[0x08, 0x10, 0x80, 0x88],
+            CallingConvention::SystemVAmd64 => &[0x38, 0x30, 0x10, 0x08, 0x80, 0x88],
+            CallingConvention::X86_32 => &[],
+            CallingConvention::AArch64 => &[
+                0x4000, 0x4008, 0x4010, 0x4018, 0x4020, 0x4028, 0x4030, 0x4038,
+            ],
+            CallingConvention::Arm32 => &[0x20, 0x24, 0x28, 0x2c],
+            CallingConvention::PowerPc32 => &[0x0c, 0x10, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x28],
+            CallingConvention::PowerPc64 => &[0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50],
+            CallingConvention::LoongArch32 => {
+                &[0x110, 0x114, 0x118, 0x11c, 0x120, 0x124, 0x128, 0x12c]
+            }
+            CallingConvention::LoongArch64 => {
+                &[0x120, 0x128, 0x130, 0x138, 0x140, 0x148, 0x150, 0x158]
+            }
+            CallingConvention::Mips32 => &[0x10, 0x14, 0x18, 0x1c],
+            CallingConvention::Mips64 => &[0x10, 0x18, 0x20, 0x28],
+        }
+    }
+
     pub fn effective_param_offsets(&self) -> &[u64] {
-        self.cspec_param_offsets.as_deref().unwrap_or(&[])
+        if let Some(offsets) = self.cspec_param_offsets.as_deref() {
+            if !offsets.is_empty() {
+                return offsets;
+            }
+        }
+        Self::default_param_offsets(self.abi, self.pointer_size)
     }
 
     pub fn param_slot_for_name(&self, name: &str) -> Option<usize> {
@@ -160,12 +187,12 @@ impl AbiState {
 fn float_hw_names_for_offset(
     abi: CallingConvention,
     offset: u64,
-    pointer_size: u32,
+    _pointer_size: u32,
 ) -> Vec<String> {
     let is_x86 = matches!(
         abi,
         CallingConvention::X86_32 | CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
-    ) || pointer_size == 8;
+    );
     if !is_x86 {
         return Vec::new();
     }
@@ -205,7 +232,7 @@ pub fn float_param_bits_for_name(name: &str) -> Option<u32> {
     }
 }
 
-fn hw_names_for_offset(abi: CallingConvention, offset: u64, pointer_size: u32) -> Vec<String> {
+fn hw_names_for_offset(abi: CallingConvention, offset: u64, _pointer_size: u32) -> Vec<String> {
     let x64 = [
         (0x00u64, &["RAX", "EAX", "AX", "AL", "rax", "eax"][..]),
         (0x08, &["RCX", "ECX", "CX", "CL", "rcx", "ecx"]),
@@ -248,7 +275,15 @@ fn hw_names_for_offset(abi: CallingConvention, offset: u64, pointer_size: u32) -
         (0x5c, &["pc", "PC", "r15"]),
     ];
     let aarch64 = [
-        (0x00u64, &["x0", "w0", "X0", "W0"][..]),
+        (0x4000u64, &["x0", "w0", "X0", "W0"][..]),
+        (0x4008, &["x1", "w1", "X1", "W1"]),
+        (0x4010, &["x2", "w2", "X2", "W2"]),
+        (0x4018, &["x3", "w3", "X3", "W3"]),
+        (0x4020, &["x4", "w4", "X4", "W4"]),
+        (0x4028, &["x5", "w5", "X5", "W5"]),
+        (0x4030, &["x6", "w6", "X6", "W6"]),
+        (0x4038, &["x7", "w7", "X7", "W7"]),
+        (0x00, &["x0", "w0", "X0", "W0"]),
         (0x08, &["x1", "w1", "X1", "W1"]),
         (0x10, &["x2", "w2", "X2", "W2"]),
         (0x18, &["x3", "w3", "X3", "W3"]),
@@ -257,13 +292,69 @@ fn hw_names_for_offset(abi: CallingConvention, offset: u64, pointer_size: u32) -
         (0x30, &["x6", "w6", "X6", "W6"]),
         (0x38, &["x7", "w7", "X7", "W7"]),
     ];
+    let ppc32 = [
+        (0x0cu64, &["r3", "R3"][..]),
+        (0x10, &["r4", "R4"]),
+        (0x14, &["r5", "R5"]),
+        (0x18, &["r6", "R6"]),
+        (0x1c, &["r7", "R7"]),
+        (0x20, &["r8", "R8"]),
+        (0x24, &["r9", "R9"]),
+        (0x28, &["r10", "R10"]),
+    ];
+    let ppc64 = [
+        (0x18u64, &["r3", "R3"][..]),
+        (0x20, &["r4", "R4"]),
+        (0x28, &["r5", "R5"]),
+        (0x30, &["r6", "R6"]),
+        (0x38, &["r7", "R7"]),
+        (0x40, &["r8", "R8"]),
+        (0x48, &["r9", "R9"]),
+        (0x50, &["r10", "R10"]),
+    ];
+    let loong32 = [
+        (0x110u64, &["a0", "A0"][..]),
+        (0x114, &["a1", "A1"]),
+        (0x118, &["a2", "A2"]),
+        (0x11c, &["a3", "A3"]),
+        (0x120, &["a4", "A4"]),
+        (0x124, &["a5", "A5"]),
+        (0x128, &["a6", "A6"]),
+        (0x12c, &["a7", "A7"]),
+    ];
+    let loong64 = [
+        (0x120u64, &["a0", "A0"][..]),
+        (0x128, &["a1", "A1"]),
+        (0x130, &["a2", "A2"]),
+        (0x138, &["a3", "A3"]),
+        (0x140, &["a4", "A4"]),
+        (0x148, &["a5", "A5"]),
+        (0x150, &["a6", "A6"]),
+        (0x158, &["a7", "A7"]),
+    ];
+    let mips32 = [
+        (0x10u64, &["a0", "A0"][..]),
+        (0x14, &["a1", "A1"]),
+        (0x18, &["a2", "A2"]),
+        (0x1c, &["a3", "A3"]),
+    ];
+    let mips64 = [
+        (0x10u64, &["a0", "A0"][..]),
+        (0x18, &["a1", "A1"]),
+        (0x20, &["a2", "A2"]),
+        (0x28, &["a3", "A3"]),
+    ];
     let table: &[(_, &[&str])] = match abi {
         CallingConvention::X86_32 => &x86,
         CallingConvention::Arm32 => &arm32,
         CallingConvention::AArch64 => &aarch64,
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => &x64,
-        _ if pointer_size == 8 => &x64,
-        _ => &x86,
+        CallingConvention::PowerPc32 => &ppc32,
+        CallingConvention::PowerPc64 => &ppc64,
+        CallingConvention::LoongArch32 => &loong32,
+        CallingConvention::LoongArch64 => &loong64,
+        CallingConvention::Mips32 => &mips32,
+        CallingConvention::Mips64 => &mips64,
     };
     for (off, names) in table {
         if *off == offset {
@@ -271,4 +362,57 @@ fn hw_names_for_offset(abi: CallingConvention, offset: u64, pointer_size: u32) -
         }
     }
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abi_state_new_resolves_fallback_parameter_slots() {
+        let win64 = AbiState::new(CallingConvention::WindowsX64, true, 8, 0);
+        assert_eq!(win64.param_slot_for_name("rcx"), Some(0));
+        assert_eq!(win64.param_slot_for_name("rdx"), Some(1));
+        assert_eq!(win64.param_slot_for_name("r8"), Some(2));
+        assert_eq!(win64.param_slot_for_name("r9"), Some(3));
+        assert_eq!(win64.param_slot_for_name("rax"), None);
+
+        let sysv = AbiState::new(CallingConvention::SystemVAmd64, true, 8, 0);
+        assert_eq!(sysv.param_slot_for_name("rdi"), Some(0));
+        assert_eq!(sysv.param_slot_for_name("rsi"), Some(1));
+        assert_eq!(sysv.param_slot_for_name("rdx"), Some(2));
+        assert_eq!(sysv.param_slot_for_name("rcx"), Some(3));
+        assert_eq!(sysv.param_slot_for_name("r8"), Some(4));
+        assert_eq!(sysv.param_slot_for_name("r9"), Some(5));
+
+        let aarch64 = AbiState::new(CallingConvention::AArch64, true, 8, 0);
+        assert_eq!(aarch64.param_slot_for_name("x0"), Some(0));
+        assert_eq!(aarch64.param_slot_for_name("w0"), Some(0));
+        assert_eq!(aarch64.param_slot_for_name("x7"), Some(7));
+        assert_eq!(aarch64.param_slot_for_name("w7"), Some(7));
+        assert_eq!(aarch64.param_slot_for_name("x8"), None);
+
+        let ppc64 = AbiState::new(CallingConvention::PowerPc64, true, 8, 0);
+        assert_eq!(ppc64.param_slot_for_name("r3"), Some(0));
+        assert_eq!(ppc64.param_slot_for_name("r10"), Some(7));
+        assert_eq!(ppc64.param_slot_for_name("r11"), None);
+
+        let mips32 = AbiState::new(CallingConvention::Mips32, false, 4, 0);
+        assert_eq!(mips32.param_slot_for_name("a0"), Some(0));
+        assert_eq!(mips32.param_slot_for_name("a3"), Some(3));
+        assert_eq!(mips32.param_slot_for_name("a4"), None);
+
+        let loong64 = AbiState::new(CallingConvention::LoongArch64, true, 8, 0);
+        assert_eq!(loong64.param_slot_for_name("a0"), Some(0));
+        assert_eq!(loong64.param_slot_for_name("a7"), Some(7));
+    }
+
+    #[test]
+    fn float_hw_names_rejects_non_x86_64bit_abis() {
+        assert!(float_hw_names_for_offset(CallingConvention::AArch64, 0x1200, 8).is_empty());
+        assert!(float_hw_names_for_offset(CallingConvention::PowerPc64, 0x1200, 8).is_empty());
+        assert!(float_hw_names_for_offset(CallingConvention::LoongArch64, 0x1200, 8).is_empty());
+        assert!(!float_hw_names_for_offset(CallingConvention::WindowsX64, 0x1200, 8).is_empty());
+        assert!(!float_hw_names_for_offset(CallingConvention::SystemVAmd64, 0x1200, 8).is_empty());
+    }
 }

@@ -198,12 +198,10 @@ fn recover_global_symbol_accesses_in_expr(
             recover_global_symbol_accesses_in_expr(base, globals, aliases);
             recover_global_symbol_accesses_in_expr(index, globals, aliases);
         }
-        HirExpr::Var(name) => {
-            if let Some(global_name) = aliases.get(name) {
-                *expr = HirExpr::AddressOfGlobal(global_name.clone());
-            }
-        }
-        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::AddressOfLocal(_)
+        | HirExpr::Const(_, _) => {}
     }
 }
 

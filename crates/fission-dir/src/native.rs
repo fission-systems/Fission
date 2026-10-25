@@ -411,16 +411,21 @@ fn reconstruct_op(
             }
             let value = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
             let amount = value_for(&op.inputs[1], op_index, value_space_ids, values, inputs)?;
-            // A shift amount may be narrower than the value it shifts, and the
-            // binary contract requires matching operand widths, so widen it.
-            let amount = if bits_for_size(amount_size) == bits {
-                amount
-            } else {
-                PcodeNativeExpr::Convert {
+            // A shift amount may be narrower or wider than the value it shifts;
+            // the binary contract requires matching operand widths, so adapt it.
+            let amount_bits = bits_for_size(amount_size);
+            let amount = match amount_bits.cmp(&bits) {
+                std::cmp::Ordering::Equal => amount,
+                std::cmp::Ordering::Less => PcodeNativeExpr::Convert {
                     op: PcodeNativeConvertOp::ZeroExtend,
                     value: Box::new(amount),
                     bits,
-                }
+                },
+                std::cmp::Ordering::Greater => PcodeNativeExpr::Convert {
+                    op: PcodeNativeConvertOp::Truncate { lsb_bits: 0 },
+                    value: Box::new(amount),
+                    bits,
+                },
             };
             Ok(PcodeNativeExpr::Binary {
                 op: if op.opcode == PcodeOpcode::IntLeft {
@@ -1261,6 +1266,22 @@ fn lower_foundation_symbolically(
                 SymExpr::Ule(Box::new(get(&op.inputs[0])?), Box::new(get(&op.inputs[1])?)),
                 bits_for_size(output.size),
             ),
+            PcodeOpcode::IntLeft => {
+                let left = get(&op.inputs[0])?;
+                let right = get(&op.inputs[1])?;
+                let target_bits = bits_for_size(output.size);
+                let right =
+                    adapt_shift_amount(right, bits_for_size(op.inputs[1].size), target_bits);
+                SymExpr::Shl(Box::new(left), Box::new(right))
+            }
+            PcodeOpcode::IntRight => {
+                let left = get(&op.inputs[0])?;
+                let right = get(&op.inputs[1])?;
+                let target_bits = bits_for_size(output.size);
+                let right =
+                    adapt_shift_amount(right, bits_for_size(op.inputs[1].size), target_bits);
+                SymExpr::Lshr(Box::new(left), Box::new(right))
+            }
             opcode => return Err(format!("unsupported symbolic P-code opcode {opcode:?}")),
         };
         values.insert(location_of(output), expression);
@@ -1327,8 +1348,14 @@ fn lower_candidate_symbolically(
             let inner = lower_candidate_symbolically(value, inputs)?;
             Ok(match op {
                 PcodeNativeConvertOp::ZeroExtend => {
-                    if *bits <= from {
+                    if *bits == from {
                         inner
+                    } else if *bits < from {
+                        SymExpr::Extract {
+                            expr: Box::new(inner),
+                            lsb: 0,
+                            size: *bits,
+                        }
                     } else {
                         SymExpr::Concat(
                             Box::new(SymExpr::new_const(0, *bits - from)),
@@ -1337,8 +1364,14 @@ fn lower_candidate_symbolically(
                     }
                 }
                 PcodeNativeConvertOp::SignExtend => {
-                    if *bits <= from {
+                    if *bits == from {
                         inner
+                    } else if *bits < from {
+                        SymExpr::Extract {
+                            expr: Box::new(inner),
+                            lsb: 0,
+                            size: *bits,
+                        }
                     } else {
                         let width = *bits - from;
                         let sign = SymExpr::Slt(
@@ -1401,6 +1434,21 @@ fn widen_boolean(boolean: SymExpr, bits: u32) -> SymExpr {
             t: Box::new(SymExpr::new_const(1, bits)),
             f: Box::new(SymExpr::new_const(0, bits)),
         }
+    }
+}
+
+fn adapt_shift_amount(amount: SymExpr, from_bits: u32, to_bits: u32) -> SymExpr {
+    match from_bits.cmp(&to_bits) {
+        std::cmp::Ordering::Equal => amount,
+        std::cmp::Ordering::Less => SymExpr::Concat(
+            Box::new(SymExpr::new_const(0, to_bits - from_bits)),
+            Box::new(amount),
+        ),
+        std::cmp::Ordering::Greater => SymExpr::Extract {
+            expr: Box::new(amount),
+            lsb: 0,
+            size: to_bits,
+        },
     }
 }
 
@@ -2286,6 +2334,51 @@ mod tests {
                     address: 0x1000,
                     output: Some(output.clone()),
                     inputs: vec![input_a, input_b],
+                    asm_mnemonic: None,
+                }],
+            }],
+        };
+        let foundation = PcodeFoundation::new(0x1000, function).unwrap();
+        let selection = PcodeRegionSelection {
+            block_index: 0,
+            first_op: 0,
+            op_count: 1,
+            output: location_of(&output),
+        };
+        let artifacts = DirPipeline::new(
+            PcodeNativeReconstructor::new(selection, [1, 2]),
+            PcodeObservationVerifier::default(),
+        )
+        .run(
+            &foundation,
+            &ObservationScope::location_only(selection.output),
+            ValidationBudget::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            artifacts[0].assurance.band(),
+            AssuranceBand::ConditionallyProven
+        );
+    }
+
+    #[test]
+    fn shift_with_wider_amount_is_truncated_and_validated() {
+        // Shift an 8-bit value (1 byte) by a 32-bit amount (4 bytes)
+        let input_val = varnode(2, 0, 1);
+        let input_amount = varnode(2, 4, 4);
+        let output = varnode(1, 0x100, 1);
+        let function = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: Vec::new(),
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntLeft,
+                    address: 0x1000,
+                    output: Some(output.clone()),
+                    inputs: vec![input_val, input_amount],
                     asm_mnemonic: None,
                 }],
             }],

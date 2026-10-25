@@ -697,7 +697,11 @@ fn collect_var_names_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
 }
 
 /// Remove `param_k = <hw>` copies where `<hw>` is the incoming register for slot `k`.
-fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConvention) {
+fn remove_redundant_param_hw_copies(
+    body: &mut Vec<PreHirStmt>,
+    abi: CallingConvention,
+    is_64bit: bool,
+) {
     body.retain_mut(|stmt| match stmt {
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var(lhs_name),
@@ -709,8 +713,7 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
                 .map(|n| n.saturating_sub(1))
             {
                 if let Some(hw) = peel_var_name(rhs)
-                    && param_slot_for_hw_register(hw, abi, !abi_is_32bit_register_set(abi))
-                        == Some(slot)
+                    && param_slot_for_hw_register(hw, abi, is_64bit) == Some(slot)
                 {
                     return false;
                 }
@@ -718,15 +721,27 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
             true
         }
         PreHirStmt::Block(stmts) => {
-            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), abi);
+            remove_redundant_param_hw_copies(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                abi,
+                is_64bit,
+            );
             true
         }
         PreHirStmt::While { body: stmts, .. } | PreHirStmt::DoWhile { body: stmts, .. } => {
-            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), abi);
+            remove_redundant_param_hw_copies(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                abi,
+                is_64bit,
+            );
             true
         }
         PreHirStmt::For { body: stmts, .. } => {
-            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), abi);
+            remove_redundant_param_hw_copies(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                abi,
+                is_64bit,
+            );
             true
         }
         PreHirStmt::Switch { cases, default, .. } => {
@@ -734,11 +749,13 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
                 remove_redundant_param_hw_copies(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut c.body),
                     abi,
+                    is_64bit,
                 );
             }
             remove_redundant_param_hw_copies(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                 abi,
+                is_64bit,
             );
             true
         }
@@ -750,10 +767,12 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
             remove_redundant_param_hw_copies(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 abi,
+                is_64bit,
             );
             remove_redundant_param_hw_copies(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 abi,
+                is_64bit,
             );
             true
         }
@@ -793,6 +812,9 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
         if lhs_name.starts_with("param_") {
             continue;
         }
+        if !func.locals.iter().any(|b| &b.name == lhs_name) {
+            continue;
+        }
         // Whole-body renaming is valid only for a stable entry snapshot.
         // Later writes belong to another lifetime even if the name still
         // denotes the same physical spill/register storage.
@@ -819,7 +841,7 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
         let ty = match rhs {
             PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => {
                 NirType::Int {
-                    bits: 64,
+                    bits: if func.is_64bit { 64 } else { 32 },
                     signed: true,
                 }
             }
@@ -859,7 +881,7 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
     }
 
     rename_vars_in_stmts(&mut func.body, &renames);
-    remove_redundant_param_hw_copies(&mut func.body, abi);
+    remove_redundant_param_hw_copies(&mut func.body, abi, func.is_64bit);
     promotions += promote_direct_param_register_reads(func);
     let _ = trim_unused_variadic_tail_params(func);
     add_entry_param_promotions(promotions);
@@ -985,5 +1007,38 @@ mod tests {
         });
         apply_entry_param_promotion_pass(&mut func);
         assert!(func.locals.iter().any(|binding| binding.name == "home_28"));
+    }
+
+    #[test]
+    fn entry_param_promotion_uses_32bit_types_on_32bit_abis() {
+        let mut func = PreHirFunction {
+            name: "arm_func".to_string(),
+            locals: vec![PreHirBinding {
+                name: "uVar1".to_string(),
+                ty: NirType::Unknown,
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![spill("uVar1", "r0")],
+            calling_convention: CallingConvention::Arm32,
+            is_64bit: false,
+            int_param_offsets: vec![0x20, 0x24, 0x28, 0x2c],
+            ..Default::default()
+        };
+        assert!(apply_entry_param_promotion_pass(&mut func));
+        let param_1 = func
+            .params
+            .iter()
+            .find(|p| p.name == "param_1")
+            .expect("param_1 promoted");
+        assert_eq!(
+            param_1.ty,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            "promoted param on 32-bit ABI must have 32-bit type, not 64-bit"
+        );
     }
 }

@@ -118,9 +118,37 @@ impl OsEnvironment for WindowsEnv {
             "VirtualFree" | "VirtualFreeEx" => {
                 let addr = emu.read_arg(0).unwrap_or(0);
                 let size = emu.read_arg(1).unwrap_or(0);
-                if size > 0 {
-                    emu.state.page_map.unmap_region(addr, size);
+                let free_type = emu.read_arg(2).unwrap_or(0);
+                let free_size = if (free_type & 0x8000) != 0 {
+                    // MEM_RELEASE (0x8000): dwSize must be 0 per MSDN.
+                    // Release the entire region starting at or containing addr.
+                    if size > 0 {
+                        size
+                    } else if let Some(m) = emu
+                        .state
+                        .page_map
+                        .mappings()
+                        .iter()
+                        .find(|m| m.contains(addr) || m.start == (addr & !0xFFFu64))
+                    {
+                        m.end.saturating_sub(addr & !0xFFFu64)
+                    } else {
+                        0x1000
+                    }
+                } else {
+                    size
+                };
+                if free_size > 0 {
+                    let page_start = addr & !0xFFFu64;
+                    let page_end = (addr.saturating_add(free_size) + 0xFFF) & !0xFFFu64;
+                    let mut p = page_start;
+                    while p < page_end {
+                        emu.jit_cache.invalidate_page(p);
+                        p = p.saturating_add(0x1000);
+                    }
+                    emu.state.page_map.unmap_region(addr, free_size);
                 }
+                emu.win_last_error = 0;
                 emu.write_return_val(1)?;
             }
             "VirtualProtect" => handle_virtual_protect(emu)?,
@@ -879,6 +907,13 @@ fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
             .map_region(lp_address, size, page_prot, true);
         lp_address
     };
+    if base == 0 {
+        // No free hole: VirtualAlloc fails with NULL / ERROR_NOT_ENOUGH_MEMORY.
+        tracing::warn!("VirtualAlloc(size=0x{size:X}) -> NULL");
+        emu.win_last_error = 8; // ERROR_NOT_ENOUGH_MEMORY
+        emu.write_return_val(0)?;
+        return Ok(());
+    }
     let fill = (size as usize).min(0x10_0000);
     let zeros = vec![0u8; fill];
     let _ = emu.state.write_space(emu.state.ram_space(), base, &zeros);
@@ -926,21 +961,84 @@ fn handle_virtual_protect(emu: &mut Emulator) -> Result<()> {
 }
 
 fn handle_virtual_query(emu: &mut Emulator) -> Result<()> {
-    // MEMORY_BASIC_INFORMATION lite: fill BaseAddress + RegionSize + Protect + State
+    use crate::pcode::page_map::prot;
     let addr = emu.read_arg(0)?;
     let buf = emu.read_arg(1)?;
-    let _len = emu.read_arg(2)?;
-    if buf != 0 {
-        let mut mbi = vec![0u8; 48];
-        mbi[0..8].copy_from_slice(&addr.to_le_bytes());
-        mbi[16..24].copy_from_slice(&0x1000u64.to_le_bytes()); // RegionSize
-        mbi[24..28].copy_from_slice(&0x1000u32.to_le_bytes()); // MEM_COMMIT
-        mbi[28..32].copy_from_slice(&0x04u32.to_le_bytes()); // PAGE_READWRITE
-        let _ = emu.state.write_space(emu.state.ram_space(), buf, &mbi);
-        emu.write_return_val(48)?;
-    } else {
+    let len = emu.read_arg(2)?;
+    if buf == 0 || len == 0 {
         emu.write_return_val(0)?;
+        return Ok(());
     }
+
+    let page_addr = addr & !0xFFFu64;
+    let mapping = emu
+        .state
+        .page_map
+        .mappings()
+        .iter()
+        .find(|m| m.contains(page_addr) || m.start == page_addr);
+
+    let (base_address, alloc_base, alloc_protect, region_size, state, protect, mem_type) =
+        if let Some(m) = mapping {
+            let prot_val = if (m.prot & prot::EXEC != 0) && (m.prot & prot::WRITE != 0) {
+                0x40u32 // PAGE_EXECUTE_READWRITE
+            } else if m.prot & prot::EXEC != 0 {
+                0x20u32 // PAGE_EXECUTE_READ
+            } else if m.prot & prot::WRITE != 0 {
+                0x04u32 // PAGE_READWRITE
+            } else if m.prot & prot::READ != 0 {
+                0x02u32 // PAGE_READONLY
+            } else {
+                0x01u32 // PAGE_NOACCESS
+            };
+            let reg_sz = m.end.saturating_sub(page_addr).max(0x1000);
+            let type_val = if m.anon {
+                0x20000u32 // MEM_PRIVATE
+            } else {
+                0x1000000u32 // MEM_IMAGE
+            };
+            (
+                page_addr, m.start, prot_val, reg_sz, 0x1000u32, // MEM_COMMIT
+                prot_val, type_val,
+            )
+        } else {
+            // Unmapped region
+            (
+                page_addr, 0u64, 0u32, 0x1000u64, 0x10000u32, // MEM_FREE
+                0x01u32,    // PAGE_NOACCESS
+                0u32,
+            )
+        };
+
+    let mbi = if emu.arch.pointer_size == 4 {
+        let mut data = vec![0u8; 28];
+        data[0..4].copy_from_slice(&(base_address as u32).to_le_bytes());
+        data[4..8].copy_from_slice(&(alloc_base as u32).to_le_bytes());
+        data[8..12].copy_from_slice(&alloc_protect.to_le_bytes());
+        data[12..16].copy_from_slice(&(region_size as u32).to_le_bytes());
+        data[16..20].copy_from_slice(&state.to_le_bytes());
+        data[20..24].copy_from_slice(&protect.to_le_bytes());
+        data[24..28].copy_from_slice(&mem_type.to_le_bytes());
+        data
+    } else {
+        let mut data = vec![0u8; 48];
+        data[0..8].copy_from_slice(&base_address.to_le_bytes());
+        data[8..16].copy_from_slice(&alloc_base.to_le_bytes());
+        data[16..20].copy_from_slice(&alloc_protect.to_le_bytes());
+        data[20..24].copy_from_slice(&0u32.to_le_bytes()); // padding
+        data[24..32].copy_from_slice(&region_size.to_le_bytes());
+        data[32..36].copy_from_slice(&state.to_le_bytes());
+        data[36..40].copy_from_slice(&protect.to_le_bytes());
+        data[40..44].copy_from_slice(&mem_type.to_le_bytes());
+        data[44..48].copy_from_slice(&0u32.to_le_bytes()); // padding
+        data
+    };
+
+    let write_len = (len as usize).min(mbi.len());
+    let _ = emu
+        .state
+        .write_space(emu.state.ram_space(), buf, &mbi[..write_len]);
+    emu.write_return_val(write_len as u64)?;
     Ok(())
 }
 

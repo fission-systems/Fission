@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct PackedContext {
     bits: u64,
 }
@@ -24,7 +24,7 @@ impl PackedContext {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct PackedContextOverride {
     context: PackedContext,
     mask: PackedContext,

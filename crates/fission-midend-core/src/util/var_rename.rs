@@ -9,7 +9,13 @@ pub fn rename_vars_in_stmts(body: &mut [HirStmt], renames: &[(String, String)]) 
                 rename_var_in_lvalue(lhs, renames);
                 rename_var_in_expr(rhs, renames);
             }
-            HirStmt::VaStart { va_list, .. } => rename_var_in_expr(va_list, renames),
+            HirStmt::VaStart {
+                va_list,
+                last_named_param,
+            } => {
+                rename_var_in_expr(va_list, renames);
+                rename_var_name(last_named_param, renames);
+            }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rename_var_in_expr(expr, renames),
             HirStmt::Block(stmts) => rename_vars_in_stmts(stmts, renames),
             HirStmt::While { cond, body } => {
@@ -80,9 +86,10 @@ fn rename_var_in_lvalue(lvalue: &mut HirLValue, renames: &[(String, String)]) {
 
 pub fn rename_var_in_expr(expr: &mut HirExpr, renames: &[(String, String)]) {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) | HirExpr::AddressOfLocal(name) => {
-            rename_var_name(name, renames)
+        HirExpr::Var(name) | HirExpr::AddressOfLocal(name) => {
+            rename_var_name(name, renames);
         }
+        HirExpr::AddressOfGlobal(_) => {}
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -312,5 +319,57 @@ fn apply_field_rename(
     };
     if let Some(new_name) = renames.get(&(base_name.clone(), offset)) {
         *field_name = new_name.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_vars_renames_vastart_last_named_param() {
+        let mut stmts = vec![HirStmt::VaStart {
+            va_list: HirExpr::Var("ap".to_string()),
+            last_named_param: "param_1".to_string(),
+        }];
+        rename_vars_in_stmts(
+            &mut stmts,
+            &[
+                ("ap".to_string(), "args".to_string()),
+                ("param_1".to_string(), "format".to_string()),
+            ],
+        );
+        match &stmts[0] {
+            HirStmt::VaStart {
+                va_list,
+                last_named_param,
+            } => {
+                assert_eq!(va_list, &HirExpr::Var("args".to_string()));
+                assert_eq!(last_named_param, "format");
+            }
+            _ => panic!("expected VaStart"),
+        }
+    }
+
+    #[test]
+    fn rename_var_in_expr_preserves_addressofglobal() {
+        let mut global_expr = HirExpr::AddressOfGlobal("g_target".to_string());
+        let mut local_expr = HirExpr::AddressOfLocal("local_target".to_string());
+        let renames = [
+            ("g_target".to_string(), "renamed_global".to_string()),
+            ("local_target".to_string(), "renamed_local".to_string()),
+        ];
+
+        rename_var_in_expr(&mut global_expr, &renames);
+        rename_var_in_expr(&mut local_expr, &renames);
+
+        assert_eq!(
+            global_expr,
+            HirExpr::AddressOfGlobal("g_target".to_string())
+        );
+        assert_eq!(
+            local_expr,
+            HirExpr::AddressOfLocal("renamed_local".to_string())
+        );
     }
 }

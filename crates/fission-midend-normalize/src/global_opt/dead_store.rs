@@ -88,8 +88,12 @@ impl<'a> DeadStoreCollector<'a> {
     fn collect_stmt(&mut self, stmt: &PreHirStmt, path: Vec<usize>, out: &mut Vec<StmtPath>) {
         match stmt {
             PreHirStmt::Assign { lhs, .. } => {
-                let is_mem_write =
-                    matches!(lhs, PreHirLValue::Deref { .. } | PreHirLValue::Index { .. });
+                let is_mem_write = matches!(
+                    lhs,
+                    PreHirLValue::Deref { .. }
+                        | PreHirLValue::Index { .. }
+                        | PreHirLValue::FieldAccess { .. }
+                );
                 if is_mem_write {
                     // Find the matching MemDef by scanning in order.
                     while self.current_def_idx < self.dead_defs.len()
@@ -264,24 +268,29 @@ fn recurse_remove(stmt: &mut PreHirStmt, paths: &[&StmtPath], depth: usize) {
             );
             remove_at_optional_branch(update, paths, depth, 2);
         }
-        PreHirStmt::Block(stmts) => {
-            let top: crate::HashSet<usize> = paths
-                .iter()
-                .filter(|p| p.0.len() == depth + 1)
-                .map(|p| p.0[depth])
-                .collect();
-            if !top.is_empty() {
-                let mut i = 0;
-                let mut original_idx = 0;
-                while i < stmts.len() {
-                    if top.contains(&original_idx) {
-                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts).remove(i);
-                    } else {
-                        i += 1;
-                    }
-                    original_idx += 1;
-                }
+        PreHirStmt::Switch { cases, default, .. } => {
+            for (i, case) in cases.iter_mut().enumerate() {
+                remove_at_branch(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    paths,
+                    depth,
+                    i,
+                );
             }
+            remove_at_branch(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                paths,
+                depth,
+                cases.len(),
+            );
+        }
+        PreHirStmt::Block(stmts) => {
+            remove_at_branch(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                paths,
+                depth,
+                0,
+            );
         }
         _ => {}
     }
@@ -443,6 +452,7 @@ mod tests {
             ),
         };
         let call = PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
             target: "callee".to_string(),
             args: vec![PreHirExpr::AddressOfLocal("local_18".to_string())],
             ty: NirType::Unknown,
@@ -617,5 +627,64 @@ mod tests {
         };
         assert!(init.is_none(), "dead For init should be removed");
         assert!(update.is_none(), "dead For update should be removed");
+    }
+
+    #[test]
+    fn dead_store_elimination_removes_dead_store_in_switch() {
+        let mut func = base_func(
+            vec![PreHirStmt::Switch {
+                expr: PreHirExpr::Var("sel".to_string()),
+                cases: vec![PreHirSwitchCase {
+                    values: vec![1],
+                    body: Rc::new(vec![dead_stack_store("local_sw", 42)]),
+                }],
+                default: Rc::new(vec![]),
+            }],
+            vec![int_binding("local_sw")],
+        );
+
+        let changed = apply_dead_store_elimination(&mut func);
+        assert!(changed, "dead store in switch case should be removed");
+        let PreHirStmt::Switch { cases, .. } = &func.body[0] else {
+            panic!();
+        };
+        assert!(cases[0].body.is_empty());
+    }
+
+    #[test]
+    fn review_may_alias_store_does_not_kill_reaching_definition() {
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let addr = PreHirExpr::Var("local_18".into());
+        let store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(addr.clone()),
+                ty: ty.clone(),
+            },
+            rhs: PreHirExpr::Const(7, ty.clone()),
+        };
+        let unknown_store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("p".into())),
+                ty: ty.clone(),
+            },
+            rhs: PreHirExpr::Const(9, ty.clone()),
+        };
+        let read = PreHirStmt::Return(Some(PreHirExpr::Load {
+            ptr: Box::new(addr),
+            ty,
+        }));
+        let mut func = base_func(
+            vec![store.clone(), unknown_store, read],
+            vec![ptr_binding("local_18")],
+        );
+        apply_dead_store_elimination(&mut func);
+        assert_eq!(
+            func.body.first(),
+            Some(&store),
+            "a may-alias store need not overwrite local_18; return must still read 7 when p differs"
+        );
     }
 }

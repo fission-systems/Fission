@@ -27,7 +27,7 @@ pub fn recognize_hi_lo_extract(expr: &PreHirExpr) -> Option<PreHirExpr> {
                 None
             }
             PreHirExpr::Binary {
-                op: PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
+                op: shift_op @ (PreHirBinaryOp::Shr | PreHirBinaryOp::Sar),
                 lhs,
                 rhs,
                 ..
@@ -46,7 +46,7 @@ pub fn recognize_hi_lo_extract(expr: &PreHirExpr) -> Option<PreHirExpr> {
                     Some(PreHirExpr::Cast {
                         ty: ty.clone(),
                         expr: Box::new(PreHirExpr::Binary {
-                            op: PreHirBinaryOp::Shr,
+                            op: *shift_op,
                             lhs: lhs.clone(),
                             rhs: rhs.clone(),
                             ty: inner_ty,

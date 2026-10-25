@@ -280,6 +280,7 @@ fn typed_pointer_call_decays_recovered_array_address() {
             initializer: None,
         }],
         body: vec![HirStmt::Expr(HirExpr::Call {
+            origin: None,
             target: "checksum".to_string(),
             args: vec![HirExpr::AddressOfLocal("data".to_string())],
             ty: NirType::Int {
@@ -800,6 +801,7 @@ fn preview_type_hints_explicit_function_types_override_derived_aliases() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Expr(HirExpr::Call {
+            origin: None,
             target: "GetClientRect".to_string(),
             args: vec![
                 HirExpr::Var("param_1".to_string()),
@@ -894,6 +896,7 @@ fn preview_type_hints_collect_hint_stats() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Expr(HirExpr::Call {
+            origin: None,
             target: "GetClientRect".to_string(),
             args: vec![
                 HirExpr::Var("param_1".to_string()),

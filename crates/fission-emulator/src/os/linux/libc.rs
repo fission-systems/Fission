@@ -162,6 +162,12 @@ impl SimProcedure for Mmap {
                 .map_region(addr, length.max(1), page_prot, true);
             page_align_down(addr)
         };
+        if base == 0 {
+            // No free hole: libc's mmap returns MAP_FAILED.
+            tracing::warn!("SimProcedure: mmap(len={length}) -> MAP_FAILED");
+            emu.write_return_val(u64::MAX)?;
+            return Ok(HleResult::Continue);
+        }
         let len = page_align_up(length.max(1));
         if !map_anon && fd >= 0 {
             let want = length.max(1) as usize;
@@ -394,13 +400,19 @@ impl SimProcedure for LibcStartMain {
         initialize_hle_runtime_guards(emu)?;
         // CALL __libc_start_main already pushed a return address; rewrite it to
         // our post-main exit stub so main's ret is a clean process halt.
-        const POST_MAIN_EXIT_STUB: u64 = 0xFFFFFFF1000000F8;
-        if let Ok(rsp) = emu.read_register_u64("RSP") {
-            let _ = emu.state.write_space(
-                emu.state.ram_space(),
-                rsp,
-                &POST_MAIN_EXIT_STUB.to_le_bytes(),
-            );
+        let is_64bit = emu.binary.inner().is_64bit;
+        let stub = if is_64bit {
+            super::POST_MAIN_EXIT_STUB
+        } else {
+            super::POST_MAIN_EXIT_STUB_32
+        };
+        let ptr_size = if is_64bit { 8 } else { 4 };
+        let sp_reg = emu.arch.sp_reg;
+        if let Ok(sp) = emu.read_register_u64(sp_reg) {
+            let bytes = stub.to_le_bytes();
+            let _ = emu
+                .state
+                .write_space(emu.state.ram_space(), sp, &bytes[..ptr_size]);
         }
         // musl main(int argc, char **argv): rdi=argc, rsi=argv
         let _ = emu.write_register_u64("RDI", argc);

@@ -72,6 +72,9 @@ mod tests {
             relocation_symbols: HashMap::new(),
             loader_symbols: Vec::new(),
             user_signatures: Default::default(),
+            user_comments: Default::default(),
+            user_breakpoints: Vec::new(),
+            user_watchpoints: Vec::new(),
             function_addr_index: HashMap::new(),
             function_name_index: HashMap::new(),
             functions_sorted: true,
@@ -83,6 +86,7 @@ mod tests {
             relocations: vec![],
             rich_header_records: None,
             symbol_versions: HashMap::new(),
+            symbol_version_names: HashMap::new(),
             cfg_label_leaders: Vec::new(),
         }
     }

@@ -31,15 +31,19 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
     let cross_index_mode = cli.similar_index.is_some() || cli.similar_update_index.is_some();
     let language_id = load_spec.pair.language_id.as_str().to_string();
     let query_one_function = cli.similar_index.is_some() && cli.similar_function.is_some();
+    let target_function_addr = cli
+        .similar_function
+        .map(|addr| frontend.normalize_low_bit_code_address(addr).address);
     for func in &binary.functions {
         if func.is_import {
             continue;
         }
         if query_one_function
-            && frontend
-                .normalize_low_bit_code_address(func.address)
-                .address
-                != cli.similar_function.expect("checked above")
+            && Some(
+                frontend
+                    .normalize_low_bit_code_address(func.address)
+                    .address,
+            ) != target_function_addr
         {
             continue;
         }

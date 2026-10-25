@@ -853,6 +853,7 @@ mod tests {
                 cond: PreHirExpr::Var("cond".to_string()),
                 then_body: vec![
                     PreHirStmt::Expr(PreHirExpr::Call {
+                        origin: None,
                         target: "helper".to_string(),
                         args: vec![],
                         ty: NirType::Unknown,
@@ -906,6 +907,7 @@ mod tests {
     fn suffix_side_effect_shape_classifies_call_expr_side_effect() {
         assert_suffix_side_effect_shape_kind(
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -918,6 +920,7 @@ mod tests {
     fn suffix_call_effect_shape_classifies_void_unknown_call() {
         assert_suffix_call_effect_shape_kind(
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -930,6 +933,7 @@ mod tests {
     fn suffix_call_effect_shape_classifies_return_value_ignored_call() {
         assert_suffix_call_effect_shape_kind(
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Int {
@@ -947,6 +951,7 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("tmp".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "helper".to_string(),
                     args: vec![PreHirExpr::Var("arg".to_string())],
                     ty: NirType::Int {
@@ -965,6 +970,7 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("tmp".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__popcount".to_string(),
                     args: vec![PreHirExpr::Var("value".to_string())],
                     ty: NirType::Int {
@@ -984,6 +990,7 @@ mod tests {
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("tmp".to_string()),
                     rhs: PreHirExpr::Call {
+                        origin: None,
                         target: target.to_string(),
                         args: vec![
                             PreHirExpr::Var("lhs".to_string()),
@@ -1007,6 +1014,7 @@ mod tests {
     fn guarded_tail_pure_value_accepts_flag_intrinsic_exprs() {
         for target in ["__carry", "__scarry", "__sborrow"] {
             assert!(pure_hir::expr_is_pure_value(&PreHirExpr::Call {
+                origin: None,
                 target: target.to_string(),
                 args: vec![
                     PreHirExpr::Var("lhs".to_string()),
@@ -1027,6 +1035,7 @@ mod tests {
     fn suffix_call_effect_shape_classifies_memory_mutating_call() {
         assert_suffix_call_effect_shape_kind(
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "memcpy".to_string(),
                 args: vec![
                     PreHirExpr::Var("dst".to_string()),
@@ -1045,6 +1054,7 @@ mod tests {
     fn suffix_call_effect_shape_classifies_control_effect_call() {
         assert_suffix_call_effect_shape_kind(
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "abort".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -1061,6 +1071,7 @@ mod tests {
                 rhs: PreHirExpr::Binary {
                     op: PreHirBinaryOp::Add,
                     lhs: Box::new(PreHirExpr::Call {
+                        origin: None,
                         target: "helper".to_string(),
                         args: vec![],
                         ty: NirType::Int {
@@ -1107,6 +1118,7 @@ mod tests {
         assert_suffix_side_effect_shape_kind(
             PreHirStmt::Expr(PreHirExpr::Load {
                 ptr: Box::new(PreHirExpr::Call {
+                    origin: None,
                     target: "addr_provider".to_string(),
                     args: vec![],
                     ty: NirType::Ptr(Box::new(NirType::Int {
@@ -1244,6 +1256,7 @@ mod tests {
                 lhs: PreHirLValue::Var("loaded".to_string()),
                 rhs: PreHirExpr::Load {
                     ptr: Box::new(PreHirExpr::Call {
+                        origin: None,
                         target: "ptr_source".to_string(),
                         args: vec![],
                         ty: NirType::Ptr(Box::new(NirType::Int {
@@ -1321,6 +1334,7 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("count".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__popcount".to_string(),
                     args: vec![PreHirExpr::Var("value".to_string())],
                     ty: NirType::Int {
@@ -1348,6 +1362,7 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("count".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__popcount".to_string(),
                     args: vec![PreHirExpr::Var("value".to_string())],
                     ty: NirType::Int {
@@ -1385,6 +1400,7 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("count".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__popcount64".to_string(),
                     args: vec![PreHirExpr::Var("value".to_string())],
                     ty: NirType::Int {
@@ -1419,8 +1435,10 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("count".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__popcount".to_string(),
                     args: vec![PreHirExpr::Call {
+                        origin: None,
                         target: "value_provider".to_string(),
                         args: vec![],
                         ty: NirType::Int {
@@ -1460,6 +1478,7 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("count".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__popcount".to_string(),
                     args: vec![PreHirExpr::Var("value".to_string())],
                     ty: NirType::Int {
@@ -1489,6 +1508,7 @@ mod tests {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("count".to_string()),
                 rhs: PreHirExpr::Call {
+                    origin: None,
                     target: "__popcount".to_string(),
                     args: vec![PreHirExpr::Var("value".to_string())],
                     ty: NirType::Int {
@@ -1526,6 +1546,7 @@ mod tests {
         let body = vec![
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "__popcount".to_string(),
                 args: vec![PreHirExpr::Var("value".to_string())],
                 ty: NirType::Int {
@@ -1653,6 +1674,7 @@ mod tests {
             test_if_goto("join0"),
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,

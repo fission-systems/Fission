@@ -17,39 +17,54 @@
 //! are two different conversions and there is no single outer cast that
 //! means the same thing.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::prelude::*;
 
 pub fn hoist_shared_select_casts(func: &mut PreHirFunction) -> bool {
+    let mut local_types = HashMap::new();
+    for param in &func.params {
+        local_types.insert(param.name.clone(), param.ty.clone());
+    }
+    for local in &func.locals {
+        local_types.insert(local.name.clone(), local.ty.clone());
+    }
+
     let mut changed = false;
-    walk_stmts(&mut func.body, &mut changed);
+    walk_stmts(&mut func.body, &local_types, &mut changed);
     for binding in &mut func.locals {
         if let Some(init) = binding.initializer.as_mut() {
-            rewrite(init, &mut changed);
+            rewrite(init, &local_types, &mut changed);
         }
     }
     changed
 }
 
-fn walk_stmts(stmts: &mut Vec<PreHirStmt>, changed: &mut bool) {
+fn walk_stmts(
+    stmts: &mut Vec<PreHirStmt>,
+    local_types: &HashMap<String, NirType>,
+    changed: &mut bool,
+) {
     for stmt in stmts.iter_mut() {
         match stmt {
             PreHirStmt::Assign { lhs, rhs } => {
-                walk_lvalue(lhs, changed);
-                rewrite(rhs, changed);
+                walk_lvalue(lhs, local_types, changed);
+                rewrite(rhs, local_types, changed);
             }
-            PreHirStmt::Expr(expr) => rewrite(expr, changed),
-            PreHirStmt::VaStart { va_list, .. } => rewrite(va_list, changed),
-            PreHirStmt::Return(Some(expr)) => rewrite(expr, changed),
-            PreHirStmt::Block(body) => walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), changed),
+            PreHirStmt::Expr(expr) => rewrite(expr, local_types, changed),
+            PreHirStmt::VaStart { va_list, .. } => rewrite(va_list, local_types, changed),
+            PreHirStmt::Return(Some(expr)) => rewrite(expr, local_types, changed),
+            PreHirStmt::Block(body) => {
+                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), local_types, changed)
+            }
             PreHirStmt::While { cond, body } => {
-                rewrite(cond, changed);
-                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), changed);
+                rewrite(cond, local_types, changed);
+                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), local_types, changed);
             }
             PreHirStmt::DoWhile { body, cond } => {
-                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), changed);
-                rewrite(cond, changed);
+                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), local_types, changed);
+                rewrite(cond, local_types, changed);
             }
             PreHirStmt::For {
                 init,
@@ -58,35 +73,51 @@ fn walk_stmts(stmts: &mut Vec<PreHirStmt>, changed: &mut bool) {
                 body,
             } => {
                 if let Some(init) = init.as_mut() {
-                    walk_one(init, changed);
+                    walk_one(init, local_types, changed);
                 }
                 if let Some(cond) = cond.as_mut() {
-                    rewrite(cond, changed);
+                    rewrite(cond, local_types, changed);
                 }
                 if let Some(update) = update.as_mut() {
-                    walk_one(update, changed);
+                    walk_one(update, local_types, changed);
                 }
-                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), changed);
+                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(body), local_types, changed);
             }
             PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                rewrite(cond, changed);
-                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(then_body), changed);
-                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(else_body), changed);
+                rewrite(cond, local_types, changed);
+                walk_stmts(
+                    Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    local_types,
+                    changed,
+                );
+                walk_stmts(
+                    Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    local_types,
+                    changed,
+                );
             }
             PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                rewrite(expr, changed);
+                rewrite(expr, local_types, changed);
                 for case in cases {
-                    walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), changed);
+                    walk_stmts(
+                        Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        local_types,
+                        changed,
+                    );
                 }
-                walk_stmts(Rc::<Vec<PreHirStmt>>::make_mut(default), changed);
+                walk_stmts(
+                    Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    local_types,
+                    changed,
+                );
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -97,25 +128,25 @@ fn walk_stmts(stmts: &mut Vec<PreHirStmt>, changed: &mut bool) {
     }
 }
 
-fn walk_one(stmt: &mut PreHirStmt, changed: &mut bool) {
+fn walk_one(stmt: &mut PreHirStmt, local_types: &HashMap<String, NirType>, changed: &mut bool) {
     let mut one = vec![std::mem::replace(stmt, PreHirStmt::Break)];
-    walk_stmts(&mut one, changed);
+    walk_stmts(&mut one, local_types, changed);
     *stmt = one.pop().expect("walk_stmts preserves length");
 }
 
-fn walk_lvalue(lhs: &mut PreHirLValue, changed: &mut bool) {
+fn walk_lvalue(lhs: &mut PreHirLValue, local_types: &HashMap<String, NirType>, changed: &mut bool) {
     match lhs {
         PreHirLValue::Var(_) => {}
-        PreHirLValue::Deref { ptr, .. } => rewrite(ptr, changed),
+        PreHirLValue::Deref { ptr, .. } => rewrite(ptr, local_types, changed),
         PreHirLValue::Index { base, index, .. } => {
-            rewrite(base, changed);
-            rewrite(index, changed);
+            rewrite(base, local_types, changed);
+            rewrite(index, local_types, changed);
         }
-        PreHirLValue::FieldAccess { base, .. } => rewrite(base, changed),
+        PreHirLValue::FieldAccess { base, .. } => rewrite(base, local_types, changed),
     }
 }
 
-fn rewrite(expr: &mut PreHirExpr, changed: &mut bool) {
+fn rewrite(expr: &mut PreHirExpr, local_types: &HashMap<String, NirType>, changed: &mut bool) {
     // Children first, so an inner conditional is already hoisted when this
     // one is examined.
     match expr {
@@ -128,18 +159,18 @@ fn rewrite(expr: &mut PreHirExpr, changed: &mut bool) {
         | PreHirExpr::Load { ptr: expr, .. }
         | PreHirExpr::PtrOffset { base: expr, .. }
         | PreHirExpr::AggregateCopy { src: expr, .. }
-        | PreHirExpr::FieldAccess { base: expr, .. } => rewrite(expr, changed),
+        | PreHirExpr::FieldAccess { base: expr, .. } => rewrite(expr, local_types, changed),
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            rewrite(lhs, changed);
-            rewrite(rhs, changed);
+            rewrite(lhs, local_types, changed);
+            rewrite(rhs, local_types, changed);
         }
         PreHirExpr::Index { base, index, .. } => {
-            rewrite(base, changed);
-            rewrite(index, changed);
+            rewrite(base, local_types, changed);
+            rewrite(index, local_types, changed);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                rewrite(arg, changed);
+                rewrite(arg, local_types, changed);
             }
         }
         PreHirExpr::Select {
@@ -148,9 +179,9 @@ fn rewrite(expr: &mut PreHirExpr, changed: &mut bool) {
             else_expr,
             ..
         } => {
-            rewrite(cond, changed);
-            rewrite(then_expr, changed);
-            rewrite(else_expr, changed);
+            rewrite(cond, local_types, changed);
+            rewrite(then_expr, local_types, changed);
+            rewrite(else_expr, local_types, changed);
         }
     }
 
@@ -171,6 +202,29 @@ fn rewrite(expr: &mut PreHirExpr, changed: &mut bool) {
     if then_ty != else_ty {
         return;
     }
+
+    let PreHirExpr::Cast {
+        expr: then_inner_ref,
+        ..
+    } = then_expr.as_ref()
+    else {
+        unreachable!("matched a Cast above")
+    };
+    let PreHirExpr::Cast {
+        expr: else_inner_ref,
+        ..
+    } = else_expr.as_ref()
+    else {
+        unreachable!("matched a Cast above")
+    };
+
+    let then_pre_ty = expr_type_of(then_inner_ref, local_types);
+    let else_pre_ty = expr_type_of(else_inner_ref, local_types);
+
+    if then_pre_ty != else_pre_ty {
+        return;
+    }
+
     let hoisted = then_ty.clone();
     let PreHirExpr::Cast {
         expr: then_inner, ..
@@ -190,7 +244,7 @@ fn rewrite(expr: &mut PreHirExpr, changed: &mut bool) {
     // The conditional now yields the arms' *pre-cast* value, so its own type
     // is theirs, and the hoisted cast restores what the surrounding
     // expression was given before.
-    let inner_ty = expr_type_of(&then_inner).unwrap_or_else(|| hoisted.clone());
+    let inner_ty = then_pre_ty.unwrap_or_else(|| hoisted.clone());
     *expr = PreHirExpr::Cast {
         ty: hoisted,
         expr: Box::new(PreHirExpr::Select {
@@ -205,7 +259,7 @@ fn rewrite(expr: &mut PreHirExpr, changed: &mut bool) {
 
 /// The declared type of an expression where it carries one. `None` for the
 /// shapes whose type only the surrounding context knows.
-fn expr_type_of(expr: &PreHirExpr) -> Option<NirType> {
+fn expr_type_of(expr: &PreHirExpr, local_types: &HashMap<String, NirType>) -> Option<NirType> {
     match expr {
         PreHirExpr::Const(_, ty)
         | PreHirExpr::Cast { ty, .. }
@@ -214,6 +268,11 @@ fn expr_type_of(expr: &PreHirExpr) -> Option<NirType> {
         | PreHirExpr::Select { ty, .. }
         | PreHirExpr::Call { ty, .. }
         | PreHirExpr::Load { ty, .. } => Some(ty.clone()),
+        PreHirExpr::Var(name) => local_types.get(name.as_str()).cloned(),
+        PreHirExpr::PtrOffset { base, .. } => expr_type_of(base, local_types),
+        PreHirExpr::AddressOfLocal(name) => local_types
+            .get(name.as_str())
+            .map(|t| NirType::Ptr(Box::new(t.clone()))),
         _ => None,
     }
 }
@@ -261,13 +320,36 @@ mod tests {
         PreHirFunction {
             name: "t".to_string(),
             int_param_offsets: Vec::new(),
-            locals: vec![PreHirBinding {
-                name: "x".to_string(),
-                ty: ptr_ty(),
-                surface_type_name: None,
-                origin: None,
-                initializer: None,
-            }],
+            locals: vec![
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: ptr_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "a".to_string(),
+                    ty: ptr_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "b".to_string(),
+                    ty: ptr_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "d".to_string(),
+                    ty: ptr_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
             body,
             ..Default::default()
         }
@@ -382,5 +464,95 @@ mod tests {
             panic!("shape changed");
         };
         assert!(matches!(rhs, PreHirExpr::Cast { .. }), "{rhs:?}");
+    }
+
+    /// When arms have different pre-cast types (e.g. signed vs unsigned or pointer vs integer),
+    /// hoisting would corrupt extension or produce invalid types.
+    #[test]
+    fn keeps_arms_with_different_pre_cast_types() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+
+        // Test 1: c ? (u64)i32_var : (u64)u32_var
+        let mut f1 = PreHirFunction {
+            name: "test1".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: u64_ty.clone(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "i32_var".to_string(),
+                    ty: i32_ty,
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "u32_var".to_string(),
+                    ty: u32_ty,
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![set(select(
+                cast(u64_ty.clone(), var("i32_var")),
+                cast(u64_ty.clone(), var("u32_var")),
+                u64_ty.clone(),
+            ))],
+            ..Default::default()
+        };
+        assert!(!hoist_shared_select_casts(&mut f1));
+        assert!(matches!(rhs_of(&f1), PreHirExpr::Select { .. }));
+
+        // Test 2: c ? (u64)ptr_var : (u64)u64_var
+        let mut f2 = PreHirFunction {
+            name: "test2".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: u64_ty.clone(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "ptr_var".to_string(),
+                    ty: ptr_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "u64_var".to_string(),
+                    ty: u64_ty.clone(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![set(select(
+                cast(u64_ty.clone(), var("ptr_var")),
+                cast(u64_ty.clone(), var("u64_var")),
+                u64_ty.clone(),
+            ))],
+            ..Default::default()
+        };
+        assert!(!hoist_shared_select_casts(&mut f2));
+        assert!(matches!(rhs_of(&f2), PreHirExpr::Select { .. }));
     }
 }

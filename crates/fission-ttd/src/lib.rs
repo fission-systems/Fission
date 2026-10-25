@@ -9,7 +9,10 @@ mod types;
 
 pub use recorder::{RecordingStatus, TTDRecorder};
 pub use snapshot::{ExecutionSnapshot, MemoryDelta, ShadowDelta, SnapshotStats};
-pub use types::{RegisterState, RegisterValue, X86_64_GP_REGISTERS, x86_64_register_name};
+pub use types::{
+    AARCH64_GP_REGISTERS, RegisterState, RegisterValue, X86_64_GP_REGISTERS, X86_GP_REGISTERS,
+    aarch64_register_name, x86_64_register_name, x86_register_name,
+};
 
 /// Object-safe timeline interface for consumers that should not depend on a
 /// concrete backend implementation.

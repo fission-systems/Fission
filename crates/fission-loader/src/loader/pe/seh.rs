@@ -47,25 +47,73 @@ const UNW_FLAG_CHAININFO: u8 = 0x4;
 /// following the chain to find the real handler is unimplemented scope, not
 /// a correctness bug -- those fragments just contribute no landing pads
 /// today, same as a function with no `.pdata` entry at all.
+fn get_exception_directory(binary: &LoadedBinary) -> Option<(u64, usize)> {
+    if !binary.format.eq_ignore_ascii_case("pe") || !binary.is_64bit {
+        return None;
+    }
+    let data = binary.data.as_slice();
+    if data.len() < 0x40 {
+        return None;
+    }
+    let lfanew = u32::from_le_bytes(data.get(0x3c..0x40)?.try_into().ok()?) as usize;
+    if data.get(lfanew..lfanew + 4)? != b"PE\0\0" {
+        return None;
+    }
+    let magic = u16::from_le_bytes(data.get(lfanew + 24..lfanew + 26)?.try_into().ok()?);
+    if magic != 0x020b {
+        // PE32+ (64-bit)
+        return None;
+    }
+    let num_rva_and_sizes =
+        u32::from_le_bytes(data.get(lfanew + 132..lfanew + 136)?.try_into().ok()?);
+    if num_rva_and_sizes <= 3 {
+        return None;
+    }
+    let rva = u32::from_le_bytes(data.get(lfanew + 160..lfanew + 164)?.try_into().ok()?);
+    let size = u32::from_le_bytes(data.get(lfanew + 164..lfanew + 168)?.try_into().ok()?);
+    if rva != 0 && size > 0 {
+        Some((binary.image_base + rva as u64, size as usize))
+    } else {
+        None
+    }
+}
+
 pub fn analyze_seh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
     let mut out = HashMap::new();
 
-    let Some(pdata_sec) = binary.sections.iter().find(|s| s.name == ".pdata") else {
+    let (pdata_vma, pdata_len) = get_exception_directory(binary)
+        .or_else(|| {
+            binary
+                .sections
+                .iter()
+                .find(|s| s.name.eq_ignore_ascii_case(".pdata"))
+                .map(|s| (s.virtual_address, s.virtual_size as usize))
+        })
+        .unwrap_or((0, 0));
+    if pdata_vma == 0 || pdata_len == 0 {
         return out;
-    };
-    let Some(xdata_sec) = binary.sections.iter().find(|s| s.name == ".xdata") else {
-        return out;
-    };
+    }
 
-    let start = pdata_sec.file_offset as usize;
-    let end = start.saturating_add(pdata_sec.file_size as usize);
-    let Some(pdata_bytes) = binary.data.as_slice().get(start..end) else {
+    let pdata_bytes = binary.get_bytes(pdata_vma, pdata_len).or_else(|| {
+        let sec = binary.sections.iter().find(|s| {
+            pdata_vma >= s.virtual_address
+                && pdata_vma < s.virtual_address.saturating_add(s.virtual_size)
+        })?;
+        let offset_in_sec = (pdata_vma - sec.virtual_address) as usize;
+        let file_start = (sec.file_offset as usize).checked_add(offset_in_sec)?;
+        let file_end = file_start.checked_add(pdata_len)?;
+        binary
+            .data
+            .as_slice()
+            .get(file_start..file_end)
+            .map(|s| s.to_vec())
+    });
+    let Some(pdata_bytes) = pdata_bytes else {
         return out;
     };
 
     let read_at = |addr: u64, len: usize| binary.get_bytes(addr, len);
     let symbol_at = |addr: u64| binary.relocation_symbols.get(&addr).cloned();
-    let xdata_end_vma = xdata_sec.virtual_address + xdata_sec.virtual_size;
 
     for entry in pdata_bytes.chunks_exact(12) {
         let begin_rva = u32::from_le_bytes(entry[0..4].try_into().unwrap());
@@ -109,10 +157,24 @@ pub fn analyze_seh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
         // The language-specific data (this GCC build's LSDA bytes) starts
         // immediately after the 4-byte ExceptionHandler RVA field.
         let lsda_vma = handler_rva_vma + 4;
-        if lsda_vma >= xdata_end_vma {
+        let sec_end = binary
+            .sections
+            .iter()
+            .find_map(|s| {
+                let start = s.virtual_address;
+                let end = start.saturating_add(s.virtual_size);
+                if lsda_vma >= start && lsda_vma < end {
+                    Some(end)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(lsda_vma + 4096);
+
+        if lsda_vma >= sec_end {
             continue;
         }
-        let max_len = usize::try_from((xdata_end_vma - lsda_vma).min(4096)).unwrap_or(0);
+        let max_len = usize::try_from((sec_end - lsda_vma).min(4096)).unwrap_or(0);
         let Some(lsda_bytes) = binary.get_bytes(lsda_vma, max_len) else {
             continue;
         };
@@ -198,5 +260,30 @@ mod tests {
         let risky = &table[&0x140001450];
         assert!(risky.type_table.is_empty()); // cleanup-only, no catch of its own
         assert_eq!(risky.call_sites.len(), 2);
+    }
+
+    #[test]
+    fn analyze_seh_lsda_recovers_handlers_when_unwind_info_is_in_rdata_without_xdata() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_seh_guarded_test.exe");
+        let mut binary = LoadedBinary::from_file(&path).expect("load SEH test PE");
+
+        // Simulate toolchains (MSVC / lld-link / MinGW) that do not create a separate .xdata
+        // section or merge it into .rdata.
+        for sec in binary.sections.iter_mut() {
+            if sec.name == ".xdata" {
+                sec.name = ".rdata_merged".to_string();
+            }
+        }
+
+        assert!(
+            binary.sections.iter().all(|s| s.name != ".xdata"),
+            "no .xdata section should be present"
+        );
+
+        let table = analyze_seh_lsda(&binary);
+        assert_eq!(table.len(), 2);
+        let guarded = &table[&0x1400014c9];
+        assert_eq!(guarded.call_sites[0].landing_pad, Some(0x1400014e6));
     }
 }

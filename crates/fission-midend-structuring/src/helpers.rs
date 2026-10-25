@@ -74,21 +74,19 @@ pub fn merge_equivalent_switch_cases(cases: &mut Vec<PreHirSwitchCase>) {
     *cases = merged;
 }
 
-pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<PreHirSwitchCase>) -> usize {
+pub fn detect_and_patch_case_fallthrough(
+    cases: &mut Vec<PreHirSwitchCase>,
+    default: Option<&[PreHirStmt]>,
+) -> usize {
     let mut patched = 0usize;
     let n = cases.len();
-    if n < 2 {
+    if n == 0 {
         return 0;
     }
     let next_labels: Vec<Option<String>> = (0..n)
-        .map(|i| {
-            cases[i].body.iter().find_map(|s| {
-                if let PreHirStmt::Label(l) = s {
-                    Some(l.clone())
-                } else {
-                    None
-                }
-            })
+        .map(|i| match cases[i].body.first() {
+            Some(PreHirStmt::Label(l)) => Some(l.clone()),
+            _ => None,
         })
         .collect();
     for i in 0..(n - 1) {
@@ -103,6 +101,22 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<PreHirSwitchCase>) -> u
             if label == next_label {
                 *label = SWITCH_FALLTHROUGH_SENTINEL.to_string();
                 patched += 1;
+            }
+        }
+    }
+    if let Some(default_body) = default {
+        if let Some(PreHirStmt::Label(default_label)) = default_body.first() {
+            if let Some(last_case) = cases.last_mut() {
+                let last_stmt = std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut last_case.body)
+                    .iter_mut()
+                    .rev()
+                    .find(|s| !matches!(s, PreHirStmt::Label(_)));
+                if let Some(PreHirStmt::Goto(label)) = last_stmt {
+                    if label == default_label {
+                        *label = SWITCH_FALLTHROUGH_SENTINEL.to_string();
+                        patched += 1;
+                    }
+                }
             }
         }
     }

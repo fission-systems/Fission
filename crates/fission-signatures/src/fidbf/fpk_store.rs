@@ -586,6 +586,20 @@ impl LazyFidDatabase {
         &self.source_path
     }
 
+    pub fn function_count(&self) -> usize {
+        self.functions.record_count() as usize
+    }
+
+    pub fn find_candidates_by_full_hash(&self, full_hash: u64) -> Vec<FidbfFunction> {
+        let Ok(records) = self
+            .candidates
+            .get_or_load(full_hash, || self.functions.records_by_key(full_hash))
+        else {
+            return Vec::new();
+        };
+        records.to_vec()
+    }
+
     /// Whether the database carries any library row at all.
     ///
     /// `libraries` is read once on open, so an empty vector means the `.lib`

@@ -38,30 +38,34 @@ mod tests {
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
 
     fn test_binary() -> LoadedBinary {
-        LoadedBinaryBuilder::new("fixture.bin".into(), DataBuffer::Heap(vec![0_u8; 8]))
-            .format("TEST")
-            .image_base(0x1000)
-            .is_64bit(false)
-            .add_function(FunctionInfo {
-                name: "main".into(),
-                address: 0x1000,
-                size: 32,
-                is_export: true,
-                is_import: false,
-                external_library: None,
-                ..Default::default()
-            })
-            .add_function(FunctionInfo {
-                name: "puts".into(),
-                address: 0x2000,
-                size: 8,
-                is_export: false,
-                is_import: true,
-                external_library: Some("libc.so".into()),
-                ..Default::default()
-            })
-            .build()
-            .expect("fixture binary")
+        LoadedBinaryBuilder::new(
+            "fixture.bin".into(),
+            DataBuffer::Heap(vec![0x7f, b'E', b'L', b'F', 0x90, 0x90, 0x90, 0x90]),
+        )
+        .format("TEST")
+        .image_base(0x1000)
+        .entry_point(0x1000)
+        .is_64bit(false)
+        .add_function(FunctionInfo {
+            name: "main".into(),
+            address: 0x1000,
+            size: 32,
+            is_export: true,
+            is_import: false,
+            external_library: None,
+            ..Default::default()
+        })
+        .add_function(FunctionInfo {
+            name: "puts".into(),
+            address: 0x2000,
+            size: 8,
+            is_export: false,
+            is_import: true,
+            external_library: Some("libc.so".into()),
+            ..Default::default()
+        })
+        .build()
+        .expect("fixture binary")
     }
 
     #[test]
@@ -169,5 +173,106 @@ mod tests {
             limits,
         );
         assert_eq!(out.status, ScriptRunStatus::Timeout, "{out:?}");
+    }
+
+    #[test]
+    fn run_script_respects_max_output_bytes() {
+        let bin = prepare_binary_for_script(test_binary());
+        let limits = ScriptLimits {
+            max_output_bytes: 200,
+            ..ScriptLimits::default()
+        };
+        let src = r#"
+            for i in 0..100 {
+                emit(#{"kind": "note", "message": "payload data message"});
+            }
+        "#;
+        let out = run_script(&bin, src, "bytes_limit.rhai", limits);
+        assert!(!out.findings.is_empty());
+        assert!(out.findings.len() < 100);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.message.contains("max_output_bytes")),
+            "{:?}",
+            out.diagnostics
+        );
+    }
+
+    #[cfg(feature = "emulator")]
+    #[test]
+    fn machine_launch_failure_reported_as_runtime_error() {
+        let bin = test_binary();
+        let limits = ScriptLimits::default();
+        let src = "let x = 1;";
+        let out = run_script_with(
+            &bin,
+            src,
+            "launch_err.rhai",
+            limits,
+            ScriptOptions { machine: true },
+        );
+        assert_eq!(out.status, ScriptRunStatus::Error);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.message.starts_with("failed to initialize machine: ")),
+            "diagnostics was: {:?}",
+            out.diagnostics
+        );
+    }
+
+    #[test]
+    fn run_script_enforces_max_array_size() {
+        let bin = prepare_binary_for_script(test_binary());
+        let limits = ScriptLimits {
+            max_operations: 1_000_000,
+            max_runtime_ms: 5000,
+            ..ScriptLimits::default()
+        };
+        let src = r#"
+            let arr = [];
+            for i in 0..15000 {
+                arr.push(i);
+            }
+        "#;
+        let out = run_script(&bin, src, "array_limit.rhai", limits);
+        assert_eq!(out.status, ScriptRunStatus::Error);
+        assert!(
+            out.diagnostics.iter().any(|d| {
+                let m = d.message.to_lowercase();
+                m.contains("array")
+                    || m.contains("size")
+                    || m.contains("overflow")
+                    || m.contains("too large")
+            }),
+            "{:?}",
+            out.diagnostics
+        );
+    }
+
+    #[test]
+    fn sandbox_engine_configures_collection_limits() {
+        let engine = crate::sandbox::new_engine_for_compile_check();
+        assert_eq!(engine.max_array_size(), 10_000);
+        assert_eq!(engine.max_map_size(), 10_000);
+    }
+
+    #[test]
+    fn run_script_can_query_entry_point_and_read_bytes() {
+        let bin = prepare_binary_for_script(test_binary());
+        let src = r#"
+            let ep = binary.entry_point();
+            let bytes = binary.read_bytes(0, 4);
+            emit(#{ kind: "binary_meta", entry_point: ep, bytes_len: bytes.len(), b0: bytes[0], b1: bytes[1] });
+        "#;
+        let out = run_script(&bin, src, "meta.rhai", ScriptLimits::default());
+        assert_eq!(out.status, ScriptRunStatus::Ok, "{:?}", out.diagnostics);
+        assert_eq!(out.findings.len(), 1);
+        let d = out.findings[0].data.as_ref().expect("data");
+        assert_eq!(d["entry_point"], serde_json::json!("0x1000"));
+        assert_eq!(d["bytes_len"], serde_json::json!(4));
+        assert_eq!(d["b0"], serde_json::json!(0x7f));
+        assert_eq!(d["b1"], serde_json::json!(b'E'));
     }
 }

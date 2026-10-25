@@ -72,7 +72,12 @@ pub fn record_from_run(
         .map(|(&guest_number, &count)| {
             let canonical = syscall_abi.canonical_number(guest_number);
             let unknown_key = canonical.unwrap_or(guest_number);
-            let unhandled_count = unknown.get(&unknown_key).copied().unwrap_or(0).min(count);
+            let unhandled_count = unknown
+                .get(&unknown_key)
+                .or_else(|| unknown.get(&guest_number))
+                .copied()
+                .unwrap_or(0)
+                .min(count);
             SyscallCoverage {
                 guest_number,
                 name: syscall_name(arch, guest_number, canonical),

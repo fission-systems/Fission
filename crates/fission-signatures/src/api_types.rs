@@ -121,6 +121,8 @@ pub struct ApiSignature {
     pub name: String,
     pub return_type: String,
     pub params: Vec<ParamInfo>,
+    #[serde(default)]
+    pub is_variadic: bool,
 }
 
 /// Whether `name` denotes a runtime entry whose signature record contains
@@ -144,6 +146,18 @@ pub fn canonical_variadic_runtime_symbol(name: &str) -> String {
             continue;
         }
         if let Some(stripped) = symbol.strip_prefix("__mingw_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix("__isoc99_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix("isoc99_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix("isoc23_") {
             symbol = stripped.to_string();
             continue;
         }
@@ -174,6 +188,8 @@ pub fn printf_style_format_string_arg_index(name: &str) -> Option<usize> {
         "snprintf_chk" => Some(4),
         "error" => Some(2),
         "error_at_line" => Some(4),
+        "syslog" => Some(1),
+        "wsprintf" | "wsprintfa" | "wsprintfw" => Some(1),
         _ => None,
     }
 }
@@ -215,6 +231,10 @@ pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
                 | "swscanf_s"
                 | "wsprintf"
                 | "wsprintfw"
+                | "wsprintfa"
+                | "wvsprintf"
+                | "wvsprintfa"
+                | "wvsprintfw"
                 | "scanf_s"
                 | "fscanf_s"
                 | "sscanf_s"
@@ -222,6 +242,16 @@ pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
                 | "snwprintf_s"
                 | "fwprintf_s"
                 | "wprintf_s"
+                | "open"
+                | "openat"
+                | "fcntl"
+                | "ioctl"
+                | "syscall"
+                | "syslog"
+                | "execl"
+                | "execle"
+                | "execlp"
+                | "sem_open"
         )
 }
 
@@ -240,6 +270,28 @@ impl ApiSignature {
     }
 }
 
+fn split_parameters(text: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut start = 0;
+    let mut depth: u32 = 0;
+
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '(' | '[' | '<' => depth += 1,
+            ')' | ']' | '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                result.push(&text[start..idx]);
+                start = idx + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < text.len() {
+        result.push(&text[start..]);
+    }
+    result
+}
+
 /// One `name|return_type|param:type,...` record.
 fn parse_record(line: &str) -> Result<ApiSignature, String> {
     let parts: Vec<&str> = line.split('|').collect();
@@ -252,11 +304,16 @@ fn parse_record(line: &str) -> Result<ApiSignature, String> {
         return Err("name and return type must be non-empty".to_string());
     }
     let mut params = Vec::new();
+    let mut is_variadic = false;
     let params_text = parts[2].trim();
     if !params_text.is_empty() && params_text != "void" {
-        for param in params_text.split(',') {
+        for param in split_parameters(params_text) {
             let param = param.trim();
-            if param.is_empty() || param == "..." {
+            if param.is_empty() {
+                continue;
+            }
+            if param == "..." {
+                is_variadic = true;
                 continue;
             }
             let Some((param_name, type_name)) = param.split_once(':') else {
@@ -273,6 +330,7 @@ fn parse_record(line: &str) -> Result<ApiSignature, String> {
         name: name.to_string(),
         return_type: return_type.to_string(),
         params,
+        is_variadic,
     })
 }
 
@@ -310,21 +368,32 @@ fn merge_candidates(candidates: Vec<ApiSignature>) -> Option<ApiSignature> {
     best
 }
 
-#[derive(Default)]
 pub struct ApiTypeDatabase {
     /// Records from sources that had no `.fpk`, merged eagerly.
     signatures: HashMap<String, ApiSignature>,
     /// Packed sources, in merge order, read one block at a time.
     packed: Vec<crate::fpk::FpkReader>,
-    /// Names already resolved against `packed`.
-    ///
-    /// Entries are `&'static` because the database itself is a process-lifetime
-    /// `LazyLock` -- the eager map it replaces was never freed either -- and
-    /// because `get` hands out references. Bounded by the number of distinct
-    /// names a run looks up, which is hundreds, not the 151,408 in the tables.
-    resolved: Mutex<HashMap<String, Option<&'static ApiSignature>>>,
+    /// Heap allocations owned by this database instance, freed on drop.
+    arena: Mutex<Vec<Box<ApiSignature>>>,
+    /// Names already resolved against `packed`. Pointers point to allocations in `arena`.
+    resolved: Mutex<HashMap<String, Option<*const ApiSignature>>>,
     /// Everything, materialised only if someone iterates.
     materialised: OnceLock<HashMap<String, ApiSignature>>,
+}
+
+unsafe impl Send for ApiTypeDatabase {}
+unsafe impl Sync for ApiTypeDatabase {}
+
+impl Default for ApiTypeDatabase {
+    fn default() -> Self {
+        Self {
+            signatures: HashMap::new(),
+            packed: Vec::new(),
+            arena: Mutex::new(Vec::new()),
+            resolved: Mutex::new(HashMap::new()),
+            materialised: OnceLock::new(),
+        }
+    }
 }
 
 impl std::fmt::Debug for ApiTypeDatabase {
@@ -341,6 +410,10 @@ impl std::fmt::Debug for ApiTypeDatabase {
 
 impl ApiTypeDatabase {
     pub fn from_utils_signatures() -> Result<Self, ApiTypeError> {
+        Self::from_utils_signatures_for_bitness(true)
+    }
+
+    pub fn from_utils_signatures_for_bitness(is_64bit: bool) -> Result<Self, ApiTypeError> {
         let mut db = Self::default();
         if let Some(path) = ResourceProvider::global().win_api_signatures_txt() {
             db.merge_path(&path)?;
@@ -351,11 +424,17 @@ impl ApiTypeDatabase {
         if let Some(path) = ResourceProvider::global().wdk_signatures_txt() {
             db.merge_path(&path)?;
         }
-        if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
-            db.merge_path(&path)?;
-        }
-        if let Some(path) = ResourceProvider::global().generic_clib_64_signatures_txt() {
-            db.merge_path(&path)?;
+        if is_64bit {
+            if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
+                db.merge_path(&path)?;
+            }
+            if let Some(path) = ResourceProvider::global().generic_clib_64_signatures_txt() {
+                db.merge_path(&path)?;
+            }
+        } else {
+            if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
+                db.merge_path(&path)?;
+            }
         }
         if let Some(path) = ResourceProvider::global().mac_osx_signatures_txt() {
             db.merge_path(&path)?;
@@ -420,9 +499,9 @@ impl ApiTypeDatabase {
             return self.signatures.get(name);
         }
         if let Ok(cache) = self.resolved.lock()
-            && let Some(hit) = cache.get(name)
+            && let Some(&hit) = cache.get(name)
         {
-            return *hit;
+            return hit.map(|ptr| unsafe { &*ptr });
         }
         let mut candidates: Vec<ApiSignature> = Vec::new();
         if let Some(eager) = self.signatures.get(name) {
@@ -445,13 +524,23 @@ impl ApiTypeDatabase {
                 break;
             }
         }
-        // Leaked so `get` can hand out a reference; see `resolved`.
-        let winner: Option<&'static ApiSignature> =
-            merge_candidates(candidates).map(|s| &*Box::leak(Box::new(s)));
-        if let Ok(mut cache) = self.resolved.lock() {
-            cache.insert(name.to_string(), winner);
+
+        let mut resolved = self.resolved.lock().ok()?;
+        if let Some(&hit) = resolved.get(name) {
+            return hit.map(|ptr| unsafe { &*ptr });
         }
-        winner
+        let ptr = if let Some(winner) = merge_candidates(candidates) {
+            let boxed = Box::new(winner);
+            let ptr: *const ApiSignature = &*boxed;
+            if let Ok(mut arena) = self.arena.lock() {
+                arena.push(boxed);
+            }
+            Some(ptr)
+        } else {
+            None
+        };
+        resolved.insert(name.to_string(), ptr);
+        ptr.map(|p| unsafe { &*p })
     }
 
     /// Everything the sources hold, merged. Only for callers that genuinely
@@ -533,6 +622,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_record_preserves_variadic_status() {
+        let sig = parse_record("wsprintfA|INT|pszDest:PSTR,pszFmt:PCSTR,...").expect("parse");
+        assert!(sig.is_variadic);
+        assert_eq!(sig.params.len(), 2);
+
+        let non_var = parse_record("puts|int|str:char*").expect("parse");
+        assert!(!non_var.is_variadic);
+    }
+
+    #[test]
+    fn posix_and_isoc99_variadic_symbols_are_recognized() {
+        assert!(is_known_variadic_runtime_symbol("open"));
+        assert!(is_known_variadic_runtime_symbol("fcntl"));
+        assert!(is_known_variadic_runtime_symbol("ioctl"));
+        assert!(is_known_variadic_runtime_symbol("__isoc99_scanf"));
+        assert!(is_known_variadic_runtime_symbol("isoc99_sscanf"));
+        assert!(is_known_variadic_runtime_symbol("wsprintfA"));
+    }
+
+    #[test]
     fn informative_type_count_ignores_placeholders() {
         let db = merged(&["f|int|a:char*,b:int,c:FILE*\n"]);
         assert_eq!(db.get("f").expect("f").informative_type_count(), 2);
@@ -562,9 +671,45 @@ mod tests {
             printf_style_format_string_arg_index("error_at_line"),
             Some(4)
         );
+        assert_eq!(printf_style_format_string_arg_index("syslog"), Some(1));
+        assert_eq!(printf_style_format_string_arg_index("wsprintfA"), Some(1));
+        assert_eq!(printf_style_format_string_arg_index("wsprintfW"), Some(1));
         assert!(is_known_variadic_runtime_symbol("__imp___printf_chk"));
         assert!(is_known_variadic_runtime_symbol("error"));
+        assert!(is_known_variadic_runtime_symbol("syslog"));
+        assert!(is_known_variadic_runtime_symbol("wsprintfA"));
+        assert!(is_known_variadic_runtime_symbol("wsprintfW"));
         assert_eq!(printf_style_format_string_arg_index("fputs"), None);
+    }
+
+    #[test]
+    fn posix_and_c99_variadic_symbols_are_recognized() {
+        assert_eq!(
+            canonical_variadic_runtime_symbol("__isoc99_sscanf"),
+            "sscanf"
+        );
+        assert_eq!(canonical_variadic_runtime_symbol("__isoc99_scanf"), "scanf");
+        assert_eq!(
+            canonical_variadic_runtime_symbol("__isoc23_fscanf"),
+            "fscanf"
+        );
+        assert!(is_known_variadic_runtime_symbol("__isoc99_sscanf"));
+        assert!(is_known_variadic_runtime_symbol("__isoc99_scanf"));
+        assert!(is_known_variadic_runtime_symbol("__isoc23_fscanf"));
+
+        assert!(is_known_variadic_runtime_symbol("open"));
+        assert!(is_known_variadic_runtime_symbol("openat"));
+        assert!(is_known_variadic_runtime_symbol("fcntl"));
+        assert!(is_known_variadic_runtime_symbol("ioctl"));
+        assert!(is_known_variadic_runtime_symbol("syscall"));
+        assert!(is_known_variadic_runtime_symbol("execl"));
+        assert!(is_known_variadic_runtime_symbol("execle"));
+        assert!(is_known_variadic_runtime_symbol("execlp"));
+        assert!(is_known_variadic_runtime_symbol("sem_open"));
+
+        assert!(!is_known_variadic_runtime_symbol("close"));
+        assert!(!is_known_variadic_runtime_symbol("read"));
+        assert!(!is_known_variadic_runtime_symbol("write"));
     }
 
     #[test]
@@ -702,5 +847,18 @@ mod tests {
         assert_eq!(fprintf_chk.params.len(), 3);
         assert_eq!(fprintf_chk.params[0].type_name, "FILE*");
         assert_eq!(fprintf_chk.params[2].type_name, "char*");
+    }
+
+    #[test]
+    fn parse_record_handles_function_pointer_callbacks_with_multiple_parameters() {
+        let line = "EnumWindows|BOOL|lpEnumFunc:BOOL (*)(HWND, LPARAM), lParam:LPARAM";
+        let sig = parse_record(line).expect("parse EnumWindows");
+        assert_eq!(sig.name, "EnumWindows");
+        assert_eq!(sig.return_type, "BOOL");
+        assert_eq!(sig.params.len(), 2);
+        assert_eq!(sig.params[0].name, "lpEnumFunc");
+        assert_eq!(sig.params[0].type_name, "BOOL (*)(HWND, LPARAM)");
+        assert_eq!(sig.params[1].name, "lParam");
+        assert_eq!(sig.params[1].type_name, "LPARAM");
     }
 }

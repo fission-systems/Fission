@@ -111,7 +111,8 @@ pub use linear_multiblock::{
 };
 pub use linear_recovery::{
     SESE_REGION_PROOF_BUDGET_CALLS, build_linear_sese_child_fallback,
-    region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
+    rank_linearized_exit_candidates, region_linearized_exit_candidates_algorithmic,
+    try_recover_region_linearized_body,
 };
 pub use linear_types::{
     CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey, ConditionalTailLoweringResult,

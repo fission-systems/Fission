@@ -75,7 +75,7 @@ fn active_bits(
             }
             PreHirBinaryOp::Shr | PreHirBinaryOp::Sar => {
                 if let PreHirExpr::Const(shift, _) = &**rhs {
-                    if *shift < 64 {
+                    if *shift >= 0 && *shift < 64 {
                         let left = active_bits(lhs, type_map, nz_masks);
                         if *op == PreHirBinaryOp::Sar {
                             let shifted = left >> shift;
@@ -84,10 +84,14 @@ fn active_bits(
                                 NirType::Int { bits, .. } => *bits,
                                 _ => 64,
                             };
-                            let sign_bit_val = 1u64 << (bits - 1);
-                            if (left & sign_bit_val) != 0 {
-                                let mask = type_mask(ty);
-                                (shifted | (mask & !(mask >> shift))) & mask
+                            if bits > 0 {
+                                let sign_bit_val = 1u64 << (bits - 1);
+                                if (left & sign_bit_val) != 0 {
+                                    let mask = type_mask(ty);
+                                    (shifted | (mask & !(mask >> shift))) & mask
+                                } else {
+                                    shifted
+                                }
                             } else {
                                 shifted
                             }
@@ -103,7 +107,7 @@ fn active_bits(
             }
             PreHirBinaryOp::Shl => {
                 if let PreHirExpr::Const(shift, _) = &**rhs {
-                    if *shift < 64 {
+                    if *shift >= 0 && *shift < 64 {
                         let inner = active_bits(lhs, type_map, nz_masks);
                         let mask = type_mask(ty);
                         (inner << shift) & mask
@@ -185,14 +189,28 @@ fn optimize_stmt(
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= optimize_expr(va_list, type_map, nz_masks);
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) => {
             changed |= optimize_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
                 nz_masks,
             );
+        }
+        PreHirStmt::While { cond, body } => {
+            changed |= optimize_expr(cond, type_map, nz_masks);
+            changed |= optimize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                type_map,
+                nz_masks,
+            );
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            changed |= optimize_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                type_map,
+                nz_masks,
+            );
+            changed |= optimize_expr(cond, type_map, nz_masks);
         }
         PreHirStmt::For {
             init,
@@ -349,7 +367,18 @@ fn optimize_expr_with_context(
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         if let PreHirExpr::Const(val, _) = &**inner {
             let mask = type_mask(ty);
-            let folded_val = *val & (mask as i64);
+            let raw_val = *val & (mask as i64);
+            let folded_val = match ty {
+                NirType::Int { bits, signed: true } if *bits > 0 && *bits < 64 => {
+                    let sign_bit = 1i64 << (*bits - 1);
+                    if (raw_val & sign_bit) != 0 {
+                        raw_val | !(mask as i64)
+                    } else {
+                        raw_val
+                    }
+                }
+                _ => raw_val,
+            };
             *expr = PreHirExpr::Const(folded_val, ty.clone());
             return true;
         }
@@ -590,5 +619,61 @@ mod tests {
         };
         assert!(optimize_expr(&mut expr, &type_map, &HashMap::default()));
         assert_eq!(expr, PreHirExpr::Var("carrier".to_string()));
+    }
+
+    #[test]
+    fn test_signed_constant_cast_folds_with_sign_extension() {
+        let i8_ty = NirType::Int {
+            bits: 8,
+            signed: true,
+        };
+        let mut expr = PreHirExpr::Cast {
+            ty: i8_ty.clone(),
+            expr: Box::new(PreHirExpr::Const(
+                0xFF,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+        };
+        assert!(optimize_expr(
+            &mut expr,
+            &HashMap::default(),
+            &HashMap::default()
+        ));
+        assert_eq!(expr, PreHirExpr::Const(-1, i8_ty));
+    }
+
+    #[test]
+    fn test_active_bits_negative_shift_safe() {
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Const(16, u32_ty())),
+            rhs: Box::new(PreHirExpr::Const(-1, u32_ty())),
+            ty: u32_ty(),
+        };
+        let mask = active_bits(&expr, &HashMap::default(), &HashMap::default());
+        assert_eq!(mask, type_mask(&u32_ty()));
+    }
+
+    #[test]
+    fn test_optimizes_while_condition() {
+        let mut func = PreHirFunction {
+            name: "while_test".into(),
+            body: vec![PreHirStmt::While {
+                cond: PreHirExpr::Cast {
+                    ty: u64_ty(),
+                    expr: Box::new(PreHirExpr::Const(42, u32_ty())),
+                },
+                body: vec![PreHirStmt::Break].into(),
+            }],
+            ..Default::default()
+        };
+        assert!(apply_subflow_pruning(&mut func));
+        let PreHirStmt::While { cond, .. } = &func.body[0] else {
+            panic!()
+        };
+        assert_eq!(*cond, PreHirExpr::Const(42, u64_ty()));
     }
 }

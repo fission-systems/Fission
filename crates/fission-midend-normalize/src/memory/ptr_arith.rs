@@ -640,28 +640,64 @@ impl AddTreeState {
             };
         }
 
-        for (idx, stride) in &self.non_multiples {
-            let term = PreHirExpr::Binary {
-                op: PreHirBinaryOp::Mul,
-                lhs: Box::new(idx.clone()),
-                rhs: Box::new(PreHirExpr::Const(*stride, NirType::Unknown)),
-                ty: NirType::Unknown,
+        if (!self.non_multiples.is_empty() || !self.other_terms.is_empty()) && self.elem_size > 1 {
+            let byte_ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+                bits: 8,
+                signed: false,
+            }));
+            base = PreHirExpr::Cast {
+                ty: byte_ptr_ty.clone(),
+                expr: Box::new(base),
             };
-            base = PreHirExpr::Binary {
-                op: PreHirBinaryOp::Add,
-                lhs: Box::new(base),
-                rhs: Box::new(term),
+            for (idx, stride) in &self.non_multiples {
+                let term = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(idx.clone()),
+                    rhs: Box::new(PreHirExpr::Const(*stride, NirType::Unknown)),
+                    ty: NirType::Unknown,
+                };
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(term),
+                    ty: byte_ptr_ty.clone(),
+                };
+            }
+            for other in &self.other_terms {
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(other.clone()),
+                    ty: byte_ptr_ty.clone(),
+                };
+            }
+            base = PreHirExpr::Cast {
                 ty: self.ptr_ty.clone(),
+                expr: Box::new(base),
             };
-        }
-
-        for other in &self.other_terms {
-            base = PreHirExpr::Binary {
-                op: PreHirBinaryOp::Add,
-                lhs: Box::new(base),
-                rhs: Box::new(other.clone()),
-                ty: self.ptr_ty.clone(),
-            };
+        } else {
+            for (idx, stride) in &self.non_multiples {
+                let term = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(idx.clone()),
+                    rhs: Box::new(PreHirExpr::Const(*stride, NirType::Unknown)),
+                    ty: NirType::Unknown,
+                };
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(term),
+                    ty: self.ptr_ty.clone(),
+                };
+            }
+            for other in &self.other_terms {
+                base = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(base),
+                    rhs: Box::new(other.clone()),
+                    ty: self.ptr_ty.clone(),
+                };
+            }
         }
 
         if self.non_mult_const != 0 {
@@ -928,25 +964,9 @@ fn try_recover_ptr_arith(
             return Some(typed_ptr_expr.clone());
         }
         // Byte-cast form `(uint8_t *)p + k` (or Cast-wrapped base + k): k is
-        // usually bytes. When k is a positive sub-element residual on a
-        // multi-byte pointee (e.g. int* pair field index written as +1),
-        // rescale to element*size so PtrOffset stays byte-correct for the
-        // printer.
+        // in bytes. PtrOffset is also in bytes, so emit exact unscaled byte offset.
         if from_byte_cast {
-            if let Some(elem_size) = type_byte_size(&elem_ty, pointer_layout).filter(|&sz| sz > 1) {
-                let elem_size_i = i64::try_from(elem_size).ok()?;
-                let byte_offset = if offset > 0 && offset < elem_size_i {
-                    offset.checked_mul(elem_size_i)?
-                } else {
-                    offset
-                };
-                if byte_offset != 0 {
-                    return Some(PreHirExpr::PtrOffset {
-                        base: Box::new(typed_ptr_expr.clone()),
-                        offset: byte_offset,
-                    });
-                }
-            } else if offset != 0 {
+            if offset != 0 {
                 return Some(PreHirExpr::PtrOffset {
                     base: Box::new(typed_ptr_expr.clone()),
                     offset,
@@ -1205,7 +1225,7 @@ fn try_recover_field_access(
 
     let (typed_ptr_expr, ptr_ty, _from_byte_cast) = typed_pointer_base(&base_expr, binding_types)?;
     let elem_ty = pointee_ty(&ptr_ty)?;
-    let NirType::Aggregate { fields, .. } = elem_ty else {
+    let NirType::Aggregate { size, fields } = elem_ty else {
         return None;
     };
 
@@ -1214,20 +1234,36 @@ fn try_recover_field_access(
     }
     let field_offset = offset as u32;
 
-    let field = fields.iter().find(|f| f.offset == field_offset);
-    let (field_name, field_ty) = match field {
-        Some(f) => (f.name.clone(), f.ty.clone()),
-        // Hex, like every other synthetic field name -- the typedef the
-        // printer emits spells them `field_{offset:x}`, so a decimal name here
-        // reads `->field_16` against a struct that declares `field_10` and the
-        // member does not exist.
-        None => (format!("field_{field_offset:x}"), NirType::Unknown),
-    };
+    let access_size = type_byte_size(access_ty, pointer_layout)?;
+    if access_size == 0 {
+        return None;
+    }
 
-    let final_ty = if matches!(field_ty, NirType::Unknown) {
-        access_ty.clone()
-    } else {
-        field_ty
+    if *size > 0 && (field_offset as u64).checked_add(access_size)? > *size as u64 {
+        return None;
+    }
+    if *size == 0 && fields.is_empty() {
+        return None;
+    }
+
+    let field = fields.iter().find(|f| f.offset == field_offset);
+    let (field_name, final_ty) = match field {
+        Some(f) => {
+            if f.ty != NirType::Unknown {
+                if type_byte_size(&f.ty, pointer_layout) != Some(access_size) {
+                    return None;
+                }
+                (f.name.clone(), f.ty.clone())
+            } else {
+                (f.name.clone(), access_ty.clone())
+            }
+        }
+        None => {
+            if *size > 0 && field_offset >= *size {
+                return None;
+            }
+            (format!("field_{field_offset:x}"), access_ty.clone())
+        }
     };
 
     Some(PreHirExpr::FieldAccess {
@@ -3424,9 +3460,9 @@ mod tests {
     }
 
     #[test]
-    fn byte_cast_sub_element_const_rescales_to_pointee_size() {
-        // `(uint8_t *)(int *p) + 1` with multi-byte pointee → PtrOffset(+4)
-        // (Pair/KV second-field mis-scale class).
+    fn byte_cast_sub_element_const_preserves_unscaled_byte_offset() {
+        // `(uint8_t *)(int *p) + 1` with multi-byte pointee → PtrOffset(+1)
+        // (Byte offsets on byte-cast pointers are preserved unscaled).
         let p_ty = NirType::Ptr(Box::new(NirType::Int {
             bits: 32,
             signed: true,
@@ -3472,10 +3508,10 @@ mod tests {
         assert!(super::apply_ptr_arith_recovery_pass(&mut func));
         match &func.body[0] {
             PreHirStmt::Assign {
-                rhs: PreHirExpr::PtrOffset { offset: 4, .. },
+                rhs: PreHirExpr::PtrOffset { offset: 1, .. },
                 ..
             } => {}
-            other => panic!("expected PtrOffset(+4), got {other:?}"),
+            other => panic!("expected PtrOffset(+1), got {other:?}"),
         }
     }
 
@@ -3533,6 +3569,84 @@ mod tests {
                 );
             }
             other => panic!("expected FieldAccess(field_0) of Index, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_access_rejects_mismatched_width_and_oob_offset() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let agg_ty = NirType::Aggregate {
+            size: 8,
+            fields: vec![fission_midend_core::StructField {
+                offset: 0,
+                ty: u64_ty.clone(),
+                name: "quad".to_owned(),
+            }],
+        };
+        let p_ty = NirType::Ptr(Box::new(agg_ty));
+
+        // 1-byte store to offset 0 (where field is 8 bytes)
+        let body = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("p".to_owned())),
+                        offset: 0,
+                    }),
+                    ty: u8_ty.clone(),
+                },
+                rhs: PreHirExpr::Const(1, u8_ty.clone()),
+            },
+            // 4-byte store to offset 16 (beyond struct size 8)
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("p".to_owned())),
+                        offset: 16,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+                rhs: PreHirExpr::Const(
+                    2,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+        ];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+
+        // Neither access should be rewritten to FieldAccess
+        super::apply_ptr_arith_recovery_pass(&mut func);
+
+        match &func.body[0] {
+            PreHirStmt::Assign { lhs, .. } => {
+                assert!(
+                    !matches!(lhs, PreHirLValue::FieldAccess { .. }),
+                    "mismatched store width should not become FieldAccess"
+                );
+            }
+            _ => panic!("expected Assign"),
+        }
+        match &func.body[1] {
+            PreHirStmt::Assign { lhs, .. } => {
+                assert!(
+                    !matches!(lhs, PreHirLValue::FieldAccess { .. }),
+                    "out of bounds offset should not become FieldAccess"
+                );
+            }
+            _ => panic!("expected Assign"),
         }
     }
 }

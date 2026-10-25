@@ -129,7 +129,11 @@ pub fn parse_external_identity_from_loader_string(
     })
 }
 
-fn register_va(idx: &mut ExternalSymbolIndex, va: u64, identity: ExternalSymbolIdentity) {
+pub(crate) fn register_va(
+    idx: &mut ExternalSymbolIndex,
+    va: u64,
+    identity: ExternalSymbolIdentity,
+) {
     let ck = identity.canonical_key();
     idx.canonical_to_identity
         .entry(ck.clone())
@@ -159,13 +163,32 @@ pub fn build_external_symbol_index(binary: &LoadedBinary) -> ExternalSymbolIndex
         }
     }
 
+    for (&va, name) in binary.relocation_symbols.iter() {
+        if let Some(id) = parse_external_identity_from_loader_string(name, None) {
+            register_va(&mut idx, va, id);
+        }
+    }
+
+    let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
     for (&va, name) in binary.global_symbols.iter() {
         let n = name.as_str();
-        if !(n.starts_with("__imp__") || n.starts_with("__imp_")) {
-            continue;
-        }
-        if let Some(id) = parse_external_identity_from_loader_string(n, None) {
-            register_va(&mut idx, va, id);
+        if n.starts_with("__imp__") || n.starts_with("__imp_") {
+            if let Some(id) = parse_external_identity_from_loader_string(n, None) {
+                register_va(&mut idx, va, id);
+            }
+        } else if !is_pe {
+            // For ELF and Mach-O binaries, dynamic library imports do not use __imp_ prefix.
+            // Index global symbols residing outside executable sections or matching imported functions.
+            if binary.executable_section_containing(va).is_none()
+                || binary
+                    .functions
+                    .iter()
+                    .any(|f| f.address == va && f.is_import)
+            {
+                if let Some(id) = parse_external_identity_from_loader_string(n, None) {
+                    register_va(&mut idx, va, id);
+                }
+            }
         }
     }
 
@@ -228,5 +251,45 @@ mod tests {
         assert_eq!(id.symbol_key, "ReadFile");
         assert!(id.library_key.is_none());
         assert_eq!(id.canonical_key(), "*::ReadFile");
+    }
+
+    #[test]
+    fn elf_dynamic_import_global_symbols_are_indexed() {
+        let mut relocations = std::collections::HashMap::new();
+        relocations.insert(0x2010, "free".into());
+
+        let bin = LoadedBinaryBuilder::new("elf_bin".to_string(), DataBuffer::Heap(vec![0u8; 64]))
+            .format("ELF64")
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".got".to_string(),
+                virtual_address: 0x2000,
+                virtual_size: 0x100,
+                file_offset: 0x100,
+                file_size: 0x100,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_global_symbol(0x2008, "malloc".into())
+            .add_relocation_symbols(relocations)
+            .build()
+            .expect("build");
+
+        let idx = build_external_symbol_index(&bin);
+        let id_malloc = idx.identity_for_va(0x2008).expect("malloc in got");
+        assert_eq!(id_malloc.symbol_key, "malloc");
+
+        let id_free = idx.identity_for_va(0x2010).expect("free in relocations");
+        assert_eq!(id_free.symbol_key, "free");
     }
 }

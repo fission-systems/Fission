@@ -71,7 +71,8 @@ fn visit_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) -> bo
         | PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
-        | PreHirExpr::AggregateCopy { src: inner, .. } => {
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= visit_expr(inner, var_types);
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
@@ -108,6 +109,7 @@ fn visit_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) -> bo
                     if matches_abs_mask(*val, bits) {
                         let fn_name = if bits == 32 { "fabsf" } else { "fabs" };
                         *expr = PreHirExpr::Call {
+                            origin: None,
                             target: fn_name.to_string(),
                             args: vec![inner],
                             ty: NirType::Float { bits },
@@ -121,6 +123,7 @@ fn visit_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) -> bo
                     if matches_abs_mask(*val, bits) {
                         let fn_name = if bits == 32 { "fabsf" } else { "fabs" };
                         *expr = PreHirExpr::Call {
+                            origin: None,
                             target: fn_name.to_string(),
                             args: vec![inner],
                             ty: NirType::Float { bits },
@@ -173,6 +176,9 @@ fn visit_stmt(stmt: &mut PreHirStmt, var_types: &HashMap<String, NirType>) -> bo
                     changed |= visit_expr(base, var_types);
                     changed |= visit_expr(index, var_types);
                 }
+                PreHirLValue::FieldAccess { base, .. } => {
+                    changed |= visit_expr(base, var_types);
+                }
                 _ => {}
             }
         }
@@ -182,10 +188,32 @@ fn visit_stmt(stmt: &mut PreHirStmt, var_types: &HashMap<String, NirType>) -> bo
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= visit_expr(va_list, var_types);
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. }
-        | PreHirStmt::For { body, .. } => {
+        PreHirStmt::Block(body) => {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
+                changed |= visit_stmt(s, var_types);
+            }
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+            changed |= visit_expr(cond, var_types);
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
+                changed |= visit_stmt(s, var_types);
+            }
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(i) = init {
+                changed |= visit_stmt(i.as_mut(), var_types);
+            }
+            if let Some(c) = cond {
+                changed |= visit_expr(c, var_types);
+            }
+            if let Some(u) = update {
+                changed |= visit_stmt(u.as_mut(), var_types);
+            }
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= visit_stmt(s, var_types);
             }

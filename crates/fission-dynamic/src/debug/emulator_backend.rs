@@ -32,6 +32,8 @@ pub struct EmulatorBackend {
     /// How much of the guest's standard output has already been reported as
     /// an `OutputString` event.
     stdout_reported: usize,
+    /// Execution deadline for bounded emulator runs.
+    deadline: Option<std::time::Instant>,
 }
 
 impl EmulatorBackend {
@@ -42,6 +44,7 @@ impl EmulatorBackend {
             last_outcome: None,
             events: std::collections::VecDeque::new(),
             stdout_reported: 0,
+            deadline: None,
         }
     }
 
@@ -226,6 +229,13 @@ impl ExecutionBackend for EmulatorBackend {
 
     fn set_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
         self.timeline = Some(timeline);
+    }
+
+    fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        self.deadline = deadline;
+        if let Some(emu) = &mut self.emulator {
+            emu.set_deadline(deadline);
+        }
     }
 
     fn enumerate_processes() -> Vec<ProcessInfo> {
@@ -485,6 +495,25 @@ impl ExecutionBackend for EmulatorBackend {
             .map_err(|e| fission_core::err!(debug, "Memory read failed at 0x{:x}: {}", address, e))
     }
 
+    fn read_memory_partial(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        let Some(emu) = &self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        use fission_emulator::pcode::page_map::AccessKind;
+        let available = emu.state.page_map.readable_extent(address, size);
+        if available == 0 {
+            emu.state
+                .page_map
+                .check_range(address, 1, AccessKind::Read)
+                .map_err(|e| {
+                    fission_core::err!(debug, "Cannot access memory at 0x{:x}: {}", address, e)
+                })?;
+        }
+        emu.state
+            .read_space_readonly(emu.state.ram_space(), address, available)
+            .map_err(|e| fission_core::err!(debug, "Memory read failed at 0x{:x}: {}", address, e))
+    }
+
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
         let Some(emu) = &mut self.emulator else {
             return Err(fission_core::err!(debug, "Emulator not running"));
@@ -592,6 +621,9 @@ impl ExecutionBackend for EmulatorBackend {
             Err(elf) => emu
                 .apply_linux_image(elf)
                 .map_err(|e| fission_core::err!(debug, "ELF image failed: {}", e))?,
+        }
+        if let Some(deadline) = self.deadline {
+            emu.set_deadline(Some(deadline));
         }
         self.emulator = Some(emu);
         if let Some(timeline) = &self.timeline {

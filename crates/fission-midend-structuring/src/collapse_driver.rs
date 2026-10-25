@@ -856,6 +856,7 @@ mod tests {
         let first_test = PreHirStmt::Assign {
             lhs: fission_midend_prehir::PreHirLValue::Var("item".to_string()),
             rhs: PreHirExpr::Call {
+                origin: None,
                 target: "next_item".to_string(),
                 args: Vec::new(),
                 ty: fission_midend_core::ir::NirType::Unknown,

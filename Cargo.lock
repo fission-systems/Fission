@@ -851,6 +851,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "fission-analysis-db",
+ "fission-analysis-protocol",
  "fission-core",
  "fission-decompiler",
  "fission-dir",
@@ -899,6 +900,7 @@ name = "fission-decompiler"
 version = "0.2.3"
 dependencies = [
  "fission-analysis-db",
+ "fission-analysis-protocol",
  "fission-core",
  "fission-loader",
  "fission-midend-core",

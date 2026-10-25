@@ -178,6 +178,15 @@ pub struct UserSignature {
     pub param_names: Vec<String>,
 }
 
+/// A watchpoint registered by a user project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Archive, Deserialize, Serialize)]
+pub struct UserWatchpoint {
+    pub address: u64,
+    pub size: u64,
+    pub on_read: bool,
+    pub on_write: bool,
+}
+
 /// Information about an inferred type (class/struct) from metadata
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 pub struct InferredTypeInfo {
@@ -396,6 +405,13 @@ pub struct LoadedBinaryInner {
     /// analysis database supplied them; see `fission-project`.
     #[rkyv(with = rkyv::with::AsVec)]
     pub user_signatures: std::collections::HashMap<u64, UserSignature>,
+    /// User comments from project file keyed by address.
+    #[rkyv(with = rkyv::with::AsVec)]
+    pub user_comments: std::collections::HashMap<u64, String>,
+    /// User breakpoints from project file.
+    pub user_breakpoints: Vec<u64>,
+    /// User watchpoints from project file.
+    pub user_watchpoints: Vec<UserWatchpoint>,
     /// Relocation use-site mapping (instruction/data address -> referenced symbol name).
     pub relocation_symbols: std::collections::HashMap<u64, String>,
     /// Index of functions by address for O(1) lookup
@@ -416,6 +432,8 @@ pub struct LoadedBinaryInner {
     pub rich_header_records: Option<Vec<RichHeaderRecord>>,
     /// ELF symbol versioning (address -> version name).
     pub symbol_versions: std::collections::HashMap<u64, String>,
+    /// ELF symbol versioning by symbol name (symbol name -> version name).
+    pub symbol_version_names: std::collections::HashMap<String, String>,
     /// COFF/PE label addresses (for example MingW `.l_startw`) used as CFG block leaders.
     pub cfg_label_leaders: Vec<u64>,
 }
@@ -648,6 +666,7 @@ pub struct LoadedBinaryBuilder {
     relocations: Vec<RelocationEntry>,
     rich_header_records: Option<Vec<RichHeaderRecord>>,
     symbol_versions: std::collections::HashMap<u64, String>,
+    symbol_version_names: std::collections::HashMap<String, String>,
     inferred_types: Vec<InferredTypeInfo>,
     cfg_label_leaders: Vec<u64>,
 }

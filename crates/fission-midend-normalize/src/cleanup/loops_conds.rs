@@ -45,18 +45,21 @@ pub fn recover_guarded_loop_tail_accumulator_returns(stmts: &mut Vec<PreHirStmt>
             continue;
         };
         let end = replacement.end;
-        stmts.splice(
-            idx..end,
-            [
-                PreHirStmt::While {
-                    cond: replacement.cond,
-                    body: replacement.body.into(),
-                },
-                PreHirStmt::Return(Some(PreHirExpr::Var(replacement.accumulator))),
-            ],
-        );
+        let mut replacement_stmts = Vec::new();
+        if replacement.has_other_incoming_jumps {
+            replacement_stmts.push(PreHirStmt::Label(replacement.label));
+        }
+        replacement_stmts.push(PreHirStmt::While {
+            cond: replacement.cond,
+            body: replacement.body.into(),
+        });
+        replacement_stmts.push(PreHirStmt::Return(Some(PreHirExpr::Var(
+            replacement.accumulator,
+        ))));
+        let count = replacement_stmts.len();
+        stmts.splice(idx..end, replacement_stmts);
         changed = true;
-        idx += 2;
+        idx += count;
     }
     while idx < stmts.len() {
         changed |= recover_guarded_loop_tail_accumulator_returns_in_stmt(&mut stmts[idx]);
@@ -69,7 +72,100 @@ struct GuardedLoopTailReplacement {
     cond: PreHirExpr,
     body: Vec<PreHirStmt>,
     accumulator: String,
+    label: String,
+    has_other_incoming_jumps: bool,
     end: usize,
+}
+
+fn stale_temp_equals_accumulator_before_loop(
+    stmts: &[PreHirStmt],
+    idx: usize,
+    stale_temp: &str,
+    accumulator: &str,
+) -> bool {
+    if stale_temp == accumulator {
+        return true;
+    }
+    let mut last_stale_val: Option<&PreHirExpr> = None;
+    let mut last_acc_val: Option<&PreHirExpr> = None;
+
+    for stmt in &stmts[..idx] {
+        if let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } = stmt
+        {
+            if name == stale_temp {
+                last_stale_val = Some(rhs);
+            }
+            if name == accumulator {
+                last_acc_val = Some(rhs);
+            }
+        }
+    }
+
+    match (last_stale_val, last_acc_val) {
+        (Some(s), Some(a)) => {
+            if s == a {
+                return true;
+            }
+            if matches!(s, PreHirExpr::Var(v) if v == accumulator) {
+                return true;
+            }
+            if matches!(a, PreHirExpr::Var(v) if v == stale_temp) {
+                return true;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn has_other_gotos_to_label(stmts: &[PreHirStmt], skip_idx: usize, label: &str) -> bool {
+    for (i, stmt) in stmts.iter().enumerate() {
+        if i == skip_idx {
+            continue;
+        }
+        if stmt_has_goto_to_label(stmt, label) {
+            return true;
+        }
+    }
+    false
+}
+
+fn stmt_has_goto_to_label(stmt: &PreHirStmt, label: &str) -> bool {
+    match stmt {
+        PreHirStmt::Goto(target) => target == label,
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(|s| stmt_has_goto_to_label(s, label))
+                || else_body.iter().any(|s| stmt_has_goto_to_label(s, label))
+        }
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            body.iter().any(|s| stmt_has_goto_to_label(s, label))
+        }
+        PreHirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_ref()
+                .map_or(false, |s| stmt_has_goto_to_label(s, label))
+                || update
+                    .as_ref()
+                    .map_or(false, |s| stmt_has_goto_to_label(s, label))
+                || body.iter().any(|s| stmt_has_goto_to_label(s, label))
+        }
+        PreHirStmt::Block(body) => body.iter().any(|s| stmt_has_goto_to_label(s, label)),
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|c| c.body.iter().any(|s| stmt_has_goto_to_label(s, label)))
+                || default.iter().any(|s| stmt_has_goto_to_label(s, label))
+        }
+        _ => false,
+    }
 }
 
 fn guarded_loop_tail_replacement(
@@ -103,6 +199,9 @@ fn guarded_loop_tail_replacement(
         return None;
     }
     let accumulator = accumulator_updated_from_temp(&body, &stale_temp)?;
+    if !stale_temp_equals_accumulator_before_loop(stmts, idx, &stale_temp, &accumulator) {
+        return None;
+    }
     if !stmts[..idx]
         .iter()
         .any(|stmt| stmt_assigns_var(stmt, &accumulator))
@@ -126,10 +225,13 @@ fn guarded_loop_tail_replacement(
     if stale_def_idx >= acc_update_idx {
         return None;
     }
+    let has_other_incoming_jumps = has_other_gotos_to_label(stmts, idx, label);
     Some(GuardedLoopTailReplacement {
         cond: cond.clone(),
         body,
         accumulator,
+        label: label.clone(),
+        has_other_incoming_jumps,
         end,
     })
 }
@@ -683,7 +785,13 @@ fn resolve_loop_header_expr(expr: &PreHirExpr, values: &HashMap<String, PreHirEx
             else_expr: Box::new(resolve_loop_header_expr(else_expr, values)),
             ty: ty.clone(),
         },
-        PreHirExpr::Call { target, args, ty } => PreHirExpr::Call {
+        PreHirExpr::Call {
+            target,
+            args,
+            ty,
+            origin,
+        } => PreHirExpr::Call {
+            origin: *origin,
             target: target.clone(),
             args: args
                 .iter()
@@ -1504,7 +1612,9 @@ fn rewrite_found_breaks_in_stmt(stmt: &mut PreHirStmt) -> bool {
 
 fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
-    // Nested regions first.
+    // Nested regions in the same break scope (If and Block).
+    // Break inside nested loops (While, DoWhile, For) or Switch belong to those scopes
+    // and must never be rewritten into an early return from this enclosing loop.
     for stmt in body.iter_mut() {
         match stmt {
             PreHirStmt::If {
@@ -1519,21 +1629,9 @@ fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>) -> bool {
                     else_body,
                 ));
             }
-            PreHirStmt::Block(inner)
-            | PreHirStmt::While { body: inner, .. }
-            | PreHirStmt::DoWhile { body: inner, .. }
-            | PreHirStmt::For { body: inner, .. } => {
+            PreHirStmt::Block(inner) => {
                 changed |=
                     rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner));
-            }
-            PreHirStmt::Switch { cases, default, .. } => {
-                for case in cases.iter_mut() {
-                    changed |= rewrite_found_breaks_in_body(
-                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
-                    );
-                }
-                changed |=
-                    rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }

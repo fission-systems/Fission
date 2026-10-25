@@ -102,6 +102,83 @@ pub fn resolve_signatures_base_from_bundles() -> Option<PathBuf> {
     resolve_signatures_base_from_roots(prioritized_bundle_roots())
 }
 
+/// Standard platform user cache directory for Fission:
+/// `$XDG_CACHE_HOME/fission/cache` or `dirs::cache_dir().join("fission").join("cache")`.
+#[must_use]
+pub fn fission_cache_dir() -> Option<PathBuf> {
+    dirs::cache_dir().map(|d| d.join("fission").join("cache"))
+}
+
+/// Resolve the Ghidra data directory containing `.opinion` and `.xml` constraints.
+///
+/// Order of evaluation:
+/// 1. `FISSION_GHIDRA_DATA_DIR` environment variable.
+/// 2. Explicit and ambient bundle roots (`prioritized_bundle_roots()`), checking for
+///    `ghidra-data/`, `utils/ghidra-data/`, or direct Ghidra structure.
+/// 3. Workspace root from `find_workspace_root("FISSION_ROOT")`, looking under `utils/ghidra-data`.
+#[must_use]
+pub fn find_ghidra_data_root() -> PathBuf {
+    if let Some(path) = std::env::var_os("FISSION_GHIDRA_DATA_DIR") {
+        return PathBuf::from(path);
+    }
+    for root in prioritized_bundle_roots() {
+        let candidate = root.join("ghidra-data");
+        if candidate.is_dir() {
+            return candidate;
+        }
+        let candidate_utils = root.join("utils").join("ghidra-data");
+        if candidate_utils.is_dir() {
+            return candidate_utils;
+        }
+        if root.join("Ghidra").join("Features").is_dir() {
+            return root;
+        }
+    }
+    crate::core::utils::find_workspace_root("FISSION_ROOT")
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("utils")
+        .join("ghidra-data")
+}
+
+/// Resolve the SLEIGH specs directory containing `languages/`, `compiled/`, and manifests.
+///
+/// Order of evaluation:
+/// 1. `FISSION_SLEIGH_SPEC_DIR` environment variable (normalizing any trailing `languages/`).
+/// 2. Explicit and ambient bundle roots (`prioritized_bundle_roots()`), checking for
+///    `sleigh-specs/`, `utils/sleigh-specs/`, or direct `languages/`.
+/// 3. Workspace root from `find_workspace_root("FISSION_ROOT")`, looking under `utils/sleigh-specs`.
+#[must_use]
+pub fn find_sleigh_specs_root() -> PathBuf {
+    if let Some(path) = std::env::var_os("FISSION_SLEIGH_SPEC_DIR") {
+        let path = PathBuf::from(path);
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "languages")
+        {
+            return path.parent().unwrap_or(&path).to_path_buf();
+        }
+        return path;
+    }
+    for root in prioritized_bundle_roots() {
+        let candidate = root.join("sleigh-specs");
+        if candidate.is_dir() {
+            return candidate;
+        }
+        let candidate_utils = root.join("utils").join("sleigh-specs");
+        if candidate_utils.is_dir() {
+            return candidate_utils;
+        }
+        if root.join("languages").is_dir() {
+            return root;
+        }
+    }
+    crate::core::utils::find_workspace_root("FISSION_ROOT")
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("utils")
+        .join("sleigh-specs")
+}
+
 #[must_use]
 pub fn resolve_signatures_base_from_roots(
     roots: impl IntoIterator<Item = PathBuf>,
@@ -365,5 +442,34 @@ mod resource_bundle_tests {
         unsafe {
             std::env::remove_var("FISSION_RESOURCE_ROOT");
         }
+    }
+
+    #[test]
+    fn find_ghidra_data_and_sleigh_specs_roots_resolve() {
+        let ghidra = find_ghidra_data_root();
+        assert!(ghidra.exists(), "ghidra data root should exist: {ghidra:?}");
+
+        let specs = find_sleigh_specs_root();
+        assert!(specs.exists(), "sleigh specs root should exist: {specs:?}");
+
+        let cache = fission_cache_dir();
+        assert!(cache.is_some(), "platform cache dir should resolve");
+    }
+
+    #[test]
+    fn bundle_root_can_provide_sleigh_specs_and_ghidra_data() {
+        let _guard = DETECT_LOCK.lock().expect("detect lock poisoned");
+
+        let dir = tempfile::tempdir().unwrap();
+        let ghidra_dir = dir.path().join("ghidra-data");
+        let specs_dir = dir.path().join("sleigh-specs");
+        fs::create_dir_all(&ghidra_dir).unwrap();
+        fs::create_dir_all(&specs_dir).unwrap();
+
+        set_cli_resource_bundle_root(Some(dir.path().to_path_buf()));
+        assert_eq!(find_ghidra_data_root(), ghidra_dir);
+        assert_eq!(find_sleigh_specs_root(), specs_dir);
+
+        set_cli_resource_bundle_root(None);
     }
 }

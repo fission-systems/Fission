@@ -233,7 +233,10 @@ impl XrefDatabase {
             else {
                 continue;
             };
-            if decoded.stop_reason != DecodeStopReason::TerminalControlFlow {
+            if !matches!(
+                decoded.stop_reason,
+                DecodeStopReason::TerminalControlFlow | DecodeStopReason::IndirectBranchHalt
+            ) {
                 continue;
             }
             let mut analyzer = crate::analysis::value_set::ValueSetAnalyzer::new();

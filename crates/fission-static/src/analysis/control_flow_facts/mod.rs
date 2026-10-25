@@ -603,7 +603,7 @@ fn section_upper_bound(binary: &LoadedBinary, address: u64) -> u64 {
 }
 
 fn collect_indirect_targets(binary: &LoadedBinary) -> BTreeSet<u64> {
-    let little_endian = !binary.inner().arch_spec.contains("BE");
+    let little_endian = binary.is_little_endian();
     let mut targets = BTreeSet::new();
 
     for use_site in relocation_use_sites(binary) {
@@ -616,7 +616,7 @@ fn collect_indirect_targets(binary: &LoadedBinary) -> BTreeSet<u64> {
 }
 
 fn collect_relocation_targets_in_range(binary: &LoadedBinary, start: u64, end: u64) -> Vec<u64> {
-    let little_endian = !binary.inner().arch_spec.contains("BE");
+    let little_endian = binary.is_little_endian();
     let mut targets = Vec::new();
 
     for use_site in relocation_use_sites(binary) {
@@ -683,7 +683,7 @@ pub(crate) fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'s
     }
 }
 
-fn resolve_call_target_name(
+pub(crate) fn resolve_call_target_name(
     binary: &LoadedBinary,
     target_addr: u64,
 ) -> Option<(String, Option<&str>)> {
@@ -702,7 +702,7 @@ fn resolve_call_target_name(
     })
 }
 
-fn resolve_call_target_name_direct(
+pub(crate) fn resolve_call_target_name_direct(
     binary: &LoadedBinary,
     target_addr: u64,
 ) -> Option<(String, Option<&str>)> {
@@ -1238,5 +1238,47 @@ mod tests {
             resolved.map(|(sym, _)| sym),
             Some("ExitProcess".to_string())
         );
+    }
+
+    #[test]
+    fn collect_indirect_targets_uses_canonical_big_endian_for_powerpc_alias() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+
+        let mut data = vec![0u8; 0x3000];
+        data[0x1200..0x1208].copy_from_slice(&0x1400_1500u64.to_be_bytes());
+
+        let binary = LoadedBinaryBuilder::new("ppc.elf".to_string(), DataBuffer::Heap(data))
+            .format("ELF")
+            .architecture(fission_core::architecture::ArchitectureDescriptor {
+                processor: "PowerPC".into(),
+                endian: "big".into(),
+                bitness: 64,
+                variant: "default".into(),
+                abi: None,
+                raw_machine: "ppc64".into(),
+            })
+            .image_base(0x1400_0000)
+            .add_section(fission_loader::loader::SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1400_1000,
+                virtual_size: 0x1000,
+                file_offset: 0x1000,
+                file_size: 0x1000,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_relocations(vec![RelocationEntry {
+                address: 0x1400_1200,
+                r_type: 10,
+                size: 8,
+                addend: 0,
+                symbol_name: None,
+            }])
+            .build()
+            .expect("build");
+
+        let facts = ControlFlowFacts::assemble(&binary, None);
+        assert!(facts.indirect_targets.contains(&0x1400_1500));
     }
 }

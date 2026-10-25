@@ -395,3 +395,259 @@ fn aggressive_instruction_finder_does_not_run_under_balanced_or_conservative() {
         "Balanced must not run the riskier AIF-style scanner -- only Aggressive should"
     );
 }
+
+#[test]
+fn validate_after_condition_handles_section_start_defined_ptr_and_padding() {
+    use super::discover::validate_after_condition;
+
+    let mut bytes = vec![0x00; 0x100];
+    bytes[0x10] = 0x90; // NOP padding before 0x401011
+    bytes[0x20] = 0xcc; // INT3 padding before 0x401021
+    bytes[0x30] = 0x55; // non-padding code byte before 0x401031
+    let binary = LoadedBinaryBuilder::new("after.bin".to_string(), DataBuffer::Heap(bytes))
+        .format("PE")
+        .image_base(0x400000)
+        .entry_point(0x401000)
+        .arch_spec("x86:LE:64:default")
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 0x100,
+            file_offset: 0,
+            file_size: 0x100,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("synthetic binary");
+    let exec_ranges = executable_ranges(&binary);
+    let mut refs = std::collections::HashSet::new();
+    refs.insert(0x401050);
+
+    // `after="defined"` must accept the start of an executable section
+    assert!(validate_after_condition(
+        &binary,
+        0x401000,
+        "defined",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    // `after="ptr"` requires a pointer/reference targeting `addr`
+    assert!(validate_after_condition(
+        &binary,
+        0x401050,
+        "ptr",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    assert!(!validate_after_condition(
+        &binary,
+        0x401054,
+        "ptr",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    // `after="data"` accepts 0x00, 0x90, and 0xcc alignment padding
+    assert!(validate_after_condition(
+        &binary,
+        0x401011,
+        "data",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    assert!(validate_after_condition(
+        &binary,
+        0x401021,
+        "data",
+        &exec_ranges,
+        Some(&refs)
+    ));
+    assert!(!validate_after_condition(
+        &binary,
+        0x401031,
+        "data",
+        &exec_ranges,
+        Some(&refs)
+    ));
+}
+
+#[test]
+fn tracker_merges_overlapping_intervals_and_maintains_monotonic_offcut_queries() {
+    use super::discover::InstructionBoundaryTracker;
+    use std::collections::HashSet;
+
+    // Simulate overlapping instruction disassemblies:
+    // Inst 1: [0x1000, 0x1005)
+    // Inst 2: [0x1002, 0x1006)
+    // Inst 3: [0x1010, 0x1014)
+    // Inst 4: [0x1014, 0x1018)  (adjacent)
+    let raw = vec![
+        (0x1000, 0x1005),
+        (0x1002, 0x1006),
+        (0x1010, 0x1014),
+        (0x1014, 0x1018),
+    ];
+    let known = HashSet::from([0x1000]);
+    let tracker = InstructionBoundaryTracker::from_raw_boundaries(raw, known);
+
+    // Verify merged intervals:
+    // [0x1000, 0x1006) and [0x1010, 0x1018)
+    assert_eq!(tracker.intervals(), &[(0x1000, 0x1006), (0x1010, 0x1018)]);
+    // Instruction starts: 0x1000, 0x1002, 0x1010, 0x1014
+    assert_eq!(
+        tracker.instruction_starts(),
+        &[0x1000, 0x1002, 0x1010, 0x1014]
+    );
+
+    // Test in_body:
+    assert!(tracker.is_in_body(0x1000));
+    assert!(tracker.is_in_body(0x1002));
+    assert!(!tracker.is_in_body(0x1001));
+    assert!(!tracker.is_in_body(0x1005));
+    assert!(tracker.is_in_body(0x1010));
+    assert!(tracker.is_in_body(0x1014));
+
+    // Test offcut:
+    assert!(!tracker.is_offcut(0x1000)); // instruction start, not offcut
+    assert!(tracker.is_offcut(0x1001)); // interior of [0x1000, 0x1005)
+    assert!(!tracker.is_offcut(0x1002)); // instruction start, not offcut
+    assert!(tracker.is_offcut(0x1003)); // interior
+    assert!(tracker.is_offcut(0x1005)); // interior of merged interval
+    assert!(!tracker.is_offcut(0x1006)); // outside
+    assert!(!tracker.is_offcut(0x1007)); // gap between intervals
+    assert!(!tracker.is_offcut(0x1010)); // start
+    assert!(tracker.is_offcut(0x1011)); // interior
+    assert!(!tracker.is_offcut(0x1014)); // start of adjacent inst
+    assert!(tracker.is_offcut(0x1017)); // interior
+    assert!(!tracker.is_offcut(0x1018)); // end
+
+    // Test overlap:
+    assert!(tracker.is_overlap(0x1000));
+    assert!(tracker.is_overlap(0x1001));
+    assert!(tracker.is_overlap(0x1002));
+    assert!(tracker.is_overlap(0x1005));
+    assert!(!tracker.is_overlap(0x1006));
+    assert!(!tracker.is_overlap(0x1009));
+    assert!(tracker.is_overlap(0x1010));
+    assert!(tracker.is_overlap(0x1014));
+    assert!(tracker.is_overlap(0x1017));
+    assert!(!tracker.is_overlap(0x1018));
+}
+
+#[test]
+fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
+    let _guard = sleigh_runtime_discovery_lock();
+    use super::discover::walk_function_boundaries;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+    use fission_sleigh::runtime::RuntimeSleighFrontend;
+    use std::collections::HashSet;
+
+    // Layout:
+    // Func 1:
+    // 0x401000: jmp +0x10 -> 0x401012 (eb 10) - tail call to Func 2!
+    // Func 2:
+    // 0x401012: nop (90)
+    // 0x401013: ret (c3)
+    let mut bytes = vec![0xcc_u8; 0x1000];
+    bytes[0] = 0xeb;
+    bytes[1] = 0x10;
+    bytes[0x12] = 0x90;
+    bytes[0x13] = 0xc3;
+
+    let binary = LoadedBinaryBuilder::new("tailcall-test.bin".to_string(), DataBuffer::Heap(bytes))
+        .format("PE")
+        .image_base(0x400000)
+        .entry_point(0x401000)
+        .arch_spec("x86:LE:64:default")
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 0x1000,
+            file_offset: 0,
+            file_size: 0x1000,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("synthetic binary");
+
+    let load_spec = binary.load_spec().expect("load spec");
+    let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec).expect("frontend");
+
+    // 0x401012 is known as a separate function!
+    let known_functions = HashSet::from([0x401000, 0x401012]);
+    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions);
+
+    assert!(
+        boundaries.contains(&(0x401000, 0x401002)),
+        "should contain initial jmp"
+    );
+    assert!(
+        !boundaries.iter().any(|&(s, _)| s >= 0x401012),
+        "must NOT envelope tail call target function"
+    );
+}
+
+#[test]
+fn walk_function_boundaries_terminates_on_noreturn_call() {
+    let _guard = sleigh_runtime_discovery_lock();
+    use super::discover::walk_function_boundaries;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+    use fission_sleigh::runtime::RuntimeSleighFrontend;
+    use std::collections::HashSet;
+
+    // Layout:
+    // 0x401000: call 0x401020 (e8 1b 00 00 00) -> calls ExitProcess
+    // 0x401005: nop (90)  <-- dead code / data / next function; should NOT be enveloped!
+    // 0x401006: ret (c3)
+    // 0x401020: jmp [rip + 0x2fe0] -> IAT slot 0x404006 (ff 25 e0 2f 00 00)
+    let mut bytes = vec![0xcc_u8; 0x1000];
+    // call 0x401020 (rel = 0x401020 - 0x401005 = 0x1b)
+    bytes[0] = 0xe8;
+    bytes[1] = 0x1b;
+    bytes[2] = 0x00;
+    bytes[3] = 0x00;
+    bytes[4] = 0x00;
+    // dead code after noreturn:
+    bytes[5] = 0x90; // NOP
+    bytes[6] = 0xc3; // RET
+
+    let binary = LoadedBinaryBuilder::new("noreturn-test.bin".to_string(), DataBuffer::Heap(bytes))
+        .format("PE")
+        .image_base(0x400000)
+        .entry_point(0x401000)
+        .arch_spec("x86:LE:64:default")
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x401000,
+            virtual_size: 0x1000,
+            file_offset: 0,
+            file_size: 0x1000,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_iat_symbol(0x401020, "KERNEL32.DLL!ExitProcess".to_string())
+        .build()
+        .expect("synthetic binary");
+
+    let load_spec = binary.load_spec().expect("load spec");
+    let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec).expect("frontend");
+
+    let known_functions = HashSet::from([0x401000]);
+    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions);
+
+    assert!(
+        boundaries.contains(&(0x401000, 0x401005)),
+        "should contain noreturn call instruction"
+    );
+    assert!(
+        !boundaries.iter().any(|&(s, _)| s >= 0x401005),
+        "must NOT fall through past noreturn call"
+    );
+}

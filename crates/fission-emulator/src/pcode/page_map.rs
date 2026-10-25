@@ -93,7 +93,7 @@ impl GuestMapping {
 }
 
 /// Sparse page flag table + region inventory for user-mode guest address space.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PageMap {
     /// Page base address → protection flags (must include VALID when mapped).
     flags: BTreeMap<u64, u8>,
@@ -105,6 +105,14 @@ pub struct PageMap {
     pub brk: u64,
     /// Initial program break (heap start).
     pub brk_base: u64,
+    /// Guest architecture is 64-bit (affects address space upper bounds).
+    pub is_64bit: bool,
+}
+
+impl Default for PageMap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PageMap {
@@ -116,6 +124,22 @@ impl PageMap {
             mmap_hint: 0x0000_0000_6000_0000,
             brk: 0,
             brk_base: 0,
+            is_64bit: true,
+        }
+    }
+
+    pub fn set_64bit(&mut self, is_64bit: bool) {
+        self.is_64bit = is_64bit;
+        if !is_64bit && self.mmap_hint >= 0xFFFF_0000 {
+            self.mmap_hint = 0x4000_0000;
+        }
+    }
+
+    pub fn max_address(&self) -> u64 {
+        if self.is_64bit {
+            0x0000_7FFF_0000_0000
+        } else {
+            0xFFFF_0000
         }
     }
 
@@ -320,28 +344,95 @@ impl PageMap {
         Ok(())
     }
 
-    /// Allocate an anonymous region of `len` bytes (page-rounded) near `mmap_hint`.
-    /// Returns the base address on success.
-    pub fn mmap_anon(&mut self, len: u64, page_prot: u8) -> u64 {
-        let len = page_align_up(len.max(1));
-        let mut candidate = page_align_down(self.mmap_hint);
-        // Simple linear scan for a free hole; wrap once if we hit high addresses.
-        for _ in 0..4096 {
-            if self.region_free(candidate, len) {
-                self.map_region(candidate, len, page_prot | prot::ANON, true);
-                self.mmap_hint = candidate.saturating_add(len);
-                return candidate;
+    /// Calculate the contiguous readable byte count starting at `addr`, up to `max_len`.
+    ///
+    /// If `addr` itself is not readable, returns 0. Otherwise, checks subsequent pages
+    /// and returns the number of contiguous readable bytes before the first unmapped
+    /// or unreadable page boundary, capped at `max_len`.
+    pub fn readable_extent(&self, addr: u64, max_len: usize) -> usize {
+        if max_len == 0 {
+            return 0;
+        }
+        let mut page = page_align_down(addr);
+        if self.check_access(page, AccessKind::Read).is_err() {
+            return 0;
+        }
+        // Bytes available in the initial page from `addr` to page end
+        let page_offset = (addr - page) as usize;
+        let mut available = (PAGE_SIZE as usize).saturating_sub(page_offset);
+        if available >= max_len {
+            return max_len;
+        }
+        loop {
+            let next_page = page.saturating_add(PAGE_SIZE);
+            if next_page == page || self.check_access(next_page, AccessKind::Read).is_err() {
+                break;
             }
-            candidate = candidate.saturating_add(PAGE_SIZE);
-            if candidate >= 0x0000_7FFF_0000_0000 {
-                candidate = 0x0000_0000_4000_0000;
+            page = next_page;
+            available = available.saturating_add(PAGE_SIZE as usize);
+            if available >= max_len {
+                return max_len;
             }
         }
-        // Fallback: force-map at hint even if overlapping (should be rare).
-        let base = page_align_down(self.mmap_hint);
-        self.map_region(base, len, page_prot | prot::ANON, true);
-        self.mmap_hint = base.saturating_add(len);
-        base
+        available.min(max_len)
+    }
+
+    /// Allocate an anonymous region of `len` bytes (page-rounded) near `mmap_hint`.
+    /// Returns the base address on success, or `0` on allocation failure.
+    pub fn mmap_anon(&mut self, len: u64, page_prot: u8) -> u64 {
+        let len = page_align_up(len.max(1));
+        let max_addr = self.max_address();
+        let wrap_start = if self.is_64bit {
+            0x0000_0000_4000_0000
+        } else {
+            0x1000_0000
+        };
+
+        let start_hint = page_align_down(self.mmap_hint);
+        let initial_candidate =
+            if start_hint >= PAGE_SIZE && start_hint.saturating_add(len) <= max_addr {
+                start_hint
+            } else {
+                wrap_start
+            };
+
+        let ranges = if initial_candidate > wrap_start {
+            vec![
+                (initial_candidate, max_addr),
+                (wrap_start, initial_candidate),
+            ]
+        } else {
+            vec![(initial_candidate, max_addr)]
+        };
+
+        for (search_start, search_limit) in ranges {
+            let mut candidate = search_start;
+            while candidate.saturating_add(len) <= search_limit {
+                // Find first overlapping mapping in self.mappings (sorted by start)
+                let overlap = self
+                    .mappings
+                    .iter()
+                    .find(|m| candidate < m.end && candidate.saturating_add(len) > m.start);
+
+                match overlap {
+                    Some(m) => {
+                        let next = page_align_up(m.end);
+                        if next <= candidate {
+                            candidate = candidate.saturating_add(PAGE_SIZE);
+                        } else {
+                            candidate = next;
+                        }
+                    }
+                    None => {
+                        self.map_region(candidate, len, page_prot | prot::ANON, true);
+                        self.mmap_hint = candidate.saturating_add(len);
+                        return candidate;
+                    }
+                }
+            }
+        }
+
+        0
     }
 
     /// Adjust the program break. Returns the new break.
@@ -363,10 +454,19 @@ impl PageMap {
         }
         let old_brk = self.brk;
         if request > old_brk {
-            let start = page_align_down(old_brk.max(self.brk_base));
+            let start = if self.is_mapped(old_brk) {
+                page_align_up(old_brk)
+            } else {
+                page_align_down(old_brk.max(self.brk_base))
+            };
             let end = page_align_up(request);
             if end > start {
-                self.map_region(start, end - start, prot::RW | prot::ANON, true);
+                let len = end - start;
+                if !self.region_free(start, len) {
+                    // Collision with existing mapping: fail closed, return old_brk without clobbering
+                    return old_brk;
+                }
+                self.map_region(start, len, prot::RW | prot::ANON, true);
             }
         } else if request < old_brk {
             let unmap_from = page_align_up(request);
@@ -563,5 +663,89 @@ mod tests {
             !pm.mprotect_checked(0x1000, 0x2000, prot::RW),
             "partial unmapped must fail"
         );
+    }
+
+    #[test]
+    fn mmap_anon_jumps_past_large_mapping_without_overwrite() {
+        let mut pm = PageMap::new();
+        // A large 32MB mapping starting at mmap_hint (0x6000_0000..0x6200_0000)
+        pm.map_region(0x6000_0000, 32 * 1024 * 1024, prot::RW, false);
+        pm.mmap_hint = 0x6000_0000;
+
+        let base = pm.mmap_anon(0x1000, prot::RW);
+        assert_eq!(base, 0x6200_0000, "must jump past the 32MB mapping");
+        // Verify the existing 32MB mapping was not clobbered or overwritten
+        assert!(pm.is_mapped(0x6000_0000));
+        assert!(pm.is_mapped(0x61FF_F000));
+        assert!(pm.is_mapped(0x6200_0000));
+    }
+
+    #[test]
+    fn mmap_anon_32bit_guest_bounds() {
+        let mut pm = PageMap::new();
+        pm.set_64bit(false);
+        pm.mmap_hint = 0xFFF0_0000;
+
+        let base = pm.mmap_anon(0x1000, prot::RW);
+        assert!(
+            base < 0xFFFF_0000,
+            "address must be strictly below 4GB limit for 32-bit guests: 0x{base:X}"
+        );
+    }
+
+    #[test]
+    fn set_brk_collision_detection_fails_closed() {
+        let mut pm = PageMap::new();
+        pm.set_brk_base(0x5000_0000);
+        pm.set_brk(0x5000_1000);
+
+        // Map an obstacle at 0x5000_2000..0x5000_4000
+        pm.map_region(0x5000_2000, 0x2000, prot::RX, false);
+
+        // Attempting to expand brk into the obstacle must fail closed and return old_brk
+        let res = pm.set_brk(0x5000_3000);
+        assert_eq!(res, 0x5000_1000, "must fail closed and return old brk");
+        assert_eq!(pm.brk, 0x5000_1000);
+
+        // Verify obstacle permissions were preserved
+        let flags = pm.page_flags(0x5000_2000).expect("still mapped");
+        assert_eq!(
+            flags & prot::EXEC,
+            prot::EXEC,
+            "must not overwrite obstacle"
+        );
+    }
+
+    #[test]
+    fn readable_extent_clamps_to_unmapped_boundary() {
+        let mut pm = PageMap::new();
+        // Map page at 0x1000 (4096 bytes: 0x1000..0x2000)
+        pm.map_region(0x1000, 0x1000, prot::RX, true);
+
+        // Within page: request 32 bytes from 0x1000 -> 32
+        assert_eq!(pm.readable_extent(0x1000, 32), 32);
+
+        // Near end of page: 30 bytes before boundary at 0x1fe2 (0x2000 - 30)
+        let near_edge = 0x2000 - 30;
+        // Requesting 80 bytes should clamp to exactly 30 bytes because 0x2000 is unmapped
+        assert_eq!(pm.readable_extent(near_edge, 80), 30);
+
+        // Requesting exactly 30 bytes should return 30
+        assert_eq!(pm.readable_extent(near_edge, 30), 30);
+
+        // Requesting 10 bytes should return 10
+        assert_eq!(pm.readable_extent(near_edge, 10), 10);
+
+        // At unmapped address 0x2000 should return 0
+        assert_eq!(pm.readable_extent(0x2000, 80), 0);
+
+        // Now map the next page at 0x2000
+        pm.map_region(0x2000, 0x1000, prot::READ, true);
+        // Spanning across pages: 30 bytes in first page + 50 in next = 80
+        assert_eq!(pm.readable_extent(near_edge, 80), 80);
+
+        // Requesting across to unmapped 0x3000
+        let near_second_edge = 0x3000 - 15;
+        assert_eq!(pm.readable_extent(near_second_edge, 100), 15);
     }
 }

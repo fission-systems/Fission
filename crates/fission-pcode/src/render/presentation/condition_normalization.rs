@@ -260,30 +260,32 @@ fn rewrite_presentation_condition_form(expr: &mut HirExpr) -> bool {
             HirExpr::Const(0, _),
         ) = (lhs.as_ref(), rhs.as_ref())
         {
-            let new_left = HirExpr::Binary {
-                op: *cmp_op,
-                lhs: a.clone(),
-                rhs: rhs.clone(),
-                ty: NirType::Bool,
-            };
-            let new_right = HirExpr::Binary {
-                op: *cmp_op,
-                lhs: b.clone(),
-                rhs: rhs.clone(),
-                ty: NirType::Bool,
-            };
-            let logic_op = if *cmp_op == HirBinaryOp::Eq {
-                HirBinaryOp::LogicalAnd
-            } else {
-                HirBinaryOp::LogicalOr
-            };
-            *expr = HirExpr::Binary {
-                op: logic_op,
-                lhs: Box::new(new_left),
-                rhs: Box::new(new_right),
-                ty: ty.clone(),
-            };
-            return true;
+            if expr_is_presentation_pure(a) && expr_is_presentation_pure(b) {
+                let new_left = HirExpr::Binary {
+                    op: *cmp_op,
+                    lhs: a.clone(),
+                    rhs: rhs.clone(),
+                    ty: NirType::Bool,
+                };
+                let new_right = HirExpr::Binary {
+                    op: *cmp_op,
+                    lhs: b.clone(),
+                    rhs: rhs.clone(),
+                    ty: NirType::Bool,
+                };
+                let logic_op = if *cmp_op == HirBinaryOp::Eq {
+                    HirBinaryOp::LogicalAnd
+                } else {
+                    HirBinaryOp::LogicalOr
+                };
+                *expr = HirExpr::Binary {
+                    op: logic_op,
+                    lhs: Box::new(new_left),
+                    rhs: Box::new(new_right),
+                    ty: ty.clone(),
+                };
+                return true;
+            }
         }
     }
 
@@ -311,10 +313,15 @@ fn rewrite_presentation_condition_form(expr: &mut HirExpr) -> bool {
         {
             let then_matches = matches!(then_expr.as_ref(), HirExpr::Const(v, _) if v == rhs_val);
             let else_matches = matches!(else_expr.as_ref(), HirExpr::Const(v, _) if v == rhs_val);
+            if then_matches && else_matches && expr_is_presentation_pure(cond) {
+                let const_bool = if *cmp_op == HirBinaryOp::Eq { 1 } else { 0 };
+                *expr = HirExpr::Const(const_bool, NirType::Bool);
+                return true;
+            }
             let negate = match (*cmp_op, then_matches, else_matches) {
-                (HirBinaryOp::Eq, true, _) => Some(false),
+                (HirBinaryOp::Eq, true, false) => Some(false),
                 (HirBinaryOp::Eq, false, true) => Some(true),
-                (HirBinaryOp::Ne, true, _) => Some(true),
+                (HirBinaryOp::Ne, true, false) => Some(true),
                 (HirBinaryOp::Ne, false, true) => Some(false),
                 _ => None,
             };

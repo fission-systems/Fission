@@ -146,7 +146,7 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut PreHirFunction, cheap_only: 
         promoted_bindings.push(PreHirBinding {
             name: alias,
             ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
-            surface_type_name: slot_surface_type_name(&display_base, func, &inventory),
+            surface_type_name: None,
             origin: derived_origin,
             initializer: Some(PreHirExpr::Cast {
                 ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
@@ -447,7 +447,7 @@ fn collect_memory_slot_candidates(
     func: &PreHirFunction,
     candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
 ) {
-    for (first_seen, access) in collect_partitioned_memory_accesses(&func.body)
+    for (first_seen, access) in collect_partitioned_memory_accesses(&func.body, func.is_64bit)
         .into_iter()
         .enumerate()
     {
@@ -689,12 +689,47 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             parts.const_offset += sign * i64::from(*offset);
             collect_address_parts(base, parts, sign)
         }
+        PreHirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            let stride = i64::from(type_byte_size(elem_ty)?);
+            if stride <= 0 {
+                return None;
+            }
+            collect_address_parts(base, parts, sign)?;
+            if let PreHirExpr::Const(index, _) = index.as_ref() {
+                let offset = index.checked_mul(stride)?.checked_mul(sign)?;
+                parts.const_offset = parts.const_offset.checked_add(offset)?;
+                Some(())
+            } else {
+                add_scaled_index(parts, index.as_ref().clone(), sign.checked_mul(stride)?)
+            }
+        }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Add,
             lhs,
             rhs,
-            ..
+            ty,
         } => {
+            if let NirType::Ptr(elem_ty) = ty {
+                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                    let elem_sz_i = elem_sz as i64;
+                    if let PreHirExpr::Const(val, _) = rhs.as_ref() {
+                        collect_address_parts(lhs, parts, sign)?;
+                        let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
+                        parts.const_offset = parts.const_offset.checked_add(offset)?;
+                        return Some(());
+                    }
+                    if let PreHirExpr::Const(val, _) = lhs.as_ref() {
+                        collect_address_parts(rhs, parts, sign)?;
+                        let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
+                        parts.const_offset = parts.const_offset.checked_add(offset)?;
+                        return Some(());
+                    }
+                }
+            }
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, sign)
         }
@@ -702,8 +737,19 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
-            ..
+            ty,
         } => {
+            if let NirType::Ptr(elem_ty) = ty {
+                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                    let elem_sz_i = elem_sz as i64;
+                    if let PreHirExpr::Const(val, _) = rhs.as_ref() {
+                        collect_address_parts(lhs, parts, sign)?;
+                        let offset = val.checked_mul(elem_sz_i)?.checked_mul(-sign)?;
+                        parts.const_offset = parts.const_offset.checked_add(offset)?;
+                        return Some(());
+                    }
+                }
+            }
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, -sign)
         }
@@ -884,4 +930,45 @@ fn slot_family_layout(key: &MemorySlotKey) -> (i64, i64) {
     let family_offset = key.offset - lane_bytes;
     let lane = lane_bytes / i64::from(key.access_size);
     (family_offset, lane)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collect_address_parts_scales_typed_pointer_binary_add() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_u32_ty = NirType::Ptr(Box::new(u32_ty.clone()));
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("p".to_string())),
+            rhs: Box::new(PreHirExpr::Const(5, u32_ty.clone())),
+            ty: ptr_u32_ty,
+        };
+        let mut parts = AddressParts::default();
+        collect_address_parts(&expr, &mut parts, 1).expect("collect parts");
+        assert_eq!(parts.const_offset, 20); // 5 elements * 4 bytes = 20
+        assert_eq!(parts.base, Some(PreHirExpr::Var("p".to_string())));
+    }
+
+    #[test]
+    fn collect_address_parts_handles_constant_index() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let expr = PreHirExpr::Index {
+            base: Box::new(PreHirExpr::Var("arr".to_string())),
+            index: Box::new(PreHirExpr::Const(2, u32_ty.clone())),
+            elem_ty: u32_ty,
+        };
+        let mut parts = AddressParts::default();
+        collect_address_parts(&expr, &mut parts, 1).expect("collect parts");
+        assert_eq!(parts.const_offset, 8); // 2 elements * 4 bytes = 8
+        assert_eq!(parts.base, Some(PreHirExpr::Var("arr".to_string())));
+    }
 }

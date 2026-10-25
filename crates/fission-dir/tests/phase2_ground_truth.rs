@@ -58,6 +58,25 @@ fn count_bits_matches_real_machine_code() {
     }
 }
 
+#[test]
+fn float_return_signature_reports_unsupported() {
+    let path = corpus_binary("control_flow_gcc_O0.exe");
+    if !path.exists() {
+        return;
+    }
+    let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
+    let mut hir = fission_midend_core::ir::HirFunction::default();
+    hir.return_type = fission_midend_core::ir::NirType::Float { bits: 32 };
+    let prehir = fission_midend_prehir::PreHirFunction::default();
+    let outcome = check_ground_truth(&mut harness, 0x140001530, &prehir, &hir, &[]);
+    match outcome {
+        VerifyOutcome::Unsupported(fission_dir::report::UnsupportedReason::Construct(msg)) => {
+            assert_eq!(msg, "floating-point ABI in ground-truth");
+        }
+        other => panic!("expected Unsupported construct, got {other:?}"),
+    }
+}
+
 /// Proves ground-truth checking has teeth: a HIR body that's been corrupted
 /// to always return 0 (as if a structuring bug had collapsed the whole
 /// accumulator loop away) still evaluates "successfully" (it's a valid,

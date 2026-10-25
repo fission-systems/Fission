@@ -211,3 +211,158 @@ fn a_script_can_read_the_code_it_stopped_in() {
         "the listing is not consecutive"
     );
 }
+
+/// Instructions placed immediately adjacent to an unmapped page boundary
+/// must disassemble successfully without triggering speculative window
+/// unmapped page faults.
+#[test]
+fn disasm_near_unmapped_page_boundary_succeeds_without_page_fault() {
+    // 0x140005000 is mapped (.idata, 4096 bytes: 0x140005000..0x140006000),
+    // 0x140006000 is unmapped. Disassemble near the trailing edge of .idata
+    // (16 bytes before the boundary at 0x140005ff0).
+    let result = run(r#"
+        let target = 0x140005ff0;
+        // Request 10 instructions (which would speculatively require 160 bytes and
+        // cross 144 bytes into unmapped 0x140006000).
+        let insns = machine.disasm(target, 10);
+        emit(#{
+            kind: "boundary_disasm",
+            count: insns.len(),
+            first_addr: insns[0].address,
+        });
+        "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    let d = result.findings[0].data.as_ref().expect("data");
+    assert!(
+        d["count"].as_i64().unwrap() > 0,
+        "must decode instructions up to the boundary"
+    );
+    assert_eq!(d["first_addr"], serde_json::json!(0x140005ff0i64));
+}
+
+#[test]
+fn machine_execution_respects_max_runtime_ms() {
+    let limits = ScriptLimits {
+        max_runtime_ms: 50,
+        max_operations: 0,
+        ..ScriptLimits::default()
+    };
+    let result = run_script_with(
+        &fixture(),
+        r#"
+        let entry = machine.pc();
+        while true {
+            machine.step();
+            machine.set_reg("RIP", entry);
+        }
+        "#,
+        "timeout_machine.rhai",
+        limits,
+        ScriptOptions { machine: true },
+    );
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Timeout,
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn disasm_near_section_boundary_does_not_bail_on_overread() {
+    let fix = fixture();
+    let sec = fix
+        .executable_section_containing(fix.inner().entry_point)
+        .or_else(|| fix.sections.iter().find(|s| s.is_executable))
+        .expect("executable section");
+    // Start 16 bytes before the end of the executable section
+    let near_end = (sec.virtual_address + sec.virtual_size).saturating_sub(16);
+    let src = format!(
+        r#"
+        let insns = machine.disasm(0x{:x}, 50);
+        emit(#{{ kind: "near_boundary", count: insns.len() }});
+        "#,
+        near_end
+    );
+    let result = run_script_with(
+        &fix,
+        &src,
+        "boundary.rhai",
+        ScriptLimits::default(),
+        ScriptOptions { machine: true },
+    );
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.findings.len(), 1);
+    assert_eq!(result.findings[0].kind, "near_boundary");
+}
+
+#[test]
+fn machine_read_clamps_unbounded_size() {
+    let result = run(r#"
+        let pc = machine.pc();
+        // Read a small valid window (16 bytes)
+        let bytes = machine.read(pc, 16);
+        emit(#{ kind: "valid_read", len: bytes.len() });
+
+        // Request 100 million bytes -- must not OOM or panic with capacity overflow;
+        // it is capped to <= 64KB and either returns <= 64KB or errors cleanly.
+        try {
+            let big = machine.read(pc, 100_000_000);
+            emit(#{ kind: "capped_read", len: big.len() });
+        } catch (e) {
+            emit(#{ kind: "capped_read", error: e });
+        }
+    "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        result.findings[0].data.as_ref().unwrap()["len"],
+        serde_json::json!(16)
+    );
+    let finding2 = result
+        .findings
+        .iter()
+        .find(|f| f.kind == "capped_read")
+        .unwrap();
+    if let Some(len) = finding2.data.as_ref().unwrap().get("len") {
+        assert!(len.as_i64().unwrap() <= 64 * 1024);
+    } else {
+        assert!(finding2.data.as_ref().unwrap().get("error").is_some());
+    }
+}
+
+#[test]
+fn machine_read_string_resilient_to_boundary() {
+    let result = run(r#"
+        let sp = machine.reg("RSP");
+        // Write a null-terminated string onto stack
+        machine.write(sp - 0x20, [104, 101, 108, 108, 111, 0]); // "hello\0"
+        // Request a large size crossing beyond the buffer
+        let s = machine.read_string(sp - 0x20, 10_000);
+        emit(#{ kind: "read_str", str: s });
+    "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        result.findings[0].data.as_ref().unwrap()["str"],
+        serde_json::json!("hello")
+    );
+}

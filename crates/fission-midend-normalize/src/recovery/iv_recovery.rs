@@ -183,12 +183,7 @@ fn recover_break_continue_in_body(
         {
             if else_body.is_empty() {
                 if let [PreHirStmt::Goto(lbl)] = then_body.as_slice() {
-                    if after_labels.contains(lbl) {
-                        // Only replace if this is the only goto to this label.
-                        goto_counts.get(lbl).copied().unwrap_or(0) == 1
-                    } else {
-                        false
-                    }
+                    after_labels.contains(lbl)
                 } else {
                     false
                 }
@@ -208,7 +203,7 @@ fn recover_break_continue_in_body(
             {
                 if else_body.is_empty() {
                     if let [PreHirStmt::Goto(lbl)] = then_body.as_slice() {
-                        head_labels.contains(lbl) && goto_counts.get(lbl).copied().unwrap_or(0) == 1
+                        head_labels.contains(lbl)
                     } else {
                         false
                     }
@@ -250,16 +245,33 @@ fn apply_break_continue_in_stmts(
     let mut changed = false;
     let n = stmts.len();
     for loop_idx in 0..n {
-        // Determine labels that appear after this loop (exit targets).
-        let mut after_labels = HashSet::default();
-        for stmt in stmts.iter().skip(loop_idx + 1) {
-            collect_labels_stmt(stmt, &mut after_labels);
-        }
-        // Head labels: labels immediately before the loop.
-        let mut head_labels = HashSet::default();
-        if loop_idx > 0 {
-            collect_labels_stmt(&stmts[loop_idx - 1], &mut head_labels);
-        }
+        // Exit labels: only the labels directly after the loop are where a
+        // `break` lands. A label further on (or nested inside a later
+        // statement) is reached past the code in between, so a jump there
+        // is not a break.
+        let after_labels: HashSet<String> = stmts[loop_idx + 1..]
+            .iter()
+            .map_while(|stmt| match stmt {
+                PreHirStmt::Label(label) => Some(label.clone()),
+                _ => None,
+            })
+            .collect();
+        // Head labels: only the labels directly before a `while` loop are
+        // where a `continue` lands. A do-while's `continue` evaluates the
+        // condition first and a for's runs the update, so a jump back to the
+        // label in front of either is not a continue.
+        let head_labels: HashSet<String> = if matches!(stmts[loop_idx], PreHirStmt::While { .. }) {
+            stmts[..loop_idx]
+                .iter()
+                .rev()
+                .map_while(|stmt| match stmt {
+                    PreHirStmt::Label(label) => Some(label.clone()),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            HashSet::default()
+        };
 
         let is_loop = matches!(
             &stmts[loop_idx],
@@ -3661,6 +3673,94 @@ mod tests {
             .expect("inner for");
         assert!(inner.0 && inner.1 && inner.2);
         assert_eq!(inner.3, 1);
+    }
+
+    #[test]
+    fn recovers_multiple_breaks_in_loop() {
+        let mut func = PreHirFunction {
+            name: "test_multi_break".to_string(),
+            body: vec![
+                PreHirStmt::While {
+                    cond: PreHirExpr::Const(1, NirType::Bool),
+                    body: vec![
+                        PreHirStmt::If {
+                            cond: PreHirExpr::Var("cond1".to_string()),
+                            then_body: vec![PreHirStmt::Goto("loop_end".to_string())].into(),
+                            else_body: vec![].into(),
+                        },
+                        PreHirStmt::If {
+                            cond: PreHirExpr::Var("cond2".to_string()),
+                            then_body: vec![PreHirStmt::Goto("loop_end".to_string())].into(),
+                            else_body: vec![].into(),
+                        },
+                    ]
+                    .into(),
+                },
+                PreHirStmt::Label("loop_end".to_string()),
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_break_continue_pass(&mut func));
+        let PreHirStmt::While { body, .. } = &func.body[0] else {
+            panic!("expected While");
+        };
+        for stmt in body.iter() {
+            let PreHirStmt::If { then_body, .. } = stmt else {
+                panic!("expected If");
+            };
+            assert_eq!(then_body.as_slice(), &[PreHirStmt::Break]);
+        }
+    }
+
+    fn goto_if(cond: &str, label: &str) -> PreHirStmt {
+        PreHirStmt::If {
+            cond: PreHirExpr::Var(cond.to_string()),
+            then_body: vec![PreHirStmt::Goto(label.to_string())].into(),
+            else_body: vec![].into(),
+        }
+    }
+
+    #[test]
+    fn goto_past_code_after_loop_is_not_a_break() {
+        // `skip` is reached past `side_effect()`, which a break would run.
+        let mut func = PreHirFunction {
+            body: vec![
+                PreHirStmt::While {
+                    cond: PreHirExpr::Const(1, NirType::Bool),
+                    body: vec![goto_if("c", "skip")].into(),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "side_effect".to_string(),
+                    args: vec![],
+                    ty: NirType::Unknown,
+                }),
+                PreHirStmt::Label("skip".to_string()),
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+        assert!(!apply_break_continue_pass(&mut func));
+    }
+
+    #[test]
+    fn goto_to_label_before_do_while_is_not_a_continue() {
+        // A do-while's `continue` evaluates the condition; jumping back to
+        // `top` re-enters the body unconditionally.
+        let mut func = PreHirFunction {
+            body: vec![
+                PreHirStmt::Label("top".to_string()),
+                PreHirStmt::DoWhile {
+                    body: vec![goto_if("c", "top")].into(),
+                    cond: PreHirExpr::Var("more".to_string()),
+                },
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+        assert!(!apply_break_continue_pass(&mut func));
     }
 }
 

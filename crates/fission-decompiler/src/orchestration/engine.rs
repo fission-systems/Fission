@@ -187,8 +187,10 @@ mod tests {
 
     #[test]
     fn preview_worker_timeout_clamps() {
+        assert_eq!(nir_worker_timeout_ms(Some(0)), 0);
         assert_eq!(nir_worker_timeout_ms(Some(500)), 1_000);
-        assert_eq!(nir_worker_timeout_ms(Some(30_000)), 10_000);
+        assert_eq!(nir_worker_timeout_ms(Some(30_000)), 30_000);
+        assert_eq!(nir_worker_timeout_ms(Some(60_000)), 60_000);
     }
 
     #[test]

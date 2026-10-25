@@ -57,6 +57,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "line_mappings_nir": nir_line_mappings,
                 "line_mappings_hir": hir_line_mappings,
                 "line_mapping_source": "fission_ssa_assignment_definition",
+            "call_mapping_source": "fission_pcode_call_operation",
             });
             // Only present when `decomp --prehir` was passed -- absence means
             // "not requested", not "structuring produced nothing".

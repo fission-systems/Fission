@@ -114,7 +114,10 @@ pub(crate) fn push_pcode_layer_with_coverage(
             coverage.omit(XrefOmissionReason::FunctionLiftFailed, 1);
             continue;
         };
-        if decoded.stop_reason != DecodeStopReason::TerminalControlFlow {
+        if !matches!(
+            decoded.stop_reason,
+            DecodeStopReason::TerminalControlFlow | DecodeStopReason::IndirectBranchHalt
+        ) {
             coverage.omit(
                 match decoded.stop_reason {
                     DecodeStopReason::InputExhausted => {
@@ -123,7 +126,8 @@ pub(crate) fn push_pcode_layer_with_coverage(
                     DecodeStopReason::InstructionLimit => {
                         XrefOmissionReason::FunctionLiftInstructionLimit
                     }
-                    DecodeStopReason::TerminalControlFlow => {
+                    DecodeStopReason::TerminalControlFlow
+                    | DecodeStopReason::IndirectBranchHalt => {
                         XrefOmissionReason::FunctionLiftNotTerminal
                     }
                 },

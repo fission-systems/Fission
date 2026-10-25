@@ -2023,6 +2023,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("rax".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "f".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -2035,6 +2036,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("rax".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "g".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -2521,6 +2523,7 @@ mod tests {
                         }),
                         then_expr: Box::new(HirExpr::Const(0, int_ty(64, false))),
                         else_expr: Box::new(HirExpr::Call {
+                            origin: None,
                             target: "fn".into(),
                             args: vec![HirExpr::Var("param_2".into())],
                             ty: int_ty(64, false),
@@ -2580,6 +2583,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("xVar2".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "__popcount".into(),
                         args: vec![HirExpr::Var("uVar1".into())],
                         ty: int_ty(8, false),
@@ -2862,6 +2866,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("x".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "side_effect".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -2915,6 +2920,7 @@ mod tests {
                 HirStmt::Assign {
                     lhs: HirLValue::Var("x".into()),
                     rhs: HirExpr::Call {
+                        origin: None,
                         target: "once".into(),
                         args: vec![HirExpr::Var("param_1".into())],
                         ty: int_ty(32, true),
@@ -3004,6 +3010,7 @@ mod tests {
                     then_body: vec![HirStmt::Assign {
                         lhs: HirLValue::Var("x".into()),
                         rhs: HirExpr::Call {
+                            origin: None,
                             target: "side".into(),
                             args: vec![],
                             ty: int_ty(32, true),
@@ -3412,6 +3419,56 @@ mod tests {
                 ty: NirType::Bool,
             }
         );
+
+        // Tautology / contradiction when both select arms equal the compared constant:
+        // (cond ? 5 : 5) == 5 -> 1 (true), (cond ? 5 : 5) != 5 -> 0 (false).
+        let same_select = || HirExpr::Select {
+            cond: Box::new(HirExpr::Const(0, NirType::Bool)),
+            then_expr: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            else_expr: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            ty: int_ty(32, true),
+        };
+        let mut tautology = HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(same_select()),
+            rhs: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_conditions_in_expr(&mut tautology));
+        assert_eq!(tautology, HirExpr::Const(1, NirType::Bool));
+
+        let mut contradiction = HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs: Box::new(same_select()),
+            rhs: Box::new(HirExpr::Const(5, int_ty(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_conditions_in_expr(&mut contradiction));
+        assert_eq!(contradiction, HirExpr::Const(0, NirType::Bool));
+    }
+
+    #[test]
+    fn condition_rewrite_preserves_bitwise_or_with_side_effects() {
+        let call_b = HirExpr::Call {
+            origin: None,
+            target: "query_state".into(),
+            args: Vec::new(),
+            ty: int_ty(32, false),
+        };
+        let mut expr = HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Or,
+                lhs: Box::new(HirExpr::Var("status".into())),
+                rhs: Box::new(call_b),
+                ty: int_ty(32, false),
+            }),
+            rhs: Box::new(HirExpr::Const(0, int_ty(32, false))),
+            ty: NirType::Bool,
+        };
+        let original = expr.clone();
+        assert!(!canonicalize_conditions_in_expr(&mut expr));
+        assert_eq!(expr, original);
     }
 
     #[test]
@@ -3950,6 +4007,7 @@ mod tests {
                         HirStmt::Assign {
                             lhs: HirLValue::Var("i".into()),
                             rhs: HirExpr::Call {
+                                origin: None,
                                 target: "other".into(),
                                 args: vec![],
                                 ty: i32.clone(),
@@ -4020,6 +4078,93 @@ mod tests {
         assert!(
             func.body.iter().any(|s| matches!(s, HirStmt::While { .. })),
             "unrelated seed must not become for-init: {:?}",
+            func.body
+        );
+    }
+
+    #[test]
+    fn goto_recovery_empty_fallthrough_does_not_conditionalize_following_code() {
+        let i32 = int_ty(32, true);
+        let mut func = HirFunction {
+            name: "empty_fallthrough".into(),
+            params: vec![param("c")],
+            locals: vec![local("x")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("c".into()),
+                    then_body: vec![HirStmt::Goto("Ljoin".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Label("Ljoin".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(42, i32.clone()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            !func.body.iter().any(|s| matches!(s, HirStmt::If { .. })),
+            "unconditional join after empty fallthrough must not be wrapped in If: {:?}",
+            func.body
+        );
+        assert!(
+            func.body
+                .iter()
+                .any(|s| matches!(s, HirStmt::Return(Some(_)))),
+            "unconditional return must remain at top level: {:?}",
+            func.body
+        );
+    }
+
+    #[test]
+    fn goto_recovery_while_preserves_lcond_when_externally_referenced() {
+        let i32 = int_ty(32, true);
+        let mut func = HirFunction {
+            name: "external_lcond_ref".into(),
+            params: vec![param("skip"), param("cond")],
+            locals: vec![local("x")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("skip".into()),
+                    then_body: vec![HirStmt::Goto("Lcond".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(1, i32.clone()),
+                },
+                HirStmt::Goto("Lcond".into()),
+                HirStmt::Label("Lbody".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("x".into())),
+                        rhs: Box::new(HirExpr::Const(1, i32.clone())),
+                        ty: i32.clone(),
+                    },
+                },
+                HirStmt::Label("Lcond".into()),
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".into()),
+                    then_body: vec![HirStmt::Goto("Lbody".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            func.body
+                .iter()
+                .any(|s| matches!(s, HirStmt::Label(l) if l == "Lcond")),
+            "Label(Lcond) must not be consumed while an external goto Lcond remains: {:?}",
             func.body
         );
     }

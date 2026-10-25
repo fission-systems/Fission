@@ -20,9 +20,12 @@ use crate::pcode::state::MachineState;
 use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 
-const MAGIC_BASE: u64 = 0xFFFFFFF100000000;
+pub const MAGIC_BASE: u64 = 0xFFFFFFF100000000;
+pub const MAGIC_BASE_32: u64 = 0x7FFF_0000;
+pub const MAGIC_SPAN: u64 = 0x1_0000;
 /// Synthetic return target after `__libc_start_main` → main; HLE as `exit(RAX)`.
-const POST_MAIN_EXIT_STUB: u64 = 0xFFFFFFF1000000F8;
+pub const POST_MAIN_EXIT_STUB: u64 = 0xFFFFFFF1000000F8;
+pub const POST_MAIN_EXIT_STUB_32: u64 = 0x7FFF_FFF8;
 
 /// Linux ELF execution environment.
 ///
@@ -184,12 +187,20 @@ impl OsEnvironment for LinuxEnv {
             return Ok(());
         }
 
+        let is_64bit = binary.inner().is_64bit;
+        let ptr_size = if is_64bit { 8 } else { 4 };
+        let magic_base = if is_64bit { MAGIC_BASE } else { MAGIC_BASE_32 };
+
         let mut plt_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
         plt_entries.sort_by_key(|&(&addr, _)| addr);
 
         if dynlink::lazy_bind_enabled() && !plt_entries.is_empty() {
             // Lazy PLT: install markers; first call binds via resolve_stub path.
-            let mut table = dynlink::PltLazyTable::default();
+            let mut table = dynlink::PltLazyTable {
+                entries: Vec::new(),
+                globals: std::collections::HashMap::new(),
+                is_64bit,
+            };
             for (i, (addr, name)) in plt_entries.iter().enumerate() {
                 let addr = **addr;
                 let bare = name
@@ -201,14 +212,15 @@ impl OsEnvironment for LinuxEnv {
                     .unwrap_or(name)
                     .to_string();
                 table.entries.push((addr, bare));
-                let mark = dynlink::make_lazy_mark(i);
+                let mark = dynlink::make_lazy_mark_for_arch(i, is_64bit);
                 tracing::debug!(
                     "PLT lazy patch: {} @ 0x{:X} → mark 0x{:X}",
                     name,
                     addr,
                     mark
                 );
-                state.write_space(state.ram_space(), addr, &mark.to_le_bytes())?;
+                let mark_bytes = mark.to_le_bytes();
+                state.write_space(state.ram_space(), addr, &mark_bytes[..ptr_size])?;
             }
             self.set_plt_lazy(table);
             return Ok(());
@@ -217,9 +229,13 @@ impl OsEnvironment for LinuxEnv {
         for (i, (&addr, name)) in plt_entries.into_iter().enumerate() {
             // Preserve mini-dynlink BIND_NOW / SharedLibs resolutions: if the GOT
             // already holds a non-magic guest VA, leave it alone.
-            if let Ok(cur) = state.read_space(state.ram_space(), addr, 8) {
-                if cur.len() == 8 {
-                    let val = u64::from_le_bytes(cur.try_into().unwrap_or([0; 8]));
+            if let Ok(cur) = state.read_space(state.ram_space(), addr, ptr_size) {
+                if cur.len() == ptr_size {
+                    let val = if is_64bit {
+                        u64::from_le_bytes(cur.try_into().unwrap_or([0; 8]))
+                    } else {
+                        u32::from_le_bytes(cur.try_into().unwrap_or([0; 4])) as u64
+                    };
                     if dynlink::is_resolved_got_target(val) {
                         tracing::debug!(
                             "PLT/GOT keep resolved: {} @ 0x{:X} → 0x{:X}",
@@ -231,33 +247,40 @@ impl OsEnvironment for LinuxEnv {
                     }
                 }
             }
-            let trampoline = MAGIC_BASE + (i as u64 * 8);
+            let trampoline = magic_base + (i as u64 * 8);
             tracing::debug!(
                 "PLT/GOT patch: {} @ 0x{:X} → trampoline 0x{:X}",
                 name,
                 addr,
                 trampoline
             );
-            state.write_space(state.ram_space(), addr, &trampoline.to_le_bytes())?;
+            let tramp_bytes = trampoline.to_le_bytes();
+            state.write_space(state.ram_space(), addr, &tramp_bytes[..ptr_size])?;
         }
         Ok(())
     }
 
     fn resolve_stub(&self, binary: &LoadedBinary, magic_addr: u64) -> Option<String> {
-        if magic_addr == POST_MAIN_EXIT_STUB {
+        if magic_addr == POST_MAIN_EXIT_STUB || magic_addr == POST_MAIN_EXIT_STUB_32 {
             return Some("__fission_post_main_exit".into());
         }
         // Lazy PLT marker: synthetic name consumed by dispatch_hle.
         if let Some(idx) = dynlink::lazy_mark_index(magic_addr) {
             return Some(format!("__plt_lazy_{idx}"));
         }
-        if magic_addr == dynlink::PLT_RESOLVER_STUB {
+        if magic_addr == dynlink::PLT_RESOLVER_STUB || magic_addr == dynlink::PLT_RESOLVER_STUB_32 {
             return Some("__plt_resolver".into());
         }
-        if magic_addr < MAGIC_BASE {
+        let is_64bit = binary.inner().is_64bit;
+        let (base, span) = if is_64bit {
+            (MAGIC_BASE, 0x1000_0000u64)
+        } else {
+            (MAGIC_BASE_32, MAGIC_SPAN)
+        };
+        if magic_addr < base || magic_addr >= base + span {
             return None;
         }
-        let index = ((magic_addr - MAGIC_BASE) / 8) as usize;
+        let index = ((magic_addr - base) / 8) as usize;
         let mut plt_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
         plt_entries.sort_by_key(|&(&addr, _)| addr);
         plt_entries
@@ -277,9 +300,16 @@ impl OsEnvironment for LinuxEnv {
                         .as_ref()
                         .map(|i| i.dynlink.global_symbols.clone())
                         .unwrap_or_default();
-                    if let Some(target) = tbl.bind_slot(&mut emu.state, idx, MAGIC_BASE, &extra) {
+                    let is_64bit = tbl.is_64bit;
+                    let magic_base = if is_64bit { MAGIC_BASE } else { MAGIC_BASE_32 };
+                    if let Some(target) = tbl.bind_slot(&mut emu.state, idx, magic_base, &extra) {
+                        let is_magic = if is_64bit {
+                            target >= MAGIC_BASE
+                        } else {
+                            (MAGIC_BASE_32..MAGIC_BASE_32 + MAGIC_SPAN).contains(&target)
+                        };
                         // If target is still in HLE magic range, dispatch that name instead.
-                        if target >= MAGIC_BASE && dynlink::lazy_mark_index(target).is_none() {
+                        if is_magic && dynlink::lazy_mark_index(target).is_none() {
                             drop(table);
                             let name = self
                                 .resolve_stub(&emu.binary, target)
@@ -358,9 +388,10 @@ impl OsEnvironment for LinuxEnv {
             }
         }
 
-        // After main returns into our synthetic stub: exit code is in RAX.
+        // After main returns into our synthetic stub: exit code is in the ABI return register.
         if func_name == "__fission_post_main_exit" {
-            let code = emu.read_register_u64("RAX").unwrap_or(0) as u32;
+            let ret_reg = syscall_conv::SyscallAbi::for_arch(&emu.arch).result;
+            let code = emu.read_register_u64(ret_reg).unwrap_or(0) as u32;
             tracing::info!("post-main exit stub: code={}", code);
             return Ok(HleResult::Halt(code));
         }
@@ -612,4 +643,91 @@ fn taint_syscall_output(emu: &mut Emulator, number: u64) {
         .map(|s| s.name.to_string())
         .unwrap_or_else(|| format!("syscall_{number}"));
     emu.taint_range(addr, len.min(1 << 20), label);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pcode::page_map::prot;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+
+    #[test]
+    fn patch_imports_32bit_does_not_clobber_adjacent_slot() {
+        let env = LinuxEnv::new();
+        let mut state = MachineState::new();
+
+        let got_slot1 = 0x2000u64;
+        let got_slot2 = 0x2004u64;
+        state.page_map.map_region(0x2000, 0x1000, prot::RW, true);
+
+        // Fill slot 2 with a sentinel value
+        state
+            .write_space(state.ram_space(), got_slot2, &[0xDE, 0xAD, 0xBE, 0xEF])
+            .unwrap();
+
+        let binary = LoadedBinaryBuilder::new("test_32".into(), DataBuffer::Heap(vec![0; 0x1000]))
+            .format("ELF32")
+            .is_64bit(false)
+            .add_iat_symbol(got_slot1, "printf".into())
+            .build()
+            .unwrap();
+
+        env.patch_imports(&mut state, &binary).unwrap();
+
+        // Slot 1 should have received a 4-byte magic address
+        let slot1_bytes = state.read_space(state.ram_space(), got_slot1, 4).unwrap();
+        let slot1_val = u32::from_le_bytes(slot1_bytes.try_into().unwrap());
+        assert_eq!(slot1_val as u64, MAGIC_BASE_32);
+
+        // Slot 2 must remain completely intact
+        let slot2_bytes = state.read_space(state.ram_space(), got_slot2, 4).unwrap();
+        assert_eq!(slot2_bytes, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
+    fn resolve_stub_32bit_and_64bit() {
+        let env = LinuxEnv::new();
+
+        let bin_32 = LoadedBinaryBuilder::new("test_32".into(), DataBuffer::Heap(vec![0; 0x1000]))
+            .format("ELF32")
+            .is_64bit(false)
+            .add_iat_symbol(0x2000, "printf".into())
+            .add_iat_symbol(0x2004, "malloc".into())
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            env.resolve_stub(&bin_32, MAGIC_BASE_32),
+            Some("printf".into())
+        );
+        assert_eq!(
+            env.resolve_stub(&bin_32, MAGIC_BASE_32 + 8),
+            Some("malloc".into())
+        );
+        assert_eq!(
+            env.resolve_stub(&bin_32, POST_MAIN_EXIT_STUB_32),
+            Some("__fission_post_main_exit".into())
+        );
+        assert_eq!(
+            env.resolve_stub(&bin_32, dynlink::PLT_RESOLVER_STUB_32),
+            Some("__plt_resolver".into())
+        );
+
+        let bin_64 = LoadedBinaryBuilder::new("test_64".into(), DataBuffer::Heap(vec![0; 0x1000]))
+            .format("ELF64")
+            .is_64bit(true)
+            .add_iat_symbol(0x4000, "puts".into())
+            .build()
+            .unwrap();
+
+        assert_eq!(env.resolve_stub(&bin_64, MAGIC_BASE), Some("puts".into()));
+        assert_eq!(
+            env.resolve_stub(&bin_64, POST_MAIN_EXIT_STUB),
+            Some("__fission_post_main_exit".into())
+        );
+        assert_eq!(
+            env.resolve_stub(&bin_64, dynlink::PLT_RESOLVER_STUB),
+            Some("__plt_resolver".into())
+        );
+    }
 }

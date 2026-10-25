@@ -33,6 +33,7 @@
 ///    function's observable output.
 ///
 /// Irreducible cases (any condition fails) are left unchanged.
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
 
@@ -46,8 +47,13 @@ const CALLEE_SAVED_REGS: &[&str] = &[
     "r11", "lr", "ebx", "ebp", "esi", "edi",
 ];
 
-fn is_callee_saved(name: &str) -> bool {
+fn is_callee_saved(name: &str, cc: CallingConvention) -> bool {
     let lower = name.to_ascii_lowercase();
+    if cc == CallingConvention::SystemVAmd64
+        && matches!(lower.as_str(), "rsi" | "rdi" | "esi" | "edi")
+    {
+        return false;
+    }
     CALLEE_SAVED_REGS.contains(&lower.as_str())
 }
 
@@ -148,7 +154,11 @@ fn walking_scaffold_alias_binding<'a>(
 /// ordinary early store through a stack-derived pointer: the first is ABI
 /// scaffold whose only reader is the matching restore, the second is the
 /// function writing to one of its own locals.
-fn is_entry_walking_scaffold_store(stmt: &PreHirStmt, aliases: &HashSet<String>) -> bool {
+fn is_entry_walking_scaffold_store(
+    stmt: &PreHirStmt,
+    aliases: &HashSet<String>,
+    cc: CallingConvention,
+) -> bool {
     let PreHirStmt::Assign {
         lhs: PreHirLValue::Deref { ptr, .. },
         rhs,
@@ -156,7 +166,8 @@ fn is_entry_walking_scaffold_store(stmt: &PreHirStmt, aliases: &HashSet<String>)
     else {
         return false;
     };
-    expr_is_stack_alias(ptr, aliases) && var_name_through_cast(rhs).is_some_and(is_callee_saved)
+    expr_is_stack_alias(ptr, aliases)
+        && var_name_through_cast(rhs).is_some_and(|r| is_callee_saved(r, cc))
 }
 
 fn looks_like_stack_slot_name(name: &str) -> bool {
@@ -189,14 +200,14 @@ fn entry_stack_slot_scaffold_name(stmt: &PreHirStmt) -> Option<&str> {
     }
 }
 
-fn is_entry_stack_slot_callee_saved_store(stmt: &PreHirStmt) -> bool {
+fn is_entry_stack_slot_callee_saved_store(stmt: &PreHirStmt, cc: CallingConvention) -> bool {
     matches!(
         stmt,
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var(lhs),
             rhs,
         } if looks_like_stack_slot_name(lhs)
-            && var_name_through_cast(rhs).is_some_and(is_callee_saved)
+            && var_name_through_cast(rhs).is_some_and(|r| is_callee_saved(r, cc))
     )
 }
 
@@ -206,7 +217,7 @@ fn is_entry_stack_slot_callee_saved_store(stmt: &PreHirStmt) -> bool {
 /// only when the destination pointer is a synthetic stack scaffold name, so
 /// ordinary early stores through parameters or globals are left intact.
 pub fn remove_entry_stack_scaffold_stores(func: &mut PreHirFunction) -> bool {
-    remove_entry_stack_scaffold_stores_from_body(&mut func.body, &[])
+    remove_entry_stack_scaffold_stores_from_body(&mut func.body, &[], func.calling_convention)
 }
 
 struct EntryStackScaffoldRemovalPlan {
@@ -225,7 +236,7 @@ impl EntryStackScaffoldRemovalPlan {
     /// assigned -- observed on ARM Thumb, where `push {lr}` supplies the
     /// scaffold evidence and the two parameter spills follow it in the same
     /// block.
-    fn prove(body: &[PreHirStmt], outer: &[&[PreHirStmt]]) -> Option<Self> {
+    fn prove(body: &[PreHirStmt], outer: &[&[PreHirStmt]], cc: CallingConvention) -> Option<Self> {
         // The prefix has to be walked with state, not filtered statement by
         // statement: a pointer only counts as scaffold because an earlier
         // statement in this same prefix bound it to a stack address. ARM's
@@ -239,7 +250,7 @@ impl EntryStackScaffoldRemovalPlan {
                 prefix_len += 1;
                 continue;
             }
-            if is_entry_walking_scaffold_store(stmt, &aliases) {
+            if is_entry_walking_scaffold_store(stmt, &aliases, cc) {
                 walking_evidence = true;
                 prefix_len += 1;
                 continue;
@@ -264,7 +275,9 @@ impl EntryStackScaffoldRemovalPlan {
         let suffix = &body[prefix_len..];
         let has_scaffold_evidence = walking_evidence
             || prefix.iter().any(is_entry_stack_scaffold_store)
-            || prefix.iter().any(is_entry_stack_slot_callee_saved_store);
+            || prefix
+                .iter()
+                .any(|stmt| is_entry_stack_slot_callee_saved_store(stmt, cc));
         if !has_scaffold_evidence {
             return None;
         }
@@ -320,8 +333,9 @@ impl EntryStackScaffoldRemovalPlan {
 fn remove_entry_stack_scaffold_stores_from_body(
     body: &mut Vec<PreHirStmt>,
     outer: &[&[PreHirStmt]],
+    cc: CallingConvention,
 ) -> bool {
-    if let Some(plan) = EntryStackScaffoldRemovalPlan::prove(body, outer)
+    if let Some(plan) = EntryStackScaffoldRemovalPlan::prove(body, outer, cc)
         && plan.apply(body)
     {
         return true;
@@ -341,6 +355,7 @@ fn remove_entry_stack_scaffold_stores_from_body(
         return remove_entry_stack_scaffold_stores_from_body(
             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner),
             &nested,
+            cc,
         );
     }
 
@@ -353,7 +368,7 @@ fn remove_entry_stack_scaffold_stores_from_body(
 /// `*<ptr_var> = <callee_saved_reg>`
 ///
 /// Returns `(ptr_var_name, reg_name)` on success.
-fn match_prologue_save(stmt: &PreHirStmt) -> Option<(String, String)> {
+fn match_prologue_save(stmt: &PreHirStmt, cc: CallingConvention) -> Option<(String, String)> {
     let PreHirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
@@ -368,7 +383,7 @@ fn match_prologue_save(stmt: &PreHirStmt) -> Option<(String, String)> {
         _ => return None,
     };
     let reg = match rhs {
-        PreHirExpr::Var(r) if is_callee_saved(r) => r.as_str(),
+        PreHirExpr::Var(r) if is_callee_saved(r, cc) => r.as_str(),
         _ => return None,
     };
     Some((ptr_var.to_string(), reg.to_string()))
@@ -378,12 +393,12 @@ fn match_prologue_save(stmt: &PreHirStmt) -> Option<(String, String)> {
 /// `<callee_saved_reg> = *<ptr_var>` (or Cast-wrapped variant)
 ///
 /// Returns `(ptr_var_name, reg_name)` on success.
-fn match_epilogue_restore(stmt: &PreHirStmt) -> Option<(String, String)> {
+fn match_epilogue_restore(stmt: &PreHirStmt, cc: CallingConvention) -> Option<(String, String)> {
     let PreHirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
     let reg = match lhs {
-        PreHirLValue::Var(r) if is_callee_saved(r) => r.as_str(),
+        PreHirLValue::Var(r) if is_callee_saved(r, cc) => r.as_str(),
         _ => return None,
     };
     // Match `Load { ptr: Var(v) }` or `Cast { Load { ptr: Var(v) } }`.
@@ -541,20 +556,21 @@ fn remove_matching_saves_restores(
     stmts: &mut Vec<PreHirStmt>,
     pairs: &HashMap<String, String>, // ptr_var → reg
     changed: &mut bool,
+    cc: CallingConvention,
 ) {
     // Recurse into nested bodies.
     for stmt in stmts.iter_mut() {
-        remove_nested(stmt, pairs, changed);
+        remove_nested(stmt, pairs, changed, cc);
     }
     // Remove flat-level matches.
     stmts.retain(|stmt| {
-        if let Some((ptr, _)) = match_prologue_save(stmt) {
+        if let Some((ptr, _)) = match_prologue_save(stmt, cc) {
             if pairs.contains_key(&ptr) {
                 *changed = true;
                 return false;
             }
         }
-        if let Some((ptr, _)) = match_epilogue_restore(stmt) {
+        if let Some((ptr, _)) = match_epilogue_restore(stmt, cc) {
             if pairs.contains_key(&ptr) {
                 *changed = true;
                 return false;
@@ -564,12 +580,18 @@ fn remove_matching_saves_restores(
     });
 }
 
-fn remove_nested(stmt: &mut PreHirStmt, pairs: &HashMap<String, String>, changed: &mut bool) {
+fn remove_nested(
+    stmt: &mut PreHirStmt,
+    pairs: &HashMap<String, String>,
+    changed: &mut bool,
+    cc: CallingConvention,
+) {
     match stmt {
         PreHirStmt::Block(body) => remove_matching_saves_restores(
             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
             pairs,
             changed,
+            cc,
         ),
         PreHirStmt::If {
             then_body,
@@ -580,11 +602,13 @@ fn remove_nested(stmt: &mut PreHirStmt, pairs: &HashMap<String, String>, changed
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 pairs,
                 changed,
+                cc,
             );
             remove_matching_saves_restores(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 pairs,
                 changed,
+                cc,
             );
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
@@ -592,12 +616,14 @@ fn remove_nested(stmt: &mut PreHirStmt, pairs: &HashMap<String, String>, changed
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 pairs,
                 changed,
+                cc,
             )
         }
         PreHirStmt::For { body, .. } => remove_matching_saves_restores(
             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
             pairs,
             changed,
+            cc,
         ),
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
@@ -605,12 +631,14 @@ fn remove_nested(stmt: &mut PreHirStmt, pairs: &HashMap<String, String>, changed
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     pairs,
                     changed,
+                    cc,
                 );
             }
             remove_matching_saves_restores(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                 pairs,
                 changed,
+                cc,
             );
         }
         _ => {}
@@ -622,12 +650,13 @@ fn remove_nested(stmt: &mut PreHirStmt, pairs: &HashMap<String, String>, changed
 /// Remove callee-saved register prologue/epilogue save-restore pairs from
 /// `func`.  Returns `true` if any statements were removed.
 pub fn remove_callee_save_prologue_epilogue(func: &mut PreHirFunction) -> bool {
+    let cc = func.calling_convention;
     // ── Step 1: Discover prologue saves in the first few top-level statements.
     let max_prologue_scan = 16usize;
     let mut candidate_pairs: HashMap<String, String> = HashMap::default(); // ptr_var → reg
 
     for stmt in func.body.iter().take(max_prologue_scan) {
-        if let Some((ptr, reg)) = match_prologue_save(stmt) {
+        if let Some((ptr, reg)) = match_prologue_save(stmt, cc) {
             candidate_pairs.insert(ptr, reg);
         } else {
             // Stop scanning at the first non-save statement to avoid false
@@ -652,7 +681,7 @@ pub fn remove_callee_save_prologue_epilogue(func: &mut PreHirFunction) -> bool {
 
     // Collect all epilogue restores anywhere in the body.
     let mut restores: HashMap<String, String> = HashMap::default(); // ptr_var → reg
-    collect_restores(&func.body, &mut restores);
+    collect_restores(&func.body, &mut restores, cc);
 
     for (ptr, reg) in &candidate_pairs {
         // Must have a matching restore.
@@ -666,7 +695,7 @@ pub fn remove_callee_save_prologue_epilogue(func: &mut PreHirFunction) -> bool {
         // The ptr variable must be used ONLY for the epilogue restore load.
         // We count all rvalue occurrences of `ptr` in the entire body;
         // it should equal exactly the number of restores for this ptr.
-        let restore_count = count_restores_for_ptr(&func.body, ptr);
+        let restore_count = count_restores_for_ptr(&func.body, ptr, cc);
         let total_uses = count_ptr_var_rvalue_uses(&func.body, ptr);
         if total_uses != restore_count {
             // ptr is used beyond just the restore loads — keep the pair.
@@ -684,7 +713,7 @@ pub fn remove_callee_save_prologue_epilogue(func: &mut PreHirFunction) -> bool {
 
     // ── Step 3: Remove all confirmed save and restore statements.
     let mut changed = false;
-    remove_matching_saves_restores(&mut func.body, &confirmed, &mut changed);
+    remove_matching_saves_restores(&mut func.body, &confirmed, &mut changed, cc);
 
     // ── Step 4: Remove now-unreferenced spill-slot bindings from locals.
     if changed {
@@ -706,63 +735,67 @@ pub fn remove_callee_save_prologue_epilogue(func: &mut PreHirFunction) -> bool {
 
 // ── Helper: collect all epilogue restores ────────────────────────────────────
 
-fn collect_restores(stmts: &[PreHirStmt], restores: &mut HashMap<String, String>) {
+fn collect_restores(
+    stmts: &[PreHirStmt],
+    restores: &mut HashMap<String, String>,
+    cc: CallingConvention,
+) {
     for stmt in stmts {
-        if let Some((ptr, reg)) = match_epilogue_restore(stmt) {
+        if let Some((ptr, reg)) = match_epilogue_restore(stmt, cc) {
             restores.entry(ptr).or_insert(reg);
         }
         match stmt {
-            PreHirStmt::Block(body) => collect_restores(body, restores),
+            PreHirStmt::Block(body) => collect_restores(body, restores, cc),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_restores(then_body, restores);
-                collect_restores(else_body, restores);
+                collect_restores(then_body, restores, cc);
+                collect_restores(else_body, restores, cc);
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                collect_restores(body, restores)
+                collect_restores(body, restores, cc)
             }
-            PreHirStmt::For { body, .. } => collect_restores(body, restores),
+            PreHirStmt::For { body, .. } => collect_restores(body, restores, cc),
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_restores(&case.body, restores);
+                    collect_restores(&case.body, restores, cc);
                 }
-                collect_restores(default, restores);
+                collect_restores(default, restores, cc);
             }
             _ => {}
         }
     }
 }
 
-fn count_restores_for_ptr(stmts: &[PreHirStmt], ptr: &str) -> usize {
+fn count_restores_for_ptr(stmts: &[PreHirStmt], ptr: &str, cc: CallingConvention) -> usize {
     let mut count = 0;
     for stmt in stmts {
-        if let Some((p, _)) = match_epilogue_restore(stmt) {
+        if let Some((p, _)) = match_epilogue_restore(stmt, cc) {
             if p == ptr {
                 count += 1;
             }
         }
         match stmt {
-            PreHirStmt::Block(body) => count += count_restores_for_ptr(body, ptr),
+            PreHirStmt::Block(body) => count += count_restores_for_ptr(body, ptr, cc),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                count += count_restores_for_ptr(then_body, ptr);
-                count += count_restores_for_ptr(else_body, ptr);
+                count += count_restores_for_ptr(then_body, ptr, cc);
+                count += count_restores_for_ptr(else_body, ptr, cc);
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                count += count_restores_for_ptr(body, ptr)
+                count += count_restores_for_ptr(body, ptr, cc)
             }
-            PreHirStmt::For { body, .. } => count += count_restores_for_ptr(body, ptr),
+            PreHirStmt::For { body, .. } => count += count_restores_for_ptr(body, ptr, cc),
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    count += count_restores_for_ptr(&case.body, ptr);
+                    count += count_restores_for_ptr(&case.body, ptr, cc);
                 }
-                count += count_restores_for_ptr(default, ptr);
+                count += count_restores_for_ptr(default, ptr, cc);
             }
             _ => {}
         }
@@ -780,12 +813,15 @@ fn count_restores_for_ptr(stmts: &[PreHirStmt], ptr: &str) -> usize {
 
 /// Match `callee_saved_reg = home_slot_var` (plain `Var` on RHS, no deref).
 /// Returns `(slot_var_name, reg_name)` on success.
-fn match_slot_epilogue_restore(stmt: &PreHirStmt) -> Option<(String, String)> {
+fn match_slot_epilogue_restore(
+    stmt: &PreHirStmt,
+    cc: CallingConvention,
+) -> Option<(String, String)> {
     let PreHirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
     let reg = match lhs {
-        PreHirLValue::Var(r) if is_callee_saved(r) => r.as_str(),
+        PreHirLValue::Var(r) if is_callee_saved(r, cc) => r.as_str(),
         _ => return None,
     };
     let slot_var = match rhs {
@@ -799,30 +835,34 @@ fn match_slot_epilogue_restore(stmt: &PreHirStmt) -> Option<(String, String)> {
     Some((slot_var.to_string(), reg.to_string()))
 }
 
-fn collect_slot_restores(stmts: &[PreHirStmt], out: &mut Vec<(String, String)>) {
+fn collect_slot_restores(
+    stmts: &[PreHirStmt],
+    out: &mut Vec<(String, String)>,
+    cc: CallingConvention,
+) {
     for stmt in stmts {
-        if let Some(pair) = match_slot_epilogue_restore(stmt) {
+        if let Some(pair) = match_slot_epilogue_restore(stmt, cc) {
             out.push(pair);
         }
         match stmt {
-            PreHirStmt::Block(body) => collect_slot_restores(body, out),
+            PreHirStmt::Block(body) => collect_slot_restores(body, out, cc),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_slot_restores(then_body, out);
-                collect_slot_restores(else_body, out);
+                collect_slot_restores(then_body, out, cc);
+                collect_slot_restores(else_body, out, cc);
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                collect_slot_restores(body, out)
+                collect_slot_restores(body, out, cc)
             }
-            PreHirStmt::For { body, .. } => collect_slot_restores(body, out),
+            PreHirStmt::For { body, .. } => collect_slot_restores(body, out, cc),
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_slot_restores(&case.body, out);
+                    collect_slot_restores(&case.body, out, cc);
                 }
-                collect_slot_restores(default, out);
+                collect_slot_restores(default, out, cc);
             }
             _ => {}
         }
@@ -877,12 +917,13 @@ fn remove_orphaned_slot_restores_from_stmts(
     stmts: &mut Vec<PreHirStmt>,
     slots: &HashSet<String>,
     changed: &mut bool,
+    cc: CallingConvention,
 ) {
     for stmt in stmts.iter_mut() {
-        remove_orphaned_slot_restore_nested(stmt, slots, changed);
+        remove_orphaned_slot_restore_nested(stmt, slots, changed, cc);
     }
     stmts.retain(|stmt| {
-        if let Some((slot, _)) = match_slot_epilogue_restore(stmt) {
+        if let Some((slot, _)) = match_slot_epilogue_restore(stmt, cc) {
             if slots.contains(&slot) {
                 *changed = true;
                 return false;
@@ -896,12 +937,14 @@ fn remove_orphaned_slot_restore_nested(
     stmt: &mut PreHirStmt,
     slots: &HashSet<String>,
     changed: &mut bool,
+    cc: CallingConvention,
 ) {
     match stmt {
         PreHirStmt::Block(body) => remove_orphaned_slot_restores_from_stmts(
             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
             slots,
             changed,
+            cc,
         ),
         PreHirStmt::If {
             then_body,
@@ -912,11 +955,13 @@ fn remove_orphaned_slot_restore_nested(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 slots,
                 changed,
+                cc,
             );
             remove_orphaned_slot_restores_from_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 slots,
                 changed,
+                cc,
             );
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
@@ -924,12 +969,14 @@ fn remove_orphaned_slot_restore_nested(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 slots,
                 changed,
+                cc,
             )
         }
         PreHirStmt::For { body, .. } => remove_orphaned_slot_restores_from_stmts(
             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
             slots,
             changed,
+            cc,
         ),
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
@@ -937,12 +984,14 @@ fn remove_orphaned_slot_restore_nested(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     slots,
                     changed,
+                    cc,
                 );
             }
             remove_orphaned_slot_restores_from_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                 slots,
                 changed,
+                cc,
             );
         }
         _ => {}
@@ -953,8 +1002,9 @@ fn remove_orphaned_slot_restore_nested(
 /// `home_slot_var` has no remaining definition in the function body (its prologue
 /// save was already stripped by `remove_entry_stack_scaffold_stores`).
 fn remove_orphaned_slot_epilogue_restores(func: &mut PreHirFunction) -> bool {
+    let cc = func.calling_convention;
     let mut candidates: Vec<(String, String)> = Vec::new();
-    collect_slot_restores(&func.body, &mut candidates);
+    collect_slot_restores(&func.body, &mut candidates, cc);
 
     let orphaned_slots: HashSet<String> = candidates
         .iter()
@@ -967,7 +1017,7 @@ fn remove_orphaned_slot_epilogue_restores(func: &mut PreHirFunction) -> bool {
     }
 
     let mut changed = false;
-    remove_orphaned_slot_restores_from_stmts(&mut func.body, &orphaned_slots, &mut changed);
+    remove_orphaned_slot_restores_from_stmts(&mut func.body, &orphaned_slots, &mut changed, cc);
 
     if changed {
         func.locals.retain(|b| !orphaned_slots.contains(&b.name));
@@ -987,11 +1037,12 @@ fn remove_orphaned_slot_epilogue_restores(func: &mut PreHirFunction) -> bool {
 /// later replaces every use of `rbx` with the original parameter, leaving the
 /// initial assignment dead and the register name undeclared in the output.
 pub fn remove_dead_callee_saved_param_loads(func: &mut PreHirFunction) -> bool {
+    let cc = func.calling_convention;
     let mut candidates: HashSet<String> = HashSet::default();
-    collect_callee_assign_targets_no_slot_rhs(&func.body, &mut candidates);
+    collect_callee_assign_targets_no_slot_rhs(&func.body, &mut candidates, cc);
 
     for b in &func.locals {
-        if is_callee_saved(&b.name) {
+        if is_callee_saved(&b.name, cc) {
             candidates.insert(b.name.clone());
         }
     }
@@ -1026,13 +1077,17 @@ pub fn remove_dead_callee_saved_param_loads(func: &mut PreHirFunction) -> bool {
 
 /// Collect all top-level `callee_reg = expr` assignments where the RHS is
 /// NOT a stack-slot variable (to avoid touching epilogue-restore patterns).
-fn collect_callee_assign_targets_no_slot_rhs(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
+fn collect_callee_assign_targets_no_slot_rhs(
+    stmts: &[PreHirStmt],
+    out: &mut HashSet<String>,
+    cc: CallingConvention,
+) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var(name),
                 rhs,
-            } if is_callee_saved(name) => {
+            } if is_callee_saved(name, cc) => {
                 let rhs_is_slot =
                     var_name_through_cast(rhs).is_some_and(looks_like_stack_slot_name);
                 if !rhs_is_slot {
@@ -1044,20 +1099,20 @@ fn collect_callee_assign_targets_no_slot_rhs(stmts: &[PreHirStmt], out: &mut Has
                 else_body,
                 ..
             } => {
-                collect_callee_assign_targets_no_slot_rhs(then_body, out);
-                collect_callee_assign_targets_no_slot_rhs(else_body, out);
+                collect_callee_assign_targets_no_slot_rhs(then_body, out, cc);
+                collect_callee_assign_targets_no_slot_rhs(else_body, out, cc);
             }
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                collect_callee_assign_targets_no_slot_rhs(body, out);
+                collect_callee_assign_targets_no_slot_rhs(body, out, cc);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_callee_assign_targets_no_slot_rhs(&case.body, out);
+                    collect_callee_assign_targets_no_slot_rhs(&case.body, out, cc);
                 }
-                collect_callee_assign_targets_no_slot_rhs(default, out);
+                collect_callee_assign_targets_no_slot_rhs(default, out, cc);
             }
             _ => {}
         }
@@ -1114,6 +1169,18 @@ fn remove_dead_callee_assigns_from_stmts(
             _ => {}
         }
     }
+    for stmt in stmts.iter_mut() {
+        if let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } = stmt
+        {
+            if dead.contains(name) && expr_has_side_effects(rhs) {
+                *stmt = PreHirStmt::Expr(rhs.clone());
+                *changed = true;
+            }
+        }
+    }
     let before = stmts.len();
     stmts.retain(|stmt| {
         !matches!(stmt, PreHirStmt::Assign { lhs: PreHirLValue::Var(name), .. } if dead.contains(name))
@@ -1145,11 +1212,12 @@ fn remove_dead_callee_assigns_from_stmts(
 /// it. `defuse_dead_assignment_pass` does not cover this because it only
 /// considers temp-like names, and these destinations are named locals.
 pub fn remove_entry_register_spills(func: &mut PreHirFunction) -> bool {
+    let cc = func.calling_convention;
     // Callee-saved registers with no definition anywhere: their only value is
     // the one they held on entry.
     let mut undefined_regs: HashSet<String> = HashSet::default();
     for b in &func.locals {
-        if is_callee_saved(&b.name) && count_var_definitions(&func.body, &b.name) == 0 {
+        if is_callee_saved(&b.name, cc) && count_var_definitions(&func.body, &b.name) == 0 {
             undefined_regs.insert(b.name.clone());
         }
     }
@@ -1248,10 +1316,13 @@ fn remove_entry_register_spills_in_stmts(
             continue;
         }
         // `dst` must not be observed before it is overwritten.
-        let mut dead = true;
+        let mut dead = false;
         for later in &stmts[i + 1..] {
             match dst_fate_in_stmt(later, dst) {
-                DstFate::Overwritten => break,
+                DstFate::Overwritten => {
+                    dead = true;
+                    break;
+                }
                 DstFate::Read => {
                     dead = false;
                     break;
@@ -1871,6 +1942,7 @@ mod tests {
                     spill_assign("local_6", PreHirExpr::Var("param_2".to_owned())),
                 ])),
                 PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
                     target: "callee".to_owned(),
                     args: vec![PreHirExpr::Var("local_6".to_owned())],
                     ty: u64_ty(),
@@ -2195,5 +2267,74 @@ mod tests {
             func.locals.is_empty(),
             "rbx local should be removed even if assignment was already deleted"
         );
+    }
+
+    #[test]
+    fn keeps_sysv_rdi_rsi_entry_stores() {
+        let mut func = PreHirFunction {
+            name: "sysv_func".to_owned(),
+            calling_convention: CallingConvention::SystemVAmd64,
+            body: vec![
+                spill_assign("home_slot_1", PreHirExpr::Var("rdi".to_owned())),
+                spill_assign("home_slot_2", PreHirExpr::Var("rsi".to_owned())),
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+        assert!(!remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(
+            func.body.len(),
+            3,
+            "rdi/rsi are parameters under SysV AMD64"
+        );
+    }
+
+    #[test]
+    fn preserves_side_effects_when_removing_dead_callee_saved_assignment() {
+        let call_expr = PreHirExpr::Call {
+            origin: None,
+            target: "foo".to_owned(),
+            args: vec![],
+            ty: u64_ty(),
+        };
+        let mut func = PreHirFunction {
+            name: "test_call".to_owned(),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rbx".to_owned()),
+                    rhs: call_expr.clone(),
+                },
+                PreHirStmt::Return(None),
+            ],
+            locals: vec![reg_binding("rbx")],
+            ..Default::default()
+        };
+        assert!(remove_dead_callee_saved_param_loads(&mut func));
+        assert_eq!(
+            func.body,
+            vec![PreHirStmt::Expr(call_expr), PreHirStmt::Return(None)],
+            "call side effect must be preserved as an Expr statement"
+        );
+    }
+
+    #[test]
+    fn keeps_unoverwritten_entry_register_spill() {
+        let mut func = PreHirFunction {
+            name: "test_unoverwritten".to_owned(),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("local_8".to_owned()),
+                    rhs: PreHirExpr::Var("rbp".to_owned()),
+                },
+                PreHirStmt::Return(None),
+            ],
+            locals: vec![reg_binding("local_8"), reg_binding("rbp")],
+            ..Default::default()
+        };
+        assert!(
+            !remove_entry_register_spills(&mut func),
+            "unoverwritten spill must not be removed"
+        );
+        assert_eq!(func.body.len(), 2);
     }
 }

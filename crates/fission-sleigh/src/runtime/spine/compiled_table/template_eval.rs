@@ -847,12 +847,14 @@ impl<'c> CompiledTableEmitter<'c> {
                     let size = self.template_varnode_size(input, state)?;
                     inputs.push(self.read_template_varnode(input, state, size)?);
                 }
-                let output = if let Some(ref out_ref) = op.output {
-                    Some(self.materialize_write_varnode(out_ref, state, mnemonic)?)
+                if let Some(ref out_ref) = op.output {
+                    let output = self.materialize_write_varnode(out_ref, state, mnemonic)?;
+                    self.emitter
+                        .emit_callother(Some(output.clone()), inputs, mnemonic)?;
+                    self.commit_template_write_target(out_ref, output, state, mnemonic)
                 } else {
-                    None
-                };
-                self.emitter.emit_callother(output, inputs, mnemonic)
+                    self.emitter.emit_callother(None, inputs, mnemonic)
+                }
             }
             CompiledOpTplOpcode::CrossBuild => {
                 if self.pcode_build_secnum >= 0 {
@@ -2009,6 +2011,106 @@ mod tests {
         assert_eq!(
             CompiledTableEmitter::truncate_to_pointer_size(&space, 0x1_0000_1234).unwrap(),
             0x1234
+        );
+    }
+
+    #[test]
+    fn callother_commits_dynamic_memory_write_target() {
+        let mut spaces = std::collections::BTreeMap::new();
+        spaces.insert(
+            0,
+            CompiledSpaceRef {
+                name: "const".to_string(),
+                index: 0,
+                word_size: 1,
+                addr_size: 8,
+            },
+        );
+        let compiled = minimal_frontend_with_spaces(spaces);
+        let mut emitter =
+            CompiledTableEmitter::new(&compiled, 0x1000, &[], 0x1000, FlowEmitOptions::default());
+        let mut state = minimal_construct_state();
+        let mut handle = test_handle("ram", 0x20);
+        handle.fixed.space = Some(CompiledSpaceRef {
+            name: "ram".to_string(),
+            index: 1,
+            word_size: 1,
+            addr_size: 8,
+        });
+        handle.fixed.offset_space = Some(CompiledSpaceRef {
+            name: "register".to_string(),
+            index: 2,
+            word_size: 1,
+            addr_size: 8,
+        });
+        handle.fixed.offset_offset = 0x30;
+        handle.fixed.offset_size = 8;
+        handle.fixed.temp_space = Some(CompiledSpaceRef {
+            name: "unique".to_string(),
+            index: 3,
+            word_size: 1,
+            addr_size: 8,
+        });
+        handle.fixed.temp_offset = 0x100;
+        handle.fixed.fixable = true;
+        state.handles.push(handle);
+
+        let out_tpl = CompiledVarnodeTpl::Varnode {
+            space: CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::Handle {
+                handle_index: 0,
+                selector: CompiledHandleSelector::Space,
+                plus: None,
+            })),
+            offset: Box::new(CompiledConstTpl::Handle {
+                handle_index: 0,
+                selector: CompiledHandleSelector::Offset,
+                plus: None,
+            }),
+            size: Box::new(CompiledConstTpl::Real { value: 4 }),
+        };
+
+        let op = CompiledOpTpl {
+            sla_raw_pcode_opcode: 0,
+            opcode: CompiledOpTplOpcode::CallOther,
+            output: Some(out_tpl),
+            inputs: vec![CompiledVarnodeTpl::Varnode {
+                space: CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::Real { value: 0 })),
+                offset: Box::new(CompiledConstTpl::Real { value: 7 }),
+                size: Box::new(CompiledConstTpl::Real { value: 4 }),
+            }],
+            label: None,
+        };
+
+        emitter
+            .emit_op_template(&state, &op)
+            .expect("emit callother");
+        let ops = emitter.finish().expect("finish emitter");
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].opcode, fission_pcode::PcodeOpcode::CallOther);
+        assert_eq!(
+            ops[0]
+                .output
+                .as_ref()
+                .map(|v| (v.space_id, v.offset, v.size)),
+            Some((3, 0x100, 4))
+        );
+        assert_eq!(ops[1].opcode, fission_pcode::PcodeOpcode::Store);
+        assert_eq!(ops[1].inputs.len(), 3);
+        assert_eq!(
+            (
+                ops[1].inputs[1].space_id,
+                ops[1].inputs[1].offset,
+                ops[1].inputs[1].size
+            ),
+            (2, 0x30, 8)
+        );
+        assert_eq!(
+            (
+                ops[1].inputs[2].space_id,
+                ops[1].inputs[2].offset,
+                ops[1].inputs[2].size
+            ),
+            (3, 0x100, 4)
         );
     }
 }

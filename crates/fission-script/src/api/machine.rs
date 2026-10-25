@@ -45,7 +45,9 @@ struct Session {
     /// language has no compiled SLEIGH frontend, which `disasm` then says
     /// rather than returning an empty listing.
     decoder: Option<Box<dyn InstructionDecoder>>,
+    binary: Option<fission_loader::loader::LoadedBinary>,
     pending: Vec<DebugEvent>,
+    deadline: Option<std::time::Instant>,
 }
 
 impl Session {
@@ -94,8 +96,18 @@ impl MachineHost {
         Self(Arc::new(Mutex::new(Session {
             backend,
             decoder,
+            binary: Some(binary.clone()),
             pending: Vec::new(),
+            deadline: None,
         })))
+    }
+
+    /// Set an execution deadline for machine execution operations.
+    pub fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        if let Ok(mut guard) = self.0.lock() {
+            guard.backend.set_deadline(deadline);
+            guard.deadline = deadline;
+        }
     }
 
     /// Take the machine back out.
@@ -119,9 +131,19 @@ impl MachineHost {
             .0
             .lock()
             .map_err(|_| fail(format!("the machine is poisoned; cannot {what}")))?;
+        if let Some(deadline) = guard.deadline {
+            if std::time::Instant::now() >= deadline {
+                return Err(fail("script exceeded max_runtime_ms"));
+            }
+        }
         let out = f(guard.backend.as_mut());
         // Whatever running produced, kept for whoever asks.
         guard.pump();
+        if let Some(deadline) = guard.deadline {
+            if std::time::Instant::now() >= deadline {
+                return Err(fail("script exceeded max_runtime_ms"));
+            }
+        }
         out
     }
 
@@ -261,7 +283,10 @@ impl MachineHost {
     pub fn set_reg(&mut self, name: String, value: i64) -> ScriptResult<()> {
         self.with("write a register", |b| {
             let mut regs = b.fetch_registers(THREAD).map_err(fail)?;
-            if regs.get(&name).is_none() {
+            if name.eq_ignore_ascii_case("pc") || name.eq_ignore_ascii_case("rip") {
+                regs.pc = value as u64;
+            }
+            if regs.get(&name).is_none() && !name.eq_ignore_ascii_case("pc") {
                 return Err(fail(format!("this machine has no register {name}")));
             }
             regs.set(&name, value as u64);
@@ -272,9 +297,8 @@ impl MachineHost {
     /// Memory as an array of byte values, so a script can index it.
     pub fn read(&mut self, address: i64, size: i64) -> ScriptResult<Array> {
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
+            let size = size.clamp(0, 64 * 1024) as usize;
+            let bytes = b.read_memory(address as u64, size).map_err(fail)?;
             Ok(bytes.into_iter().map(|v| Dynamic::from(v as i64)).collect())
         })
     }
@@ -283,11 +307,67 @@ impl MachineHost {
     /// wrote into a buffer.
     pub fn read_string(&mut self, address: i64, size: i64) -> ScriptResult<String> {
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
-            let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-            Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+            let max_len = size.clamp(0, 64 * 1024) as usize;
+            if max_len == 0 {
+                return Ok(String::new());
+            }
+
+            // Fast path: try reading the entire window at once.
+            if let Ok(bytes) = b.read_memory(address as u64, max_len) {
+                let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+                return Ok(String::from_utf8_lossy(&bytes[..end]).into_owned());
+            }
+
+            // Boundary-resilient fallback: probe memory in page-bounded chunks
+            // or byte-by-byte up to the unmapped boundary so that null-terminated
+            // strings positioned near the end of mapped pages can still be read.
+            let mut current_addr = address as u64;
+            let mut remaining = max_len;
+            let mut accumulated = Vec::new();
+
+            while remaining > 0 {
+                let page_offset = (current_addr % 4096) as usize;
+                let page_remaining = 4096 - page_offset;
+                let chunk_len = remaining.min(page_remaining);
+
+                match b.read_memory(current_addr, chunk_len) {
+                    Ok(bytes) => {
+                        if let Some(pos) = bytes.iter().position(|&byte| byte == 0) {
+                            accumulated.extend_from_slice(&bytes[..pos]);
+                            return Ok(String::from_utf8_lossy(&accumulated).into_owned());
+                        }
+                        accumulated.extend_from_slice(&bytes);
+                        current_addr += chunk_len as u64;
+                        remaining -= chunk_len;
+                    }
+                    Err(_) => {
+                        let mut probed_any = false;
+                        for offset in 0..chunk_len {
+                            match b.read_memory(current_addr + offset as u64, 1) {
+                                Ok(single) => {
+                                    let byte = single[0];
+                                    if byte == 0 {
+                                        return Ok(
+                                            String::from_utf8_lossy(&accumulated).into_owned()
+                                        );
+                                    }
+                                    accumulated.push(byte);
+                                    probed_any = true;
+                                }
+                                Err(e) => {
+                                    if accumulated.is_empty() && !probed_any {
+                                        return Err(fail(e));
+                                    }
+                                    return Ok(String::from_utf8_lossy(&accumulated).into_owned());
+                                }
+                            }
+                        }
+                        current_addr += chunk_len as u64;
+                        remaining -= chunk_len;
+                    }
+                }
+            }
+            Ok(String::from_utf8_lossy(&accumulated).into_owned())
         })
     }
 
@@ -313,8 +393,25 @@ impl MachineHost {
     pub fn disasm(&mut self, address: i64, count: i64) -> ScriptResult<Array> {
         let count = count.clamp(1, 4096) as usize;
         // Long enough for `count` instructions of any length this decodes.
-        let window = (count * 16).min(64 * 1024);
-        let bytes = self.read_bytes(address as u64, window)?;
+        let mut window = (count * 16).min(64 * 1024);
+        let address_u64 = address as u64;
+
+        if let Ok(guard) = self.0.lock() {
+            if let Some(binary) = &guard.binary {
+                if let Some(sec) = binary.section_containing_for_execution(address_u64) {
+                    let avail = (sec.virtual_address + sec.virtual_size).saturating_sub(address_u64)
+                        as usize;
+                    if avail == 0 {
+                        return Err(fail(format!(
+                            "address 0x{address:x} is beyond section bounds"
+                        )));
+                    }
+                    window = window.min(avail);
+                }
+            }
+        }
+
+        let bytes = self.read_bytes_partial(address_u64, window)?;
         self.with_session("disassemble", |s| {
             let Some(decoder) = s.decoder.as_ref() else {
                 return Err(fail(
@@ -354,9 +451,9 @@ impl MachineHost {
         self.disasm(pc, count)
     }
 
-    fn read_bytes(&mut self, address: u64, size: usize) -> ScriptResult<Vec<u8>> {
+    fn read_bytes_partial(&mut self, address: u64, size: usize) -> ScriptResult<Vec<u8>> {
         self.with("read memory", |b| {
-            b.read_memory(address, size).map_err(fail)
+            b.read_memory_partial(address, size).map_err(fail)
         })
     }
 

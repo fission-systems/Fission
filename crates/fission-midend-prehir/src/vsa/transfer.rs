@@ -258,3 +258,52 @@ pub fn nir_bits(ty: &NirType) -> Option<u32> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod review_precision_regressions {
+    use super::*;
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+    fn comparison(lhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::SLt,
+            lhs: Box::new(lhs),
+            rhs: Box::new(PreHirExpr::Const(0, u32_ty())),
+            ty: NirType::Bool,
+        }
+    }
+    #[test]
+    fn review_select_precision_must_not_expose_comparison_width_bug() {
+        let expr = PreHirExpr::Select {
+            cond: Box::new(comparison(PreHirExpr::Const(1, u32_ty()))),
+            then_expr: Box::new(PreHirExpr::Const(22, u32_ty())),
+            else_expr: Box::new(PreHirExpr::Const(11, u32_ty())),
+            ty: u32_ty(),
+        };
+        let result = eval_expr(&expr, &RangeEnv::new());
+        assert_ne!(
+            result.singleton_value(),
+            Some(22),
+            "signed 1 < 0 is false; the abstract result must not exclude 11"
+        );
+    }
+    #[test]
+    fn review_add_precision_must_not_expose_comparison_width_bug() {
+        let sum = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Const(1, u32_ty())),
+            rhs: Box::new(PreHirExpr::Const(0, u32_ty())),
+            ty: u32_ty(),
+        };
+        let result = eval_expr(&comparison(sum), &RangeEnv::new());
+        assert_ne!(
+            result.singleton_value(),
+            Some(1),
+            "signed (1 + 0) < 0 is false; analysis must not prove it true"
+        );
+    }
+}

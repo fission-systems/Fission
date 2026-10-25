@@ -198,10 +198,10 @@ impl<'a> DwarfAnalyzer<'a> {
         let debug_source = self.debug_source();
         let sections = SectionData::new(debug_source);
         let data = debug_source.data.as_slice();
-        let endian = if debug_source.arch_spec.contains("BE") {
-            RunTimeEndian::Big
-        } else {
+        let endian = if debug_source.is_little_endian() {
             RunTimeEndian::Little
+        } else {
+            RunTimeEndian::Big
         };
 
         let debug_ranges = gimli::DebugRanges::new(sections.get(".debug_ranges", data), endian);

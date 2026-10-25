@@ -1,8 +1,8 @@
 use fission_loader::{FunctionCandidateInfo, FunctionInfo, LoadedBinary};
 use fission_signatures::load_ghidra_patterns;
-use fission_sleigh::runtime::DecodedFlowKind;
 use fission_sleigh::runtime::{
-    PackedContextOverride, RuntimeFrontendStatus, RuntimeSleighFrontend,
+    DecodedFlowKind, DecodedReferenceKind, PackedContextOverride, RuntimeFrontendStatus,
+    RuntimeSleighFrontend,
 };
 
 use super::ranges::{executable_ranges, is_in_executable_ranges, runtime_load_spec_for};
@@ -334,6 +334,7 @@ pub fn discover_functions_with_runtime(
             &mut validation_cache,
             Some(&all_references),
         );
+        all_references.extend(data_refs.iter().copied());
         data_refs.retain(|&addr| !tracker.is_overlap(addr));
         if discovery_diag_enabled() {
             eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
@@ -813,8 +814,49 @@ fn collect_section_targets_resync(
     decoded_count
 }
 
-struct InstructionBoundaryTracker {
-    boundaries: Vec<(u64, u64)>,
+pub(crate) fn is_target_no_return(binary: &LoadedBinary, target: u64) -> bool {
+    let fmt = fission_core::core::ghidra_no_return::binary_format_to_ghidra_format(&binary.format);
+    let Some(fmt) = fmt else {
+        return false;
+    };
+    let comp = binary.get_ghidra_compiler_id();
+    let idx = fission_core::core::ghidra_no_return::ghidra_no_return_index();
+
+    if let Some((name, lib)) =
+        crate::analysis::control_flow_facts::resolve_call_target_name(binary, target)
+    {
+        if idx.is_no_return(fmt, comp.as_deref(), lib, &name) {
+            return true;
+        }
+    }
+    false
+}
+
+fn merge_intervals(mut intervals: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+    if intervals.is_empty() {
+        return intervals;
+    }
+    intervals.sort_unstable_by_key(|&(start, _)| start);
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(intervals.len());
+    for (start, end) in intervals {
+        if start >= end {
+            continue;
+        }
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+    merged
+}
+
+pub(crate) struct InstructionBoundaryTracker {
+    instruction_starts: Vec<u64>,
+    intervals: Vec<(u64, u64)>,
+    known_functions: std::collections::HashSet<u64>,
 }
 
 impl InstructionBoundaryTracker {
@@ -826,31 +868,28 @@ impl InstructionBoundaryTracker {
         use rayon::prelude::*;
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr))
+            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known_functions))
             .collect();
 
-        let mut tracker = Self { boundaries };
-        tracker.boundaries.sort_unstable_by_key(|&(start, _)| start);
-        tracker.boundaries.dedup_by_key(|&mut (start, _)| start);
-        tracker
+        let mut instruction_starts: Vec<u64> = boundaries.iter().map(|&(s, _)| s).collect();
+        instruction_starts.sort_unstable();
+        instruction_starts.dedup();
+
+        let intervals = merge_intervals(boundaries);
+
+        Self {
+            instruction_starts,
+            intervals,
+            known_functions: known_functions.clone(),
+        }
     }
 
     /// Register a batch of newly-accepted candidates in one pass instead of
     /// one `add_function` call each. Each address's CFG walk only ever
-    /// *reads* `binary`/`frontend`, never `self` (see
-    /// `walk_function_boundaries`), so the walks themselves are independent
-    /// and safe to run in parallel; the only genuinely shared-state part is
-    /// merging the results in, which this now does once per batch instead
-    /// of once per address.
-    ///
-    /// This is why a scanner stage calling `add_function` once per accepted
-    /// candidate in a plain sequential loop was the actual bottleneck for
-    /// large candidate batches (Balanced profile in particular): each call
-    /// re-sorted and re-deduped the *entire* accumulated `boundaries`
-    /// list -- O(n log n) on a list that only grows -- so a stage adding a
-    /// few thousand candidates paid that full-list sort a few thousand
-    /// times over. One sort at the end of the batch is the same net
-    /// bookkeeping this loop always needed, just done once.
+    /// *reads* `binary`/`frontend`/`known_functions`, never `self`, so the
+    /// walks themselves are independent and safe to run in parallel; the only
+    /// genuinely shared-state part is merging the results in, which this now
+    /// does once per batch instead of once per address.
     fn add_functions_batch(
         &mut self,
         binary: &LoadedBinary,
@@ -860,29 +899,82 @@ impl InstructionBoundaryTracker {
         if addrs.is_empty() {
             return;
         }
+        self.known_functions.extend(addrs.iter().copied());
         use rayon::prelude::*;
+        let known = &self.known_functions;
         let new_boundaries: Vec<(u64, u64)> = addrs
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr))
+            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known))
             .collect();
-        self.boundaries.extend(new_boundaries);
-        self.boundaries.sort_unstable_by_key(|&(start, _)| start);
-        self.boundaries.dedup_by_key(|&mut (start, _)| start);
+
+        let new_starts: Vec<u64> = new_boundaries.iter().map(|&(s, _)| s).collect();
+        self.instruction_starts.extend(new_starts);
+        self.instruction_starts.sort_unstable();
+        self.instruction_starts.dedup();
+
+        let mut all_intervals = std::mem::take(&mut self.intervals);
+        all_intervals.extend(new_boundaries);
+        self.intervals = merge_intervals(all_intervals);
+    }
+
+    pub(crate) fn is_overlap(&self, addr: u64) -> bool {
+        match self.intervals.binary_search_by(|&(start, end)| {
+            if addr < start {
+                std::cmp::Ordering::Greater
+            } else if addr >= end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        }) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    pub(crate) fn is_in_body(&self, addr: u64) -> bool {
+        self.instruction_starts.binary_search(&addr).is_ok()
+    }
+
+    pub(crate) fn is_offcut(&self, addr: u64) -> bool {
+        self.is_overlap(addr) && !self.is_in_body(addr)
+    }
+}
+
+#[cfg(test)]
+impl InstructionBoundaryTracker {
+    pub(crate) fn from_raw_boundaries(
+        boundaries: Vec<(u64, u64)>,
+        known_functions: std::collections::HashSet<u64>,
+    ) -> Self {
+        let mut instruction_starts: Vec<u64> = boundaries.iter().map(|&(s, _)| s).collect();
+        instruction_starts.sort_unstable();
+        instruction_starts.dedup();
+        let intervals = merge_intervals(boundaries);
+        Self {
+            instruction_starts,
+            intervals,
+            known_functions,
+        }
+    }
+
+    pub(crate) fn intervals(&self) -> &[(u64, u64)] {
+        &self.intervals
+    }
+
+    pub(crate) fn instruction_starts(&self) -> &[u64] {
+        &self.instruction_starts
     }
 }
 
 /// The actual CFG-following instruction-boundary walk used by both
 /// [`InstructionBoundaryTracker::build`] and
-/// [`InstructionBoundaryTracker::add_functions_batch`], factored out
-/// because it never reads tracker state (only `binary`/`frontend`) --
-/// every call is independent, which is what lets `add_functions_batch`
-/// run a whole batch of these in parallel and merge once instead of
-/// merging (and re-sorting the whole accumulated list) after every single
-/// one.
-fn walk_function_boundaries(
+/// [`InstructionBoundaryTracker::add_functions_batch`].
+pub(crate) fn walk_function_boundaries(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
     addr: u64,
+    known_functions: &std::collections::HashSet<u64>,
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
     {
@@ -892,6 +984,12 @@ fn walk_function_boundaries(
 
         while let Some(curr) = worklist.pop() {
             if visited.contains(&curr) {
+                continue;
+            }
+            if curr != addr
+                && (known_functions.contains(&curr)
+                    || binary.function_addr_index.contains_key(&curr))
+            {
                 continue;
             }
 
@@ -929,13 +1027,52 @@ fn walk_function_boundaries(
                         // Do not trace unconditional jumps to avoid enveloping tail call targets
                         break;
                     }
-                    DecodedFlowKind::ConditionalJump => {
-                        if let Some(target) = inst.direct_target {
+                    DecodedFlowKind::Call => {
+                        let call_target = inst.direct_target.or_else(|| {
+                            inst.references.iter().find_map(|r| match r.kind {
+                                DecodedReferenceKind::CallTarget
+                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                                _ => None,
+                            })
+                        });
+                        let is_noreturn = if let Some(target) = call_target {
                             let norm_target =
                                 crate::analysis::function_discovery::targets::normalize_target(
                                     binary, target,
                                 );
-                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges) {
+                            is_target_no_return(binary, norm_target)
+                        } else {
+                            false
+                        };
+                        if is_noreturn {
+                            break;
+                        }
+                        ip += inst.length as u64;
+                    }
+                    DecodedFlowKind::ConditionalJump => {
+                        let jump_target = inst.direct_target.or_else(|| {
+                            inst.references.iter().find_map(|r| match r.kind {
+                                DecodedReferenceKind::BranchTarget
+                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                                _ => None,
+                            })
+                        });
+                        if let Some(target) = jump_target {
+                            let norm_target =
+                                crate::analysis::function_discovery::targets::normalize_target(
+                                    binary, target,
+                                );
+                            let in_same_section = binary.sections.is_empty()
+                                || crate::analysis::function_discovery::targets::same_section(
+                                    binary,
+                                    ip,
+                                    norm_target,
+                                );
+                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges)
+                                && !known_functions.contains(&norm_target)
+                                && !binary.function_addr_index.contains_key(&norm_target)
+                                && in_same_section
+                            {
                                 worklist.push(norm_target);
                             }
                         }
@@ -954,38 +1091,12 @@ fn walk_function_boundaries(
     boundaries
 }
 
-impl InstructionBoundaryTracker {
-    fn is_overlap(&self, addr: u64) -> bool {
-        self.is_in_body(addr) || self.is_offcut(addr)
-    }
-
-    fn is_in_body(&self, addr: u64) -> bool {
-        self.boundaries
-            .binary_search_by_key(&addr, |&(start, _)| start)
-            .is_ok()
-    }
-
-    fn is_offcut(&self, addr: u64) -> bool {
-        match self.boundaries.binary_search_by(|&(start, end)| {
-            if addr <= start {
-                std::cmp::Ordering::Greater
-            } else if addr >= end {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        }) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
-    }
-}
-
-fn validate_after_condition(
+pub(crate) fn validate_after_condition(
     binary: &LoadedBinary,
     addr: u64,
     cond: &str,
     executable_ranges: &[(u64, u64)],
+    global_references: Option<&std::collections::HashSet<u64>>,
 ) -> bool {
     if addr == 0 {
         return false;
@@ -993,7 +1104,10 @@ fn validate_after_condition(
     let prev_addr = addr - 1;
 
     match cond {
-        "defined" => super::ranges::is_in_executable_ranges(prev_addr, executable_ranges),
+        "defined" => {
+            let at_section_start = executable_ranges.iter().any(|&(start, _)| addr == start);
+            at_section_start || super::ranges::is_in_executable_ranges(prev_addr, executable_ranges)
+        }
         "data" => {
             if !super::ranges::is_in_executable_ranges(prev_addr, executable_ranges) {
                 return true;
@@ -1006,15 +1120,55 @@ fn validate_after_condition(
                 }
             }
             if let Some(bytes) = binary.view_bytes(prev_addr, 1) {
-                if bytes[0] == 0x00 {
+                if matches!(bytes[0], 0x00 | 0x90 | 0xcc) {
                     return true;
                 }
             }
             false
         }
+        "ptr" => {
+            global_references.is_some_and(|refs| refs.contains(&addr))
+                || binary.relocations.iter().any(|reloc| {
+                    let target = reloc.addend as u64;
+                    target != 0
+                        && crate::analysis::function_discovery::targets::normalize_target(
+                            binary, target,
+                        ) == addr
+                })
+        }
         "function" => is_strict_boundary(binary, None, addr),
         _ => true,
     }
+}
+
+fn validate_contiguous_instructions(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    addr: u64,
+    min_instructions: usize,
+    executable_ranges: &[(u64, u64)],
+) -> bool {
+    let decode_context = image_decode_context(binary, frontend);
+    let mut ip = addr;
+    for _ in 0..min_instructions {
+        if !super::ranges::is_in_executable_ranges(ip, executable_ranges) {
+            return false;
+        }
+        let Some(bytes) = binary.view_bytes(ip, 15) else {
+            return false;
+        };
+        let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, decode_context) else {
+            return false;
+        };
+        if inst.length == 0
+            || inst.mnemonic.is_empty()
+            || inst.mnemonic.eq_ignore_ascii_case("invalid")
+        {
+            return false;
+        }
+        ip = ip.saturating_add(inst.length as u64);
+    }
+    true
 }
 
 /// Scan binary executable sections using Ghidra XML static patterns.
@@ -1055,8 +1209,8 @@ fn scan_ghidra_patterns(
         }
     }
 
-    // Phase 1: raw byte scan — collect (addr, Option<usize>) where value is the minimum valid_code_min
-    let mut raw_hits: std::collections::HashMap<u64, Option<usize>> =
+    // Phase 1: raw byte scan — collect (addr, (Option<usize>, bool)) where value is (min valid_code_min, requires_contiguous)
+    let mut raw_hits: std::collections::HashMap<u64, (Option<usize>, bool)> =
         std::collections::HashMap::new();
 
     // Build AhoCorasick automaton for the first contiguous block of fixed bytes
@@ -1118,7 +1272,7 @@ fn scan_ghidra_patterns(
         };
         let base = section.virtual_address;
 
-        let section_hits: Vec<(u64, Option<usize>)> = ac
+        let section_hits: Vec<(u64, Option<usize>, bool)> = ac
             .find_overlapping_iter(bytes)
             .map(|mat| {
                 let offset = mat.start();
@@ -1128,7 +1282,7 @@ fn scan_ghidra_patterns(
             })
             .collect::<Vec<_>>()
             .into_par_iter()
-            .filter_map(|(offset, ac_idx, addr)| {
+            .filter_map(|(_offset, ac_idx, addr)| {
                 if !is_in_executable_ranges(addr, executable_ranges) {
                     return None;
                 }
@@ -1139,7 +1293,13 @@ fn scan_ghidra_patterns(
                             let pat = &patterns[i];
                             let boundary_ok = if pat.pre_bytes.is_empty() {
                                 if let Some(cond) = &pat.after_cond {
-                                    validate_after_condition(binary, addr, cond, executable_ranges)
+                                    validate_after_condition(
+                                        binary,
+                                        addr,
+                                        cond,
+                                        executable_ranges,
+                                        global_references,
+                                    )
                                 } else {
                                     is_strict_boundary(binary, Some(frontend), addr)
                                 }
@@ -1148,7 +1308,7 @@ fn scan_ghidra_patterns(
                             };
 
                             if boundary_ok {
-                                return Some((addr, pat.valid_code_min));
+                                return Some((addr, pat.valid_code_min, pat.contiguous));
                             }
                         }
                     }
@@ -1158,7 +1318,7 @@ fn scan_ghidra_patterns(
             .collect();
 
         // Sequential fallback for patterns that start with wildcard
-        let wildcard_hits: Vec<(u64, Option<usize>)> = (0..bytes.len())
+        let wildcard_hits: Vec<(u64, Option<usize>, bool)> = (0..bytes.len())
             .into_par_iter()
             .filter_map(|offset| {
                 if wildcard_start.is_empty() {
@@ -1174,7 +1334,13 @@ fn scan_ghidra_patterns(
                         let pat = &patterns[i];
                         let boundary_ok = if pat.pre_bytes.is_empty() {
                             if let Some(cond) = &pat.after_cond {
-                                validate_after_condition(binary, addr, cond, executable_ranges)
+                                validate_after_condition(
+                                    binary,
+                                    addr,
+                                    cond,
+                                    executable_ranges,
+                                    global_references,
+                                )
                             } else {
                                 is_strict_boundary(binary, Some(frontend), addr)
                             }
@@ -1183,7 +1349,7 @@ fn scan_ghidra_patterns(
                         };
 
                         if boundary_ok {
-                            return Some((addr, pat.valid_code_min));
+                            return Some((addr, pat.valid_code_min, pat.contiguous));
                         }
                     }
                 }
@@ -1191,11 +1357,12 @@ fn scan_ghidra_patterns(
             })
             .collect();
 
-        for (addr, min_val) in section_hits.into_iter().chain(wildcard_hits) {
-            let entry = raw_hits.entry(addr).or_insert(None);
+        for (addr, min_val, contiguous) in section_hits.into_iter().chain(wildcard_hits) {
+            let entry = raw_hits.entry(addr).or_insert((None, contiguous));
             if let Some(min) = min_val {
-                *entry = Some(entry.map_or(min, |v| v.min(min)));
+                entry.0 = Some(entry.0.map_or(min, |v| v.min(min)));
             }
+            entry.1 &= contiguous;
         }
     }
 
@@ -1209,11 +1376,22 @@ fn scan_ghidra_patterns(
     // Phase 2: SLEIGH validation — once per unique address
     let mut hits: Vec<u64> = raw_hits
         .into_par_iter()
-        .filter_map(|(addr, valid_code_min)| {
+        .filter_map(|(addr, (valid_code_min, contiguous))| {
             if tracker.is_offcut(addr) {
                 return None;
             }
             let min_inst = valid_code_min.unwrap_or(3);
+            if contiguous
+                && !validate_contiguous_instructions(
+                    binary,
+                    frontend,
+                    addr,
+                    min_inst,
+                    executable_ranges,
+                )
+            {
+                return None;
+            }
             let mut local_cache = std::collections::HashMap::new();
             if validate_subroutine_candidate(
                 binary,
@@ -2091,35 +2269,26 @@ pub(crate) fn validate_subroutine_candidate(
                         adds_info = true;
                         if inst.flow_kind == DecodedFlowKind::Call {
                             has_call_to_valid = true;
+                        }
+                    }
+                }
 
-                            // [G7] noReturn CALL handling
-                            let mut is_noreturn = false;
-                            let mut name = None;
-                            let mut lib = None;
-                            if let Some(&idx) = binary.function_addr_index.get(&norm_target) {
-                                if let Some(f) = binary.functions.get(idx) {
-                                    name = Some(f.name.as_str());
-                                    lib = f.external_library.as_deref();
-                                }
-                            }
-                            if name.is_none() {
-                                if let Some(n) = binary.iat_symbols.get(&norm_target) {
-                                    name = Some(n.as_str());
-                                } else if let Some(n) = binary.global_symbols.get(&norm_target) {
-                                    name = Some(n.as_str());
-                                }
-                            }
-                            if let Some(n) = name {
-                                let fmt = fission_core::core::ghidra_no_return::binary_format_to_ghidra_format(&binary.format).unwrap_or("");
-                                let comp = binary.get_ghidra_compiler_id();
-                                let idx =
-                                    fission_core::core::ghidra_no_return::ghidra_no_return_index();
-                                is_noreturn = idx.is_no_return(fmt, comp.as_deref(), lib, n);
-                            }
-                            if is_noreturn {
-                                did_terminate = true;
-                                break;
-                            }
+                if inst.flow_kind == DecodedFlowKind::Call {
+                    let call_target = inst.direct_target.or_else(|| {
+                        inst.references.iter().find_map(|r| match r.kind {
+                            DecodedReferenceKind::CallTarget
+                            | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                            _ => None,
+                        })
+                    });
+                    if let Some(target) = call_target {
+                        let norm_target =
+                            crate::analysis::function_discovery::targets::normalize_target(
+                                binary, target,
+                            );
+                        if is_target_no_return(binary, norm_target) {
+                            did_terminate = true;
+                            break;
                         }
                     }
                 }

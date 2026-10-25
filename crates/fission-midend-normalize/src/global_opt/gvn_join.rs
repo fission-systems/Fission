@@ -38,12 +38,14 @@ fn hoist_stmts(
     let mut i = 0;
     while i < stmts.len() {
         if let PreHirStmt::If {
+            cond,
             then_body,
             else_body,
-            ..
         } = &mut stmts[i]
         {
-            if let Some((rhs, x, y)) = try_join_pair(then_body.as_slice(), else_body.as_slice()) {
+            if let Some((rhs, x, y)) =
+                try_join_pair(cond, then_body.as_slice(), else_body.as_slice())
+            {
                 let tmp = alloc_temp_name(locals, params, ctr);
                 let ty = expr_type(&rhs);
                 locals.push(PreHirBinding {
@@ -129,6 +131,49 @@ mod tests {
             binding.name.starts_with("__gvn_join_") && binding.preserves_materialization()
         }));
     }
+
+    #[test]
+    fn gvn_join_rejects_hoist_when_cond_has_side_effects() {
+        let mut func = PreHirFunction {
+            name: "test_gvn_join_side_effects".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Call {
+                    origin: None,
+                    target: "has_side_effects".to_string(),
+                    args: vec![],
+                    ty: int(32),
+                },
+                then_body: vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                        rhs: Box::new(PreHirExpr::Var("b".to_string())),
+                        ty: int(32),
+                    },
+                }]
+                .into(),
+                else_body: vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                        rhs: Box::new(PreHirExpr::Var("b".to_string())),
+                        ty: int(32),
+                    },
+                }]
+                .into(),
+            }],
+            ..Default::default()
+        };
+
+        assert!(!apply_gvn_join_hoist_pass(&mut func));
+    }
 }
 
 fn hoist_stmt_deep(
@@ -211,9 +256,13 @@ fn hoist_stmt_deep(
 }
 
 fn try_join_pair(
+    cond: &PreHirExpr,
     then_body: &[PreHirStmt],
     else_body: &[PreHirStmt],
 ) -> Option<(PreHirExpr, String, String)> {
+    if expr_has_side_effects(cond) {
+        return None;
+    }
     if then_body.is_empty() || else_body.is_empty() {
         return None;
     }

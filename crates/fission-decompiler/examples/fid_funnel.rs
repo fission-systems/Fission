@@ -29,14 +29,18 @@ fn main() {
         fission_loader::loader::LoadedBinary::from_file(&path).expect("load the binary under test");
 
     let databases = load_fid_databases(&binary);
-    let total_entries: usize = databases.iter().map(|d| d.functions.len()).sum();
+    let total_entries: usize = databases.iter().map(|d| d.function_count()).sum();
     println!(
         "databases loaded: {} ({} signature entries)",
         databases.len(),
         total_entries
     );
     for db in &databases {
-        println!("  {:<52} {:>8} entries", db.source_path, db.functions.len());
+        println!(
+            "  {:<52} {:>8} entries",
+            db.source_path(),
+            db.function_count()
+        );
     }
 
     let identifier = FidIdentifier::new(&binary, &databases).expect("FID is available here");
@@ -70,7 +74,7 @@ fn main() {
 
         let candidates: Vec<_> = databases
             .iter()
-            .flat_map(|db| db.find_by_full_hash(full_hash))
+            .flat_map(|db| db.find_candidates_by_full_hash(full_hash))
             .collect();
         if candidates.is_empty() {
             continue;

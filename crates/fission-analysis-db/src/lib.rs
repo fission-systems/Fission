@@ -522,9 +522,11 @@ fn build_functions(
 ) -> Vec<FunctionRecord> {
     let mut sorted = functions.to_vec();
     sorted.retain(|function| {
+        // Import slots live in IAT/GOT data, so they only need to be mapped;
+        // every non-import function is kept as the loader reported it.
         !function.is_import
-            || block_intervals
-                .any_containing(function.address, |index| blocks[index].permissions.execute)
+            || blocks.is_empty()
+            || block_intervals.any_containing(function.address, |_| true)
     });
     sorted.sort_by(|left, right| {
         left.address
@@ -574,6 +576,18 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
 
     let mut rows: BTreeMap<SymbolKey, SymbolFacts> = BTreeMap::new();
 
+    let lookup_version = |name: &str, addr: &u64| {
+        binary
+            .symbol_version_names
+            .get(name)
+            .or_else(|| {
+                let bare = name.split('@').next().unwrap_or(name);
+                binary.symbol_version_names.get(bare)
+            })
+            .or_else(|| binary.symbol_versions.get(addr))
+            .cloned()
+    };
+
     for function in functions {
         if function.name.is_empty() {
             continue;
@@ -589,7 +603,7 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             (function.entry, kind, function.name.clone()),
             (
                 (function.size != 0).then_some(function.size),
-                binary.symbol_versions.get(&function.entry).cloned(),
+                lookup_version(&function.name, &function.entry),
                 function.provenance.source,
             ),
         );
@@ -597,11 +611,7 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
     for (address, name) in &binary.iat_symbols {
         rows.insert(
             (*address, SymbolKind::Import, name.clone()),
-            (
-                None,
-                binary.symbol_versions.get(address).cloned(),
-                FactSource::ImportTable,
-            ),
+            (None, lookup_version(name, address), FactSource::ImportTable),
         );
     }
     for (address, name) in &binary.global_symbols {
@@ -609,21 +619,34 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             (*address, SymbolKind::Data, name.clone()),
             (
                 binary.global_symbol_sizes.get(address).copied(),
-                binary.symbol_versions.get(address).cloned(),
+                lookup_version(name, address),
                 FactSource::SymbolTable,
             ),
         );
     }
+    for (&address, name) in &binary.relocation_symbols {
+        rows.entry((address, SymbolKind::RelocationTarget, name.clone()))
+            .or_insert_with(|| {
+                (
+                    binary.global_symbol_sizes.get(&address).copied(),
+                    binary.symbol_versions.get(&address).cloned(),
+                    FactSource::RelocationTable,
+                )
+            });
+    }
     for symbol in &binary.loader_symbols {
-        let kind = match symbol.kind {
-            LoaderSymbolKind::CodeLabel => SymbolKind::Label,
-            LoaderSymbolKind::Data => SymbolKind::Data,
+        let (kind, size) = match symbol.kind {
+            LoaderSymbolKind::CodeLabel => (SymbolKind::Label, None),
+            LoaderSymbolKind::Data => (
+                SymbolKind::Data,
+                binary.global_symbol_sizes.get(&symbol.address).copied(),
+            ),
         };
         rows.insert(
             (symbol.address, kind, symbol.name.clone()),
             (
-                binary.global_symbol_sizes.get(&symbol.address).copied(),
-                binary.symbol_versions.get(&symbol.address).cloned(),
+                size,
+                lookup_version(&symbol.name, &symbol.address),
                 FactSource::SymbolTable,
             ),
         );
@@ -948,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn non_executable_import_slots_are_symbols_not_functions() {
+    fn non_executable_import_slots_populate_import_functions_and_symbols() {
         let binary = LoadedBinaryBuilder::new("imports.exe".into(), DataBuffer::Heap(vec![0; 16]))
             .format("PE")
             .image_base(0x1000)
@@ -967,7 +990,9 @@ mod tests {
                 name: "example.dll!imported".into(),
                 address: 0x3010,
                 is_import: true,
+                origin: Some("pe-import-table".into()),
                 kind: Some("import".into()),
+                external_library: Some("example.dll".into()),
                 ..FunctionInfo::default()
             })
             .add_iat_symbol(0x3010, "example.dll!imported".into())
@@ -975,7 +1000,13 @@ mod tests {
             .expect("fixture should build");
 
         let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
-        assert!(snapshot.functions.is_empty());
+        let imported = snapshot
+            .function_at(0x3010)
+            .expect("IAT import function should be retained in snapshot");
+        assert_eq!(imported.kind, FunctionKind::Import);
+        assert!(imported.is_import);
+        assert_eq!(imported.external_library.as_deref(), Some("example.dll"));
+        assert_eq!(imported.provenance.source, FactSource::ImportTable);
         assert!(
             snapshot
                 .symbols
@@ -1006,6 +1037,7 @@ mod tests {
                 kind: LoaderSymbolKind::CodeLabel,
                 origin: "pe-coff-symbol-table".into(),
             }])
+            .add_global_symbol_sizes([(0x1020, 64)].into())
             .build()
             .expect("fixture should build");
 
@@ -1017,6 +1049,7 @@ mod tests {
             .expect("loader label should reach the canonical symbol table");
         assert_eq!(label.name, ".l_start");
         assert_eq!(label.kind, SymbolKind::Label);
+        assert_eq!(label.size, None);
         assert_eq!(label.provenance.source, FactSource::SymbolTable);
     }
 
@@ -1055,5 +1088,124 @@ mod tests {
         );
         assert_eq!(headers.provenance.source, FactSource::Loader);
         assert_eq!(snapshot.memory_blocks[1].name, ".text");
+    }
+
+    #[test]
+    fn imported_and_aliased_symbols_retain_correct_version_strings() {
+        let mut ver_names = std::collections::HashMap::new();
+        ver_names.insert("puts".to_string(), "GLIBC_2.2.5".to_string());
+        ver_names.insert("puts@GLIBC_2.2.5".to_string(), "GLIBC_2.2.5".to_string());
+        ver_names.insert("alias_v1".to_string(), "VER_1.0".to_string());
+        ver_names.insert("alias_v2".to_string(), "VER_2.0".to_string());
+
+        let binary =
+            LoadedBinaryBuilder::new("elf_version_test.bin".into(), DataBuffer::Heap(vec![0; 16]))
+                .format("ELF")
+                .image_base(0x400000)
+                .is_64bit(true)
+                .add_iat_symbol(0x404018, "puts".into())
+                .add_function(FunctionInfo {
+                    name: "alias_v1".into(),
+                    address: 0x401000,
+                    size: 32,
+                    is_export: true,
+                    ..FunctionInfo::default()
+                })
+                .add_function(FunctionInfo {
+                    name: "alias_v2".into(),
+                    address: 0x401000,
+                    size: 32,
+                    is_export: true,
+                    ..FunctionInfo::default()
+                })
+                .add_symbol_version_names(ver_names)
+                .build()
+                .expect("binary should build");
+
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+
+        // 1. IAT symbol (puts at GOT slot 0x404018) should have version GLIBC_2.2.5
+        let puts_sym = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "puts")
+            .expect("puts symbol must exist");
+        assert_eq!(puts_sym.kind, SymbolKind::Import);
+        assert_eq!(puts_sym.version.as_deref(), Some("GLIBC_2.2.5"));
+
+        // 2. Aliased functions sharing address 0x401000 should retain distinct versions
+        let alias1 = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "alias_v1")
+            .expect("alias_v1 must exist");
+        assert_eq!(alias1.address, 0x401000);
+        assert_eq!(alias1.version.as_deref(), Some("VER_1.0"));
+
+        let alias2 = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "alias_v2")
+            .expect("alias_v2 must exist");
+        assert_eq!(alias2.address, 0x401000);
+        assert_eq!(alias2.version.as_deref(), Some("VER_2.0"));
+    }
+
+    #[test]
+    fn snapshot_includes_relocation_symbols_and_links_relocations() {
+        let binary = LoadedBinaryBuilder::new("relocs.bin".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("ELF")
+            .image_base(0x1000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".got".into(),
+                virtual_address: 0x2000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_relocation_symbols([(0x2010, "external_printf".into())].into())
+            .add_relocations([RelocationEntry {
+                address: 0x2010,
+                r_type: 7,
+                size: 8,
+                addend: 0,
+                symbol_name: Some("external_printf".into()),
+            }])
+            .build()
+            .expect("fixture should build");
+
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let sym = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.name == "external_printf")
+            .expect("relocation target symbol must be in snapshot.symbols");
+        assert_eq!(sym.address, 0x2010);
+        assert_eq!(sym.kind, SymbolKind::RelocationTarget);
+        assert_eq!(sym.provenance.source, FactSource::RelocationTable);
+
+        let reloc = &snapshot.relocations[0];
+        assert_eq!(reloc.symbol, Some(sym.id));
+        assert_eq!(reloc.symbol_name.as_deref(), Some("external_printf"));
+    }
+
+    #[test]
+    fn snapshot_integrity_detects_function_overflowing_memory_block() {
+        let mut snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
+        let block = &snapshot.memory_blocks[0];
+        let block_end = block.start + block.size;
+        snapshot.functions[0].entry = block_end - 10;
+        snapshot.functions[0].size = 50;
+
+        let report = snapshot.integrity_report();
+        assert!(!report.is_valid());
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::FunctionOutsideMemoryBlock { .. }
+        )));
     }
 }

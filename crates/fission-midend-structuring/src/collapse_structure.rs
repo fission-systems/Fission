@@ -45,6 +45,11 @@ pub fn emit_likely_edges_for_loop(
                 continue;
             }
             // Edge leaves the loop body → exit edge.
+            // Do not emit canonical exit edges (targeting loop_body.exit_idx)
+            // as unstructured exit candidates; they are structured loop exits.
+            if loop_body.exit_idx == Some(succ) {
+                continue;
+            }
             exits.push((bl, succ));
         }
     }
@@ -70,12 +75,18 @@ pub fn collect_likely_gotos(
 ) -> Vec<(usize, usize)> {
     let mut likely = Vec::new();
 
-    // Innermost first: loops with larger body size first (stable proxy for depth).
+    let dom = DomTree::analyze(successors, predecessors);
     let mut ordered: Vec<&LoopBody> = loops
         .iter()
         .filter(|lb| lb.head >= entry && lb.head < exit)
         .collect();
-    ordered.sort_by(|a, b| b.body.len().cmp(&a.body.len()).then(a.head.cmp(&b.head)));
+    // Innermost first: deeper dominance depth first, then smaller body size.
+    ordered.sort_by(|a, b| {
+        dom.dominance_depth(b.head)
+            .cmp(&dom.dominance_depth(a.head))
+            .then_with(|| a.body.len().cmp(&b.body.len()))
+            .then(a.head.cmp(&b.head))
+    });
 
     for lb in &ordered {
         for edge in emit_likely_edges_for_loop(lb, successors) {
@@ -93,7 +104,6 @@ pub fn collect_likely_gotos(
 
     // DAG TraceDAG pass over the window when no loop edges remain.
     if likely.is_empty() && exit > entry {
-        let dom = DomTree::analyze(successors, predecessors);
         let mut dag = TraceDag::new(successors, predecessors, &dom);
         if let Some(edge) = dag.select_likely_unstructured_edge(entry, exit, already_virtual) {
             likely.push(edge);
@@ -153,21 +163,65 @@ mod tests {
     use crate::cfg_analysis::CfgAnalysis;
 
     #[test]
-    fn emit_likely_edges_includes_exit_and_back() {
-        // head=1, body={1,2}, tail=2, exit=3:  0→1→2→1, 2→3
-        let succs = vec![vec![1], vec![2], vec![1, 3], vec![]];
-        let preds = vec![vec![], vec![0, 2], vec![1], vec![2]];
+    fn emit_likely_edges_omits_canonical_exit_and_retains_irregular_exit_and_back() {
+        // head=1, body={1,2}, tail=2, canonical exit=3, irregular break exit=4:
+        // 0→1, 0→4 (external pred for 4 so 4 is outside loop), 1→2, 2→1 (back),
+        // 2→3 (canonical exit), 2→4 (irregular exit)
+        let succs = vec![vec![1, 4], vec![2], vec![1, 3, 4], vec![], vec![]];
+        let preds = vec![vec![], vec![0, 2], vec![1], vec![2], vec![0, 2]];
         let cfg = CfgAnalysis::analyze(&succs, &preds);
         let loops = LoopBody::identify_loops(&succs, &preds, &cfg, &HashSet::default());
         let lb = loops.iter().find(|l| l.head == 1).expect("loop at 1");
+        assert_eq!(lb.exit_idx, Some(3), "canonical exit should be 3");
+
         let edges = emit_likely_edges_for_loop(lb, &succs);
         assert!(
-            edges.iter().any(|&(f, t)| f == 2 && t == 3),
-            "exit edge 2→3: {edges:?}"
+            !edges.iter().any(|&(f, t)| f == 2 && t == 3),
+            "canonical exit 2→3 must NOT be emitted as unstructured candidate: {edges:?}"
+        );
+        assert!(
+            edges.iter().any(|&(f, t)| f == 2 && t == 4),
+            "irregular exit 2→4 must be emitted: {edges:?}"
         );
         assert!(
             edges.iter().any(|&(f, t)| f == 2 && t == 1),
-            "back edge 2→1: {edges:?}"
+            "back edge 2→1 must be emitted: {edges:?}"
+        );
+    }
+
+    #[test]
+    fn collect_likely_gotos_sorts_innermost_loops_first() {
+        // Nested loops:
+        // Outer loop head=1, body={1, 2, 3, 4}, tail=4
+        // Inner loop head=2, body={2, 3}, tail=3
+        // 0 -> 1 -> 2 -> 3 -> 2 (inner back)
+        // 3 -> 4 -> 1 (outer back)
+        // 4 -> 5 (outer exit)
+        let succs = vec![
+            vec![1],    // 0
+            vec![2],    // 1 (outer head)
+            vec![3],    // 2 (inner head)
+            vec![2, 4], // 3 (inner tail back to 2, or to 4)
+            vec![1, 5], // 4 (outer tail back to 1, or to 5)
+            vec![],     // 5
+        ];
+        let mut preds = vec![Vec::new(); succs.len()];
+        for (u, s_list) in succs.iter().enumerate() {
+            for &v in s_list {
+                preds[v].push(u);
+            }
+        }
+        let cfg = CfgAnalysis::analyze(&succs, &preds);
+        let loops = LoopBody::identify_loops(&succs, &preds, &cfg, &HashSet::default());
+        assert_eq!(loops.len(), 2);
+
+        let likely = collect_likely_gotos(0, 6, &succs, &preds, &loops, &HashSet::default());
+        // Innermost loop (head 2) should be processed first!
+        // Inner loop's edge is back-edge (3, 2).
+        assert_eq!(
+            likely,
+            vec![(3, 2)],
+            "innermost loop edges must be selected first"
         );
     }
 

@@ -31,6 +31,7 @@ impl LoadedBinaryBuilder {
             relocations: Vec::new(),
             rich_header_records: None,
             symbol_versions: std::collections::HashMap::new(),
+            symbol_version_names: std::collections::HashMap::new(),
             inferred_types: Vec::new(),
             cfg_label_leaders: Vec::new(),
         }
@@ -166,6 +167,14 @@ impl LoadedBinaryBuilder {
 
     pub fn add_symbol_versions(mut self, versions: std::collections::HashMap<u64, String>) -> Self {
         self.symbol_versions.extend(versions);
+        self
+    }
+
+    pub fn add_symbol_version_names(
+        mut self,
+        versions: std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.symbol_version_names.extend(versions);
         self
     }
 
@@ -321,6 +330,9 @@ impl LoadedBinaryBuilder {
             loader_symbols,
             // Empty unless an analysis database supplies them after load.
             user_signatures: std::collections::HashMap::new(),
+            user_comments: std::collections::HashMap::new(),
+            user_breakpoints: Vec::new(),
+            user_watchpoints: Vec::new(),
             relocation_symbols,
             function_addr_index,
             function_name_index,
@@ -331,6 +343,7 @@ impl LoadedBinaryBuilder {
             relocations: self.relocations,
             rich_header_records: self.rich_header_records,
             symbol_versions: self.symbol_versions,
+            symbol_version_names: self.symbol_version_names,
             cfg_label_leaders,
         };
 

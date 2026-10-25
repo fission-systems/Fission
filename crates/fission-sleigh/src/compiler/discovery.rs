@@ -10,26 +10,11 @@ pub fn ghidra_language_manifest_path() -> PathBuf {
 }
 
 fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("fission-sleigh crate should live under repo/crates/fission-sleigh")
-        .to_path_buf()
+    fission_core::utils::find_workspace_root("FISSION_ROOT").unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub fn sleigh_specs_root() -> PathBuf {
-    if let Some(path) = env::var_os("FISSION_SLEIGH_SPEC_DIR") {
-        let path = PathBuf::from(path);
-        return normalize_sleigh_specs_root(path);
-    }
-
-    let repo_root = repo_root();
-    let utils_root = repo_root.join("utils").join("sleigh-specs");
-    if utils_root.join("languages").exists() {
-        return utils_root;
-    }
-
-    utils_root
+    fission_core::resource_roots::find_sleigh_specs_root()
 }
 
 pub fn sleigh_languages_root() -> PathBuf {
@@ -66,7 +51,9 @@ pub fn sleigh_build_cache_root() -> PathBuf {
         };
     }
 
-    repo_root().join("target").join("fission-sleigh")
+    fission_core::resource_roots::fission_cache_dir()
+        .map(|d| d.join("fission-sleigh"))
+        .unwrap_or_else(|| repo_root().join("target").join("fission-sleigh"))
 }
 
 pub fn generated_root() -> PathBuf {
@@ -161,12 +148,7 @@ pub fn infer_arch_from_entry_spec(entry_spec: &Path) -> Result<String> {
             entry_spec.display()
         )
     })?;
-    let languages_roots = [
-        sleigh_languages_root(),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("specs")
-            .join("languages"),
-    ];
+    let languages_roots = [sleigh_languages_root()];
     let mut last_error_root = None;
     for languages_root in languages_roots {
         last_error_root = Some(languages_root.clone());

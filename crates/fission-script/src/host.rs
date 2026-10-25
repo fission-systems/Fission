@@ -24,6 +24,35 @@ impl BinaryHost {
         format!("0x{:x}", self.0.image_base)
     }
 
+    pub fn entry_point(&mut self) -> String {
+        format!("0x{:x}", self.0.entry_point)
+    }
+
+    pub fn read_bytes(&mut self, addr: i64, size: i64) -> rhai::Array {
+        let size = (size.clamp(0, 64 * 1024)) as usize;
+        let addr = addr as u64;
+        let bytes: &[u8] = self
+            .0
+            .view_bytes(addr, size)
+            .or_else(|| {
+                self.0
+                    .section_containing_for_execution(addr)
+                    .and_then(|sec| self.0.view_section_bytes(sec, addr, size))
+            })
+            .or_else(|| {
+                let offset = addr as usize;
+                let data = self.0.data.as_slice();
+                if offset < data.len() {
+                    let take = size.min(data.len() - offset);
+                    Some(&data[offset..offset + take])
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(&[]);
+        bytes.iter().map(|&b| Dynamic::from(b as i64)).collect()
+    }
+
     pub fn is_64bit(&mut self) -> bool {
         self.0.is_64bit
     }
@@ -69,6 +98,8 @@ pub fn register_binary(engine: &mut Engine) -> Result<(), ScriptError> {
         .register_fn("path", BinaryHost::path)
         .register_fn("format", BinaryHost::format)
         .register_fn("image_base", BinaryHost::image_base)
+        .register_fn("entry_point", BinaryHost::entry_point)
+        .register_fn("read_bytes", BinaryHost::read_bytes)
         .register_fn("is_64bit", BinaryHost::is_64bit)
         .register_fn("functions", BinaryHost::functions)
         .register_fn("imports", BinaryHost::imports)
@@ -186,10 +217,10 @@ fn finding_from_map(m: &Map) -> ScriptFinding {
     }
 }
 
-fn approximate_findings_payload_bytes(findings: &[ScriptFinding]) -> usize {
-    serde_json::to_string(findings)
+fn single_finding_payload_bytes(finding: &ScriptFinding) -> usize {
+    serde_json::to_string(finding)
         .map(|s| s.len())
-        .unwrap_or(findings.len() * 64)
+        .unwrap_or(64)
 }
 
 pub fn register_emit(
@@ -198,6 +229,7 @@ pub fn register_emit(
     limits: ScriptLimits,
     halted: Arc<Mutex<Option<String>>>,
 ) -> Result<(), ScriptError> {
+    let payload_bytes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     engine.register_fn("emit", move |m: Map| {
         let stopped = halted.lock().map(|h| h.is_some()).unwrap_or(true);
         if stopped {
@@ -218,14 +250,23 @@ pub fn register_emit(
             return;
         }
 
-        fs.push(finding);
+        let finding_bytes = single_finding_payload_bytes(&finding);
+        let needed = if fs.is_empty() {
+            2 + finding_bytes
+        } else {
+            1 + finding_bytes
+        };
 
-        if approximate_findings_payload_bytes(&fs) > limits.max_output_bytes {
-            fs.pop();
+        let current = payload_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        if current.saturating_add(needed) > limits.max_output_bytes {
             if let Ok(mut h) = halted.lock() {
                 *h = Some("script exceeded max_output_bytes limit".into());
             }
+            return;
         }
+
+        payload_bytes.fetch_add(needed, std::sync::atomic::Ordering::Relaxed);
+        fs.push(finding);
     });
 
     Ok(())

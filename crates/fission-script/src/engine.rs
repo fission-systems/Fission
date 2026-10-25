@@ -176,7 +176,14 @@ fn run_script_inner(
         (Some(machine), _) => Some(machine),
         (None, true) => match crate::api::machine::MachineHost::launch(&binary.path, binary) {
             Ok(machine) => Some(machine),
-            Err(message) => return ScriptRunResult::error_compile(message, &limits),
+            Err(message) => {
+                let mut res = ScriptRunResult::error_runtime(
+                    format!("failed to initialize machine: {message}"),
+                    &limits,
+                );
+                res.script = Some(meta);
+                return res;
+            }
         },
         (None, false) => None,
     };
@@ -195,6 +202,13 @@ fn run_script_inner(
         }
     });
 
+    #[cfg(feature = "emulator")]
+    let mut machine = machine;
+    #[cfg(feature = "emulator")]
+    if let Some(m) = machine.as_mut() {
+        m.set_deadline(Some(deadline));
+    }
+
     let mut scope = rhai::Scope::new();
     scope.push("binary", host_bin);
     #[cfg(feature = "emulator")]
@@ -203,7 +217,13 @@ fn run_script_inner(
     }
     let eval_result = { engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast) };
 
-    if timed_out.load(std::sync::atomic::Ordering::Relaxed) {
+    if timed_out.load(std::sync::atomic::Ordering::Relaxed)
+        || Instant::now() >= deadline
+        || eval_result
+            .as_ref()
+            .err()
+            .is_some_and(|e| e.to_string().contains("max_runtime_ms"))
+    {
         let mut result = ScriptRunResult::timeout(&limits);
         result.script = Some(meta);
         return result;

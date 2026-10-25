@@ -24,7 +24,7 @@ pub struct RecoveredVariable {
     /// register-resident local, which have no slot to name.
     pub stack_offset: Option<i64>,
     pub size: Option<u32>,
-    /// `"arg"` or `"stack"`.
+    /// `"arg"`, `"stack"`, or `"reg"`.
     pub kind: &'static str,
     /// Position in the ABI argument order, for an argument.
     pub arg_index: Option<usize>,
@@ -32,6 +32,71 @@ pub struct RecoveredVariable {
     /// when the builder can trace the rendered name to one scalar SSA value.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub addresses: Vec<u64>,
+    /// Partial inference context, not a certificate of complete class layout.
+    /// This describes the existing NIR type without consulting debug or source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_shape: Option<RecoveredTypeShape>,
+}
+
+/// Known NIR storage shape. Aggregate fields are observations; unobserved
+/// fields, bases, padding, vptrs and total source-object size are not inferred.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecoveredTypeShape {
+    Unknown,
+    Bool,
+    Int {
+        bits: u32,
+        signed: bool,
+    },
+    Float {
+        bits: u32,
+    },
+    Pointer {
+        pointee: Box<RecoveredTypeShape>,
+    },
+    Aggregate {
+        observed_size: u32,
+        fields: Vec<RecoveredTypeField>,
+        layout_complete: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RecoveredTypeField {
+    pub byte_offset: u32,
+    pub name: String,
+    pub shape: RecoveredTypeShape,
+}
+
+fn type_shape(ty: &NirType, depth: usize) -> RecoveredTypeShape {
+    if depth >= 32 {
+        return RecoveredTypeShape::Unknown;
+    }
+    match ty {
+        NirType::Unknown => RecoveredTypeShape::Unknown,
+        NirType::Bool => RecoveredTypeShape::Bool,
+        NirType::Int { bits, signed } => RecoveredTypeShape::Int {
+            bits: *bits,
+            signed: *signed,
+        },
+        NirType::Float { bits } => RecoveredTypeShape::Float { bits: *bits },
+        NirType::Ptr(pointee) => RecoveredTypeShape::Pointer {
+            pointee: Box::new(type_shape(pointee, depth + 1)),
+        },
+        NirType::Aggregate { size, fields } => RecoveredTypeShape::Aggregate {
+            observed_size: *size,
+            layout_complete: false,
+            fields: fields
+                .iter()
+                .map(|f| RecoveredTypeField {
+                    byte_offset: f.offset,
+                    name: f.name.clone(),
+                    shape: type_shape(&f.ty, depth + 1),
+                })
+                .collect(),
+        },
+    }
 }
 
 /// Byte width of a type, where it has one.
@@ -77,6 +142,7 @@ fn describe(
         kind,
         arg_index,
         addresses: Vec::new(),
+        type_shape: (!matches!(binding.ty, NirType::Unknown)).then(|| type_shape(&binding.ty, 0)),
     }
 }
 
@@ -108,7 +174,12 @@ pub(crate) fn recovered_variables_with_instruction_addresses(
         out.push(describe(binding, "arg", Some(arg_index), pointer_size));
     }
     for binding in &func.locals {
-        let mut variable = describe(binding, "stack", None, pointer_size);
+        let kind = if frame_offset(binding.origin).is_some() {
+            "stack"
+        } else {
+            "reg"
+        };
+        let mut variable = describe(binding, kind, None, pointer_size);
         if let Some(addresses) = addresses_by_name.get(&binding.name) {
             variable.addresses.clone_from(addresses);
         }
@@ -212,6 +283,35 @@ mod tests {
     }
 
     #[test]
+    fn local_variable_kind_distinguishes_stack_from_register() {
+        let mut function = HirFunction::default();
+        function.locals.push(NirBinding {
+            name: "stack_var".to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-8)),
+            initializer: None,
+        });
+        function.locals.push(NirBinding {
+            name: "reg_var".to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        });
+
+        let variables = recovered_variables(&function);
+        assert_eq!(variables[0].kind, "stack");
+        assert_eq!(variables[1].kind, "reg");
+    }
+
+    #[test]
     fn omits_instruction_addresses_without_provenance() {
         let variable = RecoveredVariable {
             name: "local_value".to_string(),
@@ -221,6 +321,7 @@ mod tests {
             kind: "stack",
             arg_index: None,
             addresses: Vec::new(),
+            type_shape: None,
         };
 
         assert!(

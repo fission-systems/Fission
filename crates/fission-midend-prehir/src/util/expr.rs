@@ -70,6 +70,7 @@ mod tests {
 
     fn call(target: &str) -> PreHirExpr {
         PreHirExpr::Call {
+            origin: None,
             target: target.to_string(),
             args: vec![PreHirExpr::Const(
                 1,

@@ -886,6 +886,25 @@ fn dispatch_at_branch(ops: &[PcodeOp]) -> Option<Dispatch> {
                     (None, None) => Dispatch::default(),
                 }
             }
+            // Index scaling via shift (e.g. `index << 2` for 4-byte entries,
+            // `index << 3` for 8-byte entries) is common across ARM, MIPS,
+            // RISC-V, and x86 jump table dispatches.
+            PcodeOpcode::IntLeft if op.inputs.len() == 2 => {
+                let lhs = read(&env, &op.inputs[0]);
+                let rhs = read(&env, &op.inputs[1]);
+                match (lhs.added_const, rhs.added_const) {
+                    (Some(val), Some(shift)) => Dispatch {
+                        added_const: (shift < 64).then(|| val.wrapping_shl(shift as u32)),
+                        ..Dispatch::default()
+                    },
+                    (None, Some(shift)) if shift < 64 => Dispatch {
+                        index_scale: (shift <= 6)
+                            .then(|| lhs.index_scale.unwrap_or(1).wrapping_shl(shift as u32)),
+                        ..Dispatch::default()
+                    },
+                    _ => Dispatch::default(),
+                }
+            }
             // `Load`'s first input is the space id, the second the address.
             PcodeOpcode::Load if op.inputs.len() == 2 => {
                 let addr = read(&env, &op.inputs[1]);
@@ -1049,13 +1068,14 @@ pub fn attach_inferred_indirect_edges(
     let source_to_block_index = function
         .blocks
         .iter()
-        .filter(|block| {
+        .filter_map(|block| {
             block
                 .ops
-                .last()
-                .is_some_and(|op| op.opcode == PcodeOpcode::BranchInd)
+                .iter()
+                .rev()
+                .find(|op| op.opcode == PcodeOpcode::BranchInd)
+                .map(|op| (op.address, block.index))
         })
-        .flat_map(|block| block.ops.iter().map(move |op| (op.address, block.index)))
         .collect::<BTreeMap<_, _>>();
 
     for (source, targets) in inferred_edges {
@@ -1548,7 +1568,7 @@ impl RuntimeSleighFrontend {
                             bytes.len(),
                             fallthrough,
                         );
-                    } else {
+                    } else if stop_reason != DecodeStopReason::IndirectBranchHalt {
                         stop_reason = DecodeStopReason::TerminalControlFlow;
                     }
                 }
@@ -1562,7 +1582,7 @@ impl RuntimeSleighFrontend {
                                 fallthrough,
                             );
                         } else {
-                            stop_reason = DecodeStopReason::TerminalControlFlow;
+                            stop_reason = DecodeStopReason::IndirectBranchHalt;
                         }
                     } else if let Some(branch_target) =
                         ins_ops.last().and_then(|op| op.inputs.first())
@@ -2047,6 +2067,86 @@ mod dispatch_tests {
         let value = dispatch_at_branch(&ops).expect("the block ends in BranchInd");
         assert_eq!(value.table, Some(0x1000));
         assert_eq!(value.table_scale, Some(8));
+    }
+
+    /// Index scaling via bit shift (e.g. `shl index, 2` on ARM/RISC-V/x86)
+    /// must be recognized as scaling by `1 << shift`.
+    #[test]
+    fn shift_based_index_scaling_recovers_table_and_stride() {
+        let index = vn(2, 0x100, 8);
+        let scaled = vn(4, 0x10, 8);
+        let base = vn(4, 0x20, 8);
+        let addr = vn(4, 0x30, 8);
+        let entry = vn(4, 0x40, 8);
+        let ops = vec![
+            op(PcodeOpcode::Copy, Some(base.clone()), vec![konst(0x40000)]),
+            // index << 2 -> scale of 4
+            op(
+                PcodeOpcode::IntLeft,
+                Some(scaled.clone()),
+                vec![index, konst(2)],
+            ),
+            op(PcodeOpcode::IntAdd, Some(addr.clone()), vec![base, scaled]),
+            op(PcodeOpcode::Load, Some(entry.clone()), vec![konst(3), addr]),
+            op(PcodeOpcode::BranchInd, None, vec![entry]),
+        ];
+        let value = dispatch_at_branch(&ops).expect("the block ends in BranchInd");
+        assert_eq!(value.table, Some(0x40000));
+        assert_eq!(value.table_scale, Some(4));
+    }
+
+    /// When a block ends with BranchInd followed by trailing operations
+    /// (e.g. delay slots, stack adjustments), `attach_inferred_indirect_edges`
+    /// must still connect the block to its inferred indirect successors.
+    #[test]
+    fn attach_inferred_indirect_edges_connects_blocks_with_trailing_ops() {
+        let entry = vn(4, 0x40, 8);
+        let block0 = PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::BranchInd,
+                    output: None,
+                    inputs: vec![entry],
+                    address: 0x1004,
+                    asm_mnemonic: None,
+                },
+                // Trailing op (e.g. delay slot op or cleanup)
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    output: Some(vn(4, 0x50, 8)),
+                    inputs: vec![konst(0)],
+                    address: 0x1008,
+                    asm_mnemonic: None,
+                },
+            ],
+            successors: Vec::new(),
+        };
+        let block1 = PcodeBasicBlock {
+            index: 1,
+            start_address: 0x2000,
+            ops: Vec::new(),
+            successors: Vec::new(),
+        };
+        let block2 = PcodeBasicBlock {
+            index: 2,
+            start_address: 0x2050,
+            ops: Vec::new(),
+            successors: Vec::new(),
+        };
+        let mut func = PcodeFunction {
+            blocks: vec![block0, block1, block2],
+        };
+        let mut edges = BTreeMap::new();
+        // The BranchInd is at address 0x1004
+        edges.insert(0x1004, vec![0x2000, 0x2050]);
+
+        attach_inferred_indirect_edges(&mut func, &edges);
+
+        assert_eq!(func.blocks[0].successors, vec![1, 2]);
     }
 }
 

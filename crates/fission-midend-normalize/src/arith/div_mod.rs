@@ -880,6 +880,7 @@ mod tests {
     #[test]
     fn recognizes_arm_eabi_unsigned_division_helper() {
         let expr = PreHirExpr::Call {
+            origin: None,
             target: "__aeabi_uidiv".to_string(),
             args: vec![var("numerator"), var("denominator"), var("dead_r2")],
             ty: NirType::Unknown,
@@ -1203,6 +1204,39 @@ mod cdq_tests {
         assert!(
             collapse_cdq_style_signed_mod_div(&mod_vars(wide, "y")).is_none(),
             "bare copy/var high half must not collapse as CDQ"
+        );
+    }
+}
+
+#[cfg(test)]
+mod pr_review_regressions {
+    use super::*;
+    #[test]
+    fn review_signed_shift_is_not_truncating_division() {
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mul,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: i64_ty.clone(),
+                    expr: Box::new(PreHirExpr::Var("x".into())),
+                }),
+                rhs: Box::new(PreHirExpr::Const(0x5555_5556, i64_ty.clone())),
+                ty: i64_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(32, i64_ty.clone())),
+            ty: i64_ty,
+        };
+        let original = (-1_i64 * 0x5555_5556) >> 32;
+        let rewritten = -1_i64 / 3;
+        assert_ne!(original, rewritten);
+        assert!(
+            recognize_magic_number_division(&expr).is_none(),
+            "must not replace arithmetic shift (-1) with truncating division (0)"
         );
     }
 }

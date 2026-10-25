@@ -9,6 +9,13 @@
 use fission_loader::loader::LoadedBinary;
 use std::io::{self, Write};
 
+fn stored_size(section: &fission_core::common::types::SectionInfo) -> u64 {
+    match section.virtual_size {
+        0 => section.file_size,
+        virtual_size => virtual_size.min(section.file_size),
+    }
+}
+
 pub(super) fn print_hex(
     binary: &LoadedBinary,
     address: u64,
@@ -18,7 +25,7 @@ pub(super) fn print_hex(
     let mut stdout = io::stdout().lock();
 
     let Some(section) = binary.sections.iter().find(|section| {
-        let mapped = section.file_size.min(section.virtual_size);
+        let mapped = stored_size(section);
         section
             .virtual_address
             .checked_add(mapped)
@@ -40,7 +47,7 @@ pub(super) fn print_hex(
 
     let offset_in_section = address - section.virtual_address;
     let file_offset = (section.file_offset + offset_in_section) as usize;
-    let mapped_end = (section.file_offset + section.file_size.min(section.virtual_size)) as usize;
+    let mapped_end = (section.file_offset + stored_size(section)) as usize;
     let data = binary.data.as_slice();
     let end = file_offset
         .saturating_add(count)
@@ -135,5 +142,27 @@ mod tests {
             column(&short),
             "full:\n{full}\nshort:\n{short}"
         );
+    }
+
+    #[test]
+    fn hex_reads_section_with_zero_virtual_size() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+        let binary = LoadedBinaryBuilder::new("test.bin".into(), DataBuffer::Heap(vec![0x42; 64]))
+            .format("TEST")
+            .image_base(0x1000)
+            .add_section(SectionInfo {
+                name: ".data".into(),
+                virtual_address: 0x1000,
+                virtual_size: 0,
+                file_offset: 0,
+                file_size: 64,
+                is_readable: true,
+                is_writable: true,
+                is_executable: false,
+            })
+            .build()
+            .expect("build fixture");
+
+        assert!(super::print_hex(&binary, 0x1000, 16, true).is_ok());
     }
 }

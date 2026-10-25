@@ -442,14 +442,42 @@ fn redundant_self_cast_assignment(name: &str, rhs: &PreHirExpr, binding_ty: &Nir
     cast_bits >= binding_bits
 }
 
+fn is_redundant_self_assign(
+    stmt: &PreHirStmt,
+    binding_types: &crate::HashMap<String, NirType>,
+) -> bool {
+    let PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(name),
+        rhs,
+    } = stmt
+    else {
+        return false;
+    };
+    if matches!(rhs, PreHirExpr::Var(var) if var == name) {
+        return true;
+    }
+    if let Some(binding_ty) = binding_types.get(name.as_str()) {
+        redundant_self_cast_assignment(name, rhs, binding_ty)
+    } else {
+        false
+    }
+}
+
 fn elide_casts_in_stmts(
     stmts: &mut Vec<PreHirStmt>,
     binding_types: &crate::HashMap<String, NirType>,
     return_type: Option<&NirType>,
     changed: &mut bool,
 ) {
-    for stmt in stmts.iter_mut() {
-        elide_casts_in_stmt(stmt, binding_types, return_type, changed);
+    let mut i = 0;
+    while i < stmts.len() {
+        if is_redundant_self_assign(&stmts[i], binding_types) {
+            stmts.remove(i);
+            *changed = true;
+            continue;
+        }
+        elide_casts_in_stmt(&mut stmts[i], binding_types, return_type, changed);
+        i += 1;
     }
 }
 
@@ -465,11 +493,7 @@ fn elide_casts_in_stmt(
             rhs,
         } => {
             if let Some(binding_ty) = binding_types.get(name.as_str()) {
-                if redundant_self_cast_assignment(name, rhs, binding_ty) {
-                    *rhs = PreHirExpr::Var(name.clone());
-                    *changed = true;
-                } else if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty, binding_types)
-                {
+                if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty, binding_types) {
                     *rhs = stripped;
                     *changed = true;
                 }
@@ -477,7 +501,8 @@ fn elide_casts_in_stmt(
         }
         PreHirStmt::Return(Some(expr)) => {
             if let Some(return_type) = return_type
-                && let Some(stripped) = try_strip_return_outer_cast(expr, return_type)
+                && let Some(stripped) =
+                    try_strip_return_outer_cast(expr, return_type, binding_types)
             {
                 *expr = stripped;
                 *changed = true;
@@ -517,10 +542,20 @@ fn elide_casts_in_stmt(
             init, update, body, ..
         } => {
             if let Some(i) = init {
-                elide_casts_in_stmt(i, binding_types, return_type, changed);
+                if is_redundant_self_assign(i, binding_types) {
+                    *init = None;
+                    *changed = true;
+                } else {
+                    elide_casts_in_stmt(i, binding_types, return_type, changed);
+                }
             }
             if let Some(u) = update {
-                elide_casts_in_stmt(u, binding_types, return_type, changed);
+                if is_redundant_self_assign(u, binding_types) {
+                    *update = None;
+                    *changed = true;
+                } else {
+                    elide_casts_in_stmt(u, binding_types, return_type, changed);
+                }
             }
             elide_casts_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
@@ -830,6 +865,31 @@ fn unsigned_compare_binding_operand(
     }
 }
 
+fn resolved_expr_type(expr: &PreHirExpr, binding_types: &HashMap<String, NirType>) -> NirType {
+    match expr {
+        PreHirExpr::Var(name) => binding_types.get(name).cloned().unwrap_or(NirType::Unknown),
+        PreHirExpr::Binary { lhs, rhs, ty, .. } => {
+            let lhs_ty = resolved_expr_type(lhs, binding_types);
+            let rhs_ty = resolved_expr_type(rhs, binding_types);
+            if let (Some(l_bits), Some(r_bits)) =
+                (scalar_bit_width(&lhs_ty), scalar_bit_width(&rhs_ty))
+            {
+                let op_bits = l_bits.max(r_bits);
+                if let Some(bin_bits) = scalar_bit_width(ty) {
+                    if op_bits < bin_bits {
+                        return NirType::Int {
+                            bits: op_bits,
+                            signed: false,
+                        };
+                    }
+                }
+            }
+            ty.clone()
+        }
+        _ => expr_type(expr),
+    }
+}
+
 fn try_strip_outer_cast(
     expr: &PreHirExpr,
     binding_ty: &NirType,
@@ -842,12 +902,22 @@ fn try_strip_outer_cast(
     else {
         return None;
     };
+    let inner_ty = resolved_expr_type(inner, binding_types);
+    if let (Some(inner_bits), Some(cast_bits)) =
+        (scalar_bit_width(&inner_ty), scalar_bit_width(cast_ty))
+    {
+        if inner_bits > cast_bits {
+            return None;
+        }
+    }
+    if let (Some(inner_bits), Some(binding_bits)) =
+        (scalar_bit_width(&inner_ty), scalar_bit_width(binding_ty))
+    {
+        if inner_bits > binding_bits {
+            return None;
+        }
+    }
     if cast_ty == binding_ty {
-        let inner_ty = if let PreHirExpr::Var(name) = inner.as_ref() {
-            binding_types.get(name).cloned().unwrap_or(NirType::Unknown)
-        } else {
-            expr_type(inner)
-        };
         let compatible = match (&inner_ty, binding_ty) {
             (NirType::Unknown, _) => true,
             (a, b) if a == b => true,
@@ -877,7 +947,11 @@ fn try_strip_outer_cast(
     None
 }
 
-fn try_strip_return_outer_cast(expr: &PreHirExpr, return_type: &NirType) -> Option<PreHirExpr> {
+fn try_strip_return_outer_cast(
+    expr: &PreHirExpr,
+    return_type: &NirType,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<PreHirExpr> {
     let PreHirExpr::Cast {
         ty: cast_ty,
         expr: inner,
@@ -885,8 +959,39 @@ fn try_strip_return_outer_cast(expr: &PreHirExpr, return_type: &NirType) -> Opti
     else {
         return None;
     };
+    let inner_ty = resolved_expr_type(inner, binding_types);
+    if let (Some(inner_bits), Some(cast_bits)) =
+        (scalar_bit_width(&inner_ty), scalar_bit_width(cast_ty))
+    {
+        if inner_bits > cast_bits {
+            return None;
+        }
+    }
+    if let (Some(inner_bits), Some(return_bits)) =
+        (scalar_bit_width(&inner_ty), scalar_bit_width(return_type))
+    {
+        if inner_bits > return_bits {
+            return None;
+        }
+    }
     if cast_ty == return_type && is_scalar_non_unknown(cast_ty) {
-        Some((**inner).clone())
+        let compatible = match (&inner_ty, return_type) {
+            (NirType::Unknown, _) => true,
+            (a, b) if a == b => true,
+            (NirType::Bool, NirType::Int { .. }) => true,
+            (
+                NirType::Int {
+                    bits: inner_bits, ..
+                },
+                NirType::Int {
+                    bits: outer_bits, ..
+                },
+            ) => inner_bits <= outer_bits,
+            _ => false,
+        };
+        if compatible {
+            return Some((**inner).clone());
+        }
     } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(return_type) {
         if let (Some(cast_bits), Some(return_bits)) =
             (scalar_bit_width(cast_ty), scalar_bit_width(return_type))
@@ -895,10 +1000,8 @@ fn try_strip_return_outer_cast(expr: &PreHirExpr, return_type: &NirType) -> Opti
                 return Some((**inner).clone());
             }
         }
-        None
-    } else {
-        None
     }
+    None
 }
 
 /// ActionSetCasts / RulePushPtr / RuleStructOffset0-style cleanups at expression level.
@@ -1111,5 +1214,47 @@ mod comparison_view_tests {
         };
         assert!(strip_redundant_casts_in_expr(&mut plain, &type_map));
         assert!(matches!(plain, PreHirExpr::Var(_)));
+    }
+
+    #[test]
+    fn try_strip_return_outer_cast_preserves_truncating_cast() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let types = HashMap::from_iter([("val".to_string(), u64_ty.clone())]);
+        // return (uint32_t)(val >> 32);
+        let trunc_expr = PreHirExpr::Cast {
+            ty: u32_ty.clone(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(PreHirExpr::Var("val".into())),
+                rhs: Box::new(PreHirExpr::Const(32, u64_ty.clone())),
+                ty: u64_ty.clone(),
+            }),
+        };
+        assert!(try_strip_return_outer_cast(&trunc_expr, &u32_ty, &types).is_none());
+
+        // Direct var of 64-bit: return (uint32_t)val;
+        let direct_trunc = PreHirExpr::Cast {
+            ty: u32_ty.clone(),
+            expr: Box::new(PreHirExpr::Var("val".into())),
+        };
+        assert!(try_strip_return_outer_cast(&direct_trunc, &u32_ty, &types).is_none());
+
+        // Safe when inner expression is 32-bit: return (uint32_t)val32;
+        let types32 = HashMap::from_iter([("val32".to_string(), u32_ty.clone())]);
+        let safe_cast = PreHirExpr::Cast {
+            ty: u32_ty.clone(),
+            expr: Box::new(PreHirExpr::Var("val32".into())),
+        };
+        assert_eq!(
+            try_strip_return_outer_cast(&safe_cast, &u32_ty, &types32),
+            Some(PreHirExpr::Var("val32".into()))
+        );
     }
 }

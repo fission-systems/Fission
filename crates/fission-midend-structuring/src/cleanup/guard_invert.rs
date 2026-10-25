@@ -136,13 +136,15 @@ fn invert_in_place(
                     definition_counts,
                 ) {
                     *removed += consumed;
+                    let inner_falls_through =
+                        fallthrough_labels_after(stmts, idx, falls_through_to);
                     if let PreHirStmt::If { then_body, .. } = &mut stmts[idx] {
                         invert_in_place(
                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                             protected,
                             global_refs,
                             definition_counts,
-                            falls_through_to,
+                            &inner_falls_through,
                             removed,
                         );
                     }
@@ -153,6 +155,8 @@ fn invert_in_place(
                 // guard's jump and the then-arm's jump to the join.
                 if recover_if_else(stmts, idx, &target, protected, global_refs) {
                     *removed += 2;
+                    let inner_falls_through =
+                        fallthrough_labels_after(stmts, idx, falls_through_to);
                     if let PreHirStmt::If {
                         then_body,
                         else_body,
@@ -164,7 +168,7 @@ fn invert_in_place(
                             protected,
                             global_refs,
                             definition_counts,
-                            falls_through_to,
+                            &inner_falls_through,
                             removed,
                         );
                         invert_in_place(
@@ -172,7 +176,7 @@ fn invert_in_place(
                             protected,
                             global_refs,
                             definition_counts,
-                            falls_through_to,
+                            &inner_falls_through,
                             removed,
                         );
                     }
@@ -199,6 +203,8 @@ fn invert_in_place(
                             else_body: std::rc::Rc::new(Vec::new()),
                         };
                         *removed += 1;
+                        let inner_falls_through =
+                            fallthrough_labels_after(stmts, idx, falls_through_to);
                         // Recurse into the body just built, then continue past it.
                         if let PreHirStmt::If { then_body, .. } = &mut stmts[idx] {
                             invert_in_place(
@@ -206,7 +212,7 @@ fn invert_in_place(
                                 protected,
                                 global_refs,
                                 definition_counts,
-                                falls_through_to,
+                                &inner_falls_through,
                                 removed,
                             );
                         }
@@ -890,5 +896,40 @@ mod tests {
             panic!("expected inverted guard inside loop");
         };
         assert_eq!(then_body.as_slice(), &[expr_stmt("a"), PreHirStmt::Break]);
+    }
+
+    #[test]
+    fn inner_guard_does_not_invert_against_outer_exit_when_intermediate_label_present() {
+        // if (c1) goto L_join;
+        // if (c2) goto L_exit;
+        // y = 1;
+        // L_join:
+        // z = 2;
+        // L_exit:
+        let body = vec![
+            guard("L_join"),
+            PreHirStmt::If {
+                cond: var("c2"),
+                then_body: vec![PreHirStmt::Goto("L_exit".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            expr_stmt("y"),
+            PreHirStmt::Label("L_join".into()),
+            expr_stmt("z"),
+            PreHirStmt::Label("L_exit".into()),
+        ];
+        let (out, removed) = invert_forward_guard_gotos(body, &HashSet::default());
+        // Only the outer guard `if (c1) goto L_join;` can be inverted against `L_join`.
+        // The inner `if (c2) goto L_exit;` must NOT be inverted because exiting the then-body
+        // falls through to `L_join: z = 2;`, NOT directly to `L_exit`.
+        assert_eq!(removed, 1);
+        let PreHirStmt::If { then_body, .. } = &out[0] else {
+            panic!("expected outer inverted if");
+        };
+        // Inside `then_body`, the jump to L_exit must remain intact!
+        assert!(
+            then_body.iter().any(|s| matches!(s, PreHirStmt::If { then_body: inner, .. } if matches!(inner.as_slice(), [PreHirStmt::Goto(l)] if l == "L_exit"))),
+            "inner guard jump to L_exit must be preserved: {then_body:#?}"
+        );
     }
 }

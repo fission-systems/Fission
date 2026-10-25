@@ -119,7 +119,10 @@ pub mod base_types {
 
     /// Load all base types from `base_types.json` in the Win32 typeinfo corpus.
     pub fn all() -> Vec<TypeInfo> {
-        try_all().unwrap_or_else(|e| panic!("{e}"))
+        try_all().unwrap_or_else(|e| {
+            eprintln!("fission-signatures win_types: failed to load base_types: {e}");
+            Vec::new()
+        })
     }
 
     /// Fallible variant of [`all`] for UI and batch workers that must degrade gracefully.
@@ -261,8 +264,8 @@ pub struct PackedStructures {
     by_size: crate::fpk::FpkReader,
     /// Resolved entries, leaked so `get` can hand out `&StructDef` like the
     /// eager map did. Bounded by how many distinct structs a run looks up, and
-    /// the cache is process-lifetime anyway.
-    resolved: std::sync::Mutex<HashMap<String, &'static StructDef>>,
+    /// the cache is process-lifetime anyway. Caches `None` for absent entries.
+    resolved: std::sync::Mutex<HashMap<String, Option<&'static StructDef>>>,
 }
 
 impl PackedStructures {
@@ -280,24 +283,31 @@ impl PackedStructures {
         if let Ok(cache) = self.resolved.lock()
             && let Some(hit) = cache.get(name)
         {
-            return Some(*hit);
+            return *hit;
         }
-        let block = self.by_name.block_for(name).ok()??;
+        let block = self.by_name.block_for(name).ok().flatten();
         let mut found = None;
-        for line in block.lines() {
-            let Ok(item) = serde_json::from_str::<JsonStructDef>(line) else {
-                continue;
-            };
-            if item.name == name {
-                found = Some(struct_def_from_json(item));
-                break;
+        if let Some(block) = block {
+            for line in block.lines() {
+                let Ok(item) = serde_json::from_str::<JsonStructDef>(line) else {
+                    continue;
+                };
+                if item.name == name {
+                    found = Some(struct_def_from_json(item));
+                    break;
+                }
             }
         }
-        let leaked: &'static StructDef = Box::leak(Box::new(found?));
-        if let Ok(mut cache) = self.resolved.lock() {
-            cache.insert(name.to_string(), leaked);
+        let mut cache = self
+            .resolved
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(existing) = cache.get(name) {
+            return *existing;
         }
-        Some(leaked)
+        let leaked = found.map(|def| Box::leak(Box::new(def)) as &'static StructDef);
+        cache.insert(name.to_string(), leaked);
+        leaked
     }
 
     /// Names of every struct whose width-appropriate size is exactly `size`.
@@ -343,7 +353,13 @@ static STRUCTURES_CACHE: std::sync::OnceLock<Result<WindowsStructures, WinTypesE
 
 impl WindowsStructures {
     pub fn new() -> Self {
-        Self::try_new().unwrap_or_else(|e| panic!("{e}"))
+        Self::try_new().unwrap_or_else(|e| {
+            eprintln!("fission-signatures win_types: failed to load structures: {e}");
+            Self {
+                structures: std::sync::Arc::new(HashMap::new()),
+                packed: None,
+            }
+        })
     }
 
     /// Load the Windows structure corpus without panicking. Cached process-wide
@@ -670,5 +686,25 @@ mod packed_structures_tests {
 
         // A size nothing has must come back empty rather than wrong.
         assert!(packed.names_with_size(true, 0xffff_fffe).is_empty());
+    }
+
+    #[test]
+    fn packed_structures_negative_caching() {
+        let Some(dir) = resources()
+            .win32_typeinfo_json_path("structures.fpk")
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        else {
+            return;
+        };
+        let Some(packed) = PackedStructures::open(&dir) else {
+            return;
+        };
+
+        assert!(packed.get("NONEXISTENT_STRUCT_NAME_XYZ").is_none());
+        let cache = packed.resolved.lock().unwrap();
+        assert!(matches!(
+            cache.get("NONEXISTENT_STRUCT_NAME_XYZ"),
+            Some(None)
+        ));
     }
 }

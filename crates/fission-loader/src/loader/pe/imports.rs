@@ -250,7 +250,10 @@ pub(super) fn parse_delay_imports(
                     resolve_ordinal_name(&dll_name, ordinal)
                         .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
-                    let name_rva = if loader.is_64bit {
+                    let name_rva = if !is_rva && raw_thunk >= image_base {
+                        // V1 delay-load descriptors store VAs rather than RVAs.
+                        (raw_thunk - image_base) as u32
+                    } else if loader.is_64bit {
                         (raw_thunk & 0xFFFF_FFFF) as u32
                     } else {
                         (raw_thunk & 0x7FFF_FFFF) as u32

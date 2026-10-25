@@ -223,6 +223,7 @@ fn size_naming_renames_memcpy_length_argument() {
         ],
         return_type: NirType::Unknown,
         body: vec![HirStmt::Expr(HirExpr::Call {
+            origin: None,
             target: "memcpy".into(),
             args: vec![
                 HirExpr::Var("param_1".into()),

@@ -32,9 +32,12 @@ mod strings;
 mod xrefs;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
+pub use callgraph::build_protocol_callgraph;
 use callgraph::run_callgraph;
+pub use disasm::to_disasm_response;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
+pub use functions::{build_functions_response, function_info_to_fn_entry};
 use hex::print_hex;
 use identify::run_identify;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
@@ -177,11 +180,18 @@ fn apply_analysis_db(cli: &OneShotArgs, binary: &mut LoadedBinary) -> Result<()>
     else {
         return Ok(());
     };
-    let applied = project
+    let report = project
         .apply(binary)
         .map_err(|e| anyhow::anyhow!("{e} (database: {})", path.display()))?;
-    if cli.verbose && applied > 0 {
-        eprintln!("[*] {} name(s) from {}", applied, path.display());
+    if cli.verbose && report.total_applied() > 0 {
+        eprintln!(
+            "[*] {} decision(s) ({} name(s), {} signature(s), {} comment(s)) from {}",
+            report.total_applied(),
+            report.names_applied,
+            report.signatures_applied,
+            report.comments_applied,
+            path.display()
+        );
     }
     Ok(())
 }

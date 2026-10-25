@@ -11,7 +11,6 @@ use crate::constants::binary_format::{
 use crate::core_constants::{ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -209,7 +208,10 @@ struct OpinionSelectParams<'a> {
 static OPINION_DATABASE: OnceLock<Result<OpinionDatabase, String>> = OnceLock::new();
 
 fn opinion_cache_path() -> Option<PathBuf> {
-    let cache_dir = repo_root().join("target").join("fission-core");
+    let cache_dir = crate::core::resource_roots::fission_cache_dir().or_else(|| {
+        crate::core::utils::find_workspace_root("FISSION_ROOT")
+            .map(|r| r.join("target").join("fission-core"))
+    })?;
     let _ = fs::create_dir_all(&cache_dir);
     Some(cache_dir.join("opinion_cache.json"))
 }
@@ -954,26 +956,11 @@ fn macho_primary_key(cputype: i32, cpusubtype: i32) -> String {
 }
 
 fn ghidra_data_root() -> PathBuf {
-    if let Some(path) = env::var_os("FISSION_GHIDRA_DATA_DIR") {
-        return PathBuf::from(path);
-    }
-    repo_root().join("utils").join("ghidra-data")
+    crate::core::resource_roots::find_ghidra_data_root()
 }
 
 fn sleigh_specs_root() -> PathBuf {
-    if let Some(path) = env::var_os("FISSION_SLEIGH_SPEC_DIR") {
-        let path = PathBuf::from(path);
-        if path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name == "languages")
-            .unwrap_or(false)
-        {
-            return path.parent().unwrap_or(&path).to_path_buf();
-        }
-        return path;
-    }
-    repo_root().join("utils").join("sleigh-specs")
+    crate::core::resource_roots::find_sleigh_specs_root()
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1036,14 +1023,6 @@ pub fn known_language_ids() -> Result<HashSet<String>, String> {
         })
         .flat_map(|e| e.language_ids)
         .collect())
-}
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf()
 }
 
 fn collect_files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {

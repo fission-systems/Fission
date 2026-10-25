@@ -1066,7 +1066,7 @@ pub extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> u64 {
             0
         }
         HleResult::Continue => {
-            let _ = emu.simulate_return();
+            let _ = emu.simulate_return_for(&func_name);
             0
         }
     }

@@ -31,7 +31,7 @@ pub fn cleanup_redundant_labels(
                 if !seen_labels.insert(label.clone()) {
                     continue;
                 }
-                if cleaned.is_empty() || referenced.contains(&label) {
+                if referenced.contains(&label) {
                     cleaned.push(HirStmt::Label(label));
                 }
             }
@@ -60,6 +60,16 @@ mod tests {
 
         assert!(cleaned.contains(&HirStmt::Label("dream_L9".to_string())));
         assert!(!cleaned.contains(&HirStmt::Label("block_401000".to_string())));
+    }
+
+    #[test]
+    fn cleanup_prunes_unreferenced_leading_label() {
+        let body = vec![
+            HirStmt::Label("unreferenced_entry".to_string()),
+            HirStmt::Return(None),
+        ];
+        let cleaned = cleanup_redundant_labels(body, None);
+        assert_eq!(cleaned, vec![HirStmt::Return(None)]);
     }
 }
 
