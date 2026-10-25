@@ -45,17 +45,31 @@ Bottom-seeding locals exposes an existing transfer-width defect: a signed
 comparison uses the Boolean result width to interpret its operands. The
 submitted resolver chooses the true arm of `x = 1; switch (signed x < 0)`.
 
-Restore `vsa/solver.rs` to the recorded main implementation. Keep the other
-CircleRange, traversal, and switch-splicing changes. The switch-break test uses
+Restore `vsa/solver.rs` to the recorded main implementation. The switch-break test uses
 a literal discriminator to test splicing independently of disabled propagation.
 The negative regression is
 `review_bottom_seeding_must_not_enable_bool_width_comparison_misfold`.
 **The always-Top solver portion of #457 remains unresolved.** Operand-width
 recovery and more precise propagation require a separate measured proposal.
 
+Two further regressions on `a5472ce96` show that restoring only the solver is
+insufficient. A new `Select` evaluator chooses `22` for `1 <s 0 ? 22 : 11`,
+and singleton addition makes `(1 + 0) <s 0` provably true in the old comparison
+transfer. Both arise because the transfer interprets operands at the Boolean
+result width. They failed as
+`review_select_precision_must_not_expose_comparison_width_bug` and
+`review_add_precision_must_not_expose_comparison_width_bug`.
+
+Also restore `vsa/transfer.rs` and `vsa/circle_range.rs` to the recorded main
+versions, retaining the two new negative regressions. This defers the precision
+changes in #581 and #641 and the CircleRange changes in #668; retain the separate
+traversal and switch-splicing changes. **#542 and #483 remain unresolved too.**
+The rollback does not establish general soundness of the old VSA domain or
+transfers; it removes this batch's new precision that exposes the defect.
+
 ## Validation
 
-All three negative regressions failed on the submitted integration. The
+The first three negative regressions failed on the submitted integration. The
 temporary rollback passed all three and the related normalize, prehir, and
 pcode suites: 1,802 passed, one skipped. The applied rollback is also checked
 with the focused regressions and full workspace suite before submission.
@@ -69,9 +83,11 @@ cargo check --workspace --locked
 cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity
 ```
 
-The applied rollback passed all three focused regressions, workspace nextest
+The initial applied rollback passed three focused regressions, workspace nextest
 (3,761 passed, 10 skipped), workspace check, workspace Clippy with the flags
-above, and formatting. CI results are recorded in the PR description after
-completion. Do not infer runtime parity or benchmark quality from these tests.
-Issues #522 and #457 must remain open if ancestor commit closing keywords close
-them automatically when the integration is merged.
+above, formatting, and CI. The additional two regressions require the expanded
+rollback described above. The expanded rollback passed all five regressions and
+workspace nextest (3,754 passed, 10 skipped). Final check, Clippy, and CI results
+are recorded in the PR description after completion. Do not infer runtime parity or
+benchmark quality from these tests. Issues #522, #457, #542, and #483 must remain
+open if ancestor commit closing keywords close them automatically on merge.

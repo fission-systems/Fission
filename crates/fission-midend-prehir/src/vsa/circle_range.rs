@@ -124,11 +124,7 @@ impl CircleRange {
     /// Number of elements in the range (0 = bottom, 2^n = top).
     pub fn count(&self) -> u128 {
         if self.is_top {
-            return if self.bits >= 64 {
-                1u128 << 64
-            } else {
-                1u128 << self.bits
-            };
+            return 1u128 << self.bits;
         }
         if self.is_bottom() {
             return 0;
@@ -263,19 +259,15 @@ impl CircleRange {
         if self.is_bottom() || other.is_bottom() {
             return Self::bottom(self.bits);
         }
-        let full_span = if self.bits >= 64 {
-            1u128 << 64
-        } else {
-            1u128 << self.bits
-        };
-        let span = self.count().saturating_add(other.count()).saturating_sub(1);
-        if span >= full_span {
-            return Self::top(self.bits);
-        }
         let mask = Self::mask(self.bits);
         let lo = self.lo.wrapping_add(other.lo) & mask;
         let hi = self.hi.wrapping_add(other.hi).wrapping_sub(1) & mask;
-        Self::interval(lo, hi, self.bits)
+        // If lo == hi after wrapping, conservative top.
+        if lo == hi {
+            Self::top(self.bits)
+        } else {
+            Self::interval(lo, hi.wrapping_add(1) & mask, self.bits)
+        }
     }
 
     /// `a - b` (unsigned, wrapping).
@@ -286,19 +278,14 @@ impl CircleRange {
         if self.is_bottom() || other.is_bottom() {
             return Self::bottom(self.bits);
         }
-        let full_span = if self.bits >= 64 {
-            1u128 << 64
-        } else {
-            1u128 << self.bits
-        };
-        let span = self.count().saturating_add(other.count()).saturating_sub(1);
-        if span >= full_span {
-            return Self::top(self.bits);
-        }
         let mask = Self::mask(self.bits);
         let lo = self.lo.wrapping_sub(other.hi).wrapping_add(1) & mask;
         let hi = self.hi.wrapping_sub(other.lo) & mask;
-        Self::interval(lo, hi, self.bits)
+        if lo == hi {
+            Self::top(self.bits)
+        } else {
+            Self::interval(lo, hi, self.bits)
+        }
     }
 
     /// Logical right-shift by a constant `k`.
@@ -342,21 +329,15 @@ impl CircleRange {
         if self.is_bottom() {
             return Self::bottom(new_bits);
         }
-        if new_bits == self.bits {
-            return *self;
-        }
         let new_mask = Self::mask(new_bits);
         // If this range fits in the new width without wrapping, preserve it.
         let lo_fits = self.lo <= new_mask;
-        let hi_minus1 = self.hi.wrapping_sub(1) & Self::mask(self.bits);
-        let hi_fits = hi_minus1 <= new_mask;
-        if lo_fits && hi_fits && self.lo <= hi_minus1 {
-            let target_hi = if new_bits > self.bits {
-                hi_minus1.wrapping_add(1)
-            } else {
-                self.hi & new_mask
-            };
-            Self::interval(self.lo, target_hi, new_bits)
+        let hi_fits = {
+            let hi_minus1 = self.hi.wrapping_sub(1) & Self::mask(self.bits);
+            hi_minus1 <= new_mask
+        };
+        if lo_fits && hi_fits && self.lo <= (self.hi.wrapping_sub(1) & Self::mask(self.bits)) {
+            Self::interval(self.lo, self.hi, new_bits)
         } else {
             Self::top(new_bits)
         }
@@ -382,21 +363,13 @@ impl CircleRange {
         if self.is_bottom() {
             return Self::bottom(bits);
         }
-        if bits > self.bits {
-            let hi_minus1 = self.hi.wrapping_sub(1) & Self::mask(self.bits);
-            if self.lo <= hi_minus1 {
-                Self::interval(self.lo, hi_minus1.wrapping_add(1), bits)
-            } else {
-                Self::top(bits)
-            }
-        } else {
-            let mask = Self::mask(bits);
-            Self {
-                lo: self.lo & mask,
-                hi: self.hi & mask,
-                bits,
-                is_top: false,
-            }
+        // Reinterpret lo/hi in the new width.
+        let mask = Self::mask(bits);
+        Self {
+            lo: self.lo & mask,
+            hi: self.hi & mask,
+            bits,
+            is_top: false,
         }
     }
 
@@ -494,75 +467,5 @@ mod tests {
         assert_eq!(previous.widen(&CircleRange::bottom(8)), CircleRange::top(8));
         assert_eq!(CircleRange::bottom(8).widen(&previous), previous);
         assert_eq!(previous.widen(&CircleRange::top(8)), CircleRange::top(8));
-    }
-
-    #[test]
-    fn add_singletons_produces_singleton() {
-        let a = CircleRange::singleton(10, 32);
-        let b = CircleRange::singleton(20, 32);
-        assert_eq!(a.add(&b), CircleRange::singleton(30, 32));
-    }
-
-    #[test]
-    fn add_preserves_singleton_and_minkowski_span() {
-        let a = CircleRange::singleton(5, 32);
-        let b = CircleRange::singleton(10, 32);
-        let sum = a.add(&b);
-        assert!(sum.is_singleton());
-        assert_eq!(sum.singleton_value(), Some(15));
-        assert_eq!(sum, CircleRange::singleton(15, 32));
-
-        let zero = CircleRange::singleton(0, 32);
-        assert_eq!(zero.add(&zero), zero);
-
-        let range = CircleRange::interval(10, 20, 32);
-        let one = CircleRange::singleton(1, 32);
-        assert_eq!(range.add(&one), CircleRange::interval(11, 21, 32));
-        assert_eq!(range.add(&range), CircleRange::interval(20, 39, 32));
-
-        let wide_a = CircleRange::interval(0, 200, 8);
-        let wide_b = CircleRange::interval(0, 100, 8);
-        assert_eq!(wide_a.add(&wide_b), CircleRange::top(8));
-    }
-
-    #[test]
-    fn cast_unsigned_widening_preserves_boundary_singletons() {
-        let r8 = CircleRange::singleton(255, 8);
-        assert_eq!(r8.lo(), 255);
-        assert_eq!(r8.hi(), 0);
-        assert!(r8.is_singleton());
-        assert_eq!(r8.singleton_value(), Some(255));
-
-        let r32 = r8.cast_unsigned(32);
-        assert_eq!(r32.lo(), 255);
-        assert_eq!(r32.hi(), 256);
-        assert!(r32.is_singleton());
-        assert_eq!(r32.singleton_value(), Some(255));
-        assert_eq!(r32.count(), 1);
-
-        let r1 = CircleRange::singleton(1, 1);
-        let r1_32 = r1.cast_unsigned(32);
-        assert!(r1_32.is_singleton());
-        assert_eq!(r1_32.singleton_value(), Some(1));
-    }
-
-    #[test]
-    fn cast_unsigned_widening_preserves_boundary_intervals() {
-        let r8 = CircleRange::interval(250, 0, 8);
-        assert_eq!(r8.count(), 6);
-
-        let r32 = r8.cast_unsigned(32);
-        assert_eq!(r32.lo(), 250);
-        assert_eq!(r32.hi(), 256);
-        assert_eq!(r32.count(), 6);
-    }
-
-    #[test]
-    fn with_bits_widening_in_join_preserves_boundary_singleton() {
-        let r8 = CircleRange::singleton(255, 8);
-        let r32 = CircleRange::singleton(255, 32);
-        let joined = r8.join(&r32);
-        assert_eq!(joined, r32);
-        assert_eq!(joined.singleton_value(), Some(255));
     }
 }
