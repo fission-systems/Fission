@@ -112,7 +112,13 @@ fn match_unshifted_low(expr: &PreHirExpr) -> PreHirExpr {
 
 fn match_zext_write(expr: &PreHirExpr, x_bits: u32) -> Option<(PreHirExpr, PreHirExpr, u32)> {
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
-        let inner_bits = type_bits(&expr_type(inner));
+        let inner_ty = expr_type(inner);
+        let is_unsigned = matches!(ty, NirType::Int { signed: false, .. } | NirType::Bool)
+            && matches!(inner_ty, NirType::Int { signed: false, .. } | NirType::Bool);
+        if !is_unsigned {
+            return None;
+        }
+        let inner_bits = type_bits(&inner_ty);
         if x_bits > inner_bits {
             let hi = PreHirExpr::Const(
                 0,
@@ -184,6 +190,7 @@ where
         | PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. } => {
             f(inner);
         }
@@ -260,12 +267,22 @@ fn verify_reads_in_stmt(stmt: &PreHirStmt, x_name: &str, shift_bits: u32, valid:
         PreHirStmt::VaStart { va_list, .. } => {
             verify_reads(va_list, x_name, shift_bits, valid);
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) => {
             for s in body.iter() {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
+        }
+        PreHirStmt::While { cond, body } => {
+            verify_reads(cond, x_name, shift_bits, valid);
+            for s in body.iter() {
+                verify_reads_in_stmt(s, x_name, shift_bits, valid);
+            }
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            for s in body.iter() {
+                verify_reads_in_stmt(s, x_name, shift_bits, valid);
+            }
+            verify_reads(cond, x_name, shift_bits, valid);
         }
         PreHirStmt::For {
             init,
@@ -347,6 +364,7 @@ fn rewrite_expr(expr: &mut PreHirExpr, x_name: &str, x_low: &str, x_high: &str, 
         | PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. } => {
             rewrite_expr(inner, x_name, x_low, x_high, shift_bits);
         }
@@ -390,21 +408,60 @@ fn rewrite_stmt(
             lhs: PreHirLValue::Var(name),
             rhs,
         } if name == x_name => {
-            if let Some((hi, lo, _)) = match_piece_concat(rhs) {
-                *stmt = PreHirStmt::Block(
-                    vec![
-                        PreHirStmt::Assign {
-                            lhs: PreHirLValue::Var(x_low.to_string()),
-                            rhs: lo,
-                        },
-                        PreHirStmt::Assign {
-                            lhs: PreHirLValue::Var(x_high.to_string()),
-                            rhs: hi,
-                        },
-                    ]
-                    .into(),
-                );
-            } else if let Some((hi, lo, _)) = match_zext_write(rhs, x_bits) {
+            if let Some((mut hi, mut lo, _)) = match_piece_concat(rhs) {
+                rewrite_expr(&mut lo, x_name, x_low, x_high, shift_bits);
+                rewrite_expr(&mut hi, x_name, x_low, x_high, shift_bits);
+                if expr_reads_name(&hi, x_low) && !expr_reads_name(&lo, x_high) {
+                    *stmt = PreHirStmt::Block(
+                        vec![
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var(x_high.to_string()),
+                                rhs: hi,
+                            },
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var(x_low.to_string()),
+                                rhs: lo,
+                            },
+                        ]
+                        .into(),
+                    );
+                } else if expr_reads_name(&hi, x_low) && expr_reads_name(&lo, x_high) {
+                    let tmp_name = format!("{x_low}__split_tmp");
+                    *stmt = PreHirStmt::Block(
+                        vec![
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var(tmp_name.clone()),
+                                rhs: lo,
+                            },
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var(x_high.to_string()),
+                                rhs: hi,
+                            },
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var(x_low.to_string()),
+                                rhs: PreHirExpr::Var(tmp_name),
+                            },
+                        ]
+                        .into(),
+                    );
+                } else {
+                    *stmt = PreHirStmt::Block(
+                        vec![
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var(x_low.to_string()),
+                                rhs: lo,
+                            },
+                            PreHirStmt::Assign {
+                                lhs: PreHirLValue::Var(x_high.to_string()),
+                                rhs: hi,
+                            },
+                        ]
+                        .into(),
+                    );
+                }
+            } else if let Some((mut hi, mut lo, _)) = match_zext_write(rhs, x_bits) {
+                rewrite_expr(&mut lo, x_name, x_low, x_high, shift_bits);
+                rewrite_expr(&mut hi, x_name, x_low, x_high, shift_bits);
                 *stmt = PreHirStmt::Block(
                     vec![
                         PreHirStmt::Assign {
@@ -442,9 +499,7 @@ fn rewrite_stmt(
         PreHirStmt::VaStart { va_list, .. } => {
             rewrite_expr(va_list, x_name, x_low, x_high, shift_bits);
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) => {
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 x_name,
@@ -453,6 +508,28 @@ fn rewrite_stmt(
                 shift_bits,
                 x_bits,
             );
+        }
+        PreHirStmt::While { cond, body } => {
+            rewrite_expr(cond, x_name, x_low, x_high, shift_bits);
+            rewrite_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                x_name,
+                x_low,
+                x_high,
+                shift_bits,
+                x_bits,
+            );
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            rewrite_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                x_name,
+                x_low,
+                x_high,
+                shift_bits,
+                x_bits,
+            );
+            rewrite_expr(cond, x_name, x_low, x_high, shift_bits);
         }
         PreHirStmt::For {
             init,
@@ -638,10 +715,12 @@ fn stmt_reads_name_deep(stmt: &PreHirStmt, name: &str) -> bool {
         }
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_reads_name(expr, name),
         PreHirStmt::VaStart { va_list, .. } => expr_reads_name(va_list, name),
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => {
-            body.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
+        PreHirStmt::Block(body) => body.iter().any(|stmt| stmt_reads_name_deep(stmt, name)),
+        PreHirStmt::While { cond, body } => {
+            expr_reads_name(cond, name) || body.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
+        }
+        PreHirStmt::DoWhile { body, cond } => {
+            body.iter().any(|stmt| stmt_reads_name_deep(stmt, name)) || expr_reads_name(cond, name)
         }
         PreHirStmt::If {
             cond,
@@ -1349,5 +1428,99 @@ mod tests {
                 .iter()
                 .any(|binding| binding.name == "slot_value")
         );
+    }
+
+    #[test]
+    fn rejects_signed_cast_as_zext() {
+        let signed_32 = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let signed_64 = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let expr = PreHirExpr::Cast {
+            ty: signed_64.clone(),
+            expr: Box::new(PreHirExpr::Var("x".into())),
+        };
+        // inner ty is unknown/untyped without locals, but even if inner is cast with signed ty:
+        let signed_inner = PreHirExpr::Cast {
+            ty: signed_32.clone(),
+            expr: Box::new(PreHirExpr::Const(-5, signed_32)),
+        };
+        let outer_expr = PreHirExpr::Cast {
+            ty: signed_64,
+            expr: Box::new(signed_inner),
+        };
+        assert!(match_zext_write(&outer_expr, 64).is_none());
+    }
+
+    #[test]
+    fn rewrites_while_condition_reads() {
+        let mut cond = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: uint(32),
+                expr: Box::new(PreHirExpr::Var("pair".into())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0, uint(32))),
+            ty: NirType::Bool,
+        };
+        let mut valid = true;
+        verify_reads(&cond, "pair", 32, &mut valid);
+        assert!(valid, "low extract in while condition should be valid");
+
+        rewrite_expr(&mut cond, "pair", "pair_lo", "pair_hi", 32);
+        assert!(matches!(
+            cond,
+            PreHirExpr::Binary { lhs, .. } if matches!(
+                lhs.as_ref(),
+                PreHirExpr::Cast { expr, .. } if matches!(expr.as_ref(), PreHirExpr::Var(name) if name == "pair_lo")
+            )
+        ));
+    }
+
+    #[test]
+    fn self_referential_split_evaluates_hi_before_lo_when_hi_reads_lo() {
+        let mut stmt = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("pair".into()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Or,
+                lhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shl,
+                    lhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("pair_lo".into())),
+                        rhs: Box::new(PreHirExpr::Const(1, uint(32))),
+                        ty: uint(32),
+                    }),
+                    rhs: Box::new(PreHirExpr::Const(32, uint(32))),
+                    ty: uint(64),
+                }),
+                rhs: Box::new(PreHirExpr::Var("val".into())),
+                ty: uint(64),
+            },
+        };
+        rewrite_stmt(&mut stmt, "pair", "pair_lo", "pair_hi", 32, 64);
+        // Because hi reads pair_lo, pair_hi must be assigned BEFORE pair_lo
+        let PreHirStmt::Block(stmts) = stmt else {
+            panic!("expected Block stmt");
+        };
+        assert_eq!(stmts.len(), 2);
+        assert!(matches!(
+            &stmts[0],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } if name == "pair_hi"
+        ));
+        assert!(matches!(
+            &stmts[1],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } if name == "pair_lo"
+        ));
     }
 }
