@@ -256,7 +256,7 @@ mod tests {
         );
 
         let body_set: FxHashSet<usize> = [0, 1, 2].into_iter().collect();
-        let stmts = lower_loop_body_subgraph(&mut builder, &body_set, 0, Some(3), 0)
+        let stmts = lower_loop_body_subgraph(&mut builder, &body_set, 0, Some(3), 0, 0)
             .expect("lowered")
             .expect("body");
 
@@ -322,7 +322,7 @@ mod tests {
             .insert(0, LoweredTerminator::Goto(virtual_key));
 
         let body_set: FxHashSet<usize> = [0, 1].into_iter().collect();
-        let stmts = lower_loop_body_subgraph(&mut builder, &body_set, 0, Some(2), 0)
+        let stmts = lower_loop_body_subgraph(&mut builder, &body_set, 0, Some(2), 0, 0)
             .expect("lowered")
             .expect("body");
 

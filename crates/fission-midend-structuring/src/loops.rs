@@ -1623,15 +1623,21 @@ fn lower_loop_exit_stmt(
     host: &mut impl StructuringHost,
     pred_idx: usize,
     target: u64,
+    canonical_break_addr: Option<u64>,
 ) -> Result<PreHirStmt, MlilPreviewError> {
-    let return_expr = host
-        .find_block_index_by_address(target)
-        .map(|target_idx| host.lower_return_join_expr_for_predecessor(pred_idx, target_idx))
-        .transpose()?
-        .flatten();
-    Ok(return_expr
-        .map(|expr| PreHirStmt::Return(Some(expr)))
-        .unwrap_or(PreHirStmt::Break))
+    if Some(target) == canonical_break_addr {
+        return Ok(PreHirStmt::Break);
+    }
+    if let Some(target_idx) = host.find_block_index_by_address(target) {
+        let join_expr = host.lower_return_join_expr_for_predecessor(pred_idx, target_idx)?;
+        if let Some(expr) = join_expr {
+            return Ok(PreHirStmt::Return(Some(expr)));
+        }
+        if let Some(term_ret_expr) = trivial_return_expr(host, target_idx)? {
+            return Ok(PreHirStmt::Return(term_ret_expr));
+        }
+    }
+    Ok(PreHirStmt::Goto(block_label(target)))
 }
 
 /// Structure the acyclic interior of an already-admitted cyclic owner.
@@ -1690,16 +1696,8 @@ fn finalize_loop_body_control(
     let continue_addr = host.block_target_key(continue_idx);
     let continue_labels = std::iter::once(block_label(continue_addr)).collect();
     let break_addr = break_idx.map(|idx| host.block_target_key(idx));
-    let break_labels: std::collections::HashSet<String> = host
-        .get_loop_body(head_idx)
-        .map(|lb| {
-            lb.all_exits
-                .iter()
-                .map(|&exit| block_label(host.block_target_key(exit)))
-                .collect()
-        })
-        .filter(|labels: &std::collections::HashSet<String>| !labels.is_empty())
-        .unwrap_or_else(|| break_addr.map(block_label).into_iter().collect());
+    let break_labels: std::collections::HashSet<String> =
+        break_addr.map(block_label).into_iter().collect();
 
     let mut stats = LoopControlRewriteStats::default();
     rewrite_loop_control_gotos_multi(&mut body, &continue_labels, &break_labels, &mut stats);
@@ -1741,7 +1739,7 @@ pub fn lower_loop_body_subgraph(
     }
 
     let break_addr: Option<u64> = break_idx.map(|bi| host.block_target_key(bi));
-    let break_addrs: HashSet<u64> = host
+    let mut exit_addrs: HashSet<u64> = host
         .get_loop_body(head_idx)
         .map(|lb| {
             lb.all_exits
@@ -1749,16 +1747,13 @@ pub fn lower_loop_body_subgraph(
                 .filter_map(|&exit| Some(host.block_target_key(exit)))
                 .collect()
         })
-        .filter(|exits: &HashSet<u64>| !exits.is_empty())
-        .unwrap_or_else(|| break_addr.into_iter().collect());
+        .unwrap_or_default();
+    if let Some(ba) = break_addr {
+        exit_addrs.insert(ba);
+    }
 
-    let break_indices: HashSet<usize> = host
-        .get_loop_body(head_idx)
-        .map(|lb| lb.all_exits.iter().copied().collect())
-        .filter(|exits: &HashSet<usize>| !exits.is_empty())
-        .unwrap_or_else(|| break_idx.into_iter().collect());
+    let break_indices: HashSet<usize> = break_idx.into_iter().collect();
 
-    let head_addr: u64 = host.block_target_key(head_idx);
     let continue_addr: u64 = host.block_target_key(continue_idx);
 
     let targeted = host.collect_jump_targets()?;
@@ -1908,8 +1903,8 @@ pub fn lower_loop_body_subgraph(
                 result_stmts.push(PreHirStmt::Return(expr));
             }
             LoweredTerminator::Goto(target) | LoweredTerminator::Fallthrough(Some(target)) => {
-                if break_addrs.contains(&target) {
-                    let exit_stmt = lower_loop_exit_stmt(host, idx, target)?;
+                if exit_addrs.contains(&target) {
+                    let exit_stmt = lower_loop_exit_stmt(host, idx, target, break_addr)?;
                     if matches!(exit_stmt, PreHirStmt::Break) {
                         host.bump_loop_multi_exit_break();
                     }
@@ -1933,15 +1928,14 @@ pub fn lower_loop_body_subgraph(
                 false_target,
             } => {
                 let next_addr = host.next_block_address(idx);
-                // Check if either arm is the break or continue target
-                let true_is_break = break_addrs.contains(&true_target);
-                let false_is_break =
-                    false_target.is_some_and(|target| break_addrs.contains(&target));
+                // Check if either arm is the exit or continue target
+                let true_is_exit = exit_addrs.contains(&true_target);
+                let false_is_exit = false_target.is_some_and(|target| exit_addrs.contains(&target));
                 let true_is_continue = true_target == continue_addr;
                 let false_is_continue = false_target == Some(continue_addr);
 
-                if true_is_break && false_is_continue {
-                    let exit_stmt = lower_loop_exit_stmt(host, idx, true_target)?;
+                if true_is_exit && false_is_continue {
+                    let exit_stmt = lower_loop_exit_stmt(host, idx, true_target, break_addr)?;
                     let is_break = matches!(exit_stmt, PreHirStmt::Break);
                     result_stmts.push(PreHirStmt::If {
                         cond,
@@ -1951,9 +1945,9 @@ pub fn lower_loop_body_subgraph(
                     if is_break {
                         host.bump_loop_multi_exit_break();
                     }
-                } else if false_is_break && true_is_continue {
-                    let false_target = false_target.expect("false break target");
-                    let exit_stmt = lower_loop_exit_stmt(host, idx, false_target)?;
+                } else if false_is_exit && true_is_continue {
+                    let false_target = false_target.expect("false exit target");
+                    let exit_stmt = lower_loop_exit_stmt(host, idx, false_target, break_addr)?;
                     let is_break = matches!(exit_stmt, PreHirStmt::Break);
                     result_stmts.push(PreHirStmt::If {
                         cond: negate_expr(cond),
@@ -1963,9 +1957,23 @@ pub fn lower_loop_body_subgraph(
                     if is_break {
                         host.bump_loop_multi_exit_break();
                     }
-                } else if true_is_break && !false_is_break {
-                    // `if (cond) break;` then continue with false arm
-                    let exit_stmt = lower_loop_exit_stmt(host, idx, true_target)?;
+                } else if true_is_exit && false_is_exit {
+                    let false_target = false_target.expect("false exit target");
+                    let true_stmt = lower_loop_exit_stmt(host, idx, true_target, break_addr)?;
+                    let false_stmt = lower_loop_exit_stmt(host, idx, false_target, break_addr)?;
+                    if matches!(true_stmt, PreHirStmt::Break)
+                        || matches!(false_stmt, PreHirStmt::Break)
+                    {
+                        host.bump_loop_multi_exit_break();
+                    }
+                    result_stmts.push(PreHirStmt::If {
+                        cond,
+                        then_body: std::rc::Rc::new(vec![true_stmt]),
+                        else_body: std::rc::Rc::new(vec![false_stmt]),
+                    });
+                } else if true_is_exit && !false_is_exit {
+                    // `if (cond) exit;` then continue with false arm
+                    let exit_stmt = lower_loop_exit_stmt(host, idx, true_target, break_addr)?;
                     let is_break = matches!(exit_stmt, PreHirStmt::Break);
                     let else_body = match false_target {
                         Some(ft) if Some(ft) != next_addr => {
@@ -1986,10 +1994,10 @@ pub fn lower_loop_body_subgraph(
                     if is_break {
                         host.bump_loop_multi_exit_break();
                     }
-                } else if false_is_break && !true_is_break {
-                    // `if (!cond) break;` then continue with true arm
-                    let false_target = false_target.expect("false break target");
-                    let exit_stmt = lower_loop_exit_stmt(host, idx, false_target)?;
+                } else if false_is_exit && !true_is_exit {
+                    // `if (!cond) exit;` then continue with true arm
+                    let false_target = false_target.expect("false exit target");
+                    let exit_stmt = lower_loop_exit_stmt(host, idx, false_target, break_addr)?;
                     let is_break = matches!(exit_stmt, PreHirStmt::Break);
                     let else_body = if Some(true_target) != next_addr {
                         if let Some(target_idx) = host.find_block_index_by_address(true_target) {
