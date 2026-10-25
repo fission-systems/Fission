@@ -80,7 +80,7 @@ fn entry_window_bytes(binary: &LoadedBinary, window: usize) -> Option<&[u8]> {
 
 #[must_use]
 pub(super) fn winapi_catalog_summary(binary: &LoadedBinary) -> Option<WinApiCatalogSummary> {
-    let db = ApiTypeDatabase::from_utils_signatures().ok()?;
+    let db = ApiTypeDatabase::from_utils_signatures_for_bitness(binary.is_64bit).ok()?;
     let considered = binary.iat_symbols.len();
     let mut symbols_in_catalog = 0usize;
     for sym in binary.iat_symbols.values() {
