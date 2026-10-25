@@ -192,4 +192,59 @@ mod tests {
             SolverVerdict::Equivalent
         );
     }
+
+    #[test]
+    fn lower_sym_rejects_incomplete_return_paths_and_uninitialized_local_reads() {
+        use crate::lower_sym;
+        use fission_midend_core::ir::NirType;
+        use fission_midend_prehir::{PreHirBinaryOp, PreHirBinding, PreHirExpr, PreHirStmt};
+
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let params = vec![PreHirBinding {
+            name: "x".to_string(),
+            ty: i32_ty.clone(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }];
+        let param_vars = vec![SymExpr::new_var("x", 32)];
+
+        // 1. Single guarded return with fallthrough must be rejected rather than
+        // discarding `(x > 0)` and claiming constant return 42 on all inputs.
+        let incomplete_body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::SGt,
+                lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                rhs: Box::new(PreHirExpr::Const(0, i32_ty.clone())),
+                ty: NirType::Bool,
+            },
+            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
+                42,
+                i32_ty.clone(),
+            )))]
+            .into(),
+            else_body: Vec::new().into(),
+        }];
+        let err = lower_sym::prehir::lower(&incomplete_body, &params, &[], &param_vars)
+            .expect_err("incomplete return path should be rejected");
+        assert!(err.to_string().contains("incomplete return"));
+
+        // 2. Reading an uninitialized local must fail rather than silently seeding to 0.
+        let locals = vec![PreHirBinding {
+            name: "uninit".to_string(),
+            ty: i32_ty.clone(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }];
+        let uninit_body = vec![PreHirStmt::Return(Some(PreHirExpr::Var(
+            "uninit".to_string(),
+        )))];
+        let err = lower_sym::prehir::lower(&uninit_body, &params, &locals, &param_vars)
+            .expect_err("uninitialized local read should be rejected");
+        assert!(err.to_string().contains("undeclared variable 'uninit'"));
+    }
 }
