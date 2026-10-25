@@ -792,4 +792,40 @@ mod variadic_arity_tests {
         };
         assert_eq!(args.len(), 1);
     }
+
+    #[test]
+    fn known_variadic_api_calls_such_as_open_and_wsprintf_keep_observed_call_tail() {
+        let summaries = indexmap::IndexMap::new();
+
+        for target in [
+            "open",
+            "openat",
+            "fcntl",
+            "ioctl",
+            "wsprintfA",
+            "__isoc99_sscanf",
+        ] {
+            let mut stmts = vec![PreHirStmt::Expr(PreHirExpr::Call {
+                target: target.to_string(),
+                args: (0..4)
+                    .map(|value| PreHirExpr::Const(value, NirType::Unknown))
+                    .collect(),
+                ty: NirType::Unknown,
+            })];
+
+            assert_eq!(
+                prune_known_api_call_args_stmts(&mut stmts, &summaries),
+                0,
+                "variadic target {target} should not prune arguments"
+            );
+            let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &stmts[0] else {
+                panic!("expected call expression");
+            };
+            assert_eq!(
+                args.len(),
+                4,
+                "target {target} must preserve all 4 arguments"
+            );
+        }
+    }
 }

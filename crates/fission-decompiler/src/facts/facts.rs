@@ -2768,12 +2768,25 @@ mod tests {
                     confidence: 255,
                 },
             ),
+            (
+                0x403000,
+                CallTargetRef {
+                    address: Some(0x403000),
+                    symbol: "open".to_string(),
+                    provenance: CallTargetProvenance::Import,
+                    edge_kind: CallEdgeKind::Import,
+                    confidence: 255,
+                },
+            ),
         ]);
 
         let summaries = build_nir_import_call_prototype_summaries(&call_targets, true);
         assert_eq!(summaries["fstat"].locked_exact_arity, Some(2));
+        assert_eq!(summaries["fstat"].variadic_fixed_arity, None);
         assert_eq!(summaries["printf"].locked_exact_arity, None);
         assert_eq!(summaries["printf"].variadic_fixed_arity, Some(1));
+        assert_eq!(summaries["open"].locked_exact_arity, None);
+        assert_eq!(summaries["open"].variadic_fixed_arity, Some(2));
     }
 
     #[test]

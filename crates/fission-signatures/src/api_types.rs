@@ -157,6 +157,10 @@ pub fn canonical_variadic_runtime_symbol(name: &str) -> String {
             symbol = stripped.to_string();
             continue;
         }
+        if let Some(stripped) = symbol.strip_prefix("isoc23_") {
+            symbol = stripped.to_string();
+            continue;
+        }
         if let Some(stripped) = symbol.strip_prefix('_') {
             symbol = stripped.to_string();
             continue;
@@ -184,6 +188,8 @@ pub fn printf_style_format_string_arg_index(name: &str) -> Option<usize> {
         "snprintf_chk" => Some(4),
         "error" => Some(2),
         "error_at_line" => Some(4),
+        "syslog" => Some(1),
+        "wsprintf" | "wsprintfa" | "wsprintfw" => Some(1),
         _ => None,
     }
 }
@@ -643,9 +649,45 @@ mod tests {
             printf_style_format_string_arg_index("error_at_line"),
             Some(4)
         );
+        assert_eq!(printf_style_format_string_arg_index("syslog"), Some(1));
+        assert_eq!(printf_style_format_string_arg_index("wsprintfA"), Some(1));
+        assert_eq!(printf_style_format_string_arg_index("wsprintfW"), Some(1));
         assert!(is_known_variadic_runtime_symbol("__imp___printf_chk"));
         assert!(is_known_variadic_runtime_symbol("error"));
+        assert!(is_known_variadic_runtime_symbol("syslog"));
+        assert!(is_known_variadic_runtime_symbol("wsprintfA"));
+        assert!(is_known_variadic_runtime_symbol("wsprintfW"));
         assert_eq!(printf_style_format_string_arg_index("fputs"), None);
+    }
+
+    #[test]
+    fn posix_and_c99_variadic_symbols_are_recognized() {
+        assert_eq!(
+            canonical_variadic_runtime_symbol("__isoc99_sscanf"),
+            "sscanf"
+        );
+        assert_eq!(canonical_variadic_runtime_symbol("__isoc99_scanf"), "scanf");
+        assert_eq!(
+            canonical_variadic_runtime_symbol("__isoc23_fscanf"),
+            "fscanf"
+        );
+        assert!(is_known_variadic_runtime_symbol("__isoc99_sscanf"));
+        assert!(is_known_variadic_runtime_symbol("__isoc99_scanf"));
+        assert!(is_known_variadic_runtime_symbol("__isoc23_fscanf"));
+
+        assert!(is_known_variadic_runtime_symbol("open"));
+        assert!(is_known_variadic_runtime_symbol("openat"));
+        assert!(is_known_variadic_runtime_symbol("fcntl"));
+        assert!(is_known_variadic_runtime_symbol("ioctl"));
+        assert!(is_known_variadic_runtime_symbol("syscall"));
+        assert!(is_known_variadic_runtime_symbol("execl"));
+        assert!(is_known_variadic_runtime_symbol("execle"));
+        assert!(is_known_variadic_runtime_symbol("execlp"));
+        assert!(is_known_variadic_runtime_symbol("sem_open"));
+
+        assert!(!is_known_variadic_runtime_symbol("close"));
+        assert!(!is_known_variadic_runtime_symbol("read"));
+        assert!(!is_known_variadic_runtime_symbol("write"));
     }
 
     #[test]
