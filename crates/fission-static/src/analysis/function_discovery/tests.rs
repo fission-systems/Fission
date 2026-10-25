@@ -537,68 +537,6 @@ fn tracker_merges_overlapping_intervals_and_maintains_monotonic_offcut_queries()
 }
 
 #[test]
-fn walk_function_boundaries_follows_intra_function_unconditional_jump() {
-    let _guard = sleigh_runtime_discovery_lock();
-    use super::discover::walk_function_boundaries;
-    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
-    use fission_sleigh::runtime::RuntimeSleighFrontend;
-    use std::collections::HashSet;
-
-    // Layout:
-    // 0x401000: jmp +0x10 -> 0x401012 (eb 10)
-    // 0x401002..0x401012: padding (0xcc)
-    // 0x401012: nop (90)
-    // 0x401013: ret (c3)
-    let mut bytes = vec![0xcc_u8; 0x1000];
-    bytes[0] = 0xeb; // JMP +0x10 -> 0x401012
-    bytes[1] = 0x10;
-    bytes[0x12] = 0x90; // NOP
-    bytes[0x13] = 0xc3; // RET
-
-    let binary = LoadedBinaryBuilder::new("jmp-test.bin".to_string(), DataBuffer::Heap(bytes))
-        .format("PE")
-        .image_base(0x400000)
-        .entry_point(0x401000)
-        .arch_spec("x86:LE:64:default")
-        .is_64bit(true)
-        .add_section(SectionInfo {
-            name: ".text".to_string(),
-            virtual_address: 0x401000,
-            virtual_size: 0x1000,
-            file_offset: 0,
-            file_size: 0x1000,
-            is_executable: true,
-            is_readable: true,
-            is_writable: false,
-        })
-        .build()
-        .expect("synthetic binary");
-
-    let load_spec = binary.load_spec().expect("load spec");
-    let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec).expect("frontend");
-
-    let known_functions = HashSet::from([0x401000]);
-    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions);
-
-    // Boundaries should contain:
-    // (0x401000, 0x401002) - JMP
-    // (0x401012, 0x401013) - NOP
-    // (0x401013, 0x401014) - RET
-    assert!(
-        boundaries.contains(&(0x401000, 0x401002)),
-        "should contain initial jmp"
-    );
-    assert!(
-        boundaries.contains(&(0x401012, 0x401013)),
-        "should follow unconditional jump to target block"
-    );
-    assert!(
-        boundaries.contains(&(0x401013, 0x401014)),
-        "should decode through to ret"
-    );
-}
-
-#[test]
 fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
     let _guard = sleigh_runtime_discovery_lock();
     use super::discover::walk_function_boundaries;

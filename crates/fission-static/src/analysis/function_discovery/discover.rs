@@ -1024,32 +1024,7 @@ pub(crate) fn walk_function_boundaries(
                         break;
                     }
                     DecodedFlowKind::Jump => {
-                        let jump_target = inst.direct_target.or_else(|| {
-                            inst.references.iter().find_map(|r| match r.kind {
-                                DecodedReferenceKind::BranchTarget
-                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
-                                _ => None,
-                            })
-                        });
-                        if let Some(target) = jump_target {
-                            let norm_target =
-                                crate::analysis::function_discovery::targets::normalize_target(
-                                    binary, target,
-                                );
-                            let in_same_section = binary.sections.is_empty()
-                                || crate::analysis::function_discovery::targets::same_section(
-                                    binary,
-                                    ip,
-                                    norm_target,
-                                );
-                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges)
-                                && !known_functions.contains(&norm_target)
-                                && !binary.function_addr_index.contains_key(&norm_target)
-                                && in_same_section
-                            {
-                                worklist.push(norm_target);
-                            }
-                        }
+                        // Do not trace unconditional jumps to avoid enveloping tail call targets
                         break;
                     }
                     DecodedFlowKind::Call => {
