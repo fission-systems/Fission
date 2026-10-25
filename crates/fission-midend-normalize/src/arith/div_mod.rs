@@ -818,8 +818,13 @@ pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> 
 
             let mut x_val = x_ext;
             let mut is_sext = false;
+            // Width of the innermost integer cast around the dividend.
+            let mut widened_to_bits: Option<u32> = None;
 
-            while let PreHirExpr::Cast { expr: inner, .. } = x_val {
+            while let PreHirExpr::Cast { ty, expr: inner } = x_val {
+                if let Some(bits) = int_type_bits(ty) {
+                    widened_to_bits = Some(bits);
+                }
                 if let NirType::Int {
                     bits: orig_bits,
                     signed,
@@ -841,13 +846,16 @@ pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> 
                 }
             }
 
-            let x_bits = x_size_bits.unwrap_or_else(|| {
-                if n <= 64 && y_128 <= u32::MAX as u128 {
-                    32
-                } else {
-                    64
-                }
-            });
+            // The magic-number bound is only valid for the dividend's real
+            // width. With no type on the dividend, a widening cast still bounds
+            // it: integer widths are powers of two, so the source is at most
+            // half as wide, and a multiplier valid for that width is valid for
+            // every narrower one. Without either fact, do not guess.
+            let x_bits = match (x_size_bits, widened_to_bits) {
+                (Some(bits), _) => bits,
+                (None, Some(cast_bits)) if cast_bits >= 16 => cast_bits / 2,
+                _ => return None,
+            };
 
             let is_signed = is_signed_shift || is_sext;
             let min_shift = if is_signed {
@@ -1098,6 +1106,29 @@ mod tests {
                 ty: u32_ty.clone(),
             }
         );
+    }
+
+    #[test]
+    fn magic_number_division_rejects_dividend_of_unknown_width() {
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        // No type and no widening cast on `x`: its width, and so the
+        // multiplier's validity range, is unknown.
+        let mul = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Const(0x5555_5556_i64, i64_ty.clone())),
+            ty: i64_ty.clone(),
+        };
+        let shifted = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(mul),
+            rhs: Box::new(PreHirExpr::Const(32, i64_ty.clone())),
+            ty: i64_ty,
+        };
+        assert_eq!(recognize_magic_number_division(&shifted), None);
     }
 
     #[test]
