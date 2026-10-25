@@ -683,7 +683,7 @@ pub(crate) fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'s
     }
 }
 
-fn resolve_call_target_name(
+pub(crate) fn resolve_call_target_name(
     binary: &LoadedBinary,
     target_addr: u64,
 ) -> Option<(String, Option<&str>)> {
@@ -702,7 +702,7 @@ fn resolve_call_target_name(
     })
 }
 
-fn resolve_call_target_name_direct(
+pub(crate) fn resolve_call_target_name_direct(
     binary: &LoadedBinary,
     target_addr: u64,
 ) -> Option<(String, Option<&str>)> {
