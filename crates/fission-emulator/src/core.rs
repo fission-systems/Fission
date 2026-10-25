@@ -725,12 +725,17 @@ impl Emulator {
                     handler,
                     old_pc
                 );
-                // Minimal frame: push old PC so a cooperative handler can return via stack,
-                // and set PC to the handler. Full ucontext is future work.
+                let saved_regs = self.register_state_at(old_pc);
+                self.signals.set_current_frame_registers(saved_regs);
+
+                // Honor the 128-byte System V AMD64 red zone and 16-byte stack alignment
+                // before pushing the return address for the handler frame.
                 let sp_reg = self.arch.sp_reg;
                 let ptr_size = self.arch.pointer_size as u64;
                 if let Ok(sp) = self.read_register_u64(sp_reg) {
-                    let new_sp = sp.saturating_sub(ptr_size);
+                    let red_zone = if ptr_size == 8 { 128 } else { 0 };
+                    let aligned_sp = sp.saturating_sub(red_zone) & !0xF;
+                    let new_sp = aligned_sp.saturating_sub(ptr_size);
                     let _ = self.write_register_u64(sp_reg, new_sp);
                     let ram = self.state.ram_space();
                     if ptr_size == 8 {

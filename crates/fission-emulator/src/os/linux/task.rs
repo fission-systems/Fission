@@ -50,12 +50,13 @@ const SUPPORTED_CLONE_FLAGS: u64 = REQUIRED_THREAD_FLAGS
     | CLONE_CHILD_CLEARTID
     | CLONE_CHILD_SETTID;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ThreadSignals {
     pending: u64,
     blocked: u64,
     return_pc: Option<u64>,
     current: Option<i32>,
+    frames: Vec<crate::os::linux::signal::SignalFrame>,
 }
 
 impl ThreadSignals {
@@ -65,14 +66,16 @@ impl ThreadSignals {
             blocked: emu.signals.blocked,
             return_pc: emu.signals.return_pc,
             current: emu.signals.current,
+            frames: emu.signals.frames.clone(),
         }
     }
 
-    fn restore(self, emu: &mut Emulator) {
+    fn restore(&self, emu: &mut Emulator) {
         emu.signals.pending = self.pending;
         emu.signals.blocked = self.blocked;
         emu.signals.return_pc = self.return_pc;
         emu.signals.current = self.current;
+        emu.signals.frames = self.frames.clone();
     }
 }
 
@@ -223,6 +226,7 @@ impl LinuxTaskScheduler {
         child_context.signals.pending = 0;
         child_context.signals.return_pc = None;
         child_context.signals.current = None;
+        child_context.signals.frames.clear();
 
         if flags & CLONE_SETTLS != 0 && !layout.set_tls(&mut child_context, emu, tls) {
             return set_errno(emu, ENOSYS);

@@ -9,6 +9,11 @@ use serde::{Deserialize, Serialize};
 /// Maximum signal number (Linux allows 1..=64 for standard+RT in our model).
 pub const NSIG: usize = 64;
 
+/// Do not prevent the signal from being received from within its own handler.
+pub const SA_NODEFER: u64 = 0x4000_0000;
+/// Restore the signal action to the default upon entry to the signal handler.
+pub const SA_RESETHAND: u64 = 0x8000_0000;
+
 /// Common POSIX/Linux signal numbers.
 pub mod sig {
     pub const SIGHUP: i32 = 1;
@@ -78,6 +83,16 @@ pub enum DeliverResult {
     Ignored { signo: i32 },
 }
 
+/// Saved execution frame for an active signal handler invocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalFrame {
+    pub signo: i32,
+    pub return_pc: u64,
+    pub saved_blocked: u64,
+    #[serde(skip)]
+    pub saved_registers: Option<fission_ttd::RegisterState>,
+}
+
 /// Per-process signal bookkeeping.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignalState {
@@ -87,16 +102,16 @@ pub struct SignalState {
     pub blocked: u64,
     /// Actions for signals 1..=NSIG (index 0 unused). Vec length = NSIG+1.
     pub actions: Vec<SigAction>,
-    /// sa_flags per signal (SA_RESTART etc.) — stored for fidelity, mostly ignored.
+    /// sa_flags per signal (SA_RESTART etc.).
     pub flags: Vec<u64>,
     /// sa_mask per signal (signals blocked while handler is running).
     pub masks: Vec<u64>,
-    /// Mask saved before handler invocation to restore on `rt_sigreturn`.
-    pub saved_blocked: Option<u64>,
     /// If Some, we are inside a user handler and `rt_sigreturn` should restore this PC.
     pub return_pc: Option<u64>,
     /// Signal currently being handled (for debugging / nested delivery).
     pub current: Option<i32>,
+    /// Stack of active signal frames for nested handler reentrancy and register restoration.
+    pub frames: Vec<SignalFrame>,
 }
 
 impl Default for SignalState {
@@ -107,9 +122,9 @@ impl Default for SignalState {
             actions: vec![SigAction::Default; NSIG + 1],
             flags: vec![0; NSIG + 1],
             masks: vec![0; NSIG + 1],
-            saved_blocked: None,
             return_pc: None,
             current: None,
+            frames: Vec::new(),
         }
     }
 }
@@ -228,20 +243,26 @@ impl SignalState {
             SigAction::Ignore => DeliverResult::Ignored { signo: sig },
             SigAction::Default => Self::default_disposition(sig),
             SigAction::Handler(handler) => {
+                let saved_blocked = self.blocked;
+                let sa_flags = self.flags.get(sig as usize).copied().unwrap_or(0);
+                if sa_flags & SA_NODEFER == 0 {
+                    self.set_blocked_mask(self.blocked | b);
+                }
+                if sa_flags & SA_RESETHAND != 0 {
+                    self.actions[sig as usize] = SigAction::Default;
+                }
+                self.frames.push(SignalFrame {
+                    signo: sig,
+                    return_pc: current_pc,
+                    saved_blocked,
+                    saved_registers: None,
+                });
                 self.return_pc = Some(current_pc);
                 self.current = Some(sig);
-                if self.saved_blocked.is_none() {
-                    self.saved_blocked = Some(self.blocked);
-                }
+                // sa_mask is blocked for the handler's duration; the frame's
+                // saved_blocked restores the caller's mask on rt_sigreturn.
                 let sa_mask = self.masks.get(sig as usize).copied().unwrap_or(0);
-                let nodefer = self.flags.get(sig as usize).copied().unwrap_or(0) & 0x4000_0000 != 0;
-                let mut new_blocked = self.blocked | sa_mask;
-                if !nodefer {
-                    if let Some(b) = Self::bit(sig) {
-                        new_blocked |= b;
-                    }
-                }
-                self.set_blocked_mask(new_blocked);
+                self.set_blocked_mask(self.blocked | sa_mask);
                 DeliverResult::Handler {
                     signo: sig,
                     handler,
@@ -251,13 +272,37 @@ impl SignalState {
         }
     }
 
+    /// Attach a full register state snapshot to the most recently delivered signal frame.
+    pub fn set_current_frame_registers(&mut self, registers: fission_ttd::RegisterState) {
+        if let Some(frame) = self.frames.last_mut() {
+            frame.saved_registers = Some(registers);
+        }
+    }
+
+    /// Pop the innermost active signal frame and restore the pre-handler blocked mask.
+    pub fn pop_frame(&mut self) -> Option<SignalFrame> {
+        if let Some(frame) = self.frames.pop() {
+            self.set_blocked_mask(frame.saved_blocked);
+            self.return_pc = self.frames.last().map(|f| f.return_pc);
+            self.current = self.frames.last().map(|f| f.signo);
+            Some(frame)
+        } else if let Some(pc) = self.return_pc.take() {
+            let signo = self.current.take().unwrap_or(0);
+            Some(SignalFrame {
+                signo,
+                return_pc: pc,
+                saved_blocked: self.blocked,
+                saved_registers: None,
+            })
+        } else {
+            self.current = None;
+            None
+        }
+    }
+
     /// `rt_sigreturn`: restore PC after user handler.
     pub fn sigreturn(&mut self) -> Option<u64> {
-        self.current = None;
-        if let Some(old_blocked) = self.saved_blocked.take() {
-            self.set_blocked_mask(old_blocked);
-        }
-        self.return_pc.take()
+        self.pop_frame().map(|frame| frame.return_pc)
     }
 }
 
@@ -341,5 +386,141 @@ mod tests {
             s.blocked, orig_blocked,
             "blocked mask must be restored on sigreturn"
         );
+    }
+
+    #[test]
+    fn nested_signal_delivery_preserves_frame_stack_and_masks_until_sigreturn() {
+        let mut s = SignalState::default();
+        s.set_action(sig::SIGUSR1, SigAction::Handler(0x401000), 0);
+        s.set_action(sig::SIGUSR2, SigAction::Handler(0x402000), SA_RESETHAND);
+
+        // Deliver SIGUSR1 at 0x1000
+        s.queue(sig::SIGUSR1);
+        assert_eq!(
+            s.take_delivery(0x1000),
+            DeliverResult::Handler {
+                signo: sig::SIGUSR1,
+                handler: 0x401000,
+                old_pc: 0x1000,
+            }
+        );
+        // Same signal queued without SA_NODEFER is masked while handler is active
+        s.queue(sig::SIGUSR1);
+        assert_eq!(s.take_delivery(0x401010), DeliverResult::None);
+
+        // Nested SIGUSR2 delivered inside SIGUSR1 handler at 0x401020
+        s.queue(sig::SIGUSR2);
+        assert_eq!(
+            s.take_delivery(0x401020),
+            DeliverResult::Handler {
+                signo: sig::SIGUSR2,
+                handler: 0x402000,
+                old_pc: 0x401020,
+            }
+        );
+        // SA_RESETHAND resets SIGUSR2 disposition to Default
+        assert_eq!(s.action(sig::SIGUSR2), SigAction::Default);
+        assert_eq!(s.return_pc, Some(0x401020));
+        assert_eq!(s.current, Some(sig::SIGUSR2));
+
+        // Inner handler sigreturn restores outer handler frame and unblocks SIGUSR2 while keeping SIGUSR1 blocked
+        assert_eq!(s.sigreturn(), Some(0x401020));
+        assert_eq!(s.return_pc, Some(0x1000));
+        assert_eq!(s.current, Some(sig::SIGUSR1));
+        assert_ne!(
+            s.blocked_mask() & SignalState::bit(sig::SIGUSR1).unwrap(),
+            0
+        );
+
+        // Outer handler sigreturn restores original PC 0x1000 and unblocks SIGUSR1
+        assert_eq!(s.sigreturn(), Some(0x1000));
+        assert_eq!(s.return_pc, None);
+        assert_eq!(s.current, None);
+        assert_eq!(s.blocked_mask(), 0);
+
+        // Now the queued SIGUSR1 is deliverable again
+        assert!(matches!(
+            s.take_delivery(0x1000),
+            DeliverResult::Handler {
+                signo: sig::SIGUSR1,
+                old_pc: 0x1000,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn emulator_signal_delivery_honors_red_zone_alignment_and_restores_registers_on_sigreturn() {
+        use crate::arch::ArchInfo;
+        use crate::core::Emulator;
+        use crate::os::linux::LinuxEnv;
+        use crate::os::linux::syscall::SysRtSigreturn;
+        use crate::os::procedure::SimProcedure;
+        use crate::pcode::state::MachineState;
+        use fission_loader::loader::LoadedBinary;
+        use fission_sleigh::runtime::RuntimeSleighFrontend;
+        use std::path::PathBuf;
+
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
+        let binary = LoadedBinary::from_file(path).expect("load x86-64 ELF fixture");
+        let mut state = MachineState::new();
+        let image =
+            crate::os::linux::loader::load_elf(&mut state, &binary).expect("load fixture image");
+        let load_spec = binary.load_spec().expect("fixture load spec").clone();
+        let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)
+            .expect("candidate Sleigh frontends")
+            .into_iter()
+            .next()
+            .expect("Sleigh frontend");
+        let arch = ArchInfo::from_language_id(load_spec.pair.language_id.as_str(), Some(&binary))
+            .expect("fixture architecture");
+        let mut emu = Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new()))
+            .expect("construct emulator");
+        emu.apply_linux_image(image).expect("apply Linux image");
+
+        let base_sp = emu.read_register_u64("RSP").unwrap();
+        let initial_sp = (base_sp & !0xF) + 4; // intentionally misaligned by 4 bytes
+        let red_zone_slot = initial_sp - 64;
+        let ram = emu.state.ram_space();
+        emu.state
+            .write_space(ram, red_zone_slot, &0xdead_beef_cafe_babeu64.to_le_bytes())
+            .unwrap();
+
+        emu.pc = 0x400500;
+        emu.write_register_u64("RSP", initial_sp).unwrap();
+        emu.write_register_u64("RAX", 0x1122_3344_5566_7788)
+            .unwrap();
+        emu.write_register_u64("RDI", 0x99aa_bbcc_ddee_ff00)
+            .unwrap();
+
+        emu.signals
+            .set_action(sig::SIGUSR1, SigAction::Handler(0x401000), 0);
+        emu.raise_signal(sig::SIGUSR1);
+        assert!(emu.process_pending_signals().unwrap());
+        assert_eq!(emu.pc, 0x401000);
+
+        let handler_sp = emu.read_register_u64("RSP").unwrap();
+        // Must skip 128-byte red zone and leave (RSP + 8) % 16 == 0 at handler entry
+        assert!(handler_sp <= initial_sp - 128 - 8);
+        assert_eq!((handler_sp + 8) % 16, 0);
+
+        // Red zone data must remain intact
+        let rz_check = emu.state.read_space(ram, red_zone_slot, 8).unwrap();
+        assert_eq!(
+            u64::from_le_bytes(rz_check.try_into().unwrap()),
+            0xdead_beef_cafe_babe
+        );
+
+        // Handler clobbers caller-saved registers
+        emu.write_register_u64("RAX", 0x42).unwrap();
+        emu.write_register_u64("RCX", 0x9999).unwrap();
+
+        // rt_sigreturn must restore original PC, RSP, RAX, and RDI
+        SysRtSigreturn.run(&mut emu).unwrap();
+        assert_eq!(emu.pc, 0x400500);
+        assert_eq!(emu.read_register_u64("RSP").unwrap(), initial_sp);
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 0x1122_3344_5566_7788);
+        assert_eq!(emu.read_register_u64("RDI").unwrap(), 0x99aa_bbcc_ddee_ff00);
     }
 }
