@@ -1,6 +1,6 @@
 use crate::fidbf::{
-    FidRelationContext, FidbfDatabase, FidbfMatch, FidbfParseError, fpk_store::LazyFidDatabase,
-    parse_fidbf,
+    FidRelationContext, FidbfDatabase, FidbfFunction, FidbfMatch, FidbfParseError,
+    fpk_store::LazyFidDatabase, parse_fidbf,
 };
 use fission_core::resources::ResourceProvider;
 use std::path::PathBuf;
@@ -50,6 +50,24 @@ impl FidDatabase {
         match self {
             Self::Lazy(db) => db.source_path(),
             Self::Eager(db) => &db.source_path,
+        }
+    }
+
+    pub fn function_count(&self) -> usize {
+        match self {
+            Self::Lazy(db) => db.function_count(),
+            Self::Eager(db) => db.functions.len(),
+        }
+    }
+
+    pub fn find_candidates_by_full_hash(&self, full_hash: u64) -> Vec<FidbfFunction> {
+        match self {
+            Self::Lazy(db) => db.find_candidates_by_full_hash(full_hash),
+            Self::Eager(db) => db
+                .find_by_full_hash(full_hash)
+                .into_iter()
+                .cloned()
+                .collect(),
         }
     }
 }

@@ -121,7 +121,7 @@ impl RelationIndex {
 
 const FNV_64_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-pub(crate) fn relation_smash(function_key: i64, other_full_hash: u64) -> u64 {
+pub fn relation_smash(function_key: i64, other_full_hash: u64) -> u64 {
     (function_key as u64).wrapping_mul(FNV_64_PRIME) ^ other_full_hash
 }
 
