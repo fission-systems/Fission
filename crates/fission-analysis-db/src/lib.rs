@@ -522,13 +522,11 @@ fn build_functions(
 ) -> Vec<FunctionRecord> {
     let mut sorted = functions.to_vec();
     sorted.retain(|function| {
-        if function.is_import {
-            block_intervals.any_containing(function.address, |_| true) || blocks.is_empty()
-        } else {
-            !block_intervals.any_containing(function.address, |_| true)
-                || block_intervals
-                    .any_containing(function.address, |index| blocks[index].permissions.execute)
-        }
+        // Import slots live in IAT/GOT data, so they only need to be mapped;
+        // every non-import function is kept as the loader reported it.
+        !function.is_import
+            || blocks.is_empty()
+            || block_intervals.any_containing(function.address, |_| true)
     });
     sorted.sort_by(|left, right| {
         left.address
