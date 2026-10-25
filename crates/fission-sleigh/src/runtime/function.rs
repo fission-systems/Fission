@@ -314,6 +314,9 @@ fn control_op_branch_target_address(
             if let Some(&idx) = op_seq_to_idx.get(&(op.address, target_seq)) {
                 return Some(ops[idx].address);
             }
+            if let Some(target_op) = ops.iter().find(|o| o.seq_num == target_seq) {
+                return Some(target_op.address);
+            }
         }
     }
     direct_control_target_with_symbolic_internal_label(op)
@@ -338,8 +341,13 @@ fn targets_own_instruction_internally(
     op.inputs
         .first()
         .and_then(|input| relative_pcode_target_seq(op, input))
-        .and_then(|target_seq| op_seq_to_idx.get(&(op.address, target_seq)))
-        .is_some_and(|&idx| ops[idx].address == op.address)
+        .and_then(|target_seq| {
+            op_seq_to_idx
+                .get(&(op.address, target_seq))
+                .copied()
+                .or_else(|| ops.iter().position(|o| o.seq_num == target_seq))
+        })
+        .is_some_and(|idx| ops[idx].address == op.address)
 }
 
 fn control_op_splits_instruction_cfg(
@@ -508,12 +516,12 @@ pub fn build_instruction_cfg_snapshot(
 
         match term.opcode {
             PcodeOpcode::Branch => {
-                if let Some(target) = direct_control_target_with_symbolic_internal_label(term) {
+                if let Some(target) = control_op_branch_target_address(term, ops, &op_seq_to_idx) {
                     leaders.insert(target);
                 }
             }
             PcodeOpcode::CBranch => {
-                let branch_target = direct_control_target_with_symbolic_internal_label(term);
+                let branch_target = control_op_branch_target_address(term, ops, &op_seq_to_idx);
                 if let Some(fallthrough) = instruction_fallthrough(addr, instruction_lengths) {
                     if branch_target != Some(fallthrough) {
                         if let Some(target) = branch_target {
@@ -595,7 +603,7 @@ pub fn build_instruction_cfg_snapshot(
                 match term.opcode {
                     PcodeOpcode::Branch => {
                         if let Some(target) =
-                            direct_control_target_with_symbolic_internal_label(term)
+                            control_op_branch_target_address(term, ops, &op_seq_to_idx)
                         {
                             if let Some(dst) = leader_for_target(target, &block_starts, &reachable)
                             {
@@ -605,7 +613,7 @@ pub fn build_instruction_cfg_snapshot(
                     }
                     PcodeOpcode::CBranch => {
                         let branch_target =
-                            direct_control_target_with_symbolic_internal_label(term);
+                            control_op_branch_target_address(term, ops, &op_seq_to_idx);
                         if let Some(fallthrough) =
                             instruction_fallthrough(last_addr, instruction_lengths)
                         {
@@ -891,5 +899,58 @@ mod instruction_cfg_tests {
 
         assert_eq!(snapshot.block_starts, vec![entry]);
         assert!(snapshot.edges.is_empty());
+    }
+
+    #[test]
+    fn instruction_cfg_relative_branch_creates_leader_and_edge() {
+        let entry = 0x1000u64;
+        let target = 0x1010u64;
+        let reachable = vec![entry, target];
+        let lengths = BTreeMap::from([(entry, 4), (target, 1)]);
+
+        // Op at entry (0x1000) branches with relative sequence offset +1 to an op at target (0x1010)
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Branch,
+                address: entry,
+                output: None,
+                inputs: vec![Varnode::constant(1, 4)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Return,
+                address: target,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+
+        let snapshot = build_instruction_cfg_snapshot(
+            entry,
+            &reachable,
+            &lengths,
+            &ops,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &InstructionCfgHints::default(),
+            true,
+        );
+
+        assert_eq!(snapshot.block_starts, vec![entry, target]);
+        assert!(
+            snapshot
+                .edges
+                .iter()
+                .any(|edge| edge.from == entry && edge.to == target),
+            "expected edge from {entry:#x} to {target:#x}, got {:?}",
+            snapshot.edges
+        );
+        assert!(
+            !snapshot.exit_blocks.contains(&entry),
+            "entry must not be an exit block when it has a branch successor"
+        );
     }
 }
