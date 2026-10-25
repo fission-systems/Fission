@@ -146,7 +146,7 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut PreHirFunction, cheap_only: 
         promoted_bindings.push(PreHirBinding {
             name: alias,
             ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
-            surface_type_name: slot_surface_type_name(&display_base, func, &inventory),
+            surface_type_name: None,
             origin: derived_origin,
             initializer: Some(PreHirExpr::Cast {
                 ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
@@ -447,7 +447,7 @@ fn collect_memory_slot_candidates(
     func: &PreHirFunction,
     candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
 ) {
-    for (first_seen, access) in collect_partitioned_memory_accesses(&func.body)
+    for (first_seen, access) in collect_partitioned_memory_accesses(&func.body, func.is_64bit)
         .into_iter()
         .enumerate()
     {

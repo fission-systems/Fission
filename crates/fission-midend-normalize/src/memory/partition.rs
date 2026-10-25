@@ -61,6 +61,7 @@ pub struct PartitionedMemoryAccess {
     pub stride: Option<i64>,
     pub index: Option<PreHirExpr>,
     pub access_ty: NirType,
+    pub pointer_bytes: u32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -70,8 +71,11 @@ struct AddressParts {
     scaled_index: Option<(PreHirExpr, i64)>,
 }
 
-pub fn collect_partitioned_memory_accesses(stmts: &[PreHirStmt]) -> Vec<PartitionedMemoryAccess> {
-    collect_partitioned_accesses(stmts, false)
+pub fn collect_partitioned_memory_accesses(
+    stmts: &[PreHirStmt],
+    is_64bit: bool,
+) -> Vec<PartitionedMemoryAccess> {
+    collect_partitioned_accesses(stmts, false, if is_64bit { 8 } else { 4 })
 }
 
 /// Collect pointer-based accesses plus accesses already recovered as indexed
@@ -81,16 +85,23 @@ pub fn collect_partitioned_memory_accesses(stmts: &[PreHirStmt]) -> Vec<Partitio
 /// scalar access widths.
 pub(super) fn collect_partitioned_memory_accesses_with_structured_accesses(
     stmts: &[PreHirStmt],
+    is_64bit: bool,
 ) -> Vec<PartitionedMemoryAccess> {
-    collect_partitioned_accesses(stmts, true)
+    collect_partitioned_accesses(stmts, true, if is_64bit { 8 } else { 4 })
 }
 
 fn collect_partitioned_accesses(
     stmts: &[PreHirStmt],
     include_structured_accesses: bool,
+    pointer_bytes: u32,
 ) -> Vec<PartitionedMemoryAccess> {
     let mut accesses = Vec::new();
-    collect_accesses_from_stmts(stmts, &mut accesses, include_structured_accesses);
+    collect_accesses_from_stmts(
+        stmts,
+        &mut accesses,
+        include_structured_accesses,
+        pointer_bytes,
+    );
     accesses
 }
 
@@ -98,15 +109,27 @@ pub fn partition_key_for_pointer_expr(
     ptr: &PreHirExpr,
     access_ty: &NirType,
 ) -> Option<PartitionKey> {
-    let access = parse_partitioned_access(ptr, access_ty, MemoryAccessKind::Load)?;
+    partition_key_for_pointer_expr_with_pointer_bytes(ptr, access_ty, 8)
+}
+
+pub fn partition_key_for_pointer_expr_with_pointer_bytes(
+    ptr: &PreHirExpr,
+    access_ty: &NirType,
+    pointer_bytes: u32,
+) -> Option<PartitionKey> {
+    let access = parse_partitioned_access(ptr, access_ty, MemoryAccessKind::Load, pointer_bytes)?;
     Some(access.partition_key())
 }
 
 pub(super) fn type_byte_size(ty: &NirType) -> Option<u32> {
+    type_byte_size_with_pointer_bytes(ty, 8)
+}
+
+pub(super) fn type_byte_size_with_pointer_bytes(ty: &NirType, pointer_bytes: u32) -> Option<u32> {
     match ty {
         NirType::Bool => Some(1),
         NirType::Int { bits, .. } => Some(bits / 8),
-        NirType::Ptr(_) => Some(8),
+        NirType::Ptr(_) => Some(pointer_bytes),
         NirType::Aggregate { size, .. } => Some(*size),
         NirType::Float { bits } => Some(bits / 8),
         NirType::Unknown => None,
@@ -115,7 +138,9 @@ pub(super) fn type_byte_size(ty: &NirType) -> Option<u32> {
 
 impl PartitionedMemoryAccess {
     pub fn partition_key(&self) -> PartitionKey {
-        let width = i64::from(type_byte_size(&self.access_ty).unwrap_or(0));
+        let width = i64::from(
+            type_byte_size_with_pointer_bytes(&self.access_ty, self.pointer_bytes).unwrap_or(0),
+        );
         let mut effect_class = classify_base_object(&self.base);
         // `classify_base_object` classifies a `local_XX`/`stack_XX`-named
         // base as `Stack` purely from its *name prefix* -- it has no
@@ -166,76 +191,151 @@ fn collect_accesses_from_stmts(
     stmts: &[PreHirStmt],
     accesses: &mut Vec<PartitionedMemoryAccess>,
     include_structured_accesses: bool,
+    pointer_bytes: u32,
 ) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign { lhs, rhs } => {
                 match lhs {
                     PreHirLValue::Deref { ptr, ty } => {
-                        if let Some(access) =
-                            parse_partitioned_access(ptr, ty, MemoryAccessKind::Store)
-                        {
+                        if let Some(access) = parse_partitioned_access(
+                            ptr,
+                            ty,
+                            MemoryAccessKind::Store,
+                            pointer_bytes,
+                        ) {
                             accesses.push(access);
                         }
                     }
                     PreHirLValue::FieldAccess {
                         base, offset, ty, ..
                     } if include_structured_accesses => {
-                        if let Some(access) =
-                            parse_recovered_field_access(base, *offset, ty, MemoryAccessKind::Store)
-                        {
+                        if let Some(access) = parse_recovered_field_access(
+                            base,
+                            *offset,
+                            ty,
+                            MemoryAccessKind::Store,
+                            pointer_bytes,
+                        ) {
                             accesses.push(access);
                         }
-                        collect_accesses_from_expr(base, accesses, include_structured_accesses);
+                        collect_accesses_from_expr(
+                            base,
+                            accesses,
+                            include_structured_accesses,
+                            pointer_bytes,
+                        );
                     }
                     PreHirLValue::Index {
                         base,
                         index,
                         elem_ty,
                     } if include_structured_accesses => {
-                        if let Some(access) =
-                            parse_index_access(base, index, elem_ty, MemoryAccessKind::Store)
-                        {
+                        if let Some(access) = parse_index_access(
+                            base,
+                            index,
+                            elem_ty,
+                            MemoryAccessKind::Store,
+                            pointer_bytes,
+                        ) {
                             accesses.push(access);
                         }
-                        collect_accesses_from_expr(base, accesses, include_structured_accesses);
-                        collect_accesses_from_expr(index, accesses, include_structured_accesses);
+                        collect_accesses_from_expr(
+                            base,
+                            accesses,
+                            include_structured_accesses,
+                            pointer_bytes,
+                        );
+                        collect_accesses_from_expr(
+                            index,
+                            accesses,
+                            include_structured_accesses,
+                            pointer_bytes,
+                        );
                     }
                     _ => {}
                 }
-                collect_accesses_from_expr(rhs, accesses, include_structured_accesses);
+                collect_accesses_from_expr(
+                    rhs,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
             }
             PreHirStmt::VaStart { va_list, .. } => {
-                collect_accesses_from_expr(va_list, accesses, include_structured_accesses);
+                collect_accesses_from_expr(
+                    va_list,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
             }
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-                collect_accesses_from_expr(expr, accesses, include_structured_accesses);
+                collect_accesses_from_expr(
+                    expr,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
             }
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
-            | PreHirStmt::For { body, .. } => {
-                collect_accesses_from_stmts(body, accesses, include_structured_accesses)
-            }
+            | PreHirStmt::For { body, .. } => collect_accesses_from_stmts(
+                body,
+                accesses,
+                include_structured_accesses,
+                pointer_bytes,
+            ),
             PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                collect_accesses_from_expr(expr, accesses, include_structured_accesses);
+                collect_accesses_from_expr(
+                    expr,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
                 for case in cases {
-                    collect_accesses_from_stmts(&case.body, accesses, include_structured_accesses);
+                    collect_accesses_from_stmts(
+                        &case.body,
+                        accesses,
+                        include_structured_accesses,
+                        pointer_bytes,
+                    );
                 }
-                collect_accesses_from_stmts(default, accesses, include_structured_accesses);
+                collect_accesses_from_stmts(
+                    default,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
             }
             PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                collect_accesses_from_expr(cond, accesses, include_structured_accesses);
-                collect_accesses_from_stmts(then_body, accesses, include_structured_accesses);
-                collect_accesses_from_stmts(else_body, accesses, include_structured_accesses);
+                collect_accesses_from_expr(
+                    cond,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
+                collect_accesses_from_stmts(
+                    then_body,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
+                collect_accesses_from_stmts(
+                    else_body,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -250,24 +350,32 @@ fn collect_accesses_from_expr(
     expr: &PreHirExpr,
     accesses: &mut Vec<PartitionedMemoryAccess>,
     include_structured_accesses: bool,
+    pointer_bytes: u32,
 ) {
     match expr {
         PreHirExpr::Load { ptr, ty } => {
-            if let Some(access) = parse_partitioned_access(ptr, ty, MemoryAccessKind::Load) {
+            if let Some(access) =
+                parse_partitioned_access(ptr, ty, MemoryAccessKind::Load, pointer_bytes)
+            {
                 accesses.push(access);
             }
-            collect_accesses_from_expr(ptr, accesses, include_structured_accesses);
+            collect_accesses_from_expr(ptr, accesses, include_structured_accesses, pointer_bytes);
         }
         PreHirExpr::FieldAccess {
             base, offset, ty, ..
         } => {
             if include_structured_accesses
-                && let Some(access) =
-                    parse_recovered_field_access(base, *offset, ty, MemoryAccessKind::Load)
+                && let Some(access) = parse_recovered_field_access(
+                    base,
+                    *offset,
+                    ty,
+                    MemoryAccessKind::Load,
+                    pointer_bytes,
+                )
             {
                 accesses.push(access);
             }
-            collect_accesses_from_expr(base, accesses, include_structured_accesses);
+            collect_accesses_from_expr(base, accesses, include_structured_accesses, pointer_bytes);
         }
         PreHirExpr::Index {
             base,
@@ -276,29 +384,34 @@ fn collect_accesses_from_expr(
         } => {
             if include_structured_accesses
                 && let Some(access) =
-                    parse_index_access(base, index, elem_ty, MemoryAccessKind::Load)
+                    parse_index_access(base, index, elem_ty, MemoryAccessKind::Load, pointer_bytes)
             {
                 accesses.push(access);
             }
-            collect_accesses_from_expr(base, accesses, include_structured_accesses);
-            collect_accesses_from_expr(index, accesses, include_structured_accesses);
+            collect_accesses_from_expr(base, accesses, include_structured_accesses, pointer_bytes);
+            collect_accesses_from_expr(index, accesses, include_structured_accesses, pointer_bytes);
         }
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::AggregateCopy { src: expr, .. } => {
-            collect_accesses_from_expr(expr, accesses, include_structured_accesses)
+            collect_accesses_from_expr(expr, accesses, include_structured_accesses, pointer_bytes)
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            collect_accesses_from_expr(lhs, accesses, include_structured_accesses);
-            collect_accesses_from_expr(rhs, accesses, include_structured_accesses);
+            collect_accesses_from_expr(lhs, accesses, include_structured_accesses, pointer_bytes);
+            collect_accesses_from_expr(rhs, accesses, include_structured_accesses, pointer_bytes);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                collect_accesses_from_expr(arg, accesses, include_structured_accesses);
+                collect_accesses_from_expr(
+                    arg,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
             }
         }
         PreHirExpr::PtrOffset { base, .. } => {
-            collect_accesses_from_expr(base, accesses, include_structured_accesses)
+            collect_accesses_from_expr(base, accesses, include_structured_accesses, pointer_bytes)
         }
         PreHirExpr::Select {
             cond,
@@ -306,9 +419,19 @@ fn collect_accesses_from_expr(
             else_expr,
             ..
         } => {
-            collect_accesses_from_expr(cond, accesses, include_structured_accesses);
-            collect_accesses_from_expr(then_expr, accesses, include_structured_accesses);
-            collect_accesses_from_expr(else_expr, accesses, include_structured_accesses);
+            collect_accesses_from_expr(cond, accesses, include_structured_accesses, pointer_bytes);
+            collect_accesses_from_expr(
+                then_expr,
+                accesses,
+                include_structured_accesses,
+                pointer_bytes,
+            );
+            collect_accesses_from_expr(
+                else_expr,
+                accesses,
+                include_structured_accesses,
+                pointer_bytes,
+            );
         }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -322,12 +445,13 @@ fn parse_recovered_field_access(
     offset: u32,
     access_ty: &NirType,
     kind: MemoryAccessKind,
+    pointer_bytes: u32,
 ) -> Option<PartitionedMemoryAccess> {
     let ptr = PreHirExpr::PtrOffset {
         base: Box::new(base.clone()),
         offset: i64::from(offset),
     };
-    parse_partitioned_access(&ptr, access_ty, kind)
+    parse_partitioned_access(&ptr, access_ty, kind, pointer_bytes)
 }
 
 fn parse_index_access(
@@ -335,23 +459,25 @@ fn parse_index_access(
     index: &PreHirExpr,
     elem_ty: &NirType,
     kind: MemoryAccessKind,
+    pointer_bytes: u32,
 ) -> Option<PartitionedMemoryAccess> {
     let ptr = PreHirExpr::Index {
         base: Box::new(base.clone()),
         index: Box::new(index.clone()),
         elem_ty: elem_ty.clone(),
     };
-    parse_partitioned_access(&ptr, elem_ty, kind)
+    parse_partitioned_access(&ptr, elem_ty, kind, pointer_bytes)
 }
 
 fn parse_partitioned_access(
     ptr: &PreHirExpr,
     access_ty: &NirType,
     kind: MemoryAccessKind,
+    pointer_bytes: u32,
 ) -> Option<PartitionedMemoryAccess> {
-    let access_size = i64::from(type_byte_size(access_ty)?);
+    let access_size = i64::from(type_byte_size_with_pointer_bytes(access_ty, pointer_bytes)?);
     let mut parts = AddressParts::default();
-    collect_address_parts(ptr, &mut parts, 1)?;
+    collect_address_parts(ptr, &mut parts, 1, pointer_bytes)?;
     let base = parts.base?;
     if expr_has_side_effects(&base) {
         return None;
@@ -374,14 +500,15 @@ fn parse_partitioned_access(
         stride,
         index,
         access_ty: access_ty.clone(),
+        pointer_bytes,
     })
 }
 
 fn classify_base_object(base: &PreHirExpr) -> MemoryAccessClass {
     match base {
-        PreHirExpr::Var(name)
-        | PreHirExpr::AddressOfGlobal(name)
-        | PreHirExpr::AddressOfLocal(name) => {
+        PreHirExpr::AddressOfGlobal(_) => MemoryAccessClass::GlobalLike,
+        PreHirExpr::AddressOfLocal(_) => MemoryAccessClass::Stack,
+        PreHirExpr::Var(name) => {
             if name.starts_with("stack_")
                 || name.starts_with("local_")
                 || name.starts_with("home_")
@@ -417,31 +544,36 @@ fn classify_escape(base: &PreHirExpr) -> MemoryEscapeClass {
     }
 }
 
-fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64) -> Option<()> {
+fn collect_address_parts(
+    expr: &PreHirExpr,
+    parts: &mut AddressParts,
+    sign: i64,
+    pointer_bytes: u32,
+) -> Option<()> {
     match expr {
         PreHirExpr::Const(value, _) => {
             parts.const_offset += sign * *value;
             Some(())
         }
-        PreHirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
+        PreHirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign, pointer_bytes),
         PreHirExpr::PtrOffset { base, offset } => {
             parts.const_offset += sign * *offset;
-            collect_address_parts(base, parts, sign)
+            collect_address_parts(base, parts, sign, pointer_bytes)
         }
         PreHirExpr::FieldAccess { base, offset, .. } => {
             parts.const_offset += sign * i64::from(*offset);
-            collect_address_parts(base, parts, sign)
+            collect_address_parts(base, parts, sign, pointer_bytes)
         }
         PreHirExpr::Index {
             base,
             index,
             elem_ty,
         } => {
-            let stride = i64::from(type_byte_size(elem_ty)?);
+            let stride = i64::from(type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes)?);
             if stride <= 0 {
                 return None;
             }
-            collect_address_parts(base, parts, sign)?;
+            collect_address_parts(base, parts, sign, pointer_bytes)?;
             if let PreHirExpr::Const(index, _) = index.as_ref() {
                 let offset = index.checked_mul(stride)?.checked_mul(sign)?;
                 parts.const_offset = parts.const_offset.checked_add(offset)?;
@@ -457,24 +589,24 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             ty,
         } => {
             if let NirType::Ptr(elem_ty) = ty {
-                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                if let Some(elem_sz) = type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1) {
                     let elem_sz_i = elem_sz as i64;
                     if let PreHirExpr::Const(val, _) = rhs.as_ref() {
-                        collect_address_parts(lhs, parts, sign)?;
+                        collect_address_parts(lhs, parts, sign, pointer_bytes)?;
                         let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
                         parts.const_offset = parts.const_offset.checked_add(offset)?;
                         return Some(());
                     }
                     if let PreHirExpr::Const(val, _) = lhs.as_ref() {
-                        collect_address_parts(rhs, parts, sign)?;
+                        collect_address_parts(rhs, parts, sign, pointer_bytes)?;
                         let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
                         parts.const_offset = parts.const_offset.checked_add(offset)?;
                         return Some(());
                     }
                 }
             }
-            collect_address_parts(lhs, parts, sign)?;
-            collect_address_parts(rhs, parts, sign)
+            collect_address_parts(lhs, parts, sign, pointer_bytes)?;
+            collect_address_parts(rhs, parts, sign, pointer_bytes)
         }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Sub,
@@ -483,18 +615,18 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             ty,
         } => {
             if let NirType::Ptr(elem_ty) = ty {
-                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                if let Some(elem_sz) = type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1) {
                     let elem_sz_i = elem_sz as i64;
                     if let PreHirExpr::Const(val, _) = rhs.as_ref() {
-                        collect_address_parts(lhs, parts, sign)?;
+                        collect_address_parts(lhs, parts, sign, pointer_bytes)?;
                         let offset = val.checked_mul(elem_sz_i)?.checked_mul(-sign)?;
                         parts.const_offset = parts.const_offset.checked_add(offset)?;
                         return Some(());
                     }
                 }
             }
-            collect_address_parts(lhs, parts, sign)?;
-            collect_address_parts(rhs, parts, -sign)
+            collect_address_parts(lhs, parts, sign, pointer_bytes)?;
+            collect_address_parts(rhs, parts, -sign, pointer_bytes)
         }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Mul,
@@ -655,12 +787,12 @@ mod tests {
             }),
         ];
 
-        let pointer_only = collect_partitioned_memory_accesses(&body);
+        let pointer_only = collect_partitioned_memory_accesses(&body, true);
         assert_eq!(pointer_only.len(), 1);
         assert_eq!(pointer_only[0].kind, MemoryAccessKind::Load);
         assert_eq!(pointer_only[0].const_offset, 0);
 
-        let accesses = collect_partitioned_memory_accesses_with_structured_accesses(&body);
+        let accesses = collect_partitioned_memory_accesses_with_structured_accesses(&body, true);
         assert_eq!(accesses.len(), 3);
         let load = accesses
             .iter()
@@ -692,7 +824,7 @@ mod tests {
             elem_ty: u32_ty.clone(),
         };
         let dynamic_access =
-            parse_partitioned_access(&dynamic_index, &u32_ty, MemoryAccessKind::Load)
+            parse_partitioned_access(&dynamic_index, &u32_ty, MemoryAccessKind::Load, 8)
                 .expect("dynamic index should retain its strided access shape");
         assert_eq!(dynamic_access.const_offset, 0);
         assert_eq!(dynamic_access.stride, Some(4));
@@ -711,9 +843,54 @@ mod tests {
             rhs: Box::new(PreHirExpr::Const(3, u32_ty.clone())),
             ty: ptr_u32_ty.clone(),
         };
-        let access = parse_partitioned_access(&expr, &u32_ty, MemoryAccessKind::Load)
+        let access = parse_partitioned_access(&expr, &u32_ty, MemoryAccessKind::Load, 8)
             .expect("should parse typed pointer add");
         // 3 elements * 4 bytes/element = 12 bytes
         assert_eq!(access.const_offset, 12);
+    }
+
+    #[test]
+    fn global_and_local_address_classification_and_32bit_pointer_width() {
+        let stderr_expr = PreHirExpr::AddressOfGlobal("stderr".to_string());
+        assert_eq!(
+            classify_base_object(&stderr_expr),
+            MemoryAccessClass::GlobalLike
+        );
+        assert_eq!(
+            classify_escape(&stderr_expr),
+            MemoryEscapeClass::NonEscaping
+        );
+
+        let local_buf = PreHirExpr::AddressOfLocal("buffer".to_string());
+        assert_eq!(classify_base_object(&local_buf), MemoryAccessClass::Stack);
+        assert_eq!(classify_escape(&local_buf), MemoryEscapeClass::NonEscaping);
+
+        // 32-bit pointer width check
+        let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: false,
+        }));
+        let load_32 = parse_partitioned_access(
+            &PreHirExpr::Var("stack_0".to_string()),
+            &ptr_ty,
+            MemoryAccessKind::Load,
+            4,
+        )
+        .expect("partitioned access");
+        assert_eq!(load_32.pointer_bytes, 4);
+        let key_32 = load_32.partition_key();
+        assert_eq!(key_32.offset_interval, (0, 4));
+
+        // 64-bit pointer width check
+        let load_64 = parse_partitioned_access(
+            &PreHirExpr::Var("stack_0".to_string()),
+            &ptr_ty,
+            MemoryAccessKind::Load,
+            8,
+        )
+        .expect("partitioned access");
+        assert_eq!(load_64.pointer_bytes, 8);
+        let key_64 = load_64.partition_key();
+        assert_eq!(key_64.offset_interval, (0, 8));
     }
 }

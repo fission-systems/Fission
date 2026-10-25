@@ -296,7 +296,9 @@ pub(super) fn collect_typed_fact_inventory(
     let tracked_roots = tracked.keys().cloned().collect::<crate::HashSet<_>>();
     let mut inventory = TypedFactInventory::default();
 
-    for access in collect_partitioned_memory_accesses_with_structured_accesses(&func.body) {
+    for access in
+        collect_partitioned_memory_accesses_with_structured_accesses(&func.body, func.is_64bit)
+    {
         // Fixed aggregate fields are inferred only from constant byte offsets.
         // Keep runtime-indexed array accesses out of the structure shape even
         // though the partition collector records their element stride.
