@@ -24,6 +24,35 @@ impl BinaryHost {
         format!("0x{:x}", self.0.image_base)
     }
 
+    pub fn entry_point(&mut self) -> String {
+        format!("0x{:x}", self.0.entry_point)
+    }
+
+    pub fn read_bytes(&mut self, addr: i64, size: i64) -> rhai::Array {
+        let size = (size.clamp(0, 64 * 1024)) as usize;
+        let addr = addr as u64;
+        let bytes: &[u8] = self
+            .0
+            .view_bytes(addr, size)
+            .or_else(|| {
+                self.0
+                    .section_containing_for_execution(addr)
+                    .and_then(|sec| self.0.view_section_bytes(sec, addr, size))
+            })
+            .or_else(|| {
+                let offset = addr as usize;
+                let data = self.0.data.as_slice();
+                if offset < data.len() {
+                    let take = size.min(data.len() - offset);
+                    Some(&data[offset..offset + take])
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(&[]);
+        bytes.iter().map(|&b| Dynamic::from(b as i64)).collect()
+    }
+
     pub fn is_64bit(&mut self) -> bool {
         self.0.is_64bit
     }
@@ -69,6 +98,8 @@ pub fn register_binary(engine: &mut Engine) -> Result<(), ScriptError> {
         .register_fn("path", BinaryHost::path)
         .register_fn("format", BinaryHost::format)
         .register_fn("image_base", BinaryHost::image_base)
+        .register_fn("entry_point", BinaryHost::entry_point)
+        .register_fn("read_bytes", BinaryHost::read_bytes)
         .register_fn("is_64bit", BinaryHost::is_64bit)
         .register_fn("functions", BinaryHost::functions)
         .register_fn("imports", BinaryHost::imports)

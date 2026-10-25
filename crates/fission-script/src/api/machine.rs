@@ -297,9 +297,8 @@ impl MachineHost {
     /// Memory as an array of byte values, so a script can index it.
     pub fn read(&mut self, address: i64, size: i64) -> ScriptResult<Array> {
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
+            let size = size.clamp(0, 64 * 1024) as usize;
+            let bytes = b.read_memory(address as u64, size).map_err(fail)?;
             Ok(bytes.into_iter().map(|v| Dynamic::from(v as i64)).collect())
         })
     }
@@ -308,11 +307,67 @@ impl MachineHost {
     /// wrote into a buffer.
     pub fn read_string(&mut self, address: i64, size: i64) -> ScriptResult<String> {
         self.with("read memory", |b| {
-            let bytes = b
-                .read_memory(address as u64, size.max(0) as usize)
-                .map_err(fail)?;
-            let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-            Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+            let max_len = size.clamp(0, 64 * 1024) as usize;
+            if max_len == 0 {
+                return Ok(String::new());
+            }
+
+            // Fast path: try reading the entire window at once.
+            if let Ok(bytes) = b.read_memory(address as u64, max_len) {
+                let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+                return Ok(String::from_utf8_lossy(&bytes[..end]).into_owned());
+            }
+
+            // Boundary-resilient fallback: probe memory in page-bounded chunks
+            // or byte-by-byte up to the unmapped boundary so that null-terminated
+            // strings positioned near the end of mapped pages can still be read.
+            let mut current_addr = address as u64;
+            let mut remaining = max_len;
+            let mut accumulated = Vec::new();
+
+            while remaining > 0 {
+                let page_offset = (current_addr % 4096) as usize;
+                let page_remaining = 4096 - page_offset;
+                let chunk_len = remaining.min(page_remaining);
+
+                match b.read_memory(current_addr, chunk_len) {
+                    Ok(bytes) => {
+                        if let Some(pos) = bytes.iter().position(|&byte| byte == 0) {
+                            accumulated.extend_from_slice(&bytes[..pos]);
+                            return Ok(String::from_utf8_lossy(&accumulated).into_owned());
+                        }
+                        accumulated.extend_from_slice(&bytes);
+                        current_addr += chunk_len as u64;
+                        remaining -= chunk_len;
+                    }
+                    Err(_) => {
+                        let mut probed_any = false;
+                        for offset in 0..chunk_len {
+                            match b.read_memory(current_addr + offset as u64, 1) {
+                                Ok(single) => {
+                                    let byte = single[0];
+                                    if byte == 0 {
+                                        return Ok(
+                                            String::from_utf8_lossy(&accumulated).into_owned()
+                                        );
+                                    }
+                                    accumulated.push(byte);
+                                    probed_any = true;
+                                }
+                                Err(e) => {
+                                    if accumulated.is_empty() && !probed_any {
+                                        return Err(fail(e));
+                                    }
+                                    return Ok(String::from_utf8_lossy(&accumulated).into_owned());
+                                }
+                            }
+                        }
+                        current_addr += chunk_len as u64;
+                        remaining -= chunk_len;
+                    }
+                }
+            }
+            Ok(String::from_utf8_lossy(&accumulated).into_owned())
         })
     }
 
