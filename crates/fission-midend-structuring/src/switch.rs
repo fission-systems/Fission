@@ -84,9 +84,12 @@ pub fn try_lower_switch(
         };
         let mut case_body = std::rc::Rc::unwrap_or_clone(case_body);
         max_skip = max_skip.max(skip_to).max(case_idx + 1);
-        if !case_body.iter().any(|s| matches!(s, PreHirStmt::Label(_))) {
-            let target_addr = host.block_start_address(case_idx);
-            case_body.insert(0, PreHirStmt::Label(block_label(target_addr)));
+        let expected_label = block_label(host.block_start_address(case_idx));
+        if !matches!(
+            case_body.first(),
+            Some(PreHirStmt::Label(l)) if l == &expected_label
+        ) {
+            case_body.insert(0, PreHirStmt::Label(expected_label));
         }
         cases.push(PreHirSwitchCase {
             values: vec![value],
@@ -94,20 +97,20 @@ pub fn try_lower_switch(
         });
     }
     merge_equivalent_switch_cases(&mut cases);
-    let ft_count = detect_and_patch_case_fallthrough(&mut cases);
     let Some((default_body, default_skip)) = host.lower_linear_body(parsed.default_idx, exit)?
     else {
         *host.active_switch_targets_mut() = old_targets;
         return Ok(None);
     };
     let mut default_body = std::rc::Rc::unwrap_or_clone(default_body);
-    if !default_body
-        .iter()
-        .any(|s| matches!(s, PreHirStmt::Label(_)))
-    {
-        let target_addr = host.block_start_address(parsed.default_idx);
-        default_body.insert(0, PreHirStmt::Label(block_label(target_addr)));
+    let expected_default_label = block_label(host.block_start_address(parsed.default_idx));
+    if !matches!(
+        default_body.first(),
+        Some(PreHirStmt::Label(l)) if l == &expected_default_label
+    ) {
+        default_body.insert(0, PreHirStmt::Label(expected_default_label));
     }
+    let ft_count = detect_and_patch_case_fallthrough(&mut cases, Some(&default_body));
     max_skip = max_skip.max(default_skip).max(parsed.default_idx + 1);
 
     *host.active_switch_targets_mut() = old_targets;
@@ -217,10 +220,18 @@ pub fn try_lower_direct_dispatcher_switch(
             success = false;
             break;
         };
+        let mut case_body = std::rc::Rc::unwrap_or_clone(case_body);
         max_skip = max_skip.max(skip_to).max(case_idx + 1);
+        let expected_label = block_label(host.block_start_address(case_idx));
+        if !matches!(
+            case_body.first(),
+            Some(PreHirStmt::Label(l)) if l == &expected_label
+        ) {
+            case_body.insert(0, PreHirStmt::Label(expected_label));
+        }
         cases.push(PreHirSwitchCase {
             values: vec![value],
-            body: case_body,
+            body: std::rc::Rc::new(case_body),
         });
     }
     if !success || cases.len() < 2 {
@@ -228,7 +239,6 @@ pub fn try_lower_direct_dispatcher_switch(
         return Ok(None);
     }
     merge_equivalent_switch_cases(&mut cases);
-    let ft_count = detect_and_patch_case_fallthrough(&mut cases);
 
     let default = if let Some(default_target) = default_target {
         let Some(default_idx) = host.find_block_index_by_address(default_target) else {
@@ -240,11 +250,20 @@ pub fn try_lower_direct_dispatcher_switch(
             *host.active_switch_targets_mut() = old_targets;
             return Ok(None);
         };
+        let mut default_body = std::rc::Rc::unwrap_or_clone(default_body);
+        let expected_default_label = block_label(host.block_start_address(default_idx));
+        if !matches!(
+            default_body.first(),
+            Some(PreHirStmt::Label(l)) if l == &expected_default_label
+        ) {
+            default_body.insert(0, PreHirStmt::Label(expected_default_label));
+        }
         max_skip = max_skip.max(skip_to).max(default_idx + 1);
-        default_body
+        std::rc::Rc::new(default_body)
     } else {
         std::rc::Rc::new(Vec::new())
     };
+    let ft_count = detect_and_patch_case_fallthrough(&mut cases, Some(default.as_slice()));
 
     *host.active_switch_targets_mut() = old_targets;
     host.bump_switch_fallthrough_detected(ft_count);
@@ -669,7 +688,7 @@ mod tests {
             },
         ];
 
-        let patched = detect_and_patch_case_fallthrough(&mut cases);
+        let patched = detect_and_patch_case_fallthrough(&mut cases, None);
         assert_eq!(patched, 1, "Expected 1 fallthrough patched");
         // The goto in case[0] should now be the sentinel.
         assert!(
@@ -702,8 +721,49 @@ mod tests {
                 .into(),
             },
         ];
-        let patched = detect_and_patch_case_fallthrough(&mut cases);
+        let patched = detect_and_patch_case_fallthrough(&mut cases, None);
         assert_eq!(patched, 0, "Expected 0 fallthroughs for non-adjacent goto");
+    }
+
+    #[test]
+    fn test_switch_fallthrough_detection_patches_last_case_to_default_and_checks_only_head_label() {
+        let mut cases = vec![
+            PreHirSwitchCase {
+                values: vec![0],
+                body: vec![
+                    PreHirStmt::Label("block_0x1000".to_string()),
+                    PreHirStmt::Goto("inner_loop_0x2000".to_string()),
+                ]
+                .into(),
+            },
+            PreHirSwitchCase {
+                values: vec![1],
+                body: vec![
+                    PreHirStmt::Label("block_0x2000".to_string()),
+                    PreHirStmt::Label("inner_loop_0x2000".to_string()),
+                    PreHirStmt::Goto("block_0x3000".to_string()),
+                ]
+                .into(),
+            },
+        ];
+        let default = vec![
+            PreHirStmt::Label("block_0x3000".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let patched = detect_and_patch_case_fallthrough(&mut cases, Some(&default));
+        assert_eq!(
+            patched, 1,
+            "Only last case -> default head label should be patched"
+        );
+        assert!(
+            matches!(&cases[0].body[1], PreHirStmt::Goto(lbl) if lbl == "inner_loop_0x2000"),
+            "Non-head label in next case must not be treated as case entry fallthrough"
+        );
+        assert!(
+            matches!(&cases[1].body[2], PreHirStmt::Goto(lbl) if lbl == SWITCH_FALLTHROUGH_SENTINEL),
+            "Last case goto to default head label should be patched to fallthrough sentinel"
+        );
     }
 
     #[test]
