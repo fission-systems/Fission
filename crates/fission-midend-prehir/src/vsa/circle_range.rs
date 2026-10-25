@@ -342,15 +342,21 @@ impl CircleRange {
         if self.is_bottom() {
             return Self::bottom(new_bits);
         }
+        if new_bits == self.bits {
+            return *self;
+        }
         let new_mask = Self::mask(new_bits);
         // If this range fits in the new width without wrapping, preserve it.
         let lo_fits = self.lo <= new_mask;
-        let hi_fits = {
-            let hi_minus1 = self.hi.wrapping_sub(1) & Self::mask(self.bits);
-            hi_minus1 <= new_mask
-        };
-        if lo_fits && hi_fits && self.lo <= (self.hi.wrapping_sub(1) & Self::mask(self.bits)) {
-            Self::interval(self.lo, self.hi, new_bits)
+        let hi_minus1 = self.hi.wrapping_sub(1) & Self::mask(self.bits);
+        let hi_fits = hi_minus1 <= new_mask;
+        if lo_fits && hi_fits && self.lo <= hi_minus1 {
+            let target_hi = if new_bits > self.bits {
+                hi_minus1.wrapping_add(1)
+            } else {
+                self.hi & new_mask
+            };
+            Self::interval(self.lo, target_hi, new_bits)
         } else {
             Self::top(new_bits)
         }
@@ -376,13 +382,21 @@ impl CircleRange {
         if self.is_bottom() {
             return Self::bottom(bits);
         }
-        // Reinterpret lo/hi in the new width.
-        let mask = Self::mask(bits);
-        Self {
-            lo: self.lo & mask,
-            hi: self.hi & mask,
-            bits,
-            is_top: false,
+        if bits > self.bits {
+            let hi_minus1 = self.hi.wrapping_sub(1) & Self::mask(self.bits);
+            if self.lo <= hi_minus1 {
+                Self::interval(self.lo, hi_minus1.wrapping_add(1), bits)
+            } else {
+                Self::top(bits)
+            }
+        } else {
+            let mask = Self::mask(bits);
+            Self {
+                lo: self.lo & mask,
+                hi: self.hi & mask,
+                bits,
+                is_top: false,
+            }
         }
     }
 
@@ -509,5 +523,46 @@ mod tests {
         let wide_a = CircleRange::interval(0, 200, 8);
         let wide_b = CircleRange::interval(0, 100, 8);
         assert_eq!(wide_a.add(&wide_b), CircleRange::top(8));
+    }
+
+    #[test]
+    fn cast_unsigned_widening_preserves_boundary_singletons() {
+        let r8 = CircleRange::singleton(255, 8);
+        assert_eq!(r8.lo(), 255);
+        assert_eq!(r8.hi(), 0);
+        assert!(r8.is_singleton());
+        assert_eq!(r8.singleton_value(), Some(255));
+
+        let r32 = r8.cast_unsigned(32);
+        assert_eq!(r32.lo(), 255);
+        assert_eq!(r32.hi(), 256);
+        assert!(r32.is_singleton());
+        assert_eq!(r32.singleton_value(), Some(255));
+        assert_eq!(r32.count(), 1);
+
+        let r1 = CircleRange::singleton(1, 1);
+        let r1_32 = r1.cast_unsigned(32);
+        assert!(r1_32.is_singleton());
+        assert_eq!(r1_32.singleton_value(), Some(1));
+    }
+
+    #[test]
+    fn cast_unsigned_widening_preserves_boundary_intervals() {
+        let r8 = CircleRange::interval(250, 0, 8);
+        assert_eq!(r8.count(), 6);
+
+        let r32 = r8.cast_unsigned(32);
+        assert_eq!(r32.lo(), 250);
+        assert_eq!(r32.hi(), 256);
+        assert_eq!(r32.count(), 6);
+    }
+
+    #[test]
+    fn with_bits_widening_in_join_preserves_boundary_singleton() {
+        let r8 = CircleRange::singleton(255, 8);
+        let r32 = CircleRange::singleton(255, 32);
+        let joined = r8.join(&r32);
+        assert_eq!(joined, r32);
+        assert_eq!(joined.singleton_value(), Some(255));
     }
 }

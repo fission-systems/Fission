@@ -25,10 +25,21 @@ const MAX_ITERATIONS: usize = 8;
 pub fn solve(func: &PreHirFunction) -> RangeEnv {
     let mut env: RangeEnv = HashMap::new();
 
-    // Seed with parameter and local types.
-    for binding in func.params.iter().chain(func.locals.iter()) {
+    // Parameters start at Top (can receive arbitrary caller arguments).
+    for binding in &func.params {
         let bits = nir_bits(&binding.ty).unwrap_or(64);
         env.insert(binding.name.clone(), CircleRange::top(bits));
+    }
+
+    // Locals start at Bottom (unassigned / unvisited), or their initializer range if present.
+    for binding in &func.locals {
+        let bits = nir_bits(&binding.ty).unwrap_or(64);
+        let initial_range = if let Some(init_expr) = &binding.initializer {
+            eval_expr(init_expr, &env)
+        } else {
+            CircleRange::bottom(bits)
+        };
+        env.insert(binding.name.clone(), initial_range);
     }
 
     // Iterative forward propagation with widening.
@@ -66,8 +77,8 @@ fn propagate_stmt(stmt: &PreHirStmt, env: &mut RangeEnv, widen: bool, changed: &
                 let old = env
                     .get(name.as_str())
                     .copied()
-                    .unwrap_or_else(|| CircleRange::top(new_range.bits()));
-                let next = if widen {
+                    .unwrap_or_else(|| CircleRange::bottom(new_range.bits()));
+                let next = if widen && !old.is_bottom() {
                     new_range.widen(&old)
                 } else {
                     new_range.join(&old)
@@ -93,24 +104,30 @@ fn propagate_stmt(stmt: &PreHirStmt, env: &mut RangeEnv, widen: bool, changed: &
             propagate_stmts(then_body, &mut then_env, widen, changed);
             propagate_stmts(else_body, &mut else_env, widen, changed);
             // Merge back into env.
-            for (k, then_r) in &then_env {
-                let else_r = else_env
-                    .get(k.as_str())
+            let all_keys: std::collections::HashSet<_> =
+                then_env.keys().chain(else_env.keys()).cloned().collect();
+            for k in all_keys {
+                let then_r = then_env
+                    .get(&k)
                     .copied()
-                    .unwrap_or_else(|| CircleRange::top(then_r.bits()));
+                    .unwrap_or_else(|| CircleRange::bottom(64));
+                let else_r = else_env
+                    .get(&k)
+                    .copied()
+                    .unwrap_or_else(|| CircleRange::bottom(then_r.bits()));
                 let joined = then_r.join(&else_r);
                 let old = env
-                    .get(k.as_str())
+                    .get(&k)
                     .copied()
-                    .unwrap_or_else(|| CircleRange::top(joined.bits()));
-                let next = if widen {
+                    .unwrap_or_else(|| CircleRange::bottom(joined.bits()));
+                let next = if widen && !old.is_bottom() {
                     joined.widen(&old)
                 } else {
                     joined.join(&old)
                 };
                 if next != old {
                     *changed = true;
-                    env.insert(k.clone(), next);
+                    env.insert(k, next);
                 }
             }
         }
@@ -145,8 +162,12 @@ fn propagate_stmt(stmt: &PreHirStmt, env: &mut RangeEnv, widen: bool, changed: &
                 let old = env
                     .get(k.as_str())
                     .copied()
-                    .unwrap_or_else(|| CircleRange::top(r.bits()));
-                let next = if widen { r.widen(&old) } else { r.join(&old) };
+                    .unwrap_or_else(|| CircleRange::bottom(r.bits()));
+                let next = if widen && !old.is_bottom() {
+                    r.widen(&old)
+                } else {
+                    r.join(&old)
+                };
                 if next != old {
                     *changed = true;
                     env.insert(k, next);
@@ -172,4 +193,99 @@ pub fn range_of<'a>(env: &'a RangeEnv, binding: &NirBinding) -> CircleRange {
     env.get(binding.name.as_str())
         .copied()
         .unwrap_or_else(|| CircleRange::top(nir_bits(&binding.ty).unwrap_or(64)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{NirType, PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
+
+    fn make_test_func(
+        params: Vec<PreHirBinding>,
+        locals: Vec<PreHirBinding>,
+        body: Vec<PreHirStmt>,
+    ) -> PreHirFunction {
+        PreHirFunction {
+            name: "test_fn".to_string(),
+            params,
+            locals,
+            body,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn solve_infers_singleton_for_local_assignment() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let local_x = PreHirBinding {
+            name: "x".to_string(),
+            ty: u32_ty.clone(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        };
+        let param_p = PreHirBinding {
+            name: "p".to_string(),
+            ty: u32_ty.clone(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        };
+        let func = make_test_func(
+            vec![param_p],
+            vec![local_x],
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(5, u32_ty),
+            }],
+        );
+
+        let env = solve(&func);
+        let x_range = env.get("x").copied().expect("x in env");
+        assert!(x_range.is_singleton());
+        assert_eq!(x_range.singleton_value(), Some(5));
+
+        let p_range = env.get("p").copied().expect("p in env");
+        assert!(p_range.is_top());
+    }
+
+    #[test]
+    fn solve_infers_range_with_initializer_and_if_branches() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let local_x = PreHirBinding {
+            name: "x".to_string(),
+            ty: u32_ty.clone(),
+            surface_type_name: None,
+            origin: None,
+            initializer: Some(PreHirExpr::Const(10, u32_ty.clone())),
+        };
+        let func = make_test_func(
+            vec![],
+            vec![local_x],
+            vec![PreHirStmt::If {
+                cond: PreHirExpr::Const(1, u32_ty.clone()),
+                then_body: std::rc::Rc::new(vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(20, u32_ty.clone()),
+                }]),
+                else_body: std::rc::Rc::new(vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(21, u32_ty),
+                }]),
+            }],
+        );
+
+        let env = solve(&func);
+        let x_range = env.get("x").copied().expect("x in env");
+        assert!(!x_range.is_top());
+        assert!(!x_range.is_bottom());
+        assert_eq!(x_range.lo(), 10);
+        assert_eq!(x_range.hi(), 22);
+    }
 }
