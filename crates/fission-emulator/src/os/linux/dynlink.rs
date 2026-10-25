@@ -643,71 +643,123 @@ fn collect_global_symbols(data: &[u8], load_bias: u64) -> std::collections::Hash
     let shoff = u64::from_le_bytes(data[40..48].try_into().unwrap()) as usize;
     let shentsize = u16::from_le_bytes(data[58..60].try_into().unwrap()) as usize;
     let shnum = u16::from_le_bytes(data[60..62].try_into().unwrap()) as usize;
-    if shentsize < 64 || shoff == 0 {
-        return out;
-    }
-    for si in 0..shnum {
-        let soff = shoff + si * shentsize;
-        if soff + 64 > data.len() {
-            break;
-        }
-        let sh_type = u32::from_le_bytes(data[soff + 4..soff + 8].try_into().unwrap());
-        // SHT_DYNSYM = 11
-        if sh_type != 11 {
-            continue;
-        }
-        let sym_off = u64::from_le_bytes(data[soff + 24..soff + 32].try_into().unwrap()) as usize;
-        let sym_size = u64::from_le_bytes(data[soff + 32..soff + 40].try_into().unwrap()) as usize;
-        let entsz = {
-            let e = u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
-            if e > 0 { e } else { 24 }
-        };
-        let str_link = u32::from_le_bytes(data[soff + 40..soff + 44].try_into().unwrap()) as usize;
-        if str_link >= shnum {
-            continue;
-        }
-        let stro = shoff + str_link * shentsize;
-        if stro + 64 > data.len() {
-            continue;
-        }
-        let str_off = u64::from_le_bytes(data[stro + 24..stro + 32].try_into().unwrap()) as usize;
-        let str_size = u64::from_le_bytes(data[stro + 32..stro + 40].try_into().unwrap()) as usize;
-        let count = sym_size / entsz;
-        for i in 0..count {
-            let eoff = sym_off + i * entsz;
-            if eoff + 24 > data.len() {
+    if shentsize >= 64 && shoff != 0 {
+        for si in 0..shnum {
+            let soff = shoff + si * shentsize;
+            if soff + 64 > data.len() {
                 break;
             }
-            let st_name = u32::from_le_bytes(data[eoff..eoff + 4].try_into().unwrap()) as usize;
-            let st_info = data[eoff + 4];
-            let st_shndx = u16::from_le_bytes(data[eoff + 6..eoff + 8].try_into().unwrap());
-            let st_value = u64::from_le_bytes(data[eoff + 8..eoff + 16].try_into().unwrap());
-            if st_shndx == SHN_UNDEF || st_value == 0 {
+            let sh_type = u32::from_le_bytes(data[soff + 4..soff + 8].try_into().unwrap());
+            // SHT_DYNSYM = 11
+            if sh_type != 11 {
                 continue;
             }
-            let bind = st_info >> 4;
-            let ty = st_info & 0xf;
-            if bind != STB_GLOBAL && bind != STB_WEAK {
+            let sym_off =
+                u64::from_le_bytes(data[soff + 24..soff + 32].try_into().unwrap()) as usize;
+            let sym_size =
+                u64::from_le_bytes(data[soff + 32..soff + 40].try_into().unwrap()) as usize;
+            let entsz = {
+                let e = u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
+                if e > 0 { e } else { 24 }
+            };
+            let str_link =
+                u32::from_le_bytes(data[soff + 40..soff + 44].try_into().unwrap()) as usize;
+            if str_link >= shnum {
                 continue;
             }
-            if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
+            let stro = shoff + str_link * shentsize;
+            if stro + 64 > data.len() {
                 continue;
             }
-            if st_name >= str_size || str_off + st_name >= data.len() {
-                continue;
+            let str_off =
+                u64::from_le_bytes(data[stro + 24..stro + 32].try_into().unwrap()) as usize;
+            let str_size =
+                u64::from_le_bytes(data[stro + 32..stro + 40].try_into().unwrap()) as usize;
+            let count = sym_size / entsz;
+            for i in 0..count {
+                let eoff = sym_off + i * entsz;
+                if eoff + 24 > data.len() {
+                    break;
+                }
+                let st_name = u32::from_le_bytes(data[eoff..eoff + 4].try_into().unwrap()) as usize;
+                let st_info = data[eoff + 4];
+                let st_shndx = u16::from_le_bytes(data[eoff + 6..eoff + 8].try_into().unwrap());
+                let st_value = u64::from_le_bytes(data[eoff + 8..eoff + 16].try_into().unwrap());
+                if st_shndx == SHN_UNDEF || st_value == 0 {
+                    continue;
+                }
+                let bind = st_info >> 4;
+                let ty = st_info & 0xf;
+                if bind != STB_GLOBAL && bind != STB_WEAK {
+                    continue;
+                }
+                if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
+                    continue;
+                }
+                if st_name >= str_size || str_off + st_name >= data.len() {
+                    continue;
+                }
+                let start = str_off + st_name;
+                let end = data[start..]
+                    .iter()
+                    .position(|&b| b == 0)
+                    .map(|j| start + j)
+                    .unwrap_or(start);
+                let name = String::from_utf8_lossy(&data[start..end]).into_owned();
+                if name.is_empty() {
+                    continue;
+                }
+                out.entry(name)
+                    .or_insert(st_value.saturating_add(load_bias));
             }
-            let start = str_off + st_name;
-            let end = data[start..]
-                .iter()
-                .position(|&b| b == 0)
-                .map(|j| start + j)
-                .unwrap_or(start);
-            let name = String::from_utf8_lossy(&data[start..end]).into_owned();
-            if name.is_empty() {
-                continue;
+        }
+    }
+    if out.is_empty() {
+        if let Ok(tables) = elf64_dynamic_tables(data) {
+            if let (Some(sym_off), Some((str_off, str_size))) =
+                (tables.symtab_offset, tables.strtab)
+            {
+                let count = tables.symbol_count.unwrap_or(0);
+                let entsz = tables.sym_entry_size.max(24);
+                for i in 0..count {
+                    let eoff = sym_off + i * entsz;
+                    if eoff + 24 > data.len() {
+                        break;
+                    }
+                    let st_name =
+                        u32::from_le_bytes(data[eoff..eoff + 4].try_into().unwrap()) as usize;
+                    let st_info = data[eoff + 4];
+                    let st_shndx = u16::from_le_bytes(data[eoff + 6..eoff + 8].try_into().unwrap());
+                    let st_value =
+                        u64::from_le_bytes(data[eoff + 8..eoff + 16].try_into().unwrap());
+                    if st_shndx == SHN_UNDEF || st_value == 0 {
+                        continue;
+                    }
+                    let bind = st_info >> 4;
+                    let ty = st_info & 0xf;
+                    if bind != STB_GLOBAL && bind != STB_WEAK {
+                        continue;
+                    }
+                    if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
+                        continue;
+                    }
+                    if st_name >= str_size || str_off + st_name >= data.len() {
+                        continue;
+                    }
+                    let start = str_off + st_name;
+                    let end = data[start..]
+                        .iter()
+                        .position(|&b| b == 0)
+                        .map(|j| start + j)
+                        .unwrap_or(start);
+                    let name = String::from_utf8_lossy(&data[start..end]).into_owned();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    out.entry(name)
+                        .or_insert(st_value.saturating_add(load_bias));
+                }
             }
-            out.entry(name)
-                .or_insert(st_value.saturating_add(load_bias));
         }
     }
     out
@@ -952,6 +1004,7 @@ fn map_interpreter(
 
 // ── RELA application (mini dynamic linker for HLE / bootstrap) ─────────────
 
+const R_X86_64_NONE: u32 = 0;
 const R_X86_64_64: u32 = 1;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
@@ -962,6 +1015,7 @@ const R_AARCH64_JUMP_SLOT: u32 = 1026;
 const R_AARCH64_RELATIVE: u32 = 1027;
 const SHT_RELA: u32 = 4;
 const DT_PLTRELSZ: i64 = 2;
+const DT_HASH: i64 = 4;
 const DT_SYMTAB: i64 = 6;
 const DT_RELA: i64 = 7;
 const DT_RELASZ: i64 = 8;
@@ -971,6 +1025,9 @@ const DT_REL: i64 = 17;
 const DT_RELSZ: i64 = 18;
 const DT_PLTREL: i64 = 20;
 const DT_JMPREL: i64 = 23;
+const DT_GNU_HASH: i64 = 0x6fff_fef5;
+pub const ET_EXEC: u16 = 2;
+pub const ET_DYN: u16 = 3;
 const SHN_ABS: u16 = 0xfff1;
 
 /// Result of applying dynamic relocations to a guest image.
@@ -982,6 +1039,33 @@ pub struct RelaApplyStats {
     pub glob_dat: u64,
     pub other: u64,
     pub unresolved: u64,
+}
+
+fn section_sym_value(
+    data: &[u8],
+    symtab: Option<(usize, usize, usize)>,
+    r_sym: usize,
+    load_bias: u64,
+    is_et_dyn: bool,
+) -> Option<u64> {
+    let (sym_off, sym_size, entsz) = symtab?;
+    let eoff = sym_off.checked_add(r_sym.checked_mul(entsz)?)?;
+    if eoff + 24 > data.len() || eoff + entsz > sym_off + sym_size {
+        return None;
+    }
+    let section_index = u16::from_le_bytes(data[eoff + 6..eoff + 8].try_into().ok()?);
+    let value = u64::from_le_bytes(data[eoff + 8..eoff + 16].try_into().ok()?);
+    if section_index == SHN_UNDEF {
+        None
+    } else if section_index == SHN_ABS {
+        Some(value)
+    } else {
+        Some(if is_et_dyn {
+            load_bias.wrapping_add(value)
+        } else {
+            value
+        })
+    }
 }
 
 /// Apply SHT_RELA entries for an already-mapped ELF image in guest memory.
@@ -1007,15 +1091,116 @@ pub fn apply_rela_x86_64(
     if machine != EM_X86_64 {
         anyhow::bail!("apply_rela_x86_64: e_machine={machine}, expected {EM_X86_64}");
     }
+    let e_type = u16::from_le_bytes(elf_bytes[16..18].try_into().unwrap());
+    let is_et_dyn = e_type == ET_DYN;
+
+    let mut stats = RelaApplyStats::default();
+
+    if let Ok(tables) = elf64_dynamic_tables(elf_bytes) {
+        if !tables.rela_ranges.is_empty() {
+            for &(range_offset, range_size) in &tables.rela_ranges {
+                let end = range_offset
+                    .checked_add(range_size)
+                    .context("x86-64 RELA range overflow")?;
+                let bytes = elf_bytes
+                    .get(range_offset..end)
+                    .context("x86-64 RELA range is outside the ELF file")?;
+                for relocation in bytes.chunks_exact(24) {
+                    let r_offset = u64::from_le_bytes(relocation[0..8].try_into().unwrap());
+                    let r_info = u64::from_le_bytes(relocation[8..16].try_into().unwrap());
+                    let r_addend = i64::from_le_bytes(relocation[16..24].try_into().unwrap());
+                    let r_type = (r_info & 0xffff_ffff) as u32;
+                    let r_sym = (r_info >> 32) as usize;
+
+                    let slot = if is_et_dyn {
+                        load_bias.wrapping_add(r_offset)
+                    } else {
+                        r_offset
+                    };
+
+                    match r_type {
+                        R_X86_64_NONE => {}
+                        R_X86_64_RELATIVE => {
+                            let val = (load_bias as i64).wrapping_add(r_addend) as u64;
+                            state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
+                            stats.relative += 1;
+                        }
+                        R_X86_64_JUMP_SLOT | R_X86_64_GLOB_DAT => {
+                            let (name, defined_value) =
+                                elf64_dynamic_symbol(elf_bytes, &tables, r_sym, load_bias)
+                                    .unwrap_or_default();
+                            let bare = name.split('@').next().unwrap_or(&name);
+                            let target = if !bare.is_empty() {
+                                resolve(bare).or(defined_value)
+                            } else {
+                                defined_value
+                            };
+                            if let Some(target) = target {
+                                let val = target.wrapping_add(r_addend as u64);
+                                state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
+                                if r_type == R_X86_64_JUMP_SLOT {
+                                    stats.jump_slot += 1;
+                                } else {
+                                    stats.glob_dat += 1;
+                                }
+                            } else {
+                                stats.other += 1;
+                            }
+                        }
+                        R_X86_64_64 => {
+                            if r_sym == 0 {
+                                let val = (if is_et_dyn { load_bias } else { 0 })
+                                    .wrapping_add(r_addend as u64);
+                                state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
+                                stats.absolute += 1;
+                            } else {
+                                let (name, defined_value) =
+                                    elf64_dynamic_symbol(elf_bytes, &tables, r_sym, load_bias)
+                                        .unwrap_or_default();
+                                let bare = name.split('@').next().unwrap_or(&name);
+                                let target = if !bare.is_empty() {
+                                    resolve(bare).or(defined_value)
+                                } else {
+                                    defined_value
+                                };
+                                if let Some(target) = target {
+                                    let val = target.wrapping_add(r_addend as u64);
+                                    state.write_space(
+                                        state.ram_space(),
+                                        slot,
+                                        &val.to_le_bytes(),
+                                    )?;
+                                    stats.absolute += 1;
+                                } else {
+                                    stats.other += 1;
+                                }
+                            }
+                        }
+                        _ => {
+                            stats.other += 1;
+                        }
+                    }
+                }
+            }
+            tracing::info!(
+                "apply_rela: relative={} absolute={} jump_slot={} glob_dat={} other={}",
+                stats.relative,
+                stats.absolute,
+                stats.jump_slot,
+                stats.glob_dat,
+                stats.other
+            );
+            return Ok(stats);
+        }
+    }
+
     let shoff = u64::from_le_bytes(elf_bytes[40..48].try_into().unwrap()) as usize;
     let shentsize = u16::from_le_bytes(elf_bytes[58..60].try_into().unwrap()) as usize;
     let shnum = u16::from_le_bytes(elf_bytes[60..62].try_into().unwrap()) as usize;
     if shentsize < 64 || shoff == 0 {
-        return Ok(RelaApplyStats::default());
+        return Ok(stats);
     }
 
-    // Collect section headers lightly.
-    let mut stats = RelaApplyStats::default();
     for si in 0..shnum {
         let soff = shoff + si * shentsize;
         if soff + 64 > elf_bytes.len() {
@@ -1036,7 +1221,6 @@ pub fn apply_rela_x86_64(
         let entsz = if sh_entsize > 0 { sh_entsize } else { 24 };
         let count = sh_size / entsz;
 
-        // Symbol table for name resolution.
         let (symtab, strtab) = symtab_strtab(elf_bytes, shoff, shentsize, shnum, sh_link);
 
         for ri in 0..count {
@@ -1049,23 +1233,30 @@ pub fn apply_rela_x86_64(
             let r_addend = i64::from_le_bytes(elf_bytes[roff + 16..roff + 24].try_into().unwrap());
             let r_type = (r_info & 0xffff_ffff) as u32;
             let r_sym = (r_info >> 32) as usize;
-            // ET_EXEC/DYN: r_offset is VA (may already include image base).
-            let slot = if r_offset >= load_bias {
-                r_offset
+            let slot = if is_et_dyn {
+                load_bias.wrapping_add(r_offset)
             } else {
-                r_offset.saturating_add(load_bias)
+                r_offset
             };
 
             match r_type {
+                R_X86_64_NONE => {}
                 R_X86_64_RELATIVE => {
                     let val = (load_bias as i64).wrapping_add(r_addend) as u64;
                     state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
                     stats.relative += 1;
                 }
-                R_X86_64_JUMP_SLOT | R_X86_64_GLOB_DAT | R_X86_64_64 => {
+                R_X86_64_JUMP_SLOT | R_X86_64_GLOB_DAT => {
                     let name = sym_name(elf_bytes, symtab, strtab, r_sym).unwrap_or_default();
                     let bare = name.split('@').next().unwrap_or(&name);
-                    if let Some(target) = resolve(bare) {
+                    let defined_value =
+                        section_sym_value(elf_bytes, symtab, r_sym, load_bias, is_et_dyn);
+                    let target = if !bare.is_empty() {
+                        resolve(bare).or(defined_value)
+                    } else {
+                        defined_value
+                    };
+                    if let Some(target) = target {
                         let val = target.wrapping_add(r_addend as u64);
                         state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
                         if r_type == R_X86_64_JUMP_SLOT {
@@ -1077,15 +1268,42 @@ pub fn apply_rela_x86_64(
                         stats.other += 1;
                     }
                 }
+                R_X86_64_64 => {
+                    if r_sym == 0 {
+                        let val =
+                            (if is_et_dyn { load_bias } else { 0 }).wrapping_add(r_addend as u64);
+                        state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
+                        stats.absolute += 1;
+                    } else {
+                        let name = sym_name(elf_bytes, symtab, strtab, r_sym).unwrap_or_default();
+                        let bare = name.split('@').next().unwrap_or(&name);
+                        let defined_value =
+                            section_sym_value(elf_bytes, symtab, r_sym, load_bias, is_et_dyn);
+                        let target = if !bare.is_empty() {
+                            resolve(bare).or(defined_value)
+                        } else {
+                            defined_value
+                        };
+                        if let Some(target) = target {
+                            let val = target.wrapping_add(r_addend as u64);
+                            state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
+                            stats.absolute += 1;
+                        } else {
+                            stats.other += 1;
+                        }
+                    }
+                }
                 _ => {
                     stats.other += 1;
                 }
             }
         }
     }
+
     tracing::info!(
-        "apply_rela: relative={} jump_slot={} glob_dat={} other={}",
+        "apply_rela: relative={} absolute={} jump_slot={} glob_dat={} other={}",
         stats.relative,
+        stats.absolute,
         stats.jump_slot,
         stats.glob_dat,
         stats.other
@@ -1093,12 +1311,19 @@ pub fn apply_rela_x86_64(
     Ok(stats)
 }
 
-#[derive(Default)]
-struct Aarch64DynamicTables {
-    rela_ranges: Vec<(usize, usize)>,
-    symtab_offset: Option<usize>,
-    strtab: Option<(usize, usize)>,
-    sym_entry_size: usize,
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Elf64DynamicTables {
+    pub(crate) rela_ranges: Vec<(usize, usize)>,
+    pub(crate) symtab_offset: Option<usize>,
+    pub(crate) strtab: Option<(usize, usize)>,
+    pub(crate) sym_entry_size: usize,
+    pub(crate) symbol_count: Option<usize>,
+}
+
+pub(crate) type Aarch64DynamicTables = Elf64DynamicTables;
+
+fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
+    elf64_dynamic_tables(data)
 }
 
 /// Apply the AArch64 dynamic relocation subset supported by the Linux HLE path.
@@ -1205,7 +1430,7 @@ pub fn apply_rela_aarch64(
     Ok(stats)
 }
 
-fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
+fn elf64_dynamic_tables(data: &[u8]) -> Result<Elf64DynamicTables> {
     let phoff = usize::try_from(u64::from_le_bytes(data[32..40].try_into().unwrap()))
         .context("program-header offset too large")?;
     let phentsize = usize::from(u16::from_le_bytes(data[54..56].try_into().unwrap()));
@@ -1239,7 +1464,7 @@ fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
     }
 
     let Some((dynamic_offset, dynamic_size)) = dynamic_range else {
-        anyhow::bail!("AArch64 dynamic ELF has no PT_DYNAMIC segment");
+        anyhow::bail!("dynamic ELF has no PT_DYNAMIC segment");
     };
     if dynamic_size % 16 != 0 {
         anyhow::bail!("PT_DYNAMIC size is not a multiple of ELF64_Dyn");
@@ -1263,6 +1488,7 @@ fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
             tag,
             DT_NULL
                 | DT_PLTRELSZ
+                | DT_HASH
                 | DT_SYMTAB
                 | DT_RELA
                 | DT_RELASZ
@@ -1274,6 +1500,7 @@ fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
                 | DT_PLTREL
                 | DT_JMPREL
                 | DT_STRTAB
+                | DT_GNU_HASH
         ) {
             if let Some(old) = tags.insert(tag, value)
                 && old != value
@@ -1290,7 +1517,7 @@ fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
     }
 
     if tags.get(&DT_RELSZ).copied().unwrap_or(0) != 0 {
-        anyhow::bail!("AArch64 DT_REL relocations are unsupported; expected RELA");
+        anyhow::bail!("DT_REL relocations are unsupported; expected RELA");
     }
     let mut ranges = Vec::new();
     let rela_size = tags.get(&DT_RELASZ).copied().unwrap_or(0);
@@ -1300,7 +1527,7 @@ fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
             .context("DT_RELASZ is present without DT_RELA")?;
         let rela_ent = tags.get(&DT_RELAENT).copied().unwrap_or(24);
         if rela_ent != 24 || rela_size % rela_ent != 0 {
-            anyhow::bail!("unsupported AArch64 DT_RELA entry size {rela_ent}");
+            anyhow::bail!("unsupported DT_RELA entry size {rela_ent}");
         }
         ranges.push((
             elf64_vaddr_to_offset(data, rela_addr, rela_size)?,
@@ -1314,11 +1541,11 @@ fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
             .get(&DT_JMPREL)
             .context("DT_PLTRELSZ is present without DT_JMPREL")?;
         if tags.get(&DT_PLTREL).copied() != Some(DT_RELA as u64) {
-            anyhow::bail!("AArch64 PLT relocations must use DT_RELA");
+            anyhow::bail!("PLT relocations must use DT_RELA");
         }
         let rela_ent = tags.get(&DT_RELAENT).copied().unwrap_or(24);
         if rela_ent != 24 || plt_size % rela_ent != 0 {
-            anyhow::bail!("unsupported AArch64 PLT RELA entry size {rela_ent}");
+            anyhow::bail!("unsupported PLT RELA entry size {rela_ent}");
         }
         ranges.push((
             elf64_vaddr_to_offset(data, plt_addr, plt_size)?,
@@ -1332,43 +1559,115 @@ fn aarch64_dynamic_tables(data: &[u8]) -> Result<Aarch64DynamicTables> {
         let left_end = pair[0]
             .0
             .checked_add(pair[0].1)
-            .context("AArch64 RELA range overflow")?;
+            .context("RELA range overflow")?;
         if left_end > pair[1].0 {
-            anyhow::bail!("AArch64 dynamic relocation ranges overlap");
+            anyhow::bail!("dynamic relocation ranges overlap");
         }
     }
 
-    let (symtab_offset, strtab, sym_entry_size) = if ranges.is_empty() {
-        (None, None, 24)
-    } else {
-        let symtab_offset = tags
-            .get(&DT_SYMTAB)
-            .map(|&addr| elf64_vaddr_to_offset(data, addr, 24))
-            .transpose()?;
-        let strtab = match (tags.get(&DT_STRTAB), tags.get(&DT_STRSZ)) {
-            (Some(&addr), Some(&size)) => Some((
-                elf64_vaddr_to_offset(data, addr, size)?,
-                usize::try_from(size).context("DT_STRSZ too large")?,
-            )),
-            (None, None) => None,
-            _ => anyhow::bail!("incomplete AArch64 dynamic string-table metadata"),
-        };
-        let syment = tags.get(&DT_SYMENT).copied().unwrap_or(24);
-        if syment != 24 {
-            anyhow::bail!("unsupported AArch64 dynamic symbol size {syment}");
-        }
-        (
-            symtab_offset,
-            strtab,
-            usize::try_from(syment).context("DT_SYMENT too large")?,
-        )
+    let symtab_offset = tags
+        .get(&DT_SYMTAB)
+        .map(|&addr| elf64_vaddr_to_offset(data, addr, 24))
+        .transpose()?;
+    let strtab = match (tags.get(&DT_STRTAB), tags.get(&DT_STRSZ)) {
+        (Some(&addr), Some(&size)) => Some((
+            elf64_vaddr_to_offset(data, addr, size)?,
+            usize::try_from(size).context("DT_STRSZ too large")?,
+        )),
+        (None, None) => None,
+        _ => anyhow::bail!("incomplete dynamic string-table metadata"),
     };
+    let syment = tags.get(&DT_SYMENT).copied().unwrap_or(24);
+    if syment != 24 {
+        anyhow::bail!("unsupported dynamic symbol size {syment}");
+    }
+    let sym_entry_size = usize::try_from(syment).context("DT_SYMENT too large")?;
 
-    Ok(Aarch64DynamicTables {
+    let mut symbol_count = None;
+    if let Some(&hash_addr) = tags.get(&DT_HASH) {
+        if let Ok(hash_off) = elf64_vaddr_to_offset(data, hash_addr, 8) {
+            if hash_off + 8 <= data.len() {
+                let nchain =
+                    u32::from_le_bytes(data[hash_off + 4..hash_off + 8].try_into().unwrap())
+                        as usize;
+                symbol_count = Some(nchain);
+            }
+        }
+    }
+    if symbol_count.is_none() {
+        if let Some(&gnu_hash_addr) = tags.get(&DT_GNU_HASH) {
+            if let Ok(gnu_hash_off) = elf64_vaddr_to_offset(data, gnu_hash_addr, 16) {
+                if gnu_hash_off + 16 <= data.len() {
+                    let nbuckets = u32::from_le_bytes(
+                        data[gnu_hash_off..gnu_hash_off + 4].try_into().unwrap(),
+                    ) as usize;
+                    let symoffset = u32::from_le_bytes(
+                        data[gnu_hash_off + 4..gnu_hash_off + 8].try_into().unwrap(),
+                    ) as usize;
+                    let bloom_size = u32::from_le_bytes(
+                        data[gnu_hash_off + 8..gnu_hash_off + 12]
+                            .try_into()
+                            .unwrap(),
+                    ) as usize;
+                    if let Some(buckets_off) = bloom_size
+                        .checked_mul(8)
+                        .and_then(|bs| gnu_hash_off.checked_add(16)?.checked_add(bs))
+                    {
+                        if let Some(chains_off) = nbuckets
+                            .checked_mul(4)
+                            .and_then(|nb| buckets_off.checked_add(nb))
+                        {
+                            if nbuckets > 0 && buckets_off + nbuckets * 4 <= data.len() {
+                                let mut max_bucket = 0usize;
+                                for b in 0..nbuckets {
+                                    let b_val = u32::from_le_bytes(
+                                        data[buckets_off + b * 4..buckets_off + b * 4 + 4]
+                                            .try_into()
+                                            .unwrap(),
+                                    ) as usize;
+                                    if b_val > max_bucket {
+                                        max_bucket = b_val;
+                                    }
+                                }
+                                if max_bucket >= symoffset {
+                                    let mut chain_idx = max_bucket - symoffset;
+                                    while chains_off + (chain_idx + 1) * 4 <= data.len() {
+                                        let hash_val = u32::from_le_bytes(
+                                            data[chains_off + chain_idx * 4
+                                                ..chains_off + chain_idx * 4 + 4]
+                                                .try_into()
+                                                .unwrap(),
+                                        );
+                                        chain_idx += 1;
+                                        if (hash_val & 1) != 0 {
+                                            break;
+                                        }
+                                    }
+                                    symbol_count = Some(symoffset + chain_idx);
+                                } else if max_bucket == 0 {
+                                    symbol_count = Some(symoffset);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if symbol_count.is_none() {
+        if let (Some(sym_off), Some((str_off, _))) = (symtab_offset, strtab) {
+            if str_off > sym_off {
+                symbol_count = Some((str_off - sym_off) / sym_entry_size);
+            }
+        }
+    }
+
+    Ok(Elf64DynamicTables {
         rela_ranges: ranges,
         symtab_offset,
         strtab,
         sym_entry_size,
+        symbol_count,
     })
 }
 
@@ -1427,57 +1726,62 @@ fn aarch64_dynamic_symbol(
     index: usize,
     load_bias: u64,
 ) -> Result<(String, Option<u64>)> {
+    elf64_dynamic_symbol(data, tables, index, load_bias)
+}
+
+fn elf64_dynamic_symbol(
+    data: &[u8],
+    tables: &Elf64DynamicTables,
+    index: usize,
+    load_bias: u64,
+) -> Result<(String, Option<u64>)> {
     if index == 0 {
         return Ok((String::new(), Some(0)));
     }
     let symtab = tables
         .symtab_offset
-        .context("AArch64 relocation references a symbol but DT_SYMTAB is absent")?;
+        .context("dynamic relocation references a symbol but DT_SYMTAB is absent")?;
     let entry_offset = index
         .checked_mul(tables.sym_entry_size)
         .and_then(|delta| symtab.checked_add(delta))
-        .context("AArch64 dynamic symbol offset overflow")?;
+        .context("dynamic symbol offset overflow")?;
     let entry_end = entry_offset
         .checked_add(24)
-        .context("AArch64 dynamic symbol range overflow")?;
+        .context("dynamic symbol range overflow")?;
     let entry = data
         .get(entry_offset..entry_end)
-        .context("AArch64 dynamic symbol entry is outside the ELF file")?;
+        .context("dynamic symbol entry is outside the ELF file")?;
     let name_offset = u32::from_le_bytes(entry[0..4].try_into().unwrap()) as usize;
     let section_index = u16::from_le_bytes(entry[6..8].try_into().unwrap());
     let value = u64::from_le_bytes(entry[8..16].try_into().unwrap());
     let strtab = tables
         .strtab
-        .context("AArch64 relocation references a symbol but DT_STRTAB is absent")?;
+        .context("dynamic relocation references a symbol but DT_STRTAB is absent")?;
     if name_offset >= strtab.1 {
-        anyhow::bail!("AArch64 dynamic symbol name offset is outside DT_STRTAB");
+        anyhow::bail!("dynamic symbol name offset is outside DT_STRTAB");
     }
     let name_start = strtab
         .0
         .checked_add(name_offset)
-        .context("AArch64 dynamic symbol name offset overflow")?;
+        .context("dynamic symbol name offset overflow")?;
     let name_limit = strtab
         .0
         .checked_add(strtab.1)
-        .context("AArch64 dynamic string-table range overflow")?;
+        .context("dynamic string-table range overflow")?;
     let name_bytes = data
         .get(name_start..name_limit)
-        .context("AArch64 dynamic string table is outside the ELF file")?;
+        .context("dynamic string table is outside the ELF file")?;
     let name_end = name_bytes
         .iter()
         .position(|&byte| byte == 0)
-        .context("unterminated AArch64 dynamic symbol name")?;
+        .context("unterminated dynamic symbol name")?;
     let name = String::from_utf8_lossy(&name_bytes[..name_end]).into_owned();
     let defined_value = if section_index == 0 {
         None
     } else if section_index == SHN_ABS {
         Some(value)
     } else {
-        Some(
-            value
-                .checked_add(load_bias)
-                .context("AArch64 dynamic symbol value overflow")?,
-        )
+        Some(load_bias.wrapping_add(value))
     };
     Ok((name, defined_value))
 }
@@ -1867,5 +2171,206 @@ mod tests {
             .expect_err("x86-64 relocation path must reject AArch64 ELF");
         assert!(format!("{error:#}").contains("expected 62"));
         assert!(state.page_map.mappings().is_empty());
+    }
+
+    #[test]
+    fn stripped_elf_applies_relocations_via_pt_dynamic() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        if !path.is_file() {
+            return;
+        }
+        let mut data = std::fs::read(&path).unwrap();
+        // Strip section headers: e_shoff = 0, e_shentsize = 0, e_shnum = 0.
+        data[40..48].fill(0);
+        data[58..60].fill(0);
+        data[60..62].fill(0);
+
+        let binary = LoadedBinary::from_file(&path).unwrap();
+        let mut state = MachineState::new();
+        let info = crate::os::linux::image_info::load_elf_image(
+            &mut state,
+            &binary,
+            &crate::os::linux::image_info::ProcessArgs::default(),
+        )
+        .unwrap();
+
+        let mut resolved = 0u64;
+        let stats = apply_rela_x86_64(&mut state, &data, info.load_addr, |name| {
+            if name == "puts" || name == "__libc_start_main" {
+                resolved += 1;
+                Some(0xFFFFFFF1_00000000 + resolved * 8)
+            } else {
+                Some(0)
+            }
+        })
+        .expect("apply_rela on stripped binary");
+
+        assert!(
+            stats.jump_slot >= 1 || stats.glob_dat >= 1,
+            "expected JUMP_SLOT/GLOB_DAT applies on stripped binary: {stats:?}"
+        );
+    }
+
+    #[test]
+    fn stripped_elf_collects_global_symbols_via_pt_dynamic() {
+        let mut elf = vec![0u8; 0x1000];
+        // ELF header
+        elf[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+        elf[4] = 2; // ELF64
+        elf[5] = 1; // LE
+        elf[6] = 1; // version
+        elf[16..18].copy_from_slice(&ET_DYN.to_le_bytes()); // ET_DYN
+        elf[18..20].copy_from_slice(&EM_X86_64.to_le_bytes());
+        elf[20..24].copy_from_slice(&1u32.to_le_bytes());
+        elf[32..40].copy_from_slice(&64u64.to_le_bytes()); // phoff
+        elf[52..54].copy_from_slice(&64u16.to_le_bytes()); // ehsize
+        elf[54..56].copy_from_slice(&56u16.to_le_bytes()); // phentsize
+        elf[56..58].copy_from_slice(&2u16.to_le_bytes()); // phnum
+        // Section headers are stripped: shoff = 0, shentsize = 0, shnum = 0
+
+        // PT_LOAD
+        let ph0 = 64;
+        elf[ph0..ph0 + 4].copy_from_slice(&PT_LOAD.to_le_bytes());
+        elf[ph0 + 4..ph0 + 8].copy_from_slice(&7u32.to_le_bytes());
+        elf[ph0 + 8..ph0 + 16].copy_from_slice(&0u64.to_le_bytes());
+        elf[ph0 + 16..ph0 + 24].copy_from_slice(&0u64.to_le_bytes());
+        elf[ph0 + 32..ph0 + 40].copy_from_slice(&0x1000u64.to_le_bytes());
+        elf[ph0 + 40..ph0 + 48].copy_from_slice(&0x1000u64.to_le_bytes());
+
+        // PT_DYNAMIC
+        let ph1 = 64 + 56;
+        let dyn_off = 0x100usize;
+        let dyn_sz = 6 * 16u64;
+        elf[ph1..ph1 + 4].copy_from_slice(&PT_DYNAMIC.to_le_bytes());
+        elf[ph1 + 4..ph1 + 8].copy_from_slice(&6u32.to_le_bytes());
+        elf[ph1 + 8..ph1 + 16].copy_from_slice(&(dyn_off as u64).to_le_bytes());
+        elf[ph1 + 16..ph1 + 24].copy_from_slice(&(dyn_off as u64).to_le_bytes());
+        elf[ph1 + 32..ph1 + 40].copy_from_slice(&dyn_sz.to_le_bytes());
+        elf[ph1 + 40..ph1 + 48].copy_from_slice(&dyn_sz.to_le_bytes());
+
+        let tags: [(i64, u64); 6] = [
+            (DT_SYMTAB, 0x200),
+            (DT_SYMENT, 24),
+            (DT_STRTAB, 0x300),
+            (DT_STRSZ, 32),
+            (DT_HASH, 0x400),
+            (DT_NULL, 0),
+        ];
+        for (i, (tag, val)) in tags.iter().enumerate() {
+            let off = dyn_off + i * 16;
+            elf[off..off + 8].copy_from_slice(&tag.to_le_bytes());
+            elf[off + 8..off + 16].copy_from_slice(&val.to_le_bytes());
+        }
+
+        // DT_HASH at 0x400: nbucket = 1, nchain = 2
+        elf[0x400..0x404].copy_from_slice(&1u32.to_le_bytes());
+        elf[0x404..0x408].copy_from_slice(&2u32.to_le_bytes());
+
+        // DT_STRTAB at 0x300: \0my_func\0
+        elf[0x300..0x309].copy_from_slice(b"\0my_func\0");
+
+        // DT_SYMTAB at 0x200
+        // Symbol 1 at 0x200 + 24
+        let sym1 = 0x200 + 24;
+        elf[sym1..sym1 + 4].copy_from_slice(&1u32.to_le_bytes()); // st_name = 1 ("my_func")
+        elf[sym1 + 4] = (STB_GLOBAL << 4) | STT_FUNC;
+        elf[sym1 + 6..sym1 + 8].copy_from_slice(&1u16.to_le_bytes()); // st_shndx = 1
+        elf[sym1 + 8..sym1 + 16].copy_from_slice(&0x1000u64.to_le_bytes()); // st_value = 0x1000
+
+        let symbols = collect_global_symbols(&elf, 0x40000);
+        assert_eq!(
+            symbols.get("my_func"),
+            Some(&0x41000),
+            "expected my_func resolved on stripped shared library, got {symbols:?}"
+        );
+    }
+
+    #[test]
+    fn et_dyn_low_base_addressing_and_r_x86_64_64_r_sym_zero() {
+        let mut elf = vec![0u8; 0x1000];
+        // ELF header
+        elf[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+        elf[4] = 2; // ELF64
+        elf[5] = 1; // LE
+        elf[6] = 1; // version
+        elf[16..18].copy_from_slice(&ET_DYN.to_le_bytes()); // ET_DYN
+        elf[18..20].copy_from_slice(&EM_X86_64.to_le_bytes());
+        elf[20..24].copy_from_slice(&1u32.to_le_bytes());
+        elf[32..40].copy_from_slice(&64u64.to_le_bytes()); // phoff
+        elf[52..54].copy_from_slice(&64u16.to_le_bytes()); // ehsize
+        elf[54..56].copy_from_slice(&56u16.to_le_bytes()); // phentsize
+        elf[56..58].copy_from_slice(&2u16.to_le_bytes()); // phnum
+        // Section headers are stripped: shoff = 0, shentsize = 0, shnum = 0
+
+        // Program header 0: PT_LOAD
+        let ph0 = 64;
+        elf[ph0..ph0 + 4].copy_from_slice(&PT_LOAD.to_le_bytes());
+        elf[ph0 + 4..ph0 + 8].copy_from_slice(&7u32.to_le_bytes()); // PF_R | PF_W | PF_X
+        elf[ph0 + 8..ph0 + 16].copy_from_slice(&0u64.to_le_bytes()); // p_offset
+        elf[ph0 + 16..ph0 + 24].copy_from_slice(&0u64.to_le_bytes()); // p_vaddr
+        elf[ph0 + 32..ph0 + 40].copy_from_slice(&0x1000u64.to_le_bytes()); // p_filesz
+        elf[ph0 + 40..ph0 + 48].copy_from_slice(&0x100_000u64.to_le_bytes()); // p_memsz
+
+        // Program header 1: PT_DYNAMIC
+        let ph1 = 64 + 56;
+        let dyn_off = 0x200u64;
+        let dyn_sz = 4 * 16u64; // 4 entries: DT_RELA, DT_RELASZ, DT_RELAENT, DT_NULL
+        elf[ph1..ph1 + 4].copy_from_slice(&PT_DYNAMIC.to_le_bytes());
+        elf[ph1 + 4..ph1 + 8].copy_from_slice(&6u32.to_le_bytes());
+        elf[ph1 + 8..ph1 + 16].copy_from_slice(&dyn_off.to_le_bytes());
+        elf[ph1 + 16..ph1 + 24].copy_from_slice(&dyn_off.to_le_bytes()); // vaddr == offset
+        elf[ph1 + 32..ph1 + 40].copy_from_slice(&dyn_sz.to_le_bytes());
+        elf[ph1 + 40..ph1 + 48].copy_from_slice(&dyn_sz.to_le_bytes());
+
+        // PT_DYNAMIC entries at dyn_off
+        let rela_off = 0x300u64;
+        let rela_sz = 2 * 24u64; // 2 relocations
+        let mut doff = dyn_off as usize;
+        // DT_RELA
+        elf[doff..doff + 8].copy_from_slice(&DT_RELA.to_le_bytes());
+        elf[doff + 8..doff + 16].copy_from_slice(&rela_off.to_le_bytes());
+        doff += 16;
+        // DT_RELASZ
+        elf[doff..doff + 8].copy_from_slice(&DT_RELASZ.to_le_bytes());
+        elf[doff + 8..doff + 16].copy_from_slice(&rela_sz.to_le_bytes());
+        doff += 16;
+        // DT_RELAENT
+        elf[doff..doff + 8].copy_from_slice(&DT_RELAENT.to_le_bytes());
+        elf[doff + 8..doff + 16].copy_from_slice(&24u64.to_le_bytes());
+        doff += 16;
+        // DT_NULL
+        elf[doff..doff + 8].copy_from_slice(&DT_NULL.to_le_bytes());
+        elf[doff + 8..doff + 16].copy_from_slice(&0u64.to_le_bytes());
+
+        // RELA records at rela_off
+        let mut roff = rela_off as usize;
+        // Entry 0: R_X86_64_RELATIVE at r_offset = 0x20000, addend = 0x50
+        // Notice r_offset (0x20000) >= load_bias (0x10000)!
+        elf[roff..roff + 8].copy_from_slice(&0x20000u64.to_le_bytes());
+        elf[roff + 8..roff + 16].copy_from_slice(&(R_X86_64_RELATIVE as u64).to_le_bytes());
+        elf[roff + 16..roff + 24].copy_from_slice(&0x50i64.to_le_bytes());
+        roff += 24;
+        // Entry 1: R_X86_64_64 at r_offset = 0x20008, r_sym = 0, addend = 0x100
+        elf[roff..roff + 8].copy_from_slice(&0x20008u64.to_le_bytes());
+        elf[roff + 8..roff + 16].copy_from_slice(&(R_X86_64_64 as u64).to_le_bytes()); // r_sym = 0
+        elf[roff + 16..roff + 24].copy_from_slice(&0x100i64.to_le_bytes());
+
+        let mut state = MachineState::new();
+        let load_bias = 0x10000u64;
+        // Map region at slot addresses: load_bias + r_offset = 0x10000 + 0x20000 = 0x30000
+        state.page_map.map_region(0x30000, 0x2000, prot::RW, true);
+
+        let stats = apply_rela_x86_64(&mut state, &elf, load_bias, |_| None)
+            .expect("apply relocations on synthetic ET_DYN");
+        assert_eq!(stats.relative, 1);
+        assert_eq!(stats.absolute, 1);
+
+        // Verify slot 0x30000 received load_bias + 0x50 = 0x10050
+        let bytes0 = state.read_space(state.ram_space(), 0x30000, 8).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes0.try_into().unwrap()), 0x10050);
+
+        // Verify slot 0x30008 received load_bias + 0x100 = 0x10100
+        let bytes1 = state.read_space(state.ram_space(), 0x30008, 8).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes1.try_into().unwrap()), 0x10100);
     }
 }
