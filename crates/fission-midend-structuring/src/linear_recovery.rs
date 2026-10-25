@@ -81,24 +81,35 @@ pub fn region_linearized_exit_candidates_algorithmic(
             .filter(|&i| host.dom_tree().dominates(start_idx, i))
             .collect();
 
-        let score = |exit: &LinearExit| -> usize {
-            let LinearExit::Join(join_idx) = *exit else {
-                return 0;
-            };
-            if let Some(pdoms) = postdom.postdominators().get(&join_idx) {
-                dominated_nodes
-                    .iter()
-                    .filter(|&&n| pdoms.contains(&n))
-                    .count()
-            } else {
-                0
-            }
-        };
-
-        candidates.sort_by(|a, b| score(b).cmp(&score(a)));
+        rank_linearized_exit_candidates(&mut candidates, &dominated_nodes, postdom);
     }
 
     candidates
+}
+
+/// Rank candidate exits by the SAILR H2 heuristic ("post-dominator maximization"):
+/// each candidate join is scored by how many dominated region nodes it post-dominates.
+pub fn rank_linearized_exit_candidates(
+    candidates: &mut [LinearExit],
+    dominated_nodes: &[usize],
+    postdom: &crate::cfg_analysis::PostDomTree,
+) {
+    let score = |exit: &LinearExit| -> usize {
+        let LinearExit::Join(join_idx) = *exit else {
+            return 0;
+        };
+        dominated_nodes
+            .iter()
+            .filter(|&&n| {
+                postdom
+                    .postdominators()
+                    .get(&n)
+                    .is_some_and(|pdoms| pdoms.contains(&join_idx))
+            })
+            .count()
+    };
+
+    candidates.sort_by(|a, b| score(b).cmp(&score(a)));
 }
 
 /// Recover a linearized body for a failed structured region starting at `start_idx`.
@@ -202,4 +213,65 @@ pub fn build_linear_sese_child_fallback(
         body.insert(0, PreHirStmt::Label(entry_label));
     }
     Ok(cleanup_redundant_labels(body, None))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cfg_analysis::PostDomTree;
+
+    #[test]
+    fn sailr_h2_ranks_join_by_number_of_dominated_nodes_it_postdominates() {
+        // Construct a CFG where candidate exits join different numbers of dominated region nodes.
+        // Node 0: Function entry -> reaches 1 (region head), and has a bypass edge to exit 6.
+        // Node 1: Region start -> [2, 3] (dominated by 1: nodes 2, 3, 4, 5)
+        // Node 2: [4]
+        // Node 3: [5]
+        // Node 4: [6, 7] (diverges to exit 6 or exit 7)
+        // Node 5: [6]    (all paths go to exit 6)
+        // Node 6: Candidate Exit A -> [8]
+        // Node 7: Candidate Exit B -> [8]
+        // Node 8: Final Exit -> []
+        //
+        // Dominated region nodes: [2, 3, 4, 5].
+        // Node 5's only successor is 6 -> Node 6 post-dominates 5.
+        // Node 3's only successor is 5, which goes to 6 -> Node 6 post-dominates 3.
+        // Node 2's only successor is 4, which reaches both 6 and 7 -> neither 6 nor 7 post-dominates 2 or 4.
+        //
+        // Therefore:
+        // Node 6 post-dominates 2 dominated nodes: {3, 5}.
+        // Node 7 post-dominates 0 dominated nodes.
+        //
+        // SAILR H2 should rank Node 6 (Exit A) strictly ahead of Node 7 (Exit B).
+        let successors = vec![
+            vec![1, 6], // 0
+            vec![2, 3], // 1
+            vec![4],    // 2
+            vec![5],    // 3
+            vec![6, 7], // 4
+            vec![6],    // 5
+            vec![8],    // 6 (Exit A)
+            vec![8],    // 7 (Exit B)
+            vec![],     // 8
+        ];
+        let mut predecessors = vec![Vec::new(); successors.len()];
+        for (u, succs) in successors.iter().enumerate() {
+            for &v in succs {
+                predecessors[v].push(u);
+            }
+        }
+
+        let postdom = PostDomTree::analyze(&successors, &predecessors);
+        let dominated_nodes = vec![2, 3, 4, 5];
+
+        // Intentionally start with candidates in reverse order: [Exit B (7), Exit A (6)].
+        let mut candidates = vec![LinearExit::Join(7), LinearExit::Join(6)];
+        rank_linearized_exit_candidates(&mut candidates, &dominated_nodes, &postdom);
+
+        assert_eq!(
+            candidates,
+            vec![LinearExit::Join(6), LinearExit::Join(7)],
+            "SAILR H2 must rank Join(6) first because it post-dominates 2 region nodes while Join(7) post-dominates 0"
+        );
+    }
 }
