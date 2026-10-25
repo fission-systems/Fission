@@ -563,7 +563,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let pointer_size = u64::from(self.options.pointer_size.max(1));
         let entry_width = selector.entry_size.min(pointer_size).max(4) as usize;
-        let little_endian = !binary.arch_spec.contains(":BE:");
+        let little_endian = binary.is_little_endian();
         let decode_modes = branchind_decode_modes(
             selector.relative_entries,
             selector.table_base,
@@ -663,7 +663,7 @@ impl<'a> PreviewBuilder<'a> {
             collect_switch_dependencies(switch_var, &self.defs, self.pcode)?;
 
         let little_endian = if let Some(bin) = self.binary {
-            !bin.arch_spec.contains(":BE:")
+            bin.is_little_endian()
         } else {
             !self.options.is_big_endian
         };

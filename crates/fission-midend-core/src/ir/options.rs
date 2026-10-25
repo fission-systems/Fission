@@ -678,10 +678,7 @@ impl NirRenderOptions {
             pe_x64_only: true,
             is_64bit: binary.is_64bit,
             is_data_ref_origin: false,
-            is_big_endian: binary
-                .sleigh_language_id()
-                .unwrap_or(&binary.arch_spec)
-                .contains(":BE:"),
+            is_big_endian: !binary.is_little_endian(),
             pointer_size: if binary.is_64bit { 8 } else { 4 },
             format: binary.format.clone(),
             image_base: inner.image_base,
@@ -1200,5 +1197,24 @@ mod loader_symbol_option_tests {
             Some("___EH_FRAME_BEGIN__")
         );
         assert!(!options.global_names.contains_key(&0x401000));
+    }
+
+    #[test]
+    fn from_loaded_binary_uses_canonical_binary_endianness_for_big_endian_alias() {
+        let binary = LoadedBinaryBuilder::new("ppc.elf".into(), DataBuffer::Heap(vec![]))
+            .format("ELF")
+            .architecture(fission_core::architecture::ArchitectureDescriptor {
+                processor: "PowerPC".into(),
+                endian: "big".into(),
+                bitness: 64,
+                variant: "default".into(),
+                abi: None,
+                raw_machine: "ppc64".into(),
+            })
+            .build()
+            .expect("fixture should build");
+
+        let options = NirRenderOptions::from_loaded_binary(&binary);
+        assert!(options.is_big_endian);
     }
 }
