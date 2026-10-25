@@ -344,6 +344,39 @@ impl PageMap {
         Ok(())
     }
 
+    /// Calculate the contiguous readable byte count starting at `addr`, up to `max_len`.
+    ///
+    /// If `addr` itself is not readable, returns 0. Otherwise, checks subsequent pages
+    /// and returns the number of contiguous readable bytes before the first unmapped
+    /// or unreadable page boundary, capped at `max_len`.
+    pub fn readable_extent(&self, addr: u64, max_len: usize) -> usize {
+        if max_len == 0 {
+            return 0;
+        }
+        let mut page = page_align_down(addr);
+        if self.check_access(page, AccessKind::Read).is_err() {
+            return 0;
+        }
+        // Bytes available in the initial page from `addr` to page end
+        let page_offset = (addr - page) as usize;
+        let mut available = (PAGE_SIZE as usize).saturating_sub(page_offset);
+        if available >= max_len {
+            return max_len;
+        }
+        loop {
+            let next_page = page.saturating_add(PAGE_SIZE);
+            if next_page == page || self.check_access(next_page, AccessKind::Read).is_err() {
+                break;
+            }
+            page = next_page;
+            available = available.saturating_add(PAGE_SIZE as usize);
+            if available >= max_len {
+                return max_len;
+            }
+        }
+        available.min(max_len)
+    }
+
     /// Allocate an anonymous region of `len` bytes (page-rounded) near `mmap_hint`.
     /// Returns the base address on success, or `0` on allocation failure.
     pub fn mmap_anon(&mut self, len: u64, page_prot: u8) -> u64 {
@@ -681,5 +714,38 @@ mod tests {
             prot::EXEC,
             "must not overwrite obstacle"
         );
+    }
+
+    #[test]
+    fn readable_extent_clamps_to_unmapped_boundary() {
+        let mut pm = PageMap::new();
+        // Map page at 0x1000 (4096 bytes: 0x1000..0x2000)
+        pm.map_region(0x1000, 0x1000, prot::RX, true);
+
+        // Within page: request 32 bytes from 0x1000 -> 32
+        assert_eq!(pm.readable_extent(0x1000, 32), 32);
+
+        // Near end of page: 30 bytes before boundary at 0x1fe2 (0x2000 - 30)
+        let near_edge = 0x2000 - 30;
+        // Requesting 80 bytes should clamp to exactly 30 bytes because 0x2000 is unmapped
+        assert_eq!(pm.readable_extent(near_edge, 80), 30);
+
+        // Requesting exactly 30 bytes should return 30
+        assert_eq!(pm.readable_extent(near_edge, 30), 30);
+
+        // Requesting 10 bytes should return 10
+        assert_eq!(pm.readable_extent(near_edge, 10), 10);
+
+        // At unmapped address 0x2000 should return 0
+        assert_eq!(pm.readable_extent(0x2000, 80), 0);
+
+        // Now map the next page at 0x2000
+        pm.map_region(0x2000, 0x1000, prot::READ, true);
+        // Spanning across pages: 30 bytes in first page + 50 in next = 80
+        assert_eq!(pm.readable_extent(near_edge, 80), 80);
+
+        // Requesting across to unmapped 0x3000
+        let near_second_edge = 0x3000 - 15;
+        assert_eq!(pm.readable_extent(near_second_edge, 100), 15);
     }
 }
