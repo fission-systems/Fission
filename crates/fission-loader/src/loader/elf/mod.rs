@@ -365,6 +365,7 @@ impl ElfLoader {
                 bytes,
                 &shdrs,
                 &section_addresses,
+                is_relocatable,
                 &mut relocation_symbols,
                 endian,
             );
@@ -662,6 +663,7 @@ impl ElfLoader {
                 bytes,
                 &shdrs,
                 &section_addresses,
+                is_relocatable,
                 &mut relocation_symbols,
                 endian,
             );
@@ -1377,6 +1379,7 @@ fn parse_relocation_symbols_64(
     full_data: &[u8],
     shdrs: &[Elf64Shdr],
     section_addresses: &[u64],
+    is_relocatable: bool,
     out: &mut HashMap<u64, String>,
     endian: Endian,
 ) {
@@ -1385,8 +1388,13 @@ fn parse_relocation_symbols_64(
         .iter()
         .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
     {
-        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
-            continue;
+        let target_base = if is_relocatable {
+            let Some(base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+                continue;
+            };
+            base
+        } else {
+            0
         };
         let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
             continue;
@@ -1418,8 +1426,8 @@ fn parse_relocation_symbols_64(
             let Some(name) = symbol_name_64(full_data, symtab, strtab, sym_index, endian) else {
                 continue;
             };
-            out.entry(target_base.saturating_add(r_offset))
-                .or_insert(name);
+            let addr = elf_reloc_site_addr(is_relocatable, target_base, r_offset);
+            out.entry(addr).or_insert(name);
         }
     }
 }
@@ -1428,6 +1436,7 @@ fn parse_relocation_symbols_32(
     full_data: &[u8],
     shdrs: &[Elf32Shdr],
     section_addresses: &[u64],
+    is_relocatable: bool,
     out: &mut HashMap<u64, String>,
     endian: Endian,
 ) {
@@ -1436,8 +1445,13 @@ fn parse_relocation_symbols_32(
         .iter()
         .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
     {
-        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
-            continue;
+        let target_base = if is_relocatable {
+            let Some(base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+                continue;
+            };
+            base
+        } else {
+            0
         };
         let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
             continue;
@@ -1469,8 +1483,8 @@ fn parse_relocation_symbols_32(
             let Some(name) = symbol_name_32(full_data, symtab, strtab, sym_index, endian) else {
                 continue;
             };
-            out.entry(target_base.saturating_add(r_offset as u64))
-                .or_insert(name);
+            let addr = elf_reloc_site_addr(is_relocatable, target_base, r_offset as u64);
+            out.entry(addr).or_insert(name);
         }
     }
 }
@@ -3643,5 +3657,198 @@ mod tests {
 
         assert_eq!(binary.image_base, 0x400000);
         assert_eq!(binary.entry_point, 0x401000);
+    }
+
+    #[test]
+    fn parse_relocation_symbols_preserves_va_on_non_relocatable_and_adds_base_on_relocatable() {
+        let mut data = vec![0u8; 512];
+        // Strtab at 0x80: "\0_ZTV3Foo\0puts\0"
+        let strtab = b"\0_ZTV3Foo\0puts\0";
+        data[0x80..0x80 + strtab.len()].copy_from_slice(strtab);
+
+        // 64-bit symtab at 0x100 (2 entries * 24 bytes):
+        // sym 1: st_name = 1 ("_ZTV3Foo")
+        data[0x100 + 24..0x100 + 28].copy_from_slice(&1u32.to_le_bytes());
+        // 64-bit rela at 0x160 (1 entry * 24 bytes):
+        // r_offset = 0x404018, r_info = (1 << 32) | 7
+        data[0x160..0x168].copy_from_slice(&0x404018u64.to_le_bytes());
+        data[0x168..0x170].copy_from_slice(&((1u64 << 32) | 7).to_le_bytes());
+
+        let shdrs_64 = vec![
+            Elf64Shdr {
+                sh_name: 0,
+                sh_type: 0,
+                sh_flags: 0,
+                sh_addr: 0,
+                sh_offset: 0,
+                sh_size: 0,
+                sh_link: 0,
+                sh_info: 0,
+                sh_addralign: 0,
+                sh_entsize: 0,
+            },
+            // Section 1: .got.plt at 0x404000
+            Elf64Shdr {
+                sh_name: 0,
+                sh_type: 1,
+                sh_flags: SHF_ALLOC | SHF_WRITE,
+                sh_addr: 0x404000,
+                sh_offset: 0x20,
+                sh_size: 0x40,
+                sh_link: 0,
+                sh_info: 0,
+                sh_addralign: 8,
+                sh_entsize: 0,
+            },
+            // Section 2: .dynsym
+            Elf64Shdr {
+                sh_name: 0,
+                sh_type: SHT_DYNSYM,
+                sh_flags: SHF_ALLOC,
+                sh_addr: 0,
+                sh_offset: 0x100,
+                sh_size: 48,
+                sh_link: 3,
+                sh_info: 0,
+                sh_addralign: 8,
+                sh_entsize: 24,
+            },
+            // Section 3: .dynstr
+            Elf64Shdr {
+                sh_name: 0,
+                sh_type: 3,
+                sh_flags: SHF_ALLOC,
+                sh_addr: 0,
+                sh_offset: 0x80,
+                sh_size: strtab.len() as u64,
+                sh_link: 0,
+                sh_info: 0,
+                sh_addralign: 1,
+                sh_entsize: 0,
+            },
+            // Section 4: .rela.plt (sh_info = 1 -> .got.plt at 0x404000)
+            Elf64Shdr {
+                sh_name: 0,
+                sh_type: SHT_RELA,
+                sh_flags: SHF_ALLOC,
+                sh_addr: 0,
+                sh_offset: 0x160,
+                sh_size: 24,
+                sh_link: 2,
+                sh_info: 1,
+                sh_addralign: 8,
+                sh_entsize: 24,
+            },
+        ];
+        let section_addrs_64 = vec![0, 0x404000, 0, 0, 0];
+
+        // Non-relocatable (ET_EXEC / ET_DYN): r_offset (0x404018) is already VA, must NOT double to 0x808018
+        let mut out_exec = HashMap::new();
+        parse_relocation_symbols_64(
+            &data,
+            &shdrs_64,
+            &section_addrs_64,
+            false,
+            &mut out_exec,
+            Endian::Little,
+        );
+        assert_eq!(out_exec.get(&0x404018), Some(&"_ZTV3Foo".to_string()));
+        assert!(!out_exec.contains_key(&0x808018));
+
+        // Relocatable (ET_REL): section_base (0x404000) + r_offset (0x404018) = 0x808018
+        let mut out_rel = HashMap::new();
+        parse_relocation_symbols_64(
+            &data,
+            &shdrs_64,
+            &section_addrs_64,
+            true,
+            &mut out_rel,
+            Endian::Little,
+        );
+        assert_eq!(out_rel.get(&0x808018), Some(&"_ZTV3Foo".to_string()));
+
+        // 32-bit symtab at 0x190 (2 entries * 16 bytes):
+        // sym 1: st_name = 10 ("puts")
+        data[0x190 + 16..0x190 + 20].copy_from_slice(&10u32.to_le_bytes());
+        // 32-bit rel at 0x1c0 (1 entry * 8 bytes):
+        // r_offset = 0x0804a010, r_info = (1 << 8) | 7
+        data[0x1c0..0x1c4].copy_from_slice(&0x0804_a010u32.to_le_bytes());
+        data[0x1c4..0x1c8].copy_from_slice(&((1u32 << 8) | 7).to_le_bytes());
+
+        let shdrs_32 = vec![
+            Elf32Shdr {
+                sh_name: 0,
+                sh_type: 0,
+                sh_flags: 0,
+                sh_addr: 0,
+                sh_offset: 0,
+                sh_size: 0,
+                sh_link: 0,
+                sh_info: 0,
+                sh_addralign: 0,
+                sh_entsize: 0,
+            },
+            Elf32Shdr {
+                sh_name: 0,
+                sh_type: 1,
+                sh_flags: (SHF_ALLOC | SHF_WRITE) as u32,
+                sh_addr: 0x0804_a000,
+                sh_offset: 0x20,
+                sh_size: 0x40,
+                sh_link: 0,
+                sh_info: 0,
+                sh_addralign: 4,
+                sh_entsize: 0,
+            },
+            Elf32Shdr {
+                sh_name: 0,
+                sh_type: SHT_DYNSYM,
+                sh_flags: SHF_ALLOC as u32,
+                sh_addr: 0,
+                sh_offset: 0x190,
+                sh_size: 32,
+                sh_link: 3,
+                sh_info: 0,
+                sh_addralign: 4,
+                sh_entsize: 16,
+            },
+            Elf32Shdr {
+                sh_name: 0,
+                sh_type: 3,
+                sh_flags: SHF_ALLOC as u32,
+                sh_addr: 0,
+                sh_offset: 0x80,
+                sh_size: strtab.len() as u32,
+                sh_link: 0,
+                sh_info: 0,
+                sh_addralign: 1,
+                sh_entsize: 0,
+            },
+            Elf32Shdr {
+                sh_name: 0,
+                sh_type: SHT_REL,
+                sh_flags: SHF_ALLOC as u32,
+                sh_addr: 0,
+                sh_offset: 0x1c0,
+                sh_size: 8,
+                sh_link: 2,
+                sh_info: 1,
+                sh_addralign: 4,
+                sh_entsize: 8,
+            },
+        ];
+        let section_addrs_32 = vec![0, 0x0804_a000, 0, 0, 0];
+
+        let mut out32_exec = HashMap::new();
+        parse_relocation_symbols_32(
+            &data,
+            &shdrs_32,
+            &section_addrs_32,
+            false,
+            &mut out32_exec,
+            Endian::Little,
+        );
+        assert_eq!(out32_exec.get(&0x0804_a010), Some(&"puts".to_string()));
+        assert!(!out32_exec.contains_key(&0x1009_4010));
     }
 }
