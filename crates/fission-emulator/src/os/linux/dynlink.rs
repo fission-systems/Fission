@@ -75,8 +75,11 @@ const LIB_BASE_STRIDE: u64 = 0x0000_0000_0200_0000; // 32 MiB slots
 /// Magic PLT lazy-resolver entry (not a real GOT slot index).
 /// First call through an unresolved PLT jumps here; the stub binds then tail-calls.
 pub const PLT_RESOLVER_STUB: u64 = 0xFFFFFFF1_FFFF_FFF0;
+pub const PLT_RESOLVER_STUB_32: u64 = 0x7FFF_FFF0;
+
 /// Per-slot lazy marker base: GOT entries hold `PLT_LAZY_MARK | (index << 3)` until bound.
 pub const PLT_LAZY_MARK: u64 = 0xFFFFFFF1_8000_0000;
+pub const PLT_LAZY_MARK_32: u64 = 0x7FFF_8000;
 
 /// True when lazy PLT binding is requested (`FISSION_LAZY_BIND=1`).
 pub fn lazy_bind_enabled() -> bool {
@@ -88,10 +91,13 @@ pub fn lazy_bind_enabled() -> bool {
 
 /// Decode a lazy GOT marker into a table index.
 pub fn lazy_mark_index(addr: u64) -> Option<usize> {
+    if addr == PLT_RESOLVER_STUB || addr == PLT_RESOLVER_STUB_32 {
+        return None;
+    }
     if addr & 0xFFFF_FFFF_8000_0000 == PLT_LAZY_MARK {
-        Some(((addr & 0x7FFF_FFF8) >> 3) as usize)
-    } else if (PLT_LAZY_MARK..PLT_LAZY_MARK + 0x1000_0000).contains(&addr) {
         Some(((addr - PLT_LAZY_MARK) >> 3) as usize)
+    } else if (PLT_LAZY_MARK_32..PLT_RESOLVER_STUB_32).contains(&addr) {
+        Some(((addr - PLT_LAZY_MARK_32) >> 3) as usize)
     } else {
         None
     }
@@ -99,6 +105,18 @@ pub fn lazy_mark_index(addr: u64) -> Option<usize> {
 
 pub fn make_lazy_mark(index: usize) -> u64 {
     PLT_LAZY_MARK | ((index as u64) << 3)
+}
+
+pub fn make_lazy_mark_32(index: usize) -> u64 {
+    PLT_LAZY_MARK_32 | ((index as u64) << 3)
+}
+
+pub fn make_lazy_mark_for_arch(index: usize, is_64bit: bool) -> u64 {
+    if is_64bit {
+        make_lazy_mark(index)
+    } else {
+        make_lazy_mark_32(index)
+    }
 }
 
 /// True when `val` looks like a mini-dynlink **shared-lib** binding we should keep.
@@ -115,20 +133,33 @@ pub fn is_resolved_got_target(val: u64) -> bool {
     if lazy_mark_index(val).is_some() {
         return false;
     }
-    // Linux HLE trampolines live at/above 0xFFFFFFF0_0000_0000.
-    if val >= 0xFFFFFFF0_0000_0000 {
+    // Linux HLE trampolines live at/above 0xFFFFFFF0_0000_0000 (64-bit)
+    // or in 0x7FFF_0000..0x8000_0000 (32-bit).
+    if val >= 0xFFFFFFF0_0000_0000 || (0x7FFF_0000..0x8000_0000).contains(&val) {
         return false;
     }
     val >= SHARED_LIB_BASE_START
 }
 
 /// Runtime table for deferred PLT/GOT binding.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct PltLazyTable {
     /// index → (GOT virtual address, symbol name)
     pub entries: Vec<(u64, String)>,
     /// Global symbol VA map accumulated from main + DT_NEEDED libs.
     pub globals: std::collections::HashMap<String, u64>,
+    /// Target architecture bitness.
+    pub is_64bit: bool,
+}
+
+impl Default for PltLazyTable {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            globals: std::collections::HashMap::new(),
+            is_64bit: true,
+        }
+    }
 }
 
 impl PltLazyTable {
@@ -163,7 +194,9 @@ impl PltLazyTable {
     ) -> Option<u64> {
         let (got_va, name) = self.entries.get(index)?.clone();
         let target = self.resolve_target(&name, hle_magic_base, extra_globals);
-        let _ = state.write_space(state.ram_space(), got_va, &target.to_le_bytes());
+        let ptr_size = if self.is_64bit { 8 } else { 4 };
+        let bytes = target.to_le_bytes();
+        let _ = state.write_space(state.ram_space(), got_va, &bytes[..ptr_size]);
         tracing::info!(
             "plt lazy bind: [{}] {} @ GOT 0x{:X} -> 0x{:X}",
             index,
@@ -841,6 +874,7 @@ pub fn build_plt_lazy_table(
     binary: &LoadedBinary,
     globals: std::collections::HashMap<String, u64>,
 ) -> PltLazyTable {
+    let is_64bit = binary.inner().is_64bit;
     let mut entries: Vec<(u64, String)> = binary
         .inner()
         .iat_symbols
@@ -858,14 +892,20 @@ pub fn build_plt_lazy_table(
         })
         .collect();
     entries.sort_by_key(|(addr, _)| *addr);
-    PltLazyTable { entries, globals }
+    PltLazyTable {
+        entries,
+        globals,
+        is_64bit,
+    }
 }
 
 /// Write lazy markers into GOT slots (in-memory). Call after sections are mapped.
 pub fn install_lazy_got(state: &mut MachineState, table: &PltLazyTable) -> Result<()> {
+    let ptr_size = if table.is_64bit { 8 } else { 4 };
     for (i, (got_va, name)) in table.entries.iter().enumerate() {
-        let mark = make_lazy_mark(i);
-        state.write_space(state.ram_space(), *got_va, &mark.to_le_bytes())?;
+        let mark = make_lazy_mark_for_arch(i, table.is_64bit);
+        let bytes = mark.to_le_bytes();
+        state.write_space(state.ram_space(), *got_va, &bytes[..ptr_size])?;
         tracing::debug!(
             "plt lazy install: [{}] {} GOT 0x{:X} mark=0x{:X}",
             i,
@@ -1939,6 +1979,10 @@ mod tests {
     fn lazy_mark_roundtrip() {
         let m = make_lazy_mark(3);
         assert_eq!(lazy_mark_index(m), Some(3));
+        let m32 = make_lazy_mark_32(5);
+        assert_eq!(lazy_mark_index(m32), Some(5));
+        assert!(lazy_mark_index(PLT_RESOLVER_STUB).is_none());
+        assert!(lazy_mark_index(PLT_RESOLVER_STUB_32).is_none());
         assert!(lazy_mark_index(0x400000).is_none());
     }
 
@@ -1963,12 +2007,46 @@ mod tests {
     }
 
     #[test]
+    fn plt_lazy_bind_writes_got_32_does_not_corrupt_adjacent_slot() {
+        let mut state = MachineState::new();
+        let got = 0x1000u64;
+        state.page_map.map_region(got, 0x1000, prot::RW, true);
+        // Write sentinel value into adjacent slot (got + 4)
+        state
+            .write_space(state.ram_space(), got + 4, &[0xAA, 0xBB, 0xCC, 0xDD])
+            .unwrap();
+        state
+            .write_space(
+                state.ram_space(),
+                got,
+                &(make_lazy_mark_32(0) as u32).to_le_bytes(),
+            )
+            .unwrap();
+        let mut table = PltLazyTable {
+            entries: vec![(got, "puts".into())],
+            globals: std::collections::HashMap::new(),
+            is_64bit: false,
+        };
+        table.globals.insert("puts".into(), 0x7FFF_1234);
+        let empty = std::collections::HashMap::new();
+        let t = table.bind_slot(&mut state, 0, 0x7FFF_0000, &empty).unwrap();
+        assert_eq!(t, 0x7FFF_1234);
+        let bytes = state.read_space(state.ram_space(), got, 4).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes.try_into().unwrap()), 0x7FFF_1234);
+        // Verify adjacent slot is untouched
+        let adj_bytes = state.read_space(state.ram_space(), got + 4, 4).unwrap();
+        assert_eq!(adj_bytes, vec![0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
     fn is_resolved_got_target_filters_magic_and_plt_stubs() {
         // Main-image PLT stubs must NOT count as resolved.
         assert!(!is_resolved_got_target(0x401000));
         assert!(!is_resolved_got_target(0));
         assert!(!is_resolved_got_target(0xFFFFFFF1_0000_0000));
+        assert!(!is_resolved_got_target(0x7FFF_0000));
         assert!(!is_resolved_got_target(make_lazy_mark(2)));
+        assert!(!is_resolved_got_target(make_lazy_mark_32(2)));
         // Shared-lib slot range used by mini-dynlink.
         assert!(is_resolved_got_target(SHARED_LIB_BASE_START + 0x1234));
     }
