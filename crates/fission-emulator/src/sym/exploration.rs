@@ -7,6 +7,9 @@ pub trait ExplorationTechnique: Send + Sync {
     /// Called when the technique is added to the manager.
     fn setup(&mut self, _stashes: &mut HashMap<String, Vec<SimState>>) {}
 
+    /// Optional hook with emulator access to register breakpoints, watchpoints, etc.
+    fn setup_emulator(&mut self, _emu: &mut crate::core::Emulator) {}
+
     /// Called right after the standard step loop.
     /// Can move states between stashes.
     fn step(&mut self, stashes: &mut HashMap<String, Vec<SimState>>);
@@ -61,7 +64,7 @@ impl DirectedSearch {
 }
 
 impl ExplorationTechnique for DirectedSearch {
-    fn step(&mut self, stashes: &mut HashMap<String, Vec<SimState>>) {
+    fn setup(&mut self, stashes: &mut HashMap<String, Vec<SimState>>) {
         let active = stashes.remove("active").unwrap_or_default();
         let mut found = Vec::new();
         let mut avoided = Vec::new();
@@ -69,10 +72,10 @@ impl ExplorationTechnique for DirectedSearch {
 
         for state in active {
             if state.pc == self.target {
-                tracing::info!("DirectedSearch: Found target at 0x{:X}", self.target);
+                tracing::info!("DirectedSearch: Found target at setup 0x{:X}", self.target);
                 found.push(state);
             } else if self.avoid.contains(&state.pc) {
-                tracing::info!("DirectedSearch: Avoiding state at 0x{:X}", state.pc);
+                tracing::info!("DirectedSearch: Avoiding state at setup 0x{:X}", state.pc);
                 avoided.push(state);
             } else {
                 next_active.push(state);
@@ -88,6 +91,63 @@ impl ExplorationTechnique for DirectedSearch {
             .or_default()
             .extend(avoided);
         stashes.insert("active".to_string(), next_active);
+    }
+
+    fn setup_emulator(&mut self, emu: &mut crate::core::Emulator) {
+        emu.set_breakpoint(self.target);
+        for &addr in &self.avoid {
+            emu.set_breakpoint(addr);
+        }
+    }
+
+    fn step(&mut self, stashes: &mut HashMap<String, Vec<SimState>>) {
+        let active = stashes.remove("active").unwrap_or_default();
+        let deadended = stashes.remove("deadended").unwrap_or_default();
+        let mut found = Vec::new();
+        let mut avoided = Vec::new();
+        let mut next_active = Vec::new();
+        let mut next_deadended = Vec::new();
+
+        for state in active {
+            if state.pc == self.target {
+                tracing::info!("DirectedSearch: Found target at 0x{:X}", self.target);
+                found.push(state);
+            } else if self.avoid.contains(&state.pc) {
+                tracing::info!("DirectedSearch: Avoiding state at 0x{:X}", state.pc);
+                avoided.push(state);
+            } else {
+                next_active.push(state);
+            }
+        }
+
+        for state in deadended {
+            if state.pc == self.target {
+                tracing::info!(
+                    "DirectedSearch: Found target in deadended at 0x{:X}",
+                    self.target
+                );
+                found.push(state);
+            } else if self.avoid.contains(&state.pc) {
+                tracing::info!(
+                    "DirectedSearch: Avoiding state in deadended at 0x{:X}",
+                    state.pc
+                );
+                avoided.push(state);
+            } else {
+                next_deadended.push(state);
+            }
+        }
+
+        stashes
+            .entry("found".to_string())
+            .or_default()
+            .extend(found);
+        stashes
+            .entry("avoid".to_string())
+            .or_default()
+            .extend(avoided);
+        stashes.insert("active".to_string(), next_active);
+        stashes.insert("deadended".to_string(), next_deadended);
     }
 
     fn is_complete(&self, stashes: &HashMap<String, Vec<SimState>>) -> bool {

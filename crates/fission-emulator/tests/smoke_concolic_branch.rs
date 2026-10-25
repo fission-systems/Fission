@@ -109,6 +109,53 @@ fn smoke_concolic_gate_stops_on_tainted_branch() {
     );
 }
 
+/// With force_interpreter enabled, interpreter must also stop on tainted CBranch and populate sym_events.
+#[test]
+fn smoke_concolic_gate_stops_on_tainted_branch_interpreter() {
+    let mut emu = load_emu(b"A", true).unwrap_or_else(|e| panic!("{e:#}"));
+    emu.force_interpreter = true;
+    emu.run().unwrap_or_else(|e| panic!("run: {e:#}"));
+    assert!(
+        emu.sym_stop_requested || !emu.sym_events.is_empty(),
+        "expected interpreter gate stop or events; metrics={}",
+        emu.metrics.summary_line()
+    );
+    assert!(
+        !emu.sym_events.is_empty(),
+        "expected at least one SymBranch under interpreter; metrics={}",
+        emu.metrics.summary_line()
+    );
+}
+
+/// Verify DirectedSearch discovers target even if in deadended (immediate exit) or via breakpoint.
+#[test]
+fn smoke_directed_search_finds_target() {
+    use fission_emulator::sym::SimulationManager;
+    use fission_emulator::sym::exploration::DirectedSearch;
+
+    let emu = load_emu(b"A", true).unwrap_or_else(|e| panic!("{e:#}"));
+    let entry_pc = emu.pc;
+    let mut mgr = SimulationManager::new(emu).with_max_steps(8);
+    // Direct search towards the entry_pc itself (or entry_pc + 4)
+    mgr.use_technique(Box::new(DirectedSearch::new(entry_pc, Vec::new())));
+    mgr.step().unwrap();
+    assert_eq!(mgr.stash_len("found"), 1);
+}
+
+/// Verify SimState snapshots and isolates VFS and stdin_buffer.
+#[test]
+fn smoke_vfs_and_stdin_isolated_in_simstate() {
+    use fission_emulator::sym::SimulationManager;
+
+    let emu = load_emu(b"AB", true).unwrap_or_else(|e| panic!("{e:#}"));
+    let mgr = SimulationManager::new(emu);
+    let active = mgr.stashes.get("active").unwrap();
+    assert_eq!(active.len(), 1);
+    let state0 = &active[0];
+    assert!(state0.vfs.is_some());
+    assert_eq!(state0.stdin_buffer, Some(b"AB".to_vec()));
+}
+
 /// E2E: SimulationManager forks on tainted branch; both exit paths deadend.
 #[test]
 fn smoke_explore_fork_both_exits() {
