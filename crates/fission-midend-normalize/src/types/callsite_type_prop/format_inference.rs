@@ -63,8 +63,8 @@ pub(super) fn apply_variadic_printf_format_string_arg_types(
         else {
             continue;
         };
-        let pointer_bits = if func.is_64bit { 64 } else { 32 };
-        for (offset, ty) in parse_printf_format_specifier_types(literal, pointer_bits)
+        let (pointer_bits, long_bits) = c_pointer_and_long_bits(func);
+        for (offset, ty) in parse_printf_format_specifier_types(literal, pointer_bits, long_bits)
             .into_iter()
             .enumerate()
         {
@@ -379,8 +379,8 @@ pub(super) fn apply_site_sensitive_translated_format_types(func: &mut PreHirFunc
 
     let mut changed = false;
     for (format_index, literal, arg_chains) in evidence {
-        let pointer_bits = if func.is_64bit { 64 } else { 32 };
-        for (offset, ty) in parse_printf_format_specifier_types(&literal, pointer_bits)
+        let (pointer_bits, long_bits) = c_pointer_and_long_bits(func);
+        for (offset, ty) in parse_printf_format_specifier_types(&literal, pointer_bits, long_bits)
             .into_iter()
             .enumerate()
         {
@@ -516,9 +516,22 @@ fn quoted_string_literal_text(name: &str) -> Option<&str> {
 /// argument supplying [a `*`] width/precision... shall appear before the
 /// argument (if any) to be converted") are both handled to keep the
 /// specifier-to-argument-position alignment correct.
+/// Pointer and C `long` widths of the function's data model: `long` is
+/// pointer-sized under LP64 and ILP32, but stays 32-bit under Win64's LLP64.
+fn c_pointer_and_long_bits(func: &PreHirFunction) -> (usize, usize) {
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
+    let long_bits = if func.calling_convention == CallingConvention::WindowsX64 {
+        32
+    } else {
+        pointer_bits
+    };
+    (pointer_bits, long_bits)
+}
+
 pub(super) fn parse_printf_format_specifier_types(
     text: &str,
     pointer_bits: usize,
+    long_bits: usize,
 ) -> Vec<Option<NirType>> {
     let mut result = Vec::new();
     let mut chars = text.chars().peekable();
@@ -625,7 +638,7 @@ pub(super) fn parse_printf_format_specifier_types(
         } else {
             match long_count {
                 0 => Some(32),
-                1 => Some(ptr_bits),
+                1 => Some(long_bits as u32),
                 _ => Some(64),
             }
         };

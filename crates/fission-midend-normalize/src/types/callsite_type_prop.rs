@@ -2299,7 +2299,7 @@ mod tests {
 
     #[test]
     fn printf_format_parser_resolves_length_modifiers() {
-        let types = parse_printf_format_specifier_types("%u %lu %llu %s %zu %zd %td %jd", 64);
+        let types = parse_printf_format_specifier_types("%u %lu %llu %s %zu %zd %td %jd", 64, 64);
         assert_eq!(
             types,
             vec![
@@ -2338,7 +2338,23 @@ mod tests {
             ]
         );
 
-        let types_32 = parse_printf_format_specifier_types("%u %lu %llu %zu %zd", 32);
+        // Win64 is LLP64: `long` stays 32-bit while `size_t` is pointer-sized.
+        let types_llp64 = parse_printf_format_specifier_types("%lu %zu", 64, 32);
+        assert_eq!(
+            types_llp64,
+            vec![
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
+            ]
+        );
+
+        let types_32 = parse_printf_format_specifier_types("%u %lu %llu %zu %zd", 32, 32);
         assert_eq!(
             types_32,
             vec![
