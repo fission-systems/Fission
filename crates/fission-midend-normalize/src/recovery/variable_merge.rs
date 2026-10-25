@@ -773,14 +773,18 @@ fn transitive_copy_aliases(
     aliases
 }
 
-fn collect_dominant_copy_join_merges(stmts: &[PreHirStmt]) -> Vec<(String, String)> {
+fn collect_dominant_copy_join_merges(
+    stmts: &[PreHirStmt],
+    var_types: &HashMap<String, NirType>,
+) -> Vec<(String, String)> {
     let mut renames = Vec::new();
-    collect_dominant_copy_join_merges_in_stmts(stmts, &mut renames);
+    collect_dominant_copy_join_merges_in_stmts(stmts, var_types, &mut renames);
     renames
 }
 
 fn collect_dominant_copy_join_merges_in_stmts(
     stmts: &[PreHirStmt],
+    var_types: &HashMap<String, NirType>,
     renames: &mut Vec<(String, String)>,
 ) {
     for stmt in stmts {
@@ -799,41 +803,50 @@ fn collect_dominant_copy_join_merges_in_stmts(
                         && is_eligible_for_speculative_merge_by_name(&dest1)
                         && is_eligible_for_speculative_merge_by_name(&dest2)
                     {
-                        let (keep, drop) = if name_priority(&dest1) >= name_priority(&dest2) {
-                            (dest1, dest2)
-                        } else {
-                            (dest2, dest1)
-                        };
-                        renames.push((drop, keep));
+                        let t1 = var_types.get(&dest1);
+                        let t2 = var_types.get(&dest2);
+                        if t1.is_none() || t2.is_none() || t1 == t2 {
+                            let (keep, drop) = if name_priority(&dest1) >= name_priority(&dest2) {
+                                (dest1, dest2)
+                            } else {
+                                (dest2, dest1)
+                            };
+                            renames.push((drop, keep));
+                        }
                     }
                 }
-                collect_dominant_copy_join_merges_in_stmts(then_body, renames);
-                collect_dominant_copy_join_merges_in_stmts(else_body, renames);
+                collect_dominant_copy_join_merges_in_stmts(then_body, var_types, renames);
+                collect_dominant_copy_join_merges_in_stmts(else_body, var_types, renames);
             }
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. } => {
-                collect_dominant_copy_join_merges_in_stmts(body, renames);
+                collect_dominant_copy_join_merges_in_stmts(body, var_types, renames);
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
-                    collect_dominant_copy_join_merges_in_stmts(std::slice::from_ref(init), renames);
+                    collect_dominant_copy_join_merges_in_stmts(
+                        std::slice::from_ref(init),
+                        var_types,
+                        renames,
+                    );
                 }
                 if let Some(update) = update {
                     collect_dominant_copy_join_merges_in_stmts(
                         std::slice::from_ref(update),
+                        var_types,
                         renames,
                     );
                 }
-                collect_dominant_copy_join_merges_in_stmts(body, renames);
+                collect_dominant_copy_join_merges_in_stmts(body, var_types, renames);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_dominant_copy_join_merges_in_stmts(&case.body, renames);
+                    collect_dominant_copy_join_merges_in_stmts(&case.body, var_types, renames);
                 }
-                collect_dominant_copy_join_merges_in_stmts(default, renames);
+                collect_dominant_copy_join_merges_in_stmts(default, var_types, renames);
             }
             _ => {}
         }
@@ -973,7 +986,13 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     }
 
     let direct_copies = collect_direct_copies(&func.body);
-    let join_copy_merges = collect_dominant_copy_join_merges(&func.body);
+    let var_types: HashMap<String, NirType> = func
+        .locals
+        .iter()
+        .chain(func.params.iter())
+        .map(|b| (b.name.clone(), b.ty.clone()))
+        .collect();
+    let join_copy_merges = collect_dominant_copy_join_merges(&func.body, &var_types);
     let mut direct_copies = direct_copies;
     for (a, b) in join_copy_merges {
         direct_copies.insert((a.clone(), b.clone()));
@@ -2917,5 +2936,42 @@ mod tests {
             )),
             "the source value must remain available for the later parity read: {func:?}"
         );
+    }
+
+    #[test]
+    fn dominant_copy_join_merge_rejects_heterogeneous_types() {
+        let int_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(int_ty.clone()));
+        let mut var_types = HashMap::default();
+        var_types.insert("uVar1".to_string(), ptr_ty);
+        var_types.insert("uVar2".to_string(), int_ty.clone());
+
+        let stmts = vec![PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("uVar1".to_string()),
+                rhs: PreHirExpr::Var("src".to_string()),
+            }]
+            .into(),
+            else_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("uVar2".to_string()),
+                rhs: PreHirExpr::Var("src".to_string()),
+            }]
+            .into(),
+        }];
+
+        let merges = collect_dominant_copy_join_merges(&stmts, &var_types);
+        assert!(
+            merges.is_empty(),
+            "heterogeneous types should not be merged: {merges:?}"
+        );
+
+        // Now test homogeneous types
+        var_types.insert("uVar1".to_string(), int_ty);
+        let merges = collect_dominant_copy_join_merges(&stmts, &var_types);
+        assert_eq!(merges.len(), 1, "homogeneous types should be merged");
     }
 }
