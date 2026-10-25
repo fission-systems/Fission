@@ -64,7 +64,7 @@ fn merge_record(
 fn classify_function(
     f: &FunctionInfo,
     entry_point: u64,
-    _ext: Option<&ExternalSymbolIndex>,
+    ext: Option<&ExternalSymbolIndex>,
 ) -> FunctionProvenanceRecord {
     let mut evidence = Vec::new();
 
@@ -99,6 +99,33 @@ fn classify_function(
             confidence: Confidence::High,
             evidence,
         };
+    }
+
+    if let Some(ext) = ext {
+        if let Some(id) = ext.identity_for_va(f.address) {
+            evidence.push(format!("external_symbol_match={}", id.canonical_key()));
+            return FunctionProvenanceRecord {
+                address: f.address,
+                kind: FunctionProvenanceKind::ImportThunkOrStub,
+                confidence: Confidence::High,
+                evidence,
+            };
+        }
+        if let Some(target) = f.thunk_target {
+            if let Some(id) = ext.identity_for_va(target) {
+                evidence.push(format!(
+                    "thunk_target_external_match=0x{:x}:{}",
+                    target,
+                    id.canonical_key()
+                ));
+                return FunctionProvenanceRecord {
+                    address: f.address,
+                    kind: FunctionProvenanceKind::ImportThunkOrStub,
+                    confidence: Confidence::High,
+                    evidence,
+                };
+            }
+        }
     }
 
     if f.is_thunk_like && f.thunk_target.is_some() {
@@ -200,5 +227,40 @@ mod tests {
         let r = idx.records.get(&0x140001020).unwrap();
         assert_eq!(r.kind, FunctionProvenanceKind::Unknown);
         assert!(!r.exclude_from_default_batch_decompile());
+    }
+
+    #[test]
+    fn external_symbol_index_classifies_import_thunk_or_stub() {
+        let bin = LoadedBinaryBuilder::new("t.exe".to_string(), DataBuffer::Heap(vec![0u8; 32]))
+            .format("PE64")
+            .entry_point(0x140001000)
+            .image_base(0x140000000)
+            .add_function(FunctionInfo {
+                name: "stub".into(),
+                address: 0x140002000,
+                size: 16,
+                is_export: false,
+                is_import: false,
+                is_thunk_like: true,
+                thunk_target: Some(0x140003000),
+                ..Default::default()
+            })
+            .build()
+            .expect("build");
+        let mut ext = ExternalSymbolIndex::default();
+        crate::analysis::external_symbol::register_va(
+            &mut ext,
+            0x140003000,
+            crate::analysis::external_symbol::ExternalSymbolIdentity {
+                library_key: Some("kernel32.dll".to_string()),
+                symbol_key: "ExitProcess".to_string(),
+                ordinal: None,
+            },
+        );
+
+        let idx = build_function_provenance_index(&bin, Some(&ext));
+        let r = idx.records.get(&0x140002000).unwrap();
+        assert_eq!(r.kind, FunctionProvenanceKind::ImportThunkOrStub);
+        assert_eq!(r.confidence, Confidence::High);
     }
 }
