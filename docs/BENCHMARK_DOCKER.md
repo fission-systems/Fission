@@ -1,3 +1,7 @@
+> **Retired.** DecBench is the main benchmark; this docker multi-decompiler loop
+> is no longer used. See [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md). The text
+> below is kept for the history that older proposals link to.
+
 # Mandatory external benchmark loop (fission-benchmark)
 
 **Policy (2026-07-10):** Decompiler quality work that claims row-level or corpus
