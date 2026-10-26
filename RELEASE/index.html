@@ -1545,8 +1545,7 @@
 <h2 id="5-benchmark-corpus-optional-attachment">5. Benchmark corpus (optional attachment)<a class="headerlink" href="#5-benchmark-corpus-optional-attachment" title="Permanent link">&para;</a></h2>
 <p>If the release claims corpus-wide improvements:</p>
 <ul>
-<li>Capture <code>benchmark_compact_summary.json</code> (see <a href="../QUALITY_METRICS/"><code>docs/QUALITY_METRICS.md</code></a>) from a reproducible run directory under <code>benchmark/artifacts/full_benchmark/</code>.</li>
-<li>Reference the exact runner invocation from <a href="../benchmark/BENCHMARK_GUIDE.md"><code>benchmark/BENCHMARK_GUIDE.md</code></a>.</li>
+<li>Attach the DecBench local-gate <code>--dump</code> JSON, or same-row full-sweep before/after totals (<code>FISSION_BENCHMARK_NO_CACHE=1</code>), per <a href="../BENCHMARK_DECBENCH/"><code>docs/BENCHMARK_DECBENCH.md</code></a>.</li>
 </ul>
 <h2 id="6-experimental-flags">6. Experimental flags<a class="headerlink" href="#6-experimental-flags" title="Permanent link">&para;</a></h2>
 <p>Document any <strong>experimental</strong> CLI flags or environment variables that ship enabled-by-default or opt-in, with migration guidance.</p>

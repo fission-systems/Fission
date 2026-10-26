@@ -2049,31 +2049,7 @@
 <li><code>info</code>, <code>list</code>, and <code>decomp</code> work on at least one sample binary</li>
 <li>you have inspected one or two live outputs manually</li>
 </ul>
-<p>Canonical benchmark entrypoint:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>python3<span class="w"> </span>benchmark/full_benchmark/full_decomp_benchmark.py<span class="w"> </span>--help
-</span></code></pre></div>
-<p>One canonical corpus command:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>python3<span class="w"> </span>benchmark/full_benchmark/full_decomp_benchmark.py<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--corpus-manifest<span class="w"> </span>benchmark/config/benchmark_corpus/smoke_corpus.json<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span>--ghidra-dir<span class="w"> </span>/path/to/ghidra
-</span></code></pre></div>
-<p>What it compares:</p>
-<ul>
-<li>Fission whole-binary decompilation output</li>
-<li>Ghidra reference output</li>
-<li>similarity, coverage, owner metrics, and shape-drift proxies</li>
-</ul>
-<p>First artifact to read:</p>
-<ul>
-<li><code>benchmark_compact_summary.json</code></li>
-</ul>
-<p>Why this artifact first:</p>
-<ul>
-<li>it is the compact AI/operator-facing summary</li>
-<li>it is much smaller than the full benchmark summary</li>
-<li>it surfaces headline quality metrics, owner drift, shape drift, x86/x64 split, and promotion blockers without requiring a deep artifact dive</li>
-</ul>
-<p>For the full benchmark workflow, see <a href="../benchmark/full_benchmark/README.md">benchmark/full_benchmark/README.md</a>.</p>
+<p>Quality is measured with DecBench: a local sample-set gate for quick signal and a full-dataset sweep for any ranking or release claim. Commands, environment variables and rules are in <a href="../BENCHMARK_DECBENCH/"><code>BENCHMARK_DECBENCH.md</code></a>.</p>
 <h2 id="text-output-vs-json-output">Text Output vs JSON Output<a class="headerlink" href="#text-output-vs-json-output" title="Permanent link">&para;</a></h2>
 <p>Use plain text when:</p>
 <ul>
@@ -2099,7 +2075,7 @@
 <h3 id="does-the-canonical-path-depend-on-ghidras-decompiler-runtime">Does the canonical path depend on Ghidra's decompiler runtime?<a class="headerlink" href="#does-the-canonical-path-depend-on-ghidras-decompiler-runtime" title="Permanent link">&para;</a></h3>
 <p>No.</p>
 <p>The lift path is Sleigh-based, but the post-lift pipeline is Rust-native:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Sleigh spec -&gt; Fission lift to p-code -&gt; Rust-native NIR/HIR -&gt; structuring/rendering
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Sleigh spec -&gt; Fission lift to p-code -&gt; Rust-native NIR/HIR -&gt; structuring/rendering
 </span></code></pre></div>
 <h3 id="can-teams-use-it-as-a-library">Can teams use it as a library?<a class="headerlink" href="#can-teams-use-it-as-a-library" title="Permanent link">&para;</a></h3>
 <p>Yes, at the Rust crate level.</p>

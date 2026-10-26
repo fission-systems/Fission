@@ -624,41 +624,13 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#benchmark-runner-outputs" class="md-nav__link">
+  <a href="#benchmark-results" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Benchmark runner outputs
+        Benchmark results
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Benchmark runner outputs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#compact-corpus-compact_corpus_benchmark" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compact corpus (compact_corpus_benchmark)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#compact-single-benchmark-compact_single_benchmark" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compact single benchmark (compact_single_benchmark)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1326,41 +1298,13 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#benchmark-runner-outputs" class="md-nav__link">
+  <a href="#benchmark-results" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Benchmark runner outputs
+        Benchmark results
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Benchmark runner outputs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#compact-corpus-compact_corpus_benchmark" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compact corpus (compact_corpus_benchmark)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#compact-single-benchmark-compact_single_benchmark" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compact single benchmark (compact_single_benchmark)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1420,40 +1364,8 @@
 <h1 id="quality-metrics-and-trend-artifacts">Quality metrics and trend artifacts<a class="headerlink" href="#quality-metrics-and-trend-artifacts" title="Permanent link">&para;</a></h1>
 <p><strong>Last verified:</strong> 2026-05-02</p>
 <p>This note defines <strong>stable filenames and top-level JSON fields</strong> reviewers use when comparing <code>main</code> over time. It intentionally stays descriptive—<strong>no nightly automation is required yet</strong> (<a href="../RELEASE/"><code>docs/RELEASE.md</code></a> optional benchmark attachment).</p>
-<h2 id="benchmark-runner-outputs">Benchmark runner outputs<a class="headerlink" href="#benchmark-runner-outputs" title="Permanent link">&para;</a></h2>
-<p>Runs emitted under <code>benchmark/artifacts/full_benchmark/&lt;run-name&gt;/</code>.</p>
-<table>
-<thead>
-<tr>
-<th>File</th>
-<th>Role</th>
-<th>Stable identifiers</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>benchmark_summary.json</code></td>
-<td>Full verbose rollup used by regression tooling</td>
-<td>Referenced by corpus manifests / runner docs (<a href="../benchmark/BENCHMARK_GUIDE.md"><code>benchmark/BENCHMARK_GUIDE.md</code></a>)</td>
-</tr>
-<tr>
-<td><code>benchmark_compact_summary.json</code></td>
-<td>Operator-facing condensed summary (<code>compact_summary.py</code>)</td>
-<td>Top-level discriminator <code>summary_kind</code>: <code>compact_corpus_benchmark</code> <strong>or</strong> <code>compact_single_benchmark</code>; <code>compact_version</code> integer</td>
-</tr>
-</tbody>
-</table>
-<h3 id="compact-corpus-compact_corpus_benchmark">Compact corpus (<code>compact_corpus_benchmark</code>)<a class="headerlink" href="#compact-corpus-compact_corpus_benchmark" title="Permanent link">&para;</a></h3>
-<p>Authoritative schema documentation lives beside the harness (<code>benchmark/full_benchmark/grand_finale_support/artifact_models.py</code>). Trend-friendly scalars include:</p>
-<ul>
-<li>Gate posture: <code>weighted_avg_normalized_similarity</code>, <code>release_promotion_allowed</code>, <code>promotion_blockers</code></li>
-<li>Architecture buckets: <code>x86_summary</code>, <code>x64_summary</code> (<code>binary_count</code>, <code>weighted_avg_normalized_similarity</code>, <code>failed_binary_ids</code>, …)</li>
-<li>Rolled metrics: <code>owner_metric_totals</code>, <code>shape_drift_totals</code>, <code>normalize_pass_metric_totals</code>, <code>ghidra_action_metric_totals</code>, <code>blockgraph_collapse_metric_totals</code>, <code>blockgraph_region_metric_totals</code>, <code>alias_interleave_metric_totals</code>, <code>cpu_metric_totals</code></li>
-<li>Row sampling: <code>top_degraded_rows</code>, <code>per_binary_rows[]</code> (<code>direct_success</code>, <code>avg_normalized_similarity</code>, nested metric maps matching single-binary compact rows)</li>
-</ul>
-<p>Subset constants enumerating promoted keys appear in <a href="../benchmark/full_benchmark/grand_finale_support/compact_summary.py"><code>benchmark/full_benchmark/grand_finale_support/compact_summary.py</code></a> (<code>SELECTED_*</code> tuples).</p>
-<h3 id="compact-single-benchmark-compact_single_benchmark">Compact single benchmark (<code>compact_single_benchmark</code>)<a class="headerlink" href="#compact-single-benchmark-compact_single_benchmark" title="Permanent link">&para;</a></h3>
-<p>Shares nested metric dictionaries with corpus rows (<code>owner_metrics</code>, <code>shape_drift_metrics</code>, <code>normalize_pass_metrics</code>, …) and exposes comparison helpers (<code>both_success_rate_pct</code>, <code>top_regressions</code>, <code>baseline_blockers</code>).</p>
+<h2 id="benchmark-results">Benchmark results<a class="headerlink" href="#benchmark-results" title="Permanent link">&para;</a></h2>
+<p>Quality is measured with DecBench; see <a href="../BENCHMARK_DECBENCH/"><code>BENCHMARK_DECBENCH.md</code></a>. Cite the local gate's <code>--dump</code> JSON (one row per function: GED, source and output node counts) or full-sweep before/after totals. The former <code>benchmark/full_benchmark</code> runner and its <code>benchmark_summary.json</code> / <code>benchmark_compact_summary.json</code> outputs are retired.</p>
 <h2 id="nirbuildstats"><code>NirBuildStats</code><a class="headerlink" href="#nirbuildstats" title="Permanent link">&para;</a></h2>
 <p>Counters cover timing (<code>build_duration_ms</code>, <code>normalize_duration_ms</code>, …), pcode validation (<code>invalid_pcode_shape_count</code>, …), Ghidra-parity stage mirrors (<code>ghidra_action_*</code>), BlockGraph collapse admission (<code>blockgraph_collapse_*</code>), structuring outcomes (<code>structuring_*</code>, <code>region_linearize_*</code>, …). <strong>Extend counters only in <code>nir/ir/build_stats.rs</code></strong>—never fork a parallel telemetry struct.</p>
 <h2 id="loader-identity-binaryidentityreport">Loader identity (<code>BinaryIdentityReport</code>)<a class="headerlink" href="#loader-identity-binaryidentityreport" title="Permanent link">&para;</a></h2>
