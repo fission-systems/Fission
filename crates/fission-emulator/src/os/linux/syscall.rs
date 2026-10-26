@@ -806,8 +806,14 @@ impl SimProcedure for SysIoctl {
         const TCSETS: u64 = 0x5402;
         const TCSETSW: u64 = 0x5403;
         const TCSETSF: u64 = 0x5404;
+        const TIOCGPGRP: u64 = 0x540f;
+        const TIOCSPGRP: u64 = 0x5410;
+        const TIOCSWINSZ: u64 = 0x5414;
 
-        if matches!(cmd, TCGETS | TIOCGWINSZ | TCSETS | TCSETSW | TCSETSF) {
+        if matches!(
+            cmd,
+            TCGETS | TIOCGWINSZ | TCSETS | TCSETSW | TCSETSF | TIOCGPGRP | TIOCSPGRP | TIOCSWINSZ
+        ) {
             emu.set_syscall_return((-25i64) as u64)?; // -ENOTTY
             return Ok(HleResult::Continue);
         }
@@ -888,7 +894,7 @@ impl SimProcedure for SysPrlimit64 {
         let _new_limit = emu.syscall_arg(2);
         let old_limit = emu.syscall_arg(3);
 
-        if pid != 0 && pid != -1 && pid != 1000 && pid != emu.current_tid as i32 {
+        if pid != 0 && pid != 1000 && pid != emu.current_tid as i32 {
             emu.set_syscall_return((-3i64) as u64)?; // -ESRCH
             return Ok(HleResult::Continue);
         }

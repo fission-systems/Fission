@@ -920,6 +920,32 @@ mod tests {
     }
 
     #[test]
+    fn ioctl_terminal_group_and_size_setters_return_enotty() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        for command in [0x540f, 0x5410, 0x5414] {
+            dispatch_syscall(&env, &mut emu, 16, [1, command, 0x1000, 0, 0, 0]);
+            assert_eq!(read_syscall_result(&mut emu), -25, "command={command:#x}");
+        }
+    }
+
+    #[test]
+    fn prlimit64_negative_pid_is_not_a_self_alias() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let sentinel = [0xa5; 16];
+        let old_limit = guest_bytes(&mut emu, &sentinel);
+        dispatch_syscall(&env, &mut emu, 302, [u64::MAX, 3, 0, old_limit, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -3);
+        assert_eq!(
+            emu.state
+                .read_space(emu.state.ram_space(), old_limit, 16)
+                .unwrap(),
+            sentinel
+        );
+    }
+
+    #[test]
     fn unsupported_process_creation_syscalls_return_enosys() {
         let env = LinuxEnv::new();
         let mut emu = emulator();
