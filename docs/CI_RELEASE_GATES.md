@@ -170,8 +170,8 @@ not satisfy the release gate.
   default gate. Prefer fixing heavy or using a documented exception in release
   notes only after an explicit ops decision (temporary workflow input may be
   added later; default remains full gates).
-- **Local docker benchmark** remains a quality-loop tool; never promotes to
-  official latest (see [`docs/BENCHMARK_DOCKER.md`](BENCHMARK_DOCKER.md)).
+- **Local DecBench runs** are the quality-loop tool; they never promote to an
+  official ranking (see [`docs/BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md)).
 
 ## Resource bundle (`utils/`) assets
 

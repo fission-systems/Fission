@@ -11,8 +11,8 @@ full docker ranking harness:
   3. ``show``      — print source (optional) + before + after + metric deltas
 
 This is **local observation only**. It is not the official ranking oracle and
-must not be promoted to dashboard / Pages. Full semantic claims still need the
-external fission-benchmark path (see docs/BENCHMARK_DOCKER.md).
+must not be promoted to dashboard / Pages. Full semantic claims still need
+DecBench (see docs/BENCHMARK_DECBENCH.md).
 
 Examples
 --------
