@@ -104,7 +104,7 @@ fn test_parse_aarch64_token_definition() {
         subtable_executables: BTreeMap::new(),
         pcode_ops: BTreeSet::new(),
         pcode_op_sources: BTreeMap::new(),
-        default_context: 0,
+        default_context: crate::packed_context::ContextWords::ZERO,
         pattern_nodes: Vec::new(),
         field_info: BTreeMap::new(),
     };

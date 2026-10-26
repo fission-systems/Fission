@@ -131,11 +131,7 @@ fn merge_context_overrides(
     base: PackedContextOverride,
     pending: PackedContextOverride,
 ) -> PackedContextOverride {
-    let pending_mask = pending.mask_bits();
-    PackedContextOverride::new(
-        (base.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
-        base.mask_bits() | pending_mask,
-    )
+    base.merge_override(pending)
 }
 
 impl SerializableVarnode {

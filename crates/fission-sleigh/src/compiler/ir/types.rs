@@ -22,8 +22,8 @@ pub struct CompiledSubtableDefinition {
 )]
 pub struct CompiledFrontend {
     pub arch: String,
-    pub default_context: u64,
-    pub default_context_known_mask: u64,
+    pub default_context: crate::packed_context::ContextWords,
+    pub default_context_known_mask: crate::packed_context::ContextWords,
     pub entry_spec: String,
     pub entry_id: String,
     pub include_manifest: Vec<String>,
@@ -1047,8 +1047,8 @@ mod tests {
     fn minimal_frontend_with_spaces(spaces: BTreeMap<u64, CompiledSpaceRef>) -> CompiledFrontend {
         CompiledFrontend {
             arch: "test".to_string(),
-            default_context: 0,
-            default_context_known_mask: 0,
+            default_context: Default::default(),
+            default_context_known_mask: Default::default(),
             entry_spec: "test.slaspec".to_string(),
             entry_id: "test".to_string(),
             include_manifest: Vec::new(),

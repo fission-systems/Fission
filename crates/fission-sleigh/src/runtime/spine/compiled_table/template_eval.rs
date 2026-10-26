@@ -112,8 +112,8 @@ pub struct FlowEmitOptions {
     /// Ghidra `PcodeEmit` fallOffset: decoded instruction length used for `inst_next`.
     pub instruction_length: Option<u64>,
     /// Context register bits when binding cross-build / delay-slot instructions at another PC.
-    pub instruction_context_register: u64,
-    pub instruction_context_known_mask: u64,
+    pub instruction_context_register: crate::packed_context::ContextWords,
+    pub instruction_context_known_mask: crate::packed_context::ContextWords,
     /// When set, Ghidra-style `ConstTpl` flowref / flowdest constants resolve from these.
     pub flow_ref_addr: Option<u64>,
     pub flow_ref_space_index: Option<u64>,
@@ -1726,8 +1726,8 @@ mod tests {
     ) -> CompiledFrontend {
         CompiledFrontend {
             arch: "test".to_string(),
-            default_context: 0,
-            default_context_known_mask: 0,
+            default_context: Default::default(),
+            default_context_known_mask: Default::default(),
             entry_spec: "test.slaspec".to_string(),
             entry_id: "test".to_string(),
             include_manifest: Vec::new(),
@@ -1788,8 +1788,8 @@ mod tests {
             handles: Vec::new(),
             exported_handle: None,
             operands: Vec::new(),
-            context_register: 0,
-            context_known_mask: 0,
+            context_register: Default::default(),
+            context_known_mask: Default::default(),
             absolute_offset: 0,
             relative_length: 0,
             length: 0,

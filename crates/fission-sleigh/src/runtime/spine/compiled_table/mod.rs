@@ -58,7 +58,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    static BIND_CACHE: RefCell<HashMap<(u64, u64, u64), Result<RuntimeConstructState, String>>> = RefCell::new(HashMap::new());
+    static BIND_CACHE: RefCell<HashMap<(u64, ContextWords, ContextWords), Result<RuntimeConstructState, String>>> = RefCell::new(HashMap::new());
 }
 
 pub(crate) fn clear_bind_cache() {
@@ -549,8 +549,8 @@ pub(super) fn try_bind_runtime_state_at(
     memory_window: &[u8],
     memory_base: u64,
     target_address: u64,
-    context_register: u64,
-    context_known_mask: u64,
+    context_register: ContextWords,
+    context_known_mask: ContextWords,
 ) -> Result<RuntimeConstructState> {
     let key = (target_address, context_register, context_known_mask);
     if let Some(cached) = BIND_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
@@ -649,7 +649,7 @@ pub(crate) fn apply_context_commits(
     compiled: &CompiledFrontend,
     decoded: &RuntimeConstructState,
     instruction_address: u64,
-    current_context: u64,
+    current_context: ContextWords,
 ) -> Result<Vec<ResolvedContextCommit>> {
     let mut results = Vec::new();
     for commit in &decoded.context_commits {
@@ -702,8 +702,8 @@ pub(crate) fn apply_context_commits(
 /// Applies resolved context commits to a mutable context register.
 /// Called before decoding an instruction at `address` to override context.
 pub(crate) fn apply_pending_commits_to_context(
-    context_register: &mut u64,
-    context_known_mask: &mut u64,
+    context_register: &mut ContextWords,
+    context_known_mask: &mut ContextWords,
     address: u64,
     pending: &[(u64, u32, u32, u32)],
 ) -> Result<()> {
