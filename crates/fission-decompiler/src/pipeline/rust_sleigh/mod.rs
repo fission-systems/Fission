@@ -14,11 +14,8 @@ use fission_static::analysis::decomp::facts::FactStore;
 
 #[derive(Debug, Clone)]
 pub struct RustSleighDecompileResult {
-    /// Primary code (NIR-faithful by default for oracle / backward compat).
+    /// The single output surface: the structured tree after HIR presentation.
     pub code: String,
-    /// Dual-layer surfaces when available (same IR build).
-    pub code_nir: Option<String>,
-    pub code_hir: Option<String>,
     /// Typed artifacts from the same in-process NIR render. This is the
     /// canonical source for snapshots and recovered variables; compatibility
     /// TLS accessors remain available for older callers only.

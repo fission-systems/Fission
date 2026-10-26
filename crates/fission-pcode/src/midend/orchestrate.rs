@@ -10,12 +10,11 @@
 //! This module must not re-implement owner logic; it only sequences stages.
 
 use super::{
-    DecompFacts, GhidraActionConcept, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
-    NirRenderOptions, NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewHintStats,
-    PreviewTypeContext, apply_pre_hir_debug_array_hints, apply_preview_type_hints_with_stack_bias,
+    DecompFacts, GhidraActionConcept, MlilPreviewError, MlilPreviewOptions, NirRenderOptions,
+    NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewHintStats, PreviewTypeContext,
+    apply_pre_hir_debug_array_hints, apply_preview_type_hints_with_stack_bias,
     discover_guarded_tail_candidates_for_stats, record_ghidra_action_stage,
-    record_ghidra_clean_room_pipeline_complete, recover_global_symbol_accesses,
-    render_layered_pseudocode, structuring,
+    record_ghidra_clean_room_pipeline_complete, recover_global_symbol_accesses, structuring,
 };
 use crate::pcode::PcodeFunction;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -26,6 +25,44 @@ use fission_midend_normalize::{
     normalize_hir_function_with_context_and_facts, take_normalize_wave_stats,
 };
 use std::time::Instant;
+
+#[cfg(test)]
+thread_local! {
+    /// The mechanical (un-presented) print of the last render on this thread.
+    /// The pipeline emits one surface; tests of builder/structuring shape need
+    /// the form before presentation, so it is recorded here rather than added
+    /// to the public result.
+    static MECHANICAL_PRINT: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only: render `pcode` and return the mechanical print of the structured
+/// tree, before HIR presentation.
+#[cfg(test)]
+pub(crate) fn render_mechanical_preview(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+) -> Result<String, MlilPreviewError> {
+    render_mechanical_preview_with_context(pcode, name, address, options, None)
+}
+
+/// As [`render_mechanical_preview`], with a type context.
+#[cfg(test)]
+pub(crate) fn render_mechanical_preview_with_context(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+) -> Result<String, MlilPreviewError> {
+    MECHANICAL_PRINT.with(|slot| *slot.borrow_mut() = None);
+    render_mlil_preview_with_context(pcode, name, address, options, type_context)?;
+    Ok(MECHANICAL_PRINT
+        .with(|slot| slot.borrow_mut().take())
+        .expect("a successful render records its mechanical print"))
+}
 
 pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     super::builder::test_refine_partitions(accesses)
@@ -40,7 +77,8 @@ pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NirDecompileOutput {
     pub code: String,
-    pub layered: Option<LayeredPseudocode>,
+    /// Provenance for the lines of `code`.
+    pub line_mappings: Vec<crate::render::RecoveredLineMapping>,
     pub raw_hir: Option<super::PreHirFunction>,
     pub prehir: Option<super::PreHirFunction>,
     pub hir_function: Option<super::HirFunction>,
@@ -101,9 +139,6 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
-    if options.dual_layer_structuring {
-        return render_mlil_preview_dual_layer(pcode, name, address, options, None, type_context);
-    }
     render_mlil_preview_with_binary_and_context(
         pcode,
         name,
@@ -113,124 +148,6 @@ pub fn render_mlil_preview_with_context(
         type_context,
         None,
     )
-}
-
-/// Build each layer from its own structuring, then stitch them.
-///
-/// The two layers want different things from a structuring and the
-/// difference is not cosmetic: `SelectionAxis::NodeEstimate` keeps a jump
-/// when removing it would cost more CFG nodes than it saves, and
-/// `fission_midend_core::ir::SelectionAxis::Jumps` never does. Sharing one tree meant one of them was
-/// always getting the other's answer.
-///
-/// This runs the pipeline twice, so it is behind
-/// `NirRenderOptions::dual_layer_structuring` and off by default. The layer
-/// DecBench scores already receives the accuracy objective through
-/// `selection_axis`; what the second run adds is the *readable* variant, for
-/// a person rather than for the metric.
-///
-/// Returns the accuracy surface, which is what every existing caller of
-/// `render_mlil_preview_with_binary_and_context` expects back.
-pub fn render_mlil_preview_dual_layer(
-    pcode: &PcodeFunction,
-    name: &str,
-    address: u64,
-    options: &MlilPreviewOptions,
-    binary: Option<&LoadedBinary>,
-    type_context: Option<&PreviewTypeContext>,
-) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_dual_layer_output(pcode, name, address, options, binary, type_context, None)
-        .map(|output| output.code)
-}
-
-fn render_mlil_preview_dual_layer_output(
-    pcode: &PcodeFunction,
-    name: &str,
-    address: u64,
-    options: &MlilPreviewOptions,
-    binary: Option<&LoadedBinary>,
-    type_context: Option<&PreviewTypeContext>,
-    mut decomp_facts: Option<&mut dyn DecompFacts>,
-) -> Result<NirDecompileOutput, MlilPreviewError> {
-    let mut scored_options = options.clone();
-    scored_options.dual_layer_structuring = false;
-    let scored = render_mlil_preview_with_binary_and_context_output(
-        pcode,
-        name,
-        address,
-        &scored_options,
-        binary,
-        type_context,
-        reborrow_decomp_facts(&mut decomp_facts),
-    )?;
-    if !options.dual_layer_structuring
-        || options.selection_axis == fission_midend_core::ir::SelectionAxis::Jumps
-    {
-        return Ok(scored);
-    }
-    let Some(scored_layers) = scored.layered.clone() else {
-        return Ok(scored);
-    };
-    let mut readable_options = options.clone();
-    readable_options.dual_layer_structuring = false;
-    readable_options.selection_axis = fission_midend_core::ir::SelectionAxis::Jumps;
-    // A failure here is not a failure of the decompilation -- the scored
-    // surface is already built. Fall back to sharing its tree, which is what
-    // every caller got before this existed.
-    let readable = render_mlil_preview_with_binary_and_context_output(
-        pcode,
-        name,
-        address,
-        &readable_options,
-        binary,
-        type_context,
-        reborrow_decomp_facts(&mut decomp_facts),
-    );
-    let (hir, hir_mappings) = match readable {
-        Ok(readable_output) => {
-            let hir = readable_output
-                .layered
-                .as_ref()
-                .map(|layers| layers.hir.clone())
-                .unwrap_or_else(|| scored_layers.hir.clone());
-            let hir_mappings = readable_output
-                .layered
-                .as_ref()
-                .map(|layers| layers.hir_line_mappings.clone())
-                .unwrap_or_default();
-            (hir, hir_mappings)
-        }
-        Err(_) => (
-            scored_layers.hir.clone(),
-            scored_layers.hir_line_mappings.clone(),
-        ),
-    };
-    // Both surfaces are presented. The two modes differ in *structuring* --
-    // which is the difference that exists -- not in whether they went
-    // through the presentation pass. NIR remains the scored tree's
-    // semantic-faithful print, while HIR comes from the jump-minimizing tree
-    // and is allowed to optimize for readability.
-    let mut layered = stitch_dual_layers(&scored_layers, hir);
-    layered.hir_line_mappings = hir_mappings;
-    let mut output = scored;
-    output.layered = Some(layered);
-    Ok(output)
-}
-
-fn stitch_dual_layers(
-    scored_layers: &LayeredPseudocode,
-    readable_hir: String,
-) -> LayeredPseudocode {
-    // Keep the scored tree's actual NIR print here. The HIR print is a
-    // presentation surface and may elide casts or other syntax; placing it
-    // in `nir` silently changes the semantic oracle exposed through `code_nir`
-    // even though `scored.code` still came from NIR.
-    LayeredPseudocode {
-        nir: scored_layers.nir.clone(),
-        nir_line_mappings: scored_layers.nir_line_mappings.clone(),
-        hir_line_mappings: Vec::new(),
-        hir: readable_hir,
-    }
 }
 
 fn reborrow_decomp_facts<'borrow, 'facts>(
@@ -285,22 +202,6 @@ fn render_mlil_preview_with_binary_and_context_output(
         effective_options.function_type_aliases = type_context.function_type_aliases.clone();
     }
     let options = &effective_options;
-    // Two output modes, two structurings. Handled here rather than in a
-    // wrapper because the pipeline calls this entry point directly. Legacy
-    // string-returning wrappers install their observation compatibility state
-    // before entering here; typed callers receive all successful observations
-    // in the returned value and do not mutate that state.
-    if options.dual_layer_structuring {
-        return render_mlil_preview_dual_layer_output(
-            pcode,
-            name,
-            address,
-            options,
-            binary,
-            type_context,
-            decomp_facts,
-        );
-    }
     let debug = RenderDebugFlags::from_env();
     let debug_log = |stage: &str| {
         if debug.preview_debug {
@@ -605,16 +506,21 @@ fn render_mlil_preview_with_binary_and_context_output(
     }
     debug_log("print_start");
     let print_start = Instant::now();
-    // Always build dual NIR/HIR surfaces from one structured tree. Callers that
-    // only need a single string use `LayeredPseudocode::primary` / legacy
-    // `render_nir` which returns the NIR-faithful surface for oracle compat.
+    // One surface: the structured tree after HIR presentation. `render_nir`
+    // and the other string-returning entry points return it too.
     let definitions = builder
         .recovered_single_definition_addresses()
         .into_iter()
         .collect();
-    let layered =
-        crate::render::render_layered_pseudocode_with_provenance(&hir, options, &definitions);
-    let rendered = layered.nir.clone();
+    let (rendered, line_mappings) =
+        crate::render::render_pseudocode_with_provenance(&hir, options, &definitions);
+    #[cfg(test)]
+    MECHANICAL_PRINT.with(|slot| {
+        *slot.borrow_mut() = Some(
+            crate::render::render_layered_pseudocode_with_provenance(&hir, options, &definitions)
+                .nir,
+        );
+    });
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrintC);
     record_ghidra_clean_room_pipeline_complete(&mut build_stats);
     build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
@@ -631,7 +537,7 @@ fn render_mlil_preview_with_binary_and_context_output(
     debug_log("print_done");
     Ok(NirDecompileOutput {
         code: rendered,
-        layered: Some(layered),
+        line_mappings,
         raw_hir: Some(raw_hir),
         prehir: Some(prehir),
         hir_function: Some(hir_function),
@@ -771,20 +677,6 @@ mod tests {
         assert!(is_unknown_arity_thunk(&hidden_thunk));
         assert!(!is_unknown_arity_thunk(&export_thunk));
         assert!(!is_unknown_arity_thunk(&FunctionInfo::default()));
-    }
-
-    #[test]
-    fn dual_layer_stitch_preserves_scored_nir_surface() {
-        let scored = LayeredPseudocode {
-            nir: "(unsigned long long)(uint)lane".into(),
-            hir: "lane".into(),
-            ..Default::default()
-        };
-
-        let layered = stitch_dual_layers(&scored, "readable lane".into());
-
-        assert_eq!(layered.nir, scored.nir);
-        assert_eq!(layered.hir, "readable lane");
     }
 
     #[test]

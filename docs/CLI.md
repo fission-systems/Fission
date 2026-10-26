@@ -1049,8 +1049,8 @@ If you change compatibility behavior, also verify at least one legacy flat invoc
 
 ## Decompilation line provenance
 
-JSON decompilation includes additive `line_mappings_nir`, `line_mappings_hir`,
-and `line_mappings` (the selected layer). Each row contains 1-based physical
+JSON decompilation includes `line_mappings`, the map for the single output
+surface (`code`). Each row contains 1-based physical
 `line_number`, native instruction `addresses`, and `defined_variables`.
 `line_mapping_source` is `fission_ssa_assignment_definition`.
 
@@ -1059,6 +1059,10 @@ binding at an actual printed assignment/initializer. They are not complete
 provenance of every RHS variable, call, load, predicate, or effect on that line.
 Input/phi values, cloned/ambiguous sites, partial accesses, repeated definitions,
 and unproved lines remain unmapped. Consumers must honor `defined_variables`
-and prefer direct variable `addresses` when available. NIR and HIR maps are
-computed separately; CLI header/warning deletion remaps physical lines and
-abstains on ambiguous repeated text. No code or effect transformation is added.
+and prefer direct variable `addresses` when available. CLI header/warning
+deletion remaps physical lines and abstains on ambiguous repeated text. No code or effect transformation is added.
+
+`--layer` and the `code_nir`, `code_hir`, `layer`, `line_mappings_nir` and
+`line_mappings_hir` JSON fields were removed with the NIR/HIR split
+([ADR 0015](adr/0015-single-output-surface.md)); `--layer` is still accepted
+and ignored.

@@ -354,5 +354,6 @@ Regression-prevention workflow:
 - `.github/workflows/release-tag.yml`
 
 ## NIR vs HIR Policy
-1. **NIR (Normalized Intermediate Representation)**: Must be 100% semantically identical to the source. Correctness and semantic parity are the absolute highest priorities. Primary semantic oracle / default benchmark `code`.
-2. **HIR (High-level Intermediate Representation)**: Acts as human-readable pseudocode. It does NOT need mechanical 1:1 NIR text form, and can prioritize readability and C-friendly structures — but only under the presentation contract: same evaluation count/order for effects, clone-only polish, no oracle swap. See [`docs/adr/0011-hir-presentation-contract.md`](docs/adr/0011-hir-presentation-contract.md) and `crates/fission-pcode/src/render/AGENTS.md`.
+There is one output surface ([`docs/adr/0015-single-output-surface.md`](docs/adr/0015-single-output-surface.md)).
+1. **NIR (Normalized Intermediate Representation)**: the internal representation. Must be 100% semantically identical to the source; owns semantics and the structuring choice (selected on `SelectionAxis::NodeEstimate`). It is no longer a printed surface.
+2. **HIR (High-level Intermediate Representation)**: the tree after presentation, and the only output (`code`). It may prioritize readability and C-friendly structure, but only under the presentation contract: same evaluation count/order for effects, clone-only polish, structural firewall. See [`docs/adr/0011-hir-presentation-contract.md`](docs/adr/0011-hir-presentation-contract.md) and `crates/fission-pcode/src/render/AGENTS.md`. Because this text is what gets scored, report total distance next to the perfect count when making quality claims.

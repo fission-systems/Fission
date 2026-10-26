@@ -11,7 +11,7 @@
 //!        ├── layer        dual-surface contracts
 //!        ├── printer      C print (Nir / Hir profiles)
 //!        ├── presentation HIR-only tree polish
-//!        └── pipeline     layered render orchestration
+//!        └── pipeline     single-surface render orchestration
 //! ```
 
 // Structured-IR and option types used by printer / presentation submodules.
@@ -57,12 +57,11 @@ mod presentation;
 mod printer;
 mod variables;
 
-pub use layer::{LayeredPseudocode, PrintProfile, PseudocodeLayer, RecoveredLineMapping};
+pub use layer::{PrintProfile, RecoveredLineMapping};
 
-pub(crate) use pipeline::{
-    recover_global_symbol_accesses, render_hir_function_with_global_decls,
-    render_layered_pseudocode,
-};
+#[cfg(test)]
+pub(crate) use pipeline::render_layered_pseudocode;
+pub(crate) use pipeline::{recover_global_symbol_accesses, render_hir_function_with_global_decls};
 pub(crate) use presentation::apply_hir_presentation;
 pub use printer::render_contracted_wrapper_summary;
 pub(crate) use printer::{
@@ -74,4 +73,6 @@ pub use variables::{
     RecoveredTypeField, RecoveredTypeShape, RecoveredVariable, recovered_variables,
 };
 
+#[cfg(test)]
 pub(crate) use layered::render_layered_pseudocode_with_provenance;
+pub(crate) use layered::render_pseudocode_with_provenance;

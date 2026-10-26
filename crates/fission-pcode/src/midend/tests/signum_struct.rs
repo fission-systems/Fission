@@ -213,7 +213,8 @@ fn preview_signum_diamond_returns_one_for_positive() {
     options.pe_x64_only = false;
     options.is_64bit = false;
     options.pointer_size = 4;
-    let code = render_mlil_preview(&func, "signum_like", 0x1000, &options).expect("render");
+    let code = crate::midend::render_mechanical_preview(&func, "signum_like", 0x1000, &options)
+        .expect("render");
     eprintln!("signum_like:\n{code}");
     assert!(
         code.contains("return 1") || code.contains("return 1;"),

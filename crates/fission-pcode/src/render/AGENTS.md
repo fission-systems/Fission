@@ -12,25 +12,25 @@ Canonical policy:
 ```text
 render/
 ├── mod.rs           # owner surface + type bridge from nir
-├── layer.rs         # PseudocodeLayer, PrintProfile, LayeredPseudocode
+├── layer.rs         # PrintProfile, RecoveredLineMapping (LayeredPseudocode is test-only)
 ├── printer.rs       # C print (shared walk; profile sugar)
 ├── presentation/    # HIR-only tree polish (apply_hir_presentation)
 │   └── mod.rs
-├── layered.rs       # dual-layer print + global/aggregate decls
+├── layered.rs       # final-surface print + global/aggregate decls
 ├── globals.rs       # pre-print global symbol access recovery
 └── pipeline.rs      # thin facade re-exporting layered + globals
 ```
 
 | Path | Role |
 |------|------|
-| `layer` | Dual-surface contracts |
-| `printer` | NIR/HIR text emission |
+| `layer` | Print profiles + line-mapping type |
+| `printer` | C text emission (`PrintProfile::Nir` is the mechanical print used by tests; `Hir` is the output) |
 | `presentation` | Readability-only tree polish before HIR print |
-| `layered` | `render_layered_pseudocode` + print-time decls/stubs |
+| `layered` | `render_pseudocode_with_provenance` (the one output surface) + print-time decls/stubs |
 | `globals` | `recover_global_symbol_accesses` (address→name rewrites) |
 | `pipeline` | Facade only — prefer importing from `crate::render` |
 
-**Do not rename this module to `hir`.** It owns both NIR and HIR print surfaces.
+**Do not rename this module to `hir`.** It owns both print profiles; only the HIR one is an output (ADR 0015).
 
 ## Dependency direction
 
@@ -50,15 +50,16 @@ nir (types / builder / normalize / structuring / labels)
 
 ## Rules (do)
 
-1. Clone before presentation polish; never polish the tree used for NIR print.
+1. Clone before presentation polish; never polish the caller's tree.
 2. Keep semantic recovery in normalize/structuring.
 3. Structural invariants only (def counts, purity, goto/label shape, truthiness).
 4. Preserve single evaluation of calls/loads.
 5. Focused tests under `presentation` / `layered` / `globals` for every new transform.
 6. **Measurement-only quality claims** (repo root `Agents.md` Core Rule 10): new presentation folds that claim readability improvement need a **measured** real-binary/row baseline and remeasure — not synthetic IR alone. Fixture tests may land mechanical coverage; they do not prove quality.
-7. Real-binary verification with `fission_cli decomp --layer both` and/or fission-benchmark when the change is a quality claim.
+7. Real-binary verification with `fission_cli decomp` and/or fission-benchmark when the change is a quality claim. There is one surface, so report total distance next to the perfect count.
 8. Dead pure-assign elim must use **whole-function** use counts (never subtree-local).
 9. Rely on `presentation/invariants.rs` post-pass firewall; on violation polish is rolled back.
+10. Tests that pin builder/structuring *shape* use `crate::midend::render_mechanical_preview` (the print before presentation); tests of the output surface use `render_mlil_preview`.
 
 ## Rules (don’t)
 

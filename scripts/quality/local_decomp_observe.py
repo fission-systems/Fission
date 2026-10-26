@@ -162,7 +162,6 @@ def run_decomp(
     binary: Path,
     addr: str,
     *,
-    layer: str = "both",
     timeout_s: float = 120.0,
 ) -> dict[str, Any]:
     cmd = [
@@ -171,8 +170,6 @@ def run_decomp(
         str(binary),
         "--addr",
         addr,
-        "--layer",
-        layer,
         "--json",
         "--no-header",
     ]
@@ -257,13 +254,9 @@ def capture_from_row(
     source_path: str | None,
     note: str | None,
 ) -> dict[str, Any]:
-    nir = row.get("code_nir") or (row.get("code") if row.get("layer") in (None, "nir", "both") else None)
-    hir = row.get("code_hir")
-    if not nir and row.get("code") and row.get("layer") == "hir":
-        hir = row.get("code")
-    if not nir and not hir:
-        # Fall back to single code field.
-        nir = row.get("code")
+    # One output surface. It is stored under the `hir` names so sessions
+    # captured before the NIR/HIR split was removed stay comparable.
+    hir = row.get("code")
     capture = {
         "role": role,
         "captured_at": utc_now(),
@@ -275,14 +268,11 @@ def capture_from_row(
         "addr": addr or row.get("address"),
         "function_name": row.get("name"),
         "engine_used": row.get("engine_used"),
-        "layer": row.get("layer"),
         "note": note,
         "source_path": source_path,
         "source": source_text,
-        "code_nir": nir,
         "code_hir": hir,
         "code": row.get("code"),
-        "metrics_nir": code_metrics(nir if isinstance(nir, str) else None),
         "metrics_hir": code_metrics(hir if isinstance(hir, str) else None),
         "preview_build_stats": row.get("preview_build_stats"),
         "raw_keys": sorted(row.keys()),
@@ -294,8 +284,6 @@ def write_capture_dir(session_dir: Path, role: str, capture: dict[str, Any]) -> 
     role_dir = session_dir / role
     role_dir.mkdir(parents=True, exist_ok=True)
     write_json(role_dir / "capture.json", capture)
-    if capture.get("code_nir"):
-        (role_dir / "nir.c").write_text(str(capture["code_nir"]), encoding="utf-8")
     if capture.get("code_hir"):
         (role_dir / "hir.c").write_text(str(capture["code_hir"]), encoding="utf-8")
     if capture.get("source"):
@@ -351,13 +339,9 @@ def build_report(session_dir: Path) -> dict[str, Any]:
         "binary": after.get("binary") or before.get("binary"),
         "before_git": before.get("git_short"),
         "after_git": after.get("git_short"),
-        "metrics_nir_delta": metric_delta(
-            before.get("metrics_nir") or {}, after.get("metrics_nir") or {}
-        ),
         "metrics_hir_delta": metric_delta(
             before.get("metrics_hir") or {}, after.get("metrics_hir") or {}
         ),
-        "nir_changed": (before.get("code_nir") or "") != (after.get("code_nir") or ""),
         "hir_changed": (before.get("code_hir") or "") != (after.get("code_hir") or ""),
         "source": before.get("source") or after.get("source"),
         "source_path": before.get("source_path") or after.get("source_path"),
@@ -365,10 +349,6 @@ def build_report(session_dir: Path) -> dict[str, Any]:
     write_json(session_dir / "report.json", report)
     md = render_markdown(before, after, report)
     (session_dir / "report.md").write_text(md, encoding="utf-8")
-    (session_dir / "diff_nir.patch").write_text(
-        unified_diff(before.get("code_nir"), after.get("code_nir"), "nir.c"),
-        encoding="utf-8",
-    )
     (session_dir / "diff_hir.patch").write_text(
         unified_diff(before.get("code_hir"), after.get("code_hir"), "hir.c"),
         encoding="utf-8",
@@ -429,44 +409,24 @@ def render_markdown(
     parts += [
         "## 2. Before (baseline)",
         "",
-        "### NIR",
-        "",
         "```c",
-        str(before.get("code_nir") or before.get("code") or "").rstrip(),
-        "```",
-        "",
-        "### HIR",
-        "",
-        "```c",
-        str(before.get("code_hir") or "").rstrip() or "_(none)_",
+        str(before.get("code_hir") or before.get("code") or "").rstrip() or "_(none)_",
         "```",
         "",
         "## 3. After (remeasure)",
         "",
-        "### NIR",
-        "",
         "```c",
-        str(after.get("code_nir") or after.get("code") or "").rstrip(),
+        str(after.get("code_hir") or after.get("code") or "").rstrip() or "_(none)_",
         "```",
         "",
-        "### HIR",
-        "",
-        "```c",
-        str(after.get("code_hir") or "").rstrip() or "_(none)_",
-        "```",
-        "",
-        "## Metrics (NIR)",
-        "",
-        fmt_metrics(report.get("metrics_nir_delta") or {}, interesting),
-        "",
-        "## Metrics (HIR)",
+        "## Metrics",
         "",
         fmt_metrics(report.get("metrics_hir_delta") or {}, interesting),
         "",
-        "## Diff (NIR)",
+        "## Diff",
         "",
         "```diff",
-        unified_diff(before.get("code_nir"), after.get("code_nir"), "nir.c").rstrip()
+        unified_diff(before.get("code_hir"), after.get("code_hir"), "hir.c").rstrip()
         or "(no change)",
         "```",
         "",
@@ -511,7 +471,7 @@ def cmd_baseline(args: argparse.Namespace) -> int:
         else:
             source_text = Path(args.source).read_text(encoding="utf-8", errors="replace")
 
-    row = run_decomp(cli, binary, addr, layer=args.layer, timeout_s=args.timeout)
+    row = run_decomp(cli, binary, addr, timeout_s=args.timeout)
     capture = capture_from_row(
         row,
         role="before",
@@ -530,14 +490,13 @@ def cmd_baseline(args: argparse.Namespace) -> int:
         "addr": addr,
         "created_at": utc_now(),
         "cli": str(cli),
-        "layer": args.layer,
         "source_path": source_path,
         "source_symbol": args.source_symbol,
     }
     write_json(session_dir / "meta.json", meta)
     print(f"baseline captured → {session_dir}")
     print(f"  function: {capture.get('function_name')} @ {addr}")
-    print(f"  nir lines: {capture['metrics_nir']['lines']}  gotos: {capture['metrics_nir']['goto_count']}")
+    print(f"  lines: {capture['metrics_hir']['lines']}  gotos: {capture['metrics_hir']['goto_count']}")
     print(f"next: rebuild CLI, then:")
     print(f"  python3 scripts/quality/local_decomp_observe.py after --session {session_dir.name}")
     print(f"  python3 scripts/quality/local_decomp_observe.py show --session {session_dir.name}")
@@ -559,7 +518,6 @@ def cmd_after(args: argparse.Namespace) -> int:
     cli = resolve_cli(Path(args.cli) if args.cli else Path(meta["cli"]) if meta.get("cli") else None)
     binary = Path(args.binary).resolve() if args.binary else Path(meta["binary"])
     addr = parse_addr(args.addr) if args.addr else parse_addr(meta["addr"])
-    layer = args.layer or meta.get("layer") or "both"
 
     source_text = None
     source_path = meta.get("source_path")
@@ -568,7 +526,7 @@ def cmd_after(args: argparse.Namespace) -> int:
     elif source_path and meta.get("source_symbol") and Path(source_path).is_file():
         source_text = extract_source_symbol(Path(source_path), meta["source_symbol"])
 
-    row = run_decomp(cli, binary, addr, layer=layer, timeout_s=args.timeout)
+    row = run_decomp(cli, binary, addr, timeout_s=args.timeout)
     capture = capture_from_row(
         row,
         role="after",
@@ -716,7 +674,7 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--label", help="friendly label used to build session id")
     b.add_argument("--source", help="optional original C source file")
     b.add_argument("--source-symbol", help="function name to extract from --source")
-    b.add_argument("--layer", default="both", choices=["nir", "hir", "both"])
+    b.add_argument("--layer", default=None, choices=["nir", "hir", "both"], help="deprecated, ignored")
     b.add_argument("--timeout", type=float, default=120.0)
     b.add_argument("--note", default=None)
     b.set_defaults(func=cmd_baseline)
@@ -726,7 +684,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--binary", "-b", default=None)
     a.add_argument("--addr", default=None)
     a.add_argument("--cli", default=None)
-    a.add_argument("--layer", default=None, choices=["nir", "hir", "both"])
+    a.add_argument("--layer", default=None, choices=["nir", "hir", "both"], help="deprecated, ignored")
     a.add_argument("--timeout", type=float, default=120.0)
     a.add_argument("--note", default=None)
     a.set_defaults(func=cmd_after)

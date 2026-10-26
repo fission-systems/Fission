@@ -2,7 +2,7 @@
 """Fast local regression gate: no Docker, no Ghidra reference.
 
 Batch-decompiles a curated corpus of functions with the local `fission_cli`
-build and diffs NIR/HIR text against a checked-in golden snapshot. This is
+build and diffs the output text against a checked-in golden snapshot. This is
 NOT the official quality oracle (see `fission-benchmark` docker parity
 suite / `pr_canary.sh` for that) -- it is a cheap, broad-coverage "did this
 change anything" gate meant to run in well under a minute on every
@@ -106,8 +106,6 @@ def decompile_all(
             str(timeout_ms),
             "--benchmark",
             "--json",
-            "--layer",
-            "both",
             str(binary),
         ],
         capture_output=True,
@@ -123,7 +121,7 @@ def decompile_all(
 
 def decompile_one(cli: Path, binary: Path, addr: str) -> str:
     proc = subprocess.run(
-        [str(cli), "decomp", "--addr", addr, "--layer", "nir", str(binary)],
+        [str(cli), "decomp", "--addr", addr, str(binary)],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
@@ -149,10 +147,7 @@ def build_snapshot(
         entry: dict[str, Any] = {}
         for fn in functions:
             key = f"{fn['name']}@{fn['address']}"
-            entry[key] = {
-                "code_nir": fn.get("code_nir") or fn.get("code"),
-                "code_hir": fn.get("code_hir"),
-            }
+            entry[key] = {"code": fn.get("code")}
         snapshot[name] = entry
         print(f"  {name}: {len(entry)} functions", file=sys.stderr)
     return snapshot
@@ -208,18 +203,13 @@ def cmd_check(args: argparse.Namespace) -> int:
             key = f"{fn['name']}@{fn['address']}"
             current_keys.add(key)
             total_checked += 1
-            current = {
-                "code_nir": fn.get("code_nir") or fn.get("code"),
-                "code_hir": fn.get("code_hir"),
-            }
+            current = {"code": fn.get("code")}
             expected = golden_entry.get(key)
             if expected is None:
                 failures.append(f"{name}::{key} -- NEW function not in snapshot")
                 continue
-            if current["code_nir"] != expected["code_nir"]:
-                failures.append(f"{name}::{key} -- NIR mismatch")
-            if current["code_hir"] != expected["code_hir"]:
-                failures.append(f"{name}::{key} -- HIR mismatch")
+            if current["code"] != expected["code"]:
+                failures.append(f"{name}::{key} -- output mismatch")
         missing = set(golden_entry.keys()) - current_keys
         for key in missing:
             failures.append(f"{name}::{key} -- MISSING from current output")

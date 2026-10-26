@@ -630,7 +630,8 @@ fn diamond_join_lowers_branch_local_register_defs_as_select() {
     ]);
     let options = test_options();
 
-    let code = render_mlil_preview(&pcode, "diamond_select", 0x1000, &options).expect("render");
+    let code = crate::midend::render_mechanical_preview(&pcode, "diamond_select", 0x1000, &options)
+        .expect("render");
 
     // The diamond select *is* built, but structuring copies the join's return
     // into both arms, so the select survives only in the exit block behind
@@ -685,7 +686,8 @@ fn diamond_join_returns_copy_through_join_value_for_each_condition_arm() {
     let options = test_options();
 
     let code =
-        render_mlil_preview(&pcode, "diamond_copy_select", 0x1000, &options).expect("render");
+        crate::midend::render_mechanical_preview(&pcode, "diamond_copy_select", 0x1000, &options)
+            .expect("render");
 
     // Structuring may preserve this diamond as an early-return instead of a
     // select. In either form, a true condition must return 10 and false 20.
@@ -745,7 +747,7 @@ fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def()
     let output =
         render_nir_with_context_output(&pcode, "partial_zero_extend", 0x1000, &options, None, None)
             .expect("render partial zero-extend");
-    let code = output.layered.expect("layered pseudocode").hir;
+    let code = output.code;
 
     assert!(
         code.contains("return 3;"),
@@ -1129,7 +1131,8 @@ fn x64_byte_add_movzx_does_not_double_add_load() {
         ],
     )]);
 
-    let code = render_mlil_preview(&pcode, "byte_add_movzx", 0x1000, &options).expect("render");
+    let code = crate::midend::render_mechanical_preview(&pcode, "byte_add_movzx", 0x1000, &options)
+        .expect("render");
     eprintln!("byte_add_movzx:\n{code}");
     // The accumulator starts at zero, so this preview can keep the one byte
     // load/add in the return expression. Count the operation across the whole

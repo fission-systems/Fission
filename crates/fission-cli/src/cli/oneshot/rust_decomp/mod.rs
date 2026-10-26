@@ -35,8 +35,6 @@ pub(crate) struct FunctionRenderResult {
 
 struct RustSleighRender {
     code: String,
-    code_nir: Option<String>,
-    code_hir: Option<String>,
     /// The flattened, goto/label-based PreHIR snapshot structuring received
     /// as input. It is only captured when requested (`decomp --prehir`).
     code_prehir: Option<String>,
@@ -48,8 +46,7 @@ struct RustSleighRender {
     /// The variables this decompilation recovered, for a consumer that wants
     /// them as data rather than as printed declarations.
     variables: Vec<fission_decompiler::RecoveredVariable>,
-    nir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
-    hir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
+    line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
 }
 
 fn render_with_rust_sleigh(
@@ -90,20 +87,13 @@ fn render_with_rust_sleigh(
         .and_then(|output| output.recovered_variables.clone())
         .unwrap_or_default();
 
-    let layers = result
+    let line_mappings = result
         .render_output
         .as_ref()
-        .and_then(|output| output.layered.as_ref());
-    let nir_line_mappings = layers
-        .map(|layers| layers.nir_line_mappings.clone())
-        .unwrap_or_default();
-    let hir_line_mappings = layers
-        .map(|layers| layers.hir_line_mappings.clone())
+        .map(|output| output.line_mappings.clone())
         .unwrap_or_default();
     Ok(RustSleighRender {
         code: result.code,
-        code_nir: result.code_nir,
-        code_hir: result.code_hir,
         code_prehir,
         fell_back: result.fell_back,
         fallback_reason: result.fallback_reason,
@@ -111,8 +101,7 @@ fn render_with_rust_sleigh(
         hint_stats: result.hint_stats,
         evidence: result.evidence,
         variables,
-        nir_line_mappings,
-        hir_line_mappings,
+        line_mappings,
     })
 }
 
@@ -247,7 +236,6 @@ pub(crate) fn make_internal_error_result(
     let asm_fallback = fallback.is_some();
     let record = CliRustDecompileRecord {
         func: func.clone(),
-        layer: config.layer,
         outcome: CliRustOutcome::WorkerInternalError {
             message,
             assembly_fallback_code: fallback,
@@ -293,36 +281,18 @@ pub(crate) fn render_one_function_inner(
     match render_with_rust_sleigh(binary, facts, func, config.timeout_ms, config.prehir) {
         Ok(rendered) => {
             let decomp_sec = start.elapsed().as_secs_f64();
-            let nir_original = rendered.code_nir.as_deref().unwrap_or(&rendered.code);
-            let hir_original = rendered.code_hir.as_deref().unwrap_or(&rendered.code);
-            let nir_line_mappings = remap_retained_lines(
-                nir_original,
-                &apply_output_filters(nir_original, config),
-                &rendered.nir_line_mappings,
-            );
-            let hir_line_mappings = remap_retained_lines(
-                hir_original,
-                &apply_output_filters(hir_original, config),
-                &rendered.hir_line_mappings,
-            );
             let code = apply_output_filters(&rendered.code, config);
-            // Dual surfaces from one IR build; fall back so JSON shape stays stable.
-            let code_nir =
-                filter_optional(rendered.code_nir, config).unwrap_or_else(|| code.clone());
-            let code_hir =
-                filter_optional(rendered.code_hir, config).unwrap_or_else(|| code.clone());
+            let line_mappings =
+                remap_retained_lines(&rendered.code, &code, &rendered.line_mappings);
             // No fallback for DIR -- absent means "not requested" or "not
             // captured" (e.g. decompile fell back before structuring ran),
-            // not "same as the default layer".
+            // not "same as the output".
             let code_prehir = filter_optional(rendered.code_prehir, config);
 
             let record = CliRustDecompileRecord {
                 func: func.clone(),
-                layer: config.layer,
                 outcome: CliRustOutcome::Success {
                     code,
-                    code_nir: Some(code_nir),
-                    code_hir: Some(code_hir),
                     code_prehir,
                     fell_back: rendered.fell_back,
                     fallback_reason: rendered.fallback_reason,
@@ -330,8 +300,7 @@ pub(crate) fn render_one_function_inner(
                     hint_stats: rendered.hint_stats.clone(),
                     decomp_sec,
                     variables: rendered.variables,
-                    nir_line_mappings,
-                    hir_line_mappings,
+                    line_mappings,
                 },
             };
 
@@ -360,7 +329,6 @@ pub(crate) fn render_one_function_inner(
             ) {
                 let record = CliRustDecompileRecord {
                     func: func.clone(),
-                    layer: config.layer,
                     outcome: CliRustOutcome::AssemblyFallback {
                         fallback_code,
                         original_error: error_text.clone(),
@@ -375,7 +343,6 @@ pub(crate) fn render_one_function_inner(
             } else {
                 let record = CliRustDecompileRecord {
                     func: func.clone(),
-                    layer: config.layer,
                     outcome: CliRustOutcome::HardError {
                         error_text,
                         decomp_sec,
@@ -429,11 +396,15 @@ fn run_with_functions(
     let cpu_start = capture_process_cpu_snapshot();
     let effective_no_header = cli.no_header || cli.ghidra_compat;
     let effective_json = cli.json || cli.benchmark;
-    let layer = cli
-        .layer
-        .as_deref()
-        .and_then(fission_decompiler::PseudocodeLayer::parse)
-        .unwrap_or(fission_decompiler::PseudocodeLayer::Nir);
+    // `--layer` selected between a mechanical and a presented surface. There
+    // is one surface now; the flag is still parsed so existing scripts keep
+    // running, but it no longer selects anything. Say so, rather than let a
+    // script that asked for `nir` believe it got it.
+    if cli.layer.is_some() && !(cli.no_warnings || cli.ghidra_compat) {
+        eprintln!(
+            "warning: --layer is deprecated and ignored; there is a single output surface (HIR)"
+        );
+    }
     let config = RenderConfig {
         benchmark: cli.benchmark,
         ghidra_compat: cli.ghidra_compat,
@@ -442,7 +413,6 @@ fn run_with_functions(
         debug_decomp_bundle: cli.debug_decomp_bundle.is_some(),
         requested_address: cli.address,
         timeout_ms: workers::resolve_render_timeout_ms(cli.timeout_ms),
-        layer,
         prehir: cli.prehir,
     };
     let stack_size_bytes = workers::resolve_decomp_stack_size_bytes();
@@ -762,10 +732,8 @@ mod project_call_arity_tests {
         );
         assert!(
             rendered_caller.code.contains("(void *)"),
-            "typed pointer parameters should convert scalar-shaped ABI actuals at the call only. code:\n{}\nNIR:\n{}\nHIR:\n{}",
-            rendered_caller.code,
-            rendered_caller.code_nir.as_deref().unwrap_or("<none>"),
-            rendered_caller.code_hir.as_deref().unwrap_or("<none>")
+            "typed pointer parameters should convert scalar-shaped ABI actuals at the call only. code:\n{}",
+            rendered_caller.code
         );
 
         let project =

@@ -1,7 +1,7 @@
 # ADR 0011: HIR presentation contract
 
-**Status:** Accepted  
-**Last verified:** 2026-07-17
+**Status:** Accepted — §1 and §6 amended by [ADR 0015](0015-single-output-surface.md) (one output surface)  
+**Last verified:** 2026-10-26
 
 ## Context
 

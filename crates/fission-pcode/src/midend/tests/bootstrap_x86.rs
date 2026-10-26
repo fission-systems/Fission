@@ -88,8 +88,13 @@ fn preview_supports_pe_x86_multiblock_direct_target_branch() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "x86_branchy", 0x4000, &preview_options_x86())
-        .expect("preview render");
+    let code = crate::midend::render_mechanical_preview(
+        &func,
+        "x86_branchy",
+        0x4000,
+        &preview_options_x86(),
+    )
+    .expect("preview render");
     assert!(code.contains("return 0;"), "{code}");
     assert!(code.contains("return 1;"), "{code}");
 }
@@ -407,7 +412,7 @@ fn preview_proven_void_call_does_not_hide_post_call_return_def() {
         .call_result_is_source_value
         .insert("release".to_string(), false);
 
-    let code = render_mlil_preview_with_context(
+    let code = crate::midend::render_mechanical_preview_with_context(
         &func,
         "x64_proven_void_call_then_value",
         0x1400021c0,
@@ -557,7 +562,7 @@ fn preview_x64_ret_recovers_predecessor_computed_return_register() {
         None,
     )
     .expect("preview render");
-    let code = output.layered.expect("layered pseudocode").hir;
+    let code = output.code;
     assert!(code.contains("return param_1 + 5;"), "{code}");
     assert!(!code.contains("return;"), "{code}");
     assert!(!code.contains("return *"), "{code}");
@@ -715,7 +720,7 @@ fn preview_inlines_lea_register_return() {
     let output =
         render_nir_with_context_output(&func, "lea_add", 0x140001450, &options, None, None)
             .expect("preview render");
-    let code = output.layered.expect("layered pseudocode").hir;
+    let code = output.code;
     // Win64 register args surface as pointer-width integers on the HIR profile.
     assert!(
         code.contains("lea_add(int param_1, int param_2)")
@@ -1321,8 +1326,9 @@ fn preview_structures_intra_instruction_conditional_return_copy() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "conditional_max", 0x140001460, &options)
-        .expect("preview render");
+    let code =
+        crate::midend::render_mechanical_preview(&func, "conditional_max", 0x140001460, &options)
+            .expect("preview render");
     // The guard may come out either way round: the branch says "if a < b keep
     // b", and inverting it to "if a > b keep a" is the same function. What has
     // to hold is that the guard compares the two parameters and its arm
@@ -2292,7 +2298,7 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
         None,
     )
     .expect("preview render");
-    let code = output.layered.expect("layered pseudocode").hir;
+    let code = output.code;
     // Call targets recovered (fibonacci / printf). Full CSE of the live call
     // result into the printf argument list is HIR-quality polish; accept either
     // fully inlined or temp-mediated forms that keep the recovered names.

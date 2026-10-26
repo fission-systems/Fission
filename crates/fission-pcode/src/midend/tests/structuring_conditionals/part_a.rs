@@ -62,7 +62,8 @@ fn multi_block_preview_lowers_simple_if_without_failing() {
     };
 
     let code =
-        render_mlil_preview(&func, "branchy", 0x3000, &preview_options()).expect("preview render");
+        crate::midend::render_mechanical_preview(&func, "branchy", 0x3000, &preview_options())
+            .expect("preview render");
     assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
     assert!(code.contains("return 0;"));
     assert!(code.contains("return 1;"));
@@ -125,8 +126,9 @@ fn x86_try_lower_if_still_structures_canonical_if() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "x86_if", 0x4300, &preview_options_x86())
-        .expect("preview render");
+    let code =
+        crate::midend::render_mechanical_preview(&func, "x86_if", 0x4300, &preview_options_x86())
+            .expect("preview render");
     // 32-bit mode: register_param is skipped (is_64bit guard), so the REGISTER_SPACE
     // varnode at offset 0x08 resolves to hardware name "rcx" via x64_ghidra_reg_name.
     assert!(
@@ -273,8 +275,9 @@ fn multi_block_preview_lowers_conditional_goto_style_if() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "cond_goto_if", 0x3400, &preview_options())
-        .expect("preview render");
+    let code =
+        crate::midend::render_mechanical_preview(&func, "cond_goto_if", 0x3400, &preview_options())
+            .expect("preview render");
     assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
     assert!(code.contains("return 0;"));
     assert!(code.contains("return 1;"));

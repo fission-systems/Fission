@@ -4,7 +4,9 @@
 //! Global pointer recovery lives in [`super::globals`].
 
 use super::globals::is_c_identifier;
-use super::layer::{LayeredPseudocode, PrintProfile};
+#[cfg(test)]
+use super::layer::LayeredPseudocode;
+use super::layer::{PrintProfile, RecoveredLineMapping};
 use super::presentation::apply_hir_presentation_with_globals;
 use super::printer::has_unknown_arity_declaration;
 use super::printer::surface_type_definition_source;
@@ -27,21 +29,16 @@ pub(crate) fn render_hir_function_with_global_decls(
     render_hir_function_with_profile(hir, options, PrintProfile::Nir)
 }
 
-/// Dual NIR/HIR presentation from one structured function tree.
-pub(crate) fn render_layered_pseudocode(
-    hir: &HirFunction,
-    options: &MlilPreviewOptions,
-) -> LayeredPseudocode {
-    render_layered_pseudocode_with_provenance(hir, options, &HashMap::new())
-}
-
-pub(crate) fn render_layered_pseudocode_with_provenance(
+/// The final pseudocode surface: the structured tree after HIR presentation.
+///
+/// There is one surface. Presentation runs on a clone, so the caller's tree is
+/// not touched (ADR 0011), and the structuring that produced the tree was
+/// selected on the accuracy axis (ADR 0015).
+pub(crate) fn render_pseudocode_with_provenance(
     hir: &HirFunction,
     options: &MlilPreviewOptions,
     definitions: &HashMap<String, u64>,
-) -> LayeredPseudocode {
-    let (nir, nir_line_mappings) =
-        render_hir_function_with_provenance(hir, options, PrintProfile::Nir, definitions);
+) -> (String, Vec<RecoveredLineMapping>) {
     let mut hir_tree = hir.clone();
     // Presentation must know which names are file-scope, or its
     // dead-assignment pass deletes stores to globals -- the write is the
@@ -66,8 +63,29 @@ pub(crate) fn render_layered_pseudocode_with_provenance(
     // whole reason the set exists.
     collect_address_named_globals(hir, options, &mut global_names);
     apply_hir_presentation_with_globals(&mut hir_tree, &global_names);
+    render_hir_function_with_provenance(&hir_tree, options, PrintProfile::Hir, definitions)
+}
+
+/// Test helper: the mechanical print next to the final surface, so the
+/// printer's two profiles can still be compared in one place.
+#[cfg(test)]
+pub(crate) fn render_layered_pseudocode(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+) -> LayeredPseudocode {
+    render_layered_pseudocode_with_provenance(hir, options, &HashMap::new())
+}
+
+#[cfg(test)]
+pub(crate) fn render_layered_pseudocode_with_provenance(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+    definitions: &HashMap<String, u64>,
+) -> LayeredPseudocode {
+    let (nir, nir_line_mappings) =
+        render_hir_function_with_provenance(hir, options, PrintProfile::Nir, definitions);
     let (hir_code, hir_line_mappings) =
-        render_hir_function_with_provenance(&hir_tree, options, PrintProfile::Hir, definitions);
+        render_pseudocode_with_provenance(hir, options, definitions);
     LayeredPseudocode {
         nir,
         hir: hir_code,

@@ -81,10 +81,12 @@ use normalize::{normalize_function_body, normalize_stmt};
 
 // Presentation/print surface lives at crate root `render` (ADR 0011).
 // `pub(crate)` so tests and owners can keep using `crate::midend::print_*`.
+#[cfg(test)]
+pub(crate) use crate::render::render_layered_pseudocode;
 pub(crate) use crate::render::{
     print_expr, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_stmt, print_type, recover_global_symbol_accesses,
-    render_hir_function_with_global_decls, render_layered_pseudocode,
+    render_hir_function_with_global_decls,
 };
 
 /// Builder-side (PreHIR) counterpart to [`print_expr`] -- builder embeds
@@ -126,19 +128,21 @@ pub use self::cspec::RegisterNamer;
 pub use self::tail_wrapper::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
-pub use crate::render::{
-    LayeredPseudocode, PrintProfile, PseudocodeLayer, render_contracted_wrapper_summary,
-};
+pub use crate::render::{PrintProfile, render_contracted_wrapper_summary};
 pub use fission_midend_normalize::{
     is_known_api_signature, normalize_hir_function, take_normalize_wave_stats,
 };
 
 // Top-level preview/NIR entrypoints (builder → normalize → structure → print).
 pub use self::orchestrate::{
-    NirDecompileOutput, build_raw_hir, render_mlil_preview, render_mlil_preview_dual_layer,
+    NirDecompileOutput, build_raw_hir, render_mlil_preview,
     render_mlil_preview_with_binary_and_context, render_mlil_preview_with_context, render_nir,
     render_nir_with_binary_and_context, render_nir_with_binary_and_context_output,
     render_nir_with_context, render_nir_with_context_output, test_refine_partitions,
+};
+#[cfg(test)]
+pub(crate) use self::orchestrate::{
+    render_mechanical_preview, render_mechanical_preview_with_context,
 };
 
 /// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.

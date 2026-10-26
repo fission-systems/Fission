@@ -196,7 +196,7 @@ fn x64_live_argument_slots_cross_only_proven_nonwriting_calls() {
             );
         }
 
-        render_mlil_preview_with_context(
+        crate::midend::render_mechanical_preview_with_context(
             &func,
             "caller",
             base,
@@ -2348,7 +2348,8 @@ fn aarch64_return_only_join_inlines_predecessor_return_values() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "return_join", 0x1000, &options).expect("preview render");
+    let code = crate::midend::render_mechanical_preview(&func, "return_join", 0x1000, &options)
+        .expect("preview render");
     assert!(code.contains("param_1 + 10"), "{code}");
     assert!(code.contains("param_1 ^ 43690"), "{code}");
     assert!(
@@ -2575,7 +2576,8 @@ fn aarch64_return_join_with_exact_x0_store_preserves_predecessor_return() {
     };
 
     let code =
-        render_mlil_preview(&func, "store_and_return", 0x1060, &options).expect("preview render");
+        crate::midend::render_mechanical_preview(&func, "store_and_return", 0x1060, &options)
+            .expect("preview render");
     assert!(code.contains("long long store_and_return"), "{code}");
     assert!(code.contains("xVar0 = param_1 + 10;"), "{code}");
     assert!(code.contains("result_sink = xVar0;"), "{code}");
@@ -3173,7 +3175,8 @@ fn aarch64_instruction_local_conditional_merge_returns_both_values() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "op_sub", 0x100054, &options).expect("preview render");
+    let code = crate::midend::render_mechanical_preview(&func, "op_sub", 0x100054, &options)
+        .expect("preview render");
     assert!(!code.contains("__fission_branchind"), "{code}");
     assert!(!code.contains("var_39c00"), "{code}");
     assert!(
