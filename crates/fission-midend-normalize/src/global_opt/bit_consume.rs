@@ -464,9 +464,10 @@ fn backward_propagate_inner(expr: &PreHirExpr, out_consume: u64, result: &mut Ve
             if let PreHirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 // Arithmetic shift: sign-bit may replicate; treat upper bits as consumed too
+                // `n == 0` replicates nothing; `64 - n` would be a shift by 64.
                 let src_mask = (out_consume << n)
-                    | (if out_consume >> 63 != 0 {
-                        u64::MAX << (64 - n.min(63))
+                    | (if n != 0 && out_consume >> 63 != 0 {
+                        u64::MAX << (64 - n)
                     } else {
                         0
                     });
@@ -953,5 +954,19 @@ mod tests {
                 ..
             } if name == "cond_var"
         ));
+    }
+
+    #[test]
+    fn sar_by_zero_does_not_replicate_sign_bit() {
+        // `x >>s 0` is the identity: the sign bit has nothing to replicate
+        // into, and the replication mask must not shift by 64.
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(PreHirExpr::Var("x".into())),
+            rhs: Box::new(PreHirExpr::Const(0, uint(32))),
+            ty: uint(64),
+        };
+        let consumed = backward_propagate(&expr, 1u64 << 63);
+        assert_eq!(consumed, vec![("x".to_string(), 1u64 << 63)]);
     }
 }

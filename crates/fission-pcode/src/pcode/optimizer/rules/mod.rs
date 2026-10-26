@@ -189,7 +189,13 @@ impl OptimizationRules {
             } else {
                 4
             };
-            return Some(self.make_constant(op, (1i64 << (all_ones * 8)) - 1));
+            // A 64-bit (or wider) result is all-ones in the whole i64; shifting by
+            // 64 would overflow (panic with overflow checks, wrap to 0 without).
+            let all_ones_val = match all_ones.checked_mul(8) {
+                Some(bits) if bits < 64 => (1i64 << bits) - 1,
+                _ => -1,
+            };
+            return Some(self.make_constant(op, all_ones_val));
         }
 
         // x | x => x
