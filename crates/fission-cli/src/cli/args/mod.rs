@@ -52,6 +52,21 @@ pub enum ParsedInvocation {
     Sandbox(SandboxArgs),
     /// Solver- and emulator-backed DIR/HIR correctness verification
     Verify(VerifyArgs),
+    /// Machine-readable description of the CLI contract
+    Schema(SchemaArgs),
+}
+
+/// `fission_cli schema`: describe the `--contract v1` envelope and error codes.
+#[derive(Args, Clone, Debug, Default, PartialEq, Eq)]
+pub struct SchemaArgs {
+    /// Command to describe (see `--list`); omit for the envelope schema
+    pub command: Option<String>,
+    /// List the commands that have a contract schema
+    #[arg(long, conflicts_with_all = ["command", "error_codes"])]
+    pub list: bool,
+    /// Print the registry of stable error codes and their exit-code kinds
+    #[arg(long = "error-codes", conflicts_with = "command")]
+    pub error_codes: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -138,6 +153,21 @@ struct CliArgs {
     #[arg(long = "no-db", global = true)]
     no_analysis_db: bool,
 
+    /// Machine-contract mode: one JSON envelope on stdout, typed exit codes.
+    ///
+    /// Only `v1` exists. Requires the command's own `--json`. Also read from
+    /// FISSION_CONTRACT. See `fission_cli schema`. (Handled before parsing, so
+    /// the value never reaches a command.)
+    #[arg(long = "contract", global = true, value_name = "VERSION")]
+    _contract: Option<String>,
+
+    /// With `--contract v1`: exit 4 when some items of a batch failed.
+    ///
+    /// Without it a batch that produced at least one result exits 0 and lists
+    /// the failures in the envelope.
+    #[arg(long = "fail-on-partial", global = true)]
+    _fail_on_partial: bool,
+
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -193,6 +223,16 @@ enum CliCommand {
     Sandbox(SandboxArgs),
     /// Solver- and emulator-backed DIR/HIR correctness verification
     Verify(VerifyArgs),
+    /// Describe the machine-readable CLI contract (envelope, error codes)
+    #[command(
+        long_about = "Describe the machine-readable CLI contract used with `--contract v1`.
+
+With no arguments it prints the JSON Schema of the response envelope. `--list` names the commands the contract covers and `--error-codes` prints the registry of stable error codes with their kinds and exit codes.
+
+Exit codes under `--contract v1`: 0 ok, 1 failed, 2 usage, 3 input, 4 partial (only with --fail-on-partial), 5 timeout, 6 environment, 70 internal.
+"
+    )]
+    Schema(SchemaArgs),
 }
 
 // ── Verify subcommand types ────────────────────────────────────────────────
@@ -1064,7 +1104,7 @@ struct ScriptRunArgs {
     verbose: bool,
 }
 
-const CANONICAL_SUBCOMMANDS: &[&str] = &[
+pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "info",
     "list",
     "disasm",
@@ -1089,6 +1129,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "debug",
     "db",
     "ai",
+    "schema",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1429,6 +1470,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 }
                 CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
+                CliCommand::Schema(schema) => return ParsedInvocation::Schema(schema),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
                 CliCommand::Db(_) => unreachable!("db branch handled above"),
@@ -1469,6 +1511,7 @@ mod tests {
             ParsedInvocation::Db(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Schema(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1548,6 +1591,7 @@ mod tests {
             ParsedInvocation::Db(_) => panic!("legacy parser cannot emit db"),
             ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
+            ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
         }
     }
 

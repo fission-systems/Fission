@@ -52,8 +52,10 @@ contract as a major change. This proposal is designed to be additive.
 
 A global option `--contract <VERSION>` (env `FISSION_CONTRACT`), initially only
 `v1`. When absent, behavior is unchanged. `--json` keeps its current meaning
-when used alone. `--contract v1` implies JSON output and conflicts with
-human-oriented flags (for example `-o` text output) with a usage error.
+when used alone. `--contract v1` requires the command's own `--json`; without it the run fails
+with the usage error `json_required` (exit 2), because the supervisor cannot
+know which subcommands accept the flag. `--help` and `--version` are passed
+through unchanged.
 
 Name and flag shape are open (see Open questions).
 
@@ -157,15 +159,16 @@ code registry. `fission_cli schema <command>` prints the JSON Schema (draft
 prints the registry. This lets an agent self-check output and discover codes
 without reading docs.
 
+P0 ships the envelope schema and the error-code registry; per-command `data`
+payloads are marked `x-data-schema: untyped` and are typed in follow-up work.
 Schemas are the source of truth in code and are also committed under
 `docs/schemas/`. A test fails if the generated schema differs from the committed
 one, so a payload change cannot land without an explicit schema (and, if
 incompatible, a `schema_version`) change.
 
-Generating schemas from Rust types would normally use `schemars`. The workspace
-does not depend on it today; adding it is a dependency decision to be made in
-the implementation PR. The alternative is hand-written schemas guarded by
-golden-file tests.
+Decision for P0: hand-written schemas guarded by golden-file tests, so no new
+dependency is added. `schemars` can be reconsidered when `data` payloads are
+typed.
 
 ### 5. Where it lives
 
