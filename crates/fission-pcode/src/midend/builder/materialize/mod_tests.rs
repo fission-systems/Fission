@@ -1609,7 +1609,8 @@ fn conditional_loop_exit_accumulator_merge_uses_external_seed_binding() {
 
 #[test]
 fn stack_home_accumulator_store_uses_seeded_live_gpr_binding() {
-    let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x14, 4);
+    // x86-64 `EBP` is the low half of `RBP` at 0x28; 0x14 is the high half of `RDX`.
+    let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 4);
     let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
     let rsp_addr = register(UNIQUE_SPACE_ID, 0x200, 8);
     let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
@@ -2222,7 +2223,8 @@ fn block_entry_accumulator_read_accepts_loop_exit_zero_seed() {
 
 #[test]
 fn stack_home_accumulator_store_rejects_side_effect_after_live_def() {
-    let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x14, 4);
+    // x86-64 `EBP` is the low half of `RBP` at 0x28; 0x14 is the high half of `RDX`.
+    let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 4);
     let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
     let rsp_addr = register(UNIQUE_SPACE_ID, 0x200, 8);
     let load_tmp = register(UNIQUE_SPACE_ID, 0x208, 8);
