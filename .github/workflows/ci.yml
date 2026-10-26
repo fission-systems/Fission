@@ -428,6 +428,8 @@ jobs:
       run_emulator_softfloat_check: ${{ needs.changes.outputs.run_emulator_softfloat_check == 'true' }}
       run_plugin_interactive_check: ${{ needs.changes.outputs.run_plugin_interactive_check == 'true' }}
       run_cli_alt_feature_checks: ${{ needs.changes.outputs.run_cli_alt_feature_checks == 'true' }}
+      # Doctests and optional-feature suites run beside nextest, not after it.
+      parallel_lanes: true
 
   # Native debugger tests are feature-gated and exercise OS process control.
   # Keep them out of unrelated Rust changes, but always run them when the
