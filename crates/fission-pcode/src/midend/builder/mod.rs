@@ -571,6 +571,7 @@ impl<'a> PreviewBuilder<'a> {
                 .unwrap_or_default(),
             float_shares_int_slots: self.options.cspec_float_shares_int_slots,
             is_64bit: self.options.is_64bit,
+            is_big_endian: self.options.is_big_endian,
             suppress_entry_register_params: self.suppress_entry_register_params,
             ..PreHirFunction::default()
         }
@@ -858,6 +859,7 @@ impl<'a> PreviewBuilder<'a> {
                 .unwrap_or_default(),
             float_shares_int_slots: self.options.cspec_float_shares_int_slots,
             is_64bit: self.options.is_64bit,
+            is_big_endian: self.options.is_big_endian,
             suppress_entry_register_params: self.suppress_entry_register_params,
             callee_observed_max_arity: IndexMap::new(),
             callee_summaries,

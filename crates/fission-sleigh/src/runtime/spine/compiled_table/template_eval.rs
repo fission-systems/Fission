@@ -891,6 +891,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 let saved_emit = self.emitter.emit_context();
                 let saved_labels = std::mem::take(&mut self.label_positions);
                 let saved_built = std::mem::take(&mut self.built_operands);
+                let saved_exported = std::mem::take(&mut self.exported_build_varnodes);
                 self.emitter.set_emit_context(target_pc, unique_seed);
                 self.crossbuild_depth += 1;
                 let emit_result = (|| -> Result<()> {
@@ -905,6 +906,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     Ok(())
                 })();
                 self.crossbuild_depth -= 1;
+                self.exported_build_varnodes = saved_exported;
                 self.built_operands = saved_built;
                 self.label_positions = saved_labels;
                 self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
@@ -948,6 +950,7 @@ impl<'c> CompiledTableEmitter<'c> {
                         let saved_emit = self.emitter.emit_context();
                         let saved_labels = std::mem::take(&mut self.label_positions);
                         let saved_built = std::mem::take(&mut self.built_operands);
+                        let saved_exported = std::mem::take(&mut self.exported_build_varnodes);
                         self.emitter.set_emit_context(slot_pc, unique_seed);
                         let inner = (|| -> Result<()> {
                             for cop in &slot_state.constructor_template.ops {
@@ -955,6 +958,7 @@ impl<'c> CompiledTableEmitter<'c> {
                             }
                             Ok(())
                         })();
+                        self.exported_build_varnodes = saved_exported;
                         self.built_operands = saved_built;
                         self.label_positions = saved_labels;
                         self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
@@ -1016,29 +1020,37 @@ impl<'c> CompiledTableEmitter<'c> {
             // treated as "already built" because the parent used the same numeric
             // index for a different operand (e.g. 0 for the memory operand itself).
             let saved_built = std::mem::take(&mut self.built_operands);
-            if child.constructor_template.ops.is_empty() {
-                // Ghidra PcodeEmit.build(): when the child template is empty (null in Ghidra),
-                // fall back to the parent's named section indexed by the operand number.
-                // Corresponds to: prototype.getNamedTempl(secnum) where secnum = operand_index.
-                self.pcode_build_secnum = build_operand_section_index(operand_index)?;
-                if let Some(Some(named_tpl)) = state.named_templates.get(operand_index) {
-                    for named_op in &named_tpl.ops {
-                        self.emit_op_template(child, named_op)?;
+            let saved_exported = std::mem::take(&mut self.exported_build_varnodes);
+            // Child negative handles name its own BUILD results. Resolve its
+            // export before restoring the caller, and publish only that result.
+            let child_result = (|| -> Result<Option<Varnode>> {
+                if child.constructor_template.ops.is_empty() {
+                    self.pcode_build_secnum = build_operand_section_index(operand_index)?;
+                    if let Some(Some(named_tpl)) = state.named_templates.get(operand_index) {
+                        for named_op in &named_tpl.ops {
+                            self.emit_op_template(child, named_op)?;
+                        }
+                    }
+                } else {
+                    self.pcode_build_secnum = -1;
+                    for child_op in &child.constructor_template.ops {
+                        self.emit_op_template(child, child_op)?;
                     }
                 }
-            } else {
-                self.pcode_build_secnum = -1;
-                for child_op in &child.constructor_template.ops {
-                    self.emit_op_template(child, child_op)?;
-                }
-            }
+                Ok(child
+                    .constructor_template
+                    .result
+                    .as_ref()
+                    .and_then(|export_tpl| {
+                        let tpl = CompiledVarnodeTpl::HandleTpl(Box::new(export_tpl.clone()));
+                        self.resolve_varnode_tpl(&tpl, child).ok()
+                    }))
+            })();
+            self.exported_build_varnodes = saved_exported;
             self.built_operands = saved_built;
-            if let Some(export_tpl) = child.constructor_template.result.as_ref() {
-                let tpl = CompiledVarnodeTpl::HandleTpl(Box::new(export_tpl.clone()));
-                if let Ok(varnode) = self.resolve_varnode_tpl(&tpl, child) {
-                    let handle_key = exported_build_handle_key(operand_index)?;
-                    self.exported_build_varnodes.insert(handle_key, varnode);
-                }
+            if let Some(varnode) = child_result? {
+                let handle_key = exported_build_handle_key(operand_index)?;
+                self.exported_build_varnodes.insert(handle_key, varnode);
             }
             Ok(())
         })();
@@ -2111,6 +2123,96 @@ mod tests {
                 ops[1].inputs[2].size
             ),
             (3, 0x100, 4)
+        );
+    }
+    fn review_build_state(
+        ops: Vec<CompiledOpTpl>,
+        result: Option<CompiledHandleTpl>,
+    ) -> RuntimeConstructState {
+        let mut state = minimal_construct_state();
+        std::sync::Arc::make_mut(&mut state.constructor).constructor_template =
+            std::sync::Arc::new(CompiledConstructorTemplate {
+                handles: vec![],
+                decode_steps: vec![],
+                num_labels: 0,
+                result,
+                ops,
+                template_source: CompiledTemplateSource::SpecDerived,
+            });
+        state
+    }
+
+    fn review_child_handle(child: RuntimeConstructState) -> RuntimeHandle {
+        let mut handle = test_handle("const", 0);
+        handle.subtable_state = Some(Box::new(child));
+        handle
+    }
+
+    fn review_constant_export(value: u64) -> CompiledHandleTpl {
+        CompiledHandleTpl {
+            space: Some(CompiledSpaceTpl::SpaceRef(CompiledSpaceRef {
+                name: "const".into(),
+                index: 0,
+                word_size: 1,
+                addr_size: 8,
+            })),
+            size: Some(CompiledConstTpl::Real { value: 4 }),
+            ptr_offset: Some(CompiledConstTpl::Real { value }),
+            ptr_space: None,
+            ptr_size: None,
+            temp_space: None,
+            temp_offset: None,
+        }
+    }
+
+    #[test]
+    fn review_nested_build_exports_do_not_overwrite_a_parent_sibling() {
+        let compiled = minimal_frontend_with_spaces(std::collections::BTreeMap::new());
+        let mut emitter =
+            CompiledTableEmitter::new(&compiled, 0x1000, &[], 0x1000, FlowEmitOptions::default());
+        let first = review_build_state(vec![], Some(review_constant_export(11)));
+        let nested = review_build_state(vec![], Some(review_constant_export(22)));
+        let mut second = review_build_state(vec![build_op_with_operand_index(0)], None);
+        second.handles.push(review_child_handle(nested));
+        let mut root = minimal_construct_state();
+        root.handles = vec![review_child_handle(first), review_child_handle(second)];
+        emitter.emit_build_operand(&root, 0).unwrap();
+        emitter.emit_build_operand(&root, 1).unwrap();
+        assert_eq!(
+            emitter
+                .exported_build_varnodes
+                .get(&-1)
+                .unwrap()
+                .constant_val,
+            11
+        );
+        assert!(!emitter.exported_build_varnodes.contains_key(&-2));
+    }
+
+    #[test]
+    fn review_failed_build_restores_parent_scope() {
+        let compiled = minimal_frontend_with_spaces(std::collections::BTreeMap::new());
+        let mut emitter =
+            CompiledTableEmitter::new(&compiled, 0x1000, &[], 0x1000, FlowEmitOptions::default());
+        let mut root = minimal_construct_state();
+        root.handles.push(review_child_handle(review_build_state(
+            vec![build_op_with_operand_index(99)],
+            None,
+        )));
+        emitter.built_operands.insert(7);
+        emitter
+            .exported_build_varnodes
+            .insert(-8, const_varnode(77, 4));
+        assert!(emitter.emit_build_operand(&root, 0).is_err());
+        assert!(emitter.built_operands.contains(&7));
+        assert!(!emitter.built_operands.contains(&99));
+        assert_eq!(
+            emitter
+                .exported_build_varnodes
+                .get(&-8)
+                .unwrap()
+                .constant_val,
+            77
         );
     }
 }

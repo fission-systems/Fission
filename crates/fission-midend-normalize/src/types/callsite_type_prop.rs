@@ -1178,6 +1178,7 @@ mod tests {
             ],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: indexmap::IndexMap::from([
@@ -1726,6 +1727,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),
@@ -1775,6 +1777,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),
@@ -1996,6 +1999,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: indexmap::IndexMap::from([(
@@ -2088,6 +2092,7 @@ mod tests {
             ],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),
@@ -2137,6 +2142,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: indexmap::IndexMap::from([(
@@ -2270,6 +2276,7 @@ mod tests {
             ],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),
@@ -2459,6 +2466,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),
@@ -2501,6 +2509,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: indexmap::IndexMap::from([(
@@ -2584,6 +2593,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: indexmap::IndexMap::from([(
@@ -2654,6 +2664,7 @@ mod tests {
             })],
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: indexmap::IndexMap::from([(

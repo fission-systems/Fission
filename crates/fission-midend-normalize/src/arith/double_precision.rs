@@ -5,7 +5,7 @@ pub fn apply_double_precision_reconstruction_pass(func: &mut PreHirFunction) -> 
     let mut changed = false;
 
     // Phase 1: Collapse contiguous loads and stores in the function body
-    if collapse_contiguous_mem_ops(&mut func.body, &mut func.locals) {
+    if collapse_contiguous_mem_ops(&mut func.body, &mut func.locals, func.is_big_endian) {
         changed = true;
     }
 
@@ -54,12 +54,14 @@ fn expr_reads_var(expr: &PreHirExpr, name: &str) -> bool {
 
 fn expr_reads_memory(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Load { .. } | PreHirExpr::Call { .. } => true,
+        PreHirExpr::Load { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::FieldAccess { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::AggregateCopy { .. } => true,
         PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::Unary { expr: inner, .. }
-        | PreHirExpr::PtrOffset { base: inner, .. }
-        | PreHirExpr::FieldAccess { base: inner, .. }
-        | PreHirExpr::AggregateCopy { src: inner, .. } => expr_reads_memory(inner),
+        | PreHirExpr::PtrOffset { base: inner, .. } => expr_reads_memory(inner),
         PreHirExpr::Binary { lhs, rhs, .. } => expr_reads_memory(lhs) || expr_reads_memory(rhs),
         PreHirExpr::Select {
             cond,
@@ -68,9 +70,6 @@ fn expr_reads_memory(expr: &PreHirExpr) -> bool {
             ..
         } => {
             expr_reads_memory(cond) || expr_reads_memory(then_expr) || expr_reads_memory(else_expr)
-        }
-        PreHirExpr::Index { base, index, .. } => {
-            expr_reads_memory(base) || expr_reads_memory(index)
         }
         _ => false,
     }
@@ -946,9 +945,29 @@ fn match_lo_shr_mix(
 
 // ── Contiguous Loads & Stores collapsing ───────────────────────────────────
 
+/// Which of two adjacent 32-bit accesses is at the lower address.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WordPair {
+    /// The first statement's address is 4 bytes below the second's.
+    FirstIsLow,
+    /// The second statement's address is 4 bytes below the first's.
+    SecondIsLow,
+}
+
+fn word_pair(first_ptr: &PreHirExpr, second_ptr: &PreHirExpr) -> Option<WordPair> {
+    if is_ptr_offset_by_4(second_ptr, first_ptr) {
+        Some(WordPair::FirstIsLow)
+    } else if is_ptr_offset_by_4(first_ptr, second_ptr) {
+        Some(WordPair::SecondIsLow)
+    } else {
+        None
+    }
+}
+
 fn collapse_contiguous_mem_ops(
     stmts: &mut Vec<PreHirStmt>,
     locals: &mut Vec<PreHirBinding>,
+    is_big_endian: bool,
 ) -> bool {
     let mut changed = false;
 
@@ -962,6 +981,7 @@ fn collapse_contiguous_mem_ops(
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     locals,
+                    is_big_endian,
                 );
             }
             PreHirStmt::If {
@@ -972,10 +992,12 @@ fn collapse_contiguous_mem_ops(
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                     locals,
+                    is_big_endian,
                 );
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                     locals,
+                    is_big_endian,
                 );
             }
             PreHirStmt::Switch { cases, default, .. } => {
@@ -983,83 +1005,95 @@ fn collapse_contiguous_mem_ops(
                     changed |= collapse_contiguous_mem_ops(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         locals,
+                        is_big_endian,
                     );
                 }
                 changed |= collapse_contiguous_mem_ops(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                     locals,
+                    is_big_endian,
                 );
             }
             _ => {}
         }
     }
 
-    // Now try to collapse contiguous loads
+    let u64_ty = || NirType::Int {
+        bits: 64,
+        signed: false,
+    };
+
+    // Now try to collapse contiguous loads and stores.
     let mut i = 0;
     let mut new_stmts = Vec::new();
     while i < stmts.len() {
         if i + 1 < stmts.len() {
+            // Two adjacent 32-bit loads from base and base + 4 become one
+            // 64-bit load. The word at the lower address is the least
+            // significant on a little-endian target and the most significant
+            // on a big-endian one; the two statements may come in either
+            // address order.
             if let (
                 PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var(lo_var),
+                    lhs: PreHirLValue::Var(first_var),
                     rhs:
                         PreHirExpr::Load {
-                            ptr: lo_ptr,
-                            ty: lo_ty,
+                            ptr: first_ptr,
+                            ty: first_ty,
                         },
                 },
                 PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var(hi_var),
+                    lhs: PreHirLValue::Var(second_var),
                     rhs:
                         PreHirExpr::Load {
-                            ptr: hi_ptr,
-                            ty: hi_ty,
+                            ptr: second_ptr,
+                            ty: second_ty,
                         },
                 },
             ) = (&stmts[i], &stmts[i + 1])
             {
-                if is_32bit_int(lo_ty) && is_32bit_int(hi_ty) && is_ptr_offset_by_4(hi_ptr, lo_ptr)
-                {
-                    // Contiguous load!
+                // The second pointer is evaluated after the first assignment,
+                // so it must not read the variable that assignment writes.
+                if let Some(pair) = word_pair(first_ptr, second_ptr).filter(|_| {
+                    is_32bit_int(first_ty)
+                        && is_32bit_int(second_ty)
+                        && first_var != second_var
+                        && !expr_reads_var(second_ptr, first_var)
+                        && !expr_reads_memory(first_ptr)
+                        && !expr_reads_memory(second_ptr)
+                }) {
+                    let base_ptr = match pair {
+                        WordPair::FirstIsLow => first_ptr,
+                        WordPair::SecondIsLow => second_ptr,
+                    };
                     let temp_64_name = format!("uVar_dp_{}", locals.len());
                     locals.push(PreHirBinding {
                         name: temp_64_name.clone(),
-                        ty: NirType::Int {
-                            bits: 64,
-                            signed: false,
-                        },
+                        ty: u64_ty(),
                         surface_type_name: None,
                         origin: None,
                         initializer: None,
                     });
-
-                    // Add: temp_64 = load(lo_ptr)
                     new_stmts.push(PreHirStmt::Assign {
                         lhs: PreHirLValue::Var(temp_64_name.clone()),
                         rhs: PreHirExpr::Load {
-                            ptr: lo_ptr.clone(),
-                            ty: NirType::Int {
-                                bits: 64,
-                                signed: false,
-                            },
+                            ptr: base_ptr.clone(),
+                            ty: u64_ty(),
                         },
                     });
-                    // lo_var = cast(temp_64)
-                    new_stmts.push(PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(lo_var.clone()),
-                        rhs: PreHirExpr::Cast {
-                            ty: lo_ty.clone(),
-                            expr: Box::new(PreHirExpr::Var(temp_64_name.clone())),
-                        },
-                    });
-                    // hi_var = cast(temp_64 >> 32)
-                    new_stmts.push(PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(hi_var.clone()),
-                        rhs: PreHirExpr::Cast {
-                            ty: hi_ty.clone(),
-                            expr: Box::new(PreHirExpr::Binary {
+                    // Is this statement's word the low 32 bits of the 64-bit value?
+                    let first_is_lsw = (pair == WordPair::FirstIsLow) != is_big_endian;
+                    for (var, ty, is_lsw) in [
+                        (first_var, first_ty, first_is_lsw),
+                        (second_var, second_ty, !first_is_lsw),
+                    ] {
+                        let temp = PreHirExpr::Var(temp_64_name.clone());
+                        let value = if is_lsw {
+                            temp
+                        } else {
+                            PreHirExpr::Binary {
                                 op: PreHirBinaryOp::Shr,
-                                lhs: Box::new(PreHirExpr::Var(temp_64_name.clone())),
+                                lhs: Box::new(temp),
                                 rhs: Box::new(PreHirExpr::Const(
                                     32,
                                     NirType::Int {
@@ -1067,13 +1101,17 @@ fn collapse_contiguous_mem_ops(
                                         signed: false,
                                     },
                                 )),
-                                ty: NirType::Int {
-                                    bits: 64,
-                                    signed: false,
-                                },
-                            }),
-                        },
-                    });
+                                ty: u64_ty(),
+                            }
+                        };
+                        new_stmts.push(PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var(var.clone()),
+                            rhs: PreHirExpr::Cast {
+                                ty: ty.clone(),
+                                expr: Box::new(value),
+                            },
+                        });
+                    }
 
                     changed = true;
                     i += 2;
@@ -1081,38 +1119,48 @@ fn collapse_contiguous_mem_ops(
                 }
             }
 
-            // Contiguous stores collapsing
-            // *ptr = cast(val_64)
-            // *(ptr + 4) = cast(val_64 >> 32)
+            // Two adjacent 32-bit stores of the halves of one 64-bit value
+            // become one 64-bit store, with the same endianness rule.
             if let (
                 PreHirStmt::Assign {
                     lhs:
                         PreHirLValue::Deref {
-                            ptr: lo_ptr,
-                            ty: lo_ty,
+                            ptr: first_ptr,
+                            ty: first_ty,
                         },
-                    rhs: lo_val,
+                    rhs: first_val,
                 },
                 PreHirStmt::Assign {
                     lhs:
                         PreHirLValue::Deref {
-                            ptr: hi_ptr,
-                            ty: hi_ty,
+                            ptr: second_ptr,
+                            ty: second_ty,
                         },
-                    rhs: hi_val,
+                    rhs: second_val,
                 },
             ) = (&stmts[i], &stmts[i + 1])
             {
-                if is_32bit_int(lo_ty) && is_32bit_int(hi_ty) && is_ptr_offset_by_4(hi_ptr, lo_ptr)
-                {
-                    if let Some(val_64) = match_split_stores(lo_val, hi_val) {
+                // A pointer that reads memory could observe the first store.
+                if let Some(pair) = word_pair(first_ptr, second_ptr).filter(|_| {
+                    is_32bit_int(first_ty)
+                        && is_32bit_int(second_ty)
+                        && !expr_reads_memory(first_ptr)
+                        && !expr_reads_memory(second_ptr)
+                }) {
+                    let (base_ptr, low_val, high_val) = match pair {
+                        WordPair::FirstIsLow => (first_ptr, first_val, second_val),
+                        WordPair::SecondIsLow => (second_ptr, second_val, first_val),
+                    };
+                    let (lsw_val, msw_val) = if is_big_endian {
+                        (high_val, low_val)
+                    } else {
+                        (low_val, high_val)
+                    };
+                    if let Some(val_64) = match_split_stores(lsw_val, msw_val) {
                         new_stmts.push(PreHirStmt::Assign {
                             lhs: PreHirLValue::Deref {
-                                ptr: lo_ptr.clone(),
-                                ty: NirType::Int {
-                                    bits: 64,
-                                    signed: false,
-                                },
+                                ptr: base_ptr.clone(),
+                                ty: u64_ty(),
                             },
                             rhs: val_64,
                         });
@@ -1192,6 +1240,171 @@ mod tests {
         }
     }
 
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
+    }
+
+    fn ptr_plus(base: &str, offset: i64) -> PreHirExpr {
+        if offset == 0 {
+            var(base)
+        } else {
+            PreHirExpr::PtrOffset {
+                base: Box::new(var(base)),
+                offset,
+            }
+        }
+    }
+
+    fn load_assign(dst: &str, ptr: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(dst.to_string()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(ptr),
+                ty: u32_ty(),
+            },
+        }
+    }
+
+    fn store_assign(ptr: PreHirExpr, val: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(ptr),
+                ty: u32_ty(),
+            },
+            rhs: val,
+        }
+    }
+
+    /// `(x32) val` and `(x32) (val >> 32)`.
+    fn low_word(val: &str) -> PreHirExpr {
+        PreHirExpr::Cast {
+            ty: u32_ty(),
+            expr: Box::new(var(val)),
+        }
+    }
+
+    fn high_word(val: &str) -> PreHirExpr {
+        PreHirExpr::Cast {
+            ty: u32_ty(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(var(val)),
+                rhs: Box::new(PreHirExpr::Const(32, u32_ty())),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+        }
+    }
+
+    /// Which 32-bit half of the collapsed 64-bit temp `dst` is assigned from.
+    fn half_of(stmts: &[PreHirStmt], dst: &str) -> &'static str {
+        for stmt in stmts {
+            if let PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast { expr, .. },
+            } = stmt
+                && name == dst
+            {
+                return if matches!(expr.as_ref(), PreHirExpr::Binary { .. }) {
+                    "high"
+                } else {
+                    "low"
+                };
+            }
+        }
+        panic!("no cast assignment to {dst}");
+    }
+
+    fn collapse(stmts: Vec<PreHirStmt>, is_big_endian: bool) -> Option<Vec<PreHirStmt>> {
+        let mut stmts = stmts;
+        let mut locals = Vec::new();
+        collapse_contiguous_mem_ops(&mut stmts, &mut locals, is_big_endian).then_some(stmts)
+    }
+
+    #[test]
+    fn contiguous_loads_assign_halves_by_target_endianness() {
+        let body = || {
+            vec![
+                load_assign("lo", ptr_plus("p", 0)),
+                load_assign("hi", ptr_plus("p", 4)),
+            ]
+        };
+        let le = collapse(body(), false).expect("collapse");
+        assert_eq!(half_of(&le, "lo"), "low");
+        assert_eq!(half_of(&le, "hi"), "high");
+        // Big-endian: the word at base + 0 is the most significant.
+        let be = collapse(body(), true).expect("collapse");
+        assert_eq!(half_of(&be, "lo"), "high");
+        assert_eq!(half_of(&be, "hi"), "low");
+    }
+
+    #[test]
+    fn contiguous_loads_collapse_when_the_high_address_comes_first() {
+        let body = vec![
+            load_assign("b", ptr_plus("p", 4)),
+            load_assign("a", ptr_plus("p", 0)),
+        ];
+        let le = collapse(body.clone(), false).expect("collapse");
+        assert_eq!(half_of(&le, "a"), "low");
+        assert_eq!(half_of(&le, "b"), "high");
+        // The wide load is at the lower address either way.
+        assert!(matches!(
+            &le[0],
+            PreHirStmt::Assign { rhs: PreHirExpr::Load { ptr, .. }, .. } if ptr.as_ref() == &var("p")
+        ));
+        let be = collapse(body, true).expect("collapse");
+        assert_eq!(half_of(&be, "a"), "high");
+        assert_eq!(half_of(&be, "b"), "low");
+    }
+
+    #[test]
+    fn contiguous_loads_not_collapsed_when_first_assignment_changes_the_pointer() {
+        // `p = *p; q = *(p + 4)`: the second load uses the new p.
+        let body = vec![
+            load_assign("p", ptr_plus("p", 0)),
+            load_assign("q", ptr_plus("p", 4)),
+        ];
+        assert!(collapse(body, false).is_none());
+    }
+
+    #[test]
+    fn split_stores_collapse_by_target_endianness() {
+        // Little-endian: low word at base + 0.
+        let le_body = vec![
+            store_assign(ptr_plus("p", 0), low_word("v")),
+            store_assign(ptr_plus("p", 4), high_word("v")),
+        ];
+        assert!(collapse(le_body.clone(), false).is_some());
+        // The same statements on a big-endian target put the low word at the
+        // high address, so they are not a 64-bit store of `v`.
+        assert!(collapse(le_body, true).is_none());
+
+        // Big-endian: high word at base + 0.
+        let be_body = vec![
+            store_assign(ptr_plus("p", 0), high_word("v")),
+            store_assign(ptr_plus("p", 4), low_word("v")),
+        ];
+        let collapsed = collapse(be_body.clone(), true).expect("collapse");
+        assert_eq!(collapsed.len(), 1);
+        assert!(collapse(be_body, false).is_none());
+    }
+
+    #[test]
+    fn split_stores_collapse_when_the_high_address_comes_first() {
+        let body = vec![
+            store_assign(ptr_plus("p", 4), high_word("v")),
+            store_assign(ptr_plus("p", 0), low_word("v")),
+        ];
+        let collapsed = collapse(body, false).expect("collapse");
+        assert_eq!(collapsed.len(), 1);
+        assert!(matches!(
+            &collapsed[0],
+            PreHirStmt::Assign { lhs: PreHirLValue::Deref { ptr, .. }, .. } if ptr.as_ref() == &var("p")
+        ));
+    }
+
     #[test]
     fn match_split_stores_rejects_non_var_expressions() {
         let lo_val = PreHirExpr::Load {
@@ -1218,5 +1431,47 @@ mod tests {
         let lo1 = PreHirExpr::Var("a".to_string());
         let lo2 = PreHirExpr::Var("b".to_string());
         assert!(!is_carry_of(&carry_expr, &lo1, &lo2, "lo", &defs));
+    }
+    #[test]
+    fn review_effectful_load_pointers_keep_their_evaluation_count() {
+        for ptr in [
+            PreHirExpr::Call {
+                origin: None,
+                target: "next_pointer".into(),
+                args: vec![],
+                ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+            PreHirExpr::Load {
+                ptr: Box::new(var("pointer_slot")),
+                ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+            PreHirExpr::FieldAccess {
+                base: Box::new(var("record")),
+                field_name: "pointer".into(),
+                offset: 0,
+                ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+            PreHirExpr::Index {
+                base: Box::new(var("pointers")),
+                index: Box::new(var("index")),
+                elem_ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+        ] {
+            for reverse in [false, true] {
+                let higher = PreHirExpr::PtrOffset {
+                    base: Box::new(ptr.clone()),
+                    offset: 4,
+                };
+                let body = if reverse {
+                    vec![load_assign("high", higher), load_assign("low", ptr.clone())]
+                } else {
+                    vec![load_assign("low", ptr.clone()), load_assign("high", higher)]
+                };
+                assert!(
+                    collapse(body, false).is_none(),
+                    "pointer effects must execute twice"
+                );
+            }
+        }
     }
 }
