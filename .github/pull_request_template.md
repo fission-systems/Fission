@@ -23,7 +23,7 @@
 - [ ] **Decompilation orchestration / Rust-Sleigh** (`crates/fission-decompiler/`)
 - [ ] **Loader / binary parsing** (`crates/fission-loader/`)
 - [ ] **CLI / UX** (`crates/fission-cli/`)
-- [ ] **Benchmark harness / corpus** (`benchmark/source_semantic_benchmark/`, `benchmark/full_benchmark/`, `benchmark/config/`)
+- [ ] **Benchmark harness / corpus** (`benchmark/config/`, `scripts/quality/decbench_*`; see [`docs/BENCHMARK_DECBENCH.md`](../docs/BENCHMARK_DECBENCH.md))
 - [ ] **Docs / process only** (no semantic code paths)
 - [ ] **CI / release plumbing** (`.github/`, `docs/RELEASE.md`)
 

@@ -235,37 +235,7 @@ Run it only after:
 - `info`, `list`, and `decomp` work on at least one sample binary
 - you have inspected one or two live outputs manually
 
-Canonical benchmark entrypoint:
-
-```bash
-python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
-```
-
-One canonical corpus command:
-
-```bash
-python3 benchmark/full_benchmark/full_decomp_benchmark.py \
-  --corpus-manifest benchmark/config/benchmark_corpus/smoke_corpus.json \
-  --ghidra-dir /path/to/ghidra
-```
-
-What it compares:
-
-- Fission whole-binary decompilation output
-- Ghidra reference output
-- similarity, coverage, owner metrics, and shape-drift proxies
-
-First artifact to read:
-
-- `benchmark_compact_summary.json`
-
-Why this artifact first:
-
-- it is the compact AI/operator-facing summary
-- it is much smaller than the full benchmark summary
-- it surfaces headline quality metrics, owner drift, shape drift, x86/x64 split, and promotion blockers without requiring a deep artifact dive
-
-For the full benchmark workflow, see [benchmark/full_benchmark/README.md](../benchmark/full_benchmark/README.md).
+Quality is measured with DecBench: a local sample-set gate for quick signal and a full-dataset sweep for any ranking or release claim. Commands, environment variables and rules are in [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
 
 ## Text Output vs JSON Output
 
