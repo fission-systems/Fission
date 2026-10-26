@@ -8,8 +8,8 @@
 //! The rewrite changes the value of `w` whenever the sum exceeds 255, so it
 //! only runs on evidence that the copy keeps just the low byte:
 //!
-//! * the addition is itself an 8-bit operation (`ty` is at most 8 bits), so
-//!   the sum already wrapped modulo 256, or
+//! * the addition is an unsigned 8-bit operation and its binding preserves
+//!   that unsigned value (a signed binding could reinterpret it), or
 //! * the destination is declared at most 8 bits wide, so the assignment
 //!   truncates anyway and the mask only spells that out.
 //!
@@ -87,7 +87,7 @@ fn rewrite_stmt(
                             bits: 32,
                             signed: false,
                         });
-                    if !truncation_is_evidenced(name, &source_ty, type_map) {
+                    if !truncation_is_evidenced(name, src, &source_ty, type_map) {
                         byte_ranged.insert(name.clone(), false);
                         byte_sum_names.insert(name.clone(), false);
                         last_def.insert(name.clone(), rhs.clone());
@@ -260,16 +260,23 @@ fn rewrite_stmt(
     }
 }
 
-/// The copy keeps only the low byte: the sum is an 8-bit operation, or the
-/// destination is declared 8 bits wide and the assignment truncates anyway.
+/// A narrow destination truncates itself. A wider copy may only be masked
+/// when both the operation and its binding preserve an unsigned byte value.
+/// In particular, a signed byte binding can turn 200 into -56 before the copy.
 fn truncation_is_evidenced(
     destination: &str,
+    source: &str,
     source_ty: &NirType,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     let byte_wide =
         |ty: &NirType| matches!(ty, NirType::Int { bits, .. } if (1..=8).contains(bits));
-    byte_wide(source_ty) || type_map.get(destination).is_some_and(byte_wide)
+    let unsigned_byte =
+        matches!(source_ty, NirType::Int { bits, signed: false } if (1..=8).contains(bits));
+    let unsigned_binding = type_map
+        .get(source)
+        .is_none_or(|ty| matches!(ty, NirType::Int { bits, signed: false } if *bits > 0));
+    type_map.get(destination).is_some_and(byte_wide) || (unsigned_byte && unsigned_binding)
 }
 
 /// Type of the `& 0xff` mask: the destination's width, keeping its
@@ -527,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn recovered_mask_uses_unsigned_destination_width() {
+    fn signed_byte_sum_copy_preserves_its_widening() {
         let mut func = PreHirFunction {
             name: "signed_byte_sum".into(),
             params: vec![],
@@ -556,31 +563,9 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(apply_byte_sum_index_trunc(&mut func));
-        assert!(matches!(
-            &func.body[1],
-            PreHirStmt::Assign {
-                rhs: PreHirExpr::Binary {
-                    op: PreHirBinaryOp::And,
-                    rhs,
-                    ty: NirType::Int {
-                        bits: 32,
-                        signed: false,
-                    },
-                    ..
-                },
-                ..
-            } if matches!(
-                rhs.as_ref(),
-                PreHirExpr::Const(
-                    0xff,
-                    NirType::Int {
-                        bits: 32,
-                        signed: false,
-                    }
-                )
-            )
-        ));
+        let before = func.body.clone();
+        assert!(!apply_byte_sum_index_trunc(&mut func));
+        assert_eq!(func.body, before);
     }
 
     fn assign(dst: &str, rhs: PreHirExpr) -> PreHirStmt {
@@ -789,5 +774,32 @@ mod tests {
             ],
         );
         assert!(!apply_byte_sum_index_trunc(&mut f));
+    }
+    #[test]
+    fn review_signed_byte_widening_does_not_become_zero_extension() {
+        for (op_ty, binding_ty) in [(i8_ty(), i8_ty()), (u8_ty(), i8_ty()), (i8_ty(), u32_ty())] {
+            let mut f = func(
+                vec![
+                    binding("a", u8_ty()),
+                    binding("b", u8_ty()),
+                    binding("sum", binding_ty),
+                    binding(
+                        "out",
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    ),
+                ],
+                vec![assign("sum", add(op_ty)), assign("out", var("sum"))],
+            );
+            let before = f.body.clone();
+            assert_eq!((200_u8 as i8) as i32, -56);
+            apply_byte_sum_index_trunc(&mut f);
+            assert_eq!(
+                f.body, before,
+                "masking a signed byte after widening changes -56 into 200"
+            );
+        }
     }
 }

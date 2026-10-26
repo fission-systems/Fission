@@ -54,12 +54,14 @@ fn expr_reads_var(expr: &PreHirExpr, name: &str) -> bool {
 
 fn expr_reads_memory(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Load { .. } | PreHirExpr::Call { .. } => true,
+        PreHirExpr::Load { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::FieldAccess { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::AggregateCopy { .. } => true,
         PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::Unary { expr: inner, .. }
-        | PreHirExpr::PtrOffset { base: inner, .. }
-        | PreHirExpr::FieldAccess { base: inner, .. }
-        | PreHirExpr::AggregateCopy { src: inner, .. } => expr_reads_memory(inner),
+        | PreHirExpr::PtrOffset { base: inner, .. } => expr_reads_memory(inner),
         PreHirExpr::Binary { lhs, rhs, .. } => expr_reads_memory(lhs) || expr_reads_memory(rhs),
         PreHirExpr::Select {
             cond,
@@ -68,9 +70,6 @@ fn expr_reads_memory(expr: &PreHirExpr) -> bool {
             ..
         } => {
             expr_reads_memory(cond) || expr_reads_memory(then_expr) || expr_reads_memory(else_expr)
-        }
-        PreHirExpr::Index { base, index, .. } => {
-            expr_reads_memory(base) || expr_reads_memory(index)
         }
         _ => false,
     }
@@ -1060,6 +1059,8 @@ fn collapse_contiguous_mem_ops(
                         && is_32bit_int(second_ty)
                         && first_var != second_var
                         && !expr_reads_var(second_ptr, first_var)
+                        && !expr_reads_memory(first_ptr)
+                        && !expr_reads_memory(second_ptr)
                 }) {
                     let base_ptr = match pair {
                         WordPair::FirstIsLow => first_ptr,
@@ -1430,5 +1431,47 @@ mod tests {
         let lo1 = PreHirExpr::Var("a".to_string());
         let lo2 = PreHirExpr::Var("b".to_string());
         assert!(!is_carry_of(&carry_expr, &lo1, &lo2, "lo", &defs));
+    }
+    #[test]
+    fn review_effectful_load_pointers_keep_their_evaluation_count() {
+        for ptr in [
+            PreHirExpr::Call {
+                origin: None,
+                target: "next_pointer".into(),
+                args: vec![],
+                ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+            PreHirExpr::Load {
+                ptr: Box::new(var("pointer_slot")),
+                ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+            PreHirExpr::FieldAccess {
+                base: Box::new(var("record")),
+                field_name: "pointer".into(),
+                offset: 0,
+                ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+            PreHirExpr::Index {
+                base: Box::new(var("pointers")),
+                index: Box::new(var("index")),
+                elem_ty: NirType::Ptr(Box::new(u32_ty())),
+            },
+        ] {
+            for reverse in [false, true] {
+                let higher = PreHirExpr::PtrOffset {
+                    base: Box::new(ptr.clone()),
+                    offset: 4,
+                };
+                let body = if reverse {
+                    vec![load_assign("high", higher), load_assign("low", ptr.clone())]
+                } else {
+                    vec![load_assign("low", ptr.clone()), load_assign("high", higher)]
+                };
+                assert!(
+                    collapse(body, false).is_none(),
+                    "pointer effects must execute twice"
+                );
+            }
+        }
     }
 }
