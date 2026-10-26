@@ -713,6 +713,7 @@ mod tests {
             float_param_offsets: Vec::new(),
             float_shares_int_slots: false,
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),

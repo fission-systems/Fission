@@ -1799,6 +1799,7 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
         surface_return_type_name: None,
         calling_convention: Default::default(),
         is_64bit: true,
+        is_big_endian: false,
         suppress_entry_register_params: false,
         callee_observed_max_arity: Default::default(),
         callee_summaries: Default::default(),
@@ -1837,6 +1838,7 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     let mut func = PreHirFunction {
         variadic_fixed_arity: None,
         name: "test_or_compare".to_string(),
+        is_big_endian: false,
         int_param_offsets: Vec::new(),
         float_param_offsets: Vec::new(),
         float_shares_int_slots: false,
