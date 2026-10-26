@@ -68,8 +68,7 @@ Heavy CI uploads automation artifacts under `benchmark/artifacts/automation/` â€
 
 If the release claims corpus-wide improvements:
 
-- Capture `benchmark_compact_summary.json` (see [`docs/QUALITY_METRICS.md`](QUALITY_METRICS.md)) from a reproducible run directory under `benchmark/artifacts/full_benchmark/`.
-- Reference the exact runner invocation from [`benchmark/BENCHMARK_GUIDE.md`](../benchmark/BENCHMARK_GUIDE.md).
+- Attach the DecBench local-gate `--dump` JSON, or same-row full-sweep before/after totals (`FISSION_BENCHMARK_NO_CACHE=1`), per [`docs/BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
 
 ## 6. Experimental flags
 

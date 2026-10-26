@@ -1,6 +1,6 @@
 name: Benchmark regression
 
-description: Report a source-semantic, feature-shape, automation, or full benchmark regression.
+description: Report a DecBench regression (local sample-set gate or full-dataset sweep).
 title: "benchmark: "
 labels:
   - benchmark
@@ -19,11 +19,9 @@ body:
     attributes:
       label: Benchmark suite
       options:
-        - source semantic smoke
-        - feature-shape canaries
-        - source-owned-all
-        - full benchmark / Ghidra comparison
-        - automation lane
+        - DecBench local sample-set gate
+        - DecBench full sweep (unoptimized)
+        - DecBench full sweep (other config)
         - other
     validations:
       required: true
@@ -32,7 +30,7 @@ body:
     id: artifact
     attributes:
       label: Artifact path or URL
-      placeholder: benchmark/artifacts/source_semantic_benchmark/feature-shape-canaries-latest
+      placeholder: /tmp/gate_after.json (--dump output) or the sweep checkpoint directory
     validations:
       required: true
 
@@ -42,11 +40,9 @@ body:
       label: Reproduction command
       render: bash
       placeholder: |
-        python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
-          --manifest benchmark/source_semantic_benchmark/manifests/feature_shape_canaries.json \
-          --fission-bin target/release/fission_cli \
-          --timeout-sec 45 \
-          --jobs 1
+        cargo build -p fission-cli --release
+        python scripts/quality/decbench_sample_set_gate.py check \
+          --cli target/release/fission_cli --dump /tmp/gate_after.json
     validations:
       required: true
 
@@ -56,10 +52,9 @@ body:
       label: Metric deltas / failing rows
       render: text
       placeholder: |
-        weighted_semantic_similarity: 0.71 -> 0.64
-        behavior_pass_rate: 0.80 -> 0.60
-        comparison_outcome: regressed
-        top row: <entry>::<function>
+        total GED: 1234 -> 1310
+        perfect matches: 88 -> 81
+        worst row: <binary>::<function>
     validations:
       required: true
 

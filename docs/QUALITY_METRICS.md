@@ -4,29 +4,9 @@
 
 This note defines **stable filenames and top-level JSON fields** reviewers use when comparing `main` over time. It intentionally stays descriptive—**no nightly automation is required yet** ([`docs/RELEASE.md`](RELEASE.md) optional benchmark attachment).
 
-## Benchmark runner outputs
+## Benchmark results
 
-Runs emitted under `benchmark/artifacts/full_benchmark/<run-name>/`.
-
-| File | Role | Stable identifiers |
-|------|------|---------------------|
-| `benchmark_summary.json` | Full verbose rollup used by regression tooling | Referenced by corpus manifests / runner docs ([`benchmark/BENCHMARK_GUIDE.md`](../benchmark/BENCHMARK_GUIDE.md)) |
-| `benchmark_compact_summary.json` | Operator-facing condensed summary (`compact_summary.py`) | Top-level discriminator `summary_kind`: `compact_corpus_benchmark` **or** `compact_single_benchmark`; `compact_version` integer |
-
-### Compact corpus (`compact_corpus_benchmark`)
-
-Authoritative schema documentation lives beside the harness (`benchmark/full_benchmark/grand_finale_support/artifact_models.py`). Trend-friendly scalars include:
-
-- Gate posture: `weighted_avg_normalized_similarity`, `release_promotion_allowed`, `promotion_blockers`
-- Architecture buckets: `x86_summary`, `x64_summary` (`binary_count`, `weighted_avg_normalized_similarity`, `failed_binary_ids`, …)
-- Rolled metrics: `owner_metric_totals`, `shape_drift_totals`, `normalize_pass_metric_totals`, `ghidra_action_metric_totals`, `blockgraph_collapse_metric_totals`, `blockgraph_region_metric_totals`, `alias_interleave_metric_totals`, `cpu_metric_totals`
-- Row sampling: `top_degraded_rows`, `per_binary_rows[]` (`direct_success`, `avg_normalized_similarity`, nested metric maps matching single-binary compact rows)
-
-Subset constants enumerating promoted keys appear in [`benchmark/full_benchmark/grand_finale_support/compact_summary.py`](../benchmark/full_benchmark/grand_finale_support/compact_summary.py) (`SELECTED_*` tuples).
-
-### Compact single benchmark (`compact_single_benchmark`)
-
-Shares nested metric dictionaries with corpus rows (`owner_metrics`, `shape_drift_metrics`, `normalize_pass_metrics`, …) and exposes comparison helpers (`both_success_rate_pct`, `top_regressions`, `baseline_blockers`).
+Quality is measured with DecBench; see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md). Cite the local gate's `--dump` JSON (one row per function: GED, source and output node counts) or full-sweep before/after totals. The former `benchmark/full_benchmark` runner and its `benchmark_summary.json` / `benchmark_compact_summary.json` outputs are retired.
 
 ## `NirBuildStats`
 
