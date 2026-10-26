@@ -4,7 +4,13 @@ use bincode::Options;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-type Key = (u64, Option<(u64, u64)>);
+type Key = (
+    u64,
+    Option<(
+        crate::packed_context::ContextWords,
+        crate::packed_context::ContextWords,
+    )>,
+);
 type Raw = (
     DecodedInstruction,
     Vec<PcodeOp>,
@@ -48,7 +54,7 @@ fn codec() -> impl Options {
         .reject_trailing_bytes()
 }
 fn key(address: u64, context: Option<PackedContextOverride>) -> Key {
-    (address, context.map(|c| (c.context_bits(), c.mask_bits())))
+    (address, context.map(|c| (c.context(), c.mask())))
 }
 impl RawDecodeSeed {
     #[cfg(test)]

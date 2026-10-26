@@ -361,7 +361,7 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
              pub context_changes: &'static [GeneratedContextOp],\n\
          }}\n\n\
          pub const GENERATED_ARCH: &str = {};\n\
-         pub const GENERATED_DEFAULT_CONTEXT: u64 = {};\n\
+         pub const GENERATED_DEFAULT_CONTEXT: [u32; {}] = {:?};\n\
          pub const GENERATED_ENTRY_SPEC: &str = {};\n\
          pub const GENERATED_ENTRY_ID: &str = {};\n\
          pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = {};\n\
@@ -371,7 +371,8 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
          ];\n\
          ",
         rust_string(&compiled.arch),
-        compiled.default_context,
+        compiled.default_context.words().len(),
+        compiled.default_context.words(),
         rust_string(&compiled.entry_spec),
         rust_string(&compiled.entry_id),
         compiled

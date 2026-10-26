@@ -75,6 +75,6 @@ impl RuntimeSleighFrontend {
             }
         }
 
-        (context_override.mask_bits() != 0).then_some(context_override)
+        (!context_override.mask().is_zero()).then_some(context_override)
     }
 }

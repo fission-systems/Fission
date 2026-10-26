@@ -8,7 +8,7 @@ use super::*;
 use crate::compiler::ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 use crate::compiler::preprocessor::{ExpandedSpec, PreprocessedLine};
 use crate::compiler::sla::CompiledSlaTemplateLibrary;
-use crate::packed_context::{set_packed_context_bits, PackedContextOverride};
+use crate::packed_context::{set_packed_context_bits, ContextWords, PackedContextOverride};
 
 pub fn compile_frontend(
     arch: &str,
@@ -24,7 +24,7 @@ pub fn compile_frontend(
         subtable_executables: BTreeMap::new(),
         pcode_ops: BTreeSet::new(),
         pcode_op_sources: BTreeMap::new(),
-        default_context: 0,
+        default_context: ContextWords::ZERO,
         pattern_nodes: Vec::new(),
         field_info: BTreeMap::new(),
     };
@@ -37,10 +37,10 @@ pub fn compile_frontend(
     // Infer default context from .pspec if available
     let default_context_override =
         infer_default_context_from_pspec(entry_spec, processor_spec, &collector.field_info)?;
-    collector.default_context = default_context_override.context_bits();
+    collector.default_context = default_context_override.context();
     if std::env::var_os("FISSION_TRACE_CONTEXT_DEFAULT").is_some() {
         eprintln!(
-            "Inferred Default Context for {}: 0x{:016x}",
+            "Inferred Default Context for {}: 0x{:x}",
             arch, collector.default_context
         );
     }
@@ -68,7 +68,7 @@ pub fn compile_frontend(
     Ok(CompiledFrontend {
         arch: arch.to_string(),
         default_context: collector.default_context,
-        default_context_known_mask: default_context_override.mask_bits(),
+        default_context_known_mask: default_context_override.mask(),
         entry_spec: expanded
             .entry_spec
             .file_name()
@@ -122,8 +122,8 @@ fn infer_default_context_from_pspec(
 
     let content = fs::read_to_string(&pspec_path)
         .with_context(|| format!("read pspec {}", pspec_path.display()))?;
-    let mut default_context = 0u64;
-    let mut default_context_known_mask = 0u64;
+    let mut default_context = ContextWords::ZERO;
+    let mut default_context_known_mask = ContextWords::ZERO;
 
     for line in content.lines() {
         let line = line.trim();
@@ -169,7 +169,7 @@ fn infer_default_context_from_pspec(
             }
         }
     }
-    Ok(PackedContextOverride::new(
+    Ok(PackedContextOverride::from_words(
         default_context,
         default_context_known_mask,
     ))
@@ -458,7 +458,7 @@ pub(super) struct Collector {
     pub(super) subtable_executables: BTreeMap<String, Vec<CompiledExecutableConstructor>>,
     pub(super) pcode_ops: BTreeSet<String>,
     pub(super) pcode_op_sources: BTreeMap<String, String>,
-    pub(super) default_context: u64,
+    pub(super) default_context: ContextWords,
     pub(super) pattern_nodes: Vec<CompiledPatternNode>,
     pub(super) field_info: BTreeMap<String, FieldBitRange>,
 }

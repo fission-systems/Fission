@@ -17,8 +17,8 @@ pub struct RuntimeConstructState {
     pub exported_handle: Option<RuntimeHandle>,
     pub operands: Vec<BoundOperand>,
     /// Context register after this constructor's context changes have been applied.
-    pub context_register: u64,
-    pub context_known_mask: u64,
+    pub context_register: crate::packed_context::ContextWords,
+    pub context_known_mask: crate::packed_context::ContextWords,
     /// Absolute byte offset of this constructor state from the instruction start.
     /// Mirrors Ghidra ConstructState.offset.
     pub absolute_offset: usize,

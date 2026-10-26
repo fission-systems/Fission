@@ -211,8 +211,8 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     minimum_length: usize,
-    context_register: u64,
-    context_known_mask: u64,
+    context_register: ContextWords,
+    context_known_mask: ContextWords,
     cursor: usize,
     pool_guard: PoolGuard,
     walker: spine::RuntimeParserWalker,
@@ -2157,7 +2157,7 @@ mod sleigh_parity_gaps_tests {
         assert_probe_reuse_matches_two_walks(
             &thumb,
             &[0x88, 0xbf],
-            Some(crate::runtime::PackedContextOverride::new(
+            Some(crate::runtime::PackedContextOverride::from_words(
                 thumb.default_context,
                 thumb.default_context_known_mask,
             )),
@@ -2384,7 +2384,7 @@ mod operand_expression_borrow_tests {
 
     fn snapshot(walker: &CompiledParserWalker<'_, '_>) -> String {
         format!(
-            "{:?} {:?} {:?} {} {} {} {:?}",
+            "{:?} {:?} {:?} {} {:x} {:x} {:?}",
             walker.handles,
             walker.operand_absolute_offsets,
             walker.operand_relative_lengths,

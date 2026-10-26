@@ -48,12 +48,12 @@ fn main() {
             compiled.default_context,
             compiled.default_context_known_mask,
         );
-        let got = (from_sla.context_bits(), from_sla.mask_bits());
+        let got = (from_sla.context(), from_sla.mask());
         if want == got {
             agree += 1;
         } else {
             mismatches.push(format!(
-                "{}: spec=(0x{:016x},0x{:016x}) sla=(0x{:016x},0x{:016x})",
+                "{}: spec=(0x{:x},0x{:x}) sla=(0x{:x},0x{:x})",
                 entry.entry_id, want.0, want.1, got.0, got.1
             ));
         }

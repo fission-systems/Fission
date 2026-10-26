@@ -223,15 +223,13 @@ fn shifted_instruction_constraint_byte(byte: u8, index: usize) -> Result<u64> {
         .ok_or_else(|| anyhow!("instruction constraint byte shift {shift} exceeds u64 width"))
 }
 
-fn shifted_context_constraint_value(context_register: u64, offset: u32) -> Result<u64> {
-    context_register
-        .checked_shr(offset)
-        .ok_or_else(|| anyhow!("context constraint shift {offset} exceeds u64 width"))
+fn shifted_context_constraint_value(context_register: ContextWords, offset: u32) -> Result<u64> {
+    context_register.shr_low_u64(offset)
 }
 
 pub(super) fn possible_context_probe_values(
-    context_register: u64,
-    context_known_mask: u64,
+    context_register: ContextWords,
+    context_known_mask: ContextWords,
     start_bit: u32,
     bit_size: u32,
 ) -> Result<Vec<u64>> {
@@ -420,9 +418,10 @@ pub(super) fn pattern_block_byte_len(block: &CompiledPatternBlock) -> Result<usi
 mod tests {
     use super::{
         append_decision_probe_byte, decision_probe_value_u8, ensure_decision_probe_byte_width,
-        ensure_u8_decision_probe_width, shifted_context_constraint_value,
-        shifted_instruction_constraint_byte,
+        ensure_u8_decision_probe_width, possible_context_probe_values,
+        shifted_context_constraint_value, shifted_instruction_constraint_byte,
     };
+    use crate::packed_context::ContextWords;
 
     #[test]
     fn decision_probe_values_fail_closed_above_u8_width() {
@@ -447,10 +446,46 @@ mod tests {
         );
         assert!(shifted_instruction_constraint_byte(0x12, 8).is_err());
 
+        let low = |bits| ContextWords::from_low_u64(bits);
         assert_eq!(
-            shifted_context_constraint_value(0x8000_0000_0000_0000, 63).unwrap(),
+            shifted_context_constraint_value(low(0x8000_0000_0000_0000), 63).unwrap(),
             1
         );
-        assert!(shifted_context_constraint_value(1, 64).is_err());
+        // Bit 64 is word 2's least significant bit, no longer past the register.
+        let mut wide = ContextWords::ZERO;
+        wide.set_word(2, 1, 1).unwrap();
+        assert_eq!(shifted_context_constraint_value(wide, 64).unwrap(), 1);
+        assert_eq!(shifted_context_constraint_value(wide, 63).unwrap(), 2);
+        // Only the end of the register is out of reach.
+        assert!(shifted_context_constraint_value(low(1), 8 * 32).is_err());
+    }
+
+    #[test]
+    fn context_constraint_reads_a_window_that_spans_words() {
+        let mut ctx = ContextWords::ZERO;
+        ctx.set_word(1, 0xffff_0000, u32::MAX).unwrap();
+        ctx.set_word(2, 0x0000_00ab, u32::MAX).unwrap();
+        // Bits 48..=71: the high half of word 1, then word 2's low byte.
+        assert_eq!(
+            shifted_context_constraint_value(ctx, 48).unwrap() & 0xff_ffff,
+            0xab_ffff
+        );
+    }
+
+    #[test]
+    fn context_probe_values_see_high_context_words() {
+        let mut known = ContextWords::ZERO;
+        let mut value = ContextWords::ZERO;
+        // 2 bits at bit 98 (word 3): known, set to 0b10.
+        known.set_bits(98, 2, 0b11).unwrap();
+        value.set_bits(98, 2, 0b10).unwrap();
+        assert_eq!(
+            possible_context_probe_values(value, known, 98, 2).unwrap(),
+            vec![0b10]
+        );
+        // Same field, unknown: all four values are possible.
+        let mut all = possible_context_probe_values(value, ContextWords::ZERO, 98, 2).unwrap();
+        all.sort_unstable();
+        assert_eq!(all, vec![0, 1, 2, 3]);
     }
 }

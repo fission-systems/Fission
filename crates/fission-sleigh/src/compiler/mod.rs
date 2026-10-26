@@ -523,10 +523,18 @@ fn discover_all_entry_specs_uncached() -> Result<Vec<EntrySpec>> {
     Ok(entries)
 }
 
+/// Bump whenever the serialized layout of [`CompiledFrontend`] changes.
+///
+/// bincode has no self-description: a cache written with an older layout is
+/// not rejected with an error but misread, and a misread length prefix aborts
+/// the process on a multi-exabyte allocation. Folding the layout into the file
+/// name means an old cache is never opened.
+const FRONTEND_CACHE_LAYOUT: u32 = 2;
+
 pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFrontend> {
     let entry_id = entry_id_from_path(entry_spec)?;
     let cache_dir = sleigh_build_cache_root().join("cache");
-    let cache_path = cache_dir.join(format!("{}.bin", entry_id));
+    let cache_path = cache_dir.join(format!("{entry_id}.v{FRONTEND_CACHE_LAYOUT}.bin"));
 
     // Try to load from cache
     if let Ok(cache_file) = fs::File::open(&cache_path) {

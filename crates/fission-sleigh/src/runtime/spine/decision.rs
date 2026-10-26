@@ -534,8 +534,8 @@ mod tests {
         );
         CompiledFrontend {
             arch: "test".to_string(),
-            default_context: 0,
-            default_context_known_mask: 0,
+            default_context: Default::default(),
+            default_context_known_mask: Default::default(),
             entry_spec: "test.slaspec".to_string(),
             entry_id: "test".to_string(),
             include_manifest: Vec::new(),

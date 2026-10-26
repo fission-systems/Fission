@@ -1,14 +1,14 @@
 use super::*;
 pub(super) use crate::packed_context::{
-    packed_context_word, set_packed_context_bits, set_packed_context_word,
+    packed_context_word, set_packed_context_bits, set_packed_context_word, ContextWords,
 };
 
 #[derive(Debug, Clone)]
 pub(super) struct CompiledInstructionContext<'a> {
     pub(super) inner: RuntimeInstructionContext<'a>,
     pub(super) instruction_cursor: usize,
-    pub(super) context_register: u64,
-    pub(super) context_known_mask: u64,
+    pub(super) context_register: ContextWords,
+    pub(super) context_known_mask: ContextWords,
 }
 
 impl<'a> std::ops::Deref for CompiledInstructionContext<'a> {
@@ -40,14 +40,14 @@ impl<'a> CompiledInstructionContext<'a> {
                 instruction_width_profile,
             ),
             instruction_cursor: cursor,
-            context_register: 0,
-            context_known_mask: 0,
+            context_register: ContextWords::ZERO,
+            context_known_mask: ContextWords::ZERO,
         })
     }
 }
 
 pub(super) fn packed_context_bytes(
-    context_register: u64,
+    context_register: ContextWords,
     bytestart: u32,
     bytesize: u32,
 ) -> Result<u32> {
@@ -73,7 +73,7 @@ pub(super) fn packed_context_bytes(
 }
 
 pub(super) fn packed_context_bits(
-    context_register: u64,
+    context_register: ContextWords,
     startbit: u32,
     bitsize: u32,
 ) -> Result<u32> {

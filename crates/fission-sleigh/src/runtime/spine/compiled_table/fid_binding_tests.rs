@@ -33,9 +33,10 @@ fn fid_binding_reuse_is_exact_across_addresses_and_preserves_clear() {
     let first = get_or_decode(&compiled, &bytes, 0x1000, true).unwrap();
     assert!(matches!(&first, Binding::Shared(_)));
     super::super::BIND_CACHE.with(|cache| {
-        cache
-            .borrow_mut()
-            .insert((0, 0, 0), Err("stale test entry".into()));
+        cache.borrow_mut().insert(
+            (0, Default::default(), Default::default()),
+            Err("stale test entry".into()),
+        );
     });
     for address in [0x2000, 0x8000_0000_0000_0100, u64::MAX - 64] {
         let reused = get_or_decode(&compiled, &bytes, address, true).unwrap();
@@ -133,7 +134,10 @@ fn fid_binding_owner_cow_nested_unwind_and_threads_are_isolated() {
         });
     }
     let old = Arc::as_ptr(&compiled);
-    Arc::make_mut(&mut compiled).default_context_known_mask ^= 1;
+    Arc::make_mut(&mut compiled)
+        .default_context_known_mask
+        .set_word(0, 1, 1)
+        .unwrap();
     assert_ne!(old, Arc::as_ptr(&compiled));
     {
         let _scope = FrontendScope::enter(&compiled);
