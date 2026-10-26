@@ -84,6 +84,10 @@ stdout:
   per-command shapes are reused rather than redesigned.
 - `tool` records the build that produced the result, so a stored result is
   traceable to a version (this also serves the provenance gap in #660).
+- `warnings` carries non-fatal conditions an agent reading only stdout would
+  otherwise miss (for example an input that was repaired or partially parsed).
+  Each warning is `{code, message}`.
+- Batch commands add `summary: {total, succeeded, failed}` next to `data`.
 - Unknown keys must be tolerated by clients, matching `VERSIONING.md`.
 
 Failure uses the same envelope with `ok: false` and no `data`:
@@ -128,10 +132,18 @@ them.
 | 1 | `failed` | The invocation ran but produced no usable result (for example every requested function failed). |
 | 2 | `usage` | Invalid arguments or option combination. Matches clap's existing usage-error code. |
 | 3 | `input` | Input missing, unreadable or unsupported. |
-| 4 | `partial` | Some items succeeded and some failed; `data` has both. |
+| 4 | `partial` | Some items succeeded and some failed, and the caller asked for strictness with `--fail-on-partial`; `data` has both. |
 | 5 | `timeout` | A configured time limit was reached and no result was produced. |
 | 6 | `environment` | Required resources unavailable (resource root, signatures, runtime). |
 | 70 | `internal` | Unexpected internal failure or panic caught at the boundary. |
+
+Batch rule: a batch that produces at least one successful item exits 0 and
+reports the failed items in `data` and in `summary` (`total`, `succeeded`,
+`failed`); a batch that produces none exits 1. Exit 4 is returned only with
+`--fail-on-partial`. The default favors keeping useful output: a harness that
+discards stdout on any non-zero exit would lose the successful rows. This
+matches how other agent-oriented decompiler CLIs treat per-function failures
+(see "Prior art reviewed").
 
 Legacy mode keeps today's behavior (exit 1 for fatal errors, exit 0 when only
 function rows failed). The two worker binaries that already use exit code 2 are
@@ -164,6 +176,47 @@ error that `fission_cli.rs::main` maps instead of printing `{:?}` and exiting
 metric. Errors raised deeper in the stack are classified at the CLI boundary by
 downcasting to known error types; unclassified errors map to `failed` with
 code `unclassified` until each source is typed.
+
+## Prior art reviewed
+
+Reference clones live under `vendor/` (gitignored, reference-only, nothing
+copied). Ideas taken from reading `Noelo-Lab/kuna` (Apache-2.0), an
+agent-first decompiler, and a few CLIs:
+
+- **Self-describing commands.** Each subcommand's `--help` states its flags and
+  the shape of its `--json` document and exits before loading anything. Adopted:
+  `schema` plus `--help` text that names the contract shape (P0).
+- **Broken pipe is not an error.** A reader closing stdout early must not
+  panic or print a diagnostic, and the exit code must still reflect the work's
+  verdict. Adopted as a design rule (P0).
+- **Warnings reach stdout.** Repaired or degraded input is listed in the JSON,
+  not only on stderr. Adopted: `warnings` in the envelope.
+- **Exit code follows "did any useful output land".** Adopted as the batch rule
+  above, with `--fail-on-partial` for strict callers.
+- **Docs and the agent skill ship inside the binary** (`docs` topics,
+  `install-skill`). Deferred to P1.
+- **Option discovery as a structured catalog.** Deferred to P1 (`capabilities`).
+- **Incremental output while a long batch runs** (an index file that can be read
+  as items complete). Deferred to P1 as NDJSON streaming.
+- Kuna deliberately keeps no state between invocations; Fission's `db` does.
+  That is a difference to keep in mind for P2, not something to copy.
+
+## Implementation approach (supervisor)
+
+Fission has several hundred direct `println!` sites across its commands, so
+wrapping every payload in-process would be a large refactor. P0 instead adds a
+thin supervisor in `fission-cli`: with `--contract v1` the binary re-executes
+itself (same executable, contract flag removed, an internal environment marker
+set), captures stdout and stderr, and writes the envelope. In the child, fatal
+errors are classified into `{kind, code}` and reported as one structured stderr
+record; the supervisor maps exit status and that record to the envelope and
+exit code. A crashed or panicking child becomes `internal` instead of a bare
+backtrace, and a child whose stdout is not valid JSON becomes
+`output_not_json`. This is a staging step: commands can later return typed
+payloads in-process without changing the contract.
+
+Costs: one extra process start and buffering the payload in memory, both small
+next to analysis. Large `decomp --all` output should use P1 streaming instead.
 
 ## Compatibility and migration
 
@@ -218,5 +271,4 @@ with worker restarts (#630 fixups) must be confirmed so `timeout` and
 3. Exact exit-code numbering. 70 follows `sysexits` (`EX_SOFTWARE`); is the
    small-integer range for the rest acceptable?
 4. `schemars` versus hand-written schemas with golden tests.
-5. Whether `partial` (4) should be configurable (a `--fail-on-partial` style
-   flag) for callers that want a binary pass/fail.
+5. Resolved by the batch rule: `partial` is opt-in via `--fail-on-partial`.
