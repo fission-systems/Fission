@@ -709,6 +709,8 @@ pub struct HirFunction {
     pub float_shares_int_slots: bool,
     /// When false, x64-only normalize passes (entry param promotion, etc.) are skipped.
     pub is_64bit: bool,
+    /// Byte order of the target's memory.
+    pub is_big_endian: bool,
     /// When true, entry-register reads should stay as hardware registers rather than ABI params.
     pub suppress_entry_register_params: bool,
     /// Per-callee symbol: maximum argument count observed at direct call sites in this function.
@@ -735,6 +737,7 @@ impl Default for HirFunction {
             float_param_offsets: Vec::new(),
             float_shares_int_slots: false,
             is_64bit: true,
+            is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: IndexMap::new(),
             callee_summaries: IndexMap::new(),
