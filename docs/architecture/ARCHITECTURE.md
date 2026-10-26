@@ -1,6 +1,20 @@
 # Fission Architecture
 
-Updated: 2026-07-26
+Updated: 2026-10-01
+
+## Experimental successor: FSL and one FIR
+
+The `fission-fsl` research direction adopts one canonical FIR with multiple
+output layers. Its priorities are semantic accuracy and recompilation; its
+new semantic model has no NIR/HIR split. Existing pipeline owners may be
+replaced as FIR-native coverage is implemented and validated. The first
+instruction contract has a reference evaluator and compilable C/Rust outputs,
+alongside JIT/AOT native decoder/lifter generation. See
+[ADR 0015](../adr/0015-fsl-single-fir-recompilation.md) and the
+[compiler/migration RFC](../research/fsl-fir-compiler-architecture.md).
+
+The ownership and layers below describe the currently integrated legacy
+decompiler. The FIR experiment does not yet replace its whole-program path.
 
 ## Ownership
 

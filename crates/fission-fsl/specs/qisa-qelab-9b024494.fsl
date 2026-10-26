@@ -1,0 +1,26 @@
+language qisa.qelab.9b024494.le {
+ byte_order little;
+ address_unit byte;
+ instruction qwait {
+  encoding 32 mask 0xfff00000 value 0x60000000 { field cycles offset 0 bits 20; }
+  mnemonic "QWAIT";
+  evidence "qelab-pinned" "https://github.com/QE-Lab/eQASM_Assembler/blob/9b024494558287a937cdd5a8ccd63fcaa784b1c4/qisa-as/qisa_driver.cpp" "9b024494558287a937cdd5a8ccd63fcaa784b1c4" "generate_QWAIT and pinned qisa_opcodes.qmap; host little-endian uint32 bytes; reserved bits zero; timing semantics unsupported.";
+  semantics unsupported;
+ }
+ instruction qwaitr {
+  encoding 32 mask 0xfff07fff value 0x70000000 { field source offset 15 bits 5; }
+  mnemonic "QWAITR";
+  evidence "qelab-pinned" "https://github.com/QE-Lab/eQASM_Assembler/blob/9b024494558287a937cdd5a8ccd63fcaa784b1c4/qisa-as/qisa_driver.cpp" "9b024494558287a937cdd5a8ccd63fcaa784b1c4" "generate_QWAITR; timing state and register value semantics unsupported.";
+  semantics unsupported;
+ }
+ instruction quantum_bundle {
+  encoding 32 mask 0x80000000 value 0x80000000 {
+   field separator offset 0 bits 3;
+   field slot0 offset 3 bits 14;
+   field slot1 offset 17 bits 14;
+  }
+  mnemonic "quantum.bundle.opaque";
+  evidence "qelab-pinned" "https://github.com/QE-Lab/eQASM_Assembler/blob/9b024494558287a937cdd5a8ccd63fcaa784b1c4/qisa-as/qisa_driver.h" "9b024494558287a937cdd5a8ccd63fcaa784b1c4" "DblInstr_BitOffsets only; preserve opaque slots; no gate, physical target, timing or concurrency semantics inferred.";
+  semantics unsupported;
+ }
+}

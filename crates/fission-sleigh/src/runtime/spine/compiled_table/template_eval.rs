@@ -112,8 +112,8 @@ pub struct FlowEmitOptions {
     /// Ghidra `PcodeEmit` fallOffset: decoded instruction length used for `inst_next`.
     pub instruction_length: Option<u64>,
     /// Context register bits when binding cross-build / delay-slot instructions at another PC.
-    pub instruction_context_register: u64,
-    pub instruction_context_known_mask: u64,
+    pub instruction_context_register: u128,
+    pub instruction_context_known_mask: u128,
     /// When set, Ghidra-style `ConstTpl` flowref / flowdest constants resolve from these.
     pub flow_ref_addr: Option<u64>,
     pub flow_ref_space_index: Option<u64>,

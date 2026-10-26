@@ -1,0 +1,61 @@
+language quantum.ideal.reference {
+    byte_order little;
+    address_unit byte;
+    instruction bell {
+        opcode 0x01;
+        mnemonic "bell.measure";
+        evidence "self-authored" "https://openqasm.com/versions/3.0/language/insts.html" "logical-v1" "Synthetic logical circuit selector, not a hardware opcode; explicit caller initial quantum state.";
+        semantics {
+            quantum.h 0;
+            quantum.cx 0, 1;
+            %a: u1 = quantum.measure_z 0;
+            %b: u1 = quantum.measure_z 1;
+        }
+    }
+    instruction bell_coherent {
+        opcode 0x02;
+        mnemonic "bell.coherent";
+        evidence "self-authored" "https://openqasm.com/versions/3.0/" "logical-v1" "Preserve Bell-state coherence before measurement.";
+        semantics { quantum.h 0; quantum.cx 0, 1; }
+    }
+    instruction hh {
+        opcode 0x03;
+        mnemonic "h.h";
+        evidence "self-authored" "https://openqasm.com/versions/3.0/" "logical-v1" "Hadamard involution on arbitrary caller input.";
+        semantics { quantum.h 0; quantum.h 0; }
+    }
+    instruction hzh {
+        opcode 0x04;
+        mnemonic "h.z.h";
+        evidence "self-authored" "https://openqasm.com/versions/3.0/" "logical-v1" "Interference identity HZH=X; phase-sensitive reference.";
+        semantics { quantum.h 0; quantum.z 0; quantum.h 0; }
+    }
+    instruction feedforward {
+        opcode 0x05;
+        mnemonic "measure.correct";
+        evidence "self-authored" "https://openqasm.com/versions/3.0/language/classical.html" "logical-v1" "Measurement output is a classical SSA bit controlling a subsequent X effect.";
+        semantics {
+            quantum.h 0;
+            %a: u1 = quantum.measure_z 0;
+            quantum.x_if 0, %a;
+            %b: u1 = quantum.measure_z 0;
+        }
+    }
+    instruction reset_entangled {
+        opcode 0x06;
+        mnemonic "bell.reset";
+        evidence "self-authored" "https://openqasm.com/versions/3.0/language/insts.html" "logical-v1" "Reset discards one entangled subsystem and preserves a mixture in its partner.";
+        semantics { quantum.h 0; quantum.cx 0, 1; quantum.reset 0; }
+    }
+    instruction ghz {
+        opcode 0x07;
+        mnemonic "ghz.measure";
+        evidence "self-authored" "https://openqasm.com/versions/3.0/" "logical-v1" "Three-qubit joint state and correlated measurement.";
+        semantics {
+            quantum.h 0; quantum.cx 0, 1; quantum.cx 1, 2;
+            %a: u1 = quantum.measure_z 0;
+            %b: u1 = quantum.measure_z 1;
+            %c: u1 = quantum.measure_z 2;
+        }
+    }
+}

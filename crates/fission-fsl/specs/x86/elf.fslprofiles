@@ -1,0 +1,18 @@
+# Authored loader selection rules for the existing bounded x86 v2 package.
+# ELF machine/class/endian is not sufficient evidence for a source ABI.
+profiles 1 {
+    profile fission.x86.elf32.scalar {
+        match elf machine 3 bits 32 endian little flags 0x0 0x0;
+        target x86 scalar;
+        decoder owned-x86-v2;
+        package 4f21befdc46ff60cb74913f0e2dea88b770cc1edbcb414590c99a72b90a67470;
+        abi unselected;
+    }
+    profile fission.x86.elf64.scalar {
+        match elf machine 62 bits 64 endian little flags 0x0 0x0;
+        target x86 scalar;
+        decoder owned-x86-v2;
+        package 4f21befdc46ff60cb74913f0e2dea88b770cc1edbcb414590c99a72b90a67470;
+        abi unselected;
+    }
+}

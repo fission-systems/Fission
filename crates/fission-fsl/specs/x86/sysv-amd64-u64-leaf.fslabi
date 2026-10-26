@@ -1,0 +1,23 @@
+abi sysv.amd64.u64.leaf.v1 {
+    evidence "x86-64-gcc-cspec-reference" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/languages/x86/x86-64-gcc.cspec" "sha256:5eaa848f3eba7ebd4023541f9f37645dae077e8426fb562592f398d599530a9e" "Authored restricted SysV AMD64 integer-register leaf projection. Register order, preservation and return-stack delta only. Not a complete cspec migration, source prototype, float, aggregate or stack-argument allocator.";
+    data pointer_size 8;
+    stack_pointer "RSP" "ram";
+    default_convention "u64-leaf";
+    convention "u64-leaf" {
+        extrapop 8;
+        stackshift 8;
+        input_register "RDI" 8 8;
+        input_register "RSI" 8 8;
+        input_register "RDX" 8 8;
+        input_register "RCX" 8 8;
+        input_register "R8" 8 8;
+        input_register "R9" 8 8;
+        output_register "RAX" 8 8;
+        preserved_register "RBX";
+        preserved_register "RBP";
+        preserved_register "R12";
+        preserved_register "R13";
+        preserved_register "R14";
+        preserved_register "R15";
+    }
+}

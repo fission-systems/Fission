@@ -21,6 +21,7 @@ pub mod pdb_registers;
 pub mod pdb_sidecar;
 pub mod pe;
 pub mod pipeline;
+pub mod profiles;
 pub mod reader;
 pub mod strings;
 pub mod types;
@@ -28,6 +29,30 @@ pub use analyzers::{cpp, golang, rust};
 pub use types::*;
 
 impl LoadedBinary {
+    /// Explicit owned profile policy; no opinion/ldefs or legacy fallback.
+    pub fn from_file_with_catalog<P: AsRef<Path>>(
+        path: P,
+        catalog: &profiles::OwnedProfileCatalog,
+    ) -> Result<profiles::ProfiledBinary> {
+        let path = path.as_ref();
+        pipeline::LoaderPipeline::load_with_catalog(
+            DataBuffer::Heap(std::fs::read(path)?),
+            path.to_string_lossy().into_owned(),
+            catalog,
+        )
+    }
+
+    /// Map the file through canonical format parsing without selecting a legacy
+    /// language/compiler or resolving external debug/signature resources.
+    /// The result has architecture facts but no BinaryLoadSpec. ELF x86 only.
+    pub fn from_file_format_facts<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        pipeline::LoaderPipeline::load_format_facts(
+            DataBuffer::Heap(std::fs::read(path)?),
+            path.to_string_lossy().into_owned(),
+        )
+    }
+
     /// Load and parse a binary file using memory mapping
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path_ref = path.as_ref();

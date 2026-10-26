@@ -1,0 +1,40 @@
+abi ebpf.compiler {
+    evidence "ghidra-snapshot" "https://github.com/fission-systems/Fission/blob/96fc71f75cecdee305faf9497561c577a8955468/utils/sleigh-specs/languages/eBPF/eBPF.cspec" "sha256:9a39a517ae4b5c3a731ea2545fb5627c636ec6821c847c879d5412e12dd54d33" "Strict compiler metadata migration; byte units and ordered register entries retained. No ABI allocator or execution contract is inferred.";
+    data absolute_max_alignment 0;
+    data machine_alignment 2;
+    data default_alignment 1;
+    data default_pointer_alignment 8;
+    data pointer_size 8;
+    data wchar_size 2;
+    data short_size 2;
+    data integer_size 4;
+    data long_size 4;
+    data long_long_size 8;
+    data float_size 4;
+    data double_size 8;
+    data long_double_size 8;
+    alignment 1 1;
+    alignment 2 2;
+    alignment 4 4;
+    alignment 8 8;
+    global_space "ram";
+    global_space "syscall";
+    stack_pointer "R10" "ram";
+    default_convention "__fastcall";
+    convention "__fastcall" {
+        extrapop 0;
+        stackshift 0;
+        input_register "R1" 1 8;
+        input_register "R2" 1 8;
+        input_register "R3" 1 8;
+        input_register "R4" 1 8;
+        input_register "R5" 1 8;
+        output_register "R0" 1 8;
+        preserved_memory "ram" 8 8;
+        preserved_register "R6";
+        preserved_register "R7";
+        preserved_register "R8";
+        preserved_register "R9";
+        preserved_register "R10";
+    }
+}

@@ -1,0 +1,121 @@
+language fabric.authored.v1 {
+    byte_order little;
+    address_unit byte;
+    instruction fpga_add {
+        opcode 1;
+        mnemonic "add.u8";
+        evidence "self-authored" "https://steveicarus.github.io/iverilog/" "fabric-v1" "Combinational wrapping u8 add; no board or bitstream model.";
+        semantics {
+            %b:u8=stack.pop; %a:u8=stack.pop;
+            %sum:u8=u8.add.wrap %a,%b;
+            stack.push %sum;
+        }
+    }
+    instruction dsp_sat_add {
+        opcode 2;
+        mnemonic "saturating.add.u8";
+        evidence "self-authored" "https://www.w3.org/TR/wasm-core-2/" "fabric-v1" "Unsigned saturating add built from explicit wider bit vectors and comparison masks; not a DSP vendor opcode.";
+        semantics {
+            %b:u8=stack.pop; %a:u8=stack.pop;
+            %aw:u16=int.zext %a; %bw:u16=int.zext %b;
+            %sum:u16=u16.add.wrap %aw,%bw;
+            %maximum:u16=int.const 255;
+            %overflow:u1=int.ult %maximum,%sum;
+            %flag:u8=int.zext %overflow;
+            %zero:u8=int.const 0; %ones:u8=int.const 255;
+            %mask:u8=u8.sub %zero,%flag;
+            %keep:u8=u8.xor %mask,%ones;
+            %low:u8=int.trunc %sum;
+            %normal:u8=u8.and %low,%keep;
+            %result:u8=u8.or %normal,%mask;
+            stack.push %result;
+        }
+    }
+    instruction tensor_dot2 {
+        opcode 3;
+        mnemonic "dot.u8x2.to.u32";
+        evidence "self-authored" "https://mlir.llvm.org/docs/Dialects/Linalg/" "fabric-v1" "Fixed two-element dot product scalar elaboration; input stack a0,a1,b0,b1; no tensor storage or accelerator ABI.";
+        semantics {
+            %b1:u8=stack.pop; %b0:u8=stack.pop;
+            %a1:u8=stack.pop; %a0:u8=stack.pop;
+            %wa0:u32=int.zext %a0; %wa1:u32=int.zext %a1;
+            %wb0:u32=int.zext %b0; %wb1:u32=int.zext %b1;
+            %p0:u32=u32.mul.wrap %wa0,%wb0;
+            %p1:u32=u32.mul.wrap %wa1,%wb1;
+            %sum:u32=u32.add.wrap %p0,%p1;
+            stack.push %sum;
+        }
+    }
+    instruction asic_mac {
+        opcode 4;
+        mnemonic "mac.u16.wrap";
+        evidence "self-authored" "https://yosyshq.readthedocs.io/projects/yosys/en/latest/" "fabric-v1" "Wrapping multiply-add logic for generic synthesis; not PDK mapping or a fabricated ASIC.";
+        semantics {
+            %c:u16=stack.pop; %b:u16=stack.pop; %a:u16=stack.pop;
+            %product:u16=u16.mul.wrap %a,%b;
+            %sum:u16=u16.add.wrap %product,%c;
+            stack.push %sum;
+        }
+    }
+    instruction lif_step {
+        opcode 5;
+        mnemonic "lif.discrete.tick";
+        evidence "self-authored" "https://nest-simulator.readthedocs.io/en/stable/models/iaf_psc_delta.html" "fabric-v1" "Authored discrete LIF: pre=floor(3*v/4)+input; threshold 100; reset 0; outputs next-v,spike. One external tick, no refractory or event timing; not NEST's continuous model.";
+        semantics {
+            %input:u8=stack.pop; %v:u8=stack.pop;
+            %vw:u16=int.zext %v; %iw:u16=int.zext %input;
+            %three:u16=int.const 3; %two:u16=int.const 2;
+            %scaled:u16=u16.mul.wrap %vw,%three;
+            %decayed:u16=u16.lshr %scaled,%two;
+            %pre:u16=u16.add.wrap %decayed,%iw;
+            %threshold:u16=int.const 100;
+            %below:u1=int.ult %pre,%threshold;
+            %one:u1=int.const 1;
+            %spike:u1=u1.xor %below,%one;
+            %wideflag:u16=int.zext %spike;
+            %zero:u16=int.const 0; %ones:u16=int.const 65535;
+            %resetmask:u16=u16.sub %zero,%wideflag;
+            %keep:u16=u16.xor %resetmask,%ones;
+            %nextwide:u16=u16.and %pre,%keep;
+            %next:u8=int.trunc %nextwide;
+            stack.push %next; stack.push %spike;
+        }
+    }
+    instruction pim_bank_xor {
+        opcode 6;
+        mnemonic "bank.words.xor";
+        evidence "self-authored" "https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/MICRO-50_347.pdf" "fabric-v1" "Two caller-supplied bank words XOR; placement experiment only. No memory read/write, row commands, coherence or in-memory execution.";
+        semantics {
+            %b:u32=stack.pop; %a:u32=stack.pop;
+            %result:u32=u32.xor %a,%b;
+            stack.push %result;
+        }
+    }
+    instruction rc_euler_step {
+        opcode 7;
+        mnemonic "rc.euler.q8_8.tick";
+        evidence "self-authored" "https://ngspice.sourceforge.io/docs.html" "fabric-v1" "Discrete forward-Euler approximation of tau*dx/dt=u-x, dt=1ms,tau=4ms; nonnegative Q8.8 voltages; floor rounding. Not a continuous solver or SPICE netlist.";
+        semantics {
+            %input:u16=stack.pop; %x:u16=stack.pop;
+            %xw:u32=int.zext %x; %iw:u32=int.zext %input;
+            %three:u32=int.const 3; %two:u32=int.const 2;
+            %scaled:u32=u32.mul.wrap %xw,%three;
+            %sum:u32=u32.add.wrap %scaled,%iw;
+            %nextwide:u32=u32.lshr %sum,%two;
+            %next:u16=int.trunc %nextwide;
+            stack.push %next;
+        }
+    }
+    instruction dataflow_diamond {
+        opcode 8;
+        mnemonic "diamond.u16";
+        evidence "self-authored" "https://circt.llvm.org/docs/Dialects/Handshake/" "fabric-v1" "Acyclic fork/join arithmetic dependency graph; not stream firing, PE scheduling or CGRA routing.";
+        semantics {
+            %b:u16=stack.pop; %a:u16=stack.pop;
+            %sum:u16=u16.add.wrap %a,%b;
+            %difference:u16=u16.sub %a,%b;
+            %result:u16=u16.mul.wrap %sum,%difference;
+            stack.push %result;
+        }
+    }
+}
