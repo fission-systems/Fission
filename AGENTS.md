@@ -14,11 +14,9 @@ Fission is a Rust-first reverse-engineering/decompilation workspace. Ghidra-nati
 ```text
 Fission/
 ├── benchmark/
-│   ├── config/              # Benchmark corpus + automation manifests
-│   ├── source_semantic_benchmark/ # Canonical source-vs-Fission semantic benchmark
-│   ├── full_benchmark/      # Benchmark runner, support modules, rendering
-│   ├── artifacts/           # Benchmark outputs (automation/, source_semantic_benchmark/, full_benchmark/)
-│   └── binary/              # Curated benchmark binaries and fixtures
+│   ├── config/              # Gate policy
+│   ├── artifacts/           # Local measurement outputs
+│   └── patch_validation_pool/ # Held-out regression pool (go/stop evidence only)
 ├── crates/
 │   ├── fission-pcode/        # Canonical IR, NIR/HIR, structuring, CFG, printer
 │   ├── fission-decompiler/   # Orchestration + Rust-Sleigh bridge (re-exports IR crate)
@@ -51,9 +49,8 @@ Read the nearest child file before editing those areas.
 | NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
 | NIR telemetry contract | `crates/fission-pcode/src/midend/types.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
-| Source semantic benchmark / corpus reports | `benchmark/source_semantic_benchmark/` | Canonical source-vs-Fission semantic quality surface; Ghidra is not used as the oracle |
-| Ghidra reference benchmark | `benchmark/full_benchmark/` | Reference/comparison lane only; keep reporting/gating additive |
-| Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
+| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`, `scripts/quality/decbench_sample_set_gate.py`, `~/fission-benchmark/decbench-harness/` | The measurement surface for quality claims; published source CFGs are the answer key, Ghidra is not the oracle |
+| Benchmark policy / held-out pool | `benchmark/config/`, `benchmark/patch_validation_pool/` | Gate policy and the patch-validation pool |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
 | Checked-in utility resources | `/Users/sjkim1127/Fission/utils` | Prefer existing resource/path config and utility loaders over hardcoded paths; use this tree when reusable signatures, type info, benchmark support data, or other checked-in resources already cover the need |
@@ -75,7 +72,7 @@ Read the nearest child file before editing those areas.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
 8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
 9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
-10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. Prefer the external fission-benchmark path ([`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)) or `benchmark/source_semantic_benchmark` with caches disabled. Estimates, assumed patterns, and nextest-only green are not quality evidence.
+10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is DecBench ([`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md)); run it with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`). Estimates, assumed patterns, and nextest-only green are not quality evidence.
 
 ## Anti-Patterns
 
@@ -102,8 +99,8 @@ cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 cargo check -p fission-decompiler
 
-# Canonical benchmark runner
-python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --help
+# DecBench quick gate (see docs/BENCHMARK_DECBENCH.md)
+~/fission-benchmark/.venv-decbench/bin/python scripts/quality/decbench_sample_set_gate.py check --cli target/release/fission_cli
 
 # Formatting -- CI runs exactly this
 cargo fmt --all --check
@@ -123,7 +120,7 @@ submodules and rewrites files you never touched.
 - For NIR/structuring changes: targeted nextest filter → `cargo nextest run -p fission-pcode` → `cargo check -p fission-pcode`.
 - For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/TUI surfaces as needed).
 - For resource path / bundle resolution changes: `cargo nextest run -p fission-core` and smoke `fission_cli resources status`.
-- If benchmark/reporting changes: validate under `benchmark/source_semantic_benchmark/` and keep artifacts under `benchmark/artifacts/`.
+- If benchmark/reporting changes: validate with the DecBench gate (`scripts/quality/decbench_sample_set_gate.py`) and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 - Release gate policy: [`docs/CI_RELEASE_GATES.md`](docs/CI_RELEASE_GATES.md) (L0 Fast / L1 Heavy / L2 Release E2E / L3 CD).
 - Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): tags a commit only after **ci.yml push** + **ci-heavy** success on that SHA and **release-e2e** green; then `cd.yml` builds assets. Do not auto-tag every `main` push.
@@ -139,13 +136,13 @@ Use this loop for source-semantic or pseudocode-quality work, especially when a 
 | Allowed as | Requires |
 |---|---|
 | Mechanical change (code + synthetic invariant tests) | nextest / crate checks; **no** “quality improved” language |
-| Semantic quality claim | Anchored row(s) + remeasured semantic/static/behavior deltas |
-| Readability / HIR presentation quality claim | Anchored real-binary decomp (or benchmark row) before/after; not fixture-only |
-| Official ranking / Pages claim | External release bake path only (never local docker as latest) |
+| Semantic quality claim | Anchored DecBench row(s) + remeasured GED / type deltas, total distance next to the perfect count |
+| Readability / HIR presentation quality claim | Anchored real-binary decomp (or DecBench row) before/after; not fixture-only |
+| Official ranking / release claim | Full-dataset DecBench sweep on same rows from a tagged build (never a local run as an official ranking) |
 
 **Order of work (always):**
 
-1. **Observe** on a real binary/row (benchmark artifact, `fission_cli decomp`, or docker runner output).
+1. **Observe** on a real binary/row (DecBench row, gate `--dump`, or `fission_cli decomp`).
 2. **Record baseline** (scores, gotos, line size, fail category, snippet).
 3. **Generalize** to an invariant (no function/address special cases).
 4. **Implement** at the canonical owner.
@@ -156,25 +153,26 @@ If there is no measured baseline, **do not start a “quality” implementation*
 
 Applies to **NIR, HIR presentation, structuring, normalize, materialize, SLEIGH, and printer** surfaces. Printer/UI still must not be the semantic owner; measurement still applies if readability is claimed.
 
-### Mandatory external benchmark (fission-benchmark docker)
+### Mandatory DecBench measurement
 
-Quality claims must run the **external** benchmark against a **local** Fission
-build, not only `fission_cli` one-shots or unit tests:
-
-- Compose base: `/Users/sjkim1127/fission-benchmark/docker-compose.yml`
-- Local overlay: `/Users/sjkim1127/fission-benchmark/docker-compose.local.yml`
-- Full procedure: [`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)
+Quality claims must be measured on DecBench against a **local** Fission build,
+not only `fission_cli` one-shots or unit tests. Full procedure:
+[`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md).
 
 ```bash
-cd /Users/sjkim1127/fission-benchmark
-export FISSION_ROOT=/Users/sjkim1127/Fission
-./scripts/prepare_local_fission.sh
-docker compose -f docker-compose.yml -f docker-compose.local.yml \
-  --profile local up -d --build fission
-# Then: python runner/runner.py --corpus dev --decompilers fission ...
+cargo build -p fission-cli --release
+~/fission-benchmark/.venv-decbench/bin/python scripts/quality/decbench_sample_set_gate.py check \
+  --cli target/release/fission_cli --dump /tmp/after.json
 ```
 
-Never promote local docker / local runner results to official latest or Pages.
+- The sample-set gate is the quick signal. A ranking or release claim needs the
+  full-dataset sweep (`decbench-harness/fullrun.py`) compared on the same rows.
+- Report **total distance next to the perfect count**; the count alone has
+  ranked a regression as a win.
+- Build once, then measure; do not rebuild `fission_cli` while a run is in flight.
+
+Never promote local runs to an official ranking. The docker multi-decompiler
+loop ([`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)) is retired.
 
 ## AI Overfit Firewall
 
@@ -245,7 +243,7 @@ functions:
    function exhibiting something is a note in the proposal, not a change.
 2. **Justify without the metric**, per the test above.
 3. **Measure on a split the benchmark does not score.**
-   `fission-benchmark/corpus/scale` carries published source CFGs for 64,231
+   `~/fission-benchmark/corpus/scale` carries published source CFGs for 64,231
    functions that are not the scored sample-set, which makes fitting the
    scored rows structurally impossible rather than merely discouraged. Note
    its own bias, though: it is `-O0` with symbols, so a shape visible only
@@ -263,7 +261,7 @@ Default to extending the existing owner/pass. Add a new pass, helper, or metric 
 3. **Add focused coverage:** add or update the smallest targeted Rust/Python test that captures the invariant. Synthetic tests are necessary but not sufficient for decompiler-quality claims.
 4. **Make the scoped change:** keep production changes invariant-based, not function/address/sample-specific. Do not add runtime/build dependencies on `vendor/` reference tools.
 5. **Run local checks:** run the targeted test first, then the relevant crate checks/builds from the Build/Test section. If a known unrelated test is already failing, call it out explicitly.
-6. **Run the focused benchmark / real decomp:** rerun the exact source-semantic row or the same PE/function decomp with no stale decompilation or behavior cache. Compare behavior status, case progress, stdout/stderr, line/byte size, static feature gaps, and readability proxies (e.g. goto count) as applicable.
+6. **Run the focused benchmark / real decomp:** rerun the exact DecBench row (gate `--dump`) or the same PE/function decomp with no stale decompilation or behavior cache. Compare behavior status, case progress, stdout/stderr, line/byte size, static feature gaps, and readability proxies (e.g. goto count) as applicable.
 7. **Check regressions:** after a focused improvement, run the broader smoke manifest or automation lane. Existing pass rows must not regress, and weighted semantic/static scores should not drop without an explicit tradeoff.
 8. **Report both bars:** distinguish “mechanically changed” from “quality improved.” A merged test-only, telemetry-only, or fixture-only presentation change is **not** a quality fix unless the measured row (or agreed multi-row sample) moves.
 
@@ -316,7 +314,7 @@ Required principles:
 7. Prefer long-term maintainability and generalizable architecture over short-term output patches.
 8. Make proposals and implementations valid across multiple future quality cycles, with explicit observability and verification.
 9. Do not use estimates as evidence. Base claims on measured, reproducible data only (Core Rule 10).
-10. The final success criterion is actual improvement in `benchmark/source_semantic_benchmark` and/or external fission-benchmark measurements — never synthetic fixtures alone.
+10. The final success criterion is actual improvement in DecBench measurements — never synthetic fixtures alone.
 11. If a change was not motivated by a measured row, do not implement it as a “quality” pass; either measure first or ship it as non-quality mechanical work without quality claims.
 11. Prefer extending shared helpers (loop-carried update, same-block forward branch, return-join live-in, unconditional-copy merge) over new end-of-pipeline passes or ISA-local cleanups.
 
@@ -330,13 +328,13 @@ Resource rules:
 
 Regression-prevention workflow:
 
-1. Start from a concrete source-semantic row or small sample function.
+1. Start from a concrete DecBench row or small sample function.
 2. Record baseline behavior, case pass count, semantic/static score, stdout/stderr, line/byte size, and top feature gaps.
 3. Diagnose the canonical owner before editing: SLEIGH/raw p-code, NIR materialization, type/data recovery, structuring, cleanup, printer, benchmark, or automation.
 4. Make the smallest invariant-based production change at that owner.
 5. Add targeted coverage for the invariant before or with the fix.
 6. Run the targeted test, relevant crate checks/tests, and release CLI build when benchmark validation needs it.
-7. Run the focused source-semantic benchmark with stale decompilation and behavior caches disabled for semantic changes.
+7. Run the focused DecBench measurement with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`) for semantic changes.
 8. Compare against the baseline and inspect candidate artifacts, not just aggregate scores.
 9. Run smoke or automation regression checks after focused improvement.
 10. Report whether quality improved, stayed unchanged, or regressed. Separate test/telemetry changes from semantic fixes.

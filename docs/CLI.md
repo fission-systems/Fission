@@ -1002,11 +1002,7 @@ fission_cli inventory function-facts app.exe \
 
 ### Benchmark-adjacent decomp workflow
 
-For full corpus benchmark and comparative reporting, use the canonical benchmark runner:
-
-```bash
-python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
-```
+For quality measurement, use DecBench; see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
 
 `fission_cli --benchmark` is a decomp-output timing flag. It is not the benchmark suite driver.
 

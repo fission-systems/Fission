@@ -36,7 +36,7 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 
 | Path | Purpose |
 |------|---------|
-| [`benchmark/`](../benchmark) | Corpus configs, curated binaries/fixtures, full_benchmark Python harness, automation artifacts layout |
+| [`benchmark/`](../benchmark) | Corpus configs and patch-validation pool (the DecBench harness lives outside the repo; see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md)) |
 | [`docs/`](../docs) | Versioned guides: architecture, CLI, evaluation, changelog, onboarding (this tree) |
 | [`scripts/`](../scripts) | Benchmark/test helpers (`scripts/benchmark`, `scripts/test`, `scripts/corpus`, …) |
 | [`utils/`](../utils) | Checked-in specs/data (see [`utils/MANIFEST.md`](../utils/MANIFEST.md)) |
