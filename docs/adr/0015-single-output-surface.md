@@ -33,6 +33,26 @@ Presenting the *accuracy-selected* tree is both at least as accurate as NIR and
 free of that regression class, so the second surface bought nothing the first
 did not already have.
 
+### Full-dataset check, and what it changed
+
+The sample set above was neutral, so the first version of this change shipped
+the presentation as it was. DecBench full configs (Rust Joern, same rows, 
+before = the previous mechanical `code`) showed otherwise on O0:
+
+| Config | Variant | Σ GED vs previous | Perfect |
+|---|---|---|---|
+| `unoptimized` O0, 32,004 rows | presentation as it was | +0.87% | −184 |
+| | **without `fold_if_else_pure_returns_to_select`** | **+0.06%** | **−16** |
+| `inlined` O2, 22,839 rows | presentation as it was | +0.04% | +14 |
+| | **without the fold** | **+0.02%** | **+32** |
+| `large` O2-noinline, 1,786 rows (u-boot excluded) | either | ±0.01% | 0 |
+
+Median, p90, p99 and type score were unchanged in every case. The fold rewrote
+`if (c) return a; else return b;` into `return c ? a : b;`, which is one CFG
+node instead of three and nests into `a ? b ? x : y : z`. Ablating the four
+`?:`-forming folds one at a time put the whole O0 regression on this one; the
+others (`same_var_assign`, `seed_if_overwrite`) are net positive.
+
 ## Decision
 
 1. There is **one output surface**: the structured tree, selected on
@@ -50,7 +70,9 @@ did not already have.
 4. NIR remains the **internal** representation and the owner of semantics
    (ADR 0008). `PrintProfile::Nir` survives as the mechanical print that unit
    tests compare the final surface against.
-5. ADR 0011's presentation contract is unchanged and now load-bearing: clone-only,
+5. Presentation does **not** rewrite an `if`/`else` that returns on both arms
+   into a conditional expression. See the table above.
+6. ADR 0011's presentation contract is unchanged and now load-bearing: clone-only,
    same evaluation count and order, and the structural firewall (§7) that
    restores the pre-polish tree on a violation. Because the presented text is now
    what is scored, a presentation bug is a scored bug.

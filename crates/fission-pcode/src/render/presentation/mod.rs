@@ -99,8 +99,12 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
         changed |= switch_recovery::recover_switch_from_lowered_if_chain(&mut func.body);
         // `if (c) { x = a; } else { x = b; }` → `x = c ? a : b` (pure values only).
         changed |= fold_if_else_pure_same_var_assign(&mut func.body);
-        // `if (c) { return a; } else { return b; }` → `return c ? a : b` (pure values).
-        changed |= fold_if_else_pure_returns_to_select(&mut func.body);
+        // `if (c) { return a; } else { return b; }` is deliberately NOT folded to
+        // `return c ? a : b`. The two forms are the same program, but the `if`
+        // is the structure the code was written in, and the fold nests into
+        // `a ? b ? x : y : z` chains that read worse than the statements they
+        // replace. Measured on DecBench with the fold removed: O0 distance
+        // +0.87% -> +0.06% against the old mechanical print, O2 neutral.
         // `return x==10 ? 2 : x>10 ? DFLT : ...` → `switch (x) {..}` -- the
         // *other* real "switch lowering" shape (a binary-search-style
         // decision tree, already collapsed into one nested Select by the
@@ -1277,68 +1281,6 @@ fn fold_if_else_pure_same_var_assign(stmts: &mut Vec<HirStmt>) -> bool {
                 ty,
             },
         };
-        changed = true;
-    }
-    changed
-}
-
-/// `if (c) { return a; } else { return b; }` → `return c ? a : b` (pure operands).
-fn fold_if_else_pure_returns_to_select(stmts: &mut Vec<HirStmt>) -> bool {
-    let mut changed = false;
-    for stmt in stmts.iter_mut() {
-        match stmt {
-            HirStmt::Block(b)
-            | HirStmt::While { body: b, .. }
-            | HirStmt::DoWhile { body: b, .. }
-            | HirStmt::For { body: b, .. } => {
-                changed |= fold_if_else_pure_returns_to_select(b);
-            }
-            HirStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                changed |= fold_if_else_pure_returns_to_select(then_body);
-                changed |= fold_if_else_pure_returns_to_select(else_body);
-            }
-            HirStmt::Switch { cases, default, .. } => {
-                for case in cases {
-                    changed |= fold_if_else_pure_returns_to_select(&mut case.body);
-                }
-                changed |= fold_if_else_pure_returns_to_select(default);
-            }
-            _ => {}
-        }
-    }
-
-    for stmt in stmts.iter_mut() {
-        let HirStmt::If {
-            cond,
-            then_body,
-            else_body,
-        } = stmt
-        else {
-            continue;
-        };
-        if else_body.is_empty() || !expr_is_presentation_pure(cond) {
-            continue;
-        }
-        let Some(then_ret) = single_return_expr(then_body) else {
-            continue;
-        };
-        let Some(else_ret) = single_return_expr(else_body) else {
-            continue;
-        };
-        if !expr_is_presentation_pure(then_ret) || !expr_is_presentation_pure(else_ret) {
-            continue;
-        }
-        let ty = expr_result_type(then_ret);
-        *stmt = HirStmt::Return(Some(HirExpr::Select {
-            cond: Box::new(cond.clone()),
-            then_expr: Box::new(then_ret.clone()),
-            else_expr: Box::new(else_ret.clone()),
-            ty,
-        }));
         changed = true;
     }
     changed
@@ -2976,7 +2918,7 @@ mod tests {
     }
 
     #[test]
-    fn hir_presentation_folds_if_else_pure_returns_to_select() {
+    fn hir_presentation_keeps_if_else_pure_returns_as_statements() {
         let mut func = HirFunction {
             name: "minmax_ret".into(),
             params: vec![param("param_1")],
@@ -2992,8 +2934,8 @@ mod tests {
         apply_hir_presentation(&mut func);
         let code = crate::midend::print_hir_function(&func);
         assert!(
-            !code.contains("if (") && code.contains('?') && code.contains("return"),
-            "expected if/else pure returns → ternary return:\n{code}"
+            code.contains("if (") && !code.contains('?'),
+            "if/else returns must stay statements, not become a ternary:\n{code}"
         );
     }
 
@@ -3069,7 +3011,7 @@ mod tests {
     }
 
     #[test]
-    fn hir_presentation_folds_if_return_fallthrough_return() {
+    fn hir_presentation_keeps_if_return_fallthrough_return_as_statements() {
         let mut func = HirFunction {
             name: "early_ret".into(),
             params: vec![param("param_1")],
@@ -3088,8 +3030,8 @@ mod tests {
         apply_hir_presentation(&mut func);
         let code = crate::midend::print_hir_function(&func);
         assert!(
-            !code.contains("if (") && code.contains('?') && code.contains("return"),
-            "expected if-return + fallthrough return → ternary:\n{code}"
+            code.contains("if (") && !code.contains('?') && code.matches("return").count() == 2,
+            "if-return + fallthrough return must stay statements, not become a ternary:\n{code}"
         );
     }
 
