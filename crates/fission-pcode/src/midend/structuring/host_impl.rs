@@ -683,6 +683,20 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn bump_loop_while_subgraph_lowered(&mut self) {
         self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
     }
+    fn enter_loop_lowering(&mut self, head: usize) -> bool {
+        if self.active_loop_heads.contains(&head) {
+            self.telemetry
+                .structuring
+                .loop_lowering_reentry_declined_count += 1;
+            return false;
+        }
+        self.active_loop_heads.push(head);
+        true
+    }
+    fn leave_loop_lowering(&mut self, head: usize) {
+        let popped = self.active_loop_heads.pop();
+        debug_assert_eq!(popped, Some(head), "loop lowering left out of order");
+    }
     fn bump_loop_multi_tail_dowhile_lowered(&mut self) {
         self.telemetry
             .structuring
