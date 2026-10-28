@@ -1,0 +1,1647 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-10-28-irreducible-loop-lowering-stack-overflow/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Irreducible back edges seed loops that lower each other without bound - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#irreducible-back-edges-seed-loops-that-lower-each-other-without-bound" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Irreducible back edges seed loops that lower each other without bound
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.2.3/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-baseline-row-anchors-measured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Baseline row anchors (measured)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-owner-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Owner proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-generality-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Generality / invariant
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-widespread-and-what-it-does-not-prove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How widespread, and what it does not prove
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-candidate-changes-and-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Candidate changes and risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-validation-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Validation matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-evidence-on-disk-local-untracked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Evidence on disk (local, untracked)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-candidate-b-implementation-and-measurement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Candidate B: implementation and measurement
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="irreducible-back-edges-seed-loops-that-lower-each-other-without-bound">Irreducible back edges seed loops that lower each other without bound<a class="headerlink" href="#irreducible-back-edges-seed-loops-that-lower-each-other-without-bound" title="Permanent link">&para;</a></h1>
+<p>Status: candidate B implemented and measured in this worktree (uncommitted); A not started. Base: main <code>2bd9720a9</code>.
+This is a robustness and consistency fix. It makes no decompiler-quality claim; the numbers
+in section 4 describe how widespread the condition is, not a gain.</p>
+<h2 id="1-baseline-row-anchors-measured">1. Baseline row anchors (measured)<a class="headerlink" href="#1-baseline-row-anchors-measured" title="Permanent link">&para;</a></h2>
+<p>Both functions abort the decompiler process (<code>fatal runtime error: stack overflow, aborting</code>,
+exit 134) when decompiled alone, on main, on the #182 candidate and on the discovery-unified
+build. Found by the O2 sweep of the rebuilt 2026-10-09 binaries.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Binary</th>
+<th>Address</th>
+<th>CFG</th>
+<th>Stack needed (default is 32 MB)</th>
+<th>Output when it completes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>echocmd</code> (bltin/printf.c)</td>
+<td>dash O2</td>
+<td>0x14b50</td>
+<td>12 blocks, 193 bytes</td>
+<td>between 32 and 40 MB</td>
+<td>1,116 characters, 211 p-code ops</td>
+</tr>
+<tr>
+<td><code>main</code> (src/uniq.c)</td>
+<td>coreutils uniq O2</td>
+<td>0x2720</td>
+<td>93 blocks</td>
+<td>between 64 and 96 MB</td>
+<td>15,428 characters</td>
+</tr>
+</tbody>
+</table>
+<p><code>FISSION_RUST_DECOMP_STACK_MB=128</code> makes both finish with identical time at 128 and 256 MB, so
+the recursion is deep but finite; the 8..256 MB clamp in <code>workers::resolve_decomp_stack_size_bytes</code>
+is the only reason it ever fails.</p>
+<p>Build statistics of the small function show the repetition directly:
+<code>loop_while_subgraph_lowered_count</code> 5,552, <code>loop_multi_exit_break_count</code> 11,104,
+<code>promotion_rejected_by_gate_count</code> 5,552, <code>rejected_external_entry</code> 5,552,
+<code>structuring_reason_region_legality_count</code> 5,552, for a function whose final output has no loop.</p>
+<p>Harness consequence: one such function erases every result of its binary unless the harness
+isolates it. The sweep tooling now halves the address list on a process crash and records
+<code>process_crashes</code> in <code>run.json</code>; that is measurement tooling, not a repair.</p>
+<h2 id="2-owner-proof">2. Owner proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[ ] SLEIGH/raw p-code  - [ ] Builder/materialize  - [ ] Normalize</li>
+<li>[x] <strong>Structuring</strong> (loop identification, then loop lowering)  - [ ] Type recovery  - [ ] Printer</li>
+</ul>
+<p>Call stack at the fault (symbolized <code>profiling</code> build, lldb, top 60 frames), identical shape for both:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>try_lower_while(idx=5) -&gt; try_lower_while_impl -&gt; {closure#1} -&gt; lower_loop_body_subgraph
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  -&gt; try_lower_while(idx=4) -&gt; try_lower_while_impl -&gt; {closure#1} -&gt; lower_loop_body_subgraph
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  -&gt; try_lower_while(idx=5) -&gt; ...                      (dash: heads 5,4,5,4,...)
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                                                        (uniq: heads 1,4,1,4,...)
+</span></code></pre></div>
+<p>Why the cycle exists. <code>echocmd</code> has this CFG (successor lists):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>0:[1,11] 1:[2,10] 2:[3,6] 3:[4] 4:[5,8] 5:[6,8] 6:[7,9] 7:[5,8] 8:[] 9:[4] 10:[2] 11:[3]
+</span></code></pre></div>
+<p>Blocks 4,5,6,7,9 form one cycle with <strong>two entries</strong>, 3-&gt;4 and 2-&gt;6, so it is irreducible. Its two
+DFS back edges, 9-&gt;4 and 7-&gt;5, are both in <code>irreducible_edges</code> (the head does not dominate the tail).
+<code>LoopBody::identify_loops</code> still builds a loop from each of them:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>head=4 tails=[9] body=[4,9,6,2,5,1,10,0,7,11,3]     &lt;- contains head 5, and the entry block 0
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>head=5 tails=[7] body=[5,7,6,2,1,10,0,9,11,3,4]     &lt;- contains head 4, and the entry block 0
+</span></code></pre></div>
+<p><code>lower_loop_body_subgraph(body(4))</code> tries <code>try_lower_while</code> on block 5, whose body contains 4, and so on.
+The only thing that stops it is the global work counter
+(<code>structuring_total_work_budget_exceeded</code>); there is no check that a head is already being lowered
+on the current path. The depth reached at the budget decides how much stack is needed.</p>
+<p>Ordering fact in <code>builder/init.rs</code>: <code>identify_loops</code> runs first and the irreducible edges are removed
+from the successor/predecessor lists only afterwards, so a <code>LoopBody</code> outlives the edge that defined
+its tail. <code>identify_loops</code> step 1 groups tails from every <code>EdgeClass::Back</code> edge without testing
+<code>irreducible_edges</code>, although <code>find_base</code>/<code>extend</code> do skip them when walking predecessors.</p>
+<p>The two defects are separate:
+1. First wrong fact (data): a "loop" whose head does not dominate its body. A natural loop whose head
+   is not the entry block cannot contain the entry block.
+2. Missing guard (control): re-entering a head that is already being lowered.</p>
+<h2 id="3-generality-invariant">3. Generality / invariant<a class="headerlink" href="#3-generality-invariant" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>A LoopBody is a natural loop: its closing edge is a back edge whose head dominates its tail, and the
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>head dominates every block of the body. An edge that fails the dominance test is irreducible; it
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>is a goto edge and seeds no loop. Independently, loop lowering never starts on a head that is
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>already being lowered on the current call path.
+</span></code></pre></div>
+<p>Pure CFG/dominance facts; no ISA, name, address, compiler or corpus condition (ADR 0009). The repository
+already treats these edges as non-loop edges everywhere downstream (init.rs removes them), so this
+removes an inconsistency rather than adding a rule.</p>
+<p>Comparable coverage (two programs, one binary each, same optimization level for the anchors; the
+condition itself appears at O0 as well):</p>
+<ul>
+<li>dash O2 <code>echocmd</code>, coreutils O2 <code>uniq::main</code> (anchors).</li>
+<li>Population probe over the sweeps' targets: an irreducible back edge seeds a loop in 2,729 of 26,083
+  O2 functions (10.5%) and 235 of 34,165 O0 functions (0.7%); in 1,138 (O2) and 81 (O0) two of the
+  loops contain each other; in 2,714 (O2) and 207 (O0) a loop with a non-entry head contains the
+  entry block, which no natural loop can.</li>
+</ul>
+<h2 id="4-how-widespread-and-what-it-does-not-prove">4. How widespread, and what it does not prove<a class="headerlink" href="#4-how-widespread-and-what-it-does-not-prove" title="Permanent link">&para;</a></h2>
+<p>Same size band, structure-perfect rate (GED == 0) of O2 functions with and without a loop seeded by an
+irreducible back edge (24,147 scored rows):</p>
+<table>
+<thead>
+<tr>
+<th>Source CFG nodes</th>
+<th>Seeded: rows / GED==0 / mean GED</th>
+<th>Not seeded: rows / GED==0 / mean GED</th>
+<th>Kuna 1.515 GED==0, seeded vs not</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1-5</td>
+<td>447 / 28.2% / 31.0</td>
+<td>12,004 / 58.1% / 6.8</td>
+<td>33.6% vs 60.8%</td>
+</tr>
+<tr>
+<td>6-10</td>
+<td>345 / 0.6% / 42.4</td>
+<td>3,871 / 5.3% / 16.5</td>
+<td>7.4% vs 10.4%</td>
+</tr>
+<tr>
+<td>11-20</td>
+<td>552 / 0.0% / 57.7</td>
+<td>3,256 / 0.4% / 27.2</td>
+<td>1.1% vs 3.1%</td>
+</tr>
+</tbody>
+</table>
+<p>Kuna is also worse on these functions, so part of the difference is that irreducible CFGs are harder.
+The gap between Fission and Kuna is larger on the seeded group (1-5: 5.4 vs 2.7 points; 6-10: 6.8 vs 5.1),
+which is consistent with, but does not prove, the bogus loops costing Fission something. Not a quality claim.</p>
+<h2 id="5-candidate-changes-and-risks">5. Candidate changes and risks<a class="headerlink" href="#5-candidate-changes-and-risks" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Change</th>
+<th>Effect</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B</td>
+<td>Track the heads being lowered on the current path; <code>try_lower_while*</code> and the subgraph lowering decline (return <code>None</code>, falling back to the existing goto form) for a head already on the path</td>
+<td>Removes the recursion for every shape, bounded by the number of heads, not by the work budget</td>
+<td>Only changes functions that currently recurse into themselves (mutual pairs: 1,138 O2 / 81 O0); their output may change</td>
+</tr>
+<tr>
+<td>A</td>
+<td><code>identify_loops</code> skips back edges in <code>irreducible_edges</code>, or restricts bodies to blocks the head dominates</td>
+<td>Removes the bogus loops at their source; B becomes defence in depth</td>
+<td>Changes the loop structure of every function with an irreducible back edge (2,729 O2 / 235 O0); needs a full measured comparison</td>
+</tr>
+<tr>
+<td>C</td>
+<td>Raise the default decompile stack</td>
+<td>Both anchors finish at 128 MB</td>
+<td>Rejected: it moves the threshold, costs memory per worker, and leaves the cause</td>
+</tr>
+</tbody>
+</table>
+<p>Recommendation: B first, alone, because it is the smallest invariant-based change that makes the
+process unable to overflow on this path; then A as a separate, measured change. Interactions to check:
+<code>lower_loop_body_via_sese</code> (the <code>structure_body_members</code> path), <code>try_lower_rotated_while</code>, and
+any other caller of <code>lower_loop_body_subgraph</code> (lines 999, 1320, 1587, 2167 of <code>loops.rs</code>).</p>
+<p>Known cases that must not change under B: every function whose loop-lowering never re-enters an
+active head. Under A: functions with no irreducible back edge (all but 10.5% of O2 and 0.7% of O0).</p>
+<h2 id="6-validation-matrix">6. Validation matrix<a class="headerlink" href="#6-validation-matrix" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[ ] Synthetic CFG test: the 12-block <code>echocmd</code> graph (and a two-head mutual-containment graph) lowers
+      inside an 8 MB thread without overflow; asserts the active-head guard fires.</li>
+<li>[ ] Invariant test for A (if taken): for every <code>LoopBody</code>, the head dominates every body block; no
+      non-entry head has the entry block in its body.</li>
+<li>[ ] Both anchors decompile at the default 32 MB stack.</li>
+<li>[ ] <code>cargo nextest run -p fission-midend-structuring -p fission-pcode -p fission-decompiler</code>, both profiles.</li>
+<li>[ ] Text comparison on all O0 (34,165) and O2 (26,083) targets against the same build without the change:
+      B must change only functions in the mutual-pair set; list every changed function.</li>
+<li>[ ] Score comparison with <code>rebuild/run_all.sh</code> / <code>full_sweep.sh</code> on the O0 and O2 sweeps and the
+      sample-set: Union, structure/type/byte perfect counts, total GED distance next to them,
+      zero lost perfect matches; per-row listing of every changed score.</li>
+<li>[ ] No new <code>process_crashes</code> entries in <code>run.json</code>.</li>
+</ul>
+<h2 id="7-evidence-on-disk-local-untracked">7. Evidence on disk (local, untracked)<a class="headerlink" href="#7-evidence-on-disk-local-untracked" title="Permanent link">&para;</a></h2>
+<p><code>benchmark/artifacts/decbench/recovered-union-pipeline/runs/full-inlined-disc3/crash_investigation/</code>:
+lldb stacks for both functions, the ordered CFG/loop dump of <code>echocmd</code>, the population probe and its summary.</p>
+<h2 id="8-candidate-b-implementation-and-measurement">8. Candidate B: implementation and measurement<a class="headerlink" href="#8-candidate-b-implementation-and-measurement" title="Permanent link">&para;</a></h2>
+<p>Change (9 files, uncommitted, branch <code>investigate/loop-lowering-stack-overflow</code>): <code>StructuringHost</code> gains
+<code>enter_loop_lowering</code> / <code>leave_loop_lowering</code>; <code>PreviewBuilder</code> keeps <code>active_loop_heads: Vec&lt;usize&gt;</code>;
+<code>lower_loop_body_subgraph</code> and <code>lower_loop_body_via_sese</code> run under <code>with_active_loop_head</code>, which declines
+(returns <code>None</code>, i.e. the existing goto fallback) when the head is already being lowered on the current
+path. A new <code>NirBuildStats.loop_lowering_reentry_declined_count</code> records each decline.</p>
+<p>Tests: <code>irreducible_two_head_cycle_does_not_lower_loops_into_each_other</code> builds the 12-block <code>echocmd</code> CFG.
+Without the guard it fails with <code>loop lowering repeated 5553 times (re-entries declined: 0)</code>; with it,
+8 lowerings and a non-zero decline count. <code>cargo nextest run -p fission-midend-core -p fission-midend-structuring
+-p fission-pcode -p fission-decompiler</code>: 1,657 passed, 1 skipped. <code>cargo fmt --all --check</code> clean.</p>
+<p>Anchors at the default 32 MB stack, release build: both finish (<code>rc=0</code>, no overflow).
+dash <code>echocmd</code> 1,774 bytes, GED 13; coreutils <code>uniq::main</code> 18,169 bytes, GED 150.</p>
+<p>Sweeps (stripped inputs, same harness; baseline = the same tree without the guard, i.e. the discovery-unified
+build <code>disc3</code>; O0 on the July binaries, O2 on the rebuilt 2026-10-09 binaries):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>O0 (34,165 functions)</th>
+<th>O2 (26,083 functions)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Process crashes (harness-isolated)</td>
+<td>0 -&gt; 0</td>
+<td><strong>2 -&gt; 0</strong></td>
+</tr>
+<tr>
+<td>Functions where the guard declined a re-entry</td>
+<td>2</td>
+<td>32</td>
+</tr>
+<tr>
+<td>Functions whose text changed</td>
+<td>7 (1 caused by the guard)</td>
+<td>29 (25 where the guard fired)</td>
+</tr>
+<tr>
+<td>Union</td>
+<td>14,832 -&gt; 14,832</td>
+<td>7,774 -&gt; 7,774</td>
+</tr>
+<tr>
+<td>Perfect matches lost, any metric</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>Type perfect / mean</td>
+<td>unchanged</td>
+<td>unchanged</td>
+</tr>
+<tr>
+<td>GED mean on common rows</td>
+<td>12.2809 -&gt; 12.2804</td>
+<td>25.2845 -&gt; 25.2946</td>
+</tr>
+<tr>
+<td>Rows with a different GED</td>
+<td>1 better</td>
+<td>20 rows = 8 distinct functions: 5 worse (+225), 3 better (-140), net +85</td>
+</tr>
+</tbody>
+</table>
+<p>Reading it:</p>
+<ul>
+<li>The rows that appear only in the new run are not all the guard's: 6 of the 8 newly scored O2 functions and 6 of 7
+  changed O0 functions had a 30 s render timeout (<code>preview_timeout</code>) in the baseline and none in the new run, with
+  zero guard declines in them. Wall-clock timeouts differ between runs (O0 43 -&gt; 37, O2 42 -&gt; 36). That is load
+  noise, not an effect of the guard, and is excluded from the reading above.</li>
+<li>The two anchors are the guard's real gain: a crash that erased results is now a scored row.</li>
+<li>On the functions where the guard changes the structure, the result is mixed and slightly negative: the old
+  unbounded lowering sometimes produced a better structure before the work budget stopped it (<code>pkcs12_info</code>
+  203 -&gt; 335, <code>sys_child_open_for_compress</code> 26 -&gt; 81), and sometimes a worse one (<code>readtoken1</code> 143 -&gt; 48 is better).
+  Net +85 distance over 8 distinct functions out of 24,147 scored is not a quality claim in either direction.</li>
+<li>Byte-match values moved on 13 (O0) and 18 (O2) functions whose text is identical; that is the evaluator's
+  run-to-run noise (already seen in the 4- vs 8-worker comparison), not an effect.</li>
+</ul>
+<p>Conclusion: B removes the crash and the unbounded recursion without losing a perfect match anywhere, and its
+score effect is within noise except for 8 functions that moved in both directions. Whether the structure the old
+recursion reached is worth keeping, or whether A (no loop from an irreducible back edge) does better, is what the
+measured comparison of A should answer. Not done.</p>
+<p>Evidence: <code>runs/full-unopt-guard</code>, <code>runs/full-inlined-guard</code> and <code>runs/full-inlined-guard/ab_patches/</code> under the
+local pipeline directory (<code>guard.patch</code>, <code>discovery.patch</code>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
