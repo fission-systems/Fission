@@ -41,7 +41,10 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
+import importlib.util
 import json
+import os
 import subprocess
 import sys
 import time
@@ -104,6 +107,58 @@ def load_scoring(benchmark_root: Path):
         "TypeMatchMetric": TypeMatchMetric,
         "extract_ground_truth_types": extract_ground_truth_types,
     }
+
+
+def _digest_files(*paths: str | None) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(b"\0" if path is None else Path(path).read_bytes())
+    return digest.hexdigest()
+
+
+def cached_ground_truth_types(api: dict, original: Path, benchmark_root: Path) -> dict:
+    """`extract_ground_truth_types`, remembered on disk.
+
+    Reading an unstripped twin's DWARF took 93 of 243 seconds in a gate run --
+    more than all of GED, joern and type scoring together -- and the answer
+    depends on nothing Fission produces. The key is the SHA-256 of the binary
+    plus the SHA-256 of the extractor's own source, so a different binary or a
+    changed extractor misses instead of serving a stale answer. Entries live
+    under `<benchmark_root>/.gate-cache/` and are plain JSON; a missing,
+    unreadable or non-round-tripping entry falls back to extracting.
+
+    Set `FISSION_GATE_GT_CACHE=0` to bypass it. This is deliberately separate
+    from `FISSION_BENCHMARK_NO_CACHE`: that variable exists so a before/after
+    does not read the other run's *decompilation*, which this cache never holds.
+    """
+    extract = api["extract_ground_truth_types"]
+    if os.environ.get("FISSION_GATE_GT_CACHE") == "0":
+        return extract(original)
+    try:
+        sources = [
+            importlib.util.find_spec(name).origin
+            for name in ("decbench.metrics.type_match", "decbench.utils.binfmt")
+        ]
+        key = hashlib.sha256(
+            (_digest_files(*sources) + hashlib.sha256(original.read_bytes()).hexdigest()).encode()
+        ).hexdigest()
+        entry = benchmark_root / ".gate-cache" / "ground_truth_types" / f"{key}.json"
+    except Exception:
+        return extract(original)
+    try:
+        return json.loads(entry.read_text())
+    except Exception:
+        pass
+    types = extract(original)
+    try:
+        if json.loads(json.dumps(types)) == types:
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            temporary = entry.with_suffix(f".{os.getpid()}.tmp")
+            temporary.write_text(json.dumps(types))
+            temporary.replace(entry)
+    except Exception:
+        pass
+    return types
 
 
 def source_cfg_name(fn: str, src) -> str | None:
@@ -225,7 +280,7 @@ def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None
                 src_cfgs[key] = {}
             try:
                 gt_types[key] = (
-                    api["extract_ground_truth_types"](original)
+                    cached_ground_truth_types(api, original, benchmark_root)
                     if original and original.is_file()
                     else {}
                 )
