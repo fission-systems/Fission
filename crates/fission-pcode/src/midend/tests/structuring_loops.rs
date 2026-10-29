@@ -2653,3 +2653,124 @@ fn do_while_x86_zext_passthrough_accumulator_naming() {
         "expected rax as the loop accumulator in the body: {code}"
     );
 }
+
+/// The 12-block CFG of an `-O2` `echocmd`-shaped function: blocks 4,5,6,7,9 form one cycle that is
+/// entered twice (3->4 and 2->6), so its two DFS back edges 9->4 and 7->5 are irreducible.
+/// Successors by block: 0:[1,11] 1:[2,10] 2:[3,6] 3:[4] 4:[5,8] 5:[6,8] 6:[7,9] 7:[5,8] 8:[] 9:[4] 10:[2] 11:[3].
+fn two_entry_cycle_with_two_heads() -> PcodeFunction {
+    let addr = |idx: usize| 0x6000 + 0x10 * idx as u64;
+    // (block, kind) where a conditional block is (taken target, fallthrough is the next block).
+    enum End {
+        Cond(usize),
+        Jump(usize),
+        Fall,
+        Ret,
+    }
+    let layout = [
+        End::Cond(11),
+        End::Cond(10),
+        End::Cond(6),
+        End::Fall,
+        End::Cond(8),
+        End::Cond(8),
+        End::Cond(9),
+        End::Cond(5),
+        End::Ret,
+        End::Jump(4),
+        End::Jump(2),
+        End::Jump(3),
+    ];
+    let blocks = layout
+        .iter()
+        .enumerate()
+        .map(|(idx, end)| {
+            let a = addr(idx);
+            let cond = uniq(0x700 + idx as u64, 1);
+            let mut ops = vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Store,
+                address: a,
+                output: None,
+                inputs: vec![cst(0, 4), reg(0x28, 8), cst(idx as i64 + 1, 4)],
+                asm_mnemonic: None,
+            }];
+            let mut push = |opcode, output: Option<Varnode>, inputs: Vec<Varnode>| {
+                let seq_num = ops.len() as u32;
+                ops.push(PcodeOp {
+                    seq_num,
+                    opcode,
+                    address: a + u64::from(seq_num),
+                    output,
+                    inputs,
+                    asm_mnemonic: None,
+                });
+            };
+            match end {
+                End::Cond(target) => {
+                    push(
+                        PcodeOpcode::Copy,
+                        Some(cond.clone()),
+                        vec![reg(0x08 + idx as u64, 1)],
+                    );
+                    push(
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![cst(addr(*target) as i64, 8), cond],
+                    );
+                }
+                End::Jump(target) => push(
+                    PcodeOpcode::Branch,
+                    None,
+                    vec![cst(addr(*target) as i64, 8)],
+                ),
+                End::Ret => push(PcodeOpcode::Return, None, vec![cst(0, 8), cst(0, 4)]),
+                End::Fall => {}
+            }
+            PcodeBasicBlock {
+                index: idx as u32,
+                start_address: a,
+                successors: vec![],
+                ops,
+            }
+        })
+        .collect();
+    PcodeFunction { blocks }
+}
+
+#[test]
+fn irreducible_two_head_cycle_does_not_lower_loops_into_each_other() {
+    // Run on a very large stack so a missing guard shows up as a huge lowering count, not as a
+    // process abort that would take the whole test binary down with it.
+    let stats = std::thread::Builder::new()
+        .stack_size(512 * 1024 * 1024)
+        .spawn(|| {
+            render_nir_with_context_output(
+                &two_entry_cycle_with_two_heads(),
+                "two_entry_cycle",
+                0x6000,
+                &preview_options(),
+                None,
+                None,
+            )
+            .expect("preview render")
+            .build_stats
+            .expect("preview build stats")
+        })
+        .expect("spawn")
+        .join()
+        .expect("render thread");
+    // Each of the two heads is lowered once per attempt mode and structuring pass (8 in total here).
+    // Without the guard the same CFG lowered them into each other 5,553 times -- bounded only by
+    // the work budget -- so any bound independent of that budget separates the two.
+    assert!(
+        stats.loop_while_subgraph_lowered_count <= 32,
+        "loop lowering repeated {} times (re-entries declined: {}); it must be bounded by the number \
+         of loop heads, not by the structuring work budget",
+        stats.loop_while_subgraph_lowered_count,
+        stats.loop_lowering_reentry_declined_count
+    );
+    assert!(
+        stats.loop_lowering_reentry_declined_count >= 1,
+        "the cycle between the two heads must be cut by declining a re-entry, not by exhausting the work budget"
+    );
+}
