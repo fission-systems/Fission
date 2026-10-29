@@ -19,6 +19,7 @@ Fission/
 │   └── patch_validation_pool/ # Held-out regression pool (go/stop evidence only)
 ├── crates/
 │   ├── fission-pcode-ir/     # p-code IR, optimizer, block-level CFG facts (leaf crate)
+│   ├── fission-cspec/        # cspec/ldefs/pspec parsing, register model, seed_nir_render_options
 │   ├── fission-pcode/        # NIR/HIR, structuring, CFG, printer; re-exports fission-pcode-ir
 │   ├── fission-decompiler/   # Orchestration + Rust-Sleigh bridge (re-exports IR crate)
 │   ├── fission-sleigh/       # Sleigh decode/lift runtime

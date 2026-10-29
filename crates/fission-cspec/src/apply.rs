@@ -6,7 +6,7 @@
 use super::loader::load_cspec_for_pair;
 use super::register_model::{apply_register_model_for_options, register_model_for_language};
 use super::{ResolvedPrototype, SlaRegisterMap};
-use crate::midend::{CallingConvention, NirRenderOptions};
+use crate::{CallingConvention, NirRenderOptions};
 
 /// Root of the checked-in Ghidra language tree (`utils/sleigh-specs/languages`).
 ///

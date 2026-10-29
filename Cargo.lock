@@ -896,6 +896,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-cspec"
+version = "0.2.3"
+dependencies = [
+ "anyhow",
+ "fission-core",
+ "fission-loader",
+ "fission-midend-core",
+ "fission-pcode-ir",
+ "rustc-hash",
+]
+
+[[package]]
 name = "fission-decompiler"
 version = "0.2.3"
 dependencies = [
@@ -1084,6 +1096,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "fission-core",
+ "fission-cspec",
  "fission-loader",
  "fission-midend-core",
  "fission-midend-normalize",

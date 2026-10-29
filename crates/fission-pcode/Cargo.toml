@@ -13,6 +13,7 @@ categories = ["development-tools"]
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-pcode-ir = { path = "../fission-pcode-ir" }
+fission-cspec = { path = "../fission-cspec" }
 fission-loader = { path = "../fission-loader" }
 fission-midend-core = { path = "../fission-midend-core" }
 fission-midend-prehir = { path = "../fission-midend-prehir" }

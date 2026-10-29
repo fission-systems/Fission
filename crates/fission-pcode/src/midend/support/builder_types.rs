@@ -1,24 +1,10 @@
 use super::*;
 
-pub(crate) const UNIQUE_SPACE_ID: u64 = 3;
-pub(crate) const RUST_SLEIGH_UNIQUE_SPACE_ID: u64 = 2;
-pub(crate) const REGISTER_SPACE_ID: u64 = 1;
-pub(crate) const RUST_SLEIGH_REGISTER_SPACE_ID: u64 = 4;
-pub(crate) const RUST_SLEIGH_ALT_REGISTER_SPACE_ID: u64 = 5;
-
-pub(crate) fn is_register_space_id(space_id: u64) -> bool {
-    space_id == REGISTER_SPACE_ID
-        || space_id == RUST_SLEIGH_REGISTER_SPACE_ID
-        || space_id == RUST_SLEIGH_ALT_REGISTER_SPACE_ID
-}
-
-pub(crate) fn is_unique_space_id(space_id: u64) -> bool {
-    space_id == UNIQUE_SPACE_ID || space_id == RUST_SLEIGH_UNIQUE_SPACE_ID
-}
-
-pub(crate) fn is_register_varnode(vn: &Varnode) -> bool {
-    is_register_space_id(vn.space_id)
-}
+pub(crate) use fission_pcode_ir::space::{
+    REGISTER_SPACE_ID, RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID,
+    RUST_SLEIGH_UNIQUE_SPACE_ID, UNIQUE_SPACE_ID, is_register_space_id, is_register_varnode,
+    is_unique_space_id,
+};
 
 /// Initial SESE recovery is a proof pass, not the final fallback renderer.
 /// Once proof-oriented recovery exceeds this ceiling, callers should fail

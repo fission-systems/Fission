@@ -2,14 +2,14 @@
 
 use super::apply::{apply_cspec_for_options, default_cspec_pair, sla_register_map_from_offset_map};
 use super::register_model::{apply_register_model_for_options, register_model_for_language};
-use crate::midend::NirRenderOptions;
+use crate::NirRenderOptions;
 
 /// Re-apply SLA register map and cspec after mutating `calling_convention`, endianness, or format.
-pub(crate) fn sync_preview_cspec(options: &mut NirRenderOptions) {
+pub fn sync_preview_cspec(options: &mut NirRenderOptions) {
     apply_preview_cspec(options);
 }
 
-pub(crate) fn apply_preview_cspec(options: &mut NirRenderOptions) {
+pub fn apply_preview_cspec(options: &mut NirRenderOptions) {
     let _ = apply_register_model_for_options(options);
     let Some((lang, _)) = default_cspec_pair(options) else {
         return;

@@ -2,7 +2,7 @@
 //!
 //! Ghidra-style "names from SLA, slots from cspec" lookup.
 
-use crate::midend::HashMap;
+use crate::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
@@ -10,12 +10,15 @@ use super::SlaRegisterMap;
 use super::apply::sleigh_languages_root;
 use super::ldefs::global_language_slaspec_index;
 use super::slaspec_parse::{ParsedRegister, parse_registers_from_slaspec};
-use crate::arch::x86::{X86_REG_BASE, unique_x86_register_name, x86_register_space_flag_name};
-use crate::midend::{
-    REGISTER_SPACE_ID, RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID,
-    UNIQUE_SPACE_ID, Varnode, is_register_space_id,
-};
 use fission_core::CallingConvention;
+use fission_pcode_ir::arch::x86::{
+    X86_REG_BASE, unique_x86_register_name, x86_register_space_flag_name,
+};
+use fission_pcode_ir::pcode::Varnode;
+use fission_pcode_ir::space::{
+    REGISTER_SPACE_ID, RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID,
+    UNIQUE_SPACE_ID, is_register_space_id,
+};
 
 #[derive(Default)]
 struct RegisterModelSlot {
@@ -256,7 +259,7 @@ pub fn register_model_for_abi(abi: CallingConvention) -> Option<Arc<RegisterMode
         .and_then(|(lang, _)| register_model_for_language(&lang))
 }
 
-fn minimal_options_for_abi(abi: CallingConvention) -> crate::midend::NirRenderOptions {
+fn minimal_options_for_abi(abi: CallingConvention) -> crate::NirRenderOptions {
     let (is_64bit, pointer_size) = match abi {
         CallingConvention::WindowsX64
         | CallingConvention::SystemVAmd64
@@ -266,7 +269,7 @@ fn minimal_options_for_abi(abi: CallingConvention) -> crate::midend::NirRenderOp
         | CallingConvention::LoongArch64 => (true, 8),
         _ => (false, 4),
     };
-    crate::midend::NirRenderOptions {
+    crate::NirRenderOptions {
         calling_convention: abi,
         is_64bit,
         pointer_size,
@@ -360,13 +363,13 @@ pub fn register_namer_for_abi(abi: CallingConvention) -> RegisterNamer {
     }
 }
 
-pub fn register_namer_from_options(options: &crate::midend::NirRenderOptions) -> RegisterNamer {
+pub fn register_namer_from_options(options: &crate::NirRenderOptions) -> RegisterNamer {
     RegisterNamer::from_options(options)
 }
 
 /// Populate `options.sla_register_map` from the SLA register model for `language_id`.
 pub fn apply_register_model_for_language(
-    options: &mut crate::midend::NirRenderOptions,
+    options: &mut crate::NirRenderOptions,
     language_id: &str,
 ) -> bool {
     let Some(model) = register_model_for_language(language_id) else {
@@ -377,7 +380,7 @@ pub fn apply_register_model_for_language(
 }
 
 /// Populate `options.sla_register_map` using the default preview/test language pair.
-pub fn apply_register_model_for_options(options: &mut crate::midend::NirRenderOptions) -> bool {
+pub fn apply_register_model_for_options(options: &mut crate::NirRenderOptions) -> bool {
     let Some((language_id, _)) = super::apply::default_cspec_pair(options) else {
         return false;
     };
@@ -414,7 +417,7 @@ pub struct RegisterNamer {
 }
 
 impl RegisterNamer {
-    pub fn from_options(options: &crate::midend::NirRenderOptions) -> Self {
+    pub fn from_options(options: &crate::NirRenderOptions) -> Self {
         let model = super::apply::default_cspec_pair(options)
             .and_then(|(lang, _)| register_model_for_language(&lang));
         let sla_map: Option<std::sync::Arc<HashMap<(u64, u32), String>>> = options
@@ -671,7 +674,7 @@ impl RegisterNamer {
         })
     }
 
-    pub(crate) fn param_slot_size(&self) -> u32 {
+    pub fn param_slot_size(&self) -> u32 {
         match self.abi {
             CallingConvention::AArch64
             | CallingConvention::PowerPc64
@@ -973,14 +976,14 @@ impl RegisterNamer {
         self.model
             .as_ref()
             .and_then(|m| m.family_index(&hw_name))
-            .or_else(|| crate::arch::x86::x86_gpr_family_index(hw_name.as_str()))
+            .or_else(|| fission_pcode_ir::arch::x86::x86_gpr_family_index(hw_name.as_str()))
     }
 
     pub fn gpr_family_index_for_name(&self, name: &str) -> Option<usize> {
         self.model
             .as_ref()
             .and_then(|m| m.family_index(name))
-            .or_else(|| crate::arch::x86::x86_gpr_family_index(name))
+            .or_else(|| fission_pcode_ir::arch::x86::x86_gpr_family_index(name))
     }
 
     pub fn is_known_gpr(&self, offset: u64, size: u32) -> bool {
@@ -1069,7 +1072,7 @@ fn default_return_offset(abi: CallingConvention) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::midend::cspec::{CspecPentry, CspecPrototype};
+    use crate::{CspecPentry, CspecPrototype};
 
     fn model_for(lang: &str) -> RegisterModel {
         register_model_for_language(lang)
@@ -1184,8 +1187,9 @@ mod tests {
 
     #[test]
     fn arm32_pc_is_a_return_target_not_a_returned_value() {
-        use crate::midend::cspec::RegisterNamer;
-        use crate::midend::{CallingConvention, NirRenderOptions, Varnode};
+        use crate::RegisterNamer;
+        use crate::{CallingConvention, NirRenderOptions};
+        use fission_pcode_ir::pcode::Varnode;
 
         let options = NirRenderOptions {
             calling_convention: CallingConvention::Arm32,
@@ -1196,7 +1200,7 @@ mod tests {
         };
         let namer = RegisterNamer::from_options(&options);
         let reg = |offset: u64| Varnode {
-            space_id: crate::midend::RUST_SLEIGH_REGISTER_SPACE_ID,
+            space_id: fission_pcode_ir::space::RUST_SLEIGH_REGISTER_SPACE_ID,
             offset,
             size: 4,
             is_constant: false,
@@ -1218,8 +1222,8 @@ mod tests {
 
     #[test]
     fn x64_namer_names_register_space_eflags_bits() {
-        use crate::midend::cspec::RegisterNamer;
-        use crate::midend::{CallingConvention, NirRenderOptions};
+        use crate::RegisterNamer;
+        use crate::{CallingConvention, NirRenderOptions};
 
         let options = NirRenderOptions {
             calling_convention: CallingConvention::WindowsX64,
@@ -1245,8 +1249,8 @@ mod tests {
 
     #[test]
     fn aarch64_be_namer_resolves_w0_at_high_half() {
-        use crate::midend::cspec::{RegisterNamer, test_maps::sync_preview_cspec};
-        use crate::midend::{CallingConvention, NirRenderOptions};
+        use crate::{CallingConvention, NirRenderOptions};
+        use crate::{RegisterNamer, test_maps::sync_preview_cspec};
 
         let mut options = NirRenderOptions {
             calling_convention: CallingConvention::AArch64,
@@ -1268,12 +1272,10 @@ mod tests {
 
     #[test]
     fn cspec_prototype_registers_resolve_in_register_model() {
-        use crate::midend::cspec::apply::{default_cspec_pair, sleigh_languages_root};
-        use crate::midend::cspec::loader::{
-            cspec_path_for_pair, load_cspec_for_pair, load_cspec_path,
-        };
-        use crate::midend::cspec::{CspecPentry, CspecPrototype};
-        use crate::midend::{CallingConvention, NirRenderOptions};
+        use crate::apply::{default_cspec_pair, sleigh_languages_root};
+        use crate::loader::{cspec_path_for_pair, load_cspec_for_pair, load_cspec_path};
+        use crate::{CallingConvention, NirRenderOptions};
+        use crate::{CspecPentry, CspecPrototype};
 
         for abi in [
             CallingConvention::WindowsX64,

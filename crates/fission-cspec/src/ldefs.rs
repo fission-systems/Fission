@@ -17,7 +17,7 @@
 //! every `(language_id, compiler_spec_id)` pair supported by Ghidra — including all
 //! AArch64 variants, ARM, MIPS, PowerPC, RISC-V, Sparc, LoongArch, etc.
 
-use crate::midend::HashMap;
+use crate::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 

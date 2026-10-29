@@ -34,7 +34,7 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
-      crates: "fission-midend-structuring,fission-pcode-ir,fission-pcode,fission-decompiler"
+      crates: "fission-midend-structuring,fission-pcode-ir,fission-cspec,fission-pcode,fission-decompiler"
       profile: release
       timeout_minutes: 120
 
@@ -129,7 +129,7 @@ jobs:
     name: 📈 Code Coverage (extended)
     uses: ./.github/workflows/reusable-coverage.yml
     with:
-      crates: "fission-pcode-ir,fission-pcode,fission-loader"
+      crates: "fission-pcode-ir,fission-cspec,fission-pcode,fission-loader"
       warn_threshold_pct: 60
 
   # Final summary for the nightly and manual validation run.

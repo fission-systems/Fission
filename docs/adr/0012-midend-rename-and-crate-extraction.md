@@ -79,6 +79,8 @@ before crates).
 4. ~~Physical midend-core move for `ir/`, `action_pipeline/`, `wave_stats`, labels, stats merge.~~ **Done**
    - P-code adapters: `seed_nir_render_options`, `nir_admission_facts_from_pcode`,
      `indirect_control_classification_from_pcode` remain in `fission-pcode`.
+     **Amended 2026-10-29:** `seed_nir_render_options` moved to `fission-cspec`
+     (see "Amendment" below); the other two stay.
    - Cspec helpers that formerly were inherent methods on `NirRenderOptions` are free functions.
 5. ~~Normalize source move to `fission-midend-normalize`.~~ **Done**
 6. ~~Pure structuring free-function modules to `fission-midend-structuring`.~~ **Done** (partial)
@@ -95,3 +97,26 @@ before crates).
    inherent thin wraps for loops/conditionals/switch/orphan/linear test path
    (tests call free-fns; linear residual is p-code-only; host switch_recovery
    free-fn direct).
+
+## Amendment (2026-10-29): p-code leaf crates
+
+Motivation and measurements: `docs/proposals/2026-10-29-pcode-crate-split.md`.
+Two crates split off the bottom of `fission-pcode` so a change in the midend does
+not rebuild them and a change in `fission-pcode` does not rebuild their dependents:
+
+| Crate | Contents | Workspace dependencies |
+|-------|----------|------------------------|
+| `fission-pcode-ir` | p-code IR, p-code optimizer, `arch`, address-keyed CFG snapshot, p-code-only block CFG facts (`block_cfg`), address-space ids (`space`) | none |
+| `fission-cspec` | cspec / ldefs / pspec / register model (`RegisterNamer`), `infer_entry_register_param_arity`, `seed_nir_render_options` | `fission-core`, `fission-loader`, `fission-midend-core`, `fission-pcode-ir` |
+
+This supersedes the sentence in follow-up 4 that `seed_nir_render_options` stays in
+`fission-pcode`: it needs only `NirRenderOptions`, a `LoadedBinary` and the cspec
+register map, none of which belong to the pipeline. The other two p-code adapters
+(`nir_admission_facts_from_pcode`, `indirect_control_classification_from_pcode`)
+read raw p-code and midend types together and stay in `fission-pcode`.
+
+`fission-pcode` re-exports both crates under the historical paths
+(`fission_pcode::{Pcode*, Varnode, arch, cfg}`, `fission_pcode::midend::cspec`,
+`fission_pcode::midend::{RegisterNamer, seed_nir_render_options, infer_entry_register_param_arity}`),
+so dependents switch to the leaf crates one at a time. Semantic owners, the telemetry
+contract and the NIR/HIR policy are unchanged.

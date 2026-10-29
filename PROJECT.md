@@ -3219,7 +3219,7 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   `return uVar17;` returning `param_6` — a completely unrelated leftover
   value, not the computed result at all.
   - Root cause, traced to `resolve_prototype` in
-    `fission-pcode/src/midend/cspec/mod.rs`: Ghidra's own cspecs
+    `fission-cspec/src/lib.rs`: Ghidra's own cspecs
     (`x86gcc.cspec`, `x86-64-gcc.cspec`, `x86-64-win.cspec`) declare a
     *separate* `metatype="float"` `<output>` pentry (ST0 on x86-32, XMM0_Qa
     on x86-64) alongside the integer one (EAX/RAX) — a function returns
