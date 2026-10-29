@@ -1,0 +1,1766 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-10-26-agent-first-cli-contract/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Agent-first CLI contract, phase P0 (2026-10-26) - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#agent-first-cli-contract-phase-p0-2026-10-26" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Agent-first CLI contract, phase P0 (2026-10-26)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.2.3/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#observed-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observed baseline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proposal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proposal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Proposal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-selecting-the-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Selecting the contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-envelope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Envelope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-exit-codes-contract-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Exit codes (contract mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-schema-subcommand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. schema subcommand
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-where-it-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Where it lives
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prior-art-reviewed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prior art reviewed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-approach-supervisor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation approach (supervisor)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-and-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility and migration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation plan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="agent-first-cli-contract-phase-p0-2026-10-26">Agent-first CLI contract, phase P0 (2026-10-26)<a class="headerlink" href="#agent-first-cli-contract-phase-p0-2026-10-26" title="Permanent link">&para;</a></h1>
+<p>Status: proposal. No code changes in this document.</p>
+<h2 id="why">Why<a class="headerlink" href="#why" title="Permanent link">&para;</a></h2>
+<p><a href="../../adr/0001-cli-first-external-surface/">ADR 0001</a> makes <code>fission_cli</code> the
+supported external surface. The next consumer of that surface is an AI agent
+driving Fission unattended: it cannot read a human error message, it cannot ask
+a follow-up question, and it must decide from the process result alone whether
+to retry, skip, or stop. Today the CLI is headless and has <code>--json</code>, but a few
+gaps stop an agent from trusting it. This proposal defines the smallest
+contract that closes them (P0) and leaves discovery, streaming, persistence and
+protocol work (P1 and later) for separate proposals.</p>
+<h2 id="observed-baseline">Observed baseline<a class="headerlink" href="#observed-baseline" title="Permanent link">&para;</a></h2>
+<p>Observed on a Windows release build of the CLI at <code>main</code> (2026-10-26), using a
+system PE as input. These are observations of the current behavior, not claims
+about any decompiler-quality metric.</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Observed</th>
+<th>Why it hurts an agent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list C:\nope.exe --json</code></td>
+<td>Human-readable miette text on stderr, nothing on stdout, exit 1</td>
+<td>A <code>--json</code> caller gets no JSON on failure; the cause cannot be classified.</td>
+</tr>
+<tr>
+<td><code>decomp &lt;pe&gt; --addr 0x1 --json</code> (unreadable address)</td>
+<td>JSON array with one row whose <code>error</code> is set and <code>fell_back</code> is <code>true</code>, exit 0</td>
+<td>Failure is visible only inside the payload; the exit code reports success.</td>
+</tr>
+<tr>
+<td>Any fatal error</td>
+<td>Always exit 1 (<code>fission_cli.rs</code> prints <code>{:?}</code> and exits 1)</td>
+<td>Usage, input, timeout and internal errors are indistinguishable.</td>
+</tr>
+<tr>
+<td><code>schema_version</code></td>
+<td>Present in <code>debug_decomp</code>, <code>nir_stats</code> and <code>debug_session</code> JSON; absent from <code>list</code>, <code>decomp</code>, <code>xrefs</code>, <code>callgraph</code> and others</td>
+<td>The contract is not uniform, and there is no machine-readable description of any shape.</td>
+</tr>
+<tr>
+<td>Top-level JSON shape</td>
+<td>Bare arrays for <code>list</code> and <code>decomp</code>; objects elsewhere</td>
+<td>An envelope cannot be added to arrays without changing them.</td>
+</tr>
+</tbody>
+</table>
+<p>Existing contract language: <a href="../../VERSIONING/"><code>VERSIONING.md</code></a> already allows
+additive JSON fields in a minor release and treats breaking a documented CLI
+contract as a major change. This proposal is designed to be additive.</p>
+<h2 id="design-rules">Design rules<a class="headerlink" href="#design-rules" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Opt-in, additive.</strong> Legacy output and exit codes stay exactly as they are
+   by default. The new behavior is selected by a contract version, so existing
+   scripts and benchmark harnesses that read the current shape are unaffected.</li>
+<li><strong>stdout is the payload, stderr is the log.</strong> In contract mode stdout carries
+   exactly one JSON document and nothing else; diagnostics, progress and
+   <code>[fission] Loaded config...</code> stay on stderr.</li>
+<li><strong>The process result is sufficient.</strong> An agent can branch on the exit code
+   alone, and read the envelope only for detail.</li>
+<li><strong>Stable identifiers, free-form text.</strong> Branching uses <code>error.code</code> and the
+   exit code. <code>message</code> and <code>hint</code> are for humans and may change without notice.</li>
+<li><strong>No silent success.</strong> A run that produced a failed function row is not a
+   success in contract mode.</li>
+</ol>
+<h2 id="proposal">Proposal<a class="headerlink" href="#proposal" title="Permanent link">&para;</a></h2>
+<h3 id="1-selecting-the-contract">1. Selecting the contract<a class="headerlink" href="#1-selecting-the-contract" title="Permanent link">&para;</a></h3>
+<p>A global option <code>--contract &lt;VERSION&gt;</code> (env <code>FISSION_CONTRACT</code>), initially only
+<code>v1</code>. When absent, behavior is unchanged. <code>--json</code> keeps its current meaning
+when used alone. <code>--contract v1</code> implies JSON output and conflicts with
+human-oriented flags (for example <code>-o</code> text output) with a usage error.</p>
+<p>Name and flag shape are open (see Open questions).</p>
+<h3 id="2-envelope">2. Envelope<a class="headerlink" href="#2-envelope" title="Permanent link">&para;</a></h3>
+<p>Every contract-mode invocation, success or failure, writes one JSON object to
+stdout:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"contract"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fission-cli/1"</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"decomp"</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">"ok"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">"data"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">"warnings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"worker_restarted"</span><span class="p">,</span><span class="w"> </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">],</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">"tool"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fission_cli"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.2.3"</span><span class="p">,</span><span class="w"> </span><span class="nt">"commit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"abc1234"</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">"elapsed_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">1840</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">}</span>
+</span></code></pre></div>
+<ul>
+<li><code>contract</code> is the envelope version. It changes only when the envelope itself
+  changes incompatibly.</li>
+<li><code>schema_version</code> is the version of the <code>data</code> payload for this <code>command</code>. It
+  is bumped when that payload changes incompatibly, independently of other
+  commands. It unifies the existing per-command <code>schema_version</code> fields.</li>
+<li><code>data</code> holds today's payload unchanged (including arrays), so existing
+  per-command shapes are reused rather than redesigned.</li>
+<li><code>tool</code> records the build that produced the result, so a stored result is
+  traceable to a version (this also serves the provenance gap in #660).</li>
+<li><code>warnings</code> carries non-fatal conditions an agent reading only stdout would
+  otherwise miss (for example an input that was repaired or partially parsed).
+  Each warning is <code>{code, message}</code>.</li>
+<li>Batch commands add <code>summary: {total, succeeded, failed}</code> next to <code>data</code>.</li>
+<li>Unknown keys must be tolerated by clients, matching <code>VERSIONING.md</code>.</li>
+</ul>
+<p>Failure uses the same envelope with <code>ok: false</code> and no <code>data</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"contract"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fission-cli/1"</span><span class="p">,</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"list"</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">"ok"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input_not_found"</span><span class="p">,</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input"</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"binary path does not exist: C:\\nope.exe"</span><span class="p">,</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">"hint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Check the path; relative paths resolve against the current directory."</span><span class="p">,</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="nt">"retryable"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">"context"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"C:\\nope.exe"</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">  </span><span class="p">},</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">  </span><span class="nt">"tool"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fission_cli"</span><span class="p">,</span><span class="w"> </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.2.3"</span><span class="p">,</span><span class="w"> </span><span class="nt">"commit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"abc1234"</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">"elapsed_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><code>error.kind</code> is a small closed set that maps to exit codes; <code>error.code</code> is a
+finer, documented, append-only registry (for example <code>input_not_found</code>,
+<code>input_unsupported_format</code>, <code>resource_root_missing</code>, <code>address_unreadable</code>,
+<code>function_timeout</code>, <code>internal_panic</code>). <code>retryable</code> tells an agent whether the
+same call could succeed later (for example a timeout under load) as opposed to
+being permanently wrong.</p>
+<p>Per-function failures inside a batch (<code>decomp --all</code>, <code>--addresses-file</code>) stay
+rows in <code>data</code>, but each failed row carries the same <code>{code, kind, message,
+retryable}</code> object instead of a free-form <code>error</code> string, and the envelope
+exit code reflects them (next section). The ambiguous <code>fell_back</code> and <code>layer</code>
+fields keep their current meaning in <code>data</code>; a separate cleanup can rename
+them.</p>
+<h3 id="3-exit-codes-contract-mode">3. Exit codes (contract mode)<a class="headerlink" href="#3-exit-codes-contract-mode" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Kind</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>ok</code></td>
+<td>Completed; every requested item succeeded.</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>failed</code></td>
+<td>The invocation ran but produced no usable result (for example every requested function failed).</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>usage</code></td>
+<td>Invalid arguments or option combination. Matches clap's existing usage-error code.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>input</code></td>
+<td>Input missing, unreadable or unsupported.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>partial</code></td>
+<td>Some items succeeded and some failed, and the caller asked for strictness with <code>--fail-on-partial</code>; <code>data</code> has both.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>timeout</code></td>
+<td>A configured time limit was reached and no result was produced.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>environment</code></td>
+<td>Required resources unavailable (resource root, signatures, runtime).</td>
+</tr>
+<tr>
+<td>70</td>
+<td><code>internal</code></td>
+<td>Unexpected internal failure or panic caught at the boundary.</td>
+</tr>
+</tbody>
+</table>
+<p>Batch rule: a batch that produces at least one successful item exits 0 and
+reports the failed items in <code>data</code> and in <code>summary</code> (<code>total</code>, <code>succeeded</code>,
+<code>failed</code>); a batch that produces none exits 1. Exit 4 is returned only with
+<code>--fail-on-partial</code>. The default favors keeping useful output: a harness that
+discards stdout on any non-zero exit would lose the successful rows. This
+matches how other agent-oriented decompiler CLIs treat per-function failures
+(see "Prior art reviewed").</p>
+<p>Legacy mode keeps today's behavior (exit 1 for fatal errors, exit 0 when only
+function rows failed). The two worker binaries that already use exit code 2 are
+internal and are not part of the contract.</p>
+<h3 id="4-schema-subcommand">4. <code>schema</code> subcommand<a class="headerlink" href="#4-schema-subcommand" title="Permanent link">&para;</a></h3>
+<p><code>fission_cli schema --list</code> prints the available command schemas and the error
+code registry. <code>fission_cli schema &lt;command&gt;</code> prints the JSON Schema (draft
+2020-12) for that command's envelope with its <code>data</code> payload. <code>--error-codes</code>
+prints the registry. This lets an agent self-check output and discover codes
+without reading docs.</p>
+<p>Schemas are the source of truth in code and are also committed under
+<code>docs/schemas/</code>. A test fails if the generated schema differs from the committed
+one, so a payload change cannot land without an explicit schema (and, if
+incompatible, a <code>schema_version</code>) change.</p>
+<p>Generating schemas from Rust types would normally use <code>schemars</code>. The workspace
+does not depend on it today; adding it is a dependency decision to be made in
+the implementation PR. The alternative is hand-written schemas guarded by
+golden-file tests.</p>
+<h3 id="5-where-it-lives">5. Where it lives<a class="headerlink" href="#5-where-it-lives" title="Permanent link">&para;</a></h3>
+<p>Entirely in <code>fission-cli</code> (the ADR 0001 surface): a small contract module for
+the envelope, error classification and exit-code mapping, plus a typed CLI
+error that <code>fission_cli.rs::main</code> maps instead of printing <code>{:?}</code> and exiting
+1. No decompiler, pcode or normalize crate changes, and no new quality pass or
+metric. Errors raised deeper in the stack are classified at the CLI boundary by
+downcasting to known error types; unclassified errors map to <code>failed</code> with
+code <code>unclassified</code> until each source is typed.</p>
+<h2 id="prior-art-reviewed">Prior art reviewed<a class="headerlink" href="#prior-art-reviewed" title="Permanent link">&para;</a></h2>
+<p>Reference clones live under <code>vendor/</code> (gitignored, reference-only, nothing
+copied). Ideas taken from reading <code>Noelo-Lab/kuna</code> (Apache-2.0), an
+agent-first decompiler, and a few CLIs:</p>
+<ul>
+<li><strong>Self-describing commands.</strong> Each subcommand's <code>--help</code> states its flags and
+  the shape of its <code>--json</code> document and exits before loading anything. Adopted:
+  <code>schema</code> plus <code>--help</code> text that names the contract shape (P0).</li>
+<li><strong>Broken pipe is not an error.</strong> A reader closing stdout early must not
+  panic or print a diagnostic, and the exit code must still reflect the work's
+  verdict. Adopted as a design rule (P0).</li>
+<li><strong>Warnings reach stdout.</strong> Repaired or degraded input is listed in the JSON,
+  not only on stderr. Adopted: <code>warnings</code> in the envelope.</li>
+<li><strong>Exit code follows "did any useful output land".</strong> Adopted as the batch rule
+  above, with <code>--fail-on-partial</code> for strict callers.</li>
+<li><strong>Docs and the agent skill ship inside the binary</strong> (<code>docs</code> topics,
+  <code>install-skill</code>). Deferred to P1.</li>
+<li><strong>Option discovery as a structured catalog.</strong> Deferred to P1 (<code>capabilities</code>).</li>
+<li><strong>Incremental output while a long batch runs</strong> (an index file that can be read
+  as items complete). Deferred to P1 as NDJSON streaming.</li>
+<li>Kuna deliberately keeps no state between invocations; Fission's <code>db</code> does.
+  That is a difference to keep in mind for P2, not something to copy.</li>
+</ul>
+<h2 id="implementation-approach-supervisor">Implementation approach (supervisor)<a class="headerlink" href="#implementation-approach-supervisor" title="Permanent link">&para;</a></h2>
+<p>Fission has several hundred direct <code>println!</code> sites across its commands, so
+wrapping every payload in-process would be a large refactor. P0 instead adds a
+thin supervisor in <code>fission-cli</code>: with <code>--contract v1</code> the binary re-executes
+itself (same executable, contract flag removed, an internal environment marker
+set), captures stdout and stderr, and writes the envelope. In the child, fatal
+errors are classified into <code>{kind, code}</code> and reported as one structured stderr
+record; the supervisor maps exit status and that record to the envelope and
+exit code. A crashed or panicking child becomes <code>internal</code> instead of a bare
+backtrace, and a child whose stdout is not valid JSON becomes
+<code>output_not_json</code>. This is a staging step: commands can later return typed
+payloads in-process without changing the contract.</p>
+<p>Costs: one extra process start and buffering the payload in memory, both small
+next to analysis. Large <code>decomp --all</code> output should use P1 streaming instead.</p>
+<h2 id="compatibility-and-migration">Compatibility and migration<a class="headerlink" href="#compatibility-and-migration" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Release N: add <code>--contract v1</code> and <code>schema</code>; default behavior unchanged;
+   document in <code>docs/CLI.md</code> and <code>docs/EVALUATION.md</code>.</li>
+<li>Release N+1 or later: announce deprecation of the legacy shape for commands
+   that have a contract schema; decide the default flip as a major-version item
+   under <code>VERSIONING.md</code>.</li>
+<li>The DecBench harness and any script that reads the legacy shape need no
+   change in step 1. Before step 2, check which harness code relies on
+   exit 0 with failed rows.</li>
+</ol>
+<h2 id="validation-plan">Validation plan<a class="headerlink" href="#validation-plan" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Contract tests per error kind: missing file, unsupported format, unreadable
+  address, bad arguments, timeout, missing resource root. Assert exit code,
+  <code>ok</code>, <code>error.code</code>, and that stdout is a single valid JSON document.</li>
+<li>Batch test: <code>decomp --all</code> on a fixture with at least one failing and one
+  passing function exits 4 and lists both.</li>
+<li>Legacy test: the same invocations without <code>--contract</code> keep today's output
+  and exit codes (guards the opt-in promise).</li>
+<li>Schema test: generated schemas equal the committed files; sample outputs
+  validate against them.</li>
+<li>Stream test: in contract mode stdout parses as exactly one JSON value even
+  when stderr logging is verbose.</li>
+<li>Panic test: an induced worker panic maps to <code>internal</code> with a JSON envelope,
+  not a bare stderr backtrace.</li>
+</ul>
+<p>Timeout behavior needs verification before implementation: <code>--timeout-ms</code>
+currently surfaces a <code>preview_timeout</code> message string, and how that interacts
+with worker restarts (#630 fixups) must be confirmed so <code>timeout</code> and
+<code>retryable</code> are accurate.</p>
+<h2 id="non-goals">Non-goals<a class="headerlink" href="#non-goals" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No change to decompiler output, quality, or any benchmark metric.</li>
+<li>No streaming, <code>capabilities</code> command, persistence or protocol-crate wiring;
+  those are P1 and later.</li>
+<li>No removal or rename of existing JSON fields or flags in this phase.</li>
+<li>Fixing the working-directory-dependent resource lookup (the output differed
+  between running from the repository root and from <code>/tmp</code>) is separate work.
+  It is relevant here because an agent needs deterministic output, but it is
+  tracked on its own.</li>
+</ul>
+<h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Flag name and shape: <code>--contract v1</code>, <code>--output-contract v1</code>, or a
+   <code>--format json-v1</code> value? Should the env var alone be enough for agents?</li>
+<li>Should contract-mode errors for non-<code>--json</code> invocations of human commands
+   (for example <code>hex</code>) be supported in P0, or only commands that already have
+   <code>--json</code>?</li>
+<li>Exact exit-code numbering. 70 follows <code>sysexits</code> (<code>EX_SOFTWARE</code>); is the
+   small-integer range for the rest acceptable?</li>
+<li><code>schemars</code> versus hand-written schemas with golden tests.</li>
+<li>Resolved by the batch rule: <code>partial</code> is opt-in via <code>--fail-on-partial</code>.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
