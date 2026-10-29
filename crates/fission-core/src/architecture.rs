@@ -795,6 +795,17 @@ fn scan_xml_tags(contents: &str) -> Vec<XmlTag> {
             i += 1;
             continue;
         }
+        // A comment ends at `-->`, not at the first `>` inside it: the shipped
+        // CR16.ldefs wraps a whole `<language>` block in one comment.
+        if contents[i..].starts_with("<!--") {
+            match contents[i + 4..].find("-->") {
+                Some(offset) => {
+                    i += 4 + offset + 3;
+                    continue;
+                }
+                None => break,
+            }
+        }
         let Some(end) = contents[i + 1..].find('>').map(|offset| i + 1 + offset) else {
             break;
         };
@@ -1062,6 +1073,55 @@ fn is_hidden_or_appledouble_file(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn xml_comment_ends_at_its_closing_marker_not_the_first_angle_bracket() {
+        let xml = "<root>\n<!--\n  <language id=\"hidden\">\n    <compiler name=\"c\"/>\n  </language>\n-->\n<language id=\"live\"/>\n</root>";
+        let names: Vec<_> = scan_xml_tags(xml)
+            .into_iter()
+            .map(|tag| (tag.name, tag.closing))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("root".to_string(), false),
+                ("language".to_string(), false),
+                ("root".to_string(), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn unterminated_xml_comment_yields_nothing_after_it() {
+        let tags = scan_xml_tags("<a/><!-- <b/> <c/>");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "a");
+    }
+
+    #[test]
+    fn shipped_cr16_ldefs_keeps_only_its_uncommented_language() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../utils/sleigh-specs/languages/CR16/CR16.ldefs");
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            eprintln!("skipped: {} not present in this checkout", path.display());
+            return;
+        };
+        let tags = scan_xml_tags(&contents);
+        let languages: Vec<_> = tags
+            .iter()
+            .filter(|tag| tag.name == "language" && !tag.closing)
+            .filter_map(|tag| tag.attrs.get("id").cloned())
+            .collect();
+        assert_eq!(languages, vec!["CR16C:LE:16:default".to_string()]);
+        // The commented-out CR16A/B block must not leak its inner tags either.
+        let count = |name: &str, closing: bool| {
+            tags.iter()
+                .filter(|tag| tag.name == name && tag.closing == closing)
+                .count()
+        };
+        assert_eq!(count("compiler", false), 1);
+        assert_eq!(count("language", true), 1);
+    }
+
     use super::*;
     use crate::constants::binary_format::MACHO_CPU_TYPE_ARM64;
     use crate::core_constants::{
