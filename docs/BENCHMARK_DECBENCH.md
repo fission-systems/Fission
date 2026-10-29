@@ -61,6 +61,15 @@ cargo build -p fission-cli --release
 `--dump` writes one row per function (GED, source and output node counts) so two
 runs can be compared per function rather than only in aggregate.
 
+The gate remembers each binary's DWARF ground-truth types under
+`~/fission-benchmark/.gate-cache/ground_truth_types/` (about 56 MB for the sample
+set). Reading them took 93 of 243 seconds in a measured run; with a warm cache
+the same run took 136 s against 278 s with the cache off in the same session, and
+all three runs gave byte-identical `--dump` output. The key is the SHA-256 of the
+binary and of the extractor's source, so it does not hold anything Fission
+produced and `FISSION_BENCHMARK_NO_CACHE=1` still gives an honest before/after.
+`FISSION_GATE_GT_CACHE=0` bypasses it.
+
 Resolve the CLI explicitly with `--cli`; the gate otherwise picks the newest of
 `release`, `quick-release` and `debug`, and a stale build silently scores the
 wrong thing.
