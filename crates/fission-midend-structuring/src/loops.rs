@@ -1656,6 +1656,18 @@ fn lower_loop_body_via_sese(
     break_idx: usize,
     head_idx: usize,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    with_active_loop_head(host, head_idx, |host| {
+        lower_loop_body_via_sese_unguarded(host, body_set, start_idx, break_idx, head_idx)
+    })
+}
+
+fn lower_loop_body_via_sese_unguarded(
+    host: &mut impl StructuringHost,
+    body_set: &HashSet<usize>,
+    start_idx: usize,
+    break_idx: usize,
+    head_idx: usize,
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
     if body_set.iter().copied().min() != Some(start_idx) {
         return Ok(None);
     }
@@ -1718,6 +1730,24 @@ fn finalize_loop_body_control(
     body
 }
 
+/// Run `lower` with `head` marked as being lowered. A loop whose head is already being lowered on the
+/// current path is never lowered again: that only happens when two loop bodies contain each other (an
+/// irreducible region), and each lowering would start the other one without end until the global work
+/// budget ran out -- thousands of nested frames for a function a few hundred bytes long. The caller
+/// treats the declined lowering like any other failed attempt and falls back to the goto form.
+fn with_active_loop_head<H: StructuringHost, T>(
+    host: &mut H,
+    head: usize,
+    lower: impl FnOnce(&mut H) -> Result<Option<T>, MlilPreviewError>,
+) -> Result<Option<T>, MlilPreviewError> {
+    if !host.enter_loop_lowering(head) {
+        return Ok(None);
+    }
+    let result = lower(host);
+    host.leave_loop_lowering(head);
+    result
+}
+
 /// Lower all blocks in `body_set` (the loop body excluding the head) into a HIR statement
 /// sequence, treating jumps to `break_idx` as `Break` and jumps to `continue_idx` as `Continue`.
 ///
@@ -1729,6 +1759,26 @@ fn finalize_loop_body_control(
 /// Returns `None` if the subgraph cannot be lowered (e.g. irreducible subgraph, budget
 /// exceeded). Callers should fall through to the goto-based fallback in that case.
 pub fn lower_loop_body_subgraph(
+    host: &mut impl StructuringHost,
+    body_set: &HashSet<usize>,
+    start_idx: usize,
+    break_idx: Option<usize>,
+    head_idx: usize,
+    continue_idx: usize,
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    with_active_loop_head(host, head_idx, |host| {
+        lower_loop_body_subgraph_unguarded(
+            host,
+            body_set,
+            start_idx,
+            break_idx,
+            head_idx,
+            continue_idx,
+        )
+    })
+}
+
+fn lower_loop_body_subgraph_unguarded(
     host: &mut impl StructuringHost,
     body_set: &HashSet<usize>,
     start_idx: usize,

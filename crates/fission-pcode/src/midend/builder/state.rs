@@ -229,6 +229,10 @@ pub(crate) struct PreviewBuilder<'a> {
     /// (which don't hold a `&host` reference) can share a live handle. See
     /// PROJECT.md.
     pub(crate) structuring_total_work_units: std::rc::Rc<std::cell::Cell<u64>>,
+    /// Loop heads whose lowering is in progress on the current call path, innermost last. A plain
+    /// `Vec` (not shared like the work counter): a builder cloned for an observation inherits the
+    /// path it was cloned on, so the trial cannot re-enter a head either.
+    pub(crate) active_loop_heads: Vec<usize>,
     /// Hard cap on `lower_varnode_inner`'s "re-enter via a different lowering
     /// site" redirect (`expr/lower_expr.rs`). That redirect clones `visiting`
     /// rather than sharing it, on purpose (revisiting a key through a
