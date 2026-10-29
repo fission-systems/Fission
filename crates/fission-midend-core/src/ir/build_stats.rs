@@ -151,6 +151,10 @@ pub struct NirBuildStats {
     /// How many while loops used the subgraph body lowering path (complex body with branches).
     #[serde(default)]
     pub loop_while_subgraph_lowered_count: usize,
+    /// How many times loop lowering declined to start on a head that was already being lowered on
+    /// the current path (two loops that contain each other, as in an irreducible region).
+    #[serde(default)]
+    pub loop_lowering_reentry_declined_count: usize,
     /// How many multi-tail do-while loops were successfully lowered after Ghidra-style
     /// tail ordering placed the preferred (exit-adjacent) latch at index 0.
     #[serde(default)]
