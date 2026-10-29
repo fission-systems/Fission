@@ -17,6 +17,7 @@ CORE_FALLBACK = {
     "fission-midend-normalize",
     "fission-midend-structuring",
     "fission-pcode",
+    "fission-pcode-ir",
 }
 WORKSPACE_WIDE_PATHS = {
     "Cargo.toml",

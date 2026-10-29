@@ -1089,6 +1089,7 @@ dependencies = [
  "fission-midend-normalize",
  "fission-midend-prehir",
  "fission-midend-structuring",
+ "fission-pcode-ir",
  "fission-signatures",
  "indexmap",
  "insta",
@@ -1102,6 +1103,15 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "fission-pcode-ir"
+version = "0.2.3"
+dependencies = [
+ "rustc-hash",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
