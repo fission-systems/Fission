@@ -300,6 +300,11 @@ pub trait StructuringHost {
     );
     fn bump_loop_control_explicit_reducer(&mut self);
     fn bump_loop_while_subgraph_lowered(&mut self);
+    /// Mark `head` as being lowered on the current path. Returns `false` -- and records a declined
+    /// re-entry -- when it already is, in which case the caller must not lower that loop again.
+    fn enter_loop_lowering(&mut self, head: usize) -> bool;
+    /// Undo the matching successful `enter_loop_lowering`.
+    fn leave_loop_lowering(&mut self, head: usize);
     fn bump_loop_multi_tail_dowhile_lowered(&mut self);
     fn bump_loop_for_lowered(&mut self);
     fn bump_loop_multi_exit_break(&mut self);
