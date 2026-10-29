@@ -1617,6 +1617,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#machine-contract-contract-v1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Machine contract (--contract v1)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3349,6 +3360,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#machine-contract-contract-v1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Machine contract (--contract v1)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4143,6 +4165,79 @@ and unproved lines remain unmapped. Consumers must honor <code>defined_variables
 and prefer direct variable <code>addresses</code> when available. NIR and HIR maps are
 computed separately; CLI header/warning deletion remaps physical lines and
 abstains on ambiguous repeated text. No code or effect transformation is added.</p>
+<h2 id="machine-contract-contract-v1">Machine contract (<code>--contract v1</code>)<a class="headerlink" href="#machine-contract-contract-v1" title="Permanent link">&para;</a></h2>
+<p>For AI agents and scripts that must branch on the result without parsing human
+text. Opt-in: without <code>--contract v1</code> (or <code>FISSION_CONTRACT=v1</code>) every command
+behaves as documented above. Design: <a href="../proposals/2026-10-26-agent-first-cli-contract/"><code>proposals/2026-10-26-agent-first-cli-contract.md</code></a>.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-58-1"><a id="__codelineno-58-1" name="__codelineno-58-1" href="#__codelineno-58-1"></a>fission_cli<span class="w"> </span>--contract<span class="w"> </span>v1<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
+</span><span id="__span-58-2"><a id="__codelineno-58-2" name="__codelineno-58-2" href="#__codelineno-58-2"></a>fission_cli<span class="w"> </span>--contract<span class="w"> </span>v1<span class="w"> </span>--fail-on-partial<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--json
+</span><span id="__span-58-3"><a id="__codelineno-58-3" name="__codelineno-58-3" href="#__codelineno-58-3"></a>fission_cli<span class="w"> </span>schema<span class="w">                 </span><span class="c1"># JSON Schema of the response envelope</span>
+</span><span id="__span-58-4"><a id="__codelineno-58-4" name="__codelineno-58-4" href="#__codelineno-58-4"></a>fission_cli<span class="w"> </span>schema<span class="w"> </span>--error-codes<span class="w">   </span><span class="c1"># stable error codes, kinds, exit codes</span>
+</span></code></pre></div>
+<ul>
+<li>stdout is exactly one JSON document, success or failure; logs stay on stderr.</li>
+<li>The command's own <code>--json</code> is required (<code>json_required</code>, exit 2, otherwise).
+  <code>--help</code> and <code>--version</code> pass through unchanged.</li>
+<li>Envelope: <code>contract</code>, <code>command</code>, <code>ok</code>, <code>schema_version</code>, <code>data</code>, optional
+  <code>summary</code> (<code>total</code>, <code>succeeded</code>, <code>failed</code>) for batch output, <code>warnings</code>,
+  <code>error</code> (<code>code</code>, <code>kind</code>, <code>message</code>, <code>hint</code>, <code>retryable</code>, <code>context</code>), <code>tool</code>,
+  <code>elapsed_ms</code>. Branch on <code>ok</code>, <code>error.code</code> and the exit code; <code>message</code> and
+  <code>hint</code> are for people.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Exit</th>
+<th>Kind</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>ok</td>
+<td>Completed. A batch with at least one successful item exits 0 and lists failures in <code>data</code> and <code>summary</code>.</td>
+</tr>
+<tr>
+<td>1</td>
+<td>failed</td>
+<td>No usable result (for example every batch item failed: <code>all_items_failed</code>).</td>
+</tr>
+<tr>
+<td>2</td>
+<td>usage</td>
+<td>Invalid arguments or <code>--contract</code> value.</td>
+</tr>
+<tr>
+<td>3</td>
+<td>input</td>
+<td>Input missing, unreadable or unsupported.</td>
+</tr>
+<tr>
+<td>4</td>
+<td>partial</td>
+<td>Some batch items failed and <code>--fail-on-partial</code> was given.</td>
+</tr>
+<tr>
+<td>5</td>
+<td>timeout</td>
+<td>A time limit was reached.</td>
+</tr>
+<tr>
+<td>6</td>
+<td>environment</td>
+<td>Required resources unavailable.</td>
+</tr>
+<tr>
+<td>70</td>
+<td>internal</td>
+<td>The command crashed or panicked.</td>
+</tr>
+</tbody>
+</table>
+<p><code>data</code> is the command's existing JSON output, unchanged (arrays stay arrays).
+Per-command <code>data</code> schemas are not typed yet; the envelope schema marks them
+<code>x-data-schema: untyped</code>. Committed schemas live in <a href="schemas/"><code>schemas/</code></a>.</p>
 
 
 

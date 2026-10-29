@@ -1464,8 +1464,10 @@ contract as a major change. This proposal is designed to be additive.</p>
 <h3 id="1-selecting-the-contract">1. Selecting the contract<a class="headerlink" href="#1-selecting-the-contract" title="Permanent link">&para;</a></h3>
 <p>A global option <code>--contract &lt;VERSION&gt;</code> (env <code>FISSION_CONTRACT</code>), initially only
 <code>v1</code>. When absent, behavior is unchanged. <code>--json</code> keeps its current meaning
-when used alone. <code>--contract v1</code> implies JSON output and conflicts with
-human-oriented flags (for example <code>-o</code> text output) with a usage error.</p>
+when used alone. <code>--contract v1</code> requires the command's own <code>--json</code>; without it the run fails
+with the usage error <code>json_required</code> (exit 2), because the supervisor cannot
+know which subcommands accept the flag. <code>--help</code> and <code>--version</code> are passed
+through unchanged.</p>
 <p>Name and flag shape are open (see Open questions).</p>
 <h3 id="2-envelope">2. Envelope<a class="headerlink" href="#2-envelope" title="Permanent link">&para;</a></h3>
 <p>Every contract-mode invocation, success or failure, writes one JSON object to
@@ -1594,14 +1596,15 @@ code registry. <code>fission_cli schema &lt;command&gt;</code> prints the JSON S
 2020-12) for that command's envelope with its <code>data</code> payload. <code>--error-codes</code>
 prints the registry. This lets an agent self-check output and discover codes
 without reading docs.</p>
-<p>Schemas are the source of truth in code and are also committed under
+<p>P0 ships the envelope schema and the error-code registry; per-command <code>data</code>
+payloads are marked <code>x-data-schema: untyped</code> and are typed in follow-up work.
+Schemas are the source of truth in code and are also committed under
 <code>docs/schemas/</code>. A test fails if the generated schema differs from the committed
 one, so a payload change cannot land without an explicit schema (and, if
 incompatible, a <code>schema_version</code>) change.</p>
-<p>Generating schemas from Rust types would normally use <code>schemars</code>. The workspace
-does not depend on it today; adding it is a dependency decision to be made in
-the implementation PR. The alternative is hand-written schemas guarded by
-golden-file tests.</p>
+<p>Decision for P0: hand-written schemas guarded by golden-file tests, so no new
+dependency is added. <code>schemars</code> can be reconsidered when <code>data</code> payloads are
+typed.</p>
 <h3 id="5-where-it-lives">5. Where it lives<a class="headerlink" href="#5-where-it-lives" title="Permanent link">&para;</a></h3>
 <p>Entirely in <code>fission-cli</code> (the ADR 0001 surface): a small contract module for
 the envelope, error classification and exit-code mapping, plus a typed CLI

@@ -1,0 +1,82 @@
+{
+  "contract": "fission-cli/1",
+  "error_codes": [
+    {
+      "code": "usage_error",
+      "exit_code": 2,
+      "kind": "usage",
+      "retryable": false,
+      "summary": "Invalid arguments or option combination."
+    },
+    {
+      "code": "json_required",
+      "exit_code": 2,
+      "kind": "usage",
+      "retryable": false,
+      "summary": "--contract v1 needs the command's own --json flag."
+    },
+    {
+      "code": "input_not_found",
+      "exit_code": 3,
+      "kind": "input",
+      "retryable": false,
+      "summary": "The input path does not exist or cannot be read."
+    },
+    {
+      "code": "input_unsupported_format",
+      "exit_code": 3,
+      "kind": "input",
+      "retryable": false,
+      "summary": "The input is not a supported executable format."
+    },
+    {
+      "code": "resource_root_missing",
+      "exit_code": 6,
+      "kind": "environment",
+      "retryable": false,
+      "summary": "Required resources (signatures, detectors) were not found."
+    },
+    {
+      "code": "function_timeout",
+      "exit_code": 5,
+      "kind": "timeout",
+      "retryable": true,
+      "summary": "A configured time limit was reached before a result was produced."
+    },
+    {
+      "code": "all_items_failed",
+      "exit_code": 1,
+      "kind": "failed",
+      "retryable": false,
+      "summary": "A batch ran but every requested item failed; data lists them."
+    },
+    {
+      "code": "partial_failure",
+      "exit_code": 4,
+      "kind": "partial",
+      "retryable": false,
+      "summary": "Some batch items failed and --fail-on-partial was given; data has all."
+    },
+    {
+      "code": "output_not_json",
+      "exit_code": 1,
+      "kind": "failed",
+      "retryable": false,
+      "summary": "The command succeeded but its stdout was not JSON."
+    },
+    {
+      "code": "internal_panic",
+      "exit_code": 70,
+      "kind": "internal",
+      "retryable": false,
+      "summary": "The command terminated abnormally (panic or crash)."
+    },
+    {
+      "code": "unclassified",
+      "exit_code": 1,
+      "kind": "failed",
+      "retryable": false,
+      "summary": "The command failed with an error that has no specific code yet."
+    }
+  ]
+}
