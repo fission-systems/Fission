@@ -2,14 +2,13 @@ use crate::analysis::callgraph::CallGraph;
 use crate::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use crate::analysis::xrefs::XrefDatabase;
 use fission_analysis_db::{FactSource, ProgramSnapshot, SymbolKind};
+use fission_cspec::register_model_for_language;
+use fission_cspec::{RegisterNamer, infer_entry_register_param_arity};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
     DwarfFrameBase, DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
-use fission_pcode::midend::cspec::register_model_for_language;
-use fission_pcode::{
-    PcodeFunction, PcodeOp, PcodeOpcode, RegisterNamer, Varnode, infer_entry_register_param_arity,
-};
+use fission_pcode_ir::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_signatures::fidbf::{FidRelationContext, FidbfDatabase};
 use fission_signatures::{FidDatabaseSet, fid::FidDatabase};
 use fission_sleigh::runtime::{
@@ -439,9 +438,9 @@ impl FactStore {
         else {
             return;
         };
-        let mut options = fission_pcode::seed_nir_render_options(binary);
+        let mut options = fission_cspec::seed_nir_render_options(binary);
         let register_map = register_model.to_sla_register_map();
-        if !fission_pcode::midend::cspec::apply::apply_cspec_for_pair(
+        if !fission_cspec::apply::apply_cspec_for_pair(
             &mut options,
             load_spec.pair.language_id.as_str(),
             load_spec.pair.compiler_spec_id.as_str(),
@@ -1727,7 +1726,7 @@ mod tests {
     }
 
     fn runtime_callback_test_namer() -> RegisterNamer {
-        let options = fission_pcode::NirRenderOptions {
+        let options = fission_cspec::NirRenderOptions {
             is_64bit: true,
             pointer_size: 8,
             format: "ELF64".into(),
@@ -1754,7 +1753,7 @@ mod tests {
         let import_slot = 0x406000;
         let call_target = runtime_callback_test_varnode(2, 0x100, 8);
         let pcode = PcodeFunction {
-            blocks: vec![fission_pcode::PcodeBasicBlock {
+            blocks: vec![fission_pcode_ir::PcodeBasicBlock {
                 index: 0,
                 start_address: 0x400000,
                 successors: Vec::new(),

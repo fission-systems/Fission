@@ -12,7 +12,7 @@
 
 use fission_emulator::MachineState;
 use fission_emulator::pcode::eval::{Evaluator, StepResult};
-use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
 use fission_solver::Solver;
 
 /// Somewhere to put operands: the unique space, which is scratch.

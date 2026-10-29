@@ -618,7 +618,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     let out = self.template_write_target(out_tpl, state)?;
                     let trunc_const = Varnode::constant(0, 4);
                     self.emitter.append_checked(
-                        fission_pcode::PcodeOpcode::SubPiece,
+                        fission_pcode_ir::PcodeOpcode::SubPiece,
                         Some(out.clone()),
                         vec![value, trunc_const],
                         "SUBPIECE",
@@ -2098,7 +2098,7 @@ mod tests {
             .expect("emit callother");
         let ops = emitter.finish().expect("finish emitter");
         assert_eq!(ops.len(), 2);
-        assert_eq!(ops[0].opcode, fission_pcode::PcodeOpcode::CallOther);
+        assert_eq!(ops[0].opcode, fission_pcode_ir::PcodeOpcode::CallOther);
         assert_eq!(
             ops[0]
                 .output
@@ -2106,7 +2106,7 @@ mod tests {
                 .map(|v| (v.space_id, v.offset, v.size)),
             Some((3, 0x100, 4))
         );
-        assert_eq!(ops[1].opcode, fission_pcode::PcodeOpcode::Store);
+        assert_eq!(ops[1].opcode, fission_pcode_ir::PcodeOpcode::Store);
         assert_eq!(ops[1].inputs.len(), 3);
         assert_eq!(
             (

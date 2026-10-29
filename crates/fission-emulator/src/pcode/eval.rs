@@ -1,6 +1,6 @@
 use crate::pcode::state::MachineState;
 use anyhow::Result;
-use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 /// The flat op index a resolved intra-block branch names.
 ///

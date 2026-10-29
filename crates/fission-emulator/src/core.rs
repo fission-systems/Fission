@@ -191,7 +191,7 @@ pub struct Emulator {
     /// block names an entry by index, and callbacks read it back. Entries
     /// include 128-bit/vector ops routed through the evaluator and taint-mode
     /// outputs whose shadow needs rebuilding after lowering.
-    pub(crate) wide_ops: Vec<fission_pcode::ir::PcodeOp>,
+    pub(crate) wide_ops: Vec<fission_pcode_ir::ir::PcodeOp>,
 
     /// Linux ELF process image metadata (stack/auxv/brk) when loaded via ELF loader.
     pub image_info: Option<crate::os::linux::image_info::ImageInfo>,
@@ -903,7 +903,7 @@ impl Emulator {
 
     pub(crate) fn snapshot_taint_op(
         &self,
-        op: &fission_pcode::ir::PcodeOp,
+        op: &fission_pcode_ir::ir::PcodeOp,
         memory_address: Option<(u64, u64)>,
     ) -> Option<TaintOpSnapshot> {
         if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
@@ -925,7 +925,7 @@ impl Emulator {
                 }
             })
             .collect();
-        let loaded_bytes = if op.opcode == fission_pcode::ir::PcodeOpcode::Load {
+        let loaded_bytes = if op.opcode == fission_pcode_ir::ir::PcodeOpcode::Load {
             if let (Some((space, address)), Some(output)) = (memory_address, op.output.as_ref()) {
                 (0..u64::from(output.size).min(64))
                     .map(|offset| self.state.get_shadow_memory(space, address + offset))
@@ -993,7 +993,7 @@ impl Emulator {
     /// Propagate direct-data and active control provenance through this p-code operation.
     pub(crate) fn apply_taint_to_op(
         &mut self,
-        op: &fission_pcode::ir::PcodeOp,
+        op: &fission_pcode_ir::ir::PcodeOp,
         memory_address: Option<(u64, u64)>,
     ) {
         self.apply_taint_to_op_with_snapshot(op, memory_address, None);
@@ -1001,7 +1001,7 @@ impl Emulator {
 
     pub(crate) fn apply_taint_to_op_with_snapshot(
         &mut self,
-        op: &fission_pcode::ir::PcodeOp,
+        op: &fission_pcode_ir::ir::PcodeOp,
         memory_address: Option<(u64, u64)>,
         snapshot: Option<&TaintOpSnapshot>,
     ) {
@@ -1009,7 +1009,7 @@ impl Emulator {
             return;
         }
 
-        use fission_pcode::ir::PcodeOpcode;
+        use fission_pcode_ir::ir::PcodeOpcode;
         if op.opcode == PcodeOpcode::CBranch {
             return;
         }
@@ -1107,11 +1107,11 @@ impl Emulator {
 
     fn apply_interpreter_taint_snapshot(
         &mut self,
-        op: &fission_pcode::ir::PcodeOp,
+        op: &fission_pcode_ir::ir::PcodeOp,
         memory_address: Option<(u64, u64)>,
         snapshot: &TaintOpSnapshot,
     ) {
-        use fission_pcode::ir::PcodeOpcode;
+        use fission_pcode_ir::ir::PcodeOpcode;
 
         let mut data = None;
         let mut control = self.taint.active_control_set();
@@ -1438,13 +1438,14 @@ impl Emulator {
         let is_call = first.ops.iter().any(|op| {
             matches!(
                 op.opcode,
-                fission_pcode::ir::PcodeOpcode::Call | fission_pcode::ir::PcodeOpcode::CallInd
+                fission_pcode_ir::ir::PcodeOpcode::Call
+                    | fission_pcode_ir::ir::PcodeOpcode::CallInd
             )
         });
         let is_return = first
             .ops
             .iter()
-            .any(|op| op.opcode == fission_pcode::ir::PcodeOpcode::Return);
+            .any(|op| op.opcode == fission_pcode_ir::ir::PcodeOpcode::Return);
         Ok(InstructionShape {
             address: first.pc,
             length: first.len,
@@ -1971,7 +1972,7 @@ impl Emulator {
         &mut self,
     ) -> Result<Vec<crate::jit::compiler::GuestInsn>> {
         use crate::jit::compiler::GuestInsn;
-        use fission_pcode::ir::PcodeOpcode;
+        use fission_pcode_ir::ir::PcodeOpcode;
 
         let mut out = Vec::new();
         let mut cur = self.pc;

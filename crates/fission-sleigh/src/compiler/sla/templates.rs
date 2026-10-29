@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, bail, Result};
-use fission_pcode::PcodeOpcode;
+use fission_pcode_ir::PcodeOpcode;
 
 use super::*;
 use crate::compiler::ir::{

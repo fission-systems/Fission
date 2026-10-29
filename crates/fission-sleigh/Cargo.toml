@@ -13,7 +13,7 @@ categories = ["development-tools"]
 [dependencies]
 anyhow = "1.0.102"
 fission-core = { path = "../fission-core" }
-fission-pcode = { path = "../fission-pcode" }
+fission-pcode-ir = { path = "../fission-pcode-ir" }
 flate2 = "1.1"
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.145"

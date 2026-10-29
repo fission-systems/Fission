@@ -4,7 +4,7 @@
 //! can hold at a given address, enabling jump-table resolution, read/write xref refinement,
 //! and constant propagation without full decompilation.
 
-use fission_pcode::{PcodeFunction, PcodeOpcode, Varnode};
+use fission_pcode_ir::{PcodeFunction, PcodeOpcode, Varnode};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Represents the known possible states of a value during analysis.
@@ -282,7 +282,7 @@ impl ValueSetAnalyzer {
         true
     }
 
-    fn evaluate_op(&mut self, state: &mut ValueState, op: &fission_pcode::PcodeOp) {
+    fn evaluate_op(&mut self, state: &mut ValueState, op: &fission_pcode_ir::PcodeOp) {
         match op.opcode {
             PcodeOpcode::Copy => {
                 if let Some(out) = &op.output {
@@ -423,7 +423,7 @@ impl ValueSetAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_pcode::{PcodeBasicBlock, PcodeOp};
+    use fission_pcode_ir::{PcodeBasicBlock, PcodeOp};
 
     #[test]
     fn test_abstract_value_default() {

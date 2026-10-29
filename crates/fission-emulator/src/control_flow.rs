@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::ir::PcodeOpcode;
+use fission_pcode_ir::ir::PcodeOpcode;
 use fission_sleigh::runtime::{PackedContextOverride, RuntimeSleighFrontend};
 
 use crate::pcode::state::MachineState;

@@ -168,7 +168,7 @@ fn fid_mask_matches_ghidra_exactly_for_operand_size_prefix() {
 /// x86-64 SLEIGH register-space layout, independently confirmed earlier this
 /// session via the register-locals feature work, e.g. RDX resolving to
 /// 0x10) are hardcoded here rather than resolved through
-/// `fission_pcode::midend::cspec::RegisterModel`, since that would require
+/// `fission_pcode_ir::midend::cspec::RegisterModel`, since that would require
 /// a `fission-pcode` dependency this crate deliberately doesn't have (see
 /// `fid_full_hash`'s doc comment).
 #[test]

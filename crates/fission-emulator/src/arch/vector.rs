@@ -22,7 +22,7 @@
 //! semantics. `NEON_ext` implements AArch64's byte extract from the
 //! concatenation of two vectors.
 
-use fission_pcode::ir::{PcodeOp, PcodeOpcode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode};
 
 use crate::core::Emulator;
 
@@ -167,7 +167,7 @@ fn read_bytes(emu: &mut Emulator, op: &PcodeOp, index: usize) -> anyhow::Result<
         .read_space(vn.space_id, vn.offset, vn.size as usize)
 }
 
-fn write_bytes(emu: &mut Emulator, vn: &fission_pcode::ir::Varnode, data: &[u8]) -> bool {
+fn write_bytes(emu: &mut Emulator, vn: &fission_pcode_ir::ir::Varnode, data: &[u8]) -> bool {
     let size = (vn.size as usize).min(data.len());
     emu.state
         .write_space(vn.space_id, vn.offset, &data[..size])

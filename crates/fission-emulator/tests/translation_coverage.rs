@@ -47,7 +47,7 @@ use std::path::{Path, PathBuf};
 use fission_emulator::jit::compiler::{GuestInsn, JitCompiler};
 use fission_emulator::pcode::spaces::SpaceLayout;
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::ir::{PcodeOp, PcodeOpcode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode};
 use fission_sleigh::runtime::{PackedContextOverride, RuntimeSleighFrontend};
 
 /// Instructions to translate per binary.

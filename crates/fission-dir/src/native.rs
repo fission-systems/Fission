@@ -12,7 +12,7 @@ use fission_emulator::{
     MachineState,
     pcode::eval::{Evaluator, StepResult},
 };
-use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::{PcodeOp, PcodeOpcode, Varnode};
 use fission_solver::{Solver, SymExpr};
 
 use crate::product::{
@@ -1751,7 +1751,7 @@ const fn mask_value(value: u64, bits: u32) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use fission_pcode::{PcodeBasicBlock, PcodeFunction};
+    use fission_pcode_ir::{PcodeBasicBlock, PcodeFunction};
 
     use super::*;
     use crate::product::{AssuranceBand, DirPipeline};

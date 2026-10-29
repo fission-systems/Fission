@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::{PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::compiler::{
     load_construct_templates_from_sla, packaged_sla_for_entry_spec, CompiledSpaceRef,
 };

@@ -25,7 +25,7 @@
 //! offset means would only ever be testing the disagreement.
 
 use anyhow::{Result, bail};
-use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::core::Emulator;
 use crate::jit::compiler::{GuestInsn, remap_relative_branches};
@@ -368,7 +368,7 @@ impl Emulator {
         Ok(InterpExit::FallThrough(fallthrough))
     }
 
-    pub(crate) fn apply_symbolic_shadow_to_op(&mut self, op: &fission_pcode::ir::PcodeOp) {
+    pub(crate) fn apply_symbolic_shadow_to_op(&mut self, op: &fission_pcode_ir::ir::PcodeOp) {
         use crate::jit::callbacks::{
             SymBinOpKind, SymUnOpKind, jit_shadow_binop, jit_shadow_copy, jit_shadow_load,
             jit_shadow_store, jit_shadow_unop,

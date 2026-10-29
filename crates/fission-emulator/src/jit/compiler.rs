@@ -15,7 +15,7 @@ use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module, default_libcall_names};
-use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
 use std::collections::HashMap;
 
 use crate::jit::callbacks::{SymBinOpKind, SymUnOpKind};

@@ -3,7 +3,7 @@
 //! RuntimeConstructState/RuntimeParserWalker -> RuntimeTemplateEvaluator -> RuntimePcodeEmitter`.
 
 use anyhow::{anyhow, bail, Result};
-use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
     CompiledConstTpl, CompiledConstructTplKind, CompiledContextCommitTarget, CompiledDecisionProbe,

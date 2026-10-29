@@ -28,7 +28,7 @@ use fission_core::core::ghidra_no_return::{
     binary_format_to_ghidra_format, ghidra_no_return_index,
 };
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{PcodeFunction, PcodeOpcode};
+use fission_pcode_ir::{PcodeFunction, PcodeOpcode};
 use fission_sleigh::runtime::{
     DecodeContract, DecodeMemoryContext, RawDecodeSeed, RuntimeSleighFrontend,
 };
@@ -375,7 +375,7 @@ fn original_no_return_predicate(pcode: &PcodeFunction, no_return: &BTreeSet<u64>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_pcode::{PcodeBasicBlock, PcodeOp, Varnode};
+    use fission_pcode_ir::{PcodeBasicBlock, PcodeOp, Varnode};
 
     fn op(seq_num: u32, opcode: PcodeOpcode) -> PcodeOp {
         PcodeOp {

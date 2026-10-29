@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::cfg::AddressCfgSnapshot;
+use fission_pcode_ir::cfg::AddressCfgSnapshot;
 use fission_sleigh::runtime::{
     build_instruction_cfg_snapshot, DecodeContract, InstructionCfgHints, RuntimeSleighFrontend,
 };

@@ -1,7 +1,7 @@
 //! P-code-derived cross-reference extraction with bounded value-set analysis.
 
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::PcodeOpcode;
+use fission_pcode_ir::PcodeOpcode;
 use fission_sleigh::runtime::{DecodeStopReason, DecodedFlowKind, RuntimeSleighFrontend};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -371,7 +371,7 @@ fn is_fallthrough_target(instruction_address: u64, instruction_length: u64, targ
 }
 
 fn direct_ram_target(
-    varnode: &fission_pcode::Varnode,
+    varnode: &fission_pcode_ir::Varnode,
     ram_space_id: u64,
     addressable_unit_bytes: u64,
 ) -> Option<u64> {
