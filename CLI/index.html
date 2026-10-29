@@ -4153,8 +4153,8 @@ unknown.</p>
 </span></code></pre></div>
 <p>If you change compatibility behavior, also verify at least one legacy flat invocation still routes correctly and emits a deprecation warning.</p>
 <h2 id="decompilation-line-provenance">Decompilation line provenance<a class="headerlink" href="#decompilation-line-provenance" title="Permanent link">&para;</a></h2>
-<p>JSON decompilation includes additive <code>line_mappings_nir</code>, <code>line_mappings_hir</code>,
-and <code>line_mappings</code> (the selected layer). Each row contains 1-based physical
+<p>JSON decompilation includes <code>line_mappings</code>, the map for the single output
+surface (<code>code</code>). Each row contains 1-based physical
 <code>line_number</code>, native instruction <code>addresses</code>, and <code>defined_variables</code>.
 <code>line_mapping_source</code> is <code>fission_ssa_assignment_definition</code>.</p>
 <p>These partial maps describe the result definition of a single-assignment SSA
@@ -4162,9 +4162,12 @@ binding at an actual printed assignment/initializer. They are not complete
 provenance of every RHS variable, call, load, predicate, or effect on that line.
 Input/phi values, cloned/ambiguous sites, partial accesses, repeated definitions,
 and unproved lines remain unmapped. Consumers must honor <code>defined_variables</code>
-and prefer direct variable <code>addresses</code> when available. NIR and HIR maps are
-computed separately; CLI header/warning deletion remaps physical lines and
-abstains on ambiguous repeated text. No code or effect transformation is added.</p>
+and prefer direct variable <code>addresses</code> when available. CLI header/warning
+deletion remaps physical lines and abstains on ambiguous repeated text. No code or effect transformation is added.</p>
+<p><code>--layer</code> and the <code>code_nir</code>, <code>code_hir</code>, <code>layer</code>, <code>line_mappings_nir</code> and
+<code>line_mappings_hir</code> JSON fields were removed with the NIR/HIR split
+(<a href="../adr/0015-single-output-surface/">ADR 0015</a>); <code>--layer</code> is still accepted
+and ignored.</p>
 <h2 id="machine-contract-contract-v1">Machine contract (<code>--contract v1</code>)<a class="headerlink" href="#machine-contract-contract-v1" title="Permanent link">&para;</a></h2>
 <p>For AI agents and scripts that must branch on the result without parsing human
 text. Opt-in: without <code>--contract v1</code> (or <code>FISSION_CONTRACT=v1</code>) every command
