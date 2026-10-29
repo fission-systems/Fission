@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::cfg::AddressCfgSnapshot;
 use fission_sleigh::runtime::{
-    DecodeContract, InstructionCfgHints, RuntimeSleighFrontend, build_instruction_cfg_snapshot,
+    build_instruction_cfg_snapshot, DecodeContract, InstructionCfgHints, RuntimeSleighFrontend,
 };
 use fission_static::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use serde::Deserialize;

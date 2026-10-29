@@ -1090,8 +1090,6 @@ dependencies = [
  "fission-midend-prehir",
  "fission-midend-structuring",
  "fission-signatures",
- "fission-sleigh",
- "fission-static",
  "indexmap",
  "insta",
  "log",
