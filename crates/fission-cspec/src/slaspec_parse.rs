@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
+use super::slaspec_cache;
+
 /// One hardware register entry extracted from a `define register` statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedRegister {
@@ -22,14 +24,34 @@ pub struct ParsedRegister {
 }
 
 /// Expand a `.slaspec` entry file and extract all register definitions.
+///
+/// The result depends only on the bytes of the files the expansion reads, so it
+/// is cached on disk keyed by their content; see [`slaspec_cache`].
 pub fn parse_registers_from_slaspec(entry_spec: &Path) -> Result<Vec<ParsedRegister>> {
+    parse_registers_cached(entry_spec, slaspec_cache::default_cache_dir().as_deref())
+}
+
+pub(crate) fn parse_registers_cached(
+    entry_spec: &Path,
+    cache_dir: Option<&Path>,
+) -> Result<Vec<ParsedRegister>> {
+    let cache_path = cache_dir.map(|dir| slaspec_cache::entry_path(dir, entry_spec));
+    if let Some(registers) = cache_path.as_deref().and_then(slaspec_cache::load) {
+        return Ok(registers);
+    }
     let expanded = expand_entry_spec(entry_spec)?;
-    extract_define_registers(&expanded)
+    let registers = extract_define_registers(&expanded)?;
+    if let Some(path) = cache_path.as_deref() {
+        slaspec_cache::store(path, &expanded.sources, &registers);
+    }
+    Ok(registers)
 }
 
 struct ExpandedSpec {
     defines: BTreeMap<String, String>,
     lines: Vec<String>,
+    /// Every file read, in read order, with the hash of the bytes parsed.
+    sources: Vec<(PathBuf, u64)>,
 }
 
 fn expand_entry_spec(entry_spec: &Path) -> Result<ExpandedSpec> {
@@ -42,11 +64,13 @@ fn expand_entry_spec(entry_spec: &Path) -> Result<ExpandedSpec> {
         defines: BTreeMap::new(),
         lines: Vec::new(),
         seen_files: HashSet::default(),
+        sources: Vec::new(),
     };
     state.expand_file(entry_spec)?;
     Ok(ExpandedSpec {
         defines: state.defines,
         lines: state.lines,
+        sources: state.sources,
     })
 }
 
@@ -55,6 +79,7 @@ struct PreprocessorState {
     defines: BTreeMap<String, String>,
     lines: Vec<String>,
     seen_files: HashSet<PathBuf>,
+    sources: Vec<(PathBuf, u64)>,
 }
 
 #[derive(Clone, Copy)]
@@ -67,11 +92,13 @@ struct ConditionalFrame {
 impl PreprocessorState {
     fn expand_file(&mut self, path: &Path) -> Result<()> {
         let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        if !self.seen_files.insert(canonical) {
+        if !self.seen_files.insert(canonical.clone()) {
             return Ok(());
         }
         let source = fs::read_to_string(path)
             .with_context(|| format!("read sleigh source {}", path.display()))?;
+        self.sources
+            .push((canonical, slaspec_cache::content_hash(source.as_bytes())));
         let mut conditionals: Vec<ConditionalFrame> = Vec::new();
         let mut with_depth: u32 = 0;
 
