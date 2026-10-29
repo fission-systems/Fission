@@ -41,8 +41,10 @@ pub fn format_hex(bytes: &[u8]) -> String {
 
 /// Parse a hex string (with or without spaces/0x) into bytes
 pub fn parse_hex(s: &str) -> Option<Vec<u8>> {
-    let clean = s.replace("0x", "").replace(' ', "");
-    if !clean.len().is_multiple_of(2) {
+    let clean = s.replace("0x", "").replace("0X", "").replace(' ', "");
+    // Pairs are sliced by byte index below, which panics inside a multi-byte
+    // character; anything that is not ASCII is not hex anyway.
+    if !clean.is_ascii() || !clean.len().is_multiple_of(2) {
         return None;
     }
 
@@ -152,7 +154,23 @@ mod truncate_char_boundary_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_named_type_identity, sanitize_symbol_name};
+    use super::{normalize_named_type_identity, parse_hex, sanitize_symbol_name};
+
+    #[test]
+    fn parse_hex_accepts_either_case_of_the_prefix_and_spaces() {
+        assert_eq!(parse_hex("0x41 42"), Some(vec![0x41, 0x42]));
+        assert_eq!(parse_hex("0X41 0X42"), Some(vec![0x41, 0x42]));
+        assert_eq!(parse_hex("4142"), Some(vec![0x41, 0x42]));
+        assert_eq!(parse_hex("414"), None);
+        assert_eq!(parse_hex("zz"), None);
+    }
+
+    #[test]
+    fn parse_hex_rejects_non_ascii_instead_of_slicing_inside_a_character() {
+        // Six bytes, even length: byte-indexed pairs would cut a 3-byte char.
+        assert_eq!(parse_hex("가가"), None);
+        assert_eq!(parse_hex("4é"), None);
+    }
 
     #[test]
     fn sanitize_symbol_name_strips_common_import_and_signature_wrappers() {
