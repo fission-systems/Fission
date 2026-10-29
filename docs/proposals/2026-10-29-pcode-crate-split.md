@@ -289,3 +289,54 @@ For every step:
   leaf, which is the intended direction.)
 * Is a smaller `lib-test` achievable without moving tests? The 30k lines of
   in-crate tests are why `fission-pcode`'s test unit is 1.6× its library.
+
+## Results after F, A, B and S (measured 2026-10-29)
+
+Steps F ([#694](https://github.com/fission-systems/Fission/pull/694)), A
+([#695](https://github.com/fission-systems/Fission/pull/695)), B
+([#696](https://github.com/fission-systems/Fission/pull/696)) and S
+([#697](https://github.com/fission-systems/Fission/pull/697)) were implemented, each with a
+byte-identical sample-set dump (233 rows, O0 and O2) and an unchanged `nextest` count.
+These are mechanical changes; none of them is a decompiler-quality claim.
+
+**What differed from the plan**
+
+* `midend/cfg.rs` moved only in part (the p-code-only block CFG functions, about 760 lines
+  with tests). The LSDA, no-return and PreHir-expression parts need the loader, call
+  summaries or midend types and stayed, so the `resolve_lifted_direct_call_target`
+  back-edge never arose. Total moved into the leaf: about 7.3k lines.
+* `abi.rs` moved only in part: `infer_entry_register_param_arity`. `AbiState` and the
+  providers are bound to builder types. The address-space ids and the register/unique
+  varnode predicates, shared by both sides, went to the leaf instead.
+* S also switched `fission-sleigh`, `fission-emulator` and `fission-dir` (not just
+  `fission-static`) to the leaf. Without that, `sleigh` and `emulator` still reached
+  `fission-pcode` and the fan-out did not shrink. The answer to the first open question is
+  yes: `cargo check` after the import switch passes. Only `fission-decompiler` now depends
+  on `fission-pcode` directly (`dir` through a dev edge, `cli` through the decompiler).
+
+**Measured rebuild fan-out** (CI-like: `CARGO_INCREMENTAL=0`, `CARGO_BUILD_JOBS=4`,
+`cargo test --no-run --workspace --locked --timings`; one touch of a single source file after a
+cold build, one run per cell, so the wall times carry run-to-run noise):
+
+| Touched file | Crates whose units rebuilt, before | after | Wall, before | after | Summed unit time, before | after |
+|---|---|---|---:|---:|---:|---:|
+| `fission-pcode/src/midend/structuring/mod.rs` | sleigh, emulator, cli, pcode, static, decompiler, script, dynamic, dir | pcode, cli, decompiler, dir | 114 s | 45 s | 372 s | 128 s |
+| `fission-sleigh/src/lib.rs` | pcode, emulator, sleigh, cli, static, decompiler, dir, script, dynamic | emulator, sleigh, cli, static, decompiler, dir, script, dynamic | 83 s | 62 s | 307 s | 211 s |
+| p-code IR module (`pcode`, now `pcode-ir`) | everything above | everything above plus the two new crates | 92 s | 86 s | 329 s | 318 s |
+| cspec module | everything above | same, cspec itself small | 92 s | 78 s | 311 s | 263 s |
+| `fission-static/src/lib.rs` | emulator, cli, pcode, static, sleigh, decompiler, script, dynamic, dir | emulator, cli, static, sleigh, decompiler, script, dynamic, dir | 72 s | 60 s | 226 s | 201 s |
+
+* The case the split targets, an edit inside the midend, drops from nine rebuilt crates
+  to four and from 114 s to 45 s of wall time. That is the 175 s versus 350 s direction the
+  model predicted, at a smaller absolute scale because the cold-build dependency cost is
+  cached here.
+* Edits at the bottom (the IR itself) gain almost nothing: everything depends on them,
+  and the split adds two small crates to the rebuild.
+* **CI test selection** (`scripts/ci/select_affected_crates.py`) for a midend edit shrinks from
+  `cli, decompiler, dir, dynamic, emulator, pcode, script, sleigh, static` to
+  `cli, decompiler, dir, pcode`. A `fission-sleigh` or `fission-static` edit no longer selects
+  `fission-pcode` (tests that were 66 s of unit time).
+
+**Not measured**: the 183-commit replay was not rerun on the new graph, so the 19.5 % figure
+remains the model's. The wall times above are single runs. Actual CI wall time on pull requests
+has not been observed yet; compare it over the next merges before claiming a CI speed-up.
