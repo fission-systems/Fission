@@ -20,6 +20,7 @@ pub mod arch;
 pub mod block_cfg;
 pub mod cfg;
 pub mod pcode;
+pub mod space;
 
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};
 pub use pcode::*;

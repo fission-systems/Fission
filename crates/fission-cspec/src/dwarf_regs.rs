@@ -19,7 +19,7 @@
 //! pipeline as `.cspec`/`.pspec`. Zero-dependency hand-written XML state
 //! machine, same approach as `pspec.rs`.
 
-use crate::midend::HashMap;
+use crate::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
 

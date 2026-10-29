@@ -1,0 +1,19 @@
+[package]
+name = "fission-cspec"
+version = "0.2.3"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Calling-convention (cspec), language definition and register model for Fission"
+repository = "https://github.com/fission-systems/Fission"
+license = "Apache-2.0"
+readme = "../../README.md"
+keywords = ["cspec", "sleigh", "abi", "decompiler"]
+categories = ["development-tools"]
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+fission-midend-core = { path = "../fission-midend-core" }
+fission-pcode-ir = { path = "../fission-pcode-ir" }
+anyhow = "1.0"
+rustc-hash = "2.1"

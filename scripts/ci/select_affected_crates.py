@@ -18,6 +18,7 @@ CORE_FALLBACK = {
     "fission-midend-structuring",
     "fission-pcode",
     "fission-pcode-ir",
+    "fission-cspec",
 }
 WORKSPACE_WIDE_PATHS = {
     "Cargo.toml",

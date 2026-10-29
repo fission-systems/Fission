@@ -6,7 +6,7 @@
 //!    to get the precise `.cspec` filename.
 //! parsed and cached at most once per process lifetime.
 
-use crate::midend::HashMap;
+use crate::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 

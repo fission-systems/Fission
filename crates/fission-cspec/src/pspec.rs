@@ -23,7 +23,7 @@
 //!
 //! Zero-dependency: hand-written XML state machine, same approach as `cspec.rs`.
 
-use crate::midend::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 

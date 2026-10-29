@@ -33,7 +33,7 @@ mod abi;
 mod abstract_location;
 mod builder;
 mod cfg;
-pub mod cspec;
+pub use fission_cspec as cspec;
 /// Normalize owner (implementation in `fission-midend-normalize`, ADR 0012).
 pub use fission_midend_normalize as normalize;
 mod orchestrate;
@@ -122,13 +122,13 @@ pub fn print_prehir_function(func: &fission_midend_prehir::PreHirFunction) -> St
 
 pub use fission_core::CallingConvention;
 
-pub use self::abi::infer_entry_register_param_arity;
 pub use self::cfg::structuring_cfg_edges;
 pub use self::cspec::RegisterNamer;
 pub use self::tail_wrapper::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
 pub use crate::render::{PrintProfile, render_contracted_wrapper_summary};
+pub use fission_cspec::infer_entry_register_param_arity;
 pub use fission_midend_normalize::{
     is_known_api_signature, normalize_hir_function, take_normalize_wave_stats,
 };
@@ -145,15 +145,7 @@ pub(crate) use self::orchestrate::{
     render_mechanical_preview, render_mechanical_preview_with_context,
 };
 
-/// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.
-///
-/// Prefer this over bare [`NirRenderOptions::from_loaded_binary`] when register
-/// naming / cspec data is needed (the core constructor stays resource-free).
-pub fn seed_nir_render_options(binary: &fission_loader::loader::LoadedBinary) -> NirRenderOptions {
-    let mut options = NirRenderOptions::from_loaded_binary(binary);
-    cspec::apply::ensure_sla_register_map(&mut options);
-    options
-}
+pub use fission_cspec::seed_nir_render_options;
 
 /// P-code adapter: admission facts from a lifted function shape.
 pub fn nir_admission_facts_from_pcode(pcode: &crate::pcode::PcodeFunction) -> NirAdmissionFacts {

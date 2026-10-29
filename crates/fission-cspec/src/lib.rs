@@ -19,7 +19,21 @@
 //! Callers must populate cspec fields from `utils/sleigh-specs/languages` before ABI-sensitive
 //! lowering (see [`apply::apply_cspec_for_options`]).
 
-use crate::midend::HashMap;
+// Same lint posture as when this code lived in `fission-pcode`: it was written
+// under these allows, and the split is not the place to change them.
+#![allow(clippy::all)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_assignments)]
+#![forbid(unsafe_code)]
+
+pub use fission_core::CallingConvention;
+pub use fission_midend_core::ir::NirRenderOptions;
+
+pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHasher>;
+
 use std::path::Path;
 
 pub mod apply;
@@ -32,9 +46,14 @@ pub use register_model::{
     RegisterModel, RegisterNamer, register_model_for_abi, register_model_for_language,
     register_namer_for_abi, register_namer_from_options,
 };
+mod entry_arity;
+pub use entry_arity::infer_entry_register_param_arity;
 mod slaspec_parse;
-#[cfg(test)]
-pub(crate) mod test_maps;
+/// Test helpers that populate the SLA register map and cspec from the
+/// checked-in specs. Public (and not `cfg(test)`) because `fission-pcode`'s own
+/// tests call them; production code has no reason to.
+#[doc(hidden)]
+pub mod test_maps;
 
 /// A name → (offset_in_register_space, size_in_bytes) lookup table.
 /// Populated from `ELEM_VARNODE_SYM` in the compiled `.sla` artifact.
@@ -1062,4 +1081,14 @@ mod arm_stack_pentry_tests {
         );
         assert_eq!(rp.extrapop, 0, "ARM pushes no return address on the stack");
     }
+}
+
+/// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.
+///
+/// Prefer this over bare [`NirRenderOptions::from_loaded_binary`] when register
+/// naming / cspec data is needed (the core constructor stays resource-free).
+pub fn seed_nir_render_options(binary: &fission_loader::loader::LoadedBinary) -> NirRenderOptions {
+    let mut options = NirRenderOptions::from_loaded_binary(binary);
+    apply::ensure_sla_register_map(&mut options);
+    options
 }
