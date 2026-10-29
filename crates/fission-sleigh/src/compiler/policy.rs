@@ -99,9 +99,21 @@ pub(super) fn canonical_processor_name(name: &str) -> Option<String> {
     let manifest_path = ghidra_language_manifest_path();
     let contents = fs::read_to_string(manifest_path).ok()?;
     let manifest = serde_json::from_str::<GhidraLanguageManifest>(&contents).ok()?;
-    manifest.entries.into_iter().find_map(|entry| {
+    canonical_processor_in(&manifest.entries, name)
+}
+
+/// The first manifest entry whose processor or alias is `name`, as its processor.
+///
+/// Callers that already hold the parsed manifest use this instead of
+/// [`canonical_processor_name`], which reads and parses the whole file on every
+/// call.
+pub(super) fn canonical_processor_in(
+    entries: &[GhidraLanguageManifestEntry],
+    name: &str,
+) -> Option<String> {
+    entries.iter().find_map(|entry| {
         if entry.processor == name || entry.language_aliases.iter().any(|alias| alias == name) {
-            Some(entry.processor)
+            Some(entry.processor.clone())
         } else {
             None
         }
