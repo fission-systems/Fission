@@ -16,7 +16,10 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context, Result};
-use policy::{canonical_processor_name, is_executable_candidate_entry, language_aliases_for};
+use policy::{
+    canonical_processor_in, canonical_processor_name, is_executable_candidate_entry,
+    language_aliases_for,
+};
 use serde::{Deserialize, Serialize};
 
 pub use ast::parse_expanded_spec;
@@ -439,12 +442,26 @@ fn discover_all_entry_specs_from_manifest() -> Result<Option<Vec<EntrySpec>>> {
             .with_context(|| format!("read manifest {}", manifest_path.display()))?,
     )
     .with_context(|| format!("parse manifest {}", manifest_path.display()))?;
+    // `spec_root_for_arch` would re-read and re-parse the manifest once per
+    // entry (146 times) just to canonicalise a processor name this loop already
+    // holds; resolve each distinct processor once against the parsed manifest.
+    let languages_root = sleigh_languages_root();
+    let mut processor_roots: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for entry in &manifest.entries {
+        processor_roots
+            .entry(entry.processor.clone())
+            .or_insert_with(|| {
+                let canonical = canonical_processor_in(&manifest.entries, &entry.processor)
+                    .unwrap_or_else(|| entry.processor.clone());
+                languages_root.join(canonical)
+            });
+    }
     let mut entries = manifest
         .entries
         .into_iter()
         .map(|entry| EntrySpec {
             arch: entry.processor.clone(),
-            path: spec_root_for_arch(&entry.processor).join(&entry.entry_spec),
+            path: processor_roots[&entry.processor].join(&entry.entry_spec),
             entry_spec: entry.entry_spec,
             entry_id: entry.entry_id,
             language_ids: entry.language_ids,
@@ -923,6 +940,22 @@ mod tests {
         assert!(!compiled.construct_templates.is_empty());
         assert!(!compiled.definitions.is_empty());
         assert!(!compiled.pattern_nodes.is_empty());
+    }
+
+    /// The catalog resolves each processor root once from the parsed manifest;
+    /// `spec_root_for_arch` re-reads the manifest per call. Both must agree.
+    #[test]
+    fn catalog_paths_match_per_entry_spec_root_resolution() {
+        let entries = runtime_entry_specs().expect("runtime catalog");
+        assert!(!entries.is_empty());
+        for entry in entries {
+            assert_eq!(
+                entry.path,
+                spec_root_for_arch(&entry.arch).join(&entry.entry_spec),
+                "entry {}",
+                entry.entry_id
+            );
+        }
     }
 
     #[test]

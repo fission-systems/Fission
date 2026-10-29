@@ -42,6 +42,18 @@ impl SignatureResourceProvider {
         db.get(name)
     }
 
+    /// The process-wide catalog for one bitness, or `None` if it failed to load.
+    ///
+    /// Callers that only need lookups share this instance (and its decompressed
+    /// blocks) instead of building their own `ApiTypeDatabase`.
+    pub fn api_database_for_bitness(&self, is_64bit: bool) -> Option<&ApiTypeDatabase> {
+        if is_64bit {
+            self.api_types.as_ref().ok()
+        } else {
+            self.api_types_32.as_ref().ok()
+        }
+    }
+
     pub fn api_signatures_json(&self) -> Option<String> {
         let signatures: Vec<&ApiSignature> = self.api_signatures().ok()?.collect();
         serde_json::to_string(&signatures).ok()

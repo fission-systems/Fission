@@ -1,6 +1,6 @@
 //! MSVC CRT JSON patterns (`fission-signatures`) + WinAPI catalog coverage (informational).
 
-use fission_signatures::{ApiTypeDatabase, SIGNATURE_DB};
+use fission_signatures::{ApiTypeDatabase, SIGNATURE_DB, SIGNATURE_RESOURCES};
 
 use crate::loader::LoadedBinary;
 
@@ -80,11 +80,14 @@ fn entry_window_bytes(binary: &LoadedBinary, window: usize) -> Option<&[u8]> {
 
 #[must_use]
 pub(super) fn winapi_catalog_summary(binary: &LoadedBinary) -> Option<WinApiCatalogSummary> {
-    let db = ApiTypeDatabase::from_utils_signatures_for_bitness(binary.is_64bit).ok()?;
+    // The process-wide catalog, not a fresh one: building an `ApiTypeDatabase`
+    // per binary re-decompressed the same signature blocks that the decompiler
+    // later decompresses again from its own copy.
+    let db = SIGNATURE_RESOURCES.api_database_for_bitness(binary.is_64bit)?;
     let considered = binary.iat_symbols.len();
     let mut symbols_in_catalog = 0usize;
     for sym in binary.iat_symbols.values() {
-        if symbol_in_winapi_catalog(&db, sym) {
+        if symbol_in_winapi_catalog(db, sym) {
             symbols_in_catalog += 1;
         }
     }
