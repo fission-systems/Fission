@@ -2,6 +2,7 @@ mod ast;
 mod codegen;
 pub mod discovery;
 mod equivalence;
+mod frontend_cache;
 mod ir;
 pub use ir::default_context_from_sla_and_pspec;
 mod policy;
@@ -546,7 +547,7 @@ fn discover_all_entry_specs_uncached() -> Result<Vec<EntrySpec>> {
 /// not rejected with an error but misread, and a misread length prefix aborts
 /// the process on a multi-exabyte allocation. Folding the layout into the file
 /// name means an old cache is never opened.
-const FRONTEND_CACHE_LAYOUT: u32 = 2;
+const FRONTEND_CACHE_LAYOUT: u32 = 3;
 
 pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFrontend> {
     let entry_id = entry_id_from_path(entry_spec)?;
@@ -557,9 +558,9 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     if let Ok(cache_file) = fs::File::open(&cache_path) {
         let cache_metadata = cache_file.metadata().ok();
         let cache_mtime = cache_metadata.and_then(|m| m.modified().ok());
+        drop(cache_file);
         if let Some(cache_time) = cache_mtime {
-            let reader = std::io::BufReader::new(cache_file);
-            if let Ok(compiled) = bincode::deserialize_from::<_, CompiledFrontend>(reader) {
+            if let Some(compiled) = frontend_cache::read(&cache_path) {
                 if !frontend_cache_is_stale(entry_spec, &compiled, cache_time) {
                     tracing::info!(
                         "Loaded compiled Sleigh frontend for {} from cache",
@@ -595,18 +596,9 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     if let Err(e) = fs::create_dir_all(&cache_dir) {
         tracing::warn!("Failed to create Sleigh cache directory: {}", e);
     } else {
-        match fs::File::create(&cache_path) {
-            Ok(file) => {
-                let writer = std::io::BufWriter::new(file);
-                if let Err(e) = bincode::serialize_into(writer, &compiled) {
-                    tracing::warn!("Failed to write Sleigh cache to bincode: {}", e);
-                } else {
-                    tracing::info!("Cached compiled Sleigh frontend for {}", entry_id);
-                }
-            }
-            Err(e) => {
-                tracing::warn!("Failed to create Sleigh cache file: {}", e);
-            }
+        match frontend_cache::write(&cache_path, &mut compiled) {
+            Ok(()) => tracing::info!("Cached compiled Sleigh frontend for {}", entry_id),
+            Err(e) => tracing::warn!("Failed to write Sleigh cache: {:#}", e),
         }
     }
 

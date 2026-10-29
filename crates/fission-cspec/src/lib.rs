@@ -48,6 +48,7 @@ pub use register_model::{
 };
 mod entry_arity;
 pub use entry_arity::infer_entry_register_param_arity;
+mod slaspec_cache;
 mod slaspec_parse;
 /// Test helpers that populate the SLA register map and cspec from the
 /// checked-in specs. Public (and not `cfg(test)`) because `fission-pcode`'s own
