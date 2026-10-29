@@ -45,7 +45,7 @@ impl PackedDecodedPcodeFunction {
 mod tests {
     use super::*;
     use crate::runtime::{DecodeStopReason, DecodedFlowKind, DecodedInstruction};
-    use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use fission_pcode_ir::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
     use std::collections::{BTreeMap, BTreeSet};
 
     fn fixture(stop_reason: DecodeStopReason) -> DecodedPcodeFunction {

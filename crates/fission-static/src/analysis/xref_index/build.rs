@@ -813,7 +813,7 @@ mod tests {
     use fission_loader::loader::{
         DataBuffer, FunctionInfo, LoadedBinaryBuilder, RelocationEntry, SectionInfo,
     };
-    use fission_pcode::PcodeOpcode;
+    use fission_pcode_ir::PcodeOpcode;
     use fission_sleigh::runtime::RuntimeSleighFrontend;
 
     #[test]

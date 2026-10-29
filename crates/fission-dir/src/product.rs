@@ -7,7 +7,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use fission_pcode::{PcodeFunction, PcodeValidationError, ValidatedPcodeFunction, Varnode};
+use fission_pcode_ir::{PcodeFunction, PcodeValidationError, ValidatedPcodeFunction, Varnode};
 
 /// Version of the canonical byte stream used for [`FoundationIdentity::digest`].
 pub const FOUNDATION_IDENTITY_VERSION: u32 = 1;
@@ -702,7 +702,7 @@ impl Hasher for Fnv1a64 {
 
 #[cfg(test)]
 mod tests {
-    use fission_pcode::{PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
+    use fission_pcode_ir::{PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
 
     use super::*;
 

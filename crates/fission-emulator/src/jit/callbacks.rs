@@ -116,7 +116,7 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
     // The table is append-only and nothing appends to it while a block runs,
     // so this reference outlives the borrow of `state` below. Same shape as
     // the `os` pointer taken a few functions down.
-    let op: *const fission_pcode::ir::PcodeOp = op;
+    let op: *const fission_pcode_ir::ir::PcodeOp = op;
     let op = unsafe { &*op };
 
     // A vector userop is answered against whole varnodes rather than the
@@ -926,7 +926,7 @@ pub extern "C" fn jit_taint_output(emu_ptr: *mut Emulator, index: u64) {
         tracing::error!("jit_taint_output: no op at index {index}");
         return;
     };
-    let op = op as *const fission_pcode::ir::PcodeOp;
+    let op = op as *const fission_pcode_ir::ir::PcodeOp;
     let op = unsafe { &*op };
     emu.apply_taint_to_op(op, None);
 }

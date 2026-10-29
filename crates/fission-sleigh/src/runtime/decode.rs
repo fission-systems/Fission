@@ -104,7 +104,7 @@ impl RuntimeSleighFrontend {
     /// `resolve_register_offset` resolves a Ghidra-style register name (as
     /// carried by a decoded `BoundOperand::NamedVarnode`) to its SLEIGH
     /// register-space offset -- typically
-    /// `fission_pcode::midend::cspec::RegisterModel::lookup_name`, supplied
+    /// `fission_pcode_ir::midend::cspec::RegisterModel::lookup_name`, supplied
     /// by the caller rather than depended on directly (`fission-pcode`
     /// depends on `fission-sleigh`, not the other way around).
     ///

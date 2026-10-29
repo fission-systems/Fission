@@ -1,5 +1,5 @@
 use fission_emulator::metrics::{EmulatorMetrics, is_jit_supported};
-use fission_pcode::ir::PcodeOpcode;
+use fission_pcode_ir::ir::PcodeOpcode;
 
 #[test]
 fn metrics_tracks_unimplemented() {

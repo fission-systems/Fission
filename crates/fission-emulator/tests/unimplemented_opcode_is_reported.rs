@@ -12,7 +12,7 @@
 //! was lowered to nothing" is indistinguishable from "nobody is counting".
 
 use fission_emulator::jit::compiler::{GuestInsn, JitCompiler};
-use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 /// `CPoolRef` is a JVM p-code op. No x86 or ARM SLEIGH spec emits one, which
 /// is exactly what makes it a safe probe: it can only appear here.

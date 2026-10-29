@@ -18,7 +18,7 @@ use std::fmt;
 
 use anyhow::{anyhow, bail, Result};
 use fission_core::architecture::BinaryLoadSpec;
-use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::{

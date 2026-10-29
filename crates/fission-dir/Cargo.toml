@@ -19,7 +19,7 @@ fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-midend-core = { path = "../fission-midend-core" }
 fission-midend-prehir = { path = "../fission-midend-prehir" }
-fission-pcode = { path = "../fission-pcode" }
+fission-pcode-ir = { path = "../fission-pcode-ir" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-solver = { path = "../fission-solver" }
 fission-emulator = { path = "../fission-emulator" }

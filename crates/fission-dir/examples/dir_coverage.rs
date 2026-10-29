@@ -174,6 +174,6 @@ fn reason(e: &PcodeNativeReconstructError) -> String {
 fn lift(
     binary: &fission_loader::loader::LoadedBinary,
     addr: u64,
-) -> Option<fission_pcode::PcodeFunction> {
+) -> Option<fission_pcode_ir::PcodeFunction> {
     fission_decompiler::disasm::raw_pcode_function(binary, addr).ok()
 }

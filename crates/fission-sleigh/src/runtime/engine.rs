@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fission_pcode::PcodeOp;
+use fission_pcode_ir::PcodeOp;
 
 use crate::compiler::{CompiledFrontend, EntrySpec};
 use crate::runtime::spine::compiled_table;

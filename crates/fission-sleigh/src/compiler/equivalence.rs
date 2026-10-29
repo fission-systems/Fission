@@ -79,7 +79,7 @@ pub fn build_runtime_fixture_report(
     processor: &str,
     entry_id: &str,
     fixtures: &[RuntimeParityFixture],
-    mut decode: impl FnMut(&RuntimeParityFixture) -> Result<(Vec<fission_pcode::PcodeOp>, u64)>,
+    mut decode: impl FnMut(&RuntimeParityFixture) -> Result<(Vec<fission_pcode_ir::PcodeOp>, u64)>,
 ) -> RuntimeParityReport {
     let mut totals = std::collections::BTreeMap::<String, usize>::new();
     let mut catastrophic_mismatch_count = 0usize;
@@ -130,7 +130,7 @@ pub fn build_runtime_fixture_report(
 fn classify_fixture_mismatch(
     fixture: &RuntimeParityFixture,
     actual_decode_len: Option<u64>,
-    actual_ops: &[fission_pcode::PcodeOp],
+    actual_ops: &[fission_pcode_ir::PcodeOp],
 ) -> EquivalenceMismatchKind {
     let Some(actual_len) = actual_decode_len else {
         return EquivalenceMismatchKind::DecisionTreeNoMatch;

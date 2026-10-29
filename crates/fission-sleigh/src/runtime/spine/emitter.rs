@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::runtime::RuntimeSleighError;
 

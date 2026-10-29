@@ -19,7 +19,8 @@ fission-analysis-db = { path = "../fission-analysis-db" }
 fission-loader = { path = "../fission-loader" }
 fission-signatures = { path = "../fission-signatures" }
 fission-sleigh = { path = "../fission-sleigh" }
-fission-pcode = { path = "../fission-pcode" }
+fission-pcode-ir = { path = "../fission-pcode-ir" }
+fission-cspec = { path = "../fission-cspec" }
 fission-midend-core = { path = "../fission-midend-core" }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -41,7 +42,7 @@ cc = "1.0"
 [dev-dependencies]
 proptest = "1.4"
 insta = { version = "1.47", features = ["yaml"] }
-fission-pcode = { path = "../fission-pcode" }
+fission-pcode-ir = { path = "../fission-pcode-ir" }
 fission-loader = { path = "../fission-loader" }
 criterion = { version = "0.5", features = ["html_reports"] }
 

@@ -1,6 +1,6 @@
 //! Runtime telemetry for emulator quality and coverage.
 
-use fission_pcode::ir::PcodeOpcode;
+use fission_pcode_ir::ir::PcodeOpcode;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

@@ -197,7 +197,7 @@ impl DecodeCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use fission_pcode_ir::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
     use std::collections::{BTreeMap, BTreeSet};
 
     fn decoded(reason: DecodeStopReason) -> Arc<DecodedPcodeFunction> {

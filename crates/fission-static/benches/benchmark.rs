@@ -6,7 +6,7 @@
 //! assume the repo `benchmark/` tree.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::fs;
 use std::path::PathBuf;
 
@@ -96,7 +96,7 @@ fn structuring_cfg_edges_benchmark(c: &mut Criterion) {
         let func = build_diamond_cfg(*size);
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter(|| {
-                let result = fission_pcode::structuring_cfg_edges(black_box(&func));
+                let result = fission_pcode_ir::block_cfg::structuring_cfg_edges(black_box(&func));
                 black_box(result)
             })
         });
@@ -108,7 +108,7 @@ fn structuring_cfg_edges_benchmark(c: &mut Criterion) {
         let name = format!("complex_d{}_b{}", depth, branches);
         group.bench_with_input(BenchmarkId::from_parameter(&name), &name, |b, _| {
             b.iter(|| {
-                let result = fission_pcode::structuring_cfg_edges(black_box(&func));
+                let result = fission_pcode_ir::block_cfg::structuring_cfg_edges(black_box(&func));
                 black_box(result)
             })
         });

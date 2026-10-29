@@ -1,5 +1,5 @@
 use super::*;
-use fission_pcode::cfg::{AddressCfgSnapshot, AddressEdge};
+use fission_pcode_ir::cfg::{AddressCfgSnapshot, AddressEdge};
 use std::collections::BTreeSet;
 
 fn is_cfg_split_opcode(opcode: PcodeOpcode) -> bool {

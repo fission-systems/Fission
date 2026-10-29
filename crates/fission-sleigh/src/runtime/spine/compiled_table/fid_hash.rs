@@ -87,12 +87,14 @@ enum MemoryAddressShape {
 /// Restricted to instructions with exactly one such op on purpose: with two,
 /// nothing here proves which display operand owns which, and a wrong operand
 /// mix is the failure mode this module refuses to risk.
-fn sole_dereferenced_address(ops: &[fission_pcode::PcodeOp]) -> Option<&fission_pcode::Varnode> {
+fn sole_dereferenced_address(
+    ops: &[fission_pcode_ir::PcodeOp],
+) -> Option<&fission_pcode_ir::Varnode> {
     let mut found = None;
     for op in ops {
         if !matches!(
             op.opcode,
-            fission_pcode::PcodeOpcode::Load | fission_pcode::PcodeOpcode::Store
+            fission_pcode_ir::PcodeOpcode::Load | fission_pcode_ir::PcodeOpcode::Store
         ) {
             continue;
         }
@@ -105,7 +107,7 @@ fn sole_dereferenced_address(ops: &[fission_pcode::PcodeOp]) -> Option<&fission_
     found
 }
 
-fn as_register_offset(v: &fission_pcode::Varnode, register_space_index: u64) -> Option<u64> {
+fn as_register_offset(v: &fission_pcode_ir::Varnode, register_space_index: u64) -> Option<u64> {
     (!v.is_constant && u64::from(v.space_id) == register_space_index).then_some(v.offset)
 }
 
@@ -114,14 +116,14 @@ fn as_register_offset(v: &fission_pcode::Varnode, register_space_index: u64) -> 
 /// constant. Used both directly (`[reg+disp]`) and as a sub-match inside SIB
 /// base+disp folding.
 fn producer_reg_plus_const(
-    ops: &[fission_pcode::PcodeOp],
-    v: &fission_pcode::Varnode,
+    ops: &[fission_pcode_ir::PcodeOp],
+    v: &fission_pcode_ir::Varnode,
     register_space_index: u64,
 ) -> Option<(u64, i64)> {
     let producer = ops
         .iter()
         .find(|op| op.output.as_ref().is_some_and(|out| out == v))?;
-    if producer.opcode != fission_pcode::PcodeOpcode::IntAdd {
+    if producer.opcode != fission_pcode_ir::PcodeOpcode::IntAdd {
         return None;
     }
     let [a, b] = producer.inputs.as_slice() else {
@@ -144,14 +146,14 @@ fn producer_reg_plus_const(
 /// in `ops` (either input order) -- SLEIGH's encoding of `index*scale` --
 /// returns the index register's offset and the scale.
 fn producer_scaled_index(
-    ops: &[fission_pcode::PcodeOp],
-    v: &fission_pcode::Varnode,
+    ops: &[fission_pcode_ir::PcodeOp],
+    v: &fission_pcode_ir::Varnode,
     register_space_index: u64,
 ) -> Option<(u64, i64)> {
     let producer = ops
         .iter()
         .find(|op| op.output.as_ref().is_some_and(|out| out == v))?;
-    if producer.opcode != fission_pcode::PcodeOpcode::IntMult {
+    if producer.opcode != fission_pcode_ir::PcodeOpcode::IntMult {
         return None;
     }
     let [a, b] = producer.inputs.as_slice() else {
@@ -186,13 +188,13 @@ fn producer_scaled_index(
 /// see the module doc comment). Returns `None` for anything else rather
 /// than guess.
 fn trace_simple_memory_address(
-    ops: &[fission_pcode::PcodeOp],
+    ops: &[fission_pcode_ir::PcodeOp],
     register_space_index: u64,
     target_space_id: u64,
     target_offset: u64,
     target_size: u32,
 ) -> Option<MemoryAddressShape> {
-    let matches_target = |v: &fission_pcode::Varnode| -> bool {
+    let matches_target = |v: &fission_pcode_ir::Varnode| -> bool {
         v.space_id == target_space_id && v.offset == target_offset && v.size == target_size
     };
 
@@ -201,7 +203,7 @@ fn trace_simple_memory_address(
         .find(|op| op.output.as_ref().is_some_and(matches_target))?;
 
     match producer.opcode {
-        fission_pcode::PcodeOpcode::IntAdd => {
+        fission_pcode_ir::PcodeOpcode::IntAdd => {
             let [a, b] = producer.inputs.as_slice() else {
                 return None;
             };
@@ -252,7 +254,7 @@ fn trace_simple_memory_address(
             }
             None
         }
-        fission_pcode::PcodeOpcode::Copy => {
+        fission_pcode_ir::PcodeOpcode::Copy => {
             let input = producer.inputs.first()?;
             let offset = as_register_offset(input, register_space_index)?;
             // AArch64 post-index writeback (`ldp x29,x30,[sp],#0x10`): the
@@ -281,12 +283,12 @@ fn trace_simple_memory_address(
 /// `trace_simple_memory_address`'s `Copy` arm) but still needs to be mixed
 /// into the specific hash as this operand's displacement.
 fn find_self_writeback_displacement(
-    ops: &[fission_pcode::PcodeOp],
+    ops: &[fission_pcode_ir::PcodeOp],
     register_space_index: u64,
     base_offset: u64,
 ) -> Option<i64> {
     ops.iter().find_map(|op| {
-        if op.opcode != fission_pcode::PcodeOpcode::IntAdd {
+        if op.opcode != fission_pcode_ir::PcodeOpcode::IntAdd {
             return None;
         }
         let out = op.output.as_ref()?;
@@ -608,7 +610,7 @@ pub(crate) struct FidHashes {
 /// `resolve_register_offset` resolves a `BoundOperand::NamedVarnode`'s
 /// Ghidra-style register name (e.g. `"EAX"`) to its SLEIGH register-space
 /// offset -- deliberately a caller-supplied callback rather than a direct
-/// dependency, since the register model (`fission_pcode::midend::cspec::
+/// dependency, since the register model (`fission_pcode_ir::midend::cspec::
 /// RegisterModel`) lives in a crate that depends on `fission-sleigh`, not
 /// the other way around.
 ///

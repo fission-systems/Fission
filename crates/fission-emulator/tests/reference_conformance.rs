@@ -19,7 +19,7 @@ use fission_emulator::jit::compiler::{GuestInsn, JitCompiler};
 use fission_emulator::os::LinuxEnv;
 use fission_emulator::pcode::state::MachineState;
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use std::path::PathBuf;
 
