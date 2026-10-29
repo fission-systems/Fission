@@ -1369,8 +1369,12 @@
 <td>Immutable typed program metadata snapshots</td>
 </tr>
 <tr>
+<td><a href="../crates/fission-pcode-ir"><code>crates/fission-pcode-ir</code></a></td>
+<td>p-code IR, p-code optimizer, block-level CFG facts (leaf; no workspace dependencies)</td>
+</tr>
+<tr>
 <td><a href="../crates/fission-pcode"><code>crates/fission-pcode</code></a></td>
-<td>Canonical IR, NIR/HIR, structuring, CFG analysis, printer</td>
+<td>NIR/HIR, structuring, CFG analysis, printer; re-exports <code>fission-pcode-ir</code> under the historical paths</td>
 </tr>
 <tr>
 <td><code>crates/fission-midend-core</code></td>
