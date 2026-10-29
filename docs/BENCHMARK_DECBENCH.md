@@ -11,8 +11,33 @@ The data and harness live outside this repository, under
 |------|------|
 | Dataset (do not re-download) | `~/fission-benchmark/decbench-data` — binaries, published source CFGs, per-function scores of the other decompilers |
 | Sweep harness | `~/fission-benchmark/decbench-harness/fullrun.py`, `fullagg.py` |
-| Python environment | `~/fission-benchmark/.venv-decbench/bin/python` (has `pydantic`, `pyjoern`; the system Python has neither) |
+| Python environment | `~/fission-benchmark/.venv-decbench/bin/python` (has `pydantic`, `networkx`, `orjson`; the system Python has neither `pydantic` nor a CFG parser) |
+| CFG parser | `rust-joern`, built from source at `~/rust-joern` (see below) |
 | Sample-set kit | `vendor/decbench-evalkit/decbench-evalkit-sample-set` |
+
+## CFG parser: rust-joern
+
+GED's source- and decompiled-side CFGs come from
+[rust-joern](https://github.com/Noelo-Lab/rust-joern), not the JVM-backed
+`pyjoern` (DecBench switched on 2026-10-09, Noelo-Lab/decbench#99). It is not on
+PyPI:
+
+```bash
+git clone https://github.com/sjkim1127/rust-joern ~/rust-joern   # or Noelo-Lab/rust-joern
+(cd ~/rust-joern && cargo build --release)
+```
+
+`runner/ged.py` in `~/fission-benchmark` calls
+`rust_joern.parse_source(path, no_ddg=True, strict=True, preprocessed=True)`,
+the same call as DecBench. Override the checkout with `RUST_JOERN_DIR`.
+`FISSION_GED_BACKEND=pyjoern` restores the old parser **only** to reproduce a
+number taken before the switch; do not compare across backends.
+
+Measured on 259 rows (same Fission build, same published source CFGs): the two
+parsers give identical output-node counts on 258, identical GED on 202, and GED
+sums 26,718 (pyjoern) vs 26,710 (rust-joern), maximum per-row difference 12 in
+either direction. The JVM parse used to be ~84% of a full sweep's worker time;
+it is now close to zero.
 
 ## Two tools, two jobs
 
@@ -50,8 +75,7 @@ CONFIG=unoptimized CKPT=/tmp/decbench-full-ckpt python3 fullagg.py
 
 Environment: `CONFIG` (`unoptimized`, `optimized`, `inlined`, `large`, …),
 `CKPT` (one checkpoint per binary, so an interrupted sweep resumes), `LIMIT`
-(binaries), `ONLY` (comma-separated), `BINARY_WORKERS`, `JOERN_CHUNK`,
-`JVM_CAP`. `FISSION_BENCHMARK_NO_CACHE=1` disables the decompile / GED / type
+(binaries), `ONLY` (comma-separated), `BINARY_WORKERS`, `JOERN_CHUNK`. `FISSION_BENCHMARK_NO_CACHE=1` disables the decompile / GED / type
 caches; **use it for any before/after**, otherwise the second run reads the
 first run's answers.
 
@@ -79,6 +103,5 @@ the leaderboard percentages.
   `~/fission-benchmark` carries published source CFGs for 64,231 functions that
   the sample set does not score; use it as the unseen split (it is `-O0` with
   symbols, so a shape visible only there is a different overfit).
-- Do not run more Joern JVMs than memory allows: each wants ~1.5 GB.
 - Local results are never an official ranking. A leaderboard or release claim is
   the sweep, on same rows, from a tagged build.
