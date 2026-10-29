@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "required": [
+          "schema_version",
+          "data"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "required": [
+          "error"
+        ]
+      }
+    }
+  ],
+  "description": "One JSON document on stdout for every contract-mode invocation, success or failure.",
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "contract": {
+      "const": "fission-cli/1"
+    },
+    "data": {
+      "description": "The command's own JSON output, unchanged.",
+      "x-data-schema": "untyped"
+    },
+    "elapsed_ms": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "error": {
+      "properties": {
+        "code": {
+          "description": "See `fission_cli schema --error-codes`.",
+          "type": "string"
+        },
+        "context": {
+          "type": "object"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "failed",
+            "usage",
+            "input",
+            "partial",
+            "timeout",
+            "environment",
+            "internal"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "kind",
+        "message",
+        "retryable"
+      ],
+      "type": "object"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "schema_version": {
+      "description": "Version of the `data` payload for this command.",
+      "minimum": 1,
+      "type": "integer"
+    },
+    "summary": {
+      "description": "Present for batch commands whose rows report per-item errors.",
+      "properties": {
+        "failed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "succeeded": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "succeeded",
+        "failed"
+      ],
+      "type": "object"
+    },
+    "tool": {
+      "properties": {
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "warnings": {
+      "items": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "contract",
+    "command",
+    "ok",
+    "warnings",
+    "tool",
+    "elapsed_ms"
+  ],
+  "title": "fission_cli --contract v1 response envelope",
+  "type": "object"
+}

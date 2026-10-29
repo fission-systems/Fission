@@ -1062,3 +1062,40 @@ deletion remaps physical lines and abstains on ambiguous repeated text. No code 
 `line_mappings_hir` JSON fields were removed with the NIR/HIR split
 ([ADR 0015](adr/0015-single-output-surface.md)); `--layer` is still accepted
 and ignored.
+
+## Machine contract (`--contract v1`)
+
+For AI agents and scripts that must branch on the result without parsing human
+text. Opt-in: without `--contract v1` (or `FISSION_CONTRACT=v1`) every command
+behaves as documented above. Design: [`proposals/2026-10-26-agent-first-cli-contract.md`](proposals/2026-10-26-agent-first-cli-contract.md).
+
+```bash
+fission_cli --contract v1 list app.exe --json
+fission_cli --contract v1 --fail-on-partial decomp app.exe --all --json
+fission_cli schema                 # JSON Schema of the response envelope
+fission_cli schema --error-codes   # stable error codes, kinds, exit codes
+```
+
+- stdout is exactly one JSON document, success or failure; logs stay on stderr.
+- The command's own `--json` is required (`json_required`, exit 2, otherwise).
+  `--help` and `--version` pass through unchanged.
+- Envelope: `contract`, `command`, `ok`, `schema_version`, `data`, optional
+  `summary` (`total`, `succeeded`, `failed`) for batch output, `warnings`,
+  `error` (`code`, `kind`, `message`, `hint`, `retryable`, `context`), `tool`,
+  `elapsed_ms`. Branch on `ok`, `error.code` and the exit code; `message` and
+  `hint` are for people.
+
+| Exit | Kind | Meaning |
+|------|------|---------|
+| 0 | ok | Completed. A batch with at least one successful item exits 0 and lists failures in `data` and `summary`. |
+| 1 | failed | No usable result (for example every batch item failed: `all_items_failed`). |
+| 2 | usage | Invalid arguments or `--contract` value. |
+| 3 | input | Input missing, unreadable or unsupported. |
+| 4 | partial | Some batch items failed and `--fail-on-partial` was given. |
+| 5 | timeout | A time limit was reached. |
+| 6 | environment | Required resources unavailable. |
+| 70 | internal | The command crashed or panicked. |
+
+`data` is the command's existing JSON output, unchanged (arrays stay arrays).
+Per-command `data` schemas are not typed yet; the envelope schema marks them
+`x-data-schema: untyped`. Committed schemas live in [`schemas/`](schemas/).
