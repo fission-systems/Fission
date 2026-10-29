@@ -444,7 +444,14 @@ impl DefUseTracker {
                                 };
                                 // Create mask for the slice in B's space
                                 // The consumed bits of A (input_consume_req) map to B at (req << (offset*8))
-                                let shifted_req = input_consume_req << (offset * 8);
+                                // A slice starting at or past bit 64 (e.g. the high half of a
+                                // 16-byte register) is not representable in the u64 mask, so
+                                // stay conservative: everything is consumed.
+                                let shifted_req = match offset.checked_mul(8) {
+                                    Some(shift) if shift < 64 => input_consume_req << shift,
+                                    _ if input_consume_req == 0 => 0,
+                                    _ => u64::MAX,
+                                };
                                 if self.add_consume(&op.inputs[0], shifted_req) {
                                     changed = true;
                                 }
@@ -604,5 +611,56 @@ mod tests {
 
         let mask = tracker.get_nz_mask(&vn);
         assert_eq!(mask, 0x0F);
+    }
+
+    #[test]
+    fn subpiece_past_bit_64_consumes_conservatively() {
+        // out(8) = SUBPIECE(wide(16), 8): the slice starts at bit 64, which a
+        // u64 consume mask cannot express. Must not overflow the shift, and
+        // must keep the whole source live.
+        let wide = Varnode {
+            space_id: 1,
+            offset: 0x100,
+            size: 16,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let out = Varnode {
+            space_id: 1,
+            offset: 0x200,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::SubPiece,
+                        address: 0x1000,
+                        output: Some(out.clone()),
+                        inputs: vec![wide.clone(), Varnode::constant(8, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1004,
+                        output: None,
+                        inputs: vec![out],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        };
+
+        let mut tracker = DefUseTracker::new();
+        tracker.build(&func);
+
+        assert_eq!(tracker.get_consume_mask(&wide), u64::MAX);
     }
 }

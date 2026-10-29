@@ -1319,3 +1319,42 @@ fn test_loop_header_temp_coalescing_preserves_multiequal() {
     assert_eq!(ops[1].inputs[0], phi);
     assert_eq!(ops[2].opcode, PcodeOpcode::Return);
 }
+
+#[test]
+fn test_or_all_ones_is_all_ones_at_every_width() {
+    let optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
+    let or_all_ones = |size: u32| PcodeOp {
+        seq_num: 0,
+        opcode: PcodeOpcode::IntOr,
+        address: 0x1000,
+        output: Some(Varnode {
+            space_id: 1,
+            offset: 0x100,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }),
+        inputs: vec![
+            Varnode {
+                space_id: 2,
+                offset: 0x10,
+                size,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode::constant(-1, size),
+        ],
+        asm_mnemonic: None,
+    };
+
+    for (size, expected) in [(1, 0xFF), (4, 0xFFFF_FFFF), (8, -1)] {
+        let Some(optimized) = optimizer.rules.try_optimize(&or_all_ones(size)) else {
+            panic!("x | -1 should fold at size {size}")
+        };
+        assert_eq!(optimized.opcode, PcodeOpcode::Copy);
+        assert_eq!(
+            optimized.inputs[0].constant_val, expected,
+            "x | -1 at size {size}"
+        );
+    }
+}
