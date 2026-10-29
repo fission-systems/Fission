@@ -1,0 +1,16 @@
+[package]
+name = "fission-pcode-ir"
+version = "0.2.3"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "P-code IR, optimizer and block-level CFG facts for Fission"
+repository = "https://github.com/fission-systems/Fission"
+license = "Apache-2.0"
+readme = "../../README.md"
+keywords = ["ir", "pcode", "optimizer", "decompiler"]
+categories = ["development-tools"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rustc-hash = "2.1"

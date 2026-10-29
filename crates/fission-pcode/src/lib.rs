@@ -20,12 +20,11 @@
 // Forbidding it makes that guarantee a compile error instead of a nightly job.
 #![forbid(unsafe_code)]
 
-pub mod arch;
-pub mod cfg;
+pub use fission_pcode_ir::{arch, cfg};
 pub(crate) mod fast_hash;
 /// Post-lift midend (structured IR, normalize, structuring, orchestration).
 pub mod midend;
-mod pcode;
+use fission_pcode_ir::pcode;
 pub mod prelude;
 /// Dual-layer C presentation (NIR/HIR print surfaces). Owner: ADR 0008 / 0011.
 pub mod render;

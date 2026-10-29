@@ -14,7 +14,8 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols, relocations, virtual types; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
 | [`crates/fission-analysis-protocol`](../crates/fission-analysis-protocol) | Target-independent analysis backend, resource capability, and HTTP/worker wire contracts |
 | [`crates/fission-analysis-db`](../crates/fission-analysis-db) | Immutable typed program metadata snapshots |
-| [`crates/fission-pcode`](../crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, CFG analysis, printer |
+| [`crates/fission-pcode-ir`](../crates/fission-pcode-ir) | p-code IR, p-code optimizer, block-level CFG facts (leaf; no workspace dependencies) |
+| [`crates/fission-pcode`](../crates/fission-pcode) | NIR/HIR, structuring, CFG analysis, printer; re-exports `fission-pcode-ir` under the historical paths |
 | `crates/fission-midend-core` | Midend shared substrate (**owns** IR / action_pipeline / wave_stats / labels; ADR 0012) |
 | `crates/fission-midend-prehir` | Mutable flat PreHIR AST used by static normalize and structuring; not the DIR product (ADR 0014) |
 | `crates/fission-midend-normalize` | Normalize owner (**owns** normalize pipeline source; ADR 0012) |
