@@ -1376,6 +1376,14 @@ it is now close to zero.</p>
 (<code>scripts/quality/decbench_sample_set_baseline.json</code>) after a measured gain.
 <code>--dump</code> writes one row per function (GED, source and output node counts) so two
 runs can be compared per function rather than only in aggregate.</p>
+<p>The gate remembers each binary's DWARF ground-truth types under
+<code>~/fission-benchmark/.gate-cache/ground_truth_types/</code> (about 56 MB for the sample
+set). Reading them took 93 of 243 seconds in a measured run; with a warm cache
+the same run took 136 s against 278 s with the cache off in the same session, and
+all three runs gave byte-identical <code>--dump</code> output. The key is the SHA-256 of the
+binary and of the extractor's source, so it does not hold anything Fission
+produced and <code>FISSION_BENCHMARK_NO_CACHE=1</code> still gives an honest before/after.
+<code>FISSION_GATE_GT_CACHE=0</code> bypasses it.</p>
 <p>Resolve the CLI explicitly with <code>--cli</code>; the gate otherwise picks the newest of
 <code>release</code>, <code>quick-release</code> and <code>debug</code>, and a stale build silently scores the
 wrong thing.</p>
