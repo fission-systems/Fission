@@ -255,7 +255,7 @@ impl XrefDatabase {
         base_addr: u64,
         mapped: &[(u64, u64)],
     ) -> Option<XrefOmissionReason> {
-        let Ok(instructions) = frontend.decode_window(code, base_addr, usize::MAX) else {
+        let Ok(instructions) = frontend.decode_window_parallel(code, base_addr) else {
             return Some(XrefOmissionReason::InstructionDecodeFailed);
         };
         let decoded_bytes = instructions
