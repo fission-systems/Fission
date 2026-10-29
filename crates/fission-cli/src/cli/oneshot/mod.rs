@@ -306,6 +306,7 @@ fn run() -> Result<()> {
         }
         ParsedInvocation::Sandbox(args) => run_sandbox(args),
         ParsedInvocation::Verify(args) => run_verify(args),
+        ParsedInvocation::Schema(args) => crate::cli::contract::run_schema(&args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }

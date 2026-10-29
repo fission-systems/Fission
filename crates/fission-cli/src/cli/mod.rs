@@ -3,6 +3,7 @@
 //! Unified command-line interface for Fission binary analysis.
 //! This module provides one-shot mode only (fission_cli binary).
 
+pub mod contract;
 pub mod oneshot;
 pub mod output;
 pub mod resources;
