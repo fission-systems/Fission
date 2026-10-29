@@ -1,0 +1,2100 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-10-29-pcode-crate-split/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Splitting fission-pcode to cut rebuild fan-out (2026-10-29) - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#splitting-fission-pcode-to-cut-rebuild-fan-out-2026-10-29" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Splitting fission-pcode to cut rebuild fan-out (2026-10-29)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.2.3/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-this-was-measured-and-its-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How this was measured (and its limits)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#observed-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observed baseline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Observed baseline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-the-time-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the time is
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-history-changes-and-how-far-it-propagates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the history changes, and how far it propagates
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#module-dependency-graph-inside-fission-pcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module dependency graph inside fission-pcode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Module dependency graph inside fission-pcode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-each-dependent-imports-from-fission-pcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What each dependent imports from fission-pcode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#candidates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Candidates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Candidates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-fission-pcode-ir-the-p-code-ir-leaf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. fission-pcode-ir: the p-code IR leaf
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-fission-cspec-calling-convention-register-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. fission-cspec: calling-convention / register model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s-decouple-fission-static-from-fission-pcode-requires-a-and-b" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S. Decouple fission-static from fission-pcode (requires A and B)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#f-remove-fission-pcodes-dev-dependencies-on-sleigh-and-static" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F. Remove fission-pcode's dev-dependencies on sleigh and static
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#considered-and-not-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Considered and not recommended
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combined-effect-model-183-commits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combined effect (model, 183 commits)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#beyond-this-proposal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Beyond this proposal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#order-of-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Order of work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results-after-f-a-b-and-s-measured-2026-10-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results after F, A, B and S (measured 2026-10-29)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="splitting-fission-pcode-to-cut-rebuild-fan-out-2026-10-29">Splitting <code>fission-pcode</code> to cut rebuild fan-out (2026-10-29)<a class="headerlink" href="#splitting-fission-pcode-to-cut-rebuild-fan-out-2026-10-29" title="Permanent link">&para;</a></h1>
+<p>Status: proposal. No code is moved by this document.</p>
+<p>This is a <strong>mechanical</strong> refactor proposal. It makes no decompiler-quality
+claim (<a href="../../AGENTS.md">AGENTS.md</a>, Core Rule 10): the only behavioural gate is
+that DecBench output stays byte-identical (see "Verification").</p>
+<h2 id="why">Why<a class="headerlink" href="#why" title="Permanent link">&para;</a></h2>
+<p>A pull request that touches Rust rebuilds every crate above the one it
+changed. In CI the dependency cache already absorbs the external crates, so
+the compile time of an ordinary PR is the workspace crates being rebuilt. This
+proposal asks where that fan-out comes from, and which splits of
+<code>fission-pcode</code> (137k lines, the crate with the largest own cost) would
+actually shrink it. It continues <a href="../../adr/0012-midend-rename-and-crate-extraction/">ADR 0012</a>,
+whose phase D ("owner extraction") is still in progress.</p>
+<h2 id="how-this-was-measured-and-its-limits">How this was measured (and its limits)<a class="headerlink" href="#how-this-was-measured-and-its-limits" title="Permanent link">&para;</a></h2>
+<p>All numbers below were measured on one machine: macOS, <code>rustc 1.97.0</code>, <code>main</code>
+at <code>266e3f4a8</code>, <code>cargo test --no-run --workspace --locked --timings</code> with
+<code>CARGO_INCREMENTAL=0</code> and <code>CARGO_BUILD_JOBS=4</code> to resemble CI. The scripts are
+local (the <code>benchmark/</code> tree is not tracked); they are described, not
+committed.</p>
+<ul>
+<li><strong>Unit time</strong> is cargo's per-unit duration from the <code>--timings</code> report, split
+  into <code>lib</code>, <code>lib-test</code> (the crate compiled again with <code>cfg(test)</code>) and
+  <code>other</code> (integration tests, benches, build scripts). It is CPU time summed
+  over units, not wall time.</li>
+<li><strong>Replay</strong> takes the 183 non-merge commits on <code>main</code> from 2026-09-24 to
+  2026-10-29 that touch Rust or <code>Cargo.toml</code>, maps each touched file to a crate
+  (or to a candidate crate), and charges the unit time of every unit cargo would
+  rebuild: the changed crate, every crate that depends on it, and, through a
+  dev-dependency, only the dependent's test units. A test-only file charges
+  only that crate's test units.</li>
+<li><strong>Split costs are estimates.</strong> The measured <code>fission-pcode</code> cost (108.3 s:
+  lib 41, lib-test 66, other 1) is divided over the parts by line count
+  (<code>lib-test</code> also carries the 30,419 lines of in-crate tests, which belong to the
+  remainder). The three parts sum back to the measured 108.3 s.</li>
+<li>The replay models the leaf as the 6,559 lines of <code>pcode</code>, <code>arch</code> and <code>cfg</code>
+  (5.7 s) and <code>fission-cspec</code> as the 5,127 lines of <code>cspec</code> (4.4 s). The extra
+  <code>midend/cfg.rs</code> (1,209 lines) and <code>abi.rs</code> (597 lines) listed under the
+  candidates would add roughly 1 s and 0.5 s; they do not change the ranking.</li>
+<li>Not modelled: nextest <em>execution</em> time (CI: 258 s for 3,270 tests), link
+  time (small here: 8 s over 85 links, but this is macOS <code>ld</code>, not the Linux
+  linker CI uses), and the wall-clock effect of fewer units on a 4-vCPU runner.</li>
+<li>A commit is treated as one CI build. Cargo rebuilds a dependent on any
+  source change of its dependency, including private changes, so no saving is
+  assumed from "the interface did not change".</li>
+</ul>
+<h2 id="observed-baseline">Observed baseline<a class="headerlink" href="#observed-baseline" title="Permanent link">&para;</a></h2>
+<h3 id="where-the-time-is">Where the time is<a class="headerlink" href="#where-the-time-is" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Cold build, CI-like</th>
+<th>After touching <code>fission-pcode</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wall time</td>
+<td>232 s</td>
+<td>92 s</td>
+</tr>
+<tr>
+<td>Unit time, workspace crates</td>
+<td>519 s</td>
+<td>305 s</td>
+</tr>
+<tr>
+<td>Unit time, external crates</td>
+<td>389 s</td>
+<td>0 s (cached)</td>
+</tr>
+<tr>
+<td>Linking</td>
+<td>172 links, 11.9 s (1.3 %)</td>
+<td>85 links, 8.0 s (2.6 %)</td>
+</tr>
+</tbody>
+</table>
+<p>External dependencies are not the lever for an ordinary PR; the workspace
+crates are. <code>fission-pcode</code> alone is 108.3 s of the 519 s.</p>
+<h3 id="what-the-history-changes-and-how-far-it-propagates">What the history changes, and how far it propagates<a class="headerlink" href="#what-the-history-changes-and-how-far-it-propagates" title="Permanent link">&para;</a></h3>
+<p>Replaying the 183 commits (rebuild-on-change = unit time rebuilt when that
+crate's source changes):</p>
+<table>
+<thead>
+<tr>
+<th>Crate</th>
+<th style="text-align: right;">Commits touching it</th>
+<th style="text-align: right;">Rebuild-on-change</th>
+<th style="text-align: right;">Share of total replay cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fission-midend-normalize</code></td>
+<td style="text-align: right;">35</td>
+<td style="text-align: right;">389 s (75 %)</td>
+<td style="text-align: right;">18 %</td>
+</tr>
+<tr>
+<td><code>fission-loader</code></td>
+<td style="text-align: right;">24</td>
+<td style="text-align: right;">472 s (91 %)</td>
+<td style="text-align: right;">15 %</td>
+</tr>
+<tr>
+<td><code>fission-pcode</code></td>
+<td style="text-align: right;">31</td>
+<td style="text-align: right;">350 s (68 %)</td>
+<td style="text-align: right;">14 %</td>
+</tr>
+<tr>
+<td><code>fission-signatures</code></td>
+<td style="text-align: right;">13</td>
+<td style="text-align: right;">493 s (95 %)</td>
+<td style="text-align: right;">8 %</td>
+</tr>
+<tr>
+<td><code>fission-sleigh</code></td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">309 s (60 %)</td>
+<td style="text-align: right;">7 %</td>
+</tr>
+<tr>
+<td><code>fission-static</code></td>
+<td style="text-align: right;">19</td>
+<td style="text-align: right;">289 s (56 %)</td>
+<td style="text-align: right;">7 %</td>
+</tr>
+<tr>
+<td><code>fission-midend-prehir</code></td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">413 s (80 %)</td>
+<td style="text-align: right;">6 %</td>
+</tr>
+<tr>
+<td><code>fission-midend-structuring</code></td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">370 s (71 %)</td>
+<td style="text-align: right;">6 %</td>
+</tr>
+<tr>
+<td><code>fission-midend-core</code></td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">420 s (81 %)</td>
+<td style="text-align: right;">5 %</td>
+</tr>
+<tr>
+<td><code>fission-emulator</code></td>
+<td style="text-align: right;">23</td>
+<td style="text-align: right;">136 s (26 %)</td>
+<td style="text-align: right;">4 %</td>
+</tr>
+</tbody>
+</table>
+<p>Two structural facts explain why <code>fission-pcode</code> is on the critical path of so
+many rebuilds:</p>
+<ol>
+<li><strong>Crates that only need the IR still depend on the whole crate.</strong>
+   <code>fission-sleigh</code>, <code>fission-emulator</code>, <code>fission-dir</code> and <code>fission-static</code>
+   import almost nothing from <code>fission-pcode</code> except p-code IR types (below), but
+   because they depend on the crate, a change in the 114k-line <code>midend</code> rebuilds
+   them. <code>fission-emulator</code> and <code>fission-dir</code> additionally reach <code>fission-pcode</code>
+   through <code>fission-static</code> and <code>fission-decompiler</code>.</li>
+<li><strong>A dev-dependency cycle</strong> (<code>fission-pcode</code> dev-depends on <code>fission-sleigh</code>
+   and <code>fission-static</code>, which depend on <code>fission-pcode</code>). Cargo allows it, but
+   it means a change in <code>sleigh</code>, <code>static</code>, or anything beneath them rebuilds
+   <code>fission-pcode</code>'s test units (lib-test is 66 s, larger than the 41 s lib,
+   because of the 30,419 lines of in-crate tests).</li>
+</ol>
+<p>29 % of the replayed commits (53 of 183) touch a crate with ten or more
+dependents (<code>core</code>, <code>loader</code>, <code>signatures</code>, <code>midend-core</code>, <code>midend-prehir</code>).
+Splitting <code>fission-pcode</code> cannot help those; see "Beyond this proposal".</p>
+<h2 id="module-dependency-graph-inside-fission-pcode">Module dependency graph inside <code>fission-pcode</code><a class="headerlink" href="#module-dependency-graph-inside-fission-pcode" title="Permanent link">&para;</a></h2>
+<p>Lines of Rust per group, and the references that cross groups (non-test code,
+counted from <code>crate::…</code> paths):</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th style="text-align: right;">Lines</th>
+<th>References to other groups</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>midend::builder</code></td>
+<td style="text-align: right;">67,301</td>
+<td><code>pcode</code> ×230, <code>midend</code> root ×32, <code>structuring</code> ×23, <code>arch</code> ×14, <code>midend::cfg</code> ×11, <code>cspec</code> ×10, <code>support</code> ×8</td>
+</tr>
+<tr>
+<td><code>midend::tests</code> (<code>cfg(test)</code>)</td>
+<td style="text-align: right;">30,419</td>
+<td>builder internals</td>
+</tr>
+<tr>
+<td><code>render</code></td>
+<td style="text-align: right;">16,099</td>
+<td><code>midend</code> print functions ×25</td>
+</tr>
+<tr>
+<td><code>pcode</code> (IR, optimizer, graph)</td>
+<td style="text-align: right;">5,946</td>
+<td><strong>none</strong> (no workspace-crate imports; one <code>pub(crate)</code> item)</td>
+</tr>
+<tr>
+<td><code>midend::structuring</code></td>
+<td style="text-align: right;">5,730</td>
+<td><code>midend</code> root ×8, <code>ir</code> ×5, <code>pcode</code> ×4, <code>builder</code> ×2</td>
+</tr>
+<tr>
+<td><code>midend::cspec</code></td>
+<td style="text-align: right;">5,127</td>
+<td><code>midend</code> root ×20 (<code>NirRenderOptions</code>, a <code>HashMap</code> alias), <code>arch</code> ×3</td>
+</tr>
+<tr>
+<td><code>midend::pass</code></td>
+<td style="text-align: right;">1,602</td>
+<td><code>structuring</code> ×10, <code>builder</code> ×2</td>
+</tr>
+<tr>
+<td><code>midend::cfg</code></td>
+<td style="text-align: right;">1,209</td>
+<td><code>pcode</code> ×7, <code>cfg</code> ×3, <code>builder</code> ×1 (<code>resolve_lifted_direct_call_target</code>)</td>
+</tr>
+<tr>
+<td><code>midend::abi</code></td>
+<td style="text-align: right;">597</td>
+<td><code>pcode</code> ×4, <code>cspec</code> ×1, <code>arch</code> ×1</td>
+</tr>
+<tr>
+<td><code>cfg</code></td>
+<td style="text-align: right;">343</td>
+<td><code>midend::structuring_cfg_edges</code> ×1</td>
+</tr>
+<tr>
+<td><code>arch</code></td>
+<td style="text-align: right;">270</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>Cycles: <code>render</code> calls <code>midend</code> print functions ×25 and <code>midend</code> (orchestrate,
+mod) calls <code>render</code> ×8.</p>
+<h3 id="what-each-dependent-imports-from-fission-pcode">What each dependent imports from <code>fission-pcode</code><a class="headerlink" href="#what-each-dependent-imports-from-fission-pcode" title="Permanent link">&para;</a></h3>
+<p>Use trees were expanded, so grouped imports are counted. Comments are excluded.</p>
+<table>
+<thead>
+<tr>
+<th>Dependent</th>
+<th style="text-align: right;">IR types (<code>pcode</code>)</th>
+<th style="text-align: right;"><code>cfg</code></th>
+<th><code>midend</code> / render</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fission-sleigh</code></td>
+<td style="text-align: right;">43</td>
+<td style="text-align: right;">4 (<code>AddressCfgSnapshot</code>, <code>AddressEdge</code>)</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>fission-emulator</code></td>
+<td style="text-align: right;">41 (<code>ir</code>)</td>
+<td style="text-align: right;">0</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>fission-dir</code></td>
+<td style="text-align: right;">14</td>
+<td style="text-align: right;">0</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>fission-static</code></td>
+<td style="text-align: right;">29</td>
+<td style="text-align: right;">0</td>
+<td>8: <code>structuring_cfg_edges</code> ×2, <code>cspec</code> ×2, <code>RegisterNamer</code>, <code>infer_entry_register_param_arity</code>, <code>seed_nir_render_options</code>, <code>NirRenderOptions</code></td>
+</tr>
+<tr>
+<td><code>fission-decompiler</code></td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">0</td>
+<td>29: <code>cspec</code>, <code>PreHir*</code>, <code>build_raw_hir</code>, <code>NirFunctionHints</code>, …</td>
+</tr>
+</tbody>
+</table>
+<p>Only <code>fission-decompiler</code> genuinely needs the pipeline. The other four need the
+IR, the address-CFG snapshot, and (for <code>static</code>) a handful of cspec/abi helpers.</p>
+<h2 id="candidates">Candidates<a class="headerlink" href="#candidates" title="Permanent link">&para;</a></h2>
+<p>Names are working names.</p>
+<h3 id="a-fission-pcode-ir-the-p-code-ir-leaf">A. <code>fission-pcode-ir</code>: the p-code IR leaf<a class="headerlink" href="#a-fission-pcode-ir-the-p-code-ir-leaf" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Contents:</strong> <code>src/pcode</code> (5,946), <code>src/arch</code> (270), <code>src/cfg</code> (343) and
+  <code>midend/cfg.rs</code> (1,209), about 7.8k lines.</li>
+<li><strong>Why it is clean:</strong> <code>pcode</code> and <code>arch</code> have no workspace imports; <code>src/pcode</code>
+  has one <code>pub(crate)</code> item and no deep paths used from <code>midend</code> or <code>render</code>.</li>
+<li><strong>Prerequisites:</strong> (1) <code>cfg/export.rs</code> calls <code>midend::structuring_cfg_edges</code>,
+  which lives in <code>midend/cfg.rs</code>; moving both resolves it. (2) <code>midend/cfg.rs</code>
+  calls one builder function (<code>resolve_lifted_direct_call_target</code>); relocate or
+  copy that helper. (3) <code>fission-pcode</code> re-exports the moved items under the same
+  paths (<code>fission_pcode::{Pcode*, Varnode, arch, cfg, ir}</code>), so the five
+  dependents keep compiling unchanged.</li>
+<li><strong>Fan-out effect alone:</strong> the leaf (estimated 5.7 s) no longer rebuilds when a
+  lower-layer crate changes. Replay: <strong>4.7 % less rebuild work</strong> (see table).
+  By itself it is weak, because <code>sleigh</code>, <code>emulator</code> and <code>dir</code> still reach
+  <code>fission-pcode</code> through <code>static</code> and <code>decompiler</code>.</li>
+<li><strong>Risk: low.</strong> Public paths are preserved by re-exports. Watch for private
+  helpers shared with <code>midend</code> (none found), <code>#![forbid(unsafe_code)]</code> and
+  serde derives in the new crate, and benches/examples that import by path.</li>
+</ul>
+<h3 id="b-fission-cspec-calling-convention-register-model">B. <code>fission-cspec</code>: calling-convention / register model<a class="headerlink" href="#b-fission-cspec-calling-convention-register-model" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Contents:</strong> <code>midend/cspec</code> (5,127), <code>midend/abi.rs</code> (597,
+  <code>infer_entry_register_param_arity</code>) and <code>seed_nir_render_options</code>
+  (<code>midend/mod.rs</code>). About 5.7k lines plus a small function.</li>
+<li><strong>Dependencies:</strong> <code>fission-midend-core</code> (<code>NirRenderOptions</code>), <code>fission-loader</code>
+  (<code>LoadedBinary</code>), the leaf from A; <code>RegisterNamer</code> stays re-exported.</li>
+<li><strong>Prerequisite and ADR impact:</strong> <a href="../../adr/0012-midend-rename-and-crate-extraction/">ADR 0012</a>
+  says <code>seed_nir_render_options</code> and the other p-code adapters remain in
+  <code>fission-pcode</code>. This candidate moves one of them (not
+  <code>nir_admission_facts_from_pcode</code>), so the ADR needs an amendment.</li>
+<li><strong>Fan-out effect alone:</strong> small, about 0.6 % beyond A (its 4.4 s estimated
+  cost). Its value is that it is what lets <code>fission-static</code> stop depending on
+  <code>fission-pcode</code> (candidate S).</li>
+<li><strong>Risk: medium.</strong> New dependency on the loader from a crate that today sits
+  inside <code>fission-pcode</code>; cspec behaviour feeds register naming everywhere, so
+  the byte-identical gate must be run on both O0 and O2 rows.</li>
+</ul>
+<h3 id="s-decouple-fission-static-from-fission-pcode-requires-a-and-b">S. Decouple <code>fission-static</code> from <code>fission-pcode</code> (requires A and B)<a class="headerlink" href="#s-decouple-fission-static-from-fission-pcode-requires-a-and-b" title="Permanent link">&para;</a></h3>
+<p><code>fission-static</code> uses 29 IR references and the eight helpers listed above. After A
+and B every one of them lives in the leaf or <code>fission-cspec</code>, so <code>static</code>
+(including its dev-dependency on <code>fission-pcode</code>) can depend on those two
+crates instead. This is a mechanical import change.</p>
+<ul>
+<li><strong>Why it matters:</strong> <code>static</code> is on the path to <code>sleigh</code> (dev), <code>emulator</code> and
+  <code>dir</code>; cutting it removes them from the rebuild set of a <code>fission-pcode</code>
+  change.</li>
+<li><strong>Fan-out effect (A + B + S):</strong> a change in <code>fission-pcode</code> rebuilds
+  <strong>175 s instead of 350 s</strong>, and only <code>cli</code>, <code>decompiler</code>, <code>dir</code> and <code>pcode</code>
+  (before: also <code>dynamic</code>, <code>emulator</code>, <code>script</code>, <code>sleigh</code>, <code>static</code>). Replay:
+  <strong>19.5 % less rebuild work</strong>, median commit 350 s → 213 s.</li>
+<li><strong>Risk: medium.</strong> Pays off only together with A and B. If a helper turns out to
+  need <code>PreviewBuilder</code> internals, S is partly blocked; <code>cargo check -p
+  fission-static</code> after the import switch is the test.</li>
+</ul>
+<h3 id="f-remove-fission-pcodes-dev-dependencies-on-sleigh-and-static">F. Remove <code>fission-pcode</code>'s dev-dependencies on <code>sleigh</code> and <code>static</code><a class="headerlink" href="#f-remove-fission-pcodes-dev-dependencies-on-sleigh-and-static" title="Permanent link">&para;</a></h3>
+<p>Only one file uses them:
+<code>crates/fission-pcode/tests/cfg_ghidra_parity_fixtures.rs</code>. Moving it into
+<code>crates/fission-sleigh/tests/</code> (which already dev-depends on <code>static</code>) removes
+both dev edges. With A done it needs only the leaf (<code>AddressCfgSnapshot</code>,
+<code>structuring_cfg_edges</code>).</p>
+<ul>
+<li><strong>Fan-out effect alone:</strong> 3.2 % less rebuild work: a change in <code>sleigh</code>
+  stops rebuilding <code>fission-pcode</code>'s 66 s test unit (309 s → 242 s per change).
+  It adds to A+B+S: 22.4 % in total.</li>
+<li><strong>Risk: low.</strong> One file, test-only. A dev cycle between <code>sleigh</code> and <code>static</code>
+  remains and is out of scope.</li>
+</ul>
+<h3 id="considered-and-not-recommended">Considered and not recommended<a class="headerlink" href="#considered-and-not-recommended" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Extract <code>render</code> (16,099 lines).</strong> <code>render</code> and <code>midend</code> call each other
+  (25 and 8 references), and <code>fission-pcode</code> would still depend on a <code>render</code>
+  crate, so a render change would rebuild <code>fission-pcode</code> anyway: no fan-out gain.</li>
+<li><strong>Extract <code>builder</code> (67,301 lines).</strong> <code>structuring</code> and <code>pass</code> call back into it
+  (2 + 2 references), <code>PreviewBuilder</code> implements <code>StructuringHost</code>, and
+  <code>fission-decompiler</code> needs the pipeline anyway, so no dependent would be
+  isolated. High risk, no measured gain.</li>
+<li><strong>Move the 30,419 in-crate test lines to <code>tests/</code>.</strong> Each file becomes its own
+  test binary with its own link, and the tests use crate-private items.</li>
+</ul>
+<h2 id="combined-effect-model-183-commits">Combined effect (model, 183 commits)<a class="headerlink" href="#combined-effect-model-183-commits" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Candidates</th>
+<th style="text-align: right;">Total rebuild work</th>
+<th style="text-align: right;">Mean / commit</th>
+<th style="text-align: right;">Median</th>
+<th style="text-align: right;">p90</th>
+<th style="text-align: right;">Saved vs now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>none (current)</td>
+<td style="text-align: right;">57,327 s</td>
+<td style="text-align: right;">313.3 s</td>
+<td style="text-align: right;">350.4 s</td>
+<td style="text-align: right;">472.3 s</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td>A</td>
+<td style="text-align: right;">54,617 s</td>
+<td style="text-align: right;">298.5 s</td>
+<td style="text-align: right;">344.5 s</td>
+<td style="text-align: right;">446.4 s</td>
+<td style="text-align: right;">4.7 %</td>
+</tr>
+<tr>
+<td>A + B</td>
+<td style="text-align: right;">54,289 s</td>
+<td style="text-align: right;">296.7 s</td>
+<td style="text-align: right;">340.0 s</td>
+<td style="text-align: right;">446.4 s</td>
+<td style="text-align: right;">5.3 %</td>
+</tr>
+<tr>
+<td>F</td>
+<td style="text-align: right;">55,517 s</td>
+<td style="text-align: right;">303.4 s</td>
+<td style="text-align: right;">350.4 s</td>
+<td style="text-align: right;">472.3 s</td>
+<td style="text-align: right;">3.2 %</td>
+</tr>
+<tr>
+<td>A + B + S</td>
+<td style="text-align: right;">46,156 s</td>
+<td style="text-align: right;">252.2 s</td>
+<td style="text-align: right;">213.2 s</td>
+<td style="text-align: right;">446.4 s</td>
+<td style="text-align: right;">19.5 %</td>
+</tr>
+<tr>
+<td>A + B + S + F</td>
+<td style="text-align: right;">44,498 s</td>
+<td style="text-align: right;">243.2 s</td>
+<td style="text-align: right;">213.2 s</td>
+<td style="text-align: right;">446.4 s</td>
+<td style="text-align: right;">22.4 %</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>The p90 does not move: commits that touch the bottom of the graph (<code>core</code>,
+  <code>loader</code>, <code>signatures</code>, <code>midend-*</code>) rebuild almost everything in every variant.</li>
+<li>These are model results on estimated split costs. They are an argument for the
+  order of work, not a promise: the success criterion below is a re-measurement.</li>
+<li>The saving is in <em>compile</em> unit time. CI test selection is by affected
+  crate, so a smaller affected set should also shorten test execution; that was
+  not measured.</li>
+</ul>
+<h2 id="beyond-this-proposal">Beyond this proposal<a class="headerlink" href="#beyond-this-proposal" title="Permanent link">&para;</a></h2>
+<p>Splitting <code>fission-pcode</code> addresses about a fifth of the replay cost at best. The
+rest sits lower: <code>fission-midend-normalize</code> (18 %), <code>fission-loader</code> (15 %) and
+<code>fission-signatures</code> (8 %) are changed often and almost everything depends on
+them. Before proposing anything there, check what those commits actually touch
+(for example whether <code>loader</code> or <code>signatures</code> changes are data/format code that
+the pipeline above does not read), as a separate measured proposal.</p>
+<h2 id="order-of-work">Order of work<a class="headerlink" href="#order-of-work" title="Permanent link">&para;</a></h2>
+<p>One crate per pull request, each independently revertable:</p>
+<ol>
+<li><strong>F</strong> (one file, no dependencies on the others). Re-measure.</li>
+<li><strong>A</strong>, with re-exports so no dependent changes. Re-measure.</li>
+<li><strong>B</strong>, with the ADR 0012 amendment.</li>
+<li><strong>S</strong>: switch <code>fission-static</code>'s imports. This is the step that moves the
+   numbers; if it is blocked, stop and reassess before B is worth keeping.</li>
+</ol>
+<h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">&para;</a></h2>
+<p>For every step:</p>
+<ul>
+<li><strong>Behaviour unchanged:</strong> the 250-row DecBench sample-set gate, run with
+  <code>FISSION_BENCHMARK_NO_CACHE=1</code> on a release <code>fission_cli</code> built from <code>main</code>
+  and from the change, must give byte-identical per-function dumps. This is the
+  method used for the <code>CircleRange</code> change. The gate needs the eval kit under
+  <code>vendor/decbench-evalkit/</code>.</li>
+<li><code>cargo check --workspace</code>, <code>cargo nextest run</code> for the affected crates (both
+  the dev and test profiles), <code>cargo fmt --all --check</code>.</li>
+<li><strong>Effect re-measured, not assumed:</strong> rerun the <code>--timings</code> build and the
+  commit replay with the new crate graph and report the actual numbers next to
+  the model's. No saving is claimed before that.</li>
+<li>Update <a href="../../adr/0012-midend-rename-and-crate-extraction/">ADR 0012</a>,
+  <code>docs/PROJECT_MAP.md</code>, and the child <code>AGENTS.md</code> files that name
+  <code>crates/fission-pcode/src/...</code> paths.</li>
+</ul>
+<h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Are <code>infer_entry_register_param_arity</code> and <code>seed_nir_render_options</code> the only
+  <code>midend</code> items <code>fission-static</code> needs? The import scan says yes for <code>src/</code> and
+  <code>tests/</code>; <code>cargo check</code> after the switch is the proof.</li>
+<li>Does <code>midend/cfg.rs</code> have users inside <code>midend</code> that would need the leaf crate
+  as a new dependency edge? (<code>builder</code> uses it ×11; that edge goes <code>pcode</code> →
+  leaf, which is the intended direction.)</li>
+<li>Is a smaller <code>lib-test</code> achievable without moving tests? The 30k lines of
+  in-crate tests are why <code>fission-pcode</code>'s test unit is 1.6× its library.</li>
+</ul>
+<h2 id="results-after-f-a-b-and-s-measured-2026-10-29">Results after F, A, B and S (measured 2026-10-29)<a class="headerlink" href="#results-after-f-a-b-and-s-measured-2026-10-29" title="Permanent link">&para;</a></h2>
+<p>Steps F (<a href="https://github.com/fission-systems/Fission/pull/694">#694</a>), A
+(<a href="https://github.com/fission-systems/Fission/pull/695">#695</a>), B
+(<a href="https://github.com/fission-systems/Fission/pull/696">#696</a>) and S
+(<a href="https://github.com/fission-systems/Fission/pull/697">#697</a>) were implemented, each with a
+byte-identical sample-set dump (233 rows, O0 and O2) and an unchanged <code>nextest</code> count.
+These are mechanical changes; none of them is a decompiler-quality claim.</p>
+<p><strong>What differed from the plan</strong></p>
+<ul>
+<li><code>midend/cfg.rs</code> moved only in part (the p-code-only block CFG functions, about 760 lines
+  with tests). The LSDA, no-return and PreHir-expression parts need the loader, call
+  summaries or midend types and stayed, so the <code>resolve_lifted_direct_call_target</code>
+  back-edge never arose. Total moved into the leaf: about 7.3k lines.</li>
+<li><code>abi.rs</code> moved only in part: <code>infer_entry_register_param_arity</code>. <code>AbiState</code> and the
+  providers are bound to builder types. The address-space ids and the register/unique
+  varnode predicates, shared by both sides, went to the leaf instead.</li>
+<li>S also switched <code>fission-sleigh</code>, <code>fission-emulator</code> and <code>fission-dir</code> (not just
+  <code>fission-static</code>) to the leaf. Without that, <code>sleigh</code> and <code>emulator</code> still reached
+  <code>fission-pcode</code> and the fan-out did not shrink. The answer to the first open question is
+  yes: <code>cargo check</code> after the import switch passes. Only <code>fission-decompiler</code> now depends
+  on <code>fission-pcode</code> directly (<code>dir</code> through a dev edge, <code>cli</code> through the decompiler).</li>
+</ul>
+<p><strong>Measured rebuild fan-out</strong> (CI-like: <code>CARGO_INCREMENTAL=0</code>, <code>CARGO_BUILD_JOBS=4</code>,
+<code>cargo test --no-run --workspace --locked --timings</code>; one touch of a single source file after a
+cold build, one run per cell, so the wall times carry run-to-run noise):</p>
+<table>
+<thead>
+<tr>
+<th>Touched file</th>
+<th>Crates whose units rebuilt, before</th>
+<th>after</th>
+<th style="text-align: right;">Wall, before</th>
+<th style="text-align: right;">after</th>
+<th style="text-align: right;">Summed unit time, before</th>
+<th style="text-align: right;">after</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fission-pcode/src/midend/structuring/mod.rs</code></td>
+<td>sleigh, emulator, cli, pcode, static, decompiler, script, dynamic, dir</td>
+<td>pcode, cli, decompiler, dir</td>
+<td style="text-align: right;">114 s</td>
+<td style="text-align: right;">45 s</td>
+<td style="text-align: right;">372 s</td>
+<td style="text-align: right;">128 s</td>
+</tr>
+<tr>
+<td><code>fission-sleigh/src/lib.rs</code></td>
+<td>pcode, emulator, sleigh, cli, static, decompiler, dir, script, dynamic</td>
+<td>emulator, sleigh, cli, static, decompiler, dir, script, dynamic</td>
+<td style="text-align: right;">83 s</td>
+<td style="text-align: right;">62 s</td>
+<td style="text-align: right;">307 s</td>
+<td style="text-align: right;">211 s</td>
+</tr>
+<tr>
+<td>p-code IR module (<code>pcode</code>, now <code>pcode-ir</code>)</td>
+<td>everything above</td>
+<td>everything above plus the two new crates</td>
+<td style="text-align: right;">92 s</td>
+<td style="text-align: right;">86 s</td>
+<td style="text-align: right;">329 s</td>
+<td style="text-align: right;">318 s</td>
+</tr>
+<tr>
+<td>cspec module</td>
+<td>everything above</td>
+<td>same, cspec itself small</td>
+<td style="text-align: right;">92 s</td>
+<td style="text-align: right;">78 s</td>
+<td style="text-align: right;">311 s</td>
+<td style="text-align: right;">263 s</td>
+</tr>
+<tr>
+<td><code>fission-static/src/lib.rs</code></td>
+<td>emulator, cli, pcode, static, sleigh, decompiler, script, dynamic, dir</td>
+<td>emulator, cli, static, sleigh, decompiler, script, dynamic, dir</td>
+<td style="text-align: right;">72 s</td>
+<td style="text-align: right;">60 s</td>
+<td style="text-align: right;">226 s</td>
+<td style="text-align: right;">201 s</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>The case the split targets, an edit inside the midend, drops from nine rebuilt crates
+  to four and from 114 s to 45 s of wall time. That is the 175 s versus 350 s direction the
+  model predicted, at a smaller absolute scale because the cold-build dependency cost is
+  cached here.</li>
+<li>Edits at the bottom (the IR itself) gain almost nothing: everything depends on them,
+  and the split adds two small crates to the rebuild.</li>
+<li><strong>CI test selection</strong> (<code>scripts/ci/select_affected_crates.py</code>) for a midend edit shrinks from
+  <code>cli, decompiler, dir, dynamic, emulator, pcode, script, sleigh, static</code> to
+  <code>cli, decompiler, dir, pcode</code>. A <code>fission-sleigh</code> or <code>fission-static</code> edit no longer selects
+  <code>fission-pcode</code> (tests that were 66 s of unit time).</li>
+</ul>
+<p><strong>Not measured</strong>: the 183-commit replay was not rerun on the new graph, so the 19.5 % figure
+remains the model's. The wall times above are single runs. Actual CI wall time on pull requests
+has not been observed yet; compare it over the next merges before claiming a CI speed-up.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
