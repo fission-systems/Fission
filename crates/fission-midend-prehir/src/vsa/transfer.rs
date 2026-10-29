@@ -38,9 +38,20 @@ pub fn eval_expr(expr: &PreHirExpr, env: &RangeEnv) -> CircleRange {
             eval_unary(*op, src, bits)
         }
         PreHirExpr::Binary { op, lhs, rhs, ty } => {
-            let bits = nir_bits(ty).unwrap_or(64);
             let a = eval_expr(lhs, env);
             let b = eval_expr(rhs, env);
+            if is_comparison(*op) {
+                // The result is a Bool, but the operands live in their own domain:
+                // reading them at the 1-bit result width truncates both sides and
+                // makes `1 <s 0` come out true.
+                return if a.bits() == b.bits() {
+                    eval_binary(*op, a, b, a.bits())
+                } else {
+                    // Mixed widths would need a sign decision this domain does not carry.
+                    CircleRange::top(1)
+                };
+            }
+            let bits = nir_bits(ty).unwrap_or(64);
             eval_binary(*op, a, b, bits)
         }
         // For complex expressions (loads, calls, etc.) we conservatively
@@ -220,6 +231,11 @@ fn eval_binary(op: PreHirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) ->
     }
 }
 
+fn is_comparison(op: PreHirBinaryOp) -> bool {
+    use PreHirBinaryOp::*;
+    matches!(op, Eq | Ne | Lt | Le | Gt | Ge | SLt | SLe | SGt | SGe)
+}
+
 fn eval_cmp(op: PreHirBinaryOp, a: u64, b: u64, bits: u32) -> u64 {
     use PreHirBinaryOp::*;
     let result = match op {
@@ -300,10 +316,10 @@ mod review_precision_regressions {
             ty: u32_ty(),
         };
         let result = eval_expr(&comparison(sum), &RangeEnv::new());
-        assert_ne!(
+        assert_eq!(
             result.singleton_value(),
-            Some(1),
-            "signed (1 + 0) < 0 is false; analysis must not prove it true"
+            Some(0),
+            "signed (1 + 0) < 0 is false"
         );
     }
 }

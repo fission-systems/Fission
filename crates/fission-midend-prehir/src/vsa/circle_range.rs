@@ -259,15 +259,22 @@ impl CircleRange {
         if self.is_bottom() || other.is_bottom() {
             return Self::bottom(self.bits);
         }
+        let Some(span) = self.minkowski_span(other) else {
+            return Self::top(self.bits);
+        };
         let mask = Self::mask(self.bits);
         let lo = self.lo.wrapping_add(other.lo) & mask;
-        let hi = self.hi.wrapping_add(other.hi).wrapping_sub(1) & mask;
-        // If lo == hi after wrapping, conservative top.
-        if lo == hi {
-            Self::top(self.bits)
-        } else {
-            Self::interval(lo, hi.wrapping_add(1) & mask, self.bits)
-        }
+        // `span` consecutive values from `lo`; the upper bound is exclusive.
+        Self::interval(lo, lo.wrapping_add(span as u64) & mask, self.bits)
+    }
+
+    /// Element count of `{a + b}` / `{a - b}` over two non-empty, non-top ranges:
+    /// `count(A) + count(B) - 1`. `None` once that reaches 2^bits: the result
+    /// covers the whole circle, which the wrapped endpoints alone cannot say (they
+    /// would describe a smaller, unsound interval).
+    fn minkowski_span(&self, other: &Self) -> Option<u128> {
+        let span = self.count() + other.count() - 1;
+        (span < (1u128 << self.bits)).then_some(span)
     }
 
     /// `a - b` (unsigned, wrapping).
@@ -278,14 +285,13 @@ impl CircleRange {
         if self.is_bottom() || other.is_bottom() {
             return Self::bottom(self.bits);
         }
+        let Some(span) = self.minkowski_span(other) else {
+            return Self::top(self.bits);
+        };
         let mask = Self::mask(self.bits);
+        // The smallest difference is `self.lo - (other.hi - 1)`.
         let lo = self.lo.wrapping_sub(other.hi).wrapping_add(1) & mask;
-        let hi = self.hi.wrapping_sub(other.lo) & mask;
-        if lo == hi {
-            Self::top(self.bits)
-        } else {
-            Self::interval(lo, hi, self.bits)
-        }
+        Self::interval(lo, lo.wrapping_add(span as u64) & mask, self.bits)
     }
 
     /// Logical right-shift by a constant `k`.
@@ -427,6 +433,76 @@ impl CircleRange {
 #[cfg(test)]
 mod tests {
     use super::CircleRange;
+
+    #[test]
+    fn adding_singletons_gives_the_singleton_sum() {
+        for bits in [8, 32, 64] {
+            for (a, b) in [(0u64, 0u64), (5, 10), (200, 100), (u64::MAX, 1)] {
+                let sum = CircleRange::singleton(a, bits).add(&CircleRange::singleton(b, bits));
+                assert_eq!(
+                    sum,
+                    CircleRange::singleton(a.wrapping_add(b), bits),
+                    "{a} + {b} at {bits} bits"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn subtracting_singletons_gives_the_singleton_difference() {
+        for bits in [8, 32, 64] {
+            for (a, b) in [(0u64, 0u64), (10, 5), (5, 10), (0, 1)] {
+                let diff = CircleRange::singleton(a, bits).sub(&CircleRange::singleton(b, bits));
+                assert_eq!(diff, CircleRange::singleton(a.wrapping_sub(b), bits));
+            }
+        }
+    }
+
+    /// Exhaustive at 4 bits over every non-empty, non-top arc pair: the result
+    /// holds every `a op b` and, unless it is top, nothing else.
+    #[test]
+    fn add_and_sub_are_the_exact_minkowski_set() {
+        let n = 16u64;
+        let members = |r: &CircleRange| -> Vec<u64> {
+            (0..n)
+                .filter(|v| r.is_top() || (v.wrapping_sub(r.lo) & (n - 1)) < r.count() as u64)
+                .collect()
+        };
+        let mut ranges = Vec::new();
+        for lo in 0..n {
+            for len in 1..n {
+                ranges.push(CircleRange::interval(lo, (lo + len) & (n - 1), 4));
+            }
+        }
+        type Op = fn(u64, u64) -> u64;
+        let ops: [(&str, Op, Op); 2] = [
+            (
+                "add",
+                |x, y| x.wrapping_add(y) & 15,
+                |x, y| x.wrapping_add(y) & 15,
+            ),
+            (
+                "sub",
+                |x, y| x.wrapping_sub(y) & 15,
+                |x, y| x.wrapping_sub(y) & 15,
+            ),
+        ];
+        for a in &ranges {
+            for b in &ranges {
+                let (am, bm) = (members(a), members(b));
+                for (name, _, f) in &ops {
+                    let got = if *name == "add" { a.add(b) } else { a.sub(b) };
+                    let mut want: Vec<u64> = am
+                        .iter()
+                        .flat_map(|&x| bm.iter().map(move |&y| f(x, y)))
+                        .collect();
+                    want.sort_unstable();
+                    want.dedup();
+                    assert_eq!(members(&got), want, "{name}: {a:?}, {b:?} -> {got:?}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn widening_lateral_slide_reaches_top() {
