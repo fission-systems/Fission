@@ -35,9 +35,7 @@ fn typed_render_output_owns_all_pipeline_observations() {
 
     let output = render_nir_with_context_output(&func, "mod_ll", 0x2000, &options, None, None)
         .expect("typed preview render");
-    let layered = output.layered.as_ref().expect("layered output");
 
-    assert_eq!(output.code, layered.nir);
     assert_eq!(legacy_code, output.code);
     assert!(output.raw_hir.is_some());
     assert!(output.prehir.is_some());

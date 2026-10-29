@@ -46,8 +46,8 @@ pub struct DecompArgs {
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 
-    /// Pseudocode layer: nir (accuracy-selected), hir (readable), both
-    #[arg(long = "layer", value_name = "LAYER", value_parser = ["nir", "hir", "both"])]
+    /// Deprecated and ignored: there is a single output surface (HIR).
+    #[arg(long = "layer", value_name = "LAYER", value_parser = ["nir", "hir", "both"], hide = true)]
     pub layer: Option<String>,
 
     /// Also emit the mutable PreHIR body captured before structuring.

@@ -3,7 +3,7 @@
 
 PreHIR is the flattened, goto/label-based body the structuring stage receives
 as input; HIR is its final structured output (if/while/for). Both are exposed
-by `fission_cli decomp --prehir --json` (`code_prehir`/`code_hir` fields),
+by `fission_cli decomp --prehir --json` (`code_prehir`/`code` fields),
 which are projected from the typed render result rather than ambient snapshot
 state.
 
@@ -189,8 +189,6 @@ def decompile_all_with_prehir(
             "--timeout-ms",
             str(timeout_ms),
             "--json",
-            "--layer",
-            "both",
             "--prehir",
             str(binary),
         ],
@@ -230,7 +228,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         functions = decompile_all_with_prehir(cli, binary_path, args.limit, args.timeout_ms)
         for fn in functions:
             prehir_code = fn.get("code_prehir")
-            hir_code = fn.get("code_hir")
+            hir_code = fn.get("code")
             if not prehir_code or not hir_code:
                 unsupported += 1
                 continue
@@ -249,7 +247,7 @@ def cmd_check(args: argparse.Namespace) -> int:
                 low.append(f"{key} -- {detail}")
 
     print(
-        f"checked {checked} functions ({unsupported} skipped: no code_prehir/code_hir)",
+        f"checked {checked} functions ({unsupported} skipped: no code_prehir/code)",
         file=sys.stderr,
     )
 

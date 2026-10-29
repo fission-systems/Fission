@@ -3,9 +3,12 @@ use fission_loader::loader::types::LoaderSymbolKind;
 
 /// What a structuring is being selected *for*.
 ///
-/// The NIR/HIR split is this choice, not a printing difference. It lives on
-/// the render options rather than in an environment variable so the two
-/// layers can ask for different structurings of the same function.
+/// There is one output surface and one structuring per function, selected
+/// on `NodeEstimate`. `Jumps` is the pre-2026-09-06 objective, kept as an
+/// explicit option so a caller (or a measurement) can ask for it; nothing in
+/// the pipeline selects it on its own any more. It lives on the render
+/// options rather than in an environment variable so the choice travels with
+/// the call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum SelectionAxis {
     /// Fewest CFG nodes as Joern counts them -- the axis VJ-GED scores.
@@ -65,16 +68,6 @@ pub struct NirRenderOptions {
     /// Which objective alternative structurings are judged against.
     #[serde(default)]
     pub selection_axis: SelectionAxis,
-    /// Build each layer from its own structuring instead of sharing one.
-    ///
-    /// Off by default, and deliberately: the scored layer already gets the
-    /// accuracy objective through [`Self::selection_axis`], so the second
-    /// build buys a *readability* variant and nothing else. It costs a full
-    /// second pipeline run on the functions where the two objectives
-    /// disagree -- measured at 19% (x86) to 33% (ARM) of the functions that
-    /// reach alternative structuring -- so it is opt-in.
-    #[serde(default)]
-    pub dual_layer_structuring: bool,
     #[serde(default)]
     pub conservative_irreducible_fallback: bool,
     #[serde(default)]
@@ -713,7 +706,6 @@ impl NirRenderOptions {
             // passes, which is what makes the split per-layer rather than
             // per-process.
             selection_axis: SelectionAxis::from_env(),
-            dual_layer_structuring: false,
         };
         // SLA register map seeding lives in `fission-pcode` (cspec / register model)
         // so this crate does not depend on SLEIGH language resources. Callers that
@@ -1141,25 +1133,18 @@ mod selection_axis_tests {
     /// -- which is what a process-wide switch forces -- makes one of them a
     /// relabelling of the other.
     #[test]
-    fn the_two_modes_can_be_asked_for_independently() {
-        let mut scored = NirRenderOptions::default();
-        let mut readable = NirRenderOptions::default();
-        scored.selection_axis = SelectionAxis::NodeEstimate;
-        readable.selection_axis = SelectionAxis::Jumps;
-        assert_ne!(scored.selection_axis, readable.selection_axis);
+    fn the_axis_travels_with_the_options() {
+        let mut node = NirRenderOptions::default();
+        let mut jumps = NirRenderOptions::default();
+        node.selection_axis = SelectionAxis::NodeEstimate;
+        jumps.selection_axis = SelectionAxis::Jumps;
+        assert_ne!(node.selection_axis, jumps.selection_axis);
     }
 
     /// Accuracy is what ships unless something asks otherwise.
     #[test]
     fn the_default_objective_is_the_scored_one() {
         assert_eq!(SelectionAxis::default(), SelectionAxis::NodeEstimate);
-    }
-
-    /// And the second build is opt-in, because the scored layer already gets
-    /// the accuracy objective without it.
-    #[test]
-    fn dual_layer_structuring_is_off_by_default() {
-        assert!(!NirRenderOptions::default().dual_layer_structuring);
     }
 }
 

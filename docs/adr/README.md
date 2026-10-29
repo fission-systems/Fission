@@ -18,5 +18,6 @@ Short, durable decisions complement [`docs/architecture/ARCHITECTURE.md`](../arc
 | [0012](0012-midend-rename-and-crate-extraction.md) | Midend rename + normalize/structuring crate extraction roadmap |
 | [0013](0013-print-expr-vs-dual-layer-printer.md) | Diagnostic `print_expr` vs dual-layer C printer |
 | [0014](0014-dir-product-vs-prestructure-substrate.md) | Dual reconstruction paths — product DIR vs pre-structure substrate |
+| [0015](0015-single-output-surface.md) | One output surface — HIR over an accuracy-selected tree (amends 0011) |
 
 New decisions: copy [`0000-template.md`](0000-template.md), bump the next number, link from this table.

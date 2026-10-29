@@ -1,4 +1,4 @@
-use fission_decompiler::{NirBuildStats, NirHintStats, PseudocodeLayer};
+use fission_decompiler::{NirBuildStats, NirHintStats};
 use fission_loader::loader::FunctionInfo;
 
 #[derive(Clone, Copy)]
@@ -10,8 +10,6 @@ pub(crate) struct RenderConfig {
     pub debug_decomp_bundle: bool,
     pub requested_address: Option<u64>,
     pub timeout_ms: Option<u64>,
-    /// Pseudocode surface selection (`nir` / `hir` / `both`).
-    pub layer: PseudocodeLayer,
     /// Also capture/render PreHIR alongside NIR/HIR (`decomp --prehir`).
     pub prehir: bool,
 }
@@ -19,18 +17,12 @@ pub(crate) struct RenderConfig {
 pub(crate) struct CliRustDecompileRecord {
     pub func: FunctionInfo,
     pub outcome: CliRustOutcome,
-    /// Layer selected for this render (drives plain text + JSON primary code).
-    pub layer: PseudocodeLayer,
 }
 
 pub(crate) enum CliRustOutcome {
     Success {
-        /// NIR-faithful mechanical C (oracle / default `code` for non-HIR layer).
+        /// The single output surface (HIR presentation of the structured tree).
         code: String,
-        /// Dual NIR surface when dual render is available.
-        code_nir: Option<String>,
-        /// Dual HIR surface when dual render is available.
-        code_hir: Option<String>,
         /// PreHIR text, only present when `RenderConfig::prehir` was set.
         code_prehir: Option<String>,
         fell_back: bool,
@@ -41,8 +33,7 @@ pub(crate) enum CliRustOutcome {
         /// Recovered variables, so a consumer does not have to parse them
         /// back out of the printed declarations.
         variables: Vec<fission_decompiler::RecoveredVariable>,
-        nir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
-        hir_line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
+        line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
     },
     AssemblyFallback {
         fallback_code: String,

@@ -66,8 +66,13 @@ fn multi_block_preview_lowers_wrapped_branch_condition_without_failing() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "wrapped_branch", 0x3900, &preview_options())
-        .expect("preview render");
+    let code = crate::midend::render_mechanical_preview(
+        &func,
+        "wrapped_branch",
+        0x3900,
+        &preview_options(),
+    )
+    .expect("preview render");
     assert!(code.contains("return 0;"));
     assert!(code.contains("return 1;"));
 }

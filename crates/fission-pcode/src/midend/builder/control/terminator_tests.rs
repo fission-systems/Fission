@@ -972,7 +972,8 @@ fn x86_32_diamond_return_join_recovers_eax_despite_epilogue() {
         ..Default::default()
     });
 
-    let code = render_mlil_preview(&pcode, "diamond_ret", 0x1000, &options).expect("render");
+    let code = crate::midend::render_mechanical_preview(&pcode, "diamond_ret", 0x1000, &options)
+        .expect("render");
     assert!(
         code.contains("return 1") || code.contains("return 0"),
         "expected diamond arms to recover EAX constants, got:\n{code}"
@@ -1119,7 +1120,8 @@ fn x86_32_epilogue_join_live_eax_when_pred_values_differ() {
         ..Default::default()
     });
 
-    let code = render_mlil_preview(&pcode, "sat_add_ret", 0x1000, &options).expect("render");
+    let code = crate::midend::render_mechanical_preview(&pcode, "sat_add_ret", 0x1000, &options)
+        .expect("render");
     // Must not emit bare `return;` — live primary return must appear.
     assert!(
         !code.contains("return;")

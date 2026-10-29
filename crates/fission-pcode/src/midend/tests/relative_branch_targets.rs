@@ -46,8 +46,9 @@ fn preview_supports_instruction_local_conditional_branch_targets() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "rel_cbranch", 0x5000, &preview_options())
-        .expect("preview render");
+    let code =
+        crate::midend::render_mechanical_preview(&func, "rel_cbranch", 0x5000, &preview_options())
+            .expect("preview render");
     assert!(code.contains("return 0;"), "{code}");
     assert!(code.contains("return 1;"), "{code}");
 }
@@ -196,8 +197,13 @@ fn preview_supports_instruction_local_conditional_branch_targets_over_8() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "rel_cbranch_over_8", 0x6200, &preview_options())
-        .expect("preview render");
+    let code = crate::midend::render_mechanical_preview(
+        &func,
+        "rel_cbranch_over_8",
+        0x6200,
+        &preview_options(),
+    )
+    .expect("preview render");
     assert!(code.contains("return 0;"), "{code}");
     assert!(code.contains("return 3;"), "{code}");
 }

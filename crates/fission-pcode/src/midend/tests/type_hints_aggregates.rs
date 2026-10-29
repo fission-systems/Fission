@@ -512,7 +512,7 @@ fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
 
     let context = get_client_rect_preview_type_context();
 
-    let rendered = render_mlil_preview_with_context(
+    let rendered = crate::midend::render_mechanical_preview_with_context(
         &func,
         "FUN_0x140006260",
         0x140006260,
@@ -644,7 +644,7 @@ fn preview_type_hints_fold_full_register_aggregate_store_back_to_local() {
 
     let context = get_client_rect_preview_type_context();
 
-    let rendered = render_mlil_preview_with_context(
+    let rendered = crate::midend::render_mechanical_preview_with_context(
         &func,
         "FUN_0x140006260",
         0x140006260,
@@ -792,7 +792,7 @@ fn preview_type_hints_fold_qword_lane_aggregate_store_back_to_local() {
 
     let context = get_client_rect_preview_type_context();
 
-    let rendered = render_mlil_preview_with_context(
+    let rendered = crate::midend::render_mechanical_preview_with_context(
         &func,
         "FUN_0x140006260",
         0x140006260,

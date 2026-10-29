@@ -136,13 +136,6 @@ pub(crate) fn finish_rust_sleigh_render(
     options.pe_x64_only = config.pe_x64_only;
     options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
     options.userops = userops;
-    // Two output modes, two structurings. NIR keeps a jump when removing it
-    // would cost CFG nodes; HIR removes it and pays with conditionals. Once
-    // both surfaces are presented the split costs the scored layer nothing
-    // (perfect 27 either way, distance 6,235 either way) and buys HIR
-    // goto 16 -> 5. `FISSION_DUAL_LAYER=0` shares one tree again.
-    options.dual_layer_structuring =
-        !std::env::var("FISSION_DUAL_LAYER").is_ok_and(|v| v == "0" || v == "false");
     apply_spec_overrides(binary, &mut options);
 
     let (selection, learned_facts) = select_nir_output_from_prebuilt_pcode_with_learned_facts(
@@ -165,15 +158,9 @@ pub(crate) fn finish_rust_sleigh_render(
         evidence
             .pipeline_stage_status
             .insert("nir_render".into(), "success".into());
-        let render_output = selection.render_output;
-        let layered = render_output
-            .as_ref()
-            .and_then(|output| output.layered.clone());
         return Ok(RustSleighDecompileResult {
             code,
-            code_nir: layered.as_ref().map(|l| l.nir.clone()),
-            code_hir: layered.as_ref().map(|l| l.hir.clone()),
-            render_output,
+            render_output: selection.render_output,
             fell_back: selection.fell_back,
             fallback_reason: selection.fallback_reason,
             build_stats: selection.build_stats,
@@ -198,8 +185,6 @@ pub(crate) fn finish_rust_sleigh_render(
             .insert("nir_render".into(), "pcode_dump_arch_unsupported".into());
         return Ok(RustSleighDecompileResult {
             code: render_pcode_text(name, pcode),
-            code_nir: None,
-            code_hir: None,
             render_output: None,
             fell_back: true,
             fallback_reason: Some("nir_unsupported_arch:pcode_dump".to_string()),

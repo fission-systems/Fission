@@ -51,7 +51,10 @@ REPO = Path(__file__).resolve().parent.parent.parent
 KIT = REPO / "vendor" / "decbench-evalkit" / "decbench-evalkit-sample-set"
 DEFAULT_BENCHMARK_ROOT = Path.home() / "fission-benchmark"
 BASELINE = Path(__file__).resolve().parent / "decbench_sample_set_baseline.json"
-LAYERS = ("nir", "hir")
+# One output surface. The key keeps the name `hir` so the stored floor and
+# per-function dumps stay comparable with measurements taken before the
+# NIR/HIR split was removed.
+LAYERS = ("hir",)
 JOERN_CHUNK = 60
 # Enough binaries to catch a broad regression in a couple of minutes; the
 # full run is what a submission is measured on.
@@ -201,7 +204,7 @@ def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None
         records = {}
         try:
             run = subprocess.run(
-                [str(cli), "decomp", str(KIT / "binaries" / anon), "--layer", "nir", "--json",
+                [str(cli), "decomp", str(KIT / "binaries" / anon), "--json",
                  "--no-header", "--no-warnings", "--addresses-file", str(addr_file)],
                 capture_output=True, text=True, timeout=900,
             )
@@ -241,7 +244,7 @@ def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None
         for index, unit in enumerate(units):
             if not (unit["rec"] and unit["fn"]):
                 continue
-            text = unit["rec"].get(f"code_{layer}") or unit["rec"]["code"]
+            text = unit["rec"]["code"]
             unique = f"{unit['fn']}_u{index}"
             batch[unique] = text.replace(declared_name(text, unit["addr"]), unique)
             unit[f"key_{layer}"] = unique
@@ -296,7 +299,7 @@ def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None
                 except Exception:
                     pass
             if gt.get(fn):
-                code = rec.get(f"code_{layer}") or rec["code"]
+                code = rec["code"]
                 decompiled = FunctionDecompilation(
                     name=fn, address=unit["addr"], decompiled_code=code,
                     line_count=code.count("\n") + 1, variables=api["variables"](rec),

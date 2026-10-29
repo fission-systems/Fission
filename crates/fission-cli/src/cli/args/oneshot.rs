@@ -37,7 +37,7 @@ pub struct OneShotArgs {
     pub count: usize,
     pub compiler_id: Option<String>,
     pub profile: Option<String>,
-    /// Pseudocode layer: `nir` | `hir` | `both` (see `fission_pcode::PseudocodeLayer`).
+    /// Deprecated and ignored: there is a single output surface (HIR).
     pub layer: Option<String>,
     /// Also capture/emit the pre-structuring snapshot carried by the typed
     /// render result (`decomp --prehir`).

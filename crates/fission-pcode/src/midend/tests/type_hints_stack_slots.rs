@@ -89,7 +89,7 @@ fn preview_type_hints_name_rsp_aggregate_slot_as_local() {
 
     let context = get_client_rect_preview_type_context();
 
-    let rendered = render_mlil_preview_with_context(
+    let rendered = crate::midend::render_mechanical_preview_with_context(
         &func,
         "FUN_0x140006260",
         0x140006260,
