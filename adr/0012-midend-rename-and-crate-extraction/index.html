@@ -1294,6 +1294,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#amendment-2026-10-29-p-code-leaf-crates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Amendment (2026-10-29): p-code leaf crates
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1441,7 +1452,9 @@ before crates).</p>
 <li>~~Scaffold <code>fission-midend-core</code> and route facade IR types through it.~~ <strong>Done</strong></li>
 <li>~~Physical midend-core move for <code>ir/</code>, <code>action_pipeline/</code>, <code>wave_stats</code>, labels, stats merge.~~ <strong>Done</strong></li>
 <li>P-code adapters: <code>seed_nir_render_options</code>, <code>nir_admission_facts_from_pcode</code>,
-     <code>indirect_control_classification_from_pcode</code> remain in <code>fission-pcode</code>.</li>
+     <code>indirect_control_classification_from_pcode</code> remain in <code>fission-pcode</code>.
+     <strong>Amended 2026-10-29:</strong> <code>seed_nir_render_options</code> moved to <code>fission-cspec</code>
+     (see "Amendment" below); the other two stay.</li>
 <li>Cspec helpers that formerly were inherent methods on <code>NirRenderOptions</code> are free functions.</li>
 <li>~~Normalize source move to <code>fission-midend-normalize</code>.~~ <strong>Done</strong></li>
 <li>~~Pure structuring free-function modules to <code>fission-midend-structuring</code>.~~ <strong>Done</strong> (partial)</li>
@@ -1459,6 +1472,41 @@ before crates).</p>
    (tests call free-fns; linear residual is p-code-only; host switch_recovery
    free-fn direct).</li>
 </ol>
+<h2 id="amendment-2026-10-29-p-code-leaf-crates">Amendment (2026-10-29): p-code leaf crates<a class="headerlink" href="#amendment-2026-10-29-p-code-leaf-crates" title="Permanent link">&para;</a></h2>
+<p>Motivation and measurements: <code>docs/proposals/2026-10-29-pcode-crate-split.md</code>.
+Two crates split off the bottom of <code>fission-pcode</code> so a change in the midend does
+not rebuild them and a change in <code>fission-pcode</code> does not rebuild their dependents:</p>
+<table>
+<thead>
+<tr>
+<th>Crate</th>
+<th>Contents</th>
+<th>Workspace dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fission-pcode-ir</code></td>
+<td>p-code IR, p-code optimizer, <code>arch</code>, address-keyed CFG snapshot, p-code-only block CFG facts (<code>block_cfg</code>), address-space ids (<code>space</code>)</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>fission-cspec</code></td>
+<td>cspec / ldefs / pspec / register model (<code>RegisterNamer</code>), <code>infer_entry_register_param_arity</code>, <code>seed_nir_render_options</code></td>
+<td><code>fission-core</code>, <code>fission-loader</code>, <code>fission-midend-core</code>, <code>fission-pcode-ir</code></td>
+</tr>
+</tbody>
+</table>
+<p>This supersedes the sentence in follow-up 4 that <code>seed_nir_render_options</code> stays in
+<code>fission-pcode</code>: it needs only <code>NirRenderOptions</code>, a <code>LoadedBinary</code> and the cspec
+register map, none of which belong to the pipeline. The other two p-code adapters
+(<code>nir_admission_facts_from_pcode</code>, <code>indirect_control_classification_from_pcode</code>)
+read raw p-code and midend types together and stay in <code>fission-pcode</code>.</p>
+<p><code>fission-pcode</code> re-exports both crates under the historical paths
+(<code>fission_pcode::{Pcode*, Varnode, arch, cfg}</code>, <code>fission_pcode::midend::cspec</code>,
+<code>fission_pcode::midend::{RegisterNamer, seed_nir_render_options, infer_entry_register_param_arity}</code>),
+so dependents switch to the leaf crates one at a time. Semantic owners, the telemetry
+contract and the NIR/HIR policy are unchanged.</p>
 
 
 
