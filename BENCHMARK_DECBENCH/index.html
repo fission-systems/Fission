@@ -1201,6 +1201,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#cfg-parser-rust-joern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CFG parser: rust-joern
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#two-tools-two-jobs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1294,7 +1305,11 @@ the docker multi-decompiler loop described in
 </tr>
 <tr>
 <td>Python environment</td>
-<td><code>~/fission-benchmark/.venv-decbench/bin/python</code> (has <code>pydantic</code>, <code>pyjoern</code>; the system Python has neither)</td>
+<td><code>~/fission-benchmark/.venv-decbench/bin/python</code> (has <code>pydantic</code>, <code>networkx</code>, <code>orjson</code>; the system Python has neither <code>pydantic</code> nor a CFG parser)</td>
+</tr>
+<tr>
+<td>CFG parser</td>
+<td><code>rust-joern</code>, built from source at <code>~/rust-joern</code> (see below)</td>
 </tr>
 <tr>
 <td>Sample-set kit</td>
@@ -1302,6 +1317,24 @@ the docker multi-decompiler loop described in
 </tr>
 </tbody>
 </table>
+<h2 id="cfg-parser-rust-joern">CFG parser: rust-joern<a class="headerlink" href="#cfg-parser-rust-joern" title="Permanent link">&para;</a></h2>
+<p>GED's source- and decompiled-side CFGs come from
+<a href="https://github.com/Noelo-Lab/rust-joern">rust-joern</a>, not the JVM-backed
+<code>pyjoern</code> (DecBench switched on 2026-10-09, Noelo-Lab/decbench#99). It is not on
+PyPI:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/sjkim1127/rust-joern<span class="w"> </span>~/rust-joern<span class="w">   </span><span class="c1"># or Noelo-Lab/rust-joern</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span>~/rust-joern<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>build<span class="w"> </span>--release<span class="o">)</span>
+</span></code></pre></div>
+<p><code>runner/ged.py</code> in <code>~/fission-benchmark</code> calls
+<code>rust_joern.parse_source(path, no_ddg=True, strict=True, preprocessed=True)</code>,
+the same call as DecBench. Override the checkout with <code>RUST_JOERN_DIR</code>.
+<code>FISSION_GED_BACKEND=pyjoern</code> restores the old parser <strong>only</strong> to reproduce a
+number taken before the switch; do not compare across backends.</p>
+<p>Measured on 259 rows (same Fission build, same published source CFGs): the two
+parsers give identical output-node counts on 258, identical GED on 202, and GED
+sums 26,718 (pyjoern) vs 26,710 (rust-joern), maximum per-row difference 12 in
+either direction. The JVM parse used to be ~84% of a full sweep's worker time;
+it is now close to zero.</p>
 <h2 id="two-tools-two-jobs">Two tools, two jobs<a class="headerlink" href="#two-tools-two-jobs" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1335,9 +1368,9 @@ the docker multi-decompiler loop described in
 </tbody>
 </table>
 <h3 id="local-gate">Local gate<a class="headerlink" href="#local-gate" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--release
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>~/fission-benchmark/.venv-decbench/bin/python<span class="w"> </span>scripts/quality/decbench_sample_set_gate.py<span class="w"> </span>check<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--cli<span class="w"> </span>target/release/fission_cli<span class="w"> </span>--dump<span class="w"> </span>/tmp/gate_after.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--release
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>~/fission-benchmark/.venv-decbench/bin/python<span class="w"> </span>scripts/quality/decbench_sample_set_gate.py<span class="w"> </span>check<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--cli<span class="w"> </span>target/release/fission_cli<span class="w"> </span>--dump<span class="w"> </span>/tmp/gate_after.json
 </span></code></pre></div>
 <p><code>--quick</code> scores the first 60 binaries. <code>update</code> raises the stored floor
 (<code>scripts/quality/decbench_sample_set_baseline.json</code>) after a measured gain.
@@ -1347,14 +1380,13 @@ runs can be compared per function rather than only in aggregate.</p>
 <code>release</code>, <code>quick-release</code> and <code>debug</code>, and a stale build silently scores the
 wrong thing.</p>
 <h3 id="full-sweep">Full sweep<a class="headerlink" href="#full-sweep" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>~/fission-benchmark/decbench-harness
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">CONFIG</span><span class="o">=</span>unoptimized<span class="w"> </span><span class="nv">CKPT</span><span class="o">=</span>/tmp/decbench-full-ckpt<span class="w"> </span>python3<span class="w"> </span>fullrun.py
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">CONFIG</span><span class="o">=</span>unoptimized<span class="w"> </span><span class="nv">CKPT</span><span class="o">=</span>/tmp/decbench-full-ckpt<span class="w"> </span>python3<span class="w"> </span>fullagg.py
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">cd</span><span class="w"> </span>~/fission-benchmark/decbench-harness
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">CONFIG</span><span class="o">=</span>unoptimized<span class="w"> </span><span class="nv">CKPT</span><span class="o">=</span>/tmp/decbench-full-ckpt<span class="w"> </span>python3<span class="w"> </span>fullrun.py
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">CONFIG</span><span class="o">=</span>unoptimized<span class="w"> </span><span class="nv">CKPT</span><span class="o">=</span>/tmp/decbench-full-ckpt<span class="w"> </span>python3<span class="w"> </span>fullagg.py
 </span></code></pre></div>
 <p>Environment: <code>CONFIG</code> (<code>unoptimized</code>, <code>optimized</code>, <code>inlined</code>, <code>large</code>, …),
 <code>CKPT</code> (one checkpoint per binary, so an interrupted sweep resumes), <code>LIMIT</code>
-(binaries), <code>ONLY</code> (comma-separated), <code>BINARY_WORKERS</code>, <code>JOERN_CHUNK</code>,
-<code>JVM_CAP</code>. <code>FISSION_BENCHMARK_NO_CACHE=1</code> disables the decompile / GED / type
+(binaries), <code>ONLY</code> (comma-separated), <code>BINARY_WORKERS</code>, <code>JOERN_CHUNK</code>. <code>FISSION_BENCHMARK_NO_CACHE=1</code> disables the decompile / GED / type
 caches; <strong>use it for any before/after</strong>, otherwise the second run reads the
 first run's answers.</p>
 <p><code>fullagg.py</code> compares only on rows Fission actually scored. The published
@@ -1379,7 +1411,6 @@ the leaderboard percentages.</p>
   <code>~/fission-benchmark</code> carries published source CFGs for 64,231 functions that
   the sample set does not score; use it as the unseen split (it is <code>-O0</code> with
   symbols, so a shape visible only there is a different overfit).</li>
-<li>Do not run more Joern JVMs than memory allows: each wants ~1.5 GB.</li>
 <li>Local results are never an official ranking. A leaderboard or release claim is
   the sweep, on same rows, from a tagged build.</li>
 </ul>
