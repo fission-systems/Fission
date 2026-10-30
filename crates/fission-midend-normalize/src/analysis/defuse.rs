@@ -262,7 +262,52 @@ impl<'a> RootReachabilityProof<'a> {
     }
 }
 
+/// A root-reachability closure built once for a fixed set of roots, so a walk
+/// that asks about many bindings pays for the reverse-dependency closure once
+/// instead of once per query. Answers are those of
+/// [`DefinitionDependencyMap::address_roots_reaching`] and
+/// [`DefinitionDependencyMap::nodes_reaching_roots`] for the same roots.
+pub struct RootReachability<'a> {
+    proof: RootReachabilityProof<'a>,
+    roots: &'a HashSet<String>,
+}
+
+impl RootReachability<'_> {
+    /// The roots `name` reaches.
+    pub fn roots_reaching(&self, name: &str) -> HashSet<String> {
+        self.proof
+            .nodes_reaching_from(name)
+            .into_iter()
+            .filter(|candidate| self.roots.contains(candidate))
+            .collect()
+    }
+
+    /// Every binding on a path from `name` to a root, roots included.
+    pub fn nodes_reaching(&self, name: &str) -> HashSet<String> {
+        self.proof.nodes_reaching_from(name)
+    }
+}
+
 impl DefinitionDependencyMap {
+    /// [`RootReachability`] over address provenance.
+    pub fn address_reachability<'a>(&'a self, roots: &'a HashSet<String>) -> RootReachability<'a> {
+        RootReachability {
+            proof: RootReachabilityProof::build(&self.address_dependencies, roots),
+            roots,
+        }
+    }
+
+    /// [`RootReachability`] over plain definition dependencies.
+    pub fn dependency_reachability<'a>(
+        &'a self,
+        roots: &'a HashSet<String>,
+    ) -> RootReachability<'a> {
+        RootReachability {
+            proof: RootReachabilityProof::build(&self.dependencies, roots),
+            roots,
+        }
+    }
+
     pub fn build(stmts: &[PreHirStmt]) -> Self {
         let mut map = Self {
             dependencies: HashMap::default(),
@@ -1768,6 +1813,77 @@ mod tests {
             .into_iter()
             .collect::<HashSet<_>>()
         );
+    }
+
+    /// A closure built once for a fixed set of roots must answer every query
+    /// as the one-shot methods do, including loop-carried definitions (a cycle
+    /// whose root is reached through another edge), bindings that reach no
+    /// root, and names the map has never seen.
+    #[test]
+    fn shared_reachability_answers_like_the_one_shot_queries() {
+        let ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let var = |name: &str| PreHirExpr::Var(name.into());
+        let assign = |lhs: &str, rhs: PreHirExpr| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs.into()),
+            rhs,
+        };
+        let body = vec![
+            assign("a", var("param_1")),
+            assign("b", var("a")),
+            // Loop-carried: `c` depends on itself and on `b`.
+            assign(
+                "c",
+                PreHirExpr::PtrOffset {
+                    base: Box::new(var("c")),
+                    offset: 8,
+                },
+            ),
+            assign(
+                "c",
+                PreHirExpr::Cast {
+                    expr: Box::new(var("b")),
+                    ty: ptr,
+                },
+            ),
+            assign("unrelated", var("other")),
+            assign("d", var("unrelated")),
+        ];
+        let dependencies = DefinitionDependencyMap::build(&body);
+        let roots = ["param_1", "param_2"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        let address = dependencies.address_reachability(&roots);
+        let plain = dependencies.dependency_reachability(&roots);
+
+        for name in [
+            "param_1",
+            "a",
+            "b",
+            "c",
+            "d",
+            "unrelated",
+            "other",
+            "param_2",
+            "never_seen",
+        ] {
+            assert_eq!(
+                address.roots_reaching(name),
+                dependencies.address_roots_reaching(name, &roots),
+                "address roots for {name}"
+            );
+            assert_eq!(
+                plain.nodes_reaching(name),
+                dependencies.nodes_reaching_roots(name, &roots),
+                "nodes for {name}"
+            );
+        }
+        // Not vacuous: something is actually reached.
+        assert!(!plain.nodes_reaching("b").is_empty());
+        assert!(plain.nodes_reaching("d").is_empty());
     }
 
     #[test]

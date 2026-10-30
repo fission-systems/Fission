@@ -1,6 +1,7 @@
 //! Pointer/scalar role recovery and address-contributor inference.
 
 use super::*;
+use crate::analysis::defuse::RootReachability;
 
 #[derive(Default)]
 struct BindingUseRole {
@@ -1272,6 +1273,10 @@ struct ParamPointerCandidateContext<'a> {
     dependencies: &'a DefinitionDependencyMap,
     binding_types: &'a HashMap<String, NirType>,
     params: &'a HashSet<String>,
+    /// Address-provenance closure over `params`, built the first time a query
+    /// needs it and shared by every later one in the walk (`params` is fixed
+    /// for the whole walk; the closure used to be rebuilt per dereference).
+    address_reachability: std::cell::OnceCell<RootReachability<'a>>,
 }
 
 fn param_pointer_candidates_from_expr(
@@ -1357,8 +1362,9 @@ fn record_param_pointer_from_address_expr(
             );
             if roots.is_empty() {
                 let fallback = context
-                    .dependencies
-                    .address_roots_reaching(name, context.params);
+                    .address_reachability
+                    .get_or_init(|| context.dependencies.address_reachability(context.params))
+                    .roots_reaching(name);
                 if fallback.len() == 1 {
                     roots.extend(fallback);
                 }
@@ -1549,6 +1555,7 @@ pub(super) fn apply_address_contributor_param_pointer_types(
         dependencies,
         binding_types,
         params: &params,
+        address_reachability: Default::default(),
     };
     collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);
     let address_params: HashSet<String> = candidates.keys().cloned().collect();
@@ -1627,6 +1634,7 @@ fn demote_pointer_offset_params(func: &mut PreHirFunction) -> bool {
         dependencies: &dependencies,
         binding_types: &binding_types,
         params: &params,
+        address_reachability: Default::default(),
     };
     collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);
     let address_params: HashSet<String> = candidates.keys().cloned().collect();
@@ -1892,12 +1900,13 @@ pub(super) fn promote_signed_neutral_word_load_pointees(
 
     let params: HashSet<String> = func.params.iter().map(|param| param.name.clone()).collect();
     let mut promoted = HashMap::default();
+    let reachability = dependencies.dependency_reachability(&params);
     for (name, bits) in candidates {
         if blockers.contains(&name) {
             continue;
         }
         promoted.entry(name.clone()).or_insert(bits);
-        for path_name in dependencies.nodes_reaching_roots(&name, &params) {
+        for path_name in reachability.nodes_reaching(&name) {
             if !blockers.contains(&path_name) {
                 promoted.entry(path_name).or_insert(bits);
             }
