@@ -1,5 +1,7 @@
 mod address_state;
 mod decode;
+#[cfg(test)]
+mod decode_parallel_tests;
 mod diagnostics;
 mod engine;
 mod frontend;
