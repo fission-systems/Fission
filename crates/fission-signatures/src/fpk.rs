@@ -226,7 +226,8 @@ impl FpkReader {
 
     fn decompress(&self, block: &BlockRef) -> Result<String, FpkError> {
         let raw = &self.map[block.offset..block.offset + block.comp_len];
-        let mut out = String::with_capacity(block.raw_len);
+        // `raw_len` comes from the block index; bound the up-front reservation.
+        let mut out = String::with_capacity(block.raw_len.min(MAX_RESERVED_BLOCK_BYTES));
         match self.codec & 0xff {
             COMPRESS_ZSTD => {
                 let bytes = zstd::decode_all(raw)
@@ -436,7 +437,11 @@ impl FpkReader {
     /// Every record, decompressing each block once. For callers that genuinely
     /// need the whole table; a lookup should use [`FpkReader::block_for`].
     pub fn read_all(&self) -> Result<Vec<String>, FpkError> {
-        let mut out = Vec::with_capacity(self.record_count as usize);
+        // `record_count` is a header field. Reserve a bounded start and let the
+        // vector grow; a damaged header claiming 2^60 records would otherwise
+        // abort the process before a single block was read.
+        let reserve = usize::try_from(self.record_count).map_or(0, |n| n.min(MAX_RESERVED_RECORDS));
+        let mut out = Vec::with_capacity(reserve);
         for block in &self.blocks {
             out.extend(self.decompress(block)?.lines().map(str::to_owned));
         }
@@ -613,6 +618,10 @@ pub fn append_hash_index(image: &mut Vec<u8>, mut entries: Vec<HashEntry>) {
     image.extend_from_slice(&(directory_offset as u64).to_le_bytes());
     image.extend_from_slice(&digest);
 }
+
+/// Largest up-front reservations made from counts stored in the file itself.
+const MAX_RESERVED_RECORDS: usize = 1 << 20;
+const MAX_RESERVED_BLOCK_BYTES: usize = 64 << 20;
 
 /// Directory entry length: first key, offset, compressed length, entry count.
 const HASH_DIR_LEN: usize = 24;
@@ -827,6 +836,21 @@ mod tests {
         image.extend_from_slice(&0u64.to_le_bytes());
         image.extend_from_slice(&(directory_offset as u64).to_le_bytes());
         image.extend_from_slice(&digest);
+    }
+
+    /// A header that claims an absurd record count must be an error when the
+    /// records are counted, not an allocation that aborts the process.
+    #[test]
+    fn an_absurd_header_record_count_is_corruption_not_an_abort() {
+        let mut image = pack(&["alpha|1", "beta|2"]);
+        image[8..16].copy_from_slice(&u64::MAX.to_le_bytes());
+        let reader = FpkReader::open(&write_temp(&image)).unwrap();
+        match reader.read_all() {
+            Err(FpkError::Corrupt(message)) => {
+                assert!(message.contains("header says"), "{message}")
+            }
+            other => panic!("expected a Corrupt error, got {other:?}"),
+        }
     }
 
     /// An index chunk that says it holds nothing used to reach `count - 1`.
