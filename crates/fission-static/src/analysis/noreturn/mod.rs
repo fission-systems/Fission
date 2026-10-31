@@ -28,7 +28,7 @@ use fission_core::core::ghidra_no_return::{
     binary_format_to_ghidra_format, ghidra_no_return_index,
 };
 use fission_loader::loader::LoadedBinary;
-use fission_pcode_ir::{PcodeFunction, PcodeOpcode};
+use fission_pcode_ir::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::runtime::{
     DecodeContract, DecodeMemoryContext, RawDecodeSeed, RuntimeSleighFrontend,
 };
@@ -239,6 +239,60 @@ fn compute_no_return_functions(
 /// a resolvable constant) or a branch outside this function's own decoded
 /// blocks never counts as no-return evidence, so this can under-detect but
 /// must never mark an actually-returning function as no-return.
+/// The address of the memory slot an indirect call/branch target is read from,
+/// when the block makes that plain: the operand is itself a memory varnode (how
+/// `jmp qword ptr [IAT]` is lifted), or a temporary copied or loaded from one.
+///
+/// This is the same shape the decompiler resolves as an import-table slot
+/// (`resolves_to_import_slot_before`). A PE import is called through its slot or
+/// through a thunk that jumps through it, and the loader gives an import the
+/// slot's address, so this lets a seeded import be seen as a call target.
+/// Registers, constants and temporaries with no definition in the block are
+/// declined: those are the "target not resolvable" cases that must never count
+/// as evidence.
+fn memory_slot_before(
+    ops: &[PcodeOp],
+    before: usize,
+    value: &Varnode,
+    depth: usize,
+) -> Option<u64> {
+    use fission_pcode_ir::space::{RUST_SLEIGH_UNIQUE_SPACE_ID, is_register_space_id};
+
+    // These ops come from the Rust-Sleigh lifter, where the temporary space is
+    // 2 and memory is whatever is left (3 for x86): the legacy numbering that
+    // `is_unique_space_id` also accepts would call that memory a temporary.
+    if value.is_constant || value.space_id == 0 || is_register_space_id(value.space_id) {
+        return None;
+    }
+    if value.space_id != RUST_SLEIGH_UNIQUE_SPACE_ID {
+        return Some(value.offset);
+    }
+    if depth == 0 {
+        return None;
+    }
+    let (index, definition) = ops[..before]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, candidate)| {
+            candidate.output.as_ref().is_some_and(|out| {
+                out.space_id == value.space_id
+                    && out.offset == value.offset
+                    && out.size == value.size
+            })
+        })?;
+    match definition.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast => {
+            memory_slot_before(ops, index, definition.inputs.first()?, depth - 1)
+        }
+        PcodeOpcode::Load => {
+            let pointer = definition.inputs.get(1)?;
+            (pointer.is_constant && pointer.space_id == 0).then_some(pointer.offset)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug)]
 struct NoReturnFlow {
     blocks: Vec<NoReturnBlock>,
@@ -263,11 +317,17 @@ impl NoReturnFlow {
                     events: block
                         .ops
                         .iter()
-                        .filter_map(|op| match op.opcode {
+                        .enumerate()
+                        .filter_map(|(index, op)| match op.opcode {
                             PcodeOpcode::Return => Some(NoReturnEvent::Return),
                             PcodeOpcode::Call | PcodeOpcode::Branch => {
                                 op.inputs.first().map(|v| NoReturnEvent::Target(v.offset))
                             }
+                            PcodeOpcode::CallInd | PcodeOpcode::BranchInd => op
+                                .inputs
+                                .first()
+                                .and_then(|target| memory_slot_before(&block.ops, index, target, 4))
+                                .map(NoReturnEvent::Target),
                             _ => None,
                         })
                         .collect(),
@@ -553,6 +613,127 @@ mod tests {
                 );
             }
         }
+    }
+
+    const IAT_EXIT: u64 = 0x1_4000_8268;
+
+    fn memory_slot(offset: u64) -> Varnode {
+        Varnode {
+            space_id: 3,
+            offset,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn temporary(offset: u64) -> Varnode {
+        Varnode {
+            space_id: fission_pcode_ir::space::RUST_SLEIGH_UNIQUE_SPACE_ID,
+            offset,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn indirect(seq: u32, opcode: PcodeOpcode, target: Varnode) -> PcodeOp {
+        let mut op = op(seq, opcode);
+        op.inputs = vec![target];
+        op
+    }
+
+    fn copy(seq: u32, to: Varnode, from: Varnode) -> PcodeOp {
+        let mut op = op(seq, PcodeOpcode::Copy);
+        op.output = Some(to);
+        op.inputs = vec![from];
+        op
+    }
+
+    fn single_block(ops: Vec<PcodeOp>) -> PcodeFunction {
+        PcodeFunction {
+            blocks: vec![block(0, 0x1000, vec![], ops)],
+        }
+    }
+
+    #[test]
+    fn a_call_through_a_known_no_return_iat_slot_ends_the_function() {
+        // `call qword ptr [IAT]` as Rust-Sleigh lifts it: the slot is copied
+        // into a temporary and the temporary is called.
+        let known: BTreeSet<u64> = [IAT_EXIT].into();
+        let via_copy = single_block(vec![
+            copy(0, temporary(0x79600), memory_slot(IAT_EXIT)),
+            indirect(1, PcodeOpcode::CallInd, temporary(0x79600)),
+        ]);
+        assert!(function_is_structurally_no_return(&via_copy, &known));
+        // The same shape with a slot that is not known no-return returns.
+        assert!(!function_is_structurally_no_return(
+            &via_copy,
+            &BTreeSet::from([IAT_EXIT + 8])
+        ));
+    }
+
+    #[test]
+    fn an_import_thunk_that_jumps_through_a_no_return_slot_is_itself_no_return() {
+        // `jmp qword ptr [IAT]`: BranchInd whose operand is the slot.
+        let thunk = single_block(vec![indirect(
+            0,
+            PcodeOpcode::BranchInd,
+            memory_slot(IAT_EXIT),
+        )]);
+        assert!(function_is_structurally_no_return(
+            &thunk,
+            &BTreeSet::from([IAT_EXIT])
+        ));
+        assert!(!function_is_structurally_no_return(
+            &thunk,
+            &BTreeSet::new()
+        ));
+    }
+
+    #[test]
+    fn a_caller_of_such_a_thunk_is_no_return_by_the_fixpoint() {
+        // die() { thunk(); }  with thunk -> [IAT_EXIT]. Seeds hold the slot
+        // only; the thunk joins the set, then its caller.
+        let thunk_addr = 0x1_4000_2000u64;
+        let thunk = single_block(vec![indirect(
+            0,
+            PcodeOpcode::BranchInd,
+            memory_slot(IAT_EXIT),
+        )]);
+        let caller = single_block(vec![call_op(0, thunk_addr)]);
+        let mut known: BTreeSet<u64> = [IAT_EXIT].into();
+        assert!(!function_is_structurally_no_return(&caller, &known));
+        assert!(function_is_structurally_no_return(&thunk, &known));
+        known.insert(thunk_addr);
+        assert!(function_is_structurally_no_return(&caller, &known));
+    }
+
+    #[test]
+    fn an_indirect_call_that_is_not_a_slot_is_not_evidence() {
+        let known: BTreeSet<u64> = [IAT_EXIT, 0x79600, 0x20].into();
+        // Through a register or a temporary with no resolvable definition.
+        let unresolved = single_block(vec![indirect(0, PcodeOpcode::CallInd, temporary(0x79600))]);
+        assert!(!function_is_structurally_no_return(&unresolved, &known));
+        let register = Varnode {
+            space_id: fission_pcode_ir::space::RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x20,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let through_register = single_block(vec![indirect(0, PcodeOpcode::CallInd, register)]);
+        assert!(!function_is_structurally_no_return(
+            &through_register,
+            &known
+        ));
+        // A constant operand is a direct target, not a slot.
+        let constant = single_block(vec![indirect(
+            0,
+            PcodeOpcode::CallInd,
+            Varnode::constant(IAT_EXIT as i64, 8),
+        )]);
+        assert!(!function_is_structurally_no_return(&constant, &known));
     }
 
     #[test]
