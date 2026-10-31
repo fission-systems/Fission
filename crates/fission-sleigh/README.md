@@ -116,7 +116,7 @@ fn main() -> anyhow::Result<()> {
   - `FISSION_SLEIGH_SPEC_DIR`
   - repo-relative `utils/sleigh-specs`
 - The checked-in spec snapshot is mirrored from:
-  - `vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/*/data/languages/`
+  - `vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/*/data/languages/` (see `utils/sleigh-specs/README.md` for the local deviations)
 - `RuntimeSleighFrontend::new(path)` infers language name from the file stem.
 
 ## Ghidra clean-room runtime spine

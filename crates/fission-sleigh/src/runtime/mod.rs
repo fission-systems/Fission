@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn runtime_registry_discovers_all_variants() {
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
-        assert_eq!(registry.frontends().len(), 146);
+        assert_eq!(registry.frontends().len(), 150);
         let x86_64 = registry.lookup("x86-64").expect("x86-64 registered");
         assert_eq!(x86_64.status, RuntimeFrontendStatus::ExecutableCandidate);
         assert_eq!(x86_64.processor, "x86");
@@ -486,9 +486,9 @@ mod tests {
             .map(|descriptor| descriptor.ghidra_processor.as_str())
             .collect::<BTreeSet<_>>();
 
-        assert_eq!(manifest_processors.len(), 38);
+        assert_eq!(manifest_processors.len(), 39);
         assert_eq!(registry_processors, manifest_processors);
-        // All 146 variants are promoted to ExecutableCandidate.
+        // All 150 variants are promoted to ExecutableCandidate.
         assert!(registry
             .frontends()
             .iter()

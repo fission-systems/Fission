@@ -444,7 +444,7 @@ fn discover_all_entry_specs_from_manifest() -> Result<Option<Vec<EntrySpec>>> {
     )
     .with_context(|| format!("parse manifest {}", manifest_path.display()))?;
     // `spec_root_for_arch` would re-read and re-parse the manifest once per
-    // entry (146 times) just to canonicalise a processor name this loop already
+    // entry (150 times) just to canonicalise a processor name this loop already
     // holds; resolve each distinct processor once against the parsed manifest.
     let languages_root = sleigh_languages_root();
     let mut processor_roots: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -953,7 +953,7 @@ mod tests {
     #[test]
     fn discovers_all_checked_in_entry_specs_in_stable_order() {
         let entries = discover_all_entry_specs().expect("discover all entry specs");
-        assert_eq!(entries.len(), 146);
+        assert_eq!(entries.len(), 150);
         assert_eq!(
             entries.first().map(|entry| entry.entry_spec.as_str()),
             Some("6502.slaspec")
@@ -992,8 +992,8 @@ mod tests {
     #[test]
     fn ghidra_language_manifest_covers_all_checked_in_variants() {
         let manifest = build_ghidra_language_manifest().expect("build ghidra language manifest");
-        assert_eq!(manifest.processor_count, 38);
-        assert_eq!(manifest.variant_count, 146);
+        assert_eq!(manifest.processor_count, 39);
+        assert_eq!(manifest.variant_count, 150);
         let x86_64 = manifest
             .entries
             .iter()

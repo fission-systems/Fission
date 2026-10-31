@@ -82,10 +82,12 @@ impl PreprocessorState {
             self.handle_line(path, depth, &tokenized, &mut conditionals)?;
         }
 
-        if !conditionals.is_empty() {
-            bail!("unterminated conditional block in {}", path.display());
-        }
-
+        // A conditional still open at the end of a file is not an error. Ghidra
+        // keeps one conditional stack per file and never checks it at EOF, so an
+        // `@if` that the file forgot to close only turns off the rest of that
+        // file; the file that included it carries on. Ghidra 12.1+ ships
+        // `ARM/ARMv8.sinc` with one more `@if` than `@endif`, so rejecting it
+        // would reject a spec Ghidra itself compiles.
         Ok(())
     }
 
@@ -476,6 +478,30 @@ mod tests {
             .any(|item| item.relative_path == "ia.sinc"));
         assert!(expanded.defines.contains_key("IA64"));
         assert!(!expanded.lines.is_empty());
+    }
+
+    #[test]
+    fn a_conditional_left_open_at_end_of_file_only_affects_that_file() {
+        let dir = tempdir().expect("tempdir");
+        let entry = dir.path().join("entry.slaspec");
+        let child = dir.path().join("child.sinc");
+        fs::write(&child, "before_open\n@if defined(NOPE)\nskipped_in_child\n")
+            .expect("write child");
+        fs::write(&entry, "@include \"child.sinc\"\nafter_include\n").expect("write entry");
+
+        let expanded = expand_entry_spec(&entry).expect("an open @if at EOF must not fail");
+        let rendered = expanded
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("before_open"));
+        assert!(!rendered.contains("skipped_in_child"));
+        assert!(
+            rendered.contains("after_include"),
+            "the includer's own lines are outside the child's open @if"
+        );
     }
 
     #[test]
