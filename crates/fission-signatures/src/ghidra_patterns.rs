@@ -69,6 +69,45 @@ pub struct GhidraFuncPattern {
     pub valid_code_max: Option<usize>,
     pub contiguous: bool,
     pub is_thunk: bool,
+    /// Ghidra's `<align mark= bits=>`: the pattern only applies where
+    /// `(address + mark)` has its low `bits` bits clear.
+    pub align: Option<AlignRule>,
+}
+
+/// An `<align>` constraint from a pattern file (Ghidra `AlignRule`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlignRule {
+    pub mark: u64,
+    pub bits: u32,
+}
+
+impl AlignRule {
+    pub fn allows(self, addr: u64) -> bool {
+        let mask = 1u64.checked_shl(self.bits).map_or(u64::MAX, |m| m - 1);
+        addr.wrapping_add(self.mark) & mask == 0
+    }
+}
+
+/// The `<align>` element's constraint, if its attributes are well formed.
+fn align_rule(element: &quick_xml::events::BytesStart<'_>) -> Option<AlignRule> {
+    let attr = |name: &[u8]| {
+        element
+            .attributes()
+            .filter_map(|a| a.ok())
+            .find(|a| a.key.as_ref() == name)
+            .and_then(|a| String::from_utf8(a.value.to_vec()).ok())
+    };
+    let number = |text: String| {
+        let text = text.trim();
+        match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+            Some(hex) => u64::from_str_radix(hex, 16).ok(),
+            None => text.parse().ok(),
+        }
+    };
+    Some(AlignRule {
+        mark: number(attr(b"mark")?)?,
+        bits: u32::try_from(number(attr(b"bits")?)?).ok()?,
+    })
 }
 
 impl GhidraFuncPattern {
@@ -89,6 +128,9 @@ impl GhidraFuncPattern {
 
     pub fn matches(&self, data: &[u8], data_base: u64, addr: u64) -> bool {
         if !self.constrains_any_byte() {
+            return false;
+        }
+        if self.align.is_some_and(|rule| !rule.allows(addr)) {
             return false;
         }
         if addr < data_base {
@@ -261,6 +303,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
     let mut pp_valid_code_max: Option<usize> = None;
     let mut pp_contiguous = false;
     let mut pp_is_thunk = false;
+    let mut pp_align: Option<AlignRule> = None;
 
     // standalone <pattern> accumulator
     let mut sp_pre: Vec<PatternByte> = Vec::new();
@@ -271,6 +314,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
     let mut sp_valid_code_max: Option<usize> = None;
     let mut sp_contiguous = false;
     let mut sp_is_thunk = false;
+    let mut sp_align: Option<AlignRule> = None;
     let mut sp_has_funcstart = false;
     let mut sp_star_found = false; // whether we parsed pre*post inline
 
@@ -307,6 +351,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         pp_valid_code_max = None;
                         pp_contiguous = false;
                         pp_is_thunk = false;
+                        pp_align = None;
                     }
                     "prepatterns" if ctx == Ctx::PatternPairs => {
                         ctx = Ctx::PrePatterns;
@@ -324,6 +369,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         sp_valid_code_max = None;
                         sp_contiguous = false;
                         sp_is_thunk = false;
+                        sp_align = None;
                         sp_has_funcstart = false;
                         sp_star_found = false;
                     }
@@ -336,6 +382,11 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                             _ => DataSlot::None,
                         };
                     }
+                    "align" => match ctx {
+                        Ctx::PostPatterns => pp_align = align_rule(e),
+                        Ctx::StandalonePattern => sp_align = align_rule(e),
+                        _ => {}
+                    },
                     "funcstart" | "possiblefuncstart" => {
                         let label = e
                             .attributes()
@@ -429,6 +480,11 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                     .unwrap_or("")
                     .to_ascii_lowercase();
                 match tag.as_str() {
+                    "align" => match ctx {
+                        Ctx::PostPatterns => pp_align = align_rule(e),
+                        Ctx::StandalonePattern => sp_align = align_rule(e),
+                        _ => {}
+                    },
                     "funcstart" | "possiblefuncstart" => {
                         let label = e
                             .attributes()
@@ -553,6 +609,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                         valid_code_max: pp_valid_code_max,
                                         contiguous: pp_contiguous,
                                         is_thunk: pp_is_thunk,
+                                        align: pp_align,
                                     });
                                 }
                             } else {
@@ -567,6 +624,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                             valid_code_max: pp_valid_code_max,
                                             contiguous: pp_contiguous,
                                             is_thunk: pp_is_thunk,
+                                            align: pp_align,
                                         });
                                     }
                                 }
@@ -581,6 +639,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         pp_valid_code_max = None;
                         pp_contiguous = false;
                         pp_is_thunk = false;
+                        pp_align = None;
                     }
                     "prepatterns" if ctx == Ctx::PrePatterns => {
                         ctx = Ctx::PatternPairs;
@@ -641,6 +700,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                 valid_code_max: sp_valid_code_max.take(),
                                 contiguous: sp_contiguous,
                                 is_thunk: sp_is_thunk,
+                                align: sp_align.take(),
                             });
                         }
                         ctx = Ctx::Root;
@@ -652,6 +712,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         sp_valid_code_max = None;
                         sp_contiguous = false;
                         sp_is_thunk = false;
+                        sp_align = None;
                         sp_has_funcstart = false;
                         sp_star_found = false;
                     }
@@ -980,6 +1041,7 @@ mod tests {
             valid_code_max: None,
             contiguous: false,
             is_thunk: false,
+            align: None,
         };
         assert!(pat.matches(&[0x1a, 0x44], 0, 0));
         assert!(pat.matches(&[0x1f, 0x7c], 0, 0));
@@ -1066,6 +1128,58 @@ mod tests {
     }
 
     #[test]
+    fn align_rule_follows_ghidras_alignrule() {
+        let rule = AlignRule { mark: 0, bits: 1 };
+        assert!(rule.allows(0x1000));
+        assert!(!rule.allows(0x1001));
+        let rule = AlignRule { mark: 0, bits: 2 };
+        assert!(rule.allows(0x1004));
+        assert!(!rule.allows(0x1002));
+        // `mark` shifts the address the rule is asked about.
+        let rule = AlignRule { mark: 2, bits: 2 };
+        assert!(rule.allows(0x1002));
+        assert!(!rule.allows(0x1004));
+    }
+
+    #[test]
+    fn an_align_element_restricts_where_a_pattern_matches() {
+        // ARM Thumb and ARM-state patterns differ only in this constraint
+        // (`bits=1` vs `bits=2`); without it the 4-byte-aligned pattern
+        // matched at any even address.
+        let xml = r#"<patternlist>
+          <patternpairs totalbits="32" postbits="16">
+            <prepatterns><data>0x00</data></prepatterns>
+            <postpatterns>
+              <data>0x2de9</data>
+              <align mark="0" bits="2"/>
+              <funcstart/>
+            </postpatterns>
+          </patternpairs>
+          <pattern>
+            <data>0xb5</data>
+            <align mark="0" bits="1"/>
+            <funcstart/>
+          </pattern>
+        </patternlist>"#;
+        let pats = parse_ghidra_pattern_xml(xml).unwrap();
+        assert_eq!(pats.len(), 2);
+        assert_eq!(pats[0].align, Some(AlignRule { mark: 0, bits: 2 }));
+        assert_eq!(pats[1].align, Some(AlignRule { mark: 0, bits: 1 }));
+
+        // pre byte 0x00 at 0x1003, 0x2de9 at 0x1004: 4-byte aligned, so it matches.
+        let aligned = [0x11, 0x11, 0x11, 0x00, 0x2d, 0xe9, 0x00, 0x00];
+        assert!(pats[0].matches(&aligned, 0x1000, 0x1004));
+        // The same bytes one byte later differ only in alignment (0x1005).
+        let shifted = [0x11, 0x11, 0x11, 0x11, 0x00, 0x2d, 0xe9, 0x00];
+        assert!(!pats[0].matches(&shifted, 0x1000, 0x1005));
+        let mut unconstrained = pats[0].clone();
+        unconstrained.align = None;
+        assert!(unconstrained.matches(&shifted, 0x1000, 0x1005));
+        assert!(pats[1].matches(&[0xb5], 0x1000, 0x1000));
+        assert!(!pats[1].matches(&[0xb5], 0x1000, 0x1001));
+    }
+
+    #[test]
     fn test_pattern_matches() {
         let pat = GhidraFuncPattern {
             pre_bytes: vec![PatternByte::exact(0xcc)],
@@ -1080,6 +1194,7 @@ mod tests {
             valid_code_max: None,
             contiguous: false,
             is_thunk: false,
+            align: None,
         };
         let data = vec![0xcc, 0x48, 0x83, 0xec];
         assert!(pat.matches(&data, 0x1000, 0x1001));
