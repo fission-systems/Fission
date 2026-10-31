@@ -431,7 +431,13 @@ impl ElfLoader {
             }
 
             let bytes_patched = data.as_slice();
-            relocs = parse_relocations_64(bytes_patched, &shdrs, &section_addresses, endian);
+            relocs = parse_relocations_64(
+                bytes_patched,
+                &shdrs,
+                &section_addresses,
+                is_relocatable,
+                endian,
+            );
             let ver_names = parse_gnu_versions_64(bytes_patched, &shdrs, endian);
             let (mut sym_vers, sym_ver_names) =
                 map_symbol_versions_64(bytes_patched, &shdrs, endian, &ver_names);
@@ -725,7 +731,13 @@ impl ElfLoader {
             }
 
             let bytes_patched = data.as_slice();
-            relocs = parse_relocations_32(bytes_patched, &shdrs, &section_addresses, endian);
+            relocs = parse_relocations_32(
+                bytes_patched,
+                &shdrs,
+                &section_addresses,
+                is_relocatable,
+                endian,
+            );
             let ver_names = parse_gnu_versions_32(bytes_patched, &shdrs, endian);
             let (mut sym_vers, sym_ver_names) =
                 map_symbol_versions_32(bytes_patched, &shdrs, endian, &ver_names);
@@ -2483,6 +2495,7 @@ fn parse_relocations_64(
     full_data: &[u8],
     shdrs: &[Elf64Shdr],
     section_addresses: &[u64],
+    is_relocatable: bool,
     endian: Endian,
 ) -> Vec<crate::loader::types::RelocationEntry> {
     let reader = ByteReader::new(full_data, endian);
@@ -2491,8 +2504,15 @@ fn parse_relocations_64(
         .iter()
         .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
     {
-        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
-            continue;
+        // `r_offset` is a section offset only in a relocatable object; in an
+        // executable or shared object it is already a virtual address.
+        let target_base = if is_relocatable {
+            let Some(base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+                continue;
+            };
+            base
+        } else {
+            0
         };
         let symtab = shdrs.get(shdr.sh_link as usize);
         let strtab = symtab.and_then(|sym| symbol_string_table_64(full_data, shdrs, sym));
@@ -2554,6 +2574,7 @@ fn parse_relocations_32(
     full_data: &[u8],
     shdrs: &[Elf32Shdr],
     section_addresses: &[u64],
+    is_relocatable: bool,
     endian: Endian,
 ) -> Vec<crate::loader::types::RelocationEntry> {
     let reader = ByteReader::new(full_data, endian);
@@ -2562,8 +2583,15 @@ fn parse_relocations_32(
         .iter()
         .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
     {
-        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
-            continue;
+        // `r_offset` is a section offset only in a relocatable object; in an
+        // executable or shared object it is already a virtual address.
+        let target_base = if is_relocatable {
+            let Some(base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+                continue;
+            };
+            base
+        } else {
+            0
         };
         let symtab = shdrs.get(shdr.sh_link as usize);
         let strtab = symtab.and_then(|sym| symbol_string_table_32(full_data, shdrs, sym));
@@ -4120,5 +4148,42 @@ mod tests {
                 .any(|v| v == "GLIBC_2.34"),
             "expected GOT slot address to map to GLIBC_2.34"
         );
+    }
+    #[test]
+    fn relocations_of_an_executable_are_at_their_r_offset_not_offset_by_a_section_base() {
+        // In ET_EXEC/ET_DYN `r_offset` is already a virtual address. `.rela.plt`
+        // carries a non-zero `sh_info` (the section it patches), and adding that
+        // section's address on top moved every PLT relocation out of the image.
+        for name in [
+            "x64_dyn_lsda_test.elf",
+            "x64_dyn_puts.elf",
+            "x64_dyn_lsda_pie_test.elf",
+        ] {
+            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("testdata")
+                .join(name);
+            if !path.is_file() {
+                continue;
+            }
+            let bin = LoadedBinary::from_file(&path).expect("load ELF");
+            let inner = bin.inner();
+            assert!(
+                !inner.relocations.is_empty(),
+                "{name}: expected relocations"
+            );
+            for reloc in &inner.relocations {
+                let in_image = inner.sections.iter().any(|section| {
+                    let end = section
+                        .virtual_address
+                        .saturating_add(section.virtual_size.max(section.file_size));
+                    reloc.address >= section.virtual_address && reloc.address < end
+                });
+                assert!(
+                    in_image,
+                    "{name}: relocation at {:#x} (type {}) is outside every section",
+                    reloc.address, reloc.r_type
+                );
+            }
+        }
     }
 }
