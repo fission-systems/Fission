@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Lets this binary ask for another process's Mach task port, which the
+         macOS native debugger needs for registers, memory and modules. -->
+    <key>com.apple.security.cs.debugger</key>
+    <true/>
+</dict>
+</plist>
