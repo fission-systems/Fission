@@ -3630,14 +3630,24 @@ build with <code>--features windows_native_debugger</code>, and access to an ind
 process can still be denied. On macOS, native debugging
 launches the target under <code>PT_TRACE_ME</code> (stopping it at <code>exec</code>, as on Linux)
 and reads registers, memory and loaded images through the target's Mach task
-port. macOS grants that port only to an authorized caller, so launch and attach
-are reported as conditional on <code>mach_task_port_access</code>: run
-<code>sudo DevToolsSecurity -enable</code> once (your user must be in the <code>_developer</code>
-group) or run as root. Without it the request waits on an interactive prompt;
-Fission gives up after eight seconds and the error says what to do. The target
+port. macOS grants that port only when <strong>both</strong> hold, so launch and attach are
+reported as conditional on <code>mach_task_port_access</code>:</p>
+<ol>
+<li>the <code>fission_cli</code> binary is signed with the
+   <code>com.apple.security.cs.debugger</code> entitlement (an ad-hoc signature is enough):
+   <code>scripts/macos/sign-debugger.sh target/release/fission_cli</code>, repeated after
+   every rebuild, because a rebuild replaces the signature; and</li>
+<li>Developer Tools access is authorized once per machine with
+   <code>sudo DevToolsSecurity -enable</code> (your user must be in the <code>_developer</code>
+   group).</li>
+</ol>
+<p>Without the entitlement the request is refused at once. With it but without
+the authorization it waits on an interactive prompt, so Fission gives up after
+eight seconds and says what to do. Running as root also works. The target
 must not be hardened or Apple-signed (a binary you built is fine), and only the
 host's own architecture is supported (an x86-64 process translated by Rosetta
-is not). Use <code>--emulator</code> for guest binaries; a reported emulator capability
+is not). <code>scripts/macos/run-live-debugger-tests.sh</code> runs the live tests against
+real processes. Use <code>--emulator</code> for guest binaries; a reported emulator capability
 does not guarantee that every guest architecture or instruction is supported.</p>
 <p>Treat a supported operation as an implementation capability, not as proof
 that a target exists, is accessible, or will execute successfully. Inspect the
