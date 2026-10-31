@@ -154,7 +154,8 @@ impl GhidraNoReturnIndex {
     ///   was identified as a Go or Rust binary, otherwise `None`.
     /// - `library_name`: the `FunctionInfo.external_library` value (DLL name),
     ///   used to look up DLL-specific `.hints`.  May be `None`.
-    /// - `symbol_name`: the raw symbol name from the binary.
+    /// - `symbol_name`: the raw symbol name from the binary; a `<module>!`
+    ///   prefix (PE imports) is ignored.
     pub fn is_no_return(
         &self,
         ghidra_format: &str,
@@ -162,6 +163,11 @@ impl GhidraNoReturnIndex {
         library_name: Option<&str>,
         symbol_name: &str,
     ) -> bool {
+        // The PE loader names an import `<DLL>!<Function>`; the lists hold the
+        // function alone.
+        let symbol_name = symbol_name
+            .rsplit_once('!')
+            .map_or(symbol_name, |(_, function)| function);
         let canonical = canonical_name(symbol_name);
 
         // 1. Format-level unconditional list (compiler_key = None).
@@ -458,6 +464,36 @@ mod tests {
         assert!(names.contains(&"ExitProcess".to_string()));
         assert!(names.contains(&"ExitThread".to_string()));
         assert!(!names.contains(&"SomeOtherHint".to_string()));
+    }
+
+    fn shipped_index() -> Option<GhidraNoReturnIndex> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils/ghidra-data");
+        root.join("Ghidra/Features/Base/data/noReturnFunctionConstraints.xml")
+            .is_file()
+            .then(|| GhidraNoReturnIndex::load(&root))
+    }
+
+    #[test]
+    fn a_pe_import_named_dll_bang_function_is_matched_by_its_function() {
+        // The PE loader names an import `<DLL>!<Function>`; the lists hold the
+        // bare function names, so the whole name never matched anything.
+        let Some(index) = shipped_index() else { return };
+        for name in [
+            "ExitProcess",
+            "KERNEL32.dll!ExitProcess",
+            "kernel32.dll!ExitProcess",
+        ] {
+            assert!(
+                index.is_no_return(GHIDRA_FORMAT_PE, None, Some("KERNEL32.dll"), name),
+                "{name} should be known no-return"
+            );
+        }
+        assert!(!index.is_no_return(
+            GHIDRA_FORMAT_PE,
+            None,
+            Some("KERNEL32.dll"),
+            "KERNEL32.dll!GetLastError"
+        ));
     }
 
     #[test]
