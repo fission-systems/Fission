@@ -3,7 +3,7 @@ use cpp_demangle::Symbol as CppSymbol;
 use msvc_demangler::demangle as msvc_demangle;
 use rustc_demangle::demangle as rust_demangle;
 use std::collections::HashMap;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 const SWIFT_BATCH_SIZE: usize = 256;
@@ -94,17 +94,37 @@ fn demangle_without_swift(name: &str) -> String {
     name.to_string()
 }
 
+/// Whether `name` is mangled the way Swift mangles.
+///
+/// Only forms Swift alone produces count. A bare `_T` / `__T` prefix does not:
+/// it begins ordinary C and C++ symbols (`_Tree_insert`, `_TIFFOpen`), and
+/// every such symbol sent the loader to run the external `swift` tool.
+/// What is accepted: `$s`/`$S` (Swift 4.1+, with Mach-O's extra underscore),
+/// `_T0` (Swift 4.0) and `_Tt[CPVOS]` (Swift 3 type names, as Objective-C
+/// bridging emits them), each with Mach-O's optional extra underscore.
 fn is_swift_symbol(name: &str) -> bool {
-    name.starts_with("_$s")
-        || name.starts_with("_$S")
-        || name.starts_with("_T")
-        || name.starts_with("__T")
+    if name.starts_with("_$s") || name.starts_with("_$S") {
+        return true;
+    }
+    let Some(rest) = name.strip_prefix("__T").or_else(|| name.strip_prefix("_T")) else {
+        return false;
+    };
+    let bytes = rest.as_bytes();
+    bytes.first() == Some(&b'0')
+        || (bytes.first() == Some(&b't')
+            && matches!(bytes.get(1), Some(b'C' | b'P' | b'V' | b'O' | b'S')))
 }
 
 fn swift_available() -> bool {
     *SWIFT_AVAILABLE.get_or_init(|| {
+        // The tool prints its own banner (`LLVM version ...`). Left attached to
+        // this process it lands on our stdout, in the middle of whatever JSON
+        // the command is writing.
         Command::new("swift")
             .args(["demangle", "--version"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
@@ -155,6 +175,38 @@ fn swift_demangle_batch(names: &[&str]) -> Vec<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A symbol that merely starts with `_T` is C, not Swift.
+    #[test]
+    fn only_swift_manglings_are_swift() {
+        for swift in [
+            "_$s4main3fooyyF",
+            "_$S4main3fooyyF",
+            "_T04main3FooC",
+            "__T04main3FooC",
+            "_TtC4main3Foo",
+            "__TtC4main3Foo",
+            "_TtP4main3Bar_",
+            "_TtV4main3Baz",
+        ] {
+            assert!(is_swift_symbol(swift), "{swift}");
+        }
+        for not_swift in [
+            "_Tree_insert",
+            "_TIFFOpen",
+            "_Thread_local_x",
+            "__Tp",
+            "_TFoo",
+            "_Tt",
+            "_Ttx",
+            "_Z3fooi",
+            "_main",
+            "main",
+            "",
+        ] {
+            assert!(!is_swift_symbol(not_swift), "{not_swift}");
+        }
+    }
 
     #[test]
     fn test_rust_demangle() {

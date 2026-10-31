@@ -153,10 +153,17 @@ impl<'a> GoAnalyzer<'a> {
 
         let nfunc = self.read_ptr(&header, 8, ptr_size) as usize;
         let functab_addr = addr + 8 + ptr_size as u64;
-        let mut functions = Vec::with_capacity(nfunc);
+        // `nfunc` is a count from the file. Reserve only what the file could
+        // hold; a header claiming billions would otherwise abort the process.
+        let mut functions = Vec::with_capacity(nfunc.min(self.binary.data.as_slice().len() / 8));
 
         for i in 0..nfunc {
-            let entry_addr = functab_addr + (i * ptr_size * 2) as u64;
+            let Some(entry_addr) = i
+                .checked_mul(ptr_size * 2)
+                .and_then(|step| functab_addr.checked_add(step as u64))
+            else {
+                break;
+            };
             let Some(ebytes) = self.binary.get_bytes(entry_addr, ptr_size * 2) else {
                 break;
             };

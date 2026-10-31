@@ -70,6 +70,9 @@ const EM_386: u16 = 3;
 const EM_X86_64: u16 = 62;
 const R_X86_64_64: u32 = 1;
 const R_X86_64_PC32: u32 = 2;
+/// A call/jump to a symbol through the PLT; against a symbol defined in the same
+/// object it is `S + A - P`, exactly `R_X86_64_PC32`.
+const R_X86_64_PLT32: u32 = 4;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_32: u32 = 10;
@@ -2530,8 +2533,8 @@ fn parse_relocations_64(
 
             let address = target_base.saturating_add(r_offset);
             let size = match r_type {
-                1 => 8,           // R_X86_64_64
-                2 | 10 | 11 => 4, // R_X86_64_PC32 / 32 / 32S
+                1 => 8,               // R_X86_64_64
+                2 | 4 | 10 | 11 => 4, // R_X86_64_PC32 / PLT32 / 32 / 32S
                 _ => 8,
             };
 
