@@ -1195,7 +1195,7 @@ fn scan_ghidra_patterns(
         if pat.post_bytes.is_empty() {
             continue;
         }
-        match pat.post_bytes[0] {
+        match pat.post_bytes[0].fixed() {
             Some(b) => by_first_byte.entry(b).or_default().push(i),
             None => wildcard_start.push(i),
         }
@@ -1214,8 +1214,8 @@ fn scan_ghidra_patterns(
     for (i, pat) in patterns.iter().enumerate() {
         let mut prefix = Vec::new();
         for b in &pat.post_bytes {
-            if let Some(byte) = b {
-                prefix.push(*byte);
+            if let Some(byte) = b.fixed() {
+                prefix.push(byte);
             } else {
                 break;
             }
