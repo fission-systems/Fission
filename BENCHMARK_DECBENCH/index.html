@@ -1301,11 +1301,15 @@ the docker multi-decompiler loop described in
 </tr>
 <tr>
 <td>Sweep harness</td>
-<td><code>~/fission-benchmark/decbench-harness/fullrun.py</code>, <code>fullagg.py</code></td>
+<td><code>~/fission-benchmark/decbench-harness/fullrun.py</code>, <code>fullagg.py</code> (legacy full-dataset sweep); <code>python -m fbench run</code> in the reorganised repository</td>
 </tr>
 <tr>
 <td>Python environment</td>
-<td><code>~/fission-benchmark/.venv-decbench/bin/python</code> (has <code>pydantic</code>, <code>networkx</code>, <code>orjson</code>; the system Python has neither <code>pydantic</code> nor a CFG parser)</td>
+<td><code>~/fission-benchmark/.venv-decbench/bin/python</code> (has <code>decbench</code> installed editable from <code>vendor/decbench</code>, plus <code>pydantic</code>, <code>networkx</code>, <code>scipy</code>, <code>cfgutils</code>; the system Python has neither <code>pydantic</code> nor a CFG parser)</td>
+</tr>
+<tr>
+<td>Scoring code</td>
+<td><code>scripts/quality/decbench_scoring.py</code> (this repository) calling the <code>decbench</code> package</td>
 </tr>
 <tr>
 <td>CFG parser</td>
@@ -1325,9 +1329,14 @@ PyPI:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/sjkim1127/rust-joern<span class="w"> </span>~/rust-joern<span class="w">   </span><span class="c1"># or Noelo-Lab/rust-joern</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span>~/rust-joern<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>build<span class="w"> </span>--release<span class="o">)</span>
 </span></code></pre></div>
-<p><code>runner/ged.py</code> in <code>~/fission-benchmark</code> calls
+<p><code>scripts/quality/decbench_scoring.py</code> calls
 <code>rust_joern.parse_source(path, no_ddg=True, strict=True, preprocessed=True)</code>,
-the same call as DecBench. Override the checkout with <code>RUST_JOERN_DIR</code>.
+the same call as DecBench. Override the checkout with <code>RUST_JOERN_DIR</code>. The gate
+parses a trivial function when it starts and stops with an error if the parser is
+missing, instead of finishing with every function unscored. The <code>decbench</code> commits
+that the reorganised <code>fission-benchmark</code> pins and <code>vendor/decbench</code> still call
+pyjoern, so <code>fbench</code> numbers are on the JVM parser and are not comparable with the
+gate's.
 <code>FISSION_GED_BACKEND=pyjoern</code> restores the old parser <strong>only</strong> to reproduce a
 number taken before the switch; do not compare across backends.</p>
 <p>Measured on 259 rows (same Fission build, same published source CFGs): the two
@@ -1372,10 +1381,22 @@ it is now close to zero.</p>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>~/fission-benchmark/.venv-decbench/bin/python<span class="w"> </span>scripts/quality/decbench_sample_set_gate.py<span class="w"> </span>check<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--cli<span class="w"> </span>target/release/fission_cli<span class="w"> </span>--dump<span class="w"> </span>/tmp/gate_after.json
 </span></code></pre></div>
+<p>GED, source-CFG loading and decompiled-C preparation are DecBench's own
+(<code>GEDMetric</code>, <code>rebuild_cfg</code>, <code>preprocess_decompiled_c</code>). GED is exact up to
+<code>DECBENCH_GED_MAX_NODES</code> (200) nodes and a size lower bound of at least 1 above
+it. Floors recorded before 2026-10-31 used a local copy that approximated above 60
+nodes and could score two equally sized large graphs 0: on the same binary the 29
+rows that differ are 28 functions over 60 nodes (total distance 6,226 to 7,769,
+perfect 67 to 68). Do not compare totals across that change.</p>
 <p><code>--quick</code> scores the first 60 binaries. <code>update</code> raises the stored floor
 (<code>scripts/quality/decbench_sample_set_baseline.json</code>) after a measured gain.
 <code>--dump</code> writes one row per function (GED, source and output node counts) so two
-runs can be compared per function rather than only in aggregate.</p>
+runs can be compared per function rather than only in aggregate. The summary prints
+the total GED distance next to the perfect count; report both.</p>
+<p>Compare decompiler <em>output</em> before reading score deltas. The previous scorer
+flipped one row between GED 0 and 11 on identical text; the current one gave
+byte-identical dumps on two runs of the same binary, but a few rows moving between
+two different builds is still not evidence until their decompiled text differs.</p>
 <p>The gate remembers each binary's DWARF ground-truth types under
 <code>~/fission-benchmark/.gate-cache/ground_truth_types/</code> (about 56 MB for the sample
 set). Reading them took 93 of 243 seconds in a measured run; with a warm cache
