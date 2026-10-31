@@ -1,6 +1,6 @@
 //! Sweep all loader-known functions and dump instruction-level CFG snapshots.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -42,14 +42,6 @@ struct SweepTiming {
     binary_load_sec: f64,
     frontend_load_sec: f64,
     sweep_lift_sec: f64,
-}
-
-fn parse_int(value: &str) -> Result<u64> {
-    u64::from_str_radix(
-        value.trim_start_matches("0x"),
-        if value.starts_with("0x") { 16 } else { 10 },
-    )
-    .map_err(|err| anyhow!("invalid address {value:?}: {err}"))
 }
 
 fn lift_function_snapshot(

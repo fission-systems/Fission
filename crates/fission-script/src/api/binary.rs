@@ -103,6 +103,9 @@ pub fn strings_array(binary: &LoadedBinary, min_len: usize) -> Array {
     let mut rows: Vec<(u64, String)> = binary
         .string_map
         .iter()
+        // The loader's map holds strings of every length; the caller's
+        // threshold applies here as it does to the byte-scan fallback below.
+        .filter(|(_, s)| s.chars().count() >= min_len)
         .map(|(&addr, s)| (addr, s.clone()))
         .collect();
     rows.sort_by_key(|(a, _)| *a);
@@ -131,4 +134,54 @@ pub fn strings_array(binary: &LoadedBinary, min_len: usize) -> Array {
     }
 
     arr
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strings_array;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+    fn binary_with_strings() -> fission_loader::loader::LoadedBinary {
+        let mut bytes = Vec::new();
+        for text in ["abcd", "abcdefgh"] {
+            bytes.extend_from_slice(text.as_bytes());
+            bytes.push(0);
+        }
+        let size = bytes.len() as u64;
+        LoadedBinaryBuilder::new("strings.bin".into(), DataBuffer::Heap(bytes))
+            .format("ELF")
+            .entry_point(0x1000)
+            .add_section(SectionInfo {
+                name: ".rodata".into(),
+                virtual_address: 0x1000,
+                virtual_size: size,
+                file_offset: 0,
+                file_size: size,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn strings_array_applies_the_callers_minimum_length() {
+        let binary = binary_with_strings();
+        assert!(
+            !binary.string_map.is_empty(),
+            "the loader must have found strings, or this test checks nothing"
+        );
+        let values = |min_len| {
+            strings_array(&binary, min_len)
+                .into_iter()
+                .filter_map(|row| row.try_cast::<rhai::Map>())
+                .filter_map(|row| row.get("value").and_then(|v| v.clone().into_string().ok()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(values(4).len(), 2);
+        // Used to return both: the loader's map was passed through unfiltered.
+        assert_eq!(values(6), vec!["abcdefgh".to_string()]);
+        assert!(values(9).is_empty());
+    }
 }
