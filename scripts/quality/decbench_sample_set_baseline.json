@@ -1,24 +1,22 @@
 {
   "full": {
     "decompiled": 250,
-    "elapsed_sec": 299,
+    "elapsed_sec": 99,
     "functions": 250,
-    "ged_hir_perfect": 64,
+    "ged_hir_distance": 7769.0,
+    "ged_hir_perfect": 68,
     "ged_hir_scored": 233,
     "type_hir_perfect": 16,
     "type_hir_scored": 222
   },
   "quick": {
     "decompiled": 69,
-    "elapsed_sec": 179,
+    "elapsed_sec": 28,
     "functions": 69,
-    "ged_hir_perfect": 16,
+    "ged_hir_distance": 1965.0,
+    "ged_hir_perfect": 19,
     "ged_hir_scored": 64,
-    "ged_nir_perfect": 15,
-    "ged_nir_scored": 64,
     "type_hir_perfect": 2,
-    "type_hir_scored": 63,
-    "type_nir_perfect": 2,
-    "type_nir_scored": 63
+    "type_hir_scored": 63
   }
 }

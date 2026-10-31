@@ -107,3 +107,15 @@ benchmark/artifacts/local_observe/<session>/
 - Local observe is **not** a substitute for the docker ranking / oracle loop.
 - Do not promote `local_observe` results to Pages or official latest.
 - Prefer invariant language in commits; keep row identity in proposal docs only.
+
+## `decbench_sample_set_gate.py`
+
+Scores DecBench's sample-set (GED against the published source CFGs, types
+against DWARF) and refuses a drop below `decbench_sample_set_baseline.json`. The
+scoring is in `decbench_scoring.py`, which calls the `decbench` package; see
+[`docs/BENCHMARK_DECBENCH.md`](../../docs/BENCHMARK_DECBENCH.md) for prerequisites
+and for how to read a score change. Its tests:
+
+```bash
+~/fission-benchmark/.venv-decbench/bin/python -m unittest scripts/quality/test_decbench_scoring.py
+```

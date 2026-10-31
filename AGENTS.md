@@ -51,7 +51,7 @@ Read the nearest child file before editing those areas.
 | NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
 | NIR telemetry contract | `crates/fission-pcode/src/midend/types.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
-| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`, `scripts/quality/decbench_sample_set_gate.py`, `~/fission-benchmark/decbench-harness/` | The measurement surface for quality claims; published source CFGs are the answer key, Ghidra is not the oracle |
+| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`, `scripts/quality/decbench_sample_set_gate.py` (scoring in `scripts/quality/decbench_scoring.py`), `~/fission-benchmark/` | The measurement surface for quality claims; published source CFGs are the answer key, Ghidra is not the oracle |
 | Benchmark policy / held-out pool | `benchmark/config/`, `benchmark/patch_validation_pool/` | Gate policy and the patch-validation pool |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
