@@ -197,8 +197,14 @@ impl OrdinalDatabase {
 }
 
 fn normalize_dll_name(dll_name: &str) -> String {
+    /// Module extensions the tables are keyed by. A name that already ends in
+    /// one is a whole module name: the 16-bit tables carry `kernel.exe`,
+    /// `user.exe`, `gdi.exe`, and appending `.dll` made every one unreachable.
+    const MODULE_EXTENSIONS: [&str; 9] = [
+        ".dll", ".exe", ".drv", ".ocx", ".sys", ".cpl", ".vxd", ".fon", ".mod",
+    ];
     let lower = dll_name.trim().to_ascii_lowercase();
-    if lower.ends_with(".dll") {
+    if MODULE_EXTENSIONS.iter().any(|ext| lower.ends_with(ext)) {
         lower
     } else {
         format!("{lower}.dll")
@@ -220,6 +226,31 @@ mod tests {
         );
         assert_eq!(db.resolve("mssign32.dll", 1), Some("DllUnregisterServer"));
         assert_eq!(db.resolve("not_a_real_dll_xyz.dll", 1), None);
+    }
+
+    #[test]
+    fn module_names_with_their_own_extension_are_not_given_a_second_one() {
+        assert_eq!(normalize_dll_name("kernel.exe"), "kernel.exe");
+        assert_eq!(normalize_dll_name(" USER.EXE "), "user.exe");
+        assert_eq!(normalize_dll_name("vga.drv"), "vga.drv");
+        assert_eq!(normalize_dll_name("ws2_32.dll"), "ws2_32.dll");
+        assert_eq!(normalize_dll_name("WS2_32"), "ws2_32.dll");
+        assert_eq!(
+            normalize_dll_name("api-ms-win-core-file-l1-1-0"),
+            "api-ms-win-core-file-l1-1-0.dll"
+        );
+    }
+
+    /// The 16-bit modules are what `ghidra_exports.fpk` was added for.
+    #[test]
+    fn the_sixteen_bit_modules_resolve() {
+        let db = OrdinalDatabase::try_new().expect("load ordinal corpus");
+        for module in ["kernel.exe", "user.exe", "gdi.exe"] {
+            assert!(
+                db.resolve(module, 1).is_some(),
+                "{module} ordinal 1 should be in the Ghidra export tables"
+            );
+        }
     }
 
     #[test]
