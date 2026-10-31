@@ -454,14 +454,6 @@ pub fn discover_functions_with_runtime(
         candidates.extend(dynamic.clone());
         all_known.extend(dynamic.clone());
 
-        let _ = std::fs::write(
-            "/tmp/fission_fp_stats.json",
-            format!(
-                "{{\"call_targets\": {:?}, \"data_refs\": {:?}, \"xml_hits\": {:?}, \"dynamic\": {:?}}}",
-                valid_call_targets, data_refs, xml_hits, dynamic
-            ),
-        );
-
         // Disabled thunks: causes a massive amount of FPs
         // let mut thunks = scan_jmp_thunks(binary, &frontend, &executable_ranges, &all_known);
         // thunks.retain(|&addr| !tracker.is_overlap(addr));
