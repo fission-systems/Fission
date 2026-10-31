@@ -32,6 +32,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SIGTRAP: i32 = 5;
+const SIGSTOP: i32 = 17;
+/// Single-step traps absorbed after stepping off a breakpoint before one is
+/// reported as a real event.
+const MAX_ABSORBED_STEP_TRAPS: u32 = 8;
 /// How long to wait for the Mach task port before reporting that access is
 /// not authorized. Long enough for a granted request, short enough that a
 /// headless caller is not stuck on a prompt it cannot answer.
@@ -49,6 +53,14 @@ pub struct MacOSDebugger {
     inserted: HashMap<u64, Vec<u8>>,
     /// A signal the target stopped for that is delivered when it resumes.
     pending_signal: i32,
+    /// Where the target stood right after stepping off a breakpoint on the way
+    /// to a `continue`. macOS can report one more single-step trap there after
+    /// the continue, with no instruction executed; it is not an event. More than
+    /// one such trap has been seen in a row, so the mark stays until the target
+    /// stops anywhere else.
+    step_off_pc: Option<u64>,
+    /// How many of those traps were absorbed since the step-off.
+    absorbed_step_traps: u32,
     /// Events produced while establishing a stop, delivered by `poll_event`.
     pending_events: VecDeque<DebugEvent>,
     ttd_timeline: Option<Arc<Mutex<Timeline>>>,
@@ -64,6 +76,8 @@ impl MacOSDebugger {
             threads: Vec::new(),
             inserted: HashMap::new(),
             pending_signal: 0,
+            step_off_pc: None,
+            absorbed_step_traps: 0,
             pending_events: VecDeque::new(),
             ttd_timeline: None,
         }
@@ -204,22 +218,25 @@ impl MacOSDebugger {
     }
 
     /// Turn a `waitpid` result into the event it means, updating the state.
-    fn event_for_stop(&mut self, outcome: WaitOutcome) -> FissionResult<DebugEvent> {
+    ///
+    /// `None` means the stop was a trap the debugger absorbed and the target has
+    /// been resumed; the caller keeps waiting.
+    fn event_for_stop(&mut self, outcome: WaitOutcome) -> FissionResult<Option<DebugEvent>> {
         let pid = self.pid()?;
         match outcome {
             WaitOutcome::Exited(code) => {
                 self.mark_gone(DebugStatus::Terminated);
                 self.state.event_count = self.state.event_count.saturating_add(1);
-                Ok(DebugEvent::ProcessExited {
+                Ok(Some(DebugEvent::ProcessExited {
                     exit_code: code as u32,
-                })
+                }))
             }
             WaitOutcome::Signaled(signal) => {
                 self.mark_gone(DebugStatus::Terminated);
                 self.state.event_count = self.state.event_count.saturating_add(1);
-                Ok(DebugEvent::ProcessExited {
+                Ok(Some(DebugEvent::ProcessExited {
                     exit_code: 128 + signal as u32,
-                })
+                }))
             }
             WaitOutcome::Stopped(signal) => {
                 self.state.status = DebugStatus::Suspended;
@@ -227,6 +244,7 @@ impl MacOSDebugger {
                 self.refresh_threads()?;
                 let mut words = self.state_words(pid)?;
                 let mut pc = regs::program_counter(&words);
+                let stepped_off_at = self.step_off_pc;
                 self.state.last_thread_id = Some(pid);
                 self.state.current_thread_id = Some(pid);
 
@@ -251,27 +269,45 @@ impl MacOSDebugger {
                         let registers = regs::to_registers(&words);
                         self.state.registers = Some(registers.clone());
                         self.record_ttd_snapshot(pid, registers);
-                        return Ok(DebugEvent::BreakpointHit {
+                        return Ok(Some(DebugEvent::BreakpointHit {
                             address: pc,
                             thread_id: pid,
-                        });
+                        }));
                     }
+                    // Bounded, so a target genuinely trapping here is reported.
+                    if stepped_off_at == Some(pc)
+                        && self.absorbed_step_traps < MAX_ABSORBED_STEP_TRAPS
+                    {
+                        // The extra trap right after a step-off: nothing ran,
+                        // so go on with the continue the caller asked for.
+                        self.absorbed_step_traps += 1;
+                        mach::ptrace_request(mach::PT_CONTINUE, pid, 1, 0).map_err(|errno| {
+                            FissionError::debug(format!("Continue failed: errno {errno}"))
+                        })?;
+                        self.state.status = DebugStatus::Running;
+                        return Ok(None);
+                    }
+                    self.step_off_pc = None;
                     let registers = regs::to_registers(&words);
                     self.state.registers = Some(registers.clone());
                     self.record_ttd_snapshot(pid, registers);
-                    return Ok(DebugEvent::SingleStep { thread_id: pid });
+                    return Ok(Some(DebugEvent::SingleStep { thread_id: pid }));
                 }
 
-                // Any other signal: report it and deliver it on resume.
-                self.pending_signal = signal;
+                self.step_off_pc = None;
+                // Any other signal: report it and deliver it on resume. SIGSTOP
+                // is not passed on: delivering it again would just stop the
+                // target a second time, and a debugger resuming from a stop it
+                // reported is what lifts it.
+                self.pending_signal = if signal == SIGSTOP { 0 } else { signal };
                 let registers = regs::to_registers(&words);
                 self.state.registers = Some(registers.clone());
                 self.record_ttd_snapshot(pid, registers);
-                Ok(DebugEvent::Exception {
+                Ok(Some(DebugEvent::Exception {
                     code: signal as u32,
                     address: pc,
                     first_chance: true,
-                })
+                }))
             }
         }
     }
@@ -335,17 +371,21 @@ impl MacOSDebugger {
             let outcome = self.wait_blocking(Duration::from_secs(10))?;
             // The target may have exited or faulted during the step.
             if !matches!(outcome, WaitOutcome::Stopped(SIGTRAP)) {
-                let event = self.event_for_stop(outcome)?;
-                self.pending_events.push_back(event);
+                if let Some(event) = self.event_for_stop(outcome)? {
+                    self.pending_events.push_back(event);
+                }
                 return Ok(());
             }
             self.write_breakpoint(pc)?;
             if step {
-                let event = self.event_for_stop(outcome)?;
-                self.pending_events.push_back(event);
+                if let Some(event) = self.event_for_stop(outcome)? {
+                    self.pending_events.push_back(event);
+                }
                 return Ok(());
             }
             // Stepped off the breakpoint; now run.
+            self.step_off_pc = Some(self.current_pc()?);
+            self.absorbed_step_traps = 0;
             mach::ptrace_request(mach::PT_CONTINUE, pid, 1, 0)
                 .map_err(|errno| FissionError::debug(format!("Continue failed: errno {errno}")))?;
         } else {
@@ -761,7 +801,9 @@ impl ExecutionBackend for MacOSDebugger {
             match mach::wait_pid(pid, mach::WNOHANG | mach::WUNTRACED) {
                 Ok(Some(status)) => {
                     let outcome = mach::decode_wait_status(status);
-                    return self.event_for_stop(outcome).map(Some);
+                    if let Some(event) = self.event_for_stop(outcome)? {
+                        return Ok(Some(event));
+                    }
                 }
                 Ok(None) => {
                     if timeout_ms == 0 || start.elapsed() >= timeout {

@@ -330,14 +330,24 @@ build with `--features windows_native_debugger`, and access to an individual
 process can still be denied. On macOS, native debugging
 launches the target under `PT_TRACE_ME` (stopping it at `exec`, as on Linux)
 and reads registers, memory and loaded images through the target's Mach task
-port. macOS grants that port only to an authorized caller, so launch and attach
-are reported as conditional on `mach_task_port_access`: run
-`sudo DevToolsSecurity -enable` once (your user must be in the `_developer`
-group) or run as root. Without it the request waits on an interactive prompt;
-Fission gives up after eight seconds and the error says what to do. The target
+port. macOS grants that port only when **both** hold, so launch and attach are
+reported as conditional on `mach_task_port_access`:
+
+1. the `fission_cli` binary is signed with the
+   `com.apple.security.cs.debugger` entitlement (an ad-hoc signature is enough):
+   `scripts/macos/sign-debugger.sh target/release/fission_cli`, repeated after
+   every rebuild, because a rebuild replaces the signature; and
+2. Developer Tools access is authorized once per machine with
+   `sudo DevToolsSecurity -enable` (your user must be in the `_developer`
+   group).
+
+Without the entitlement the request is refused at once. With it but without
+the authorization it waits on an interactive prompt, so Fission gives up after
+eight seconds and says what to do. Running as root also works. The target
 must not be hardened or Apple-signed (a binary you built is fine), and only the
 host's own architecture is supported (an x86-64 process translated by Rosetta
-is not). Use `--emulator` for guest binaries; a reported emulator capability
+is not). `scripts/macos/run-live-debugger-tests.sh` runs the live tests against
+real processes. Use `--emulator` for guest binaries; a reported emulator capability
 does not guarantee that every guest architecture or instruction is supported.
 
 Treat a supported operation as an implementation capability, not as proof

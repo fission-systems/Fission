@@ -117,10 +117,16 @@ impl TaskPortError {
     /// What a person has to do about it.
     pub fn remediation(&self) -> &'static str {
         match self {
+            // Observed: a caller without the debugger entitlement is refused at
+            // once, whatever the Developer Tools setting.
             Self::Denied(_) => {
-                "the process may be hardened or owned by another user; \
-                 debug a binary you built without the hardened runtime, or run as root"
+                "macOS refuses task ports to a binary that is not signed with the \
+                 `com.apple.security.cs.debugger` entitlement (run \
+                 `scripts/macos/sign-debugger.sh <fission_cli>`), to hardened or \
+                 Apple-signed targets, and to targets of another user; or run as root"
             }
+            // Observed: a signed caller waits on an authorization prompt while
+            // Developer Tools access is off.
             Self::TimedOut => {
                 "macOS is waiting for Developer Tools access to be authorized. \
                  Run `sudo DevToolsSecurity -enable` once (your user must be in the \
