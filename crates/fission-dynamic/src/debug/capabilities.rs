@@ -18,7 +18,7 @@ pub enum DebugBackendKind {
     Emulator,
     /// Linux `ptrace` backend.
     LinuxPtrace,
-    /// macOS native backend stub.
+    /// macOS native backend: `ptrace` plus the Mach task port.
     #[serde(rename = "macos_native")]
     MacOsNative,
     /// Feature-gated Win32 native debugger.
@@ -193,6 +193,10 @@ pub enum RuntimeRequirement {
     PtracePolicyAllowsAttach,
     /// The operating system permits debugging the selected process.
     TargetProcessAllowsDebugging,
+    /// macOS grants this process the target's Mach task port: Developer Tools
+    /// access is authorized for the user (`sudo DevToolsSecurity -enable`) or
+    /// the process runs as root.
+    MachTaskPortAccess,
     /// An emulated target has already been loaded into this backend.
     EmulatedMachineIsRunning,
     /// The target format and architecture are supported by the emulator.
