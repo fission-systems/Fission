@@ -1,10 +1,10 @@
 {
-  "file_count": 830,
+  "file_count": 849,
   "files": [
     {
       "path": "utils/sleigh-specs/README.md",
-      "sha256": "5a94528edacfbc391bb336e80040b96371a4402431b43ea8d9b60370427f6557",
-      "size": 858,
+      "sha256": "d1455f77821adb612076ff0ca5899c0bb8a7635e2759f876051e024750c0846d",
+      "size": 965,
       "source_path": "local migration note"
     },
     {
@@ -21,27 +21,33 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/68000/68020.sla",
-      "sha256": "f903d2609c6d925222226596c858145847e70213fb191b3ff47d5b0bd196519c",
-      "size": 67679,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "60aaaa3d6d86b35078e3ff96f25793fcff4a4852a1b632e8863b9e935ee1e9de",
+      "size": 67689,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/68000/68030.sla",
-      "sha256": "112cf04b7689d46d14fa9d77b9b4bb8b7e91ae0e5fa4975424f6f4662ab1d881",
-      "size": 70050,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "d992292fd513e725683cd0ba1d44b5ce07360cc59204a57f0c3ae064b9e3c268",
+      "size": 70070,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/68000/68040.sla",
-      "sha256": "f771dec87baca67acf63876f3a05319c44f893de6fdeb50efba80440add93f98",
-      "size": 71641,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "43787cba981bb11e3fc5a71899c52c010a63595eb4ea309128229ac480e00ec2",
+      "size": 71639,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
+    },
+    {
+      "path": "utils/sleigh-specs/compiled/68000/CPU32.sla",
+      "sha256": "ec281086ad300d828a1cdc8819db09708adcae044849e8d365cc7c2b879c33b7",
+      "size": 50378,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/68000/coldfire.sla",
-      "sha256": "89b1a83c5031afc8b1f2d9fe04350c7e0bc05e7f64549185140c863ad7b789b5",
-      "size": 78443,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "69fafde36d02e7d30941b2d2cc5fb0b9e54583b5c951f5cff1d0b043e5dd9cf4",
+      "size": 78473,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/8048/8048.sla",
@@ -51,27 +57,33 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/8051/80251.sla",
-      "sha256": "cddc1065f97403d566bac0ca858aeb000a081cdb579f0f48ac21da1e7eb43f23",
-      "size": 27837,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "8f8daba41465e36c76b62c2ea0a1e1ac7e3dfa265f36e9a00b29d09e22bdbd89",
+      "size": 27841,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/8051/80390.sla",
-      "sha256": "835e982f9dc70672ed0473fd7f5e69343d429371bbc4e3376cb410f55c9de87d",
-      "size": 12019,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "1a27344c020677c6050083f4fbd975a974ac678c206b4835be17bf3bc3f6468b",
+      "size": 12023,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/8051/8051.sla",
-      "sha256": "691b462c85dfcbd64999565985a4925db7591918261bea58369b1daa280b6c8e",
-      "size": 11828,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "4d29c923805e6d56223c04bce9e3cdf22e2bc4d2d50acea44cf142f9daed124f",
+      "size": 11840,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
+    },
+    {
+      "path": "utils/sleigh-specs/compiled/8051/cip-51.sla",
+      "sha256": "5672affd2cae696230198b37b99d56cf677b2a495231870e9274d6e029bcf27c",
+      "size": 11883,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/8051/mx51.sla",
-      "sha256": "d9e381097a76b434a9e88ac011f6857110723235a7cd4672f4a6f8f9f8dddfd1",
-      "size": 18260,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "2d3f47ad3bc5b460ef2a0b7306ad0ad297a2ff9e71153c85c2eb8de823fb4111",
+      "size": 18270,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/8085/8085.sla",
@@ -81,123 +93,123 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64.sla",
-      "sha256": "edbad5067c7cdd5f72fb5dddacc37165bc02abb63e0e05b6bb0c75fda9d72b88",
-      "size": 494950,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "7d48076e27f5cd81d24be3dbbf21ea2e5cc3b84f9559e03e6446908d19f804c5",
+      "size": 495266,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64BE.sla",
-      "sha256": "81bea4ed234659c4e0d8a6ce6b552e0ea59141f12451be70b259ca793803d4c6",
-      "size": 500874,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "704e7f8b435f9c7e8114c4f2c1a6697566ea93e3de877babf25de3795aae3d9e",
+      "size": 501452,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64_AppleSilicon.sla",
-      "sha256": "3bc07d211cf32be3b46b3dba1df6c43017bf63a9fb8c2b7ed9291e93e7ddab0f",
-      "size": 496785,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "587fde35ac4467eadeba410fd38e2a6297e71556c58245324fe3646e944aaf22",
+      "size": 497108,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM4_be.sla",
-      "sha256": "b5e8c0bdd20151be26b7698a5cb7c567d3fd033fc85685946b0146642d6ce9d5",
-      "size": 46064,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "8bea5d66b56f94c4adc602e2e532bc1430c2d6985d0b365f84b526328ae7fec7",
+      "size": 46774,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM4_le.sla",
-      "sha256": "aeafd9521ab39f71c1a1dcde1f6206ad099e880d060af9b0327b62bc2ea222e3",
-      "size": 46114,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "41c734c9a41fd076ffafc33ea0d1057b513d239bd0164b7fb86f3a3756d45351",
+      "size": 46826,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM4t_be.sla",
-      "sha256": "39b9bffad270b7febc42a6967e670be24e85e7a5c0732ee60858f19973e4c06b",
-      "size": 72119,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "b55d4a3230413d60355faf9596eb86a755db7ca78191c0853d7c3031e2133793",
+      "size": 72694,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM4t_le.sla",
-      "sha256": "3a9b244de0a4d3a33200e7c38a671629beb0c5d82a8f8fa099fad0809e763097",
-      "size": 72480,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "217b0469e25c9e31b5f9ffe9982de08481ae68833e79cc7865a9f6f72e1774ba",
+      "size": 73048,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM5_be.sla",
-      "sha256": "65dfd30593d3737bba656a89b7f925bceaeb29f06b001fe15fa31f6d654d8272",
-      "size": 50087,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "5d64b619a26994dc70d024b7a6d0a5b3996a237a704ba791edb40808c81742d2",
+      "size": 50741,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM5_le.sla",
-      "sha256": "12c8a5f67917fca78257f41c520ad1d381da1b8e4466cd939b941470b697c90c",
-      "size": 50137,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "6d52920e040bff37d26282ccefd7774d882151a0d854d7adc90711314300f6a5",
+      "size": 50782,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM5t_be.sla",
-      "sha256": "b81e5cbfb43b8d2a96b3e756899c45c3f80de74f79d0ae904c6f8051c0eeea80",
-      "size": 77424,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "926cdac322a46d5db423f081ec1e1de4efb441e0f96fead31bac7a5a4ae68773",
+      "size": 77955,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM5t_le.sla",
-      "sha256": "480359dd66f4dc537fc4e47ee654154f24c01f9c3afc34c7d993f167969e7f81",
-      "size": 77844,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "60fd14b3c959550e42453ae468ca1947ac3629c6569f7ce288d2c2f0154984e3",
+      "size": 78387,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM6_be.sla",
-      "sha256": "8414f39318ab5e4da507f1b65bb9f6ab4bffa878d08d49bf4cbee9d30aa3a234",
-      "size": 165102,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "39ae5738c56206e398d4a9e5144fa49e1492cba95d2b9766120e2f445b23696b",
+      "size": 166613,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM6_le.sla",
-      "sha256": "a77b3cda819111998cc085f22e3386743b77fe225d09f14deb4d2aa83b2e3622",
-      "size": 165727,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "b18afec409b326f06f0d083ae3e7d4c2d732335a649d27eea3b52a11dd691022",
+      "size": 167173,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM7_be.sla",
-      "sha256": "2e38b81f28deafe3596457632ca9b37024fc688f8bcc3c72c3c17ca1e825405e",
-      "size": 249984,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "0906706bf254278546f972a33254d68ecd6a33983158a1a88f055d895d6451ce",
+      "size": 254934,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM7_le.sla",
-      "sha256": "9bf1ec54f1235ebf5a9e68e791e1160fa8d92ed3b2007099725c04624a007b05",
-      "size": 251283,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "ba87e3ef9d9e49dba5f06f8197af1a6fb8a153d5f1fe59a17d8885b0ff82b557",
+      "size": 256284,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM8_be.sla",
-      "sha256": "5c74659eb34c0742a8956055e5bb3136cc33db98f808b17baba7a3f983b505f7",
-      "size": 264899,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "1082be4a4414dbbfc8e731de8bfc22c51e828869869420ec7a0c3760df61da55",
+      "size": 274342,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM8_le.sla",
-      "sha256": "c77811ea202caa70a3ecc318295a23b9f60ba76cec83b024654e6537d050f331",
-      "size": 266662,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "781007bba617f91dbf1b8b4bdba63fa3683f099bdd9c0069cc65601bd4297a2d",
+      "size": 275984,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM8m_be.sla",
-      "sha256": "621d31a4d3bc22d950c309b0f8028ee816629ddd806ab0f41c98bb1892509067",
-      "size": 266329,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "0364355444d996e3beb6dbf882aa510466c27ca720e483c85ae3c63b7cbeedc7",
+      "size": 316555,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/ARM/ARM8m_le.sla",
-      "sha256": "ffb76e825490a6ae03b9357645de0a3801e0d1b343a6a47312b7eba826243c20",
-      "size": 268054,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "51c1f3ff739fc7e91c2ffdeccbc4f2fd547631bd615f6d2dad191762332ef425",
+      "size": 318091,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/Atmel/avr32a.sla",
-      "sha256": "6e7c1bdcb6251982ea29b5c0124762a83692609461b498a1c17248b0fea53ac3",
-      "size": 68919,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "9633b6cbeee12b20b65723505bf2dbb70282fe8ab0acfaa25e9600e980334acb",
+      "size": 68945,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/Atmel/avr8.sla",
@@ -345,21 +357,27 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/HCS12/HC12.sla",
-      "sha256": "1a8a8d4c36dc7fd4dee64ba5bf2d26dbf2bc50b9e5db2e134727d89d848cd14a",
-      "size": 40781,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "757dd04434a0b03e46f74df12acbbd4536ef9f0ca957200a448b8fc06dbaba44",
+      "size": 40746,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/HCS12/HCS12.sla",
-      "sha256": "4ad2d273a74f8d1c56e71ac4c02e986af70e1a414c8983e8e283d53d4b9cd026",
-      "size": 45312,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "52846f0a01c53dd113c2e4f2f4f30f0a8258de01c88bbddf137e80001ea60a3c",
+      "size": 45206,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/HCS12/HCS12X.sla",
-      "sha256": "207a6663867d3e72d0ff934ceb1f03ac3b547b9c01508499851afd33a40c822b",
-      "size": 78232,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "980ece386543d2023884caa554f44cd29ec9e7deb46f3550f36a41d0ece6f80d",
+      "size": 78124,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
+    },
+    {
+      "path": "utils/sleigh-specs/compiled/Hexagon/hexagon.sla",
+      "sha256": "f1921f5a5fbf23b882b4727387b2c8a3dd0e39bac9497e1449a41f1e3c76e8b4",
+      "size": 238802,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/JVM/JVM.sla",
@@ -429,57 +447,57 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/MCS96/MCS96.sla",
-      "sha256": "c78d18d97107e62b1af26b658b2da7151bc2ed5fa1f3d658eafaa65b9cd5e1f5",
-      "size": 28953,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "016656b599f17addf4f5735be5a645e8f4134ab8bc7fe6d0e061d3d83ded3320",
+      "size": 28633,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/MIPS/mips32R6be.sla",
-      "sha256": "1076abe0a0e551b52a2b490fc39576fc87342de0594d75911d87851d8387bd34",
-      "size": 163995,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "1a820a1ee1b4acfa94a3dcea0358a421515fc0628c3aa305eb2800a5bce33548",
+      "size": 164116,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/MIPS/mips32R6le.sla",
-      "sha256": "7cdbb62a4bc14c026a87acb2cef3454575b6fbae7a7fe67295ad62139593a448",
-      "size": 163779,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "9c5f0c8a5b92cde6a1ad6ce695a9a7b30b9a3bfb8102185e073cfd896d640706",
+      "size": 163881,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/MIPS/mips32be.sla",
-      "sha256": "37b73401af959199152c0b9d7a858f0602f159084107057ced0e9c4d1f53820f",
-      "size": 166305,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "35e2a6d8dc08c96460189e2e033811e22a3ee1a26f05927ee75c5bae34a731db",
+      "size": 166432,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/MIPS/mips32le.sla",
-      "sha256": "58f26c361d8a0b9697c164791bd5b81bd0d5b77d462fae33d8e02da57a4ba19c",
-      "size": 166093,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "41292aab14b09adb46fa89382dac083ec90cba8603b5bf3309b404960e890f50",
+      "size": 166213,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/MIPS/mips64be.sla",
-      "sha256": "b84b79a5defb876a9cbecf11e96a44d13acbd10e484bf847b04f82d4dfaf042c",
-      "size": 177275,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "2072fa316d24313e23d52163118426b0c3cc1e7119ec2919c0a9bec756f7e099",
+      "size": 177392,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/MIPS/mips64le.sla",
-      "sha256": "443c6f12b3cc6a6e513265f04ded04d821c93d47df8109aa495e098cbc2f7b2e",
-      "size": 177151,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "8ba0d2aae851841093decf3ffc379291477b1ed52e046cbb19950635ea538b60",
+      "size": 177234,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/NDS32/nds32be.sla",
-      "sha256": "d9b24324857e4d8b3e78cfd163d845f9a71c334d1bf5cd3913680da4576e0469",
-      "size": 36221,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "fc3d9c1b21b5e9b187ee85c4287f1855481f1142c1d161d2cd542f03b045785d",
+      "size": 36225,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/NDS32/nds32le.sla",
-      "sha256": "043fe0e4232a7a46016dbcbaae9d8715530e84b86c7f9067abf8c6e1206e1c69",
-      "size": 36221,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "d9733d8d31eac2910f8cce9c9b6496a4bfee955572790bf4aa53ce29c3efe1f5",
+      "size": 36224,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PA-RISC/pa-risc32be.sla",
@@ -561,147 +579,147 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/PIC/pic18.sla",
-      "sha256": "2854f7aa02185dbd0d0cddb76de9d4c78dd1205b95d8c0cb2e58f05cab8db11c",
-      "size": 17356,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "8605fe6c68d8e0ba8023e9135a16fc040da187cb63cf791b053ab06ae39c649d",
+      "size": 17247,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_4xx_be.sla",
-      "sha256": "e46c9e9c3f8353c4177610cd0b584158ca8c5bc86513958c4eea1be2c99e3741",
-      "size": 108283,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "67f6e4ab40ed29cb513c88e118a64de84b6142c04c1744aae07f7610e935afc2",
+      "size": 110829,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_4xx_le.sla",
-      "sha256": "c1711c992b2559e7179aa1cadb3f00c81fb367790d693e3ee9a493f41aa7c6d0",
-      "size": 108382,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "90f6ae5e4a7ad1160ef83e4656a40a3137226028f21af47e0817562326657d09",
+      "size": 111008,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_be.sla",
-      "sha256": "828f7a73d56dd850f72aba935c6287bf618fd896d8ea4ef87989fd4890812dad",
-      "size": 133394,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "ee93bf0a4f9777070e461b1144a37e163b99d84279a725431c2829a28d61395f",
+      "size": 136150,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_e500_be.sla",
-      "sha256": "722fdeb6f6ecdd1c15ad29af1e32288566ce7f5d0b357cea4bbc603960d94dd2",
-      "size": 150191,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "699966574fbe2865f01c4d5cb8f1243d03bb551eae92e558473347566933450b",
+      "size": 152381,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_e500_le.sla",
-      "sha256": "4bd76338158fe46e2160a4fb91f1b1b4bb72bf285dcce3ef0900c1a2402f7e3e",
-      "size": 150384,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "b9b5e5d23d4aa2d736eb984ca8a3f5d89d7ae05d5b91c67557f035dec9bea309",
+      "size": 152560,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_e500mc_be.sla",
-      "sha256": "8ed853b5e6674f13a8dc48c66317e9ead8618e1f07c48555cf3da138c552a719",
-      "size": 108367,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "c8705d10ddc8c9c24497f1aedea255609ec50b165a1ee13e08931ff310bcaa9a",
+      "size": 110992,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_e500mc_le.sla",
-      "sha256": "b4e2a8b735f005e5ba90a90cf7b940157b1f465c9a4cf21fadcac103df8eea4d",
-      "size": 108518,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "b8c1cc17fa852631a8ece889b17f123559d72a89dd71c20bfcc9c5dc710f9aa8",
+      "size": 111154,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_le.sla",
-      "sha256": "1f03f0dda1f927dc7cad2ebe7eda15c826c6c0200086dce7c672eddc0f1a7dd5",
-      "size": 133766,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "82ee2897fb53a1c0da384acf7ce8e2a3ac7d1f2c75870ff2969b99bc2d77f196",
+      "size": 136519,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_quicciii_be.sla",
-      "sha256": "39b0c0dd280bbe43799fa0d6b3df812d4d880390835d43121f101ad14c13c84c",
-      "size": 114243,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "1a9207914d28e1806118c6b12dd04eb08782bae95092269fdec253b8a72797b7",
+      "size": 116591,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_32_quicciii_le.sla",
-      "sha256": "5383395dbc8a600c2f976c64f04cae2082d542de0103315573a39e24112ff8a6",
-      "size": 114396,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "137beb30fb6115aa713e2f169d4706d56fad3f82e11396b66eeabc164698645b",
+      "size": 116741,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_be.sla",
-      "sha256": "a3f6cfa119ce34aae7a0821d0b1195fa1b2632f130b417e25cf9c2ced3ac03e7",
-      "size": 140774,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "d0bbcc22a16ff6925ef24f283e8e1285d72132b79c2f0835f0af05b6554dd494",
+      "size": 143536,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_isa_altivec_be.sla",
-      "sha256": "7b1ebc945afc49e22ca01a80867d0d96dd6233b0e596cc5d3c0076d1fc05f010",
-      "size": 187411,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "f20a8242edc86889176ef5bc303f5bfa42d617b884ef725c69b7a3f0c9e8cc26",
+      "size": 192736,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_isa_altivec_le.sla",
-      "sha256": "2543d462398c42da7e1b5dbfd04d085d03375e293cc90a7d01d2ea4095709b51",
-      "size": 188635,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "3c1816b27c420bb5e63eb2b1f090dd4338fe35792554b60867749829d2812b8e",
+      "size": 193796,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_isa_altivec_vle_be.sla",
-      "sha256": "301058f2bf0ab618f3c1ad4128fc531640ee86fa545f9829bcaf76cceab7e6e9",
-      "size": 202446,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "f844747addbe365c5c61d487bfa63b1ac8f9787e59b174198d91352dbbe70596",
+      "size": 207790,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_isa_be.sla",
-      "sha256": "788a7947b54766afc68a10755ee2039896ac9af4a56c95733729798e9dbf346e",
-      "size": 198255,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "a3630b851880fb0ffcb6ac9661a6d1e1e7ab70286a5a6e3553b03cb5d6f66edd",
+      "size": 203358,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_isa_le.sla",
-      "sha256": "4cc754d16132076bacefc51504fcc91952f07bad037118ac23e8167423e93353",
-      "size": 199018,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "27d83157eb2481b522e07ae470d8fd14e8b453a8f1c46588f37b79995c04c539",
+      "size": 204250,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_isa_vle_be.sla",
-      "sha256": "2b3b884bb50dec2f24312734b42378f5c51715d9145504a622eb27134d0d430e",
-      "size": 215076,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "bca0609b19c748d8e055fc88962fd96bf6c37a0347d2b37fdbbe699c5e975297",
+      "size": 220311,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/PowerPC/ppc_64_le.sla",
-      "sha256": "81994d375f241b8998536724f5b1d050974277f60afe83615b0728ea1773d9b3",
-      "size": 141144,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "fe70b9203987c2d1300bdf8642cd2f625ba5e58ae51e6de186c3c8f2973669d1",
+      "size": 143813,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/RISCV/andestar_v5.sla",
-      "sha256": "a03adc3c6d7696457671551baaa6b14737c0bc0e8b267dbd6c6454ba48d67c3a",
-      "size": 108723,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "23faf9754555e0af08bdb7dca13618cdd0a399598a957517d1a95b622308264f",
+      "size": 108676,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/RISCV/riscv.ilp32d.sla",
-      "sha256": "147841d1736fe8b68add9dd99d0b2fee257ea58f2c6bbb06c833a09ae35f87cd",
-      "size": 77217,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "1344c5d0875db3602a9d2a2752bf4d58d1fc6b495386465bb6a8bde29e5b4d6a",
+      "size": 77164,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/RISCV/riscv.lp64d.sla",
-      "sha256": "0a58998a9d91eca7d896acdf0548da4fb887e5c9a7fae9bad4ab35a9a4e512e4",
-      "size": 89127,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "f9b79778dac6ed67836795cdc783b19be624fd78bbe51b937f54ce3b9f7af207",
+      "size": 89343,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/Sparc/SparcV9_32.sla",
-      "sha256": "a91755214521762fc3f180a3fdbf7387315479da76a29db181512290af56ed32",
-      "size": 40550,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "6eb6df52cf3b34544fce9acf34dfb43a25018ac0e2aa72c05bcf18a483eb2eb3",
+      "size": 40553,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/Sparc/SparcV9_64.sla",
-      "sha256": "47e2c352007a6b717dd1e4884599d4f134014496b57f615be5cb0aa0a4fb258a",
-      "size": 40334,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "202d6510faa64bf8157b8e4a14dc2ee809df12e038e54cc830f6cee89f7e235d",
+      "size": 40338,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/SuperH/sh-1.sla",
@@ -717,21 +735,21 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/SuperH/sh-2a.sla",
-      "sha256": "665d5f288d3ac573bace5b0a330364514780ad2f6b6f70a9bd1777aae6b76e6b",
-      "size": 28508,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "b33d31a060765bba76942d79d2ded550bd9bc55c992eabd862071790d792099e",
+      "size": 28551,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/SuperH4/SuperH4_be.sla",
-      "sha256": "97122deaebe0acc3957cbcb36df374f99d6a972015c5bb68e0b535f55783f7da",
-      "size": 21885,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "3ebeb5eddee9771f31ba1ac67d61f3e6f55738d3db03576c41a6c87c6f9e87ad",
+      "size": 21881,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/SuperH4/SuperH4_le.sla",
-      "sha256": "d0ab6d727bcdf5ea7475afd62d12e4ffc79857cf609f9f10d613ce9db00dd635",
-      "size": 21887,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "0bdaa27e56190d5f5189843753648b0d22cbecc694069205fddf9b48cd148502",
+      "size": 21884,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/TI_MSP430/TI_MSP430.sla",
@@ -747,9 +765,15 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/V850/V850.sla",
-      "sha256": "7f4c0e6a509c17e89d2869ad2f1aadc4273d46f002408e00c1edb156f134274f",
-      "size": 30257,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "56609ad2858f5690fba25a40f07ac2f2a180d085597d1b0c3b0caf1b03f66df7",
+      "size": 26855,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
+    },
+    {
+      "path": "utils/sleigh-specs/compiled/V850/V850e3.sla",
+      "sha256": "e0ca53f60a0d06e32b6bd7686fc24308b3195dd88a97c4240ef76341abccbd11",
+      "size": 33121,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/Xtensa/xtensa_be.sla",
@@ -789,27 +813,27 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/tricore/tricore.sla",
-      "sha256": "f9bf6cd3f24d1472519599daf93574f98d9e4311616054f94b676ebe5193d6c8",
-      "size": 149190,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "0a4b927112c6862cad83b061baf05a23c5369067cd479fe09484f4c5d8cb76af",
+      "size": 149024,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/x86/x86-64.sla",
-      "sha256": "d5adc314e2278228b380d8f653b2b579fa4a65986bb1d39b095e461fd5432481",
-      "size": 487659,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "de384b094f2a72cf0f91a9e5de4d171237b9fb39a21fcad916a32abeffed1e19",
+      "size": 501071,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/x86/x86.sla",
-      "sha256": "148ac1b90dede3d080064ca4a171f8b4c85576db41122c2c9e4de52da8a405dd",
-      "size": 432470,
-      "source_path": "vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors (Ghidra 12.0.4 compiled .sla snapshot)"
+      "sha256": "ac545a8c854eeb7a3089641669c989b583441d014f577b3c04e9d413157c2bdf",
+      "size": 439244,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/ghidra_language_manifest.json",
-      "sha256": "c56f9b7da822b6e12c4c2df224d5346cd13f8a279b9f1abc517242d2db3f80f4",
-      "size": 157393,
-      "source_path": "crates/fission-sleigh/specs/ghidra_language_manifest.json"
+      "sha256": "925ad1069b1ba3fa8ee098d45be9cc02c07ef1e0992181f9198c6a1111174989",
+      "size": 160615,
+      "source_path": "generated by crates/fission-sleigh example generate_sleigh_frontends"
     },
     {
       "path": "utils/sleigh-specs/languages/6502/6502.cspec",
@@ -855,9 +879,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/68000/68000.ldefs",
-      "sha256": "7c5a452462edfff87c37debb26abfbad439d443746e106840f96f8983ce024d0",
-      "size": 3159,
-      "source_path": "crates/fission-sleigh/specs/languages/68000/68000.ldefs"
+      "sha256": "c10188260855feb3b38467948aa66c29c23ea40eec1159e04762e74bfc424b5a",
+      "size": 3664,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/68000/data/languages/68000.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/68000/68000.opinion",
@@ -867,15 +891,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/68000/68000.pspec",
-      "sha256": "c05ae9a9651cdfbb6db539fd03792ed5625c7eb87c02c318f163ec5cc36d0dd1",
-      "size": 342,
-      "source_path": "crates/fission-sleigh/specs/languages/68000/68000.pspec"
+      "sha256": "1dc90f8ddc0c1a49d4a24022f5dcdd94b44c36234db18f48cd5340b3d6c1ea3e",
+      "size": 393,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/68000/data/languages/68000.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/68000/68000.sinc",
-      "sha256": "4a5a82d7ae5a50e25a55150a5d2a1043932bcb53923e73c456bee9a61a348fb0",
-      "size": 157635,
-      "source_path": "crates/fission-sleigh/specs/languages/68000/68000.sinc"
+      "sha256": "fea0caad18cd91249bf2441a67678e3a38e375bface616310513341fc6baf948",
+      "size": 164213,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/68000/data/languages/68000.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/68000/68000_register.cspec",
@@ -900,6 +924,12 @@
       "sha256": "3cf9c31f2be343a1ac2efa82db91ea8672bf0299c99fbd0ab92386bbd1b5a47b",
       "size": 41,
       "source_path": "crates/fission-sleigh/specs/languages/68000/68040.slaspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/68000/CPU32.slaspec",
+      "sha256": "a8eff7453b12c39ad9f73977d440b00088e48df18759acd6d52142a27e81d536",
+      "size": 89,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/68000/data/languages/CPU32.slaspec"
     },
     {
       "path": "utils/sleigh-specs/languages/68000/coldfire.slaspec",
@@ -975,9 +1005,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/8051/8051.ldefs",
-      "sha256": "6fa4e7e6811edbd20dc3f2865ddf39be4703d7cb53b437844c98b089ca4cb7d2",
-      "size": 1823,
-      "source_path": "crates/fission-sleigh/specs/languages/8051/8051.ldefs"
+      "sha256": "d3a0d16784f1b080fa35167fa2143821dfae3b628f188f97e22404ef0fe0637f",
+      "size": 2269,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/8051/data/languages/8051.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/8051/8051.opinion",
@@ -1005,9 +1035,27 @@
     },
     {
       "path": "utils/sleigh-specs/languages/8051/8051_main.sinc",
-      "sha256": "5d2c15bb250af1727cbcfba938fbbf597cf6b2f475ec02b553ccdf4b6ddf1825",
-      "size": 38245,
-      "source_path": "crates/fission-sleigh/specs/languages/8051/8051_main.sinc"
+      "sha256": "a514b25d08b85893c9fd96ead444eff856b201d98e0fd62ecf57e4387fd1a009",
+      "size": 40727,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/8051/data/languages/8051_main.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/8051/cip-51.pspec",
+      "sha256": "a1429d1e6a5698449b5f0a7c2fdca552e5c9b19020fb80a2063a68cd2a36bf51",
+      "size": 18244,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/8051/data/languages/cip-51.pspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/8051/cip-51.slaspec",
+      "sha256": "429cc7c138511752c5072bc1d977b7c217d6e88fb78a8540e62d126d35cf125f",
+      "size": 45,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/8051/data/languages/cip-51.slaspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/8051/keil-cx51.cspec",
+      "sha256": "1721ebe0a050fd24d9ceac6f8db10900c7728898c6092f10656d10cade3fb99a",
+      "size": 2191,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/8051/data/languages/keil-cx51.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/8051/mx51.cspec",
@@ -1083,21 +1131,21 @@
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64.ldefs",
-      "sha256": "488ab13f870dcd0e75eb26cb563f24c39f4d3c6111f5d0f71ae77592925f66be",
-      "size": 3682,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64.ldefs"
+      "sha256": "ae0450a9ff7d920d93d7e0f6e5e70095862e6e65e45740153b096454b85d10b8",
+      "size": 3872,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64.opinion",
-      "sha256": "6e25d96730cf351d3750173ce3785d4ad4ad9dcdea26dc0832e11eabf86899fb",
-      "size": 1896,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64.opinion"
+      "sha256": "fd60224814f69f232334f9dccd8f769a02f23348ba88eccbad0db05ae4138a4b",
+      "size": 1904,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64.opinion"
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64.pspec",
-      "sha256": "5256de6e132228a2e3729fad41fa9f06d1d5e9e4d93edd1c31b08261fbe575c3",
-      "size": 5512,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64.pspec"
+      "sha256": "45784c3d7374bc84aacba3707c5e21fc9b5ac36cce485167a22d72d96dde82c9",
+      "size": 5561,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64.slaspec",
@@ -1154,12 +1202,6 @@
       "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64_ilp32.cspec"
     },
     {
-      "path": "utils/sleigh-specs/languages/AARCH64/AARCH64_swift.cspec",
-      "sha256": "5633b58f27f7da02c9350a205cb26d213a830127cb408641c8eecf3465150860",
-      "size": 12239,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64_swift.cspec"
-    },
-    {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64_win.cspec",
       "sha256": "32527efab83a0a5f32f7a5eb3da8fe69dad96b926981fb8ef6982bb1e1ed3ed5",
       "size": 9510,
@@ -1167,15 +1209,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64base.sinc",
-      "sha256": "a02ec3681ebb32fe13c294ed146407a0017d4b1f5dcad25b170da92eb76bc39b",
-      "size": 367834,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64base.sinc"
+      "sha256": "4c70fde74b15e456a73ab51d9636381c56a5f16b876f97fe65919b583dfdb9e6",
+      "size": 367855,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64base.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64instructions.sinc",
-      "sha256": "fde6454c27ed9c2ab99cbdc403af8d188b7cf3a044468b9d9569654afcf04683",
-      "size": 141768,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64instructions.sinc"
+      "sha256": "c64884f59d9da0663ebe6ebcf9894cdf40972921b38ed24abcda847af21810f7",
+      "size": 141836,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64instructions.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64ldst.sinc",
@@ -1185,9 +1227,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64neon.sinc",
-      "sha256": "1c5d3053ea9d53ddb486d3a2a15a9f5a29df08b2ac26706dc4e7702f17390eb0",
-      "size": 1448636,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AARCH64neon.sinc"
+      "sha256": "2e25dfb07e382252005f684320869388529de0734bb8bde456196eb33d78b98e",
+      "size": 1449781,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64neon.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64sve.sinc",
@@ -1197,15 +1239,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AppleSilicon.ldefs",
-      "sha256": "c55fd46217888d07e5ff2068a0c2ccf09b2ff9bd37e62b2c02fd60acfc87b3df",
-      "size": 1001,
-      "source_path": "crates/fission-sleigh/specs/languages/AARCH64/AppleSilicon.ldefs"
+      "sha256": "5a9ebe8b948f781a25276a7fae795458daaec817c4bdd8e85aa4db7308d6b671",
+      "size": 934,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AppleSilicon.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM.cspec",
-      "sha256": "a27741e8096ab48aabb365e4216397b7bc5012d6e6b2b3a227b7b356936f3f7e",
-      "size": 13580,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM.cspec"
+      "sha256": "428cff0d02aa903b634d295a20bcc653672630e29fcb348ece400c19131def3d",
+      "size": 13330,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM.dwarf",
@@ -1233,9 +1275,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM.sinc",
-      "sha256": "1a5ddc2bc352c764f43960e5a2726113dad751b0b71a6615b988fb52f6916678",
-      "size": 12117,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM.sinc"
+      "sha256": "769bbaa6d2dc9186c463a0fb771c7d87ab0e7901d7de1989016886a834e7ba86",
+      "size": 12120,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM4_be.slaspec",
@@ -1323,27 +1365,27 @@
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM8m_be.slaspec",
-      "sha256": "aa7808df4a4d99b9fafff740e6ca101db97d2c414f48ddb51a9ef4d772e9bfca",
-      "size": 344,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM8m_be.slaspec"
+      "sha256": "c13927ed2195832b28a0c4292e9503f90c5a7db072fe3a6ae8d0f0869ee4412b",
+      "size": 348,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM8m_be.slaspec"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM8m_le.slaspec",
-      "sha256": "f9329524bae7d41c8dfddd07839fa0ad12960091572caccdc30e3785fed610d5",
-      "size": 347,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM8m_le.slaspec"
+      "sha256": "d83840c33f9023fb807ebae6116884206bcba39bc81ec94797aa8135569628db",
+      "size": 351,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM8m_le.slaspec"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMCortex.pspec",
-      "sha256": "4d28a8ed4ee6f669df7528586abfd5964b5d5e7373a519c66ca059f5baeeac1f",
-      "size": 2263,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMCortex.pspec"
+      "sha256": "21dfb2b72b251f6d6d7b3d80fa377e81d90806072fad3307a5fba96460a48cbf",
+      "size": 2668,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMCortex.pspec (+ Fission-local patch)"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMTHUMBinstructions.sinc",
-      "sha256": "dfe84fff8dbc540e663985df414925ff32dc92022d17d986e07b35b276567d92",
-      "size": 177783,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMTHUMBinstructions.sinc"
+      "sha256": "d98aa03f9f32b0155bdb6662e432c5a063e0e97a6899b2fde89667959ea520b4",
+      "size": 178619,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMTHUMBinstructions.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM_CDE.sinc",
@@ -1353,33 +1395,33 @@
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM_apcs.cspec",
-      "sha256": "21ebd59e49ded706cbe114130ffc4e459630fec0e0fce6d614c8583412655893",
-      "size": 8370,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM_apcs.cspec"
+      "sha256": "7ec92ce63bff3555f81003875a3693494b6a28b21b27ec83da59a8d9b01e3c39",
+      "size": 8140,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM_apcs.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM_v45.cspec",
-      "sha256": "7e22f510dbabe35d648bf94abb69aea6a7d2d1eaea037a4355d9bd14a59417e5",
-      "size": 5986,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM_v45.cspec"
+      "sha256": "9b10d18dd46deb2b4e1c8d2a4fc53e61fc18a26dd0a2b59ffe9cefba04af3de8",
+      "size": 5756,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM_v45.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM_v45.pspec",
-      "sha256": "390fd73c65666bf2f06c697ccbeb8b0d85904d5bcb3a7cbc3f4f7171f84c3599",
-      "size": 1863,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM_v45.pspec"
+      "sha256": "d0f5cd70e4c31a4aa8e7cc4786a2c28d6e99623673197f8ede136417a808a8a9",
+      "size": 2268,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM_v45.pspec (+ Fission-local patch)"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARM_win.cspec",
-      "sha256": "05c54dc5dc104aea19410db8298ac7757be51a860f71e901a060a78dd7467c96",
-      "size": 7962,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARM_win.cspec"
+      "sha256": "487cb9028a9be6b76077903ec0d89cbfcd50b8d84b980f6bc0c37c6f9c9aefaa",
+      "size": 7990,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARM_win.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMinstructions.sinc",
-      "sha256": "1903872589e6d69a579764242ad8a9ad4531b55897ca8caf9f407ef074c1bd30",
-      "size": 176765,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMinstructions.sinc"
+      "sha256": "13616791e4de2736656b6ef7424d91ba255c57d23752699b162febb21134f56e",
+      "size": 178719,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMinstructions.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMneon.dwarf",
@@ -1389,39 +1431,39 @@
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMneon.sinc",
-      "sha256": "43c41e08374c69e3bffae2c6f921f3e045a987a6ba8038b7ec883e311c4e17ff",
-      "size": 322100,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMneon.sinc"
+      "sha256": "a60e819b3aefdfcc4385b3d2e803b4cd560ffedcdb8f5ac5edce2dc9269ee413",
+      "size": 335272,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMneon.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMt.pspec",
-      "sha256": "0b62bd6352eaa5284dd77d083aeb47a0d387d766dfb672b31daea84bcda02c3c",
-      "size": 3252,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMt.pspec"
+      "sha256": "55005be2833dad76ae482c47914af1019b89cb6e9b94d84baa9199f26bef0ea0",
+      "size": 3622,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMt.pspec (+ Fission-local patch)"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMtTHUMB.pspec",
-      "sha256": "60ef79a3af6906435c1ab3ca1c1e5ba097e004f4e340284cbec9a7c86838ddb4",
-      "size": 3359,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMtTHUMB.pspec"
+      "sha256": "e7c68845c3ab540ed9910ae70306e497253a88c9935309b20fcc68f951ac52c6",
+      "size": 3729,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMtTHUMB.pspec (+ Fission-local patch)"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMt_v45.pspec",
-      "sha256": "3f850fa41df6dfcb59158e8ecbb13fccf80f9cf40668173c9051576a071c7925",
-      "size": 2078,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMt_v45.pspec"
+      "sha256": "70ac440427e14d0b2bb0401a74ec015a7133f2def0405173e36114f516c60aea",
+      "size": 2483,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMt_v45.pspec (+ Fission-local patch)"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMt_v6.pspec",
-      "sha256": "4d731004ab18a50b5b4c4829936dacc2a4b96868bedb197c65bc938b8b0bd950",
-      "size": 2147,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMt_v6.pspec"
+      "sha256": "66979594c11d62cc96d1a31f2073e5b7e8c21b178352d3b3de5f28f41fb473d5",
+      "size": 2552,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMt_v6.pspec (+ Fission-local patch)"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/ARMv8.sinc",
-      "sha256": "fd00c871b32d978276d05c005d94e8b3c65bc6b2170dd66614802e48774579ab",
-      "size": 56045,
-      "source_path": "crates/fission-sleigh/specs/languages/ARM/ARMv8.sinc"
+      "sha256": "b5bbee3ef772841f7dd73e1ebb4eca6f34bb42e4cf13034592ed11a0df19dc5b",
+      "size": 144960,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/ARM/data/languages/ARMv8.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/ARM/old/ARMv5.lang",
@@ -1527,9 +1569,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/Atmel/avr32a_instruction_flow.sinc",
-      "sha256": "0466b24f9ed29d3a62c0ee4661022af9a6e14d34e6a115e5a327968db2ad1b71",
-      "size": 7164,
-      "source_path": "crates/fission-sleigh/specs/languages/Atmel/avr32a_instruction_flow.sinc"
+      "sha256": "f08109284833c186212bd32ef73e2f08ac9855e22db88f617f693f71f9796596",
+      "size": 7185,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Atmel/data/languages/avr32a_instruction_flow.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/Atmel/avr32a_logic_operations.sinc",
@@ -1797,9 +1839,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/Dalvik/Dalvik.ldefs",
-      "sha256": "09f1e1ef78a03508c8d40ef0e3135a3efd5e40aea8184010bdf64ff690700057",
-      "size": 5558,
-      "source_path": "crates/fission-sleigh/specs/languages/Dalvik/Dalvik.ldefs"
+      "sha256": "ce7664dbcb0a1a04dd48b7ea199ae13dfb9b90afac09270e4597e382ed3220b4",
+      "size": 5608,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Dalvik/data/languages/Dalvik.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/Dalvik/Dalvik.opinion",
@@ -2163,9 +2205,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/HCS12/HCS12.ldefs",
-      "sha256": "3e5365637503856bbf959dc51d970617b6d6c99761d10426b86fe1f47701db7e",
-      "size": 2159,
-      "source_path": "crates/fission-sleigh/specs/languages/HCS12/HCS12.ldefs"
+      "sha256": "deff21bc0897ddedfb3ef9af786e08fa9075f9e8c3fe055943b82d75db979ddf",
+      "size": 2356,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/HCS12/data/languages/HCS12.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/HCS12/HCS12.opinion",
@@ -2205,15 +2247,87 @@
     },
     {
       "path": "utils/sleigh-specs/languages/HCS12/HCS_HC12.sinc",
-      "sha256": "7904b9b892232890287e0052198d6fab8167409654207484e407cef49919d276",
-      "size": 139692,
-      "source_path": "crates/fission-sleigh/specs/languages/HCS12/HCS_HC12.sinc"
+      "sha256": "e6ac41ddc5bdec6456b80719305506e288b4b79e607583abadc0649cf3ee99a4",
+      "size": 139567,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/HCS12/data/languages/HCS_HC12.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/HCS12/XGATE.sinc",
       "sha256": "6b83124b5b1b4b011a9c1fe94ed791b846f42f0988c404cb1385015283db30e5",
       "size": 21719,
       "source_path": "crates/fission-sleigh/specs/languages/HCS12/XGATE.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/Hexagon.opinion",
+      "sha256": "defd9d1443c38372f41af79ecc7bd224365eb5e7351c682664cc3f63949f3e58",
+      "size": 208,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/Hexagon.opinion"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon.cspec",
+      "sha256": "e70462ec4722d0b62545a14cb04989a3a4002f6c473ecdfd87695086d601716d",
+      "size": 4385,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon.cspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon.dwarf",
+      "sha256": "c784bd43fbeb13b67d6f27c2ccb1eed710fe9f432f7ced54210583ef5c962175",
+      "size": 879,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon.dwarf"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon.ldefs",
+      "sha256": "9251cf3c1026542be97c902ed7ead6897f565c080159565eaf0c0846d65136c2",
+      "size": 636,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon.ldefs"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon.pspec",
+      "sha256": "75cd1dcf92b9bc66c5ad19df93b432b98b735ef2efec2da0ae46dd83c2e92553",
+      "size": 23664,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon.pspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon.sinc",
+      "sha256": "f8de9182cf0e3d4729240a88dca589d9124fa6193c29f1cbcf5a4d179d7baa19",
+      "size": 917715,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon.slaspec",
+      "sha256": "e75b1723ac06a437a5f0ef5262d4b58bd9faec18d1f27521f7ca52db0918e809",
+      "size": 40277,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon.slaspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon_float.sinc",
+      "sha256": "22f8f2930bc901993d07188bf60063e49c51f0e5e378e274bd0d80e21ea82d74",
+      "size": 44695,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon_float.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon_hvx.sinc",
+      "sha256": "8bbf110b49509e4ca0bf647357f6520c758a2fbd18e42ff54b8c8ef362ff2e9b",
+      "size": 350524,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon_hvx.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon_hvx2.sinc",
+      "sha256": "12bbb2d70be321f6dd3ed902de9365cd204d9eb7c98d2f7f2dedf333cac19d66",
+      "size": 64697,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon_hvx2.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon_left.sinc",
+      "sha256": "092a14f47081d49e676594ec72716210388dbcd998c2ed32c30c2a47b92bbd5f",
+      "size": 39134,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon_left.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/Hexagon/hexagon_right.sinc",
+      "sha256": "eb8bda15ead5c9b76965898324eb68b37eca166fe7586721b72890dfe16082dc",
+      "size": 42844,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Hexagon/data/languages/hexagon_right.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/JVM/JVM.cspec",
@@ -2379,9 +2493,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/M16C/M16C_60.ldefs",
-      "sha256": "1745a7a442b3b282367852a93ea344439d1395683baf743a8d4383c10507d9f4",
-      "size": 663,
-      "source_path": "crates/fission-sleigh/specs/languages/M16C/M16C_60.ldefs"
+      "sha256": "16a5bfb0762e758ad056107d15fc4e2537545a1e38ea8cbe763696e5c4905b2c",
+      "size": 713,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/M16C/data/languages/M16C_60.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/M16C/M16C_60.pspec",
@@ -2403,9 +2517,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/M16C/M16C_80.ldefs",
-      "sha256": "e906234e44190864a6b40b75413cece7cfc9c96052b42a6f66dd5373052ef720",
-      "size": 663,
-      "source_path": "crates/fission-sleigh/specs/languages/M16C/M16C_80.ldefs"
+      "sha256": "6bf2fa9e42e5b1143e1e0ea9c6667f2cf4313e5520cfad8ee47bea386627316d",
+      "size": 713,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/M16C/data/languages/M16C_80.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/M16C/M16C_80.pspec",
@@ -2535,9 +2649,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MCS96/MCS96.ldefs",
-      "sha256": "85a377ecf8369cb00f618b0bd3d2677af7195f432a3f57ebeab041b8fa9696ac",
-      "size": 528,
-      "source_path": "crates/fission-sleigh/specs/languages/MCS96/MCS96.ldefs"
+      "sha256": "33247e28478c311f1c1ddda956565bf16a9b0aeb7d414a10931dc87ec154bf79",
+      "size": 772,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MCS96/data/languages/MCS96.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/MCS96/MCS96.pspec",
@@ -2547,9 +2661,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MCS96/MCS96.sinc",
-      "sha256": "31fd7a61c2bd756a2727bafb4ef96ad3fa804a84c2b8c7ddfcd9cdbf9af7f28f",
-      "size": 36395,
-      "source_path": "crates/fission-sleigh/specs/languages/MCS96/MCS96.sinc"
+      "sha256": "83bd40cc4ab7766c4e03addac69c0117ce50971f7a31c199558b43a1895deb20",
+      "size": 36260,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MCS96/data/languages/MCS96.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/MCS96/MCS96.slaspec",
@@ -2571,39 +2685,39 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips.ldefs",
-      "sha256": "ee8ae0d75adcbe1f3fddd55e916e0eb267f54b418bc592d8a0629923776b39fe",
-      "size": 15444,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips.ldefs"
+      "sha256": "d74544199433b5bf15b04b176c4cea6c8178f7e17486ee1c6d0665214140f05c",
+      "size": 18986,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips.sinc",
-      "sha256": "593af79c850cc271ede50b0243e7d6cafa4543d6999c06be4e10107fc6186461",
-      "size": 37953,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips.sinc"
+      "sha256": "f3d4272cbf5a8fc1c2173f91ee41c1ee8ff6018bf9fabec36409f4dda20dbf58",
+      "size": 38055,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips16.sinc",
-      "sha256": "b441d27f9d26e74e0baa689cf7e42835c606ca0c762b3c3dd38671d132675258",
-      "size": 46178,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips16.sinc"
+      "sha256": "7d1ccd917f13ec2f78307659ee79ad2ca3476004c1de618ee8f2bdf368e56eba",
+      "size": 46191,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips16.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32.pspec",
-      "sha256": "af053f7c02029e95a71e9ca83516919c4c8e2b1758986cda1e24940ec78426a9",
-      "size": 3665,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32.pspec"
+      "sha256": "736b42d643f09f718e085d3822627661abbc542a3b1f01d04d3efc3de16d2c72",
+      "size": 3711,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32Instructions.sinc",
-      "sha256": "2994d4ab2ab6a443a59d84c716802de6314c342ca53f36d664e4c04013f32c69",
-      "size": 64294,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32Instructions.sinc"
+      "sha256": "8f8acdf9a433ae072f212616335ebe5a9b7ff407e5850df8d7dcadd0d3fd290e",
+      "size": 64307,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32Instructions.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32R6.pspec",
-      "sha256": "e71f220083d77f7ed72cf1a6511fe46d6a0ae108a6404e44f58bf48825c0c246",
-      "size": 3741,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32R6.pspec"
+      "sha256": "48bc5dbbc9575613014c2e8caa221654a3e68759b07fd67e42495cdfbf8e444c",
+      "size": 3787,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32R6.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32R6be.slaspec",
@@ -2618,22 +2732,28 @@
       "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32R6le.slaspec"
     },
     {
+      "path": "utils/sleigh-specs/languages/MIPS/mips32_16e.pspec",
+      "sha256": "dcb0fa3ee1704895d9f140ebee4c6cc7f84fef833bb48636ba66b8062beff6b5",
+      "size": 3697,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32_16e.pspec"
+    },
+    {
       "path": "utils/sleigh-specs/languages/MIPS/mips32_eabi.cspec",
-      "sha256": "46b1f74695a7d194e2b07218fa4d461a271b39390eb8d36a99dd7c80238894a1",
-      "size": 4484,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32_eabi.cspec"
+      "sha256": "4d47b7f98c324f2982f3c765295cbed155ddaac18bdabab674a38b83bf7285ff",
+      "size": 4698,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32_eabi.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32_fp64.cspec",
-      "sha256": "e8f10714a5ca51e49e15733543e80b088b3ccf278e6f834440ece293d6c6ec19",
-      "size": 2679,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32_fp64.cspec"
+      "sha256": "b9aac958b9aa58fdf124ed23cefee2fafd83e6714616287b3b07b2dba84d13de",
+      "size": 2893,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32_fp64.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32be.cspec",
-      "sha256": "f5dbbb971f5f50c4c97e3661af969ef19229155a71c57416c4a2114e26eee9ea",
-      "size": 6548,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32be.cspec"
+      "sha256": "14ed0d57b6b7f7f66f956b617eb354b9f09bf9753751c5d9a310d15229a5e1f3",
+      "size": 6761,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32be.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32be.slaspec",
@@ -2643,9 +2763,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32le.cspec",
-      "sha256": "532ec48ae20f8a5f1e7908796220bc6d6cecb84961c4e82246c6d437c9fda59a",
-      "size": 6271,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32le.cspec"
+      "sha256": "ece4dd9c15895fb7cdb845ee82ca6072a0d4814dadf3e6c4f8fe31cec1620954",
+      "size": 6485,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32le.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32le.slaspec",
@@ -2655,15 +2775,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips32micro.pspec",
-      "sha256": "4a4d9a47c7bf60c558904cf5cf6563f42263d51a55ec8cf9fd4b1a871cd34d30",
-      "size": 3728,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips32micro.pspec"
+      "sha256": "af6f8016c5083caf7ccaec9e7d898fe4faaf4597924c87e65eae169463d52bfa",
+      "size": 3774,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips32micro.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64.pspec",
-      "sha256": "597c91387b850bdec59bde7462f26903398d90c184676afc65b5dfa47363f585",
-      "size": 3740,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64.pspec"
+      "sha256": "680f8fce6bfd9faa73bdbd13188c7cf6af2bada219c86a54670e751793244df3",
+      "size": 3786,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64Instructions.sinc",
@@ -2673,33 +2793,39 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64R6.pspec",
-      "sha256": "3255a4b5b27dbf77f00467562961728ba1442ffc658a378422737bec8140c0a5",
-      "size": 3741,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64R6.pspec"
+      "sha256": "94d651a184fd142e4353a65b3192abab22e285acbff76b68ac976e5ca9049efb",
+      "size": 3787,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64R6.pspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/MIPS/mips64_16e.pspec",
+      "sha256": "d06976adea134ecf8386adeb889a27d8271c6a98b3ae25fbe8ae95d0335b1e43",
+      "size": 3845,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64_16e.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64_32_n32.cspec",
-      "sha256": "2c44ca2d68c6eda06fe7d3000d1435f4b14c6037c9b63eac166c85384e104cb2",
-      "size": 4947,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64_32_n32.cspec"
+      "sha256": "da7c883291b4d1c34580a02936b502504c863024e8f55ae2c5b1e2052c1ae989",
+      "size": 5166,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64_32_n32.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64_32_o32.cspec",
-      "sha256": "c01f4f7211d0b44e993850b5d20b16bebd0a8077d0968c240bfba3c568211a9c",
-      "size": 5153,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64_32_o32.cspec"
+      "sha256": "72bcc186380bb8cbd0dff1920d9acfe217147f0f1e84fe3d00e27965df50f9aa",
+      "size": 5372,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64_32_o32.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64_32_o64.cspec",
-      "sha256": "b1db6a7dc4da2279992b2f7afe0cba23e56b1d8b257ffc06f5b8104eb54753fd",
-      "size": 3481,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64_32_o64.cspec"
+      "sha256": "d8b2e4278f9ad11b81bc74e3d739a24c9cd30627678a9dcf8b35e54d44760ab6",
+      "size": 3700,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64_32_o64.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64be.cspec",
-      "sha256": "0106313871a6d122df99db05c4635a869f9af71902021029631d2b94829d1b34",
-      "size": 5465,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64be.cspec"
+      "sha256": "f4aebb9edae96c048b5021bee3a3b6536cf2e2146a8c13957178f61ea60249d5",
+      "size": 5684,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64be.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64be.slaspec",
@@ -2709,9 +2835,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64le.cspec",
-      "sha256": "ee2892c549a8c302ec4241762523e009b05229ba1777318bf461643fb531bfd7",
-      "size": 4994,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64le.cspec"
+      "sha256": "dee19a8690f97c62f5b851ac4be1664150ca2b8e93450e4c32d8665ac3ab4bb2",
+      "size": 5213,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64le.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64le.slaspec",
@@ -2721,15 +2847,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips64micro.pspec",
-      "sha256": "5de075c241ee4fe06edd64c449e1fea7ff1be89104b80f3745c931fc46d9b32c",
-      "size": 3592,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips64micro.pspec"
+      "sha256": "9f3de4a1e0b9827cf64cb464d87a3f4ef4a02ec5a14804aaaed0bcab5d95263d",
+      "size": 3638,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips64micro.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips_dsp.sinc",
-      "sha256": "4cf26162bae7e6348e936c30692a4bfc8391cd9ccd8a4ac1388597a2ffa1e93b",
-      "size": 42006,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mips_dsp.sinc"
+      "sha256": "305db4833ed798be523aad59fee3d7cca5a880693e2ac19d57a442b581866779",
+      "size": 42013,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mips_dsp.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mips_mt.sinc",
@@ -2745,9 +2871,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/MIPS/mipsmicro.sinc",
-      "sha256": "b12b03bb6549ef68b672e6d1d00d051307158bc858e3e565f29f64c39db4416d",
-      "size": 167184,
-      "source_path": "crates/fission-sleigh/specs/languages/MIPS/mipsmicro.sinc"
+      "sha256": "16ded40b6a54e516f399895090f0cde5cd2cb61c0575186e436412bee888e507",
+      "size": 167214,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/MIPS/data/languages/mipsmicro.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/NDS32/lsmw.sinc",
@@ -2769,9 +2895,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/NDS32/nds32.ldefs",
-      "sha256": "cb2ccce654ab93c1a8c5c267e0ae8345d58c24a4740de473945db0368d93007a",
-      "size": 1200,
-      "source_path": "crates/fission-sleigh/specs/languages/NDS32/nds32.ldefs"
+      "sha256": "a9b7436ede3605a94bb8374851a28559f710b46cf60a47a14860504575b82158",
+      "size": 1298,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/NDS32/data/languages/nds32.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/NDS32/nds32.opinion",
@@ -2787,9 +2913,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/NDS32/nds32.sinc",
-      "sha256": "65909e98c70c408b3456e1927436474091d9b99e8071e801eff9271c065afffd",
+      "sha256": "b045960a0ca508dd2162bf577e0e3727a5e4933d6c9684acd7b02cdae33fff63",
       "size": 58440,
-      "source_path": "crates/fission-sleigh/specs/languages/NDS32/nds32.sinc"
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/NDS32/data/languages/nds32.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/NDS32/nds32be.slaspec",
@@ -3111,9 +3237,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PIC/pic18_instructions.sinc",
-      "sha256": "87d2c375b1f750adce76ec8750675a34ebd056150d057f65a430cc7ce5f16cd9",
-      "size": 52431,
-      "source_path": "crates/fission-sleigh/specs/languages/PIC/pic18_instructions.sinc"
+      "sha256": "6ad90053953e9fd11a2f50dd94007ebd3d5f74953406d848ac00001eb5a35bb2",
+      "size": 52542,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PIC/data/languages/pic18_instructions.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/4xx.sinc",
@@ -3171,9 +3297,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/altivec.sinc",
-      "sha256": "0b276dc7ef70d18b10b16d3aa2dd1fb66e950871546cbb5b95d9be356040f093",
-      "size": 54009,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/altivec.sinc"
+      "sha256": "39b8c0d74f8e5d4a66138ff8863f4b1de319c953b6b53575a97e8bb84a224851",
+      "size": 54326,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/altivec.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/evx.sinc",
@@ -3237,9 +3363,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32.pspec",
-      "sha256": "cd261429036cc946b13374ca7ccffe355ee6cd0a1ba7522365de969a0d6f353a",
-      "size": 58049,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_32.pspec"
+      "sha256": "53d7f488dcb6788b9ccc4090b51547c0fc3cd45c33e6c16e7703254e67ce69cd",
+      "size": 58094,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_32.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32_4xx_be.slaspec",
@@ -3291,9 +3417,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32_e500mc_be.cspec",
-      "sha256": "e447a6a7c104fb2d332d6e14863027a3c46619524a1b2d1284eb4e7be6a4edd8",
+      "sha256": "332510c227447e2bda83fd434024438f01a4dfe99e5f683b53c801dbea7651e7",
       "size": 2264,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_32_e500mc_be.cspec"
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_32_e500mc_be.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32_e500mc_be.slaspec",
@@ -3303,9 +3429,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32_e500mc_le.cspec",
-      "sha256": "e8d7707bc4c5f047aff8a8346c2ed6ba4a78e52427424fa7f8548e16e7d78845",
+      "sha256": "5f17b269c24129ba7b37fc5f9a22e0f06a538320f6525c37369a6227fbd32150",
       "size": 2264,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_32_e500mc_le.cspec"
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_32_e500mc_le.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32_e500mc_le.slaspec",
@@ -3321,9 +3447,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32_mpc8270.pspec",
-      "sha256": "17841d184f37e388db6a498634eb5ef26845e7ffc19f29bdd559618c11307510",
-      "size": 51397,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_32_mpc8270.pspec"
+      "sha256": "1d2e41c8476219ca1c6d6981b18dad056c1d91e967d24124e063a90bca434a53",
+      "size": 51442,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_32_mpc8270.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_32_quicciii_be.slaspec",
@@ -3339,9 +3465,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_64.pspec",
-      "sha256": "0300b68cc0a70784bc8a6a6efc65e35a9cbf4ec1b12fde92b93b47a5f5c30468",
-      "size": 58119,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_64.pspec"
+      "sha256": "3b29e2aa98abf1de15417575ab985b6f737dcde66a0b0d21962a908bb51669fa",
+      "size": 58164,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_64.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_64_32.cspec",
@@ -3423,9 +3549,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_common.sinc",
-      "sha256": "36ab3056d9341c8057c918c84bfe19cfe7e0dec817178db3f0af19827e68d0a7",
-      "size": 143550,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_common.sinc"
+      "sha256": "283dd9486268c4eb908d0d22ce3d7fdb237c2d07173a3984206fc000096adf3d",
+      "size": 143796,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_common.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_embedded.sinc",
@@ -3435,15 +3561,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_instructions.sinc",
-      "sha256": "a50a260d8d71a1fb696dba73fd79cb0354b7891730e71ef6e5406c23beeaec5a",
-      "size": 100186,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_instructions.sinc"
+      "sha256": "530bf462aa5e6a66f6f063af7bda21e135f3fe63615c6e7bc9f32c8b7ef4b4bc",
+      "size": 101437,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_instructions.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_isa.sinc",
-      "sha256": "93b8c18a062a6e385c684170668ed8498cdb905e624cc767d818d976c849cdcf",
-      "size": 119959,
-      "source_path": "crates/fission-sleigh/specs/languages/PowerPC/ppc_isa.sinc"
+      "sha256": "6fb6d93336f1827901621e8e57e8223663e130afa3be208c24e373e03d895797",
+      "size": 123070,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/PowerPC/data/languages/ppc_isa.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/PowerPC/ppc_vle.sinc",
@@ -3513,9 +3639,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.csr.sinc",
-      "sha256": "7900d216f701877743924a918a888c31aeef91ee7324c0baa2f02a4eddf6611e",
-      "size": 5595,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.csr.sinc"
+      "sha256": "2c57e6a8d5ee4f383174edbe7f1ab17675583732b4dbc87a515f44454c551232",
+      "size": 5460,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.csr.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.custom.sinc",
@@ -3537,9 +3663,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.ldefs",
-      "sha256": "6e1b6162ff20232fe715f1895a0e801e01cc7e89e3c9b2327e1667786efba46f",
-      "size": 1349,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.ldefs"
+      "sha256": "914abcc691677f04d4067042fdc6ec43799f5c6b987069c0c84f3ca82769d1f5",
+      "size": 1447,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.lp64d.slaspec",
@@ -3567,9 +3693,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32a.sinc",
-      "sha256": "885ce867fb4287af2ee80f9e5e679d974562b9353fe42ffe1a5ec5020c37f862",
-      "size": 3659,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv32a.sinc"
+      "sha256": "530ab457c9e2c16c6abf9c6be22dbb74f39e55e1808129625df2dcc90c632956",
+      "size": 3809,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv32a.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32b.sinc",
@@ -3579,15 +3705,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32d.sinc",
-      "sha256": "abfab32c6c1233a2364c3b64c1018ea5d43d6c3076b7c054a80ad9fdbe7993ba",
-      "size": 6826,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv32d.sinc"
+      "sha256": "a2ad789c6391dadbb3c3e7268fcb9d2473ee9b39b1477111ec283ae16b597224",
+      "size": 6955,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv32d.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32f.sinc",
-      "sha256": "e15bfaed5bcbca58af4b2275518aa71b144065093c328edcfc6373fe746ecdc7",
-      "size": 7237,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv32f.sinc"
+      "sha256": "f0fc256ba93ce4774fe4c95cea00562073642bb9678f3e56d4e53f8901621eb3",
+      "size": 7377,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv32f.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32i.sinc",
@@ -3603,9 +3729,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32m.sinc",
-      "sha256": "e69ccf2dafcdf9eff8dcc8a873e00e2f6220c61b57369bea705058f6413eecf2",
-      "size": 1698,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv32m.sinc"
+      "sha256": "46a89396caad41521488b36b3b77a5903676a1906a44c2fb4379b1b1086a7786",
+      "size": 1943,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv32m.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32p.sinc",
@@ -3615,9 +3741,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv32q.sinc",
-      "sha256": "3c55518da53164bab819f3e7dba12402448d68fd977cbff09c326a03303dc2ab",
-      "size": 6745,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv32q.sinc"
+      "sha256": "643d6f6bc4d0b2818707dc2ebd68a2f3a256a2698294dbe5b418b9e523d762f8",
+      "size": 6862,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv32q.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv64a.sinc",
@@ -3633,21 +3759,21 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv64d.sinc",
-      "sha256": "1907fb71d738e1b0fe2332c41bc65f29ffe4910378f3a73e66e6c6dab293b88b",
-      "size": 1311,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv64d.sinc"
+      "sha256": "a7e6f3a71f39e5d17207dc1b0b38d129c755a68a42ce979ed2f7ea665ed14241",
+      "size": 1378,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv64d.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv64f.sinc",
-      "sha256": "3c3e9b385d7c8d71935c8be377932cc76def16f7d5d3e0854cba92f65b541d9f",
-      "size": 958,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv64f.sinc"
+      "sha256": "8c178c2f66ed030a449d495e96ca6f6582ecb93b3d2fdc5438f554f5ce69d269",
+      "size": 1023,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv64f.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv64i.sinc",
-      "sha256": "37a52da82810fd92d8f9d944e0c14b62b04d00dc4ce2efbab2a928929b29abf7",
-      "size": 3047,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv64i.sinc"
+      "sha256": "acb5f3bac52ff3123ca8f5cc4a51648ce28937ea54e9f7df9eb6f68147a499e2",
+      "size": 3064,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv64i.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv64k.sinc",
@@ -3657,9 +3783,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv64m.sinc",
-      "sha256": "3862c4ec879107635240bb29cea9ae543ba7b0a92b3369698ee87adbc7dc8cce",
-      "size": 1167,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.rv64m.sinc"
+      "sha256": "2ce99fc7db3178645edec31035fe3f843523ee42ac40b8acaa63952d8aaaa38c",
+      "size": 1313,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.rv64m.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.rv64p.sinc",
@@ -3687,9 +3813,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.table.sinc",
-      "sha256": "fc871d8a6858ae40d72334add98339916b76a51f289ef97da8cb27ee42ebbb0a",
-      "size": 57297,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv.table.sinc"
+      "sha256": "e6daf6670dd419a404d752b1fc7b4de3b021938dbe78e08dd9473269a6e21a63",
+      "size": 56696,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv.table.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv.zi.sinc",
@@ -3699,9 +3825,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv32-fp.cspec",
-      "sha256": "ce24d764afb32ae914373844a96fe400c3c4983428dd5048f56f72fca95a4c54",
-      "size": 6223,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv32-fp.cspec"
+      "sha256": "18fd0fae4175a9130729aecab2a36efdddf49324ae12a642dea8798a9cba86fb",
+      "size": 6279,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv32-fp.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv32.cspec",
@@ -3717,9 +3843,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv64-fp.cspec",
-      "sha256": "c424d9e2f088260b7a7737c55219e0be1ea383d7084fcd31e0b2c1c1349381a9",
-      "size": 6289,
-      "source_path": "crates/fission-sleigh/specs/languages/RISCV/riscv64-fp.cspec"
+      "sha256": "8b5ae5e2e43d9baced3888ef5ff82149224389ce2b3e0bffa254ae028a535e36",
+      "size": 6345,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/RISCV/data/languages/riscv64-fp.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/RISCV/riscv64.cspec",
@@ -3759,9 +3885,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/Sparc/SparcV9.sinc",
-      "sha256": "332c2a2582b73bcccf9c2ce4801742a8340858765b4d53bafe0d1345f4742845",
-      "size": 67856,
-      "source_path": "crates/fission-sleigh/specs/languages/Sparc/SparcV9.sinc"
+      "sha256": "36353f736c285d96ac53bd6abd406fd4f1eddcc873ba6cfa8c50af47602d5c9b",
+      "size": 67884,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Sparc/data/languages/SparcV9.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/Sparc/SparcV9_32.cspec",
@@ -3819,9 +3945,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/SuperH/superh.ldefs",
-      "sha256": "45310dc3ea6f8f52e006cc39e2acc01d56d21450621d4f51b432d7f822fbd106",
-      "size": 1257,
-      "source_path": "crates/fission-sleigh/specs/languages/SuperH/superh.ldefs"
+      "sha256": "287eda6705b5ddaf235517688ad09ce94a727555a3521c42d71c7bad83b39fdc",
+      "size": 1461,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/SuperH/data/languages/superh.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/SuperH/superh.pspec",
@@ -3831,9 +3957,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/SuperH/superh.sinc",
-      "sha256": "e58bafd935067cc55893fb006669017969a60313fe7a03b4262e94030aa29a53",
-      "size": 74616,
-      "source_path": "crates/fission-sleigh/specs/languages/SuperH/superh.sinc"
+      "sha256": "ee67283aaa37072124a153bc09761c8e0ea45df6fab1b49d1a2ae7da01318dca",
+      "size": 74648,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/SuperH/data/languages/superh.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/SuperH/superh2a.cspec",
@@ -3861,9 +3987,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/SuperH4/SuperH4.sinc",
-      "sha256": "62fb464b2edce4b6eb8e30c3948d1ae2e5e4e3795ec2561515510dd2798c9c47",
-      "size": 77424,
-      "source_path": "crates/fission-sleigh/specs/languages/SuperH4/SuperH4.sinc"
+      "sha256": "73c932ac6e3670607b4ad9509d0b8680f6e34c9e6c903c322632ebba1d714be2",
+      "size": 77440,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/SuperH4/data/languages/SuperH4.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/SuperH4/SuperH4_be.cspec",
@@ -3927,9 +4053,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/TI_MSP430/TI_MSP430.cspec",
-      "sha256": "06a84cbde2f1fdc4f3d3f42616ff2e4209ba4c34a22fd4e8bb0a280280b1df22",
-      "size": 2910,
-      "source_path": "crates/fission-sleigh/specs/languages/TI_MSP430/TI_MSP430.cspec"
+      "sha256": "aefee1a27c519de28c5b6c47017365387611abd8652a5bdcc5b357a182b4fbfa",
+      "size": 3109,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/TI_MSP430/data/languages/TI_MSP430.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/TI_MSP430/TI_MSP430.dwarf",
@@ -4178,100 +4304,70 @@
       "source_path": "crates/fission-sleigh/specs/languages/Toy/toy_wsz_le.slaspec"
     },
     {
-      "path": "utils/sleigh-specs/languages/V850/Helpers/Conditions.sinc",
-      "sha256": "4431168429e139518049a8dbef367e7451069b2c9bf801b4883ef76795ae2e1d",
-      "size": 2336,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Helpers/Conditions.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Helpers/Extras.sinc",
-      "sha256": "af25aef2dfffdea288aeb66b2a056b38605352ed273bac31e18903ec600e2815",
-      "size": 4987,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Helpers/Extras.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Helpers/Macros.sinc",
-      "sha256": "ea01031a3a47c0776694846c951af5d08500b5830f00e1270933807297f941fb",
-      "size": 3867,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Helpers/Macros.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Helpers/Register.sinc",
-      "sha256": "42fddbd2c2e75208ef766e93778f17152ee8d3bf86525fa03c21a3995f673c0b",
-      "size": 1133,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Helpers/Register.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Helpers/Tokens.sinc",
-      "sha256": "d1dd12e0f5d27981402201eeeb6394c53ab6e026b510bb56bf86ff5d7c084a7e",
-      "size": 2055,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Helpers/Tokens.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Helpers/Variables.sinc",
-      "sha256": "bf1463380cda665ef72ad4d85e55221686b63122830ba71943cb6a61f8fa66a9",
-      "size": 1391,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Helpers/Variables.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Instructions/Arithmetic.sinc",
-      "sha256": "6f44d483388b3c8af16678ea781976a87c2605b152fd5bffd7e8bdd3af7d056d",
-      "size": 8507,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Instructions/Arithmetic.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Instructions/Float.sinc",
-      "sha256": "231c31014aa347b27c82647912d0db1404edb0158b8eefb0acf58dce42d236e5",
-      "size": 17188,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Instructions/Float.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Instructions/Load_Store.sinc",
-      "sha256": "f84afee6b5a772e976462ed7d81e3c14cd084b7e7c4ef1efc10ea6148d3c5223",
-      "size": 9718,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Instructions/Load_Store.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Instructions/Logic.sinc",
-      "sha256": "ced95459a732e1b883febb485fe49fc6d13c343909befe8f0dd092891b072454",
-      "size": 4188,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Instructions/Logic.sinc"
-    },
-    {
-      "path": "utils/sleigh-specs/languages/V850/Instructions/Special.sinc",
-      "sha256": "c6803e42d16e89d09d860143a224cd064262b1f997eb9cdda9806cf42211ff5f",
-      "size": 7979,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/Instructions/Special.sinc"
-    },
-    {
       "path": "utils/sleigh-specs/languages/V850/V850.cspec",
       "sha256": "7283f1bb2b33c0555dc44a1933e65f5e6e1331e35d766cca0a3b3a2854b14447",
       "size": 1700,
       "source_path": "crates/fission-sleigh/specs/languages/V850/V850.cspec"
     },
     {
+      "path": "utils/sleigh-specs/languages/V850/V850.dwarf",
+      "sha256": "9e9d97d646a06d01225299d32f2bdb922ca0ae64a1d97d0a7affa34f0edafb09",
+      "size": 522,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850.dwarf"
+    },
+    {
       "path": "utils/sleigh-specs/languages/V850/V850.ldefs",
-      "sha256": "1ffbc2fcc29c2c51e3da3276275a91d7756e6309e260db059f328526aaab3f1e",
-      "size": 510,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/V850.ldefs"
+      "sha256": "1178ca2807114f6787097ee2f71b1d113c2f0471b111d6bc698736d9cb2b950e",
+      "size": 1230,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/V850/V850.opinion",
-      "sha256": "30177cdaf0092e48e7543e30d902aeacf048ff9ad1211bfb4d45dd808faa991e",
-      "size": 299,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/V850.opinion"
+      "sha256": "0021b527250a78c9c5b8c48ceb902440bf51b1cd66789c0ec146f6549374d9fb",
+      "size": 434,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850.opinion"
     },
     {
       "path": "utils/sleigh-specs/languages/V850/V850.pspec",
-      "sha256": "44eb9479a254979b8712a52a02410d3da049a83df5274d80a71bfd96640e19c5",
-      "size": 249,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/V850.pspec"
+      "sha256": "475bc1194f8c36c4757c465b121b07891f184789590f2dd4eaccd42e698b05a7",
+      "size": 559,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850.pspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/V850/V850.sinc",
+      "sha256": "ffa566fefdb6d37f95205f15ec87a7a56da20fee356c2e7b8305dfc3c481d9ff",
+      "size": 19688,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/V850/V850.slaspec",
-      "sha256": "cc4e2755d2b9d7763e05700c05649712d1eb3a2062655dc9532d368958194dda",
-      "size": 1073,
-      "source_path": "crates/fission-sleigh/specs/languages/V850/V850.slaspec"
+      "sha256": "1370ed3e713027b32daa4340a208ec8e93395e68ebe106d0cdd51ea35212c184",
+      "size": 405,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850.slaspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/V850/V850_instructions.sinc",
+      "sha256": "0aa96a8c2e1fc7ba595eb9a67da6299749f81ba5495e549b70a3a8d0bc7e38db",
+      "size": 47677,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850_instructions.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/V850/V850e3.pspec",
+      "sha256": "df5f8bee5fb05e105dedee91af88dc271874cc719bad4580f0f90b02e20c4ea2",
+      "size": 797,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850e3.pspec"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/V850/V850e3.sinc",
+      "sha256": "ae6775da16cbc4d4152ed35846233e777bdf7cb82664786e2f0998eed184f519",
+      "size": 8880,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850e3.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/V850/V850e3.slaspec",
+      "sha256": "c96a9ecc5cf6679ccd27d3236e03fdb825bf4433180edeefe037bee74430fe5d",
+      "size": 434,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/V850/data/languages/V850e3.slaspec"
     },
     {
       "path": "utils/sleigh-specs/languages/Xtensa/cust.sinc",
@@ -4299,9 +4395,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/Xtensa/xtensa.ldefs",
-      "sha256": "ca2a7b16fe3ea8e2cf0728a709887d23948bf042a15cc7dba650925ff8e915f5",
-      "size": 1469,
-      "source_path": "crates/fission-sleigh/specs/languages/Xtensa/xtensa.ldefs"
+      "sha256": "fe86927dbad75d5dd1e74671154ba63bebed58a987761e269a96f2a68787e3bc",
+      "size": 1570,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Xtensa/data/languages/xtensa.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/Xtensa/xtensa.opinion",
@@ -4311,9 +4407,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/Xtensa/xtensa.pspec",
-      "sha256": "0056f224b782baa526f5e9408c51c00b9fcc55be211dfd4fc88257b245c6ecac",
-      "size": 392,
-      "source_path": "crates/fission-sleigh/specs/languages/Xtensa/xtensa.pspec"
+      "sha256": "e81f50738d3d14907a99ab90de91a46e7543cc08d632547671a33376d7b42187",
+      "size": 440,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/Xtensa/data/languages/xtensa.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/Xtensa/xtensaArch.sinc",
@@ -4449,21 +4545,21 @@
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tc172x.pspec",
-      "sha256": "8a670f613c1def11649f1c76c071990086742b5114d5db05a18f0d8ada68718a",
-      "size": 152958,
-      "source_path": "crates/fission-sleigh/specs/languages/tricore/tc172x.pspec"
+      "sha256": "433e9d43cecc46064c899752c4f150308577d6c870b9ca3807f5e09bfe01a34a",
+      "size": 153007,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/tricore/data/languages/tc172x.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tc176x.pspec",
-      "sha256": "ba1db4abe853ebcb51017095b71ad9ffc20eebff4e2fe248e1a167acc0995501",
-      "size": 104242,
-      "source_path": "crates/fission-sleigh/specs/languages/tricore/tc176x.pspec"
+      "sha256": "a3905ea468771235c8fd3d2bd4f1d80de9d6d4e3c9cbe086dfb553e5b254ad86",
+      "size": 104291,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/tricore/data/languages/tc176x.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tc29x.pspec",
-      "sha256": "c9e8b8af1e2a0afb371ee80a68ee77803f46473b47eb2a167464c4700adfa175",
-      "size": 261024,
-      "source_path": "crates/fission-sleigh/specs/languages/tricore/tc29x.pspec"
+      "sha256": "4750104acf2113da4ff2544d51bb7366266c9d5a9cfc426cdd0ae9e9599cd1cb",
+      "size": 261073,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/tricore/data/languages/tc29x.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tricore.cspec",
@@ -4479,9 +4575,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tricore.ldefs",
-      "sha256": "28a145428bc20d4fa709f548481b0920fa461848ff5388b6d94d5af6a2a0a830",
-      "size": 2206,
-      "source_path": "crates/fission-sleigh/specs/languages/tricore/tricore.ldefs"
+      "sha256": "7d35c69005555fb405dfd3ce033db927a25800bddc6867cb8347979717e69051",
+      "size": 2363,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/tricore/data/languages/tricore.ldefs"
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tricore.opinion",
@@ -4497,15 +4593,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tricore.pspec",
-      "sha256": "a27a60648751e9bd5a587b25bbc340f279f41001d1d1c97c2114662cfb4daad1",
-      "size": 277,
-      "source_path": "crates/fission-sleigh/specs/languages/tricore/tricore.pspec"
+      "sha256": "739c449bc5f5751d7c0d68afd614285269d27246f6ee3089384d47bb648d8714",
+      "size": 326,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/tricore/data/languages/tricore.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tricore.sinc",
-      "sha256": "fa301cda50c1661c416ac096e222b979a4296242dc61ee3c43c6c59421ed5662",
-      "size": 278402,
-      "source_path": "crates/fission-sleigh/specs/languages/tricore/tricore.sinc"
+      "sha256": "d184686bf1092ad6bb799102d6ed64b1c8ced07d8b8b4448ac54c939b5e9ccca",
+      "size": 278589,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/tricore/data/languages/tricore.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/tricore/tricore.slaspec",
@@ -4521,39 +4617,39 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/avx.sinc",
-      "sha256": "8d39806d025101113297fc4a65092a1eb2f741cabec8b6edd92053b1e0a0a62e",
-      "size": 129239,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/avx.sinc"
+      "sha256": "e550db98d770efa8c32acbb642f796eb177979d99f34e63dd56815ac6e66034e",
+      "size": 133364,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/avx.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/avx2.sinc",
-      "sha256": "ef3b84ee87cd4feef2c93b8d9fadf075e963d562fd41f1e39d245fe6bd067e9f",
-      "size": 51812,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/avx2.sinc"
+      "sha256": "ac3a1d23b636428f41cc80b568340beb39350630702286ab594a671a1ca14638",
+      "size": 55271,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/avx2.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/avx2_manual.sinc",
-      "sha256": "2fc5aa6ea2f6a93c5ab362c1b02413ed6c8632b4c4c96f822b63721ef4ffcf71",
-      "size": 10813,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/avx2_manual.sinc"
+      "sha256": "b3cedf86dd413bd5828e8cc2160261220eec88606bea65e445a918e4793e9f3c",
+      "size": 10817,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/avx2_manual.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/avx512.sinc",
-      "sha256": "4a3b679f76efbd32751167e366c83fdd729ac62f888d88c07648de42b92f38c1",
-      "size": 790429,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/avx512.sinc"
+      "sha256": "445b81fb0130b98a7be14c00f89dfe48494fa9acd57307860299e7b2d9c30d71",
+      "size": 782835,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/avx512.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/avx512_manual.sinc",
-      "sha256": "f13a83dd8c05012fec7de3a213017a132a511f34c660003a8803cb58451e3518",
-      "size": 62147,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/avx512_manual.sinc"
+      "sha256": "84e53563a9cc94913d2520fe5989eba97825693a9fbaf78c1978cbe9fda95959",
+      "size": 64864,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/avx512_manual.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/avx_manual.sinc",
-      "sha256": "b21b9c8426bcb65ff68b372473e88f84b5e60406da70b1a04e4a0173f1d5a27d",
-      "size": 15190,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/avx_manual.sinc"
+      "sha256": "31665eac0e7ab86b2c3ba9512743ccbfefc85fa8b917099c94261f4e610014f2",
+      "size": 16536,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/avx_manual.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/bmi1.sinc",
@@ -4569,9 +4665,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/cet.sinc",
-      "sha256": "8e15e30b3eaf72fbe5f54e07992d43438f1e380310c409f0480a2df6ede194d7",
-      "size": 2725,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/cet.sinc"
+      "sha256": "a9715b5a0a8d278dc7a48f0a020c2a309d60c505a76936a701663e422927a339",
+      "size": 2701,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/cet.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/clwb.sinc",
@@ -4580,22 +4676,34 @@
       "source_path": "crates/fission-sleigh/specs/languages/x86/clwb.sinc"
     },
     {
+      "path": "utils/sleigh-specs/languages/x86/cmpccxadd.sinc",
+      "sha256": "67b8b394c7373b777744e8857be1e8e041b951f0a9cfdd3da47c323fe34365de",
+      "size": 696,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/cmpccxadd.sinc"
+    },
+    {
       "path": "utils/sleigh-specs/languages/x86/fma.sinc",
-      "sha256": "71da41cffda5a41c109ae71ca9b70b7ca9974dda0355664083bdc95a9b84fe5d",
-      "size": 35376,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/fma.sinc"
+      "sha256": "80b4640a5c10437400e436b006de7a14931ff5708ea31f2f1d77443d9a77911f",
+      "size": 55477,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/fma.sinc"
+    },
+    {
+      "path": "utils/sleigh-specs/languages/x86/gfni.sinc",
+      "sha256": "89dd1245ccc51bdf8bbda4e701c767f9397bad6d60321bdaa2aa8af8f513588c",
+      "size": 9012,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/gfni.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/ia.sinc",
-      "sha256": "46bba656291d90c2ef801be4a78664dd5914ca05b85e59e9bfdeb26068fe9784",
-      "size": 538769,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/ia.sinc"
+      "sha256": "32a723931726561212b1f51c05d0d4324e880c4a49958e16bdc80e5066e98115",
+      "size": 551705,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/ia.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/lockable.sinc",
-      "sha256": "d8b90aa04766ef32f3a5898fcc8473baa2b157a6ea111179c6888c58f5500097",
-      "size": 32374,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/lockable.sinc"
+      "sha256": "de3639160b248e993c53986ac59b4f8d8ea8d449373c9771c76a19a0914b7d10",
+      "size": 32508,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/lockable.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/lzcnt.sinc",
@@ -4814,16 +4922,22 @@
       "source_path": "crates/fission-sleigh/specs/languages/x86/pclmulqdq.sinc"
     },
     {
+      "path": "utils/sleigh-specs/languages/x86/rao.sinc",
+      "sha256": "e2773686e667ffa77e4ef47561b2bc88b921412b13333a2535a3f9c1dfbb35fb",
+      "size": 1123,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/rao.sinc"
+    },
+    {
       "path": "utils/sleigh-specs/languages/x86/rdrand.sinc",
-      "sha256": "7debb61625bc32db031038cb05760c60435e884c53695a124e62b0bd9a478340",
-      "size": 1189,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/rdrand.sinc"
+      "sha256": "7f5a8237992287fe757b4a7e5394dea50b4c000579171a2e9fcc98e49b9fe441",
+      "size": 1277,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/rdrand.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/sgx.sinc",
-      "sha256": "5fa914ab258dc6dbfdcc2b487b78682b7457fa2fbea01b45be55fcabcd39aabc",
-      "size": 4989,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/sgx.sinc"
+      "sha256": "b4dcd030f6794adc5a839459d66f3991cff8289cce635532bdb345b951ab06cb",
+      "size": 5738,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/sgx.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/sha.sinc",
@@ -4839,9 +4953,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-16-real.pspec",
-      "sha256": "c98ae41a8a4bf9fe6a0b448ae1ac1a6f11777b8e95510650b17d5e73b6293f0b",
-      "size": 944,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86-16-real.pspec"
+      "sha256": "68cf2d52405e23103695c118519dd09c89b2963d3811530fbbf6a297ec14cb81",
+      "size": 989,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86-16-real.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-16.cspec",
@@ -4857,9 +4971,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-16.pspec",
-      "sha256": "b9cead4956f69d80b32d5a501bb2e7b7dbf9d52e6169be595b3ee3810235cc74",
-      "size": 955,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86-16.pspec"
+      "sha256": "804ea9c26c6085d3800da5f44565be69fac76ec7732444d43183053315dc905d",
+      "size": 1000,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86-16.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-32-golang.cspec",
@@ -4875,9 +4989,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-64-compat32.pspec",
-      "sha256": "9a0c179eefb5e23f5beedc9be0f21fe6a94463fbf0a06b75f8e01359ab32767e",
-      "size": 7124,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86-64-compat32.pspec"
+      "sha256": "a7bd2d8eb2e88164a342fd9615baf6dc5a1551dc159f41c48f4f59a94232a0bb",
+      "size": 7169,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86-64-compat32.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-64-gcc.cspec",
@@ -4917,15 +5031,15 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-64.pspec",
-      "sha256": "3c3dab75a2ac0b98b0552856f690e613d661e0df7cf94d6252e5604d9821629f",
-      "size": 11721,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86-64.pspec"
+      "sha256": "c9b37d3acee646dd59cdb53294b567f6df53bcfb2b57887c0652c07419347e70",
+      "size": 11766,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86-64.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86-64.slaspec",
-      "sha256": "9d66a01a4219ab0bee0697caf2d1ee389e094e927a857299cebb6182e40a4e6e",
-      "size": 106,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86-64.slaspec"
+      "sha256": "69cc4e74a89355b2baf6b7789f54f4a888c35bfa9c12c703e686c33c2cf217ff",
+      "size": 132,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86-64.slaspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86.dwarf",
@@ -4935,27 +5049,27 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86.ldefs",
-      "sha256": "b2aa14d94a6162844b18bf47f2aed8579bf90cef3459f6e322b9c1f58146098b",
-      "size": 5390,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86.ldefs"
+      "sha256": "a16a61c098c31fb01e52b533beeb1c0fb87732953002cfbd72e822afac65098a",
+      "size": 5572,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86.ldefs (+ Fission-local patch)"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86.opinion",
-      "sha256": "c209534f7a9c05906cf9eef0bcc498f07e499b0e3a30802604ef7070ec806696",
-      "size": 6116,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86.opinion"
+      "sha256": "02666030a7fd4ed9f060ae7babf299c9a0af0b762c35d92b6f293a2ae8cf8647",
+      "size": 5911,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86.opinion"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86.pspec",
-      "sha256": "7416f5f65369a1cf9c1f6f83b6749169418fb51cc674c45efe39d2f274756ccb",
-      "size": 9859,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86.pspec"
+      "sha256": "b83be4039dd2e89ceaca7e6200d3c2cbd4152f7bdee8555065a4b9de1ce76b91",
+      "size": 9904,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86.pspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86.slaspec",
-      "sha256": "90532445ab2bb2a622d648e4dfc172bd42351ab5a9c90f19d166d2117844af67",
-      "size": 450,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86.slaspec"
+      "sha256": "b7a08d09ea809d3b832cc718f28146eb4858cf899f903177068118dc78fd51e4",
+      "size": 491,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86.slaspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86borland.cspec",
@@ -4971,9 +5085,9 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86gcc.cspec",
-      "sha256": "37ac2ec43156602443b4e5625625ae5e71c61d151a8b06ece6068648046f80cd",
-      "size": 12938,
-      "source_path": "crates/fission-sleigh/specs/languages/x86/x86gcc.cspec"
+      "sha256": "e1d0eb49af5c65144e58e08a8e81e73ddbf37288631ff8105643755959247241",
+      "size": 13314,
+      "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/x86gcc.cspec"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/x86win.cspec",

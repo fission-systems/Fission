@@ -133,9 +133,9 @@ impl PreprocessorState {
             self.handle_content_line(trimmed, path, &mut conditionals)?;
         }
 
-        if !conditionals.is_empty() {
-            bail!("unterminated conditional block in {}", path.display());
-        }
+        // Same rule as `fission-sleigh`'s preprocessor and Ghidra's: the
+        // conditional stack is per file and an `@if` still open at EOF is not
+        // an error (upstream `ARM/ARMv8.sinc` has one).
         Ok(())
     }
 
@@ -612,6 +612,18 @@ mod tests {
         let parsed = parse_registers_from_slaspec(&path).expect("parse powerpc");
         assert!(parsed.iter().any(|r| r.name == "r0" && r.offset == 0));
     }
+
+    #[test]
+    fn arm_v8_slaspec_parses_despite_its_unclosed_conditional() {
+        // `ARMv8.sinc` has one more `@if` than `@endif`; Ghidra compiles it, so
+        // the parser must too.
+        let root = super::super::apply::sleigh_languages_root();
+        let path =
+            super::super::ldefs::global_language_slaspec_index(&root)["ARM:LE:32:v8"].clone();
+        let parsed = parse_registers_from_slaspec(&path).expect("parse arm v8");
+        assert!(parsed.iter().any(|r| r.name == "r0"));
+    }
+
     #[test]
     fn aarch64_slaspec_contains_x0() {
         let root = super::super::apply::sleigh_languages_root();

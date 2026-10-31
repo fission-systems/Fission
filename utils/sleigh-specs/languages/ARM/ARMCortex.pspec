@@ -7,6 +7,7 @@
     <property key="useNewFunctionStackAnalysis" value="true"/>
     <property key="enableContiguousFunctionsOnly" value="false"/>
     <property key="emulateInstructionStateModifierClass" value="ghidra.program.emulation.ARMEmulateInstructionStateModifier"/>
+    <property key="useropLibs" value="arm"/>
   </properties>
   <programcounter register="pc"/>
   <context_data>
@@ -18,14 +19,13 @@
       <set name="spsr" val="0"/>
     </tracked_set>
   </context_data>
+
   <register_data>
     <!-- ARM/Thumb-interworking bookkeeping registers (ARM.sinc's
-         SetISAModeSwitch/setISAMode): they only steer how the NEXT
-         instruction gets decoded, never real program-visible state, so
-         (like x86's bit64/segover/rex*prefix above) they must not surface
-         as decompiled-output assignments. -->
+         SetISAModeSwitch/setISAMode): decoder-only, never real program
+         state -- must not surface as decompiled-output assignments. -->
     <register name="ISAModeSwitch" hidden="true"/>
-    <register name="TB" hidden="true"/>
+    <register name="TB" alias="ISAModeSwitch" hidden="true"/>
   </register_data>
 
   <default_symbols>

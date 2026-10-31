@@ -1300,8 +1300,8 @@ mod tests {
             "../../../utils/sleigh-specs/ghidra_language_manifest.json"
         ))
         .expect("parse Ghidra language manifest");
-        assert_eq!(manifest["processor_count"], 38);
-        assert_eq!(manifest["variant_count"], 146);
+        assert_eq!(manifest["processor_count"], 39);
+        assert_eq!(manifest["variant_count"], 150);
 
         let entries = manifest["entries"].as_array().expect("entries array");
         for language_id in [

@@ -8,6 +8,7 @@
     <property key="enableSharedReturnAnalysis" value="false"/>
     <property key="enableContiguousFunctionsOnly" value="false"/>
     <property key="emulateInstructionStateModifierClass" value="ghidra.program.emulation.ARMEmulateInstructionStateModifier"/>
+    <property key="useropLibs" value="arm"/>
   </properties>
   <programcounter register="pc"/>
   <context_data>
@@ -19,12 +20,13 @@
       <set name="spsr" val="0"/>
     </tracked_set>
   </context_data>
+
   <register_data>
     <!-- ARM/Thumb-interworking bookkeeping registers (ARM.sinc's
          SetISAModeSwitch/setISAMode): decoder-only, never real program
          state -- must not surface as decompiled-output assignments. -->
     <register name="ISAModeSwitch" hidden="true"/>
-    <register name="TB" hidden="true"/>
+    <register name="TB" alias="ISAModeSwitch" hidden="true"/>
   </register_data>
 
   <default_symbols>

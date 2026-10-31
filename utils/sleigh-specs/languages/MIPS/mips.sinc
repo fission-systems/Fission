@@ -539,8 +539,9 @@ define token instr(32)
     pcrel       = (19,20)
     pcrel2      = (18,20)
     cc          = (18,20)
-    immed1625   = (16,25) signed
-    immed1623   = (16,23) signed
+    immed1625   = (16,25)
+    simmed1625   = (16,25) signed
+    simmed1623   = (16,23) signed
     rt32        = (16,20)
     rt          = (16,20)
     rtmtdsp     = (16,20)
@@ -613,11 +614,11 @@ define token instr(32)
     ac          = (11,12)
     bp          = (11,12)
     bit10       = (10,10)
-    svrs_s0     = (10,10)
+    svrs_s0     = (11,11)
     spec2       = (9,10)
-    svrs_s1     = (9,9)
+    svrs_s1     = (10,10)
     spec3       = (8,10)
-    simmed9     = (7,15)
+    simmed9     = (7,15) signed
     zero2       = (7,10)
     code        = (6,15)
     fdD         = (6,10)
@@ -650,7 +651,7 @@ define token instr(32)
     immed       = (0,15)
     simmed      = (0,15) signed
     simmseq     = (6,15) signed
-    simmed11    = (0,10)
+    simmed11    = (0,10) signed
 ;
 
 attach variables [ rs rt rd base index baser6 ] [ 
@@ -919,9 +920,12 @@ DXuPos: pos             is lsb          [ pos = lsb + 32; ]             { tmp:1 
 DinsXSize: mysize         is msbd & lsb   [ mysize = msbd - lsb + 1 + 32; ] { tmp:1 = mysize; export tmp; }
 @endif
 
+define pcodeop setISAMode;
+
 macro JXWritePC(addr) {
 @ifdef ISA_VARIANT 
    ISAModeSwitch = (addr & 0x1) != 0;
+   setISAMode(ISAModeSwitch);
    tmp:$(REGSIZE) = -2;
    tmp = tmp & addr;
    pc = tmp;

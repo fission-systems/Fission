@@ -175,9 +175,9 @@ fn sla_unimpl_constructors_decode_as_empty_runtime_ready_templates() {
         .expect("native instruction subtable");
 
     let unimplemented = [
-        ("AARCH64instructions.sinc", 3987),
-        ("AARCH64instructions.sinc", 3991),
-        ("AARCH64instructions.sinc", 3995),
+        ("AARCH64instructions.sinc", 3989),
+        ("AARCH64instructions.sinc", 3993),
+        ("AARCH64instructions.sinc", 3997),
         ("AARCH64sve.sinc", 5513),
     ];
     for (source_file, line) in unimplemented {
