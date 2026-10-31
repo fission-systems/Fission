@@ -152,15 +152,17 @@ const UNIX_GOOS: &[&str] = &[
 // Implementation
 // ---------------------------------------------------------------------------
 
-/// Build tags to consult, lowest priority first -- the order `from_raw` merged
-/// them in, so trying them in sequence and taking the first hit reproduces
-/// `or_insert`'s "first definition wins".
+/// Build tags to consult, most specific first, so that taking the first hit --
+/// as `from_raw`'s `or_insert` and the packed lookups both do -- lets an
+/// OS/arch-specific definition override a generic one.
 fn merge_tags_for(goos: &str, goarch: &str) -> Vec<String> {
-    let mut tags = vec!["all".to_string(), goarch.to_string(), goos.to_string()];
+    let mut tags = vec![format!("{goos}-{goarch}")];
     if UNIX_GOOS.contains(&goos) {
         tags.push("unix".to_string());
     }
-    tags.push(format!("{goos}-{goarch}"));
+    tags.push(goos.to_string());
+    tags.push(goarch.to_string());
+    tags.push("all".to_string());
     tags
 }
 
@@ -300,18 +302,10 @@ impl GoTypeinfoDatabase {
     }
 
     fn from_raw(raw: HashMap<String, JsonPlatformEntry>, goos: &str, goarch: &str) -> Self {
-        let is_unix = UNIX_GOOS.contains(&goos);
         let mut db = Self::default();
 
-        // Merge order (lowest → highest priority): all, arch, os, unix, os-arch
-        let merge_keys: Vec<String> = {
-            let mut v = vec!["all".to_string(), goarch.to_string(), goos.to_string()];
-            if is_unix {
-                v.push("unix".to_string());
-            }
-            v.push(format!("{}-{}", goos, goarch));
-            v
-        };
+        // Most specific tag first; `or_insert` below keeps the first definition.
+        let merge_keys = merge_tags_for(goos, goarch);
 
         for key in &merge_keys {
             if let Some(entry) = raw.get(key.as_str()) {
@@ -444,6 +438,18 @@ impl GoTypeinfoDatabase {
             "mips64"
         } else if spec.contains("mips") {
             "mips"
+        } else if spec.contains("riscv") {
+            "riscv64"
+        } else if spec.contains("powerpc") || spec.contains("ppc") {
+            if spec.contains("le") && !spec.contains("be") {
+                "ppc64le"
+            } else {
+                "ppc64"
+            }
+        } else if spec.contains("loong") {
+            "loong64"
+        } else if spec.contains("s390") {
+            "s390x"
         } else if is_64bit {
             "amd64"
         } else {
@@ -734,15 +740,60 @@ mod packed_tests {
     }
 
     #[test]
-    fn merge_order_matches_what_from_raw_used() {
-        // all, arch, os, unix when the OS is one, then os-arch.
+    fn merge_order_is_most_specific_first() {
         assert_eq!(
             merge_tags_for("linux", "amd64"),
-            vec!["all", "amd64", "linux", "unix", "linux-amd64"]
+            vec!["linux-amd64", "unix", "linux", "amd64", "all"]
         );
         assert_eq!(
             merge_tags_for("windows", "386"),
-            vec!["all", "386", "windows", "windows-386"]
+            vec!["windows-386", "windows", "386", "all"]
+        );
+    }
+
+    #[test]
+    fn a_specific_platform_definition_overrides_a_generic_one() {
+        // The shipped snapshots never define one name under two tags (checked
+        // over all eleven versions), so this is the only place the precedence
+        // is exercised.
+        let platforms = |with_specific: bool| -> HashMap<String, JsonPlatformEntry> {
+            let func = |ty: &str| {
+                format!(
+                    r#"{{"Funcs": {{"f": {{"Params": [{{"Name":"a","DataType":"{ty}"}}], "Results": []}}}}, "Types": {{}}}}"#
+                )
+            };
+            let mut json = format!(r#"{{"all": {}, "unix": {}"#, func("int"), func("long"));
+            if with_specific {
+                json.push_str(&format!(r#", "linux-amd64": {}"#, func("ulong")));
+            }
+            json.push('}');
+            serde_json::from_str(&json).expect("parse raw")
+        };
+        let db = GoTypeinfoDatabase::from_raw(platforms(true), "linux", "amd64");
+        assert_eq!(db.get_func("f").unwrap().params[0].1, "ulong");
+        // Without the most specific tag the next one down wins, not "all".
+        let db = GoTypeinfoDatabase::from_raw(platforms(false), "linux", "amd64");
+        assert_eq!(db.get_func("f").unwrap().params[0].1, "long");
+    }
+
+    #[test]
+    fn architectures_go_does_not_share_with_amd64_are_not_called_amd64() {
+        for (spec, want) in [
+            ("RISCV:LE:64:RV64GC", "riscv64"),
+            ("PowerPC:LE:64:default", "ppc64le"),
+            ("PowerPC:BE:64:default", "ppc64"),
+            ("Loongarch:LE:64:default", "loong64"),
+            ("s390x:BE:64:default", "s390x"),
+        ] {
+            assert_eq!(
+                GoTypeinfoDatabase::goarch_from_spec(true, spec),
+                want,
+                "{spec}"
+            );
+        }
+        assert_eq!(
+            GoTypeinfoDatabase::goarch_from_spec(true, "x86:LE:64:default"),
+            "amd64"
         );
     }
 }
