@@ -1380,11 +1380,17 @@ parity across every architecture and file format.</p>
 <li>Emulator: the cross-platform default (verified).</li>
 <li>Linux <code>ptrace</code>: launch, attach, step, breakpoints, registers, memory, modules
   (verified in code and by the Linux CI job).</li>
-<li>macOS: implemented in PR #704 (ptrace for control, Mach task port for state).
-  <strong>Not yet exercised against a live process</strong>: the task port needs
-  <code>sudo DevToolsSecurity -enable</code> once, which was off on the development machine.
-  Until the opt-in live tests (<code>FISSION_MACOS_LIVE_DEBUG_TESTS=1</code>) have been run,
-  treat it as unverified.</li>
+<li>macOS: <code>ptrace</code> for control, the Mach task port for state (PRs #704, #707).
+  <strong>Verified</strong> on Apple Silicon, macOS 26.5.1: seven live tests against real
+  processes (launch to exit code, single step, breakpoint hit / hidden original
+  bytes / step-off / exit, breakpoint removal, memory and register writes,
+  module list after dyld, attach and detach), 100 consecutive runs, 0 failures.
+  It needs two things on the machine: the <code>fission_cli</code> binary signed with the
+  <code>com.apple.security.cs.debugger</code> entitlement (<code>scripts/macos/sign-debugger.sh</code>,
+  redone after every rebuild) and <code>sudo DevToolsSecurity -enable</code> once.
+  <strong>Not covered:</strong> multi-threaded targets, hardware breakpoints and watchpoints,
+  x86-64 hosts, and signing of the shipped macOS archive. The live tests run by
+  hand (<code>scripts/macos/run-live-debugger-tests.sh</code>), not in CI.</li>
 <li>Windows native: behind <code>--features windows_native_debugger</code>; 29 open <code>area:dynamic</code>
   issues describe WOW64/32-bit defects (unverified individually). Either fix them
   or keep Windows live debugging out of the 1.0 promise.</li>
