@@ -478,12 +478,22 @@ fn relocation_use_sites(binary: &LoadedBinary) -> Vec<u64> {
     sites.into_iter().collect()
 }
 
+/// The pointer stored at a relocation use site.
+///
+/// A 32-bit image's slots are four bytes wide. Reading eight there fuses the
+/// slot with the one after it (`table[0]` at `0x401050` followed by
+/// `table[1]` at `0x401080` reads as `0x00401080_00401050`), a value no bounds
+/// check accepts, so every entry of a contiguous pointer table was lost. A
+/// 64-bit image keeps trying eight bytes first and falls back to four for a
+/// narrower slot.
 fn read_reloc_target_at_use_site(
     binary: &LoadedBinary,
     use_site: u64,
     little_endian: bool,
 ) -> Option<u64> {
-    if let Some(raw_8) = binary.view_bytes(use_site, 8) {
+    if binary.is_64bit
+        && let Some(raw_8) = binary.view_bytes(use_site, 8)
+    {
         let val = if little_endian {
             u64::from_le_bytes(raw_8.try_into().ok()?)
         } else {
@@ -770,6 +780,60 @@ mod tests {
                 .unwrap();
         binary.hash = hash.into();
         binary
+    }
+
+    fn pointer_table_fixture(is_64bit: bool, table: Vec<u8>) -> LoadedBinary {
+        let len = table.len() as u64;
+        LoadedBinaryBuilder::new("ptrs.bin".into(), DataBuffer::Heap(table))
+            .format("ELF")
+            .arch_spec(if is_64bit {
+                "x86:LE:64:default"
+            } else {
+                "x86:LE:32:default"
+            })
+            .is_64bit(is_64bit)
+            .image_base(0x400000)
+            .add_section(fission_loader::loader::SectionInfo {
+                name: ".data.rel.ro".into(),
+                virtual_address: 0x403000,
+                virtual_size: len,
+                file_offset: 0,
+                file_size: len,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_32bit_relocation_site_reads_one_pointer_not_two_fused() {
+        // table[0] = 0x401050, table[1] = 0x401080, little endian.
+        let binary =
+            pointer_table_fixture(false, vec![0x50, 0x10, 0x40, 0x00, 0x80, 0x10, 0x40, 0x00]);
+        assert_eq!(
+            read_reloc_target_at_use_site(&binary, 0x403000, true),
+            Some(0x401050)
+        );
+        assert_eq!(
+            read_reloc_target_at_use_site(&binary, 0x403004, true),
+            Some(0x401080)
+        );
+    }
+
+    #[test]
+    fn a_64bit_relocation_site_still_reads_the_full_slot() {
+        let binary = pointer_table_fixture(
+            true,
+            vec![
+                0x50, 0x10, 0x40, 0, 0, 0, 0, 0, 0x80, 0x10, 0x40, 0, 0, 0, 0, 0,
+            ],
+        );
+        assert_eq!(
+            read_reloc_target_at_use_site(&binary, 0x403000, true),
+            Some(0x401050)
+        );
     }
 
     #[test]
