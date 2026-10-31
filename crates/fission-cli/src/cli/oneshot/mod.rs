@@ -897,7 +897,9 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         return Ok(print_strings(
             &binary,
             &binary_data,
-            min_len.max(4),
+            // The caller's threshold, not a silent floor: `--min-len 2` used to
+            // behave as 4. The default (4) is set where the flag is declared.
+            min_len.max(1),
             &strings::StringsView {
                 with_xrefs: cli.strings_xrefs,
                 context: cli.strings_context,
