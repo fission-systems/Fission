@@ -305,8 +305,21 @@ pub struct DwarfLineRow {
     /// Source file name (leaf name only, not joined with its DWARF
     /// include-directory entry).
     pub file: String,
-    /// 1-based source line number.
+    /// 1-based source line number, or 0 for a marker: the end of a
+    /// line-program sequence, or instructions the producer marked as having
+    /// no source line. A marker ends the reach of the row before it.
     pub line: u32,
+}
+
+impl DwarfLineRow {
+    /// A marker at `address` from which no source line applies.
+    pub fn unattributed(address: u64) -> Self {
+        Self {
+            address,
+            file: String::new(),
+            line: 0,
+        }
+    }
 }
 
 /// Loader evidence for an address that may be a function entry but still
@@ -520,18 +533,21 @@ impl LoadedBinary {
     /// Resolve an address to the source file/line it maps to, per the
     /// `.debug_line` matrix: the row with the greatest `address <= address`
     /// (a line's row marks where its instructions *begin*; anything up to
-    /// the next row's address is still attributed to that line). Requires
+    /// the next row's address is still attributed to that line, unless that
+    /// next row is an end-of-sequence/no-line marker, which yields `None`). Requires
     /// `dwarf_lines` sorted ascending by `address`, which is how
     /// `DwarfAnalyzer::analyze_lines` always produces it.
     pub fn line_for_address(&self, address: u64) -> Option<&DwarfLineRow> {
-        match self
+        // The last row at or before `address`; among rows sharing an address
+        // that is the real one (markers sort first).
+        let idx = self
             .dwarf_lines
-            .binary_search_by_key(&address, |row| row.address)
-        {
-            Ok(idx) => Some(&self.dwarf_lines[idx]),
-            Err(0) => None,
-            Err(idx) => Some(&self.dwarf_lines[idx - 1]),
-        }
+            .partition_point(|row| row.address <= address);
+        let row = self.dwarf_lines.get(idx.checked_sub(1)?)?;
+        // A marker row ends the previous line's reach: gaps between units,
+        // code built without line info, and anything past the last sequence
+        // have no line.
+        (row.line != 0).then_some(row)
     }
 
     /// Get immutable reference to inner data
