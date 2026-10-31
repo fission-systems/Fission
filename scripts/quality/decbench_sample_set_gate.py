@@ -28,7 +28,9 @@ PREREQUISITES
 Both live outside this repository and the gate skips cleanly without them:
 
   - the eval kit at `vendor/decbench-evalkit/decbench-evalkit-sample-set`
-  - `fission-benchmark` with `decbench-data/` and a `pyjoern` environment
+  - `fission-benchmark/decbench-data/` (`--benchmark-root`), the `decbench`
+    package (`vendor/decbench`, installed in the python that runs this) and a
+    built rust-joern (`RUST_JOERN_DIR`, default `~/rust-joern`)
 
 USAGE
 -----
@@ -91,22 +93,22 @@ def resolve_cli(explicit: str | None) -> Path | None:
 
 
 def load_scoring(benchmark_root: Path):
-    """Import DecBench's own metric code, or explain why we cannot."""
-    sys.path.insert(0, str(benchmark_root))
-    sys.path.insert(0, str(benchmark_root / "runner"))
-    sys.path.insert(0, str(REPO / "vendor" / "decbench"))
-    from ged import compute_ged, extract_decompiled_cfgs, load_published_source_cfgs
-    from decbench.decompilers.raw.fission_raw import _variables
-    from decbench.metrics.type_match import TypeMatchMetric, extract_ground_truth_types
-
-    return {
-        "compute_ged": compute_ged,
-        "extract_decompiled_cfgs": extract_decompiled_cfgs,
-        "load_published_source_cfgs": load_published_source_cfgs,
-        "variables": _variables,
-        "TypeMatchMetric": TypeMatchMetric,
-        "extract_ground_truth_types": extract_ground_truth_types,
-    }
+    """DecBench's metric code through `decbench_scoring`, or say why we cannot."""
+    spec = importlib.util.spec_from_file_location(
+        "decbench_scoring", Path(__file__).resolve().parent / "decbench_scoring.py"
+    )
+    scoring = importlib.util.module_from_spec(spec)
+    sys.modules["decbench_scoring"] = scoring
+    spec.loader.exec_module(scoring)
+    try:
+        return scoring.load(REPO)
+    except (ImportError, RuntimeError) as exc:
+        raise SystemExit(
+            f"cannot set up scoring ({exc}). Run this with the python of an "
+            "environment that has `decbench` installed (`pip install -e vendor/decbench`: "
+            "pydantic, networkx, scipy, cfgutils) and rust-joern built (see "
+            "docs/BENCHMARK_DECBENCH.md)."
+        )
 
 
 def _digest_files(*paths: str | None) -> str:
@@ -337,6 +339,7 @@ def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None
                     result = api["compute_ged"](src[src_name], cfgs[layer][unique])
                     if "ged" in result:
                         counts[f"ged_{layer}_scored"] += 1
+                        counts[f"ged_{layer}_distance"] += result["ged"]
                         if result["ged"] == 0:
                             counts[f"ged_{layer}_perfect"] += 1
                         if dump is not None:
@@ -384,7 +387,10 @@ def render(scores: dict) -> str:
             perfect = scores.get(f"{metric}_{layer}_perfect", 0)
             scored = scores.get(f"{metric}_{layer}_scored", 0)
             rate = perfect / scored * 100 if scored else 0.0
-            lines.append(f"  {layer.upper()} {label} perfect {perfect:3d}/{scored:3d} = {rate:5.1f}%")
+            line = f"  {layer.upper()} {label} perfect {perfect:3d}/{scored:3d} = {rate:5.1f}%"
+            if metric == "ged" and f"ged_{layer}_distance" in scores:
+                line += f"  total distance {scores[f'ged_{layer}_distance']:.0f}"
+            lines.append(line)
     return "\n".join(lines)
 
 
