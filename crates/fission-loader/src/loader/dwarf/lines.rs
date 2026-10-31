@@ -23,7 +23,10 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
         match self.analyze_lines_inner() {
             Ok(mut rows) => {
-                rows.sort_by_key(|row| row.address);
+                // At one address a marker (end of a sequence) sorts before a real
+                // row (start of the next), so the lookup's last-at-address pick is
+                // the real one.
+                rows.sort_by_key(|row| (row.address, row.line != 0));
                 tracing::info!(
                     "[DwarfAnalyzer] Extracted {} line-table rows from .debug_line",
                     rows.len()
@@ -57,14 +60,19 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             let mut rows = program.rows();
             while let Some((header, row)) = rows.next_row()? {
                 if row.end_sequence() {
-                    // Marks the address just past the last real instruction
-                    // in a sequence -- not itself attributable to a line.
+                    // The address just past the last instruction of a
+                    // sequence. Nothing from here until the next sequence
+                    // starts has a source line, so keep it as a marker
+                    // (`line == 0`) that ends the previous row's reach.
+                    out.push(DwarfLineRow::unattributed(row.address()));
                     continue;
                 }
                 let Some(line) = row.line() else {
                     // Producers use line 0 for instructions that can't be
                     // attributed to any source line (e.g. compiler-generated
-                    // prologue padding) -- not a lookup-worthy row.
+                    // prologue padding). Same marker: the previous line must
+                    // not extend over them.
+                    out.push(DwarfLineRow::unattributed(row.address()));
                     continue;
                 };
 
@@ -127,8 +135,10 @@ mod tests {
             "rows must be sorted ascending by address: {rows:?}"
         );
         assert!(
-            rows.iter().all(|r| r.line > 0),
-            "line 0 rows should have been filtered out: {rows:?}"
+            rows.iter()
+                .filter(|r| r.line == 0)
+                .all(|r| r.file.is_empty()),
+            "a line-0 row is an unattributed marker with no file: {rows:?}"
         );
 
         // Cross-checked byte-for-byte against `llvm-dwarfdump --debug-line`
@@ -151,10 +161,11 @@ mod tests {
             assert_eq!(row.file, file, "wrong file at 0x{address:x}");
             assert_eq!(row.line, line, "wrong line at 0x{address:x}");
         }
-        assert!(
-            rows.iter().all(|r| r.address != 0x401131),
-            "end_sequence row at 0x401131 should have been filtered out: {rows:?}"
-        );
+        let end = rows
+            .iter()
+            .find(|r| r.address == 0x401131)
+            .unwrap_or_else(|| panic!("end_sequence at 0x401131 must be kept: {rows:?}"));
+        assert_eq!(end.line, 0, "the end_sequence row is a marker, not a line");
     }
 
     #[test]
@@ -177,5 +188,50 @@ mod tests {
 
         // Before the first row entirely.
         assert!(binary.line_for_address(0x1).is_none());
+
+        // 0x401131 is the `end_sequence` address: the last real instruction
+        // is before it, so it and everything after (a gap, other sections,
+        // the top of the address space) has no line. These used to answer
+        // with the last row of the sequence.
+        let marker = binary
+            .dwarf_lines
+            .iter()
+            .position(|r| r.address == 0x401131)
+            .expect("end_sequence marker");
+        let last_real = &binary.dwarf_lines[marker - 1];
+        assert_ne!(last_real.line, 0);
+        assert_eq!(
+            binary.line_for_address(0x401130).map(|r| r.line),
+            Some(last_real.line)
+        );
+        assert!(binary.line_for_address(0x401131).is_none());
+        assert!(binary.line_for_address(0x402000).is_none());
+        assert!(binary.line_for_address(u64::MAX).is_none());
+    }
+
+    #[test]
+    fn a_marker_at_the_same_address_as_the_next_sequence_does_not_hide_it() {
+        use crate::loader::types::DwarfLineRow;
+        let mut binary = LoadedBinary::from_file(
+            &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("testdata/x64_dyn_enum_test.elf"),
+        )
+        .expect("load enum test ELF");
+        let real = |address, line| DwarfLineRow {
+            address,
+            file: "a.c".into(),
+            line,
+        };
+        // Sequence A ends where sequence B begins (0x20).
+        binary.dwarf_lines = vec![
+            real(0x10, 1),
+            DwarfLineRow::unattributed(0x20),
+            real(0x20, 7),
+            DwarfLineRow::unattributed(0x30),
+        ];
+        assert_eq!(binary.line_for_address(0x1f).unwrap().line, 1);
+        assert_eq!(binary.line_for_address(0x20).unwrap().line, 7);
+        assert_eq!(binary.line_for_address(0x2f).unwrap().line, 7);
+        assert!(binary.line_for_address(0x30).is_none());
     }
 }
