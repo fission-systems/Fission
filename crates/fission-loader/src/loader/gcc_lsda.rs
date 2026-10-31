@@ -297,7 +297,10 @@ fn resolve_type_table(
         _ => return None,
     };
 
-    let mut table = Vec::with_capacity(usize::try_from(max_filter).ok()?);
+    // `max_filter` comes from the action table. The reads below stop at the
+    // first one that falls outside the image, so reserve a modest start and let
+    // the vector grow rather than trust the value for an allocation.
+    let mut table = Vec::with_capacity(usize::try_from(max_filter).ok()?.min(4096));
     for filter in 1..=max_filter {
         let entry_vma =
             ttype_base.wrapping_sub(u64::try_from(filter).ok()?.wrapping_mul(entry_size));

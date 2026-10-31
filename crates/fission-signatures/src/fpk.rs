@@ -388,6 +388,13 @@ impl FpkReader {
                 let _ = cached.set(raw.into_boxed_slice());
             }
             let raw = cached.get().expect("successful index decoding published");
+            if count == 0 {
+                // A chunk that holds nothing has no last key to compare; it
+                // can only come from a damaged index, and the next chunk may
+                // still hold the key.
+                chunk += 1;
+                continue;
+            }
             let mut found_here = false;
             for i in 0..count {
                 if u64_at(raw, i * HASH_ENTRY_LEN) != key {
@@ -544,6 +551,8 @@ const HASH_ENTRY_LEN: usize = 12;
 const HASH_CHUNK_ENTRIES: usize = 512;
 const LOCATOR_ROW_BITS: u32 = 20;
 const LOCATOR_ROW_MASK: u32 = (1 << LOCATOR_ROW_BITS) - 1;
+/// The block number gets the bits the row leaves: 12 of the locator's 32.
+const LOCATOR_BLOCK_MASK: u32 = u32::MAX >> LOCATOR_ROW_BITS;
 
 /// One `key -> record` mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -570,6 +579,15 @@ pub fn append_hash_index(image: &mut Vec<u8>, mut entries: Vec<HashEntry>) {
                 entry.row <= LOCATOR_ROW_MASK,
                 "row {} does not fit the locator; lower the block target",
                 entry.row
+            );
+            // The block is shifted into the high bits, where anything past the
+            // top is dropped without a trace and the entry then names some
+            // other block. Fail here, at pack time, as the row check does.
+            assert!(
+                entry.block <= LOCATOR_BLOCK_MASK,
+                "block {} does not fit the locator ({} blocks at most); raise the block target",
+                entry.block,
+                LOCATOR_BLOCK_MASK + 1
             );
             raw.extend_from_slice(&entry.key.to_le_bytes());
             raw.extend_from_slice(&((entry.block << LOCATOR_ROW_BITS) | entry.row).to_le_bytes());
@@ -782,6 +800,83 @@ mod tests {
         out.extend_from_slice(&payload);
         out.extend_from_slice(&index);
         out
+    }
+
+    /// Append a hash index made of the given raw chunks, bypassing the writer's
+    /// own invariants, so a test can hand the reader an index no honest packer
+    /// would produce. `(first_key, entry_count, raw_entries)` per chunk.
+    fn append_raw_index(image: &mut Vec<u8>, chunks: &[(u64, u32, Vec<u8>)]) {
+        let chunks_offset = image.len();
+        let mut payload = Vec::new();
+        let mut directory = Vec::new();
+        for (first_key, count, raw) in chunks {
+            let compressed = zstd::encode_all(&raw[..], 3).unwrap();
+            directory.extend_from_slice(&first_key.to_le_bytes());
+            directory.extend_from_slice(&((chunks_offset + payload.len()) as u64).to_le_bytes());
+            directory.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+            directory.extend_from_slice(&count.to_le_bytes());
+            payload.extend_from_slice(&compressed);
+        }
+        let directory_offset = chunks_offset + payload.len();
+        let digest = sha256(&payload);
+        image.extend_from_slice(&payload);
+        image.extend_from_slice(&directory);
+        image.extend_from_slice(HASH_INDEX_MAGIC);
+        image.extend_from_slice(&2u16.to_le_bytes());
+        image.extend_from_slice(&0u16.to_le_bytes());
+        image.extend_from_slice(&0u64.to_le_bytes());
+        image.extend_from_slice(&(directory_offset as u64).to_le_bytes());
+        image.extend_from_slice(&digest);
+    }
+
+    /// An index chunk that says it holds nothing used to reach `count - 1`.
+    #[test]
+    fn an_empty_index_chunk_is_passed_over_not_a_panic() {
+        let mut image = pack(&["alpha|1", "beta|2"]);
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&7u64.to_le_bytes());
+        entry.extend_from_slice(&0u32.to_le_bytes()); // locator: block 0, row 0
+        append_raw_index(
+            &mut image,
+            &[
+                (5, 0, Vec::new()), // damaged: no entries
+                (7, 1, entry),      // key 7 -> block 0 row 0
+            ],
+        );
+        let reader = FpkReader::open(&write_temp(&image)).unwrap();
+        // Key 5 sits in the empty chunk: nothing there, and no panic.
+        assert_eq!(reader.records_by_key(5).unwrap(), Vec::<String>::new());
+        // The chunk after it is still searched.
+        assert_eq!(reader.records_by_key(7).unwrap().len(), 1);
+    }
+
+    /// 4,096 blocks is all a locator can name; the 4,097th used to wrap to
+    /// block 0 and the index then pointed at the wrong record.
+    #[test]
+    #[should_panic(expected = "does not fit the locator")]
+    fn a_block_number_that_does_not_fit_the_locator_fails_at_pack_time() {
+        let mut image = pack(&["alpha|1"]);
+        append_hash_index(
+            &mut image,
+            vec![HashEntry {
+                key: 1,
+                block: LOCATOR_BLOCK_MASK + 1,
+                row: 0,
+            }],
+        );
+    }
+
+    #[test]
+    fn the_last_block_the_locator_can_name_still_packs() {
+        let mut image = pack(&["alpha|1"]);
+        append_hash_index(
+            &mut image,
+            vec![HashEntry {
+                key: 1,
+                block: LOCATOR_BLOCK_MASK,
+                row: 0,
+            }],
+        );
     }
 
     /// A path per *call*, not per process.

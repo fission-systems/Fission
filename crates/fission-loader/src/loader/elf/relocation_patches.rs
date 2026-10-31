@@ -675,8 +675,11 @@ pub(super) fn x86_64_relocation_patches_64(
                     let value = (symbol_value as i128).wrapping_add(addend as i128) as u32;
                     patches_32.push((patch_offset, value));
                 }
-                R_X86_64_PC32 => {
-                    let target_base = section_addresses[shdr.sh_info as usize];
+                R_X86_64_PC32 | R_X86_64_PLT32 => {
+                    let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied()
+                    else {
+                        continue;
+                    };
                     let place = target_base.saturating_add(r_offset);
                     let value = (symbol_value as i128)
                         .wrapping_add(addend as i128)
@@ -688,4 +691,60 @@ pub(super) fn x86_64_relocation_patches_64(
         }
     }
     (patches_64, patches_32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One `.text` section, one defined function symbol at `.text + 0x20`, and a
+    /// single RELA entry of `reloc_type` at `.text + 1` (the rel32 of an `e8`).
+    fn patches_for(reloc_type: u32) -> (Vec<(usize, u64)>, Vec<(usize, u32)>) {
+        let mut data = vec![0u8; 0x400];
+        // .symtab at 0x100: entry 1 = GLOBAL FUNC, shndx 1 (.text), value 0x20.
+        let sym = 0x100 + 24;
+        data[sym + 4] = 0x12;
+        data[sym + 6..sym + 8].copy_from_slice(&1u16.to_le_bytes());
+        data[sym + 8..sym + 16].copy_from_slice(&0x20u64.to_le_bytes());
+        // .rela at 0x200: r_offset 1, symbol 1, addend -4.
+        data[0x200..0x208].copy_from_slice(&1u64.to_le_bytes());
+        data[0x208..0x210].copy_from_slice(&((1u64 << 32) | u64::from(reloc_type)).to_le_bytes());
+        data[0x210..0x218].copy_from_slice(&(-4i64).to_le_bytes());
+
+        let shdr = |sh_type, sh_flags, sh_offset, sh_size, sh_link, sh_info| Elf64Shdr {
+            sh_name: 0,
+            sh_type,
+            sh_flags,
+            sh_addr: 0,
+            sh_offset,
+            sh_size,
+            sh_link,
+            sh_info,
+            sh_addralign: 1,
+            sh_entsize: 24,
+        };
+        let shdrs = vec![
+            shdr(0, 0, 0, 0, 0, 0),
+            shdr(1, SHF_ALLOC, 0x300, 0x10, 0, 0), // .text
+            shdr(2, 0, 0x100, 48, 0, 0),           // .symtab
+            shdr(SHT_RELA, 0, 0x200, 24, 2, 1),    // .rela.text -> .text
+        ];
+        let section_addresses = [0, 0x100000, 0, 0];
+        x86_64_relocation_patches_64(&data, &shdrs, &section_addresses, Endian::Little)
+    }
+
+    #[test]
+    fn a_pc_relative_call_is_patched_whether_it_is_pc32_or_plt32() {
+        // S + A - P = 0x100020 - 4 - 0x100001.
+        let expected = vec![(0x301usize, 0x1bu32)];
+        assert_eq!(patches_for(R_X86_64_PC32).1, expected);
+        // Modern compilers emit PLT32 for `call`; it used to be dropped.
+        assert_eq!(patches_for(R_X86_64_PLT32).1, expected);
+    }
+
+    #[test]
+    fn a_relocation_type_it_does_not_apply_patches_nothing() {
+        assert!(patches_for(9999).0.is_empty());
+        assert!(patches_for(9999).1.is_empty());
+    }
 }

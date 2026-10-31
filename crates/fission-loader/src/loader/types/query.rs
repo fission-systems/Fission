@@ -29,7 +29,15 @@ impl LoadedBinary {
             let section = &self.sections[idx];
             return self.view_section_bytes(section, address, size);
         }
-        None
+        // The search assumes sections are disjoint and non-empty. A zero-sized
+        // section, or a relocatable object's overlapping placeholder ranges,
+        // can steer it past the section that does contain `address`. A miss is
+        // confirmed against the (few) sections before it is believed.
+        let section = self
+            .sections
+            .iter()
+            .find(|section| section_contains(section, address))?;
+        self.view_section_bytes(section, address, size)
     }
 
     /// Get bytes for instruction decoding, preferring executable sections when
@@ -498,5 +506,50 @@ mod tests {
             coff_like.get_memory_mapped_data(),
             vec![0x11, 0x22, 0x33, 0x44]
         );
+    }
+}
+
+#[cfg(test)]
+mod view_bytes_tests {
+    use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+    fn section(name: &str, va: u64, size: u64, file_offset: u64) -> SectionInfo {
+        SectionInfo {
+            name: name.to_string(),
+            virtual_address: va,
+            virtual_size: size,
+            file_offset,
+            file_size: size,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        }
+    }
+
+    /// A zero-sized section that shares a start address with a real one cannot
+    /// contain anything, and must not hide the real one from the search.
+    #[test]
+    fn a_zero_sized_section_does_not_hide_the_section_it_shares_an_address_with() {
+        let mut bytes = vec![0u8; 0x300];
+        bytes[0x120] = 0xab;
+        let binary = LoadedBinaryBuilder::new("zero.bin".into(), DataBuffer::Heap(bytes))
+            .format("ELF")
+            .entry_point(0x1000)
+            .add_section(section(".real", 0x1000, 0x200, 0x100))
+            // Sorts after `.real` (same address, larger file offset), which puts
+            // the empty section where a binary search probes first.
+            .add_section(section(".empty", 0x1000, 0, 0x200))
+            .add_section(section(".tail", 0x3000, 0x10, 0x100))
+            .build()
+            .unwrap();
+        for address in [0x1000u64, 0x1020, 0x1100, 0x11ff] {
+            assert!(
+                binary.view_bytes(address, 1).is_some(),
+                "0x{address:x} is inside .real"
+            );
+        }
+        assert_eq!(binary.view_bytes(0x1020, 1), Some(&[0xab][..]));
+        assert!(binary.view_bytes(0x2000, 1).is_none(), "between sections");
+        assert!(binary.view_bytes(0x1200, 1).is_none(), "one past .real");
     }
 }

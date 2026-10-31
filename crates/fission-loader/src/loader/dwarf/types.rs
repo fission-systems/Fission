@@ -125,12 +125,13 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             }
 
             for (name, typedef_target) in typedefs {
-                let mut target = typedef_target;
-                let mut pointer_depth = 0u8;
-                while let Some(next) = pointer_targets.get(&target).copied() {
-                    pointer_depth = pointer_depth.saturating_add(1);
-                    target = next;
-                }
+                // A pointer DIE that refers back to itself, directly or through
+                // others, has no pointee; skip the typedef rather than follow it.
+                let Some((target, pointer_depth)) =
+                    follow_pointer_chain(&pointer_targets, typedef_target)
+                else {
+                    continue;
+                };
                 if pointer_depth == 0 {
                     continue;
                 }
@@ -473,7 +474,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                 Some(count) => Some(count),
                 None => self
                     .get_attr_u64(child_entry, DwAt(0x2f))? // DW_AT_upper_bound
-                    .map(|upper_bound| upper_bound + 1),
+                    .map(element_count_from_upper_bound),
             };
             dimensions.push(count);
         }
@@ -666,5 +667,68 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             return Ok(Some("void".to_string()));
         }
         self.resolve_type_ref(entry, unit, type_cache)
+    }
+}
+
+/// Follow `start` through pointer DIEs to the first non-pointer, counting the
+/// pointers crossed. `None` if the chain loops, which only a malformed or
+/// hostile `.debug_info` produces.
+fn follow_pointer_chain<K>(
+    pointer_targets: &std::collections::HashMap<K, K>,
+    start: K,
+) -> Option<(K, u8)>
+where
+    K: Copy + Eq + std::hash::Hash,
+{
+    let mut seen = std::collections::HashSet::new();
+    let mut target = start;
+    let mut depth = 0u8;
+    while let Some(next) = pointer_targets.get(&target).copied() {
+        if !seen.insert(target) {
+            return None;
+        }
+        depth = depth.saturating_add(1);
+        target = next;
+    }
+    Some((target, depth))
+}
+
+/// Elements in an array dimension from its inclusive `DW_AT_upper_bound`.
+///
+/// Compilers write `-1` for a zero-length array (`int tail[0]`); read as
+/// unsigned that is `u64::MAX`, and `+ 1` is then 0, the right count. A plain
+/// `+ 1` panicked in debug builds there.
+fn element_count_from_upper_bound(upper_bound: u64) -> u64 {
+    upper_bound.wrapping_add(1)
+}
+
+#[cfg(test)]
+mod hostile_input_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn a_chain_of_pointers_is_followed_to_its_end() {
+        let targets: HashMap<u32, u32> = [(1, 2), (2, 3)].into_iter().collect();
+        assert_eq!(follow_pointer_chain(&targets, 1), Some((3, 2)));
+        assert_eq!(follow_pointer_chain(&targets, 3), Some((3, 0)));
+    }
+
+    #[test]
+    fn a_pointer_cycle_ends_instead_of_looping_for_ever() {
+        let selfref: HashMap<u32, u32> = [(1, 1)].into_iter().collect();
+        assert_eq!(follow_pointer_chain(&selfref, 1), None);
+        let mutual: HashMap<u32, u32> = [(1, 2), (2, 3), (3, 1)].into_iter().collect();
+        assert_eq!(follow_pointer_chain(&mutual, 2), None);
+        // A tail that leads into a cycle is also a cycle.
+        let tail: HashMap<u32, u32> = [(9, 1), (1, 2), (2, 1)].into_iter().collect();
+        assert_eq!(follow_pointer_chain(&tail, 9), None);
+    }
+
+    #[test]
+    fn a_minus_one_upper_bound_is_a_zero_length_array() {
+        assert_eq!(element_count_from_upper_bound(0), 1);
+        assert_eq!(element_count_from_upper_bound(9), 10);
+        assert_eq!(element_count_from_upper_bound(u64::MAX), 0);
     }
 }

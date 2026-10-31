@@ -871,10 +871,42 @@ pub mod signature_syntax {
                 .next()
                 .is_some_and(|c| c.is_alphabetic() || c == '_')
             && !KEYWORDS.contains(&tail);
-        if is_identifier && !head.trim().is_empty() {
+        if is_identifier && !head.trim().is_empty() && !completes_the_type(head, tail) {
             (head.trim().to_string(), tail.to_string())
         } else {
             (text.to_string(), String::new())
+        }
+    }
+
+    /// Whether `tail` is the last word of the *type* in `head tail`, not a name.
+    ///
+    /// A trailing identifier is a parameter name only when what precedes it is
+    /// already a whole type. After nothing but tag and qualifier words it is
+    /// not: in `struct stat` the word is the tag, in `const uint32_t` it is the
+    /// typedef, and `struct`/`const` alone were being returned as the type.
+    /// `unsigned`/`signed` are the one place a word can go either way
+    /// (`unsigned x` names `x`, `unsigned __int64` does not), so only the MSVC
+    /// sized-integer spellings count as completing them.
+    fn completes_the_type(head: &str, tail: &str) -> bool {
+        const TAGS: [&str; 3] = ["struct", "union", "enum"];
+        const QUALIFIERS: [&str; 2] = ["const", "volatile"];
+        const SIGNEDNESS: [&str; 2] = ["signed", "unsigned"];
+        const MSVC_INTEGERS: [&str; 4] = ["__int8", "__int16", "__int32", "__int64"];
+
+        let words: Vec<&str> = head
+            .split(|c: char| c.is_whitespace() || c == '*')
+            .filter(|word| !word.is_empty())
+            .collect();
+        let is_prefix_word = |word: &&str| {
+            TAGS.contains(word) || QUALIFIERS.contains(word) || SIGNEDNESS.contains(word)
+        };
+        if words.is_empty() || !words.iter().all(is_prefix_word) || head.contains('*') {
+            return false;
+        }
+        match words.last().copied() {
+            Some(last) if TAGS.contains(&last) || QUALIFIERS.contains(&last) => true,
+            Some(_) => MSVC_INTEGERS.contains(&tail),
+            None => false,
         }
     }
 
@@ -963,6 +995,59 @@ mod signature_tests {
         assert_eq!(s.params[1].name, "");
         assert_eq!(s.params[2].type_name, "struct stat *");
         assert_eq!(s.params[2].name, "st");
+    }
+
+    /// After only a tag or qualifier word, the last identifier is the type, not
+    /// a name: `struct` and `const` alone used to come back as the type.
+    #[test]
+    fn an_unnamed_tagged_or_qualified_type_is_not_split_into_a_keyword_and_a_name() {
+        let s = parse(
+            "int (struct stat, enum mode, const uint32_t, unsigned __int64, \
+             const struct stat, volatile uint32_t)",
+        )
+        .expect("parse");
+        let got: Vec<(&str, &str)> = s
+            .params
+            .iter()
+            .map(|p| (p.type_name.as_str(), p.name.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("struct stat", ""),
+                ("enum mode", ""),
+                ("const uint32_t", ""),
+                ("unsigned __int64", ""),
+                ("const struct stat", ""),
+                ("volatile uint32_t", ""),
+            ]
+        );
+    }
+
+    /// The same words with a name after them still have a name, and
+    /// `unsigned x` still names `x`.
+    #[test]
+    fn a_name_after_a_complete_type_is_still_a_name() {
+        let s = parse(
+            "int (struct stat st, const uint32_t n, unsigned x, unsigned __int64 big, \
+             const char *p)",
+        )
+        .expect("parse");
+        let got: Vec<(&str, &str)> = s
+            .params
+            .iter()
+            .map(|p| (p.type_name.as_str(), p.name.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("struct stat", "st"),
+                ("const uint32_t", "n"),
+                ("unsigned", "x"),
+                ("unsigned __int64", "big"),
+                ("const char *", "p"),
+            ]
+        );
     }
 
     /// A function pointer parameter contains a comma and is still one

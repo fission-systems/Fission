@@ -70,6 +70,8 @@ struct DataDirectory {
 
 #[derive(Clone, Debug)]
 struct ExportDirectory {
+    /// The first ordinal: an entry's ordinal is its index plus this.
+    ordinal_base: u32,
     number_of_functions: u32,
     number_of_names: u32,
     address_of_functions: u32,
@@ -186,16 +188,18 @@ impl PeLoader {
         // Parse Exports
         // DataDirectory[0] is Export Table
         let export_started = std::time::Instant::now();
-        let export_dir_rva = match &pe_file.optional_header {
+        let (export_dir_rva, export_dir_size) = match &pe_file.optional_header {
             PeOptionalHeader::Pe32(opt) | PeOptionalHeader::Pe32Plus(opt) => opt
                 .data_directories
                 .get(0)
-                .map(|d| d.virtual_address)
-                .unwrap_or(0),
+                .map(|d| (d.virtual_address, d.size))
+                .unwrap_or((0, 0)),
         };
 
         if export_dir_rva != 0 {
-            if let Ok(mut exports) = loader.parse_exports(export_dir_rva, image_base) {
+            if let Ok(mut exports) =
+                loader.parse_exports(export_dir_rva, export_dir_size, image_base)
+            {
                 functions_info.append(&mut exports);
             }
         }
@@ -795,6 +799,7 @@ impl<'a> PeLoaderImpl<'a> {
 
     fn read_export_directory(&self, offset: u64) -> Result<ExportDirectory> {
         Ok(ExportDirectory {
+            ordinal_base: self.read_u32(offset + 16)?,
             number_of_functions: self.read_u32(offset + 20)?,
             number_of_names: self.read_u32(offset + 24)?,
             address_of_functions: self.read_u32(offset + 28)?,
@@ -857,19 +862,70 @@ impl<'a> PeLoaderImpl<'a> {
         None
     }
 
+    /// Every code export of the image, named or by ordinal.
+    ///
+    /// `dir_size` is the export data directory's size: an address-table entry
+    /// that points back *inside* the directory is a forwarder (a string naming
+    /// `OTHERDLL.Function`), not code, and is not a function of this image.
     fn parse_exports(
         &self,
         dir_rva: u32,
+        dir_size: u32,
         image_base: u64,
     ) -> Result<Vec<crate::loader::types::FunctionInfo>> {
+        // Table sizes come from the file; bound what one directory can claim.
+        const MAX_EXPORTS: u32 = 65_536;
+
         let offset = self
             .rva_to_file_offset(dir_rva, image_base)
             .ok_or(err!(loader, "Invalid Export Dir RVA"))?;
         let export_dir = self.read_export_directory(offset)?;
+        let function_count = export_dir.number_of_functions.min(MAX_EXPORTS);
+
+        let funcs_offset = if export_dir.address_of_functions != 0 {
+            self.rva_to_file_offset(export_dir.address_of_functions, image_base)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        if funcs_offset == 0 {
+            return Ok(Vec::new());
+        }
+        let is_forwarder = |rva: u32| {
+            dir_size != 0
+                && u64::from(rva) >= u64::from(dir_rva)
+                && u64::from(rva) < u64::from(dir_rva) + u64::from(dir_size)
+        };
 
         let mut functions = Vec::new();
+        // Indices (into the address table) that a name points at.
+        let mut named = std::collections::HashSet::new();
+        let mut push_export = |this: &Self, name: String, func_rva: u32| {
+            let thunk_target = this.exact_relative_jump_export_target(func_rva, image_base);
+            let is_thunk_like = thunk_target.is_some();
+            functions.push(crate::loader::types::FunctionInfo {
+                name,
+                address: image_base + func_rva as u64,
+                size: 0,
+                is_export: true,
+                is_import: false,
+                origin: Some("pe-export-table".to_string()),
+                kind: Some(
+                    if is_thunk_like {
+                        "export_thunk"
+                    } else {
+                        "export"
+                    }
+                    .to_string(),
+                ),
+                source_section: None,
+                external_library: None,
+                is_thunk_like,
+                thunk_target,
+            });
+        };
 
-        // Parse Names
+        // Named exports, in name-table order.
         if export_dir.number_of_names > 0 && export_dir.address_of_names != 0 {
             let names_offset = self
                 .rva_to_file_offset(export_dir.address_of_names, image_base)
@@ -877,61 +933,49 @@ impl<'a> PeLoaderImpl<'a> {
             let ordinals_offset = self
                 .rva_to_file_offset(export_dir.address_of_name_ordinals, image_base)
                 .unwrap_or(0);
-            let funcs_offset = self
-                .rva_to_file_offset(export_dir.address_of_functions, image_base)
-                .unwrap_or(0);
 
-            if names_offset != 0 && ordinals_offset != 0 && funcs_offset != 0 {
-                for idx in 0..export_dir.number_of_names.min(10000) {
-                    // Safety limit
+            if names_offset != 0 && ordinals_offset != 0 {
+                for idx in 0..export_dir.number_of_names.min(MAX_EXPORTS) {
                     let name_rva = self
                         .read_u32(names_offset + u64::from(idx) * 4)
                         .unwrap_or(0);
-                    let ordinal = self
-                        .read_u16(ordinals_offset + u64::from(idx) * 2)
-                        .unwrap_or(0);
-
-                    if name_rva != 0 {
-                        let name_offset =
-                            self.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
-                        let name = self.read_string_at(name_offset);
-
-                        // Lookup function RVA using ordinal
-                        // AddressOfFunctions is indexed by Ordinal (Base subtracted)
-                        let func_idx = ordinal as u64; // Indices are 0-based from table start
-                        if func_idx < export_dir.number_of_functions as u64 {
-                            let entry_offset = funcs_offset + func_idx * 4;
-                            let func_rva = self.read_u32(entry_offset).unwrap_or(0);
-
-                            if func_rva != 0 {
-                                let thunk_target =
-                                    self.exact_relative_jump_export_target(func_rva, image_base);
-                                let is_thunk_like = thunk_target.is_some();
-                                functions.push(crate::loader::types::FunctionInfo {
-                                    name,
-                                    address: image_base + func_rva as u64,
-                                    size: 0,
-                                    is_export: true,
-                                    is_import: false,
-                                    origin: Some("pe-export-table".to_string()),
-                                    kind: Some(
-                                        if is_thunk_like {
-                                            "export_thunk"
-                                        } else {
-                                            "export"
-                                        }
-                                        .to_string(),
-                                    ),
-                                    source_section: None,
-                                    external_library: None,
-                                    is_thunk_like,
-                                    thunk_target,
-                                });
-                            }
-                        }
+                    // The name-ordinal table holds indices into the address
+                    // table with the ordinal base already subtracted.
+                    let func_idx = u32::from(
+                        self.read_u16(ordinals_offset + u64::from(idx) * 2)
+                            .unwrap_or(0),
+                    );
+                    if name_rva == 0 || func_idx >= function_count {
+                        continue;
                     }
+                    named.insert(func_idx);
+                    let func_rva = self
+                        .read_u32(funcs_offset + u64::from(func_idx) * 4)
+                        .unwrap_or(0);
+                    if func_rva == 0 || is_forwarder(func_rva) {
+                        continue;
+                    }
+                    let name_offset = self.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
+                    let name = self.read_string_at(name_offset);
+                    push_export(self, name, func_rva);
                 }
             }
+        }
+
+        // Exports with no name: reachable only by ordinal. A DLL can export
+        // every function this way, and then the name table is empty.
+        for func_idx in 0..function_count {
+            if named.contains(&func_idx) {
+                continue;
+            }
+            let func_rva = self
+                .read_u32(funcs_offset + u64::from(func_idx) * 4)
+                .unwrap_or(0);
+            if func_rva == 0 || is_forwarder(func_rva) {
+                continue;
+            }
+            let ordinal = export_dir.ordinal_base.wrapping_add(func_idx);
+            push_export(self, format!("Ordinal_{ordinal}"), func_rva);
         }
 
         Ok(functions)
@@ -981,24 +1025,40 @@ impl<'a> PeLoaderImpl<'a> {
         let end_offset = offset.saturating_add(dir_size as u64);
         let mut relocs = Vec::new();
 
+        // A block covers one 4 KiB page, so it can hold up to 4096 offsets:
+        // 8 bytes of header plus 2 bytes each. A smaller cap dropped the dense
+        // page and every block after it.
+        const MAX_BLOCK_SIZE: u32 = 8 + 2 * 4096;
+
         while offset < end_offset {
             let page_rva = self.read_u32(offset).unwrap_or(0);
             let block_size = self.read_u32(offset + 4).unwrap_or(0);
-            if block_size < 8 || block_size > 4096 {
+            if block_size < 8 || block_size > MAX_BLOCK_SIZE {
                 break;
             }
 
-            let num_entries = (block_size - 8) / 2;
+            // Never read entries from past the end of the directory.
+            let available = end_offset.saturating_sub(offset);
+            let entry_bytes = u64::from(block_size).min(available).saturating_sub(8);
+            let num_entries = entry_bytes / 2;
             let mut entry_offset = offset + 8;
-            for _ in 0..num_entries {
+            let mut index = 0;
+            while index < num_entries {
                 let entry = self.read_u16(entry_offset).unwrap_or(0);
                 entry_offset += 2;
+                index += 1;
 
                 let r_type = (entry >> 12) as u32;
                 let r_offset = (entry & 0x0FFF) as u32;
 
                 if r_type == 0 {
                     continue;
+                }
+                if r_type == 4 {
+                    // HIGHADJ carries a 16-bit parameter in the entry that
+                    // follows; it is not a relocation of its own.
+                    entry_offset += 2;
+                    index += 1;
                 }
 
                 let address = image_base + page_rva as u64 + r_offset as u64;
@@ -1735,6 +1795,157 @@ mod tests {
         assert_eq!(
             loader.exact_relative_jump_export_target(thunk_rva as u32, image_base),
             Some(image_base + target_rva)
+        );
+    }
+
+    /// An image with one section mapping RVA 0x1000.. to file offset 0x200..
+    /// and an export directory at RVA 0x1000 (size 0x100).
+    fn export_fixture(
+        ordinal_base: u32,
+        function_rvas: &[u32],
+        names: &[(&str, u16)],
+    ) -> (Vec<u8>, Vec<SectionInfo>) {
+        let image_base = 0x1_4000_0000u64;
+        let file = |rva: u32| 0x200 + (rva as usize - 0x1000);
+        let mut data = vec![0u8; 0x800];
+        let dir = file(0x1000);
+        data[dir + 16..dir + 20].copy_from_slice(&ordinal_base.to_le_bytes());
+        data[dir + 20..dir + 24].copy_from_slice(&(function_rvas.len() as u32).to_le_bytes());
+        data[dir + 24..dir + 28].copy_from_slice(&(names.len() as u32).to_le_bytes());
+        data[dir + 28..dir + 32].copy_from_slice(&0x1040u32.to_le_bytes());
+        data[dir + 32..dir + 36].copy_from_slice(&0x1060u32.to_le_bytes());
+        data[dir + 36..dir + 40].copy_from_slice(&0x1070u32.to_le_bytes());
+        for (i, rva) in function_rvas.iter().enumerate() {
+            let at = file(0x1040) + i * 4;
+            data[at..at + 4].copy_from_slice(&rva.to_le_bytes());
+        }
+        for (i, (name, index)) in names.iter().enumerate() {
+            let name_rva = 0x10c0u32 + (i as u32) * 0x10;
+            let at = file(0x1060) + i * 4;
+            data[at..at + 4].copy_from_slice(&name_rva.to_le_bytes());
+            let at = file(0x1070) + i * 2;
+            data[at..at + 2].copy_from_slice(&index.to_le_bytes());
+            let at = file(name_rva);
+            data[at..at + name.len()].copy_from_slice(name.as_bytes());
+        }
+        let sections = vec![SectionInfo {
+            name: ".edata".to_string(),
+            virtual_address: image_base + 0x1000,
+            virtual_size: 0x400,
+            file_offset: 0x200,
+            file_size: 0x400,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        }];
+        (data, sections)
+    }
+
+    fn exports_of(data: &[u8], sections: &[SectionInfo]) -> Vec<(String, u64)> {
+        let loader = PeLoaderImpl {
+            data,
+            sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+        loader
+            .parse_exports(0x1000, 0x100, 0x1_4000_0000)
+            .expect("parse exports")
+            .into_iter()
+            .map(|function| (function.name, function.address))
+            .collect()
+    }
+
+    #[test]
+    fn pe_exports_include_ordinal_only_entries_and_skip_forwarders() {
+        // Index 0: named code. Index 1: a forwarder (its RVA is a string inside
+        // the export directory). Index 2: ordinal-only code. Index 3: unused.
+        let (data, sections) = export_fixture(5, &[0x2000, 0x10a0, 0x2100, 0], &[("Named", 0)]);
+        assert_eq!(
+            exports_of(&data, &sections),
+            vec![
+                ("Named".to_string(), 0x1_4000_2000),
+                // ordinal base 5 + index 2
+                ("Ordinal_7".to_string(), 0x1_4000_2100),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dll_that_exports_everything_by_ordinal_has_exports() {
+        // No name table at all: every export used to be dropped.
+        let (data, sections) = export_fixture(1, &[0x2000, 0x2010, 0x2020], &[]);
+        assert_eq!(
+            exports_of(&data, &sections),
+            vec![
+                ("Ordinal_1".to_string(), 0x1_4000_2000),
+                ("Ordinal_2".to_string(), 0x1_4000_2010),
+                ("Ordinal_3".to_string(), 0x1_4000_2020),
+            ]
+        );
+    }
+
+    fn reloc_loader_data(blocks: &[(u32, Vec<u16>)]) -> (Vec<u8>, Vec<SectionInfo>, u32) {
+        let image_base = 0x1_4000_0000u64;
+        let mut data = vec![0u8; 0x200];
+        let dir_file = data.len();
+        for (page_rva, entries) in blocks {
+            let block_size = 8 + 2 * entries.len() as u32;
+            data.extend_from_slice(&page_rva.to_le_bytes());
+            data.extend_from_slice(&block_size.to_le_bytes());
+            for entry in entries {
+                data.extend_from_slice(&entry.to_le_bytes());
+            }
+        }
+        let dir_size = (data.len() - dir_file) as u32;
+        let sections = vec![SectionInfo {
+            name: ".reloc".to_string(),
+            virtual_address: image_base + 0x1000,
+            virtual_size: u64::from(dir_size).max(0x1000),
+            file_offset: dir_file as u64,
+            file_size: u64::from(dir_size),
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        }];
+        (data, sections, dir_size)
+    }
+
+    fn relocations_of(blocks: &[(u32, Vec<u16>)]) -> Vec<(u64, u32)> {
+        let (data, sections, dir_size) = reloc_loader_data(blocks);
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+        loader
+            .parse_relocations(0x1000, dir_size, 0x1_4000_0000)
+            .expect("parse relocations")
+            .into_iter()
+            .map(|reloc| (reloc.address, reloc.r_type))
+            .collect()
+    }
+
+    #[test]
+    fn a_dense_relocation_block_and_the_blocks_after_it_are_kept() {
+        // 2,500 entries: a 5,008-byte block, over the old 4,096-byte cap, which
+        // made the parser stop there and lose this page and the next.
+        let dense: Vec<u16> = (0..2500u16).map(|i| (3 << 12) | (i % 0x1000)).collect();
+        let found = relocations_of(&[(0x2000, dense), (0x3000, vec![(10 << 12) | 0x18])]);
+        assert_eq!(found.len(), 2501);
+        assert_eq!(found.last(), Some(&(0x1_4000_0000 + 0x3000 + 0x18, 10)));
+    }
+
+    #[test]
+    fn a_highadj_parameter_is_not_a_relocation() {
+        // HIGHADJ (4) at 0x10 takes the next entry (0x1234) as its parameter.
+        // Read as an entry of its own it would be a HIGH (1) relocation at
+        // offset 0x234.
+        let found = relocations_of(&[(0x2000, vec![(4 << 12) | 0x10, 0x1234, (3 << 12) | 0x20])]);
+        assert_eq!(
+            found,
+            vec![(0x1_4000_0000 + 0x2010, 4), (0x1_4000_0000 + 0x2020, 3),]
         );
     }
 
