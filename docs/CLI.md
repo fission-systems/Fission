@@ -327,10 +327,18 @@ details, and label those reports partial.
 Launch and attach can still fail when host security policy, permissions, or a
 container's syscall filter denies ptrace. Windows live debugging requires a
 build with `--features windows_native_debugger`, and access to an individual
-process can still be denied. The macOS process-listing helper exists, but
-native debugger process control is not implemented. Use `--emulator` for
-supported guest binaries; a reported emulator capability does not guarantee
-that every guest architecture or instruction is supported.
+process can still be denied. On macOS, native debugging
+launches the target under `PT_TRACE_ME` (stopping it at `exec`, as on Linux)
+and reads registers, memory and loaded images through the target's Mach task
+port. macOS grants that port only to an authorized caller, so launch and attach
+are reported as conditional on `mach_task_port_access`: run
+`sudo DevToolsSecurity -enable` once (your user must be in the `_developer`
+group) or run as root. Without it the request waits on an interactive prompt;
+Fission gives up after eight seconds and the error says what to do. The target
+must not be hardened or Apple-signed (a binary you built is fine), and only the
+host's own architecture is supported (an x86-64 process translated by Rosetta
+is not). Use `--emulator` for guest binaries; a reported emulator capability
+does not guarantee that every guest architecture or instruction is supported.
 
 Treat a supported operation as an implementation capability, not as proof
 that a target exists, is accessible, or will execute successfully. Inspect the

@@ -47,9 +47,7 @@ fn native_capability_query_is_structured_and_does_not_need_a_target() {
     );
     assert_eq!(
         operation(&report, "attach")["support"]["status"],
-        if cfg!(target_os = "macos") {
-            "unsupported"
-        } else if cfg!(target_os = "windows") && !cfg!(feature = "windows_native_debugger") {
+        if cfg!(target_os = "windows") && !cfg!(feature = "windows_native_debugger") {
             "unsupported"
         } else if cfg!(target_os = "linux") {
             "conditional"
@@ -60,6 +58,7 @@ fn native_capability_query_is_structured_and_does_not_need_a_target() {
     assert_eq!(
         operation(&report, "module_list")["support"]["status"],
         if cfg!(target_os = "linux")
+            || cfg!(target_os = "macos")
             || (cfg!(target_os = "windows") && cfg!(feature = "windows_native_debugger"))
         {
             "conditional"

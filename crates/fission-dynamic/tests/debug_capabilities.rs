@@ -78,27 +78,41 @@ fn linux_capabilities_separate_ptrace_permission_from_build_support() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn macos_reports_process_listing_without_claiming_native_debugging() {
+fn macos_declares_that_process_control_needs_the_mach_task_port() {
     let backend = fission_dynamic::debug::platform::macos::MacOSDebugger::new();
     let report = backend.capabilities();
 
     assert_eq!(report.backend, DebugBackendKind::MacOsNative);
-    assert_eq!(
-        report.availability,
-        BackendAvailability::Unavailable {
-            reason: CapabilityReason::NativeDebuggerNotImplemented,
-        }
-    );
+    assert_eq!(report.availability, BackendAvailability::Available);
     assert_eq!(
         support(&report, DebugOperation::ProcessEnumeration),
         &OperationSupport::Supported
     );
-    assert_eq!(
-        support(&report, DebugOperation::Attach),
-        &OperationSupport::Unsupported {
-            reason: CapabilityReason::NativeDebuggerNotImplemented,
+    // Launch and attach work only for a caller macOS has authorized to take a
+    // task port; the report says so instead of claiming unconditional support.
+    for operation in [DebugOperation::Launch, DebugOperation::Attach] {
+        match support(&report, operation) {
+            OperationSupport::Conditional { requirements } => assert!(
+                requirements.contains(&RuntimeRequirement::MachTaskPortAccess),
+                "{operation:?}: {requirements:?}"
+            ),
+            other => panic!("{operation:?} should be conditional, not {other:?}"),
         }
-    );
+    }
+    for operation in [
+        DebugOperation::SingleStep,
+        DebugOperation::ContinueExecution,
+        DebugOperation::SoftwareBreakpoints,
+        DebugOperation::RegisterRead,
+        DebugOperation::MemoryRead,
+        DebugOperation::MemoryWrite,
+    ] {
+        assert_eq!(
+            support(&report, operation),
+            &OperationSupport::Supported,
+            "{operation:?}"
+        );
+    }
 }
 
 #[cfg(all(target_os = "windows", not(feature = "windows_native_debugger")))]
