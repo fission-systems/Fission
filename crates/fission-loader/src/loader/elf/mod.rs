@@ -550,6 +550,7 @@ impl ElfLoader {
         let mut existing_imports = HashSet::new();
         let mut global_symbols = HashMap::new();
         let mut global_symbol_sizes = HashMap::new();
+        let mut low_bit_mode_starts: Vec<u64> = Vec::new();
         let mut relocation_symbols = HashMap::new();
         let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
@@ -647,6 +648,7 @@ impl ElfLoader {
                         &mut existing_imports,
                         &mut global_symbols,
                         &mut global_symbol_sizes,
+                        &mut low_bit_mode_starts,
                         endian,
                         header.machine == EM_ARM,
                     );
@@ -831,6 +833,7 @@ impl ElfLoader {
             .add_relocations(relocs)
             .add_symbol_versions(symbol_versions)
             .add_symbol_version_names(symbol_version_names)
+            .low_bit_mode_starts(low_bit_mode_starts)
             .build()
     }
 
@@ -1009,6 +1012,7 @@ impl ElfLoader {
         existing_imports: &mut HashSet<String>,
         out_globals: &mut HashMap<u64, String>,
         out_global_sizes: &mut HashMap<u64, u64>,
+        out_low_bit_mode_starts: &mut Vec<u64>,
         endian: Endian,
         is_arm: bool,
     ) {
@@ -1038,6 +1042,9 @@ impl ElfLoader {
             return;
         }
 
+        // `$t`/`$a` mapping symbols: where Thumb and ARM code begin.
+        let mut mapping_symbols: Vec<(u64, bool)> = Vec::new();
+        let functions_before = out_funcs.len();
         let reader = ByteReader::new(full_data, endian);
         for index in 0..count {
             let offset = sym_start + index * entry_size;
@@ -1052,6 +1059,18 @@ impl ElfLoader {
                 continue;
             }
             if is_elf_mapping_symbol(&name) {
+                if is_arm && sym.st_shndx != SHN_UNDEF && sym.st_shndx != SHN_ABS {
+                    let address = if is_relocatable {
+                        section_addresses
+                            .get(sym.st_shndx as usize)
+                            .copied()
+                            .unwrap_or(0)
+                            .saturating_add(sym.st_value as u64)
+                    } else {
+                        sym.st_value as u64
+                    };
+                    mapping_symbols.push((address, name.starts_with("$t")));
+                }
                 continue;
             }
 
@@ -1107,7 +1126,11 @@ impl ElfLoader {
             } else {
                 sym.st_value as u64
             };
+            let thumb_marked = is_arm && sym_type == STT_FUNC && address & 1 == 1;
             let address = elf32_symbol_entry_address(address, is_arm, sym_type);
+            if thumb_marked {
+                out_low_bit_mode_starts.push(address);
+            }
 
             if sym_type == STT_OBJECT {
                 out_globals.entry(address).or_insert(name);
@@ -1148,6 +1171,23 @@ impl ElfLoader {
                     thunk_target: None,
                 },
             );
+        }
+
+        // A function whose symbol carries no Thumb bit (a `NOTYPE` label, or a
+        // toolchain that omits it) still starts in Thumb when the nearest
+        // mapping symbol before it is `$t`.
+        mapping_symbols.sort_unstable_by_key(|(address, _)| *address);
+        for function in out_funcs[functions_before..]
+            .iter()
+            .filter(|function| !function.is_import)
+        {
+            let nearest = mapping_symbols
+                .partition_point(|(address, _)| *address <= function.address)
+                .checked_sub(1)
+                .map(|index| mapping_symbols[index].1);
+            if is_arm && nearest == Some(true) {
+                out_low_bit_mode_starts.push(function.address);
+            }
         }
     }
 }
@@ -4185,5 +4225,39 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn thumb_functions_of_a_mixed_arm_image_are_recorded_by_their_symbols() {
+        // arm_a, arm_b, arm_c are ARM; thumb_a, thumb_b, thumb_c are Thumb.
+        // The ABI marks a Thumb function by bit 0 of its symbol value, which
+        // the loader strips from the address, so the mode is kept separately.
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/arm_mixed_mode.elf");
+        let bin = LoadedBinary::from_file(&path).expect("load mixed ELF");
+        assert_eq!(
+            bin.inner().low_bit_mode_starts,
+            vec![0x2017c, 0x201c4, 0x201e8]
+        );
+        for thumb in [0x2017c, 0x201c4, 0x201e8] {
+            assert!(bin.runs_in_low_bit_mode(thumb), "{thumb:#x}");
+            assert!(
+                bin.runs_in_low_bit_mode(thumb | 1),
+                "{thumb:#x} with the bit"
+            );
+        }
+        for arm in [0x20134, 0x201a4, 0x20208, 0x2023c] {
+            assert!(!bin.runs_in_low_bit_mode(arm), "{arm:#x}");
+        }
+        // No symbols, no information: the stripped image says nothing.
+        let stripped =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/arm_mixed_mode_stripped.elf");
+        let bin = LoadedBinary::from_file(&stripped).expect("load stripped mixed ELF");
+        assert!(bin.inner().low_bit_mode_starts.is_empty());
+    }
+
+    #[test]
+    fn an_x86_64_elf_has_no_low_bit_mode_functions() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_enum_test.elf");
+        let bin = LoadedBinary::from_file(&path).expect("load ELF");
+        assert!(bin.inner().low_bit_mode_starts.is_empty());
     }
 }

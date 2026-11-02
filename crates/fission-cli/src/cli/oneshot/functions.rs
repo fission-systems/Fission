@@ -40,6 +40,14 @@ pub fn build_functions_response(
     }
 }
 
+/// What the alternate code mode is called on this architecture.
+fn low_bit_mode_name(binary: &LoadedBinary) -> &'static str {
+    match binary.architecture.as_ref().map(|a| a.processor.as_str()) {
+        Some("ARM") => "thumb",
+        _ => "alternate",
+    }
+}
+
 pub(super) fn print_function_list(
     binary: &LoadedBinary,
     json: bool,
@@ -55,7 +63,7 @@ pub(super) fn print_function_list(
         let funcs: Vec<serde_json::Value> = functions
             .iter()
             .map(|f| {
-                serde_json::json!({
+                let mut entry = serde_json::json!({
                     "address": format!("0x{:x}", f.address),
                     "name": f.name,
                     "size": f.size,
@@ -67,7 +75,13 @@ pub(super) fn print_function_list(
                     "external_library": f.external_library,
                     "is_thunk_like": f.is_thunk_like,
                     "thunk_target": f.thunk_target.map(|target| format!("0x{target:x}")),
-                })
+                });
+                // Only a function in the architecture's alternate code mode
+                // says so, so listings of everything else are unchanged.
+                if binary.runs_in_low_bit_mode(f.address) {
+                    entry["isa_mode"] = serde_json::json!(low_bit_mode_name(binary));
+                }
+                entry
             })
             .collect();
         writeln!(

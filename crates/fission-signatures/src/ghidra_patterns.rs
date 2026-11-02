@@ -72,6 +72,40 @@ pub struct GhidraFuncPattern {
     /// Ghidra's `<align mark= bits=>`: the pattern only applies where
     /// `(address + mark)` has its low `bits` bits clear.
     pub align: Option<AlignRule>,
+    /// Ghidra's `<setcontext name= value=>`: the context-register values the
+    /// matched address is to be decoded with (ARM `TMode=1` for Thumb).
+    pub context: Vec<ContextSetting>,
+}
+
+/// One `<setcontext>` assignment from a pattern file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextSetting {
+    pub name: String,
+    pub value: u64,
+}
+
+/// The `<setcontext>` element's assignment, if its attributes are well formed.
+fn context_setting(element: &quick_xml::events::BytesStart<'_>) -> Option<ContextSetting> {
+    let attr = |name: &[u8]| {
+        element
+            .attributes()
+            .filter_map(|a| a.ok())
+            .find(|a| a.key.as_ref() == name)
+            .and_then(|a| String::from_utf8(a.value.to_vec()).ok())
+    };
+    let value = attr(b"value")?;
+    let value = value.trim();
+    let value = match value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        Some(hex) => u64::from_str_radix(hex, 16).ok()?,
+        None => value.parse().ok()?,
+    };
+    Some(ContextSetting {
+        name: attr(b"name")?,
+        value,
+    })
 }
 
 /// An `<align>` constraint from a pattern file (Ghidra `AlignRule`).
@@ -304,6 +338,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
     let mut pp_contiguous = false;
     let mut pp_is_thunk = false;
     let mut pp_align: Option<AlignRule> = None;
+    let mut pp_context: Vec<ContextSetting> = Vec::new();
 
     // standalone <pattern> accumulator
     let mut sp_pre: Vec<PatternByte> = Vec::new();
@@ -315,6 +350,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
     let mut sp_contiguous = false;
     let mut sp_is_thunk = false;
     let mut sp_align: Option<AlignRule> = None;
+    let mut sp_context: Vec<ContextSetting> = Vec::new();
     let mut sp_has_funcstart = false;
     let mut sp_star_found = false; // whether we parsed pre*post inline
 
@@ -352,6 +388,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         pp_contiguous = false;
                         pp_is_thunk = false;
                         pp_align = None;
+                        pp_context.clear();
                     }
                     "prepatterns" if ctx == Ctx::PatternPairs => {
                         ctx = Ctx::PrePatterns;
@@ -370,6 +407,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         sp_contiguous = false;
                         sp_is_thunk = false;
                         sp_align = None;
+                        sp_context.clear();
                         sp_has_funcstart = false;
                         sp_star_found = false;
                     }
@@ -385,6 +423,11 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                     "align" => match ctx {
                         Ctx::PostPatterns => pp_align = align_rule(e),
                         Ctx::StandalonePattern => sp_align = align_rule(e),
+                        _ => {}
+                    },
+                    "setcontext" => match ctx {
+                        Ctx::PostPatterns => pp_context.extend(context_setting(e)),
+                        Ctx::StandalonePattern => sp_context.extend(context_setting(e)),
                         _ => {}
                     },
                     "funcstart" | "possiblefuncstart" => {
@@ -483,6 +526,11 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                     "align" => match ctx {
                         Ctx::PostPatterns => pp_align = align_rule(e),
                         Ctx::StandalonePattern => sp_align = align_rule(e),
+                        _ => {}
+                    },
+                    "setcontext" => match ctx {
+                        Ctx::PostPatterns => pp_context.extend(context_setting(e)),
+                        Ctx::StandalonePattern => sp_context.extend(context_setting(e)),
                         _ => {}
                     },
                     "funcstart" | "possiblefuncstart" => {
@@ -610,6 +658,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                         contiguous: pp_contiguous,
                                         is_thunk: pp_is_thunk,
                                         align: pp_align,
+                                        context: pp_context.clone(),
                                     });
                                 }
                             } else {
@@ -625,6 +674,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                             contiguous: pp_contiguous,
                                             is_thunk: pp_is_thunk,
                                             align: pp_align,
+                                            context: pp_context.clone(),
                                         });
                                     }
                                 }
@@ -640,6 +690,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         pp_contiguous = false;
                         pp_is_thunk = false;
                         pp_align = None;
+                        pp_context.clear();
                     }
                     "prepatterns" if ctx == Ctx::PrePatterns => {
                         ctx = Ctx::PatternPairs;
@@ -701,6 +752,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                                 contiguous: sp_contiguous,
                                 is_thunk: sp_is_thunk,
                                 align: sp_align.take(),
+                                context: std::mem::take(&mut sp_context),
                             });
                         }
                         ctx = Ctx::Root;
@@ -713,6 +765,7 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         sp_contiguous = false;
                         sp_is_thunk = false;
                         sp_align = None;
+                        sp_context.clear();
                         sp_has_funcstart = false;
                         sp_star_found = false;
                     }
@@ -1042,6 +1095,7 @@ mod tests {
             contiguous: false,
             is_thunk: false,
             align: None,
+            context: Vec::new(),
         };
         assert!(pat.matches(&[0x1a, 0x44], 0, 0));
         assert!(pat.matches(&[0x1f, 0x7c], 0, 0));
@@ -1180,6 +1234,64 @@ mod tests {
     }
 
     #[test]
+    fn a_setcontext_element_is_kept_with_its_pattern() {
+        let xml = r#"<patternlist>
+          <patternpairs totalbits="32" postbits="16">
+            <prepatterns><data>0x00</data></prepatterns>
+            <postpatterns>
+              <data>0x2de9</data>
+              <align mark="0" bits="1"/>
+              <setcontext name="TMode" value="1"/>
+              <funcstart/>
+            </postpatterns>
+          </patternpairs>
+          <pattern>
+            <data>0xb5</data>
+            <setcontext name="ISA_MODE" value="0x1"/>
+            <setcontext name="other" value="0"/>
+            <funcstart/>
+          </pattern>
+          <pattern>
+            <data>0xc3</data>
+            <funcstart/>
+          </pattern>
+        </patternlist>"#;
+        let pats = parse_ghidra_pattern_xml(xml).unwrap();
+        assert_eq!(pats.len(), 3);
+        assert_eq!(
+            pats[0].context,
+            vec![ContextSetting {
+                name: "TMode".into(),
+                value: 1
+            }]
+        );
+        assert_eq!(pats[1].context.len(), 2);
+        assert_eq!(
+            pats[1].context[0],
+            ContextSetting {
+                name: "ISA_MODE".into(),
+                value: 1
+            }
+        );
+        // Context belongs to the pattern it was written in, not the next one.
+        assert!(pats[2].context.is_empty());
+    }
+
+    #[test]
+    fn shipped_arm_patterns_carry_their_mode() {
+        let patterns = load_ghidra_patterns("ARM_LE", None);
+        let thumb = patterns
+            .iter()
+            .filter(|p| p.context.iter().any(|c| c.name == "TMode" && c.value == 1))
+            .count();
+        let arm = patterns
+            .iter()
+            .filter(|p| p.context.iter().any(|c| c.name == "TMode" && c.value == 0))
+            .count();
+        assert!(thumb > 0 && arm > 0, "thumb={thumb} arm={arm}");
+    }
+
+    #[test]
     fn test_pattern_matches() {
         let pat = GhidraFuncPattern {
             pre_bytes: vec![PatternByte::exact(0xcc)],
@@ -1195,6 +1307,7 @@ mod tests {
             contiguous: false,
             is_thunk: false,
             align: None,
+            context: Vec::new(),
         };
         let data = vec![0xcc, 0x48, 0x83, 0xec];
         assert!(pat.matches(&data, 0x1000, 0x1001));

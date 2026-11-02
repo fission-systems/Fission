@@ -114,8 +114,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // (crazyflie `cf2.elf`'s leaf `invSqrt` opens `sub sp,#0x18`, no `push`,
     // and read as `stc p0,cr11,[sp,#536]`). The heuristic still owns genuine
     // interworking images, where this returns `None`.
-    let initial_context_override =
-        decode_context_for_address(binary, lifter, address_state.context_override);
+    let initial_context_override = decode_context_for_address(
+        binary,
+        lifter,
+        entry_address,
+        address_state.context_override,
+    );
     let bytes = binary
         .view_bytes(decode_entry_address, max_bytes)
         .ok_or_else(|| DecodeFailure {

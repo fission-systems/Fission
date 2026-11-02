@@ -651,3 +651,88 @@ fn walk_function_boundaries_terminates_on_noreturn_call() {
         "must NOT fall through past noreturn call"
     );
 }
+
+fn arm_mixed_mode_fixture(name: &str) -> fission_loader::LoadedBinary {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fission-loader/testdata")
+        .join(name);
+    fission_loader::LoadedBinary::from_file(&path).expect("load mixed ARM/Thumb fixture")
+}
+
+#[test]
+fn a_thumb_pattern_hit_in_a_stripped_mixed_image_is_found_and_recorded_as_thumb() {
+    // arm_a/b/c are ARM and thumb_a/b/c are Thumb; no symbols survive. The ARM
+    // prologue patterns find the ARM functions. `thumb_c` opens `push {..., lr}`
+    // and matches a Thumb pattern, which sets TMode: validated as ARM it is
+    // rejected, validated as Thumb it is a function start.
+    let mut binary = arm_mixed_mode_fixture("arm_mixed_mode_stripped.elf");
+    assert!(binary.inner().low_bit_mode_starts.is_empty());
+    discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
+    let thumb_c = 0x201e8;
+    assert!(
+        binary.functions.iter().any(|f| f.address == thumb_c),
+        "thumb_c was not discovered"
+    );
+    assert!(binary.runs_in_low_bit_mode(thumb_c));
+    // The ARM functions found by the same scan stay ARM.
+    for arm in [0x20134, 0x201a4, 0x20208] {
+        assert!(!binary.runs_in_low_bit_mode(arm), "{arm:#x}");
+    }
+}
+
+#[test]
+fn a_symbol_marked_thumb_function_decodes_as_thumb_not_as_arm() {
+    // thumb_a at 0x2017c: the same bytes read as ARM are nonsense (this is what
+    // decompiled to calls into unmapped addresses before the mode was kept).
+    let binary = arm_mixed_mode_fixture("arm_mixed_mode.elf");
+    let frontend = fission_sleigh::runtime::RuntimeSleighFrontend::new_for_load_spec(
+        binary.load_spec().expect("load spec"),
+    )
+    .expect("ARM runtime");
+    let address = 0x2017c;
+    let bytes = binary.view_bytes(address, 16).expect("bytes");
+    let mnemonics = |decoded: Vec<fission_sleigh::runtime::DecodedInstruction>| {
+        decoded
+            .into_iter()
+            .map(|instruction| instruction.mnemonic)
+            .collect::<Vec<_>>()
+    };
+
+    let as_arm = mnemonics(
+        frontend
+            .decode_window_no_pcode(bytes, address, 3)
+            .expect("arm"),
+    );
+    let thumb_context = frontend.low_bit_code_mode_override();
+    let as_thumb = mnemonics(
+        frontend
+            .decode_window_no_pcode_in_context(bytes, address, 3, thumb_context)
+            .expect("thumb"),
+    );
+    assert_ne!(
+        as_arm, as_thumb,
+        "the two readings must differ for this to prove anything"
+    );
+
+    let context = crate::analysis::decode_context_for_address(&binary, &frontend, address, None);
+    let chosen = mnemonics(
+        frontend
+            .decode_window_no_pcode_in_context(bytes, address, 3, context)
+            .expect("chosen"),
+    );
+    assert_eq!(chosen, as_thumb);
+
+    // An ARM function of the same image still decodes as ARM.
+    let arm_address = 0x201a4;
+    let arm_bytes = binary.view_bytes(arm_address, 16).expect("bytes");
+    let context =
+        crate::analysis::decode_context_for_address(&binary, &frontend, arm_address, None);
+    assert!(context.is_none());
+    let arm_chosen = frontend
+        .decode_window_no_pcode_in_context(arm_bytes, arm_address, 3, context)
+        .expect("arm function");
+    let arm_plain = frontend
+        .decode_window_no_pcode(arm_bytes, arm_address, 3)
+        .expect("arm function plain");
+    assert_eq!(mnemonics(arm_chosen), mnemonics(arm_plain));
+}

@@ -28,12 +28,18 @@ use fission_sleigh::runtime::{PackedContextOverride, RuntimeSleighFrontend};
 pub fn decode_context_for_address(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
+    address: u64,
     from_address: Option<PackedContextOverride>,
 ) -> Option<PackedContextOverride> {
     // What the address itself says always wins: a mode switch encoded in the
     // stream is more specific than a whole-image guess.
     if from_address.is_some() {
         return from_address;
+    }
+    // A function the loader or discovery knows runs in the alternate mode
+    // (Thumb) decodes in it, in an image that also holds ARM code.
+    if binary.runs_in_low_bit_mode(address) {
+        return frontend.low_bit_code_mode_override();
     }
     if !image_executes_thumb(binary) {
         return None;
@@ -161,12 +167,12 @@ mod tests {
         // very addresses `list` had just printed.
         let thumb = arm32_image(0x4429);
         assert!(image_executes_thumb(&thumb));
-        assert!(decode_context_for_address(&thumb, &frontend, None).is_some());
+        assert!(decode_context_for_address(&thumb, &frontend, 0, None).is_some());
 
         // And an ARM-mode image is not forced into Thumb by the same call.
         let arm = arm32_image(0x4428);
         assert!(!image_executes_thumb(&arm));
-        assert!(decode_context_for_address(&arm, &frontend, None).is_none());
+        assert!(decode_context_for_address(&arm, &frontend, 0, None).is_none());
     }
 
     #[test]
@@ -180,8 +186,22 @@ mod tests {
         // whole-image signal calls ARM.
         let arm = arm32_image(0x4428);
         assert_eq!(
-            decode_context_for_address(&arm, &frontend, Some(from_address)),
+            decode_context_for_address(&arm, &frontend, 0, Some(from_address)),
             Some(from_address)
         );
+    }
+    #[test]
+    fn a_function_the_loader_knows_is_thumb_decodes_as_thumb_in_an_arm_image() {
+        let frontend = RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime");
+        // An ARM-mode image (even entry, no vector table) that also holds one
+        // Thumb function. The function's own entry decides, not the image.
+        let mut image = arm32_image(0x4428);
+        image.mark_low_bit_mode_start(0x4800);
+        assert!(decode_context_for_address(&image, &frontend, 0x4800, None).is_some());
+        // The mode bit on the address is not part of the lookup.
+        assert!(decode_context_for_address(&image, &frontend, 0x4801, None).is_some());
+        // Its neighbours are still ARM.
+        assert!(decode_context_for_address(&image, &frontend, 0x4804, None).is_none());
+        assert!(decode_context_for_address(&image, &frontend, 0x4428, None).is_none());
     }
 }

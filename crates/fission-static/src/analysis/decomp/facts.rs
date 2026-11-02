@@ -524,6 +524,7 @@ impl FactStore {
         let context_override = crate::analysis::decode_context_for_address(
             binary,
             frontend,
+            address,
             address_state.context_override,
         );
         if let Some(cached) =
@@ -749,6 +750,7 @@ impl FactStore {
                 let context_override = crate::analysis::decode_context_for_address(
                     binary,
                     &frontend,
+                    func.address,
                     address_state.context_override,
                 );
                 let max_bytes = function_max_bytes(binary, decode_address, 4096);
@@ -1893,6 +1895,7 @@ mod tests {
             symbol_versions: HashMap::new(),
             symbol_version_names: HashMap::new(),
             cfg_label_leaders: Vec::new(),
+            low_bit_mode_starts: Vec::new(),
             loader_symbols: Vec::new(),
             user_signatures: Default::default(),
             user_comments: Default::default(),

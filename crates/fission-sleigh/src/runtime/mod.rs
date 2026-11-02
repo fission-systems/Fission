@@ -27,7 +27,7 @@ use crate::compiler::{
     compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec,
 };
 pub use crate::packed_context::PackedContextOverride;
-pub use address_state::RuntimeAddressState;
+pub use address_state::{is_low_bit_code_context_field, RuntimeAddressState};
 pub use function::{
     build_cfg_blocks, build_cfg_blocks_from_ops, build_cfg_blocks_with_hints,
     build_instruction_cfg_snapshot,

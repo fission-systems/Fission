@@ -449,6 +449,15 @@ pub struct LoadedBinaryInner {
     pub symbol_version_names: std::collections::HashMap<String, String>,
     /// COFF/PE label addresses (for example MingW `.l_startw`) used as CFG block leaders.
     pub cfg_label_leaders: Vec<u64>,
+    /// Entry addresses of functions that run in the architecture's low-bit
+    /// alternate code mode -- Thumb on ARM -- sorted ascending, with the mode
+    /// bit already removed. Function addresses never carry the bit themselves
+    /// (symbols and the list output are bytewise addresses), so without this a
+    /// decoder cannot tell a Thumb function from an ARM one in an image that
+    /// holds both. Filled by loaders from symbol tables and by function
+    /// discovery from pattern context; read through
+    /// [`LoadedBinary::runs_in_low_bit_mode`].
+    pub low_bit_mode_starts: Vec<u64>,
 }
 
 /// Parsed binary information with O(1) clone via Arc.
@@ -631,6 +640,23 @@ impl LoadedBinary {
         Arc::strong_count(&self.inner) == 1
     }
 
+    /// Whether the function entered at `address` runs in the low-bit alternate
+    /// code mode (Thumb on ARM). `address` may carry the mode bit.
+    pub fn runs_in_low_bit_mode(&self, address: u64) -> bool {
+        self.low_bit_mode_starts
+            .binary_search(&(address & !1))
+            .is_ok()
+    }
+
+    /// Record `address` (mode bit ignored) as a low-bit-mode function entry.
+    pub fn mark_low_bit_mode_start(&mut self, address: u64) {
+        let address = address & !1;
+        let starts = &mut self.inner_mut().low_bit_mode_starts;
+        if let Err(position) = starts.binary_search(&address) {
+            starts.insert(position, address);
+        }
+    }
+
     /// COFF/PE label addresses within `[start, end)` suitable as CFG block leaders.
     pub fn cfg_block_entry_hints_in_range(&self, start: u64, end: u64) -> Vec<u64> {
         self.cfg_label_leaders
@@ -685,4 +711,5 @@ pub struct LoadedBinaryBuilder {
     symbol_version_names: std::collections::HashMap<String, String>,
     inferred_types: Vec<InferredTypeInfo>,
     cfg_label_leaders: Vec<u64>,
+    low_bit_mode_starts: Vec<u64>,
 }

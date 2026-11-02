@@ -3,6 +3,13 @@ use crate::packed_context::PackedContextOverride;
 
 const LOW_BIT_CODE_CONTEXT_FIELDS: [&str; 4] = ["TMode", "T", "ISA_MODE", "LowBitCodeMode"];
 
+/// Whether `name` is a context field that selects the low-bit alternate code
+/// mode (ARM's `TMode`, MIPS's `ISA_MODE`) -- for callers that read a context
+/// assignment from outside the language definition, such as a pattern file.
+pub fn is_low_bit_code_context_field(name: &str) -> bool {
+    LOW_BIT_CODE_CONTEXT_FIELDS.contains(&name)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeAddressState {
     pub address: u64,

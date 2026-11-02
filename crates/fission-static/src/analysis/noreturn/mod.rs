@@ -163,6 +163,7 @@ fn compute_no_return_functions(
         let context_override = crate::analysis::decode_context_for_address(
             binary,
             &frontend,
+            f.address,
             address_state.context_override,
         );
         let max_bytes = no_return_scan_max_bytes(binary, decode_address, 4096);
