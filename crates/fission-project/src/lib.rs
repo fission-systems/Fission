@@ -404,13 +404,22 @@ impl Project {
         let mut report = ProjectApplyReport::default();
 
         for (address, name) in &self.names {
+            // Naming a function is a decision that it exists. A start discovery
+            // inferred from a scan alone stops being only that, so it is kept
+            // when the decompiler reads the table without scan-only starts.
+            let vouch = |function: &mut fission_loader::loader::types::FunctionInfo| {
+                function.name = name.clone();
+                if function.is_scan_inferred() {
+                    function.origin = Some("project".to_string());
+                }
+            };
             if let Some(&index) = inner.function_addr_index.get(address) {
-                inner.functions[index].name = name.clone();
+                vouch(&mut inner.functions[index]);
                 report.names_applied += 1;
             } else if let Some(function) =
                 inner.functions.iter_mut().find(|f| f.address == *address)
             {
-                function.name = name.clone();
+                vouch(function);
                 report.names_applied += 1;
             } else {
                 // Address is not currently indexed as a function.
@@ -767,6 +776,49 @@ mod tests {
         assert_eq!(b.user_breakpoints, vec![0x401230]);
         assert_eq!(b.user_watchpoints.len(), 1);
         assert_eq!(b.user_watchpoints[0].address, 0x405000);
+    }
+
+    #[test]
+    fn naming_a_scan_inferred_function_keeps_it_in_the_decompiler_view() {
+        let mut b = binary("abc123");
+        b.functions
+            .push(fission_loader::loader::types::FunctionInfo {
+                name: "sub_409999".to_string(),
+                address: 0x409999,
+                origin: Some(
+                    fission_loader::loader::types::FunctionInfo::SCAN_INFERRED_ORIGIN.to_string(),
+                ),
+                ..Default::default()
+            });
+        b.functions
+            .push(fission_loader::loader::types::FunctionInfo {
+                name: "sub_40a000".to_string(),
+                address: 0x40a000,
+                origin: Some(
+                    fission_loader::loader::types::FunctionInfo::SCAN_INFERRED_ORIGIN.to_string(),
+                ),
+                ..Default::default()
+            });
+        b.rebuild_function_indices();
+
+        let mut project = Project::for_binary(&b);
+        project.set_name(0x409999, "chosen_helper");
+        project.apply(&mut b).expect("apply");
+
+        let view = b.without_scan_inferred_functions();
+        assert_eq!(
+            view.function_at(0x409999).map(|f| f.name.as_str()),
+            Some("chosen_helper"),
+            "a name someone chose is a decision that the function exists"
+        );
+        assert!(
+            view.function_at(0x40a000).is_none(),
+            "an unnamed scan-only start stays out of the decompiler's view"
+        );
+        assert!(
+            b.function_at(0x40a000).is_some(),
+            "the inventory itself still lists it"
+        );
     }
 
     #[test]

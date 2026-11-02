@@ -27,6 +27,21 @@ pub struct FunctionInfo {
     pub thunk_target: Option<u64>,
 }
 
+impl FunctionInfo {
+    /// `origin` of a function that discovery inferred from a reference or
+    /// signature scan alone: no direct call, symbol, unwind record or load
+    /// configuration names it.
+    pub const SCAN_INFERRED_ORIGIN: &'static str = "sleigh-scan-inferred";
+
+    /// Whether this start rests on a scan alone. Such a start belongs in the
+    /// function inventory, but it is not evidence that the function before it
+    /// ends there: a scan can hit the inside of a function.
+    #[must_use]
+    pub fn is_scan_inferred(&self) -> bool {
+        self.origin.as_deref() == Some(Self::SCAN_INFERRED_ORIGIN)
+    }
+}
+
 /// Information about a section in the binary
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 pub struct SectionInfo {

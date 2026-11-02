@@ -78,9 +78,7 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
         !corpus.is_empty()
     };
     if !has_features {
-        bail!(
-            "no functions could be lifted for similarity comparison (try --function-discovery-profile balanced)"
-        );
+        bail!("no functions could be lifted for similarity comparison");
     }
 
     let mut stdout = std::io::stdout().lock();
@@ -186,12 +184,7 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
         return Ok(());
     }
 
-    writeln!(
-        stdout,
-        "similar: functions_indexed={} function_discovery_profile_applied={}",
-        corpus.len(),
-        cli.function_discovery_profile.is_some()
-    )?;
+    writeln!(stdout, "similar: functions_indexed={}", corpus.len())?;
     for (key, matches) in &all_results {
         if matches.is_empty() {
             continue;

@@ -55,12 +55,11 @@ use strings::print_strings;
 use xrefs::run_xrefs;
 
 use crate::cli::args::{
-    FunctionDiscoveryProfileArg, LegacyInvocationKind, OneShotArgs, ParsedInvocation,
-    ParsedOneShotArgs, parse_oneshot_args,
+    LegacyInvocationKind, OneShotArgs, ParsedInvocation, ParsedOneShotArgs, parse_oneshot_args,
 };
 use anyhow::{Context, Result};
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
+use fission_static::analysis::discover_functions_with_runtime;
 use script::execute_script;
 use std::fs;
 use std::io;
@@ -224,14 +223,6 @@ fn warn_if_packed_or_protected(binary: &LoadedBinary) {
         "[!] WARNING: binary appears packed/protected ({}) -- decompiled output may be unreliable until unpacked. Run `fission_cli info --detections` for the full list.",
         names.join(", ")
     );
-}
-
-fn map_discovery_profile_arg(profile: FunctionDiscoveryProfileArg) -> FunctionDiscoveryProfile {
-    match profile {
-        FunctionDiscoveryProfileArg::Conservative => FunctionDiscoveryProfile::Conservative,
-        FunctionDiscoveryProfileArg::Balanced => FunctionDiscoveryProfile::Balanced,
-        FunctionDiscoveryProfileArg::Aggressive => FunctionDiscoveryProfile::Aggressive,
-    }
 }
 
 /// Entry point for one-shot CLI mode
@@ -785,20 +776,19 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         }
     }
 
-    if let Some(profile_arg) = cli.function_discovery_profile {
-        let profile = map_discovery_profile_arg(profile_arg);
-        let report = discover_functions_with_runtime(&mut binary, profile);
-        if cli.verbose {
-            eprintln!(
-                "[*] SLEIGH function discovery profile {:?}: +{} functions (decoded={}, calls={}, jumps={}, unsupported_runtime={})",
-                profile,
-                report.accepted_function_count,
-                report.decoded_instruction_count,
-                report.call_target_count,
-                report.jump_target_count,
-                report.unsupported_runtime
-            );
-        }
+    // The one function discovery. Every command that reads the function table
+    // reads the table this builds, so `list`, `decomp --all`, `callgraph`,
+    // `xrefs` and the rest cannot disagree about which functions exist.
+    let report = discover_functions_with_runtime(&mut binary);
+    if cli.verbose {
+        eprintln!(
+            "[*] SLEIGH function discovery: +{} functions (decoded={}, calls={}, jumps={}, unsupported_runtime={})",
+            report.accepted_function_count,
+            report.decoded_instruction_count,
+            report.call_target_count,
+            report.jump_target_count,
+            report.unsupported_runtime
+        );
     }
 
     if cli.verbose {

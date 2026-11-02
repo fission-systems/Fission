@@ -371,6 +371,9 @@ pub(crate) fn run_decompilation_rust_sleigh(
     let selected_functions = collect_target_functions(cli, binary);
     let selection_accounting = selected_functions.accounting;
     let functions = selected_functions.functions;
+    // Selection above reads the whole inventory; decompilation reads only the
+    // functions something other than a scan vouches for.
+    let binary = &binary.without_scan_inferred_functions();
     if functions.is_empty() && cli.address.is_some() {
         let addr = cli.address.unwrap_or_default();
         let synthetic = vec![FunctionInfo {

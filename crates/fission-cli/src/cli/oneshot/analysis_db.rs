@@ -23,10 +23,7 @@ pub fn run(args: DbArgs) -> Result<()> {
     // The same discovery every other command runs. Without it `db` sees only
     // the functions the container's symbol table names, and refuses to name
     // one that `list` had just printed -- which is how this was found.
-    let _ = fission_static::analysis::discover_functions_with_runtime(
-        &mut binary,
-        fission_static::analysis::FunctionDiscoveryProfile::Balanced,
-    );
+    let _ = fission_static::analysis::discover_functions_with_runtime(&mut binary);
     let path = Project::default_path(&args.binary);
 
     let read_only = matches!(

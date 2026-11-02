@@ -1,4 +1,4 @@
-use super::{FunctionDiscoveryProfileArg, OneShotArgs, parse_hex_address};
+use super::{OneShotArgs, parse_hex_address};
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -138,10 +138,6 @@ pub struct LegacyCliArgs {
     #[arg(long, value_name = "FORMAT")]
     pub format: Option<String>,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(long, value_enum, value_name = "PROFILE")]
-    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Emit preview candidate inventory JSON for quality-corpus curation
     #[arg(long, hide = true)]
     pub preview_candidate_inventory: bool,
@@ -252,7 +248,6 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         include_nonuser_functions: cli.include_nonuser_functions,
         timeout_ms: cli.timeout_ms,
         format: cli.format,
-        function_discovery_profile: cli.function_discovery_profile,
         preview_candidate_inventory: cli.preview_candidate_inventory,
         preview_candidate_limit: cli.preview_candidate_limit,
         preview_candidate_scan_batch: cli.preview_candidate_scan_batch,

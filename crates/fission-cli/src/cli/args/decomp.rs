@@ -1,4 +1,4 @@
-use super::{FunctionDiscoveryProfileArg, parse_hex_address};
+use super::parse_hex_address;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -68,15 +68,6 @@ pub struct DecompArgs {
     /// Decompilation timeout per function in milliseconds (0 = no timeout)
     #[arg(long, value_name = "MS")]
     pub timeout_ms: Option<u64>,
-
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(
-        long,
-        value_enum,
-        value_name = "PROFILE",
-        default_value = "conservative"
-    )]
-    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Output in JSON format
     #[arg(short, long)]

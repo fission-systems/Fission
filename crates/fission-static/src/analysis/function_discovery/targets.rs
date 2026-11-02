@@ -1,8 +1,6 @@
 use fission_loader::LoadedBinary;
 use fission_sleigh::runtime::{DecodedFlowKind, DecodedInstruction, DecodedReferenceKind};
 
-use super::types::FunctionDiscoveryProfile;
-
 pub(crate) fn normalize_target(binary: &LoadedBinary, target: u64) -> u64 {
     if binary.is_64bit {
         target
@@ -175,12 +173,11 @@ pub(crate) fn collect_instruction_targets(
 }
 
 pub(crate) fn discovery_candidate_targets(
-    _profile: FunctionDiscoveryProfile,
     mut call_targets: Vec<u64>,
     _jump_targets: &[u64],
 ) -> Vec<u64> {
     // Jump targets are no longer blindly merged into call targets.
-    // They will be validated dynamically in discover.rs under the Aggressive profile.
+    // Jump targets reach discovery only through the scanners in discover.rs, which validate them.
     call_targets.sort_unstable();
     call_targets.dedup();
     call_targets

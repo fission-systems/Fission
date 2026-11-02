@@ -144,7 +144,7 @@ alternate mode carries `"isa_mode": "thumb"` in the JSON. The field is absent fo
 function, so the output of every other binary is unchanged. Addresses never carry the mode bit;
 `disasm`, `raw-pcode`, `decomp` and the other decoding commands read the mode from the function
 itself. The loader takes it from ELF symbols (bit 0 of a function symbol, or a preceding `$t`
-mapping symbol); with `--function-discovery-profile balanced`, a stripped image also gets it from
+mapping symbol); a stripped image also gets it from
 the Ghidra function-start patterns that set the Thumb context and from code pointers in data that
 carry the Thumb bit. A Thumb function that has none of these is still decoded as ARM.
 
@@ -153,8 +153,8 @@ carry the Thumb bit. A Thumb function that has none of these is still decoded as
 Build or refresh an offline index, then query it from another binary:
 
 ```bash
-fission_cli similar build-v1.exe --update-index functions.json --function-discovery-profile balanced
-fission_cli similar build-v2.exe --update-index functions.json --function-discovery-profile balanced
+fission_cli similar build-v1.exe --update-index functions.json
+fission_cli similar build-v2.exe --update-index functions.json
 fission_cli similar query.exe --index functions.json --function 0x140001000 --top 15 --json
 ```
 
@@ -461,19 +461,21 @@ fission_cli decomp app.exe --addr 0x140001000 --timeout-ms 1500
 
 Use `0` to mean no timeout where supported by the current execution path.
 
-#### `--function-discovery-profile <PROFILE>`
+#### Function discovery
 
-Controls extra function discovery before execution:
+There is one function discovery, and it runs for every command, so `list`,
+`decomp --all`, `callgraph`, `xrefs`, `strings --context` and `db` see the same
+function table. It starts from the container's symbols, unwind records and debug
+data, adds validated direct call targets, then adds starts found by data
+references, Ghidra's prologue pattern database and shared-return recovery.
 
-- `conservative`
-- `balanced`
-- `aggressive`
+A start that only a reference or signature scan names is listed with origin
+`sleigh-scan-inferred`. It is part of the inventory, but it is not used as the end
+of the function before it: a scan can land inside a function, and a decode window
+cut there would truncate the function.
 
-Example:
-
-```bash
-fission_cli decomp app.exe --all --limit 20 --function-discovery-profile balanced
-```
+The `--function-discovery-profile` option (conservative, balanced, aggressive) was
+removed. Passing it is now an error.
 
 #### `--include-nonuser-functions`
 
@@ -668,11 +670,8 @@ fission_cli disasm sample.elf --addr 0x1002000 --function
 
 `strings --contains TEXT` filters by a case-sensitive literal substring. Add
 `--section NAME` (repeatable) and `--min-len N` to narrow the listing further.
-`--context` runs conservative function discovery by default and builds one
-canonical reference index for string uses and one-hop call relationships.
-`--function-discovery-profile` can select conservative, balanced or aggressive
-explicitly; use the same profile in subsequent `callgraph`, `list` or `xrefs`
-queries to keep discovered entries aligned.
+`--context` builds one canonical reference index for string uses and one-hop
+call relationships, over the same function table every other command uses.
 
 The explicit `--context --json` envelope contains:
 
@@ -889,7 +888,6 @@ fission_cli inventory function-facts app.exe \
 - `--compiler-id <ID>`
 - `--profile <PROFILE>`
 - `--timeout-ms <MS>`
-- `--function-discovery-profile <PROFILE>`
 
 Use these only when inventory emission needs to align with a specific analysis configuration.
 
@@ -929,7 +927,6 @@ fission_cli inventory preview-candidates app.exe \
 - `--compiler-id <ID>`
 - `--profile <PROFILE>`
 - `--timeout-ms <MS>`
-- `--function-discovery-profile <PROFILE>`
 - `--quiet-batch-errors`
 
 This command is for corpus curation and candidate analysis, not normal first-pass decompilation.

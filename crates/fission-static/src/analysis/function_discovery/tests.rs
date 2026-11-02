@@ -2,7 +2,7 @@ use fission_loader::loader::{DataBuffer, FunctionCandidateInfo, LoadedBinaryBuil
 use fission_sleigh::runtime::{DecodedInstruction, DecodedReference};
 use std::sync::{Mutex, OnceLock};
 
-use super::{FunctionDiscoveryProfile, discover_functions_with_runtime};
+use super::discover_functions_with_runtime;
 use crate::analysis::function_discovery::ranges::{executable_ranges, is_in_executable_ranges};
 use crate::analysis::function_discovery::targets::{
     collect_instruction_targets, discovery_candidate_targets,
@@ -160,16 +160,13 @@ fn collect_instruction_targets_treats_rip_relative_as_jump_for_jmp_mnemonic() {
 }
 
 #[test]
-fn discovery_candidate_targets_balanced_excludes_jump_only() {
+fn discovery_candidate_targets_exclude_jump_only() {
     let calls = vec![0x401000_u64];
     let jumps = vec![0x402200_u64];
-    let balanced = discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
-    assert_eq!(balanced, vec![0x401000]);
-    let aggressive =
-        discovery_candidate_targets(FunctionDiscoveryProfile::Aggressive, balanced, &jumps);
-    assert!(aggressive.contains(&0x401000));
+    let candidates = discovery_candidate_targets(calls, &jumps);
+    assert_eq!(candidates, vec![0x401000]);
     assert!(
-        !aggressive.contains(&0x402200),
+        !candidates.contains(&0x402200),
         "Jump targets are no longer blindly accepted"
     );
 }
@@ -189,7 +186,7 @@ fn discover_accepts_call_target_inside_executable_when_not_known() {
         &mut Vec::new(),
     );
 
-    let candidates = discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
+    let candidates = discovery_candidate_targets(calls, &jumps);
     let executable_ranges = executable_ranges(&binary);
     let accepted: Vec<_> = candidates
         .into_iter()
@@ -203,7 +200,7 @@ fn discover_accepts_call_target_inside_executable_when_not_known() {
 }
 
 #[test]
-fn discover_balanced_skips_jump_only_even_when_executable() {
+fn discover_skips_jump_only_even_when_executable() {
     let binary = pe64_executable_shell();
     let mut calls = Vec::new();
     let mut jumps = Vec::new();
@@ -214,13 +211,13 @@ fn discover_balanced_skips_jump_only_even_when_executable() {
         &mut jumps,
         &mut Vec::new(),
     );
-    let candidates = discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
+    let candidates = discovery_candidate_targets(calls, &jumps);
     assert!(candidates.is_empty());
     assert!(binary.functions.is_empty());
 }
 
 #[test]
-fn discover_aggressive_excludes_jump_target_inside_executable() {
+fn discover_excludes_jump_target_inside_executable() {
     let binary = pe64_executable_shell();
     let mut calls = Vec::new();
     let mut jumps = Vec::new();
@@ -231,8 +228,7 @@ fn discover_aggressive_excludes_jump_target_inside_executable() {
         &mut jumps,
         &mut Vec::new(),
     );
-    let candidates =
-        discovery_candidate_targets(FunctionDiscoveryProfile::Aggressive, calls, &jumps);
+    let candidates = discovery_candidate_targets(calls, &jumps);
     let executable_ranges = executable_ranges(&binary);
     let accepted: Vec<_> = candidates
         .into_iter()
@@ -264,7 +260,7 @@ fn function_discovery_fails_closed_for_unsupported_runtime() {
     .build()
     .expect("builder");
 
-    let report = discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Aggressive);
+    let report = discover_functions_with_runtime(&mut binary);
 
     assert!(report.unsupported_runtime);
     assert_eq!(report.accepted_function_count, 0);
@@ -276,8 +272,7 @@ fn function_discovery_promotes_only_sleigh_validated_symbol_seeds() {
     let _guard = sleigh_runtime_discovery_lock();
     let mut binary = pe64_symbol_seed_shell();
 
-    let report =
-        discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
+    let report = discover_functions_with_runtime(&mut binary);
 
     assert!(!report.unsupported_runtime);
     assert!(binary.function_addr_index.contains_key(&0x401100));
@@ -297,20 +292,12 @@ fn function_discovery_promotes_only_sleigh_validated_symbol_seeds() {
     assert_eq!(thunk.external_library.as_deref(), Some("example.dll"));
 }
 
-/// Ghidra `AggressiveInstructionFinderAnalyzer` scorecard item. Lays out 20
-/// "known" (symbol-seeded) functions sharing an identical two-instruction
-/// prologue (`push r15; push r14`, a deliberately uncommon register choice
-/// so this doesn't also happen to collide with a real signature in
-/// `fission-signatures`' Ghidra XML pattern DB, which `scan_ghidra_patterns`
-/// already checks under every non-Conservative profile), each terminated by
-/// `ret`, separated from each other by 4-byte `0xcc` padding runs -- plus
-/// one more, identically-shaped function placed the same way but *not*
-/// seeded, simulating a function hidden in a stripped binary's padding gap.
-/// `scan_dynamic_prologues` should recognize the hidden function's prologue
-/// as recurring >= 4 times among the 20 known functions and recover it --
-/// but only under `Aggressive`, mirroring Ghidra's own AIF being strictly
-/// riskier than the reference/signature-driven scanners that also run under
-/// `Balanced`.
+/// Twenty "known" (symbol-seeded) functions share an identical two-instruction
+/// prologue (`push r15; push r14`), separated by `0xcc` padding, plus one more
+/// identically shaped function in the same padding pattern that nothing
+/// references. A scanner that trusted the binary's own recurring prologue shape
+/// would recover it; discovery deliberately does not (see
+/// `recurring_prologue_in_padding_gap_is_not_guessed`).
 fn pe64_aif_gap_shell() -> (fission_loader::LoadedBinary, u64) {
     const FUNC_BYTES: [u8; 5] = [0x41, 0x57, 0x41, 0x56, 0xc3]; // push r15; push r14; ret
     const STRIDE: u64 = 9; // 5-byte body + 4-byte 0xcc pad
@@ -356,43 +343,17 @@ fn pe64_aif_gap_shell() -> (fission_loader::LoadedBinary, u64) {
 }
 
 #[test]
-fn aggressive_instruction_finder_recovers_recurring_gap_prologue() {
+fn recurring_prologue_in_padding_gap_is_not_guessed() {
     let _guard = sleigh_runtime_discovery_lock();
     let (mut binary, hidden_address) = pe64_aif_gap_shell();
 
-    let report = discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Aggressive);
+    discover_functions_with_runtime(&mut binary);
 
-    assert!(!report.unsupported_runtime);
     assert!(
-        binary.function_addr_index.contains_key(&hidden_address),
-        "AIF should have recovered the padding-hidden function sharing the \
-         20 known functions' recurring prologue shape"
-    );
-}
-
-#[test]
-fn aggressive_instruction_finder_does_not_run_under_balanced_or_conservative() {
-    let _guard = sleigh_runtime_discovery_lock();
-
-    let (mut conservative_binary, hidden_address) = pe64_aif_gap_shell();
-    discover_functions_with_runtime(
-        &mut conservative_binary,
-        FunctionDiscoveryProfile::Conservative,
-    );
-    assert!(
-        !conservative_binary
-            .function_addr_index
-            .contains_key(&hidden_address),
-        "Conservative must not run the gap scanner at all"
-    );
-
-    let (mut balanced_binary, hidden_address) = pe64_aif_gap_shell();
-    discover_functions_with_runtime(&mut balanced_binary, FunctionDiscoveryProfile::Balanced);
-    assert!(
-        !balanced_binary
-            .function_addr_index
-            .contains_key(&hidden_address),
-        "Balanced must not run the riskier AIF-style scanner -- only Aggressive should"
+        !binary.function_addr_index.contains_key(&hidden_address),
+        "a function nothing references is not promoted on prologue shape alone: \
+         on 224 stripped benchmark binaries the self-calibrating prologue scanner \
+         added 6 addresses and none was a benchmark target"
     );
 }
 
@@ -667,7 +628,7 @@ fn a_thumb_pattern_hit_in_a_stripped_mixed_image_is_found_and_recorded_as_thumb(
     // rejected, validated as Thumb it is a function start.
     let mut binary = arm_mixed_mode_fixture("arm_mixed_mode_stripped.elf");
     assert!(binary.inner().low_bit_mode_starts.is_empty());
-    discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
+    discover_functions_with_runtime(&mut binary);
     let thumb_c = 0x201f4;
     assert!(
         binary.functions.iter().any(|f| f.address == thumb_c),

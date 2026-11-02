@@ -14,7 +14,7 @@ mod types;
 
 pub use discover::discover_functions_with_runtime;
 pub use thumb::{decode_context_for_address, image_executes_thumb};
-pub use types::{FunctionDiscoveryProfile, FunctionDiscoveryReport};
+pub use types::FunctionDiscoveryReport;
 
 #[cfg(test)]
 mod tests;

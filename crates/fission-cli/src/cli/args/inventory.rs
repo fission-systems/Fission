@@ -1,4 +1,4 @@
-use super::{FunctionDiscoveryProfileArg, parse_hex_address};
+use super::parse_hex_address;
 use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
@@ -95,10 +95,6 @@ pub struct InventoryFunctionFactsArgs {
     #[arg(long, value_name = "MS")]
     pub timeout_ms: Option<u64>,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(long, value_enum, value_name = "PROFILE")]
-    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Verbose output
     #[arg(short, long)]
     pub verbose: bool,
@@ -173,10 +169,6 @@ pub struct InventoryPreviewCandidatesArgs {
     /// Decompilation timeout per function in milliseconds
     #[arg(long, value_name = "MS")]
     pub timeout_ms: Option<u64>,
-
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(long, value_enum, value_name = "PROFILE")]
-    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Verbose output
     #[arg(short, long)]
