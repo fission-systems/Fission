@@ -40,6 +40,15 @@ impl LoadedBinary {
         self.view_section_bytes(section, address, size)
     }
 
+    /// [`view_bytes`](Self::view_bytes), but only when the section holds all
+    /// `size` bytes at `address`. A fixed-width field read -- an opcode and its
+    /// operand, say -- must not index into a window that the end of the section
+    /// cut short.
+    pub fn view_bytes_exact(&self, address: u64, size: usize) -> Option<&[u8]> {
+        self.view_bytes(address, size)
+            .filter(|bytes| bytes.len() == size)
+    }
+
     /// Get bytes for instruction decoding, preferring executable sections when
     /// relocatable objects map multiple sections to the same virtual address.
     pub fn view_executable_bytes(&self, address: u64, size: usize) -> Option<&[u8]> {

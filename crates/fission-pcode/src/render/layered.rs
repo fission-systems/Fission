@@ -1675,7 +1675,9 @@ fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>
         let next_offset = field_iter.peek().map(|(offset, _)| **offset);
         let inferred_size = next_offset.unwrap_or(size).saturating_sub(*offset).max(1);
         let fsize = nir_type_byte_size(ty).unwrap_or(inferred_size);
-        cursor = cursor.max(*offset + fsize);
+        // An offset recovered below the aggregate's base is a wrapped `u32`;
+        // adding a size to it must not trap.
+        cursor = cursor.max(offset.wrapping_add(fsize));
     }
     if cursor < size {
         members.push_str(&format!(
@@ -2586,6 +2588,35 @@ mod global_decl_tests {
             "{rendered}"
         );
         assert!(rendered.contains("fission_agg16 * param_1"), "{rendered}");
+    }
+
+    /// A field recovered below the aggregate's base carries a wrapped `u32`
+    /// offset. Sizing it must not overflow, whatever the typedef then holds.
+    #[test]
+    fn aggregate_typedef_with_a_wrapped_field_offset_does_not_overflow() {
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            0u32,
+            (
+                "a".to_string(),
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            ),
+        );
+        fields.insert(
+            0xffff_fff8u32,
+            (
+                "below_base".to_string(),
+                NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+            ),
+        );
+        let typedef = render_aggregate_typedef(16, &fields);
+        assert!(typedef.contains("below_base"));
     }
 
     #[test]

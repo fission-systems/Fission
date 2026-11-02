@@ -731,3 +731,45 @@ fn a_code_pointer_with_the_mode_bit_set_is_a_thumb_function_start() {
         "no returned address keeps the mode bit: {found:?}"
     );
 }
+
+/// A boundary probe looks at the two bytes ending at the last non-padding byte
+/// before a candidate. When that byte opens a section, the byte before it is the
+/// last one of the previous section, so the window comes back one byte long.
+/// The probe must read it as "no indirect jump here", not index past it.
+#[test]
+fn strict_boundary_probe_survives_a_window_cut_by_the_section_start() {
+    use super::discover::is_strict_boundary;
+
+    let mut bytes = vec![0xcc_u8; 0x20];
+    bytes[0x0f] = 0xff; // last byte of the first section: an `FF` opcode with no ModRM in reach
+    bytes[0x10] = 0x55; // first byte of the second section, `push rbp`
+    let section = |name: &str, va: u64, file_offset: u64| SectionInfo {
+        name: name.to_string(),
+        virtual_address: va,
+        virtual_size: 0x10,
+        file_offset,
+        file_size: 0x10,
+        is_executable: true,
+        is_readable: true,
+        is_writable: false,
+    };
+    let binary = LoadedBinaryBuilder::new("split-text.bin".to_string(), DataBuffer::Heap(bytes))
+        .format("ELF")
+        .image_base(0x400000)
+        .entry_point(0x401000)
+        .arch_spec("x86:LE:64:default")
+        .architecture(fission_core::architecture::ArchitectureDescriptor {
+            processor: "x86".into(),
+            endian: "little".into(),
+            bitness: 64,
+            variant: "default".into(),
+            abi: None,
+            raw_machine: "x86_64".into(),
+        })
+        .add_section(section(".text", 0x401000, 0))
+        .add_section(section(".text.cold", 0x401010, 0x10))
+        .build()
+        .expect("synthetic binary");
+
+    assert!(!is_strict_boundary(&binary, None, 0x401011));
+}

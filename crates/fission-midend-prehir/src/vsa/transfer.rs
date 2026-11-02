@@ -144,6 +144,11 @@ fn eval_binary(op: PreHirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) ->
                 if bv >= bits as u64 {
                     return CircleRange::singleton(0, bits);
                 }
+                // A singleton is a `u64`; a domain wider than that can shift a
+                // value out of it by an amount the domain still holds.
+                if bv >= 64 {
+                    return CircleRange::top(bits);
+                }
                 if let Some(av) = a.singleton_value() {
                     let mask = if bits >= 64 {
                         u64::MAX
@@ -321,5 +326,29 @@ mod review_precision_regressions {
             Some(0),
             "signed (1 + 0) < 0 is false"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A shift amount below the domain width but past the width of the `u64`
+    /// that carries a singleton is not representable; it must widen to top
+    /// instead of shifting a `u64` by 64 or more.
+    #[test]
+    fn shl_by_more_than_a_word_in_a_wide_domain_is_top() {
+        let a = CircleRange::singleton(1, 128);
+        let b = CircleRange::singleton(70, 128);
+        let out = eval_binary(PreHirBinaryOp::Shl, a, b, 128);
+        assert_eq!(out, CircleRange::top(128));
+    }
+
+    #[test]
+    fn shl_within_a_word_still_folds() {
+        let a = CircleRange::singleton(1, 64);
+        let b = CircleRange::singleton(8, 64);
+        let out = eval_binary(PreHirBinaryOp::Shl, a, b, 64);
+        assert_eq!(out.singleton_value(), Some(0x100));
     }
 }

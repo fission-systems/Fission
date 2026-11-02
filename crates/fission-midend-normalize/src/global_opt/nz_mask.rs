@@ -54,7 +54,8 @@ pub fn eval_expr_nz_mask(
                 {
                     if *outer_bits > inner_bits {
                         // Sign extension check
-                        let sign_bit = 1u64 << (inner_bits - 1);
+                        // A width outside 1..=64 has no sign bit in a `u64` mask.
+                        let sign_bit = 1u64.checked_shl(inner_bits.wrapping_sub(1)).unwrap_or(0);
                         if (inner_mask & sign_bit) != 0 {
                             return inner_mask | (outer_mask & !type_mask(&inner_ty));
                         }
@@ -112,7 +113,8 @@ pub fn eval_expr_nz_mask(
                             out_mask
                         } else {
                             let shifted = left_mask >> sa;
-                            let sign_bit = 1u64 << (type_bits(ty) - 1);
+                            let sign_bit =
+                                1u64.checked_shl(type_bits(ty).wrapping_sub(1)).unwrap_or(0);
                             if (left_mask & sign_bit) != 0 {
                                 (shifted | (out_mask & !(out_mask >> sa))) & out_mask
                             } else {
@@ -445,4 +447,48 @@ pub fn apply_nz_mask_simplification_pass(func: &mut PreHirFunction) -> bool {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }
     simplify_stmts(&mut func.body, &nz_masks, &type_map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(bits: u32, signed: bool) -> NirType {
+        NirType::Int { bits, signed }
+    }
+
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.into())
+    }
+
+    /// A width past 64 bits has no sign bit in a `u64` mask. Asking for one
+    /// shifted by 127, which traps in a build with overflow checks.
+    #[test]
+    fn arithmetic_shift_of_a_wide_type_has_no_sign_bit_to_replicate() {
+        let wide = int(128, true);
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(var("x")),
+            rhs: Box::new(PreHirExpr::Const(4, wide.clone())),
+            ty: wide,
+        };
+        let masks: HashMap<String, u64> = [("x".to_string(), u64::MAX)].into_iter().collect();
+        let types: HashMap<String, NirType> = HashMap::default();
+        assert_eq!(eval_expr_nz_mask(&expr, &masks, &types), u64::MAX >> 4);
+    }
+
+    /// Zero-width and over-wide inner types in a widening cast likewise.
+    #[test]
+    fn widening_cast_from_an_unrepresentable_width_does_not_overflow() {
+        for inner_bits in [0u32, 96] {
+            let inner = int(inner_bits, true);
+            let expr = PreHirExpr::Cast {
+                ty: int(128, true),
+                expr: Box::new(var("x")),
+            };
+            let masks: HashMap<String, u64> = [("x".to_string(), u64::MAX)].into_iter().collect();
+            let types: HashMap<String, NirType> = [("x".to_string(), inner)].into_iter().collect();
+            let _ = eval_expr_nz_mask(&expr, &masks, &types);
+        }
+    }
 }

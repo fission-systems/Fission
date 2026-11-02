@@ -1451,7 +1451,10 @@ fn ssa_piece_view(expr: PreHirExpr, size: u32) -> PreHirExpr {
             op: PreHirBinaryOp::And,
             lhs: Box::new(narrowed),
             rhs: Box::new(PreHirExpr::Const(
-                ((1u64 << (size * 8)) - 1) as i64,
+                // A piece of eight bytes or more has no narrower mask to apply.
+                1u64.checked_shl(size.saturating_mul(8))
+                    .unwrap_or(0)
+                    .wrapping_sub(1) as i64,
                 ty.clone(),
             )),
             ty,
@@ -1599,6 +1602,17 @@ mod tests {
             }],
         );
         assert!(operand_live_values(&ssa).is_empty());
+    }
+
+    /// A twelve-byte piece is not a power of two, so it is masked down from the
+    /// sixteen-byte view; the mask for more than eight bytes is all ones.
+    #[test]
+    fn odd_wide_piece_view_does_not_shift_past_the_mask_word() {
+        let view = ssa_piece_view(PreHirExpr::Var("x".into()), 12);
+        let PreHirExpr::Binary { rhs, .. } = view else {
+            panic!("a twelve-byte piece needs a mask");
+        };
+        assert!(matches!(*rhs, PreHirExpr::Const(-1, _)));
     }
 
     #[test]

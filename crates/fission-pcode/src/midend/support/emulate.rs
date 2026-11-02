@@ -74,8 +74,8 @@ pub(crate) fn collect_switch_dependencies(
 
 /// Helper to perform sign extension to i64 for signed arithmetic operations.
 fn sign_extend(val: u64, size_in_bytes: u32) -> i64 {
-    let bits = size_in_bytes * 8;
-    if bits >= 64 {
+    let bits = size_in_bytes.saturating_mul(8);
+    if bits == 0 || bits >= 64 {
         val as i64
     } else {
         let shift = 64 - bits;
@@ -85,7 +85,7 @@ fn sign_extend(val: u64, size_in_bytes: u32) -> i64 {
 
 /// Helper to mask values to their varnode bit size to avoid overflow garbage.
 fn mask_to_size(val: u64, size_in_bytes: u32) -> u64 {
-    let bits = size_in_bytes * 8;
+    let bits = size_in_bytes.saturating_mul(8);
     if bits >= 64 {
         val
     } else {
@@ -138,7 +138,9 @@ pub(crate) fn emulate_path(
                             let mut val = 0u64;
                             if !is_big_endian {
                                 // Little Endian
-                                for (i, &b) in bytes.iter().enumerate() {
+                                // Only the low eight bytes fit a `u64`; a wider load keeps
+                                // its low half rather than shifting past the word.
+                                for (i, &b) in bytes.iter().take(8).enumerate() {
                                     val |= (b as u64) << (i * 8);
                                 }
                             } else {
@@ -252,14 +254,16 @@ pub(crate) fn emulate_path(
             }
             PcodeOpcode::SubPiece => {
                 if inputs.len() >= 2 {
-                    let offset = inputs[1] as u32;
-                    computed = inputs[0] >> (offset * 8);
+                    let bits = (inputs[1] as u32).saturating_mul(8);
+                    computed = inputs[0].checked_shr(bits).unwrap_or(0);
                 }
             }
             PcodeOpcode::Piece => {
                 if inputs.len() >= 2 {
-                    let shift = op.inputs[1].size * 8;
-                    computed = (inputs[0] << shift) | inputs[1];
+                    // A low half of eight bytes or more leaves no room in a `u64`
+                    // for the high half; the result keeps only the low half.
+                    let shift = op.inputs[1].size.saturating_mul(8);
+                    computed = inputs[0].checked_shl(shift).unwrap_or(0) | inputs[1];
                 }
             }
             PcodeOpcode::IntCarry => {
@@ -383,5 +387,59 @@ mod tests {
 
         let res = emulate_path(&[op_sext], &leaf_values, None, false);
         assert_eq!(res, Some(0xFFFFFF80));
+    }
+    fn vn(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 1,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn op(opcode: PcodeOpcode, output: Varnode, inputs: Vec<Varnode>) -> PcodeOp {
+        PcodeOp {
+            seq_num: 0,
+            opcode,
+            address: 0x1000,
+            output: Some(output),
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    /// A shift by the whole word (8-byte low half, or a byte offset of 8) is
+    /// not a shift in a `u64`; it must not trap in a build with overflow checks.
+    #[test]
+    fn full_width_piece_and_subpiece_do_not_overflow() {
+        let hi = vn(0x10, 8);
+        let lo = vn(0x20, 8);
+        let wide = vn(0x30, 16);
+        let mut leaves = HashMap::default();
+        leaves.insert(VarnodeKey::from(&hi), 0xAAAA);
+        leaves.insert(VarnodeKey::from(&lo), 0x55);
+
+        let piece = op(
+            PcodeOpcode::Piece,
+            wide.clone(),
+            vec![hi.clone(), lo.clone()],
+        );
+        assert_eq!(emulate_path(&[piece], &leaves, None, false), Some(0x55));
+
+        let mut offset = vn(0, 4);
+        offset.is_constant = true;
+        offset.constant_val = 8;
+        let narrow = vn(0x40, 8);
+        let sub = op(PcodeOpcode::SubPiece, narrow, vec![hi, offset]);
+        assert_eq!(emulate_path(&[sub], &leaves, None, false), Some(0));
+    }
+
+    /// A zero-sized varnode has no sign bit; extending it must not shift by 64.
+    #[test]
+    fn zero_sized_varnode_helpers_do_not_overflow() {
+        assert_eq!(sign_extend(0x80, 0), 0x80);
+        assert_eq!(mask_to_size(0x80, 0), 0);
+        assert_eq!(sign_extend(0x80, u32::MAX), 0x80);
     }
 }
