@@ -13,4 +13,9 @@ __attribute__((noinline, target("thumb"))) int thumb_b(int x) { if (x > 5) { sin
 __attribute__((noinline, target("thumb"))) int thumb_c(int x, int y) { return thumb_a(x, y) + thumb_b(y) + sink; }
 __attribute__((noinline, target("arm"))) int arm_c(int x, int y) { return arm_a(x, y) + arm_b(y) + thumb_c(x, y); }
 
-__attribute__((target("arm"))) void _start(void) { sink = arm_c(4, 5) + thumb_c(2, 3); for (;;) {} }
+__attribute__((noinline, target("thumb"))) int thumb_d(int x) { return thumb_a(x, 1) + arm_b(x) + sink; }
+
+/* A table of code pointers: the linker sets bit 0 of a Thumb function's entry. */
+const void *const fn_table[] = { (const void *)thumb_d };
+
+__attribute__((target("arm"))) void _start(void) { sink = arm_c(4, 5) + thumb_c(2, 3) + ((int (*)(int))fn_table[0])(1); for (;;) {} }

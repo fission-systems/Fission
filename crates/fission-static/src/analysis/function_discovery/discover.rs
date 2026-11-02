@@ -336,7 +336,7 @@ pub fn discover_functions_with_runtime(
             // Disabled valid_jumps: it causes 1700+ FPs by blindly accepting jump targets
         }
 
-        let mut data_refs = scan_data_references(
+        let data_starts = scan_data_references(
             binary,
             &frontend,
             &executable_ranges,
@@ -344,8 +344,17 @@ pub fn discover_functions_with_runtime(
             &mut validation_cache,
             Some(&all_references),
         );
-        all_references.extend(data_refs.iter().copied());
-        data_refs.retain(|&addr| !tracker.is_overlap(addr));
+        all_references.extend(data_starts.iter().map(|start| start.address));
+        let mut data_refs: Vec<u64> = Vec::with_capacity(data_starts.len());
+        for start in data_starts {
+            if tracker.is_overlap(start.address) {
+                continue;
+            }
+            if start.low_bit_mode {
+                binary.mark_low_bit_mode_start(start.address);
+            }
+            data_refs.push(start.address);
+        }
         if discovery_diag_enabled() {
             eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
         }
@@ -678,7 +687,8 @@ fn terminal_import_thunk_target(
     let Some(bytes) = binary.view_bytes(address, 15) else {
         return None;
     };
-    let Ok(decoded) = frontend.decode_window_no_pcode(bytes, address, 1) else {
+    let context = candidate_decode_context(binary, frontend, address);
+    let Ok(decoded) = frontend.decode_window_no_pcode_in_context(bytes, address, 1, context) else {
         return None;
     };
     let Some(instruction) = decoded.first() else {
@@ -991,12 +1001,9 @@ pub(crate) fn walk_function_boundaries(
     known_functions: &std::collections::HashSet<u64>,
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
-    // A function known to run in the alternate mode (Thumb) is walked in it;
-    // everything else keeps the decode it always had.
-    let mode_context = binary
-        .runs_in_low_bit_mode(addr)
-        .then(|| frontend.low_bit_code_mode_override())
-        .flatten();
+    // The mode the function runs in: the image's, or its own when the loader
+    // or a pattern said so.
+    let mode_context = candidate_decode_context(binary, frontend, addr);
     {
         let exec_ranges = super::ranges::executable_ranges(binary);
         let mut visited = std::collections::HashSet::new();
@@ -1229,7 +1236,7 @@ fn scan_ghidra_patterns(
     tracker: &InstructionBoundaryTracker,
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
-) -> Vec<PatternFunctionStart> {
+) -> Vec<ModedFunctionStart> {
     let Some(arch_tag) = resolve_pattern_arch_tag(binary) else {
         return Vec::new();
     };
@@ -1432,7 +1439,7 @@ fn scan_ghidra_patterns(
 
     // Phase 2: SLEIGH validation -- once per unique (address, mode)
     let alternate_mode = frontend.low_bit_code_mode_override();
-    let mut hits: Vec<PatternFunctionStart> = raw_hits
+    let mut hits: Vec<ModedFunctionStart> = raw_hits
         .into_par_iter()
         .filter_map(|((addr, low_bit), (valid_code_min, contiguous))| {
             if tracker.is_offcut(addr) {
@@ -1473,7 +1480,7 @@ fn scan_ghidra_patterns(
             )
             .0
             {
-                Some(PatternFunctionStart {
+                Some(ModedFunctionStart {
                     address: addr,
                     low_bit_mode: low_bit,
                 })
@@ -1497,12 +1504,13 @@ fn scan_ghidra_patterns(
     hits
 }
 
-/// A function start a Ghidra pattern found, with the mode it was found in.
+/// A function start a scan found, with the mode it was found in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PatternFunctionStart {
-    address: u64,
-    /// The pattern set the architecture's alternate code mode (Thumb).
-    low_bit_mode: bool,
+pub(crate) struct ModedFunctionStart {
+    pub(crate) address: u64,
+    /// Found as the architecture's alternate code mode (Thumb): a pattern set
+    /// it, or the pointer to it carried the ABI's mode bit.
+    pub(crate) low_bit_mode: bool,
 }
 
 /// Whether `pattern` decodes its match in the alternate code mode: it sets a
@@ -1904,19 +1912,19 @@ fn scan_cc_padding_regions(
     results
 }
 
-fn scan_data_references(
+pub(crate) fn scan_data_references(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
     executable_ranges: &[(u64, u64)],
     known_functions: &std::collections::HashSet<u64>,
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
-) -> Vec<u64> {
+) -> Vec<ModedFunctionStart> {
     use rayon::prelude::*;
 
     let ptr_size = if binary.is_64bit { 8 } else { 4 };
 
-    let mut candidates: Vec<u64> = binary
+    let mut candidates: Vec<(u64, bool)> = binary
         .sections
         .par_iter()
         .filter(|sec| !sec.is_executable && sec.is_readable)
@@ -1932,12 +1940,17 @@ fn scan_data_references(
                     } else {
                         u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as u64
                     };
+                    // A code pointer on an architecture with a low-bit code mode
+                    // (ARM/Thumb) carries the mode in bit 0: strip it to get the
+                    // address, and remember it was set.
+                    let pointer = frontend.normalize_low_bit_code_address(val);
+                    let target = pointer.address;
                     if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
-                        val,
+                        target,
                         executable_ranges,
                     ) {
-                        if is_strict_boundary(binary, Some(frontend), val) {
-                            sec_candidates.push(val);
+                        if is_strict_boundary(binary, Some(frontend), target) {
+                            sec_candidates.push((target, pointer.context_override.is_some()));
                         }
                     }
                     offset += ptr_size;
@@ -1950,11 +1963,17 @@ fn scan_data_references(
     candidates.sort_unstable();
     candidates.dedup();
 
-    let refs: Vec<u64> = candidates
+    let alternate_mode = frontend.low_bit_code_mode_override();
+    let mut refs: Vec<ModedFunctionStart> = candidates
         .into_par_iter()
-        .filter_map(|val| {
+        .filter_map(|(val, low_bit)| {
+            let decode_context = if low_bit {
+                alternate_mode
+            } else {
+                candidate_decode_context(binary, frontend, val)
+            };
             let mut local_cache = std::collections::HashMap::new();
-            let (is_valid, res) = validate_subroutine_candidate(
+            let (is_valid, res) = validate_subroutine_candidate_in(
                 binary,
                 frontend,
                 val,
@@ -1964,15 +1983,23 @@ fn scan_data_references(
                 known_functions,
                 &mut local_cache,
                 global_references,
+                decode_context,
             );
             if is_valid && res.has_call_to_valid {
-                Some(val)
+                Some(ModedFunctionStart {
+                    address: val,
+                    low_bit_mode: low_bit,
+                })
             } else {
                 None
             }
         })
         .collect();
 
+    // The same function can be pointed at with and without the mode bit; the
+    // bit is the ABI's own statement of the mode, so it wins.
+    refs.sort_unstable_by_key(|start| (start.address, !start.low_bit_mode));
+    refs.dedup_by_key(|start| start.address);
     refs
 }
 
@@ -2188,7 +2215,10 @@ fn function_start_fingerprint(
     address: u64,
 ) -> Option<(String, String)> {
     let bytes = binary.view_bytes(address, 32)?;
-    let decoded = frontend.decode_window_no_pcode(bytes, address, 2).ok()?;
+    let context = candidate_decode_context(binary, frontend, address);
+    let decoded = frontend
+        .decode_window_no_pcode_in_context(bytes, address, 2, context)
+        .ok()?;
     if decoded.len() < 2 {
         return None;
     }
