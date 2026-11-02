@@ -145,8 +145,8 @@ function, so the output of every other binary is unchanged. Addresses never carr
 `disasm`, `raw-pcode`, `decomp` and the other decoding commands read the mode from the function
 itself. The loader takes it from ELF symbols (bit 0 of a function symbol, or a preceding `$t`
 mapping symbol); with `--function-discovery-profile balanced`, a stripped image also gets it from
-the Ghidra function-start patterns that set the Thumb context. A Thumb function that has neither
-a symbol nor a matching pattern is still decoded as ARM.
+the Ghidra function-start patterns that set the Thumb context and from code pointers in data that
+carry the Thumb bit. A Thumb function that has none of these is still decoded as ARM.
 
 ### Search for related functions across binaries
 

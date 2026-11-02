@@ -668,28 +668,28 @@ fn a_thumb_pattern_hit_in_a_stripped_mixed_image_is_found_and_recorded_as_thumb(
     let mut binary = arm_mixed_mode_fixture("arm_mixed_mode_stripped.elf");
     assert!(binary.inner().low_bit_mode_starts.is_empty());
     discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
-    let thumb_c = 0x201e8;
+    let thumb_c = 0x201f4;
     assert!(
         binary.functions.iter().any(|f| f.address == thumb_c),
         "thumb_c was not discovered"
     );
     assert!(binary.runs_in_low_bit_mode(thumb_c));
     // The ARM functions found by the same scan stay ARM.
-    for arm in [0x20134, 0x201a4, 0x20208] {
+    for arm in [0x20140, 0x201b0, 0x20214] {
         assert!(!binary.runs_in_low_bit_mode(arm), "{arm:#x}");
     }
 }
 
 #[test]
 fn a_symbol_marked_thumb_function_decodes_as_thumb_not_as_arm() {
-    // thumb_a at 0x2017c: the same bytes read as ARM are nonsense (this is what
+    // thumb_a at 0x20188: the same bytes read as ARM are nonsense (this is what
     // decompiled to calls into unmapped addresses before the mode was kept).
     let binary = arm_mixed_mode_fixture("arm_mixed_mode.elf");
     let frontend = fission_sleigh::runtime::RuntimeSleighFrontend::new_for_load_spec(
         binary.load_spec().expect("load spec"),
     )
     .expect("ARM runtime");
-    let address = 0x2017c;
+    let address = 0x20188;
     let bytes = binary.view_bytes(address, 16).expect("bytes");
     let mnemonics = |decoded: Vec<fission_sleigh::runtime::DecodedInstruction>| {
         decoded
@@ -723,7 +723,7 @@ fn a_symbol_marked_thumb_function_decodes_as_thumb_not_as_arm() {
     assert_eq!(chosen, as_thumb);
 
     // An ARM function of the same image still decodes as ARM.
-    let arm_address = 0x201a4;
+    let arm_address = 0x201b0;
     let arm_bytes = binary.view_bytes(arm_address, 16).expect("bytes");
     let context =
         crate::analysis::decode_context_for_address(&binary, &frontend, arm_address, None);
@@ -735,4 +735,38 @@ fn a_symbol_marked_thumb_function_decodes_as_thumb_not_as_arm() {
         .decode_window_no_pcode(arm_bytes, arm_address, 3)
         .expect("arm function plain");
     assert_eq!(mnemonics(arm_chosen), mnemonics(arm_plain));
+}
+
+#[test]
+fn a_code_pointer_with_the_mode_bit_set_is_a_thumb_function_start() {
+    // `fn_table` in .rodata holds 0x20249: thumb_d (0x20248) with the ABI's
+    // Thumb bit. The scan strips the bit to find the function, validates it in
+    // Thumb, and says it is one.
+    let binary = arm_mixed_mode_fixture("arm_mixed_mode_stripped.elf");
+    let frontend = fission_sleigh::runtime::RuntimeSleighFrontend::new_for_load_spec(
+        binary.load_spec().expect("load spec"),
+    )
+    .expect("ARM runtime");
+    let executable_ranges = super::ranges::executable_ranges(&binary);
+    // The functions thumb_d calls are already known, as they would be from
+    // earlier scans.
+    let known: std::collections::HashSet<u64> = [0x20140, 0x20188, 0x201b0].into();
+    let mut cache = std::collections::HashMap::new();
+    let found = super::discover::scan_data_references(
+        &binary,
+        &frontend,
+        &executable_ranges,
+        &known,
+        &mut cache,
+        None,
+    );
+    let thumb_d = found
+        .iter()
+        .find(|start| start.address == 0x20248)
+        .unwrap_or_else(|| panic!("thumb_d was not found among {found:?}"));
+    assert!(thumb_d.low_bit_mode);
+    assert!(
+        found.iter().all(|start| start.address & 1 == 0),
+        "no returned address keeps the mode bit: {found:?}"
+    );
 }

@@ -4228,23 +4228,23 @@ mod tests {
     }
     #[test]
     fn thumb_functions_of_a_mixed_arm_image_are_recorded_by_their_symbols() {
-        // arm_a, arm_b, arm_c are ARM; thumb_a, thumb_b, thumb_c are Thumb.
+        // arm_a, arm_b, arm_c are ARM; thumb_a, thumb_b, thumb_c, thumb_d are Thumb.
         // The ABI marks a Thumb function by bit 0 of its symbol value, which
         // the loader strips from the address, so the mode is kept separately.
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/arm_mixed_mode.elf");
         let bin = LoadedBinary::from_file(&path).expect("load mixed ELF");
         assert_eq!(
             bin.inner().low_bit_mode_starts,
-            vec![0x2017c, 0x201c4, 0x201e8]
+            vec![0x20188, 0x201d0, 0x201f4, 0x20248]
         );
-        for thumb in [0x2017c, 0x201c4, 0x201e8] {
+        for thumb in [0x20188, 0x201d0, 0x201f4, 0x20248] {
             assert!(bin.runs_in_low_bit_mode(thumb), "{thumb:#x}");
             assert!(
                 bin.runs_in_low_bit_mode(thumb | 1),
                 "{thumb:#x} with the bit"
             );
         }
-        for arm in [0x20134, 0x201a4, 0x20208, 0x2023c] {
+        for arm in [0x20140, 0x201b0, 0x20214, 0x2026c] {
             assert!(!bin.runs_in_low_bit_mode(arm), "{arm:#x}");
         }
         // No symbols, no information: the stripped image says nothing.
