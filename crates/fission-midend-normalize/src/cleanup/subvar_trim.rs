@@ -303,8 +303,14 @@ fn simplify_expr(
                         {
                             let target_width = int_type_bits(target_ty);
                             if let Some(w) = target_width {
-                                let expected_mask = (1_i64 << w).wrapping_sub(1);
-                                if let PreHirExpr::Const(mask_val, _) = and_rhs.as_ref() {
+                                // No constant narrower than the type exists past 64 bits.
+                                let expected_mask = match w {
+                                    64 => Some(-1_i64),
+                                    _ => 1_i64.checked_shl(w).map(|m| m.wrapping_sub(1)),
+                                };
+                                if let (Some(expected_mask), PreHirExpr::Const(mask_val, _)) =
+                                    (expected_mask, and_rhs.as_ref())
+                                {
                                     if *mask_val == expected_mask {
                                         *expr = PreHirExpr::Cast {
                                             ty: target_ty.clone(),
