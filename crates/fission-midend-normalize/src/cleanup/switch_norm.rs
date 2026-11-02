@@ -70,53 +70,21 @@ fn process_statement_list(stmts: &mut Vec<PreHirStmt>) -> bool {
             else_body,
         } = &stmts[i]
         {
-            if let Some((var_name, _op, _limit)) = match_var_const_comparison(cond) {
-                // Check if one side is a single Switch on `var_name`
-                let then_switch = get_single_switch(then_body);
-                let else_switch = get_single_switch(else_body);
-
-                match (then_switch, else_switch) {
-                    (Some((sw_expr, sw_cases, sw_default)), None) => {
-                        if get_var_name(sw_expr) == Some(var_name.clone()) {
-                            if sw_default.is_empty()
-                                || else_body.is_empty()
-                                || sw_default == else_body.as_slice()
-                            {
-                                let new_default = if sw_default.is_empty() {
-                                    else_body.clone()
-                                } else {
-                                    sw_default.to_vec().into()
-                                };
-                                stmts[i] = PreHirStmt::Switch {
-                                    expr: sw_expr.clone(),
-                                    cases: sw_cases.to_vec(),
-                                    default: new_default,
-                                };
-                                changed = true;
-                            }
-                        }
+            if let Some((var_name, op, limit)) = match_var_const_comparison(cond) {
+                // The switch sits on one arm; `guard` is the predicate that
+                // selects that arm and `other` is the arm that is not it.
+                let folded = match (get_single_switch(then_body), get_single_switch(else_body)) {
+                    (Some(switch), None) => {
+                        fold_guarded_switch(&var_name, op, limit, switch, else_body)
                     }
-                    (None, Some((sw_expr, sw_cases, sw_default))) => {
-                        if get_var_name(sw_expr) == Some(var_name.clone()) {
-                            if sw_default.is_empty()
-                                || then_body.is_empty()
-                                || sw_default == then_body.as_slice()
-                            {
-                                let new_default = if sw_default.is_empty() {
-                                    then_body.clone()
-                                } else {
-                                    sw_default.to_vec().into()
-                                };
-                                stmts[i] = PreHirStmt::Switch {
-                                    expr: sw_expr.clone(),
-                                    cases: sw_cases.to_vec(),
-                                    default: new_default,
-                                };
-                                changed = true;
-                            }
-                        }
-                    }
-                    _ => {}
+                    (None, Some(switch)) => negate_cmp_op(op).and_then(|guard| {
+                        fold_guarded_switch(&var_name, guard, limit, switch, then_body)
+                    }),
+                    _ => None,
+                };
+                if let Some(folded) = folded {
+                    stmts[i] = folded;
+                    changed = true;
                 }
             }
         }
@@ -210,6 +178,94 @@ fn negate_cmp_op(op: PreHirBinaryOp) -> Option<PreHirBinaryOp> {
         PreHirBinaryOp::Ne => Some(PreHirBinaryOp::Eq),
         _ => None,
     }
+}
+
+/// Largest guard range whose cases are enumerated to prove coverage.
+const MAX_COVERED_GUARD_RANGE: i64 = 4096;
+
+/// Whether `v <op> limit` holds, or `None` when the constants do not pin it
+/// down (an unsigned compare against a value that may be sign-extended).
+fn guard_admits(op: PreHirBinaryOp, limit: i64, v: i64) -> Option<bool> {
+    match op {
+        PreHirBinaryOp::Eq => Some(v == limit),
+        PreHirBinaryOp::Ne => Some(v != limit),
+        PreHirBinaryOp::SLt => Some(v < limit),
+        PreHirBinaryOp::SLe => Some(v <= limit),
+        PreHirBinaryOp::SGt => Some(v > limit),
+        PreHirBinaryOp::SGe => Some(v >= limit),
+        PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge => {
+            if v < 0 || limit < 0 {
+                return None;
+            }
+            Some(match op {
+                PreHirBinaryOp::Lt => v < limit,
+                PreHirBinaryOp::Le => v <= limit,
+                PreHirBinaryOp::Gt => v > limit,
+                _ => v >= limit,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Whether every value satisfying the guard is one of `labels`, so that no
+/// guarded value can reach the switch's `default`.
+fn guard_is_covered_by(op: PreHirBinaryOp, limit: i64, labels: &[i64]) -> bool {
+    if op == PreHirBinaryOp::Eq {
+        return labels.contains(&limit);
+    }
+    // Unsigned `x < L` / `x <= L` admits exactly 0..=top.
+    let top = match op {
+        PreHirBinaryOp::Lt => limit.checked_sub(1),
+        PreHirBinaryOp::Le => Some(limit),
+        _ => None,
+    };
+    let Some(top) = top.filter(|&top| limit >= 0 && top < MAX_COVERED_GUARD_RANGE) else {
+        return false;
+    };
+    (0..=top).all(|v| labels.contains(&v))
+}
+
+/// Folds `if (guard(x)) { switch (x) {..} } else { other }` into one switch
+/// when that preserves behaviour for every value of `x`:
+/// - every case label must satisfy the guard, otherwise the label would run
+///   its body where the original ran `other`;
+/// - values that fail the guard run `other`, so the folded `default` must be
+///   `other`; values that pass it but match no case run the switch's own
+///   `default`. One block can serve as both only when the two are equal, or
+///   when the switch has no `default` and the cases cover every guarded value.
+fn fold_guarded_switch(
+    var_name: &str,
+    guard: PreHirBinaryOp,
+    limit: i64,
+    (sw_expr, sw_cases, sw_default): (&PreHirExpr, &[PreHirSwitchCase], &[PreHirStmt]),
+    other: &[PreHirStmt],
+) -> Option<PreHirStmt> {
+    if get_var_name(sw_expr).as_deref() != Some(var_name) {
+        return None;
+    }
+    let labels: Vec<i64> = sw_cases
+        .iter()
+        .flat_map(|c| c.values.iter().copied())
+        .collect();
+    if !labels
+        .iter()
+        .all(|&v| guard_admits(guard, limit, v) == Some(true))
+    {
+        return None;
+    }
+    let default: Vec<PreHirStmt> = if sw_default == other {
+        sw_default.to_vec()
+    } else if sw_default.is_empty() && guard_is_covered_by(guard, limit, &labels) {
+        other.to_vec()
+    } else {
+        return None;
+    };
+    Some(PreHirStmt::Switch {
+        expr: sw_expr.clone(),
+        cases: sw_cases.to_vec(),
+        default: default.into(),
+    })
 }
 
 fn match_var_const_comparison(expr: &PreHirExpr) -> Option<(String, PreHirBinaryOp, i64)> {
