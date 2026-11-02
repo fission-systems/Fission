@@ -1,4 +1,3 @@
-use super::FunctionDiscoveryProfileArg;
 use std::path::PathBuf;
 
 /// Internal normalized one-shot execution arguments.
@@ -65,7 +64,6 @@ pub struct OneShotArgs {
     pub include_nonuser_functions: bool,
     pub timeout_ms: Option<u64>,
     pub format: Option<String>,
-    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
     pub preview_candidate_inventory: bool,
     pub preview_candidate_limit: Option<usize>,
     pub preview_candidate_scan_batch: bool,
@@ -182,7 +180,6 @@ impl Default for OneShotArgs {
             include_nonuser_functions: false,
             timeout_ms: None,
             format: None,
-            function_discovery_profile: None,
             preview_candidate_inventory: false,
             preview_candidate_limit: None,
             preview_candidate_scan_batch: false,

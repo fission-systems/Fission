@@ -23,11 +23,11 @@ pub use result::{
 };
 
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
+use fission_static::analysis::discover_functions_with_runtime;
 
-/// Run SLEIGH-backed function discovery (`Balanced`) so script `binary.functions()` aligns with automated CLI workflows.
+/// Run SLEIGH-backed function discovery so script `binary.functions()` aligns with automated CLI workflows.
 pub fn prepare_binary_for_script(mut binary: LoadedBinary) -> LoadedBinary {
-    let _ = discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
+    let _ = discover_functions_with_runtime(&mut binary);
     binary
 }
 

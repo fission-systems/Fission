@@ -7,7 +7,7 @@ use fission_sleigh::runtime::{
 
 use super::ranges::{executable_ranges, is_in_executable_ranges, runtime_load_spec_for};
 use super::targets::{collect_instruction_targets, discovery_candidate_targets};
-use super::types::{FunctionDiscoveryProfile, FunctionDiscoveryReport};
+use super::types::FunctionDiscoveryReport;
 
 fn discovery_diag_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -80,10 +80,7 @@ fn candidate_decode_context(
     super::thumb::decode_context_for_address(binary, frontend, address, None)
 }
 
-pub fn discover_functions_with_runtime(
-    binary: &mut LoadedBinary,
-    profile: FunctionDiscoveryProfile,
-) -> FunctionDiscoveryReport {
+pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDiscoveryReport {
     let mut report = FunctionDiscoveryReport::default();
     let Some(load_spec) = runtime_load_spec_for(binary) else {
         report.unsupported_runtime = true;
@@ -189,7 +186,6 @@ pub fn discover_functions_with_runtime(
             let count = collect_section_targets(
                 binary,
                 &frontend,
-                profile,
                 chunk.bytes,
                 chunk.virtual_address,
                 sweep_context,
@@ -246,7 +242,7 @@ pub fn discover_functions_with_runtime(
     all_references.extend(call_targets.iter().copied());
     all_references.extend(jump_targets.iter().copied());
 
-    let mut candidates = discovery_candidate_targets(profile, call_targets, &jump_targets);
+    let mut candidates = discovery_candidate_targets(call_targets, &jump_targets);
     if discovery_diag_enabled() {
         eprintln!(
             "DISCOVERY_DIAG: candidates={} validate_stage_start",
@@ -323,292 +319,265 @@ pub fn discover_functions_with_runtime(
         })
         .collect();
     candidates.extend(valid_symbol_seeds.iter().map(|seed| seed.address));
+    // Starts that only a reference or signature scan names. See
+    // `FunctionInfo::is_scan_inferred`.
+    let mut scan_inferred: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
-    if profile != FunctionDiscoveryProfile::Conservative {
-        let mut tracker = InstructionBoundaryTracker::build(binary, &frontend, &tracker_seeds);
-        let mut validation_cache = std::collections::HashMap::new();
+    let mut tracker = InstructionBoundaryTracker::build(binary, &frontend, &tracker_seeds);
+    let mut validation_cache = std::collections::HashMap::new();
 
-        let mut all_known: std::collections::HashSet<u64> =
-            binary.functions.iter().map(|f| f.address).collect();
-        all_known.extend(candidates.iter().copied());
+    let mut all_known: std::collections::HashSet<u64> =
+        binary.functions.iter().map(|f| f.address).collect();
+    all_known.extend(candidates.iter().copied());
 
-        if profile == FunctionDiscoveryProfile::Aggressive {
-            // Disabled valid_jumps: it causes 1700+ FPs by blindly accepting jump targets
+    let data_starts = scan_data_references(
+        binary,
+        &frontend,
+        &executable_ranges,
+        &all_known,
+        &mut validation_cache,
+        Some(&all_references),
+    );
+    all_references.extend(data_starts.iter().map(|start| start.address));
+    let mut data_refs: Vec<u64> = Vec::with_capacity(data_starts.len());
+    for start in data_starts {
+        if tracker.is_overlap(start.address) {
+            continue;
         }
+        if start.low_bit_mode {
+            binary.mark_low_bit_mode_start(start.address);
+        }
+        data_refs.push(start.address);
+    }
+    if discovery_diag_enabled() {
+        eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
+    }
+    tracker.add_functions_batch(binary, &frontend, &data_refs);
+    candidates.extend(data_refs.clone());
+    scan_inferred.extend(data_refs.iter().copied());
+    all_known.extend(data_refs.clone());
 
-        let data_starts = scan_data_references(
-            binary,
-            &frontend,
-            &executable_ranges,
-            &all_known,
-            &mut validation_cache,
-            Some(&all_references),
-        );
-        all_references.extend(data_starts.iter().map(|start| start.address));
-        let mut data_refs: Vec<u64> = Vec::with_capacity(data_starts.len());
-        for start in data_starts {
-            if tracker.is_overlap(start.address) {
+    // MSVC C++ exception-handling FuncInfo tables (x86 only -- see
+    // msvc_eh's module doc). Unlike every other scanner here, catch
+    // handlers and unwind actions are reachable *only* from these
+    // tables, never from code -- structurally invisible otherwise.
+    //
+    // Deliberately skips `validate_subroutine_candidate`'s CFG-shape
+    // heuristic (does this decode to something that looks like a
+    // normal function start/body?) and `is_strict_boundary` (is there
+    // padding or a terminator right before this address?): a real
+    // catch/unwind handler routinely starts mid-instruction-stream
+    // right after another call ends, or opens with a `call` of its
+    // own rather than a typical prologue -- confirmed on a real
+    // catch handler this scanner found (`sqlite3.dll`'s
+    // `Catch_All@0x101c36c5` per Ghidra's own naming) that both of
+    // those checks reject outright. The FuncInfo/UnwindMap/
+    // TryBlockMap chain's own bounds/same-section checks (already
+    // applied in `msvc_eh::scan_msvc_eh_funcinfo`) are the actual
+    // validation here, the same way Ghidra's own `PEExceptionAnalyzer`
+    // trusts a validated `EHFunctionInfoModel` without any additional
+    // disassembly-based check.
+    let raw_eh_candidates = super::msvc_eh::scan_msvc_eh_funcinfo(binary);
+    let mut eh_funcinfo_hits: Vec<u64> = raw_eh_candidates
+        .into_iter()
+        .filter(|&addr| {
+            !tracker.is_overlap(addr)
+                && !all_known.contains(&addr)
+                && crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                    addr,
+                    &executable_ranges,
+                )
+        })
+        .collect();
+    eh_funcinfo_hits.sort_unstable();
+    if discovery_diag_enabled() {
+        eprintln!("SCANNER_STATS: msvc_eh_funcinfo={}", eh_funcinfo_hits.len());
+    }
+    tracker.add_functions_batch(binary, &frontend, &eh_funcinfo_hits);
+    candidates.extend(eh_funcinfo_hits.clone());
+    all_known.extend(eh_funcinfo_hits);
+
+    // SafeSEH handler table + Control Flow Guard check-function
+    // pointer, from IMAGE_LOAD_CONFIG_DIRECTORY (x86 only -- see
+    // load_config's module doc). Same "PE-metadata-only reachability"
+    // rationale and same trust level as msvc_eh_funcinfo above: every
+    // SafeSEH entry is, by construction, a real handler the OS loader
+    // itself validates before ever running it.
+    let raw_load_config_candidates = super::load_config::scan_load_config_candidates(binary);
+    let mut load_config_hits: Vec<u64> = raw_load_config_candidates
+        .into_iter()
+        .filter(|&addr| {
+            !tracker.is_overlap(addr)
+                && !all_known.contains(&addr)
+                && crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                    addr,
+                    &executable_ranges,
+                )
+        })
+        .collect();
+    load_config_hits.sort_unstable();
+    if discovery_diag_enabled() {
+        eprintln!("SCANNER_STATS: load_config={}", load_config_hits.len());
+    }
+    tracker.add_functions_batch(binary, &frontend, &load_config_hits);
+    candidates.extend(load_config_hits.clone());
+    all_known.extend(load_config_hits);
+
+    // Ghidra XML static patterns (x86-64win / x86win)
+    let pattern_starts = scan_ghidra_patterns(
+        binary,
+        &frontend,
+        &executable_ranges,
+        &all_known,
+        &tracker,
+        &mut validation_cache,
+        Some(&all_references),
+    );
+    // A start found by a pattern that sets the alternate mode (Thumb) is
+    // recorded as such before it is registered, so the sizing decode below
+    // and every later decode of this function use that mode.
+    let mut xml_hits: Vec<u64> = Vec::with_capacity(pattern_starts.len());
+    for start in pattern_starts {
+        if tracker.is_overlap(start.address) {
+            continue;
+        }
+        if start.low_bit_mode {
+            binary.mark_low_bit_mode_start(start.address);
+        }
+        xml_hits.push(start.address);
+    }
+    if discovery_diag_enabled() {
+        eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
+    }
+    tracker.add_functions_batch(binary, &frontend, &xml_hits);
+    candidates.extend(xml_hits.clone());
+    scan_inferred.extend(xml_hits.iter().copied());
+    all_known.extend(xml_hits.clone());
+
+    // Disabled thunks: causes a massive amount of FPs
+    // let mut thunks = scan_jmp_thunks(binary, &frontend, &executable_ranges, &all_known);
+    // thunks.retain(|&addr| !tracker.is_overlap(addr));
+    // eprintln!("SCANNER_STATS: thunks={}", thunks.len());
+    // for &thunk_addr in &thunks {
+    //     tracker.add_function(binary, &frontend, thunk_addr);
+    // }
+    // candidates.extend(thunks.clone());
+    // all_known.extend(thunks);
+
+    // Disabled cc_padding: blindly adds functions based on padding, causing FPs
+    // let mut cc_total = 0;
+    // loop {
+    //     let mut cc_hits = scan_cc_padding_regions(binary, &frontend, &executable_ranges, &all_known, &tracker, &mut validation_cache);
+    //     cc_hits.retain(|&addr| !tracker.is_overlap(addr));
+    //     if cc_hits.is_empty() {
+    //         break;
+    //     }
+    //     cc_total += cc_hits.len();
+    //     for &cc in &cc_hits {
+    //         tracker.add_function(binary, &frontend, cc);
+    //     }
+    //     candidates.extend(cc_hits.clone());
+    //     all_known.extend(cc_hits);
+    // }
+    // eprintln!("SCANNER_STATS: cc_padding={}", cc_total);
+
+    // [G2] Shared Return Analysis (Tail Call Recovery)
+    if !jump_edges.is_empty() {
+        let mut known_sorted: Vec<u64> = all_known.iter().copied().collect();
+        known_sorted.sort_unstable();
+
+        let mut shared_returns = Vec::new();
+        for &(src, dest) in &jump_edges {
+            if all_known.contains(&dest) {
                 continue;
             }
-            if start.low_bit_mode {
-                binary.mark_low_bit_mode_start(start.address);
-            }
-            data_refs.push(start.address);
-        }
-        if discovery_diag_enabled() {
-            eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
-        }
-        tracker.add_functions_batch(binary, &frontend, &data_refs);
-        candidates.extend(data_refs.clone());
-        all_known.extend(data_refs.clone());
 
-        // MSVC C++ exception-handling FuncInfo tables (x86 only -- see
-        // msvc_eh's module doc). Unlike every other scanner here, catch
-        // handlers and unwind actions are reachable *only* from these
-        // tables, never from code -- structurally invisible otherwise.
-        //
-        // Deliberately skips `validate_subroutine_candidate`'s CFG-shape
-        // heuristic (does this decode to something that looks like a
-        // normal function start/body?) and `is_strict_boundary` (is there
-        // padding or a terminator right before this address?): a real
-        // catch/unwind handler routinely starts mid-instruction-stream
-        // right after another call ends, or opens with a `call` of its
-        // own rather than a typical prologue -- confirmed on a real
-        // catch handler this scanner found (`sqlite3.dll`'s
-        // `Catch_All@0x101c36c5` per Ghidra's own naming) that both of
-        // those checks reject outright. The FuncInfo/UnwindMap/
-        // TryBlockMap chain's own bounds/same-section checks (already
-        // applied in `msvc_eh::scan_msvc_eh_funcinfo`) are the actual
-        // validation here, the same way Ghidra's own `PEExceptionAnalyzer`
-        // trusts a validated `EHFunctionInfoModel` without any additional
-        // disassembly-based check.
-        let raw_eh_candidates = super::msvc_eh::scan_msvc_eh_funcinfo(binary);
-        let mut eh_funcinfo_hits: Vec<u64> = raw_eh_candidates
-            .into_iter()
-            .filter(|&addr| {
-                !tracker.is_overlap(addr)
-                    && !all_known.contains(&addr)
-                    && crate::analysis::function_discovery::ranges::is_in_executable_ranges(
-                        addr,
-                        &executable_ranges,
-                    )
+            let mut function_before_src = None;
+            let mut function_after_src = None;
+
+            match known_sorted.binary_search(&src) {
+                Ok(idx) => {
+                    function_before_src = Some(known_sorted[idx]);
+                    if idx + 1 < known_sorted.len() {
+                        function_after_src = Some(known_sorted[idx + 1]);
+                    }
+                }
+                Err(idx) => {
+                    if idx > 0 {
+                        function_before_src = Some(known_sorted[idx - 1]);
+                    }
+                    if idx < known_sorted.len() {
+                        function_after_src = Some(known_sorted[idx]);
+                    }
+                }
+            }
+
+            if src < dest {
+                // Forward jump
+                if let Some(after) = function_after_src {
+                    if dest >= after {
+                        shared_returns.push(dest);
+                    }
+                }
+            } else {
+                // Backward jump
+                if let Some(before) = function_before_src {
+                    if dest < before {
+                        shared_returns.push(dest);
+                    }
+                }
+            }
+        }
+
+        shared_returns.sort_unstable();
+        shared_returns.dedup();
+
+        // Parallelized the same way as the ghidra-patterns validation
+        // pass above (rayon, one fresh local cache per candidate) --
+        // this loop calls the same `validate_subroutine_candidate`,
+        // which can walk up to 4000 instructions per candidate
+        // (`must_terminate: true`), and `shared_returns` can be large
+        // on a binary with a lot of jump-table/tail-call traffic.
+        // Left sequential, this was the actual bottleneck behind
+        // Balanced-profile runs occasionally taking 19+ minutes on a
+        // real sqlite3.dll despite the earlier ghidra-patterns phase
+        // already being parallel -- confirmed via `ps` showing a
+        // single core pinned at ~100% for the whole stall, at a point
+        // in stderr output past the ghidra-patterns phase's own
+        // completion line.
+        let mut validated_shared_returns: Vec<u64> = shared_returns
+            .into_par_iter()
+            .filter(|&sr| {
+                !tracker.is_overlap(sr) && is_strict_boundary(binary, Some(&frontend), sr)
             })
-            .collect();
-        eh_funcinfo_hits.sort_unstable();
-        if discovery_diag_enabled() {
-            eprintln!("SCANNER_STATS: msvc_eh_funcinfo={}", eh_funcinfo_hits.len());
-        }
-        tracker.add_functions_batch(binary, &frontend, &eh_funcinfo_hits);
-        candidates.extend(eh_funcinfo_hits.clone());
-        all_known.extend(eh_funcinfo_hits);
-
-        // SafeSEH handler table + Control Flow Guard check-function
-        // pointer, from IMAGE_LOAD_CONFIG_DIRECTORY (x86 only -- see
-        // load_config's module doc). Same "PE-metadata-only reachability"
-        // rationale and same trust level as msvc_eh_funcinfo above: every
-        // SafeSEH entry is, by construction, a real handler the OS loader
-        // itself validates before ever running it.
-        let raw_load_config_candidates = super::load_config::scan_load_config_candidates(binary);
-        let mut load_config_hits: Vec<u64> = raw_load_config_candidates
-            .into_iter()
-            .filter(|&addr| {
-                !tracker.is_overlap(addr)
-                    && !all_known.contains(&addr)
-                    && crate::analysis::function_discovery::ranges::is_in_executable_ranges(
-                        addr,
-                        &executable_ranges,
-                    )
-            })
-            .collect();
-        load_config_hits.sort_unstable();
-        if discovery_diag_enabled() {
-            eprintln!("SCANNER_STATS: load_config={}", load_config_hits.len());
-        }
-        tracker.add_functions_batch(binary, &frontend, &load_config_hits);
-        candidates.extend(load_config_hits.clone());
-        all_known.extend(load_config_hits);
-
-        // Ghidra XML static patterns (x86-64win / x86win)
-        let pattern_starts = scan_ghidra_patterns(
-            binary,
-            &frontend,
-            &executable_ranges,
-            &all_known,
-            &tracker,
-            &mut validation_cache,
-            Some(&all_references),
-        );
-        // A start found by a pattern that sets the alternate mode (Thumb) is
-        // recorded as such before it is registered, so the sizing decode below
-        // and every later decode of this function use that mode.
-        let mut xml_hits: Vec<u64> = Vec::with_capacity(pattern_starts.len());
-        for start in pattern_starts {
-            if tracker.is_overlap(start.address) {
-                continue;
-            }
-            if start.low_bit_mode {
-                binary.mark_low_bit_mode_start(start.address);
-            }
-            xml_hits.push(start.address);
-        }
-        if discovery_diag_enabled() {
-            eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
-        }
-        tracker.add_functions_batch(binary, &frontend, &xml_hits);
-        candidates.extend(xml_hits.clone());
-        all_known.extend(xml_hits.clone());
-
-        // Ghidra's Aggressive Instruction Finder scorecard item: strictly
-        // riskier than the reference/signature-driven scanners above (which
-        // validate against known references/a static pattern DB), so --
-        // like Ghidra's own version, which is off by default with an
-        // explicit "YOU MUST CHECK THE RESULTS" warning -- only wired under
-        // the Aggressive profile, not Balanced.
-        let mut dynamic = if profile == FunctionDiscoveryProfile::Aggressive {
-            scan_dynamic_prologues(
-                binary,
-                &frontend,
-                &executable_ranges,
-                &all_known,
-                &tracker,
-                &mut validation_cache,
-                Some(&all_references),
-            )
-        } else {
-            Vec::new()
-        };
-        dynamic.retain(|&addr| !tracker.is_overlap(addr));
-        if discovery_diag_enabled() {
-            eprintln!("SCANNER_STATS: dynamic_prologues={}", dynamic.len());
-        }
-        tracker.add_functions_batch(binary, &frontend, &dynamic);
-        candidates.extend(dynamic.clone());
-        all_known.extend(dynamic.clone());
-
-        // Disabled thunks: causes a massive amount of FPs
-        // let mut thunks = scan_jmp_thunks(binary, &frontend, &executable_ranges, &all_known);
-        // thunks.retain(|&addr| !tracker.is_overlap(addr));
-        // eprintln!("SCANNER_STATS: thunks={}", thunks.len());
-        // for &thunk_addr in &thunks {
-        //     tracker.add_function(binary, &frontend, thunk_addr);
-        // }
-        // candidates.extend(thunks.clone());
-        // all_known.extend(thunks);
-
-        // Disabled cc_padding: blindly adds functions based on padding, causing FPs
-        // let mut cc_total = 0;
-        // loop {
-        //     let mut cc_hits = scan_cc_padding_regions(binary, &frontend, &executable_ranges, &all_known, &tracker, &mut validation_cache);
-        //     cc_hits.retain(|&addr| !tracker.is_overlap(addr));
-        //     if cc_hits.is_empty() {
-        //         break;
-        //     }
-        //     cc_total += cc_hits.len();
-        //     for &cc in &cc_hits {
-        //         tracker.add_function(binary, &frontend, cc);
-        //     }
-        //     candidates.extend(cc_hits.clone());
-        //     all_known.extend(cc_hits);
-        // }
-        // eprintln!("SCANNER_STATS: cc_padding={}", cc_total);
-
-        // [G2] Shared Return Analysis (Tail Call Recovery)
-        if !jump_edges.is_empty() {
-            let mut known_sorted: Vec<u64> = all_known.iter().copied().collect();
-            known_sorted.sort_unstable();
-
-            let mut shared_returns = Vec::new();
-            for &(src, dest) in &jump_edges {
-                if all_known.contains(&dest) {
-                    continue;
-                }
-
-                let mut function_before_src = None;
-                let mut function_after_src = None;
-
-                match known_sorted.binary_search(&src) {
-                    Ok(idx) => {
-                        function_before_src = Some(known_sorted[idx]);
-                        if idx + 1 < known_sorted.len() {
-                            function_after_src = Some(known_sorted[idx + 1]);
-                        }
-                    }
-                    Err(idx) => {
-                        if idx > 0 {
-                            function_before_src = Some(known_sorted[idx - 1]);
-                        }
-                        if idx < known_sorted.len() {
-                            function_after_src = Some(known_sorted[idx]);
-                        }
-                    }
-                }
-
-                if src < dest {
-                    // Forward jump
-                    if let Some(after) = function_after_src {
-                        if dest >= after {
-                            shared_returns.push(dest);
-                        }
-                    }
-                } else {
-                    // Backward jump
-                    if let Some(before) = function_before_src {
-                        if dest < before {
-                            shared_returns.push(dest);
-                        }
-                    }
-                }
-            }
-
-            shared_returns.sort_unstable();
-            shared_returns.dedup();
-
-            // Parallelized the same way as the ghidra-patterns validation
-            // pass above (rayon, one fresh local cache per candidate) --
-            // this loop calls the same `validate_subroutine_candidate`,
-            // which can walk up to 4000 instructions per candidate
-            // (`must_terminate: true`), and `shared_returns` can be large
-            // on a binary with a lot of jump-table/tail-call traffic.
-            // Left sequential, this was the actual bottleneck behind
-            // Balanced-profile runs occasionally taking 19+ minutes on a
-            // real sqlite3.dll despite the earlier ghidra-patterns phase
-            // already being parallel -- confirmed via `ps` showing a
-            // single core pinned at ~100% for the whole stall, at a point
-            // in stderr output past the ghidra-patterns phase's own
-            // completion line.
-            let mut validated_shared_returns: Vec<u64> = shared_returns
-                .into_par_iter()
-                .filter(|&sr| {
-                    !tracker.is_overlap(sr) && is_strict_boundary(binary, Some(&frontend), sr)
-                })
-                .filter_map(|sr| {
-                    let mut local_cache = std::collections::HashMap::new();
-                    let (valid, _) = validate_subroutine_candidate(
-                        binary,
-                        &frontend,
-                        sr,
-                        1,
-                        4000,
-                        true,
-                        &all_known,
-                        &mut local_cache,
-                        Some(&all_references),
-                    );
-                    valid.then_some(sr)
-                })
-                .collect();
-            validated_shared_returns.sort_unstable();
-
-            if discovery_diag_enabled() {
-                eprintln!(
-                    "SCANNER_STATS: tail_calls={}",
-                    validated_shared_returns.len()
+            .filter_map(|sr| {
+                let mut local_cache = std::collections::HashMap::new();
+                let (valid, _) = validate_subroutine_candidate(
+                    binary,
+                    &frontend,
+                    sr,
+                    1,
+                    4000,
+                    true,
+                    &all_known,
+                    &mut local_cache,
+                    Some(&all_references),
                 );
-            }
-            tracker.add_functions_batch(binary, &frontend, &validated_shared_returns);
-            candidates.extend(validated_shared_returns.clone());
-            all_known.extend(validated_shared_returns);
+                valid.then_some(sr)
+            })
+            .collect();
+        validated_shared_returns.sort_unstable();
+
+        if discovery_diag_enabled() {
+            eprintln!(
+                "SCANNER_STATS: tail_calls={}",
+                validated_shared_returns.len()
+            );
         }
+        tracker.add_functions_batch(binary, &frontend, &validated_shared_returns);
+        candidates.extend(validated_shared_returns.clone());
+        scan_inferred.extend(validated_shared_returns.iter().copied());
+        all_known.extend(validated_shared_returns);
     }
 
     candidates.sort_unstable();
@@ -654,8 +623,12 @@ pub fn discover_functions_with_runtime(
                 is_import: false,
                 origin: if is_thunk_like {
                     Some("sleigh-import-thunk".to_string())
+                } else if let Some(seed) = seed {
+                    Some(seed.origin.clone())
+                } else if scan_inferred.contains(&address) {
+                    Some(FunctionInfo::SCAN_INFERRED_ORIGIN.to_string())
                 } else {
-                    seed.map(|seed| seed.origin.clone())
+                    None
                 },
                 kind: if is_thunk_like {
                     Some("import_thunk".to_string())
@@ -727,7 +700,6 @@ fn split_import_identity(name: &str) -> (Option<String>, String) {
 fn collect_section_targets(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
-    profile: FunctionDiscoveryProfile,
     bytes: &[u8],
     base_address: u64,
     sweep_context: Option<PackedContextOverride>,
@@ -735,28 +707,6 @@ fn collect_section_targets(
     jump_targets: &mut Vec<u64>,
     jump_edges: &mut Vec<(u64, u64)>,
 ) -> usize {
-    if profile == FunctionDiscoveryProfile::Conservative {
-        let Ok(decoded) = frontend.decode_window_no_pcode_in_context(
-            bytes,
-            base_address,
-            bytes.len(),
-            sweep_context,
-        ) else {
-            return 0;
-        };
-        let decoded_count = decoded.len();
-        for instruction in decoded {
-            collect_instruction_targets(
-                binary,
-                &instruction,
-                call_targets,
-                jump_targets,
-                jump_edges,
-            );
-        }
-        return decoded_count;
-    }
-
     collect_section_targets_resync(
         binary,
         frontend,
@@ -2001,228 +1951,6 @@ pub(crate) fn scan_data_references(
     refs.sort_unstable_by_key(|start| (start.address, !start.low_bit_mode));
     refs.dedup_by_key(|start| start.address);
     refs
-}
-
-/// Ghidra's `AggressiveInstructionFinderAnalyzer` scorecard item, adapted to
-/// Fission's primitives.
-///
-/// Ghidra's version fingerprints a candidate by the *masked* bytes of its
-/// first two instructions (SLEIGH's instruction mask zeroes out immediate/
-/// displacement operand bits, so two prologues differing only in, say, a
-/// stack-frame-size immediate still fingerprint identically) and requires
-/// that fingerprint to recur at least [`AIF_MIN_FINGERPRINT_COUNT`] times
-/// among the binary's own already-known function starts before trusting it
-/// as a real prologue shape -- a self-calibrating signal that needs no
-/// hardcoded signature database and adapts to calling conventions/compilers
-/// it has never seen, as long as the same binary reuses the pattern.
-/// Fission's SLEIGH runtime doesn't expose an instruction-mask primitive at
-/// this layer, so [`function_start_fingerprint`] uses the coarser
-/// `(mnemonic, mnemonic)` pair of the first two decoded instructions
-/// instead -- still invariant to register/immediate/displacement choice
-/// (the same reason Ghidra's masking tolerates them), just unable to
-/// distinguish two different *registers* used in an otherwise-identical
-/// encoding the way byte-masking would. Documented simplification, not an
-/// oversight: real byte-masking would need SLEIGH's per-constructor
-/// operand-field boundaries exposed, a much larger addition than this
-/// scorecard item warrants on its own.
-///
-/// Candidate positions reuse the same 2+-byte `0xCC`/`0x90` padding-run
-/// boundaries `scan_cc_padding_regions` already enumerates (that scanner is
-/// kept disabled on its own -- see the comment at its call site -- because
-/// accepting any valid-looking routine after padding produces too many
-/// false positives). The fingerprint-recurrence gate below is exactly the
-/// piece that was missing there: requiring a candidate's shape to match the
-/// binary's *own* observed prologue pattern at least
-/// [`AIF_MIN_FINGERPRINT_COUNT`] times is a much stronger, self-calibrating
-/// signal than "valid routine after padding" alone, and is Ghidra AIF's
-/// actual distinguishing technique.
-fn scan_dynamic_prologues(
-    binary: &LoadedBinary,
-    frontend: &RuntimeSleighFrontend,
-    _executable_ranges: &[(u64, u64)],
-    known_functions: &std::collections::HashSet<u64>,
-    tracker: &InstructionBoundaryTracker,
-    // Unused now that candidate validation runs in parallel below (each
-    // rayon item gets its own local cache instead) -- kept in the
-    // signature so the call site doesn't need its own special case.
-    _cache: &mut std::collections::HashMap<u64, ValidationResult>,
-    global_references: Option<&std::collections::HashSet<u64>>,
-) -> Vec<u64> {
-    use rayon::prelude::*;
-
-    // Mirrors Ghidra AIF's own `MINIMUM_FUNCTION_COUNT` gate: too few known
-    // functions means too little statistical signal to trust a fingerprint.
-    const AIF_MIN_KNOWN_FUNCTIONS: usize = 20;
-    const AIF_MIN_FINGERPRINT_COUNT: usize = 4;
-    // Mirrors Ghidra AIF's `numInstr <= 2` rejection (i.e. requires > 2).
-    const AIF_MIN_INSNS: usize = 3;
-
-    if known_functions.len() < AIF_MIN_KNOWN_FUNCTIONS {
-        return Vec::new();
-    }
-
-    let mut fingerprint_counts: std::collections::HashMap<(String, String), usize> =
-        std::collections::HashMap::new();
-    for &addr in known_functions {
-        if let Some(fp) = function_start_fingerprint(binary, frontend, addr) {
-            *fingerprint_counts.entry(fp).or_insert(0) += 1;
-        }
-    }
-    let common_fingerprints: std::collections::HashSet<(String, String)> = fingerprint_counts
-        .into_iter()
-        .filter(|&(_, count)| count >= AIF_MIN_FINGERPRINT_COUNT)
-        .map(|(fp, _)| fp)
-        .collect();
-    if common_fingerprints.is_empty() {
-        return Vec::new();
-    }
-
-    let mut section_spans: Vec<(u64, u64)> = binary
-        .sections
-        .iter()
-        .filter(|s| s.is_executable)
-        .filter_map(|s| {
-            binary
-                .view_bytes(s.virtual_address, s.virtual_size as usize)
-                .map(|_| (s.virtual_address, s.virtual_address + s.virtual_size as u64))
-        })
-        .collect();
-    section_spans.sort_unstable();
-
-    let mut known_sorted: Vec<u64> = known_functions.iter().copied().collect();
-    known_sorted.sort_unstable();
-    known_sorted.dedup();
-
-    // Collect every position right after a 2+-byte 0xCC/0x90 padding run
-    // within [gap_start, gap_end) -- same enumeration `scan_cc_padding_
-    // regions` uses, just collecting all hits in the gap instead of only
-    // the first, since a single gap can hide more than one padded-off
-    // function in a heavily stripped binary.
-    let collect_padding_boundaries = |gap_start: u64, gap_end: u64, out: &mut Vec<u64>| {
-        if gap_end <= gap_start + 2 {
-            return;
-        }
-        let len = (gap_end - gap_start) as usize;
-        let Some(bytes) = binary.view_bytes(gap_start, len) else {
-            return;
-        };
-        let mut i = 0usize;
-        while i < bytes.len() {
-            let pad_start = i;
-            while i < bytes.len() && (bytes[i] == 0xcc || bytes[i] == 0x90) {
-                i += 1;
-            }
-            let pad_len = i - pad_start;
-            if pad_len >= 2 && i < bytes.len() {
-                if bytes[i] != 0xcc && bytes[i] != 0x90 && bytes[i] != 0x00 {
-                    out.push(gap_start + i as u64);
-                }
-                while i < bytes.len() && bytes[i] != 0xcc && bytes[i] != 0x90 {
-                    i += 1;
-                }
-            } else if pad_len == 0 {
-                i += 1;
-            } else {
-                while i < bytes.len() && bytes[i] != 0xcc && bytes[i] != 0x90 {
-                    i += 1;
-                }
-            }
-        }
-    };
-
-    let mut results = Vec::new();
-    for &(sec_start, sec_end) in &section_spans {
-        let in_section: Vec<u64> = known_sorted
-            .iter()
-            .copied()
-            .filter(|&a| a >= sec_start && a < sec_end)
-            .collect();
-
-        let mut boundaries: Vec<(u64, u64)> = Vec::new();
-        if in_section.is_empty() {
-            boundaries.push((sec_start, sec_end));
-        } else {
-            if in_section[0] > sec_start {
-                boundaries.push((sec_start, in_section[0]));
-            }
-            for w in in_section.windows(2) {
-                boundaries.push((w[0], w[1]));
-            }
-            if *in_section.last().unwrap() < sec_end {
-                boundaries.push((*in_section.last().unwrap(), sec_end));
-            }
-        }
-
-        let mut gap_candidates = Vec::new();
-        for (gap_start, gap_end) in boundaries {
-            collect_padding_boundaries(gap_start, gap_end, &mut gap_candidates);
-        }
-
-        // Parallelized like the ghidra-patterns validation pass in the
-        // caller: `gap_candidates` on a heavily-optimized binary can run
-        // into the thousands (one per padding-bounded gap between already-
-        // known functions), and each one here can fall through to the same
-        // `validate_subroutine_candidate` (up to 4000 instructions decoded,
-        // `must_terminate: true`) as that pass. Left sequential with a
-        // single shared `cache`, this was the actual bottleneck behind
-        // Balanced-profile runs stalling for minutes on a real sqlite3.dll
-        // -- confirmed by `ps` showing one core pinned at 100% at exactly
-        // this point in stderr output (after `xml_hits`, before this
-        // function's own `dynamic_prologues` count is printed). Each
-        // rayon item gets its own fresh cache, same tradeoff already
-        // accepted for the ghidra-patterns pass, since `cache` can't be
-        // shared mutably across threads.
-        let validated: Vec<u64> = gap_candidates
-            .into_par_iter()
-            .filter(|&candidate| {
-                !known_functions.contains(&candidate) && !tracker.is_overlap(candidate)
-            })
-            .filter(|&candidate| is_strict_boundary(binary, Some(frontend), candidate))
-            .filter_map(|candidate| {
-                let fp = function_start_fingerprint(binary, frontend, candidate)?;
-                if !common_fingerprints.contains(&fp) {
-                    return None;
-                }
-                let mut local_cache = std::collections::HashMap::new();
-                let (valid, _) = validate_subroutine_candidate(
-                    binary,
-                    frontend,
-                    candidate,
-                    AIF_MIN_INSNS,
-                    4000,
-                    true,
-                    known_functions,
-                    &mut local_cache,
-                    global_references,
-                );
-                valid.then_some(candidate)
-            })
-            .collect();
-        results.extend(validated);
-    }
-
-    results
-}
-
-/// Fingerprint for [`scan_dynamic_prologues`]: the `(mnemonic, mnemonic)`
-/// pair of the first two instructions decoded from `address`, or `None` if
-/// fewer than two instructions decode there (e.g. too close to a section's
-/// end). See the doc comment on [`scan_dynamic_prologues`] for why this is
-/// mnemonic-based rather than byte-masked like Ghidra's own fingerprint.
-fn function_start_fingerprint(
-    binary: &LoadedBinary,
-    frontend: &RuntimeSleighFrontend,
-    address: u64,
-) -> Option<(String, String)> {
-    let bytes = binary.view_bytes(address, 32)?;
-    let context = candidate_decode_context(binary, frontend, address);
-    let decoded = frontend
-        .decode_window_no_pcode_in_context(bytes, address, 2, context)
-        .ok()?;
-    if decoded.len() < 2 {
-        return None;
-    }
-    Some((decoded[0].mnemonic.clone(), decoded[1].mnemonic.clone()))
 }
 
 fn scan_jmp_thunks(

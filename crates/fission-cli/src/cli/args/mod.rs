@@ -14,13 +14,6 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum FunctionDiscoveryProfileArg {
-    Conservative,
-    Balanced,
-    Aggressive,
-}
-
 /// Parse hexadecimal address string (supports 0x prefix)
 pub fn parse_hex_address(s: &str) -> Result<u64, String> {
     let s = s.trim_start_matches("0x").trim_start_matches("0X");
@@ -498,18 +491,6 @@ struct InfoArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    ///
-    /// Defaulted the same way `list` defaults it, so both commands count the
-    /// same functions. Without it `info` reported the loader's own total and
-    /// `list` reported the discovered one, under the same label.
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Run integrated detection (section/import/string rules plus Detect It Easy signatures)
     #[arg(long)]
     detections: bool,
@@ -547,14 +528,6 @@ struct ListArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Include validated executable thunks and other non-user function units
     #[arg(long)]
     include_nonuser_functions: bool,
@@ -571,20 +544,6 @@ struct ListArgs {
 struct DisasmArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
-
-    /// Function discovery profile (conservative|balanced|aggressive)
-    ///
-    /// Defaulted the same way `list` defaults it, so an address `list` prints
-    /// can be passed straight to this command. Without it a stripped binary
-    /// resolved to the loader's own function table -- one entry on a stripped
-    /// ARM image -- and every address `list` had just handed out was reported
-    /// as "no function found".
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Address to disassemble
     #[arg(long, value_parser = parse_hex_address, required = true)]
@@ -640,20 +599,6 @@ struct PcodeStagesArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    ///
-    /// Defaulted the same way `list` defaults it, so an address `list` prints
-    /// can be passed straight to this command. Without it a stripped binary
-    /// resolved to the loader's own function table -- one entry on a stripped
-    /// ARM image -- and every address `list` had just handed out was reported
-    /// as "no function found".
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Function entry address or an address inside the function
     #[arg(long, value_parser = parse_hex_address, required = true)]
     addr: u64,
@@ -683,20 +628,6 @@ struct NirStatsArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    ///
-    /// Defaulted the same way `list` defaults it, so an address `list` prints
-    /// can be passed straight to this command. Without it a stripped binary
-    /// resolved to the loader's own function table -- one entry on a stripped
-    /// ARM image -- and every address `list` had just handed out was reported
-    /// as "no function found".
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Function entry address or an address inside the function
     #[arg(long, value_parser = parse_hex_address, required = true)]
     addr: u64,
@@ -725,20 +656,6 @@ struct NirStatsArgs {
 struct PcodeTopologyArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
-
-    /// Function discovery profile (conservative|balanced|aggressive)
-    ///
-    /// Defaulted the same way `list` defaults it, so an address `list` prints
-    /// can be passed straight to this command. Without it a stripped binary
-    /// resolved to the loader's own function table -- one entry on a stripped
-    /// ARM image -- and every address `list` had just handed out was reported
-    /// as "no function found".
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Function entry address or an address inside the function
     #[arg(long, value_parser = parse_hex_address, required = true)]
@@ -880,10 +797,6 @@ struct StringsArgs {
     #[arg(long, value_name = "TEXT")]
     contains: Option<String>,
 
-    /// Function discovery for navigation (context defaults to conservative)
-    #[arg(long, value_enum)]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Keep only strings in these sections (repeatable, e.g. --section .rdata)
     #[arg(long = "section", value_name = "NAME")]
     sections: Vec<String>,
@@ -900,14 +813,6 @@ struct StringsArgs {
 struct XrefsArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
-
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Skip Sleigh xref extraction (loader seeds only)
     #[arg(long)]
@@ -942,14 +847,6 @@ struct CallgraphArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Only this discovered function entry and its immediate relationships
     #[arg(long, value_parser = parse_hex_address)]
     function: Option<u64>,
@@ -967,14 +864,6 @@ struct IdentifyArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
-    /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
-
     /// Identify only this function entry VA instead of every discovered function
     #[arg(long, value_parser = parse_hex_address)]
     function: Option<u64>,
@@ -985,8 +874,8 @@ struct IdentifyArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Fuzzy function similarity: find functions that are structurally similar but not byte-identical (different compiler/optimization level, renamed duplicate helper, patched-but-related versions).\n\nA Fission-native, BSim-inspired analog -- NOT a byte-compatible clone of Ghidra's BSim. Without `--index`, functions are compared within the input binary. Build or update a portable offline feature index with `--update-index`, then query it with `--index`. Index identity is based on binary content hash and function entry; names and paths are result provenance. Pass `--function-discovery-profile balanced` (or `aggressive`) first -- without it, only import/export-table functions may be known.",
-    after_help = "Examples:\n  fission_cli similar app.exe --function-discovery-profile balanced\n  fission_cli similar app.exe --function-discovery-profile balanced --function 0x140001000\n  fission_cli similar app.exe --update-index corpus.json --function-discovery-profile balanced\n  fission_cli similar query.exe --index corpus.json --function 0x140001000 --json"
+    long_about = "Fuzzy function similarity: find functions that are structurally similar but not byte-identical (different compiler/optimization level, renamed duplicate helper, patched-but-related versions).\n\nA Fission-native, BSim-inspired analog -- NOT a byte-compatible clone of Ghidra's BSim. Without `--index`, functions are compared within the input binary. Build or update a portable offline feature index with `--update-index`, then query it with `--index`. Index identity is based on binary content hash and function entry; names and paths are result provenance.",
+    after_help = "Examples:\n  fission_cli similar app.exe\n  fission_cli similar app.exe --function 0x140001000\n  fission_cli similar app.exe --update-index corpus.json\n  fission_cli similar query.exe --index corpus.json --function 0x140001000 --json"
 )]
 struct SimilarArgs {
     /// Path to the binary file to analyze
@@ -1008,16 +897,6 @@ struct SimilarArgs {
     /// Upsert all lifted functions from this binary into the index and exit.
     #[arg(long, conflicts_with_all = ["index", "function"])]
     update_index: Option<PathBuf>,
-
-    /// Function discovery profile (conservative|balanced|aggressive) -- without
-    /// this, only import/export-table functions are known, which defeats the
-    /// purpose of a similarity search
-    #[arg(
-        long = "function-discovery-profile",
-        value_enum,
-        default_value = "conservative"
-    )]
-    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
@@ -1224,7 +1103,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.info_detections = info.detections;
                     args.info_identity = info.identity;
                     args.info_xrefs = info.xrefs;
-                    args.function_discovery_profile = info.function_discovery_profile;
                     args.info = !args.sections && !args.imports && !args.exports;
                     args
                 }
@@ -1233,14 +1111,12 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.list = true;
                     args.json = list.common.json;
                     args.verbose = list.common.verbose;
-                    args.function_discovery_profile = list.function_discovery_profile;
                     args.include_nonuser_functions = list.include_nonuser_functions;
                     args
                 }
                 CliCommand::Disasm(disasm) => {
                     let mut args = OneShotArgs::with_binary(disasm.binary);
                     args.count = disasm.count;
-                    args.function_discovery_profile = disasm.function_discovery_profile;
                     args.json = disasm.common.json;
                     args.verbose = disasm.common.verbose;
                     if disasm.function {
@@ -1266,7 +1142,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.pcode_stages_max_bytes = stages.max_bytes;
                     args.pcode_stages_instruction_limit = stages.instruction_limit;
                     args.pcode_stages_strict_indirect_stop = stages.strict_indirect_stop;
-                    args.function_discovery_profile = stages.function_discovery_profile;
                     args.json = stages.common.json;
                     args.verbose = stages.common.verbose;
                     args
@@ -1277,7 +1152,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.nir_stats_max_bytes = stats.max_bytes;
                     args.nir_stats_instruction_limit = stats.instruction_limit;
                     args.nir_stats_strict_indirect_stop = stats.strict_indirect_stop;
-                    args.function_discovery_profile = stats.function_discovery_profile;
                     args.json = stats.common.json;
                     args.verbose = stats.common.verbose;
                     args
@@ -1288,7 +1162,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.pcode_topology_max_bytes = topology.max_bytes;
                     args.pcode_topology_instruction_limit = topology.instruction_limit;
                     args.pcode_topology_strict_indirect_stop = topology.strict_indirect_stop;
-                    args.function_discovery_profile = topology.function_discovery_profile;
                     args.json = topology.common.json;
                     args.verbose = topology.common.verbose;
                     args
@@ -1308,7 +1181,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.engine = decomp.engine;
                     args.compiler_id = decomp.compiler_id;
                     args.timeout_ms = decomp.timeout_ms;
-                    args.function_discovery_profile = decomp.function_discovery_profile;
                     args.json = decomp.json;
                     args.output = decomp.output;
                     args.verbose = decomp.verbose;
@@ -1363,12 +1235,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.strings_xrefs = strings.xrefs;
                     args.strings_context = strings.context;
                     args.strings_contains = strings.contains;
-                    args.function_discovery_profile =
-                        strings.function_discovery_profile.or_else(|| {
-                            strings
-                                .context
-                                .then_some(FunctionDiscoveryProfileArg::Conservative)
-                        });
                     args.strings_sections = strings.sections;
                     args.json = strings.common.json;
                     args.verbose = strings.common.verbose;
@@ -1381,7 +1247,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.xref_pcode = xrefs.pcode;
                     args.xref_function = xrefs.function;
                     args.xref_to = xrefs.to;
-                    args.function_discovery_profile = xrefs.function_discovery_profile;
                     args.json = xrefs.common.json;
                     args.verbose = xrefs.common.verbose;
                     args
@@ -1390,7 +1255,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     let mut args = OneShotArgs::with_binary(callgraph.binary);
                     args.callgraph_cmd = true;
                     args.callgraph_function = callgraph.function;
-                    args.function_discovery_profile = callgraph.function_discovery_profile;
                     args.json = callgraph.common.json;
                     args.verbose = callgraph.common.verbose;
                     args
@@ -1399,7 +1263,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     let mut args = OneShotArgs::with_binary(identify.binary);
                     args.identify_cmd = true;
                     args.identify_function = identify.function;
-                    args.function_discovery_profile = identify.function_discovery_profile;
                     args.json = identify.common.json;
                     args.verbose = identify.common.verbose;
                     args
@@ -1411,7 +1274,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.similar_top_k = similar.top;
                     args.similar_index = similar.index;
                     args.similar_update_index = similar.update_index;
-                    args.function_discovery_profile = similar.function_discovery_profile;
                     args.json = similar.common.json;
                     args.verbose = similar.common.verbose;
                     args
@@ -1439,7 +1301,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                         args.compiler_id = facts.compiler_id;
                         args.profile = facts.profile;
                         args.timeout_ms = facts.timeout_ms;
-                        args.function_discovery_profile = facts.function_discovery_profile;
                         args.verbose = facts.verbose;
                         args
                     }
@@ -1460,7 +1321,6 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                         args.compiler_id = preview.compiler_id;
                         args.profile = preview.profile;
                         args.timeout_ms = preview.timeout_ms;
-                        args.function_discovery_profile = preview.function_discovery_profile;
                         args.verbose = preview.verbose;
                         args
                     }
@@ -1515,6 +1375,21 @@ mod tests {
         }
     }
 
+    fn parse_legacy(args: &[&str]) -> ParsedOneShotArgs {
+        match parse_oneshot_args_from(args.iter().copied()) {
+            ParsedInvocation::OneShot(p) => p,
+            ParsedInvocation::Script(_) => panic!("legacy parser cannot emit script"),
+            ParsedInvocation::ResourcesStatus { .. } => {
+                panic!("legacy parser cannot emit resources status")
+            }
+            ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
+            ParsedInvocation::Db(_) => panic!("legacy parser cannot emit db"),
+            ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
+            ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
+            ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
+        }
+    }
+
     #[test]
     fn sandbox_trailing_args_reach_the_guest() {
         // Without this, `sandbox`'s guest process always saw `argc == 1`
@@ -1545,54 +1420,6 @@ mod tests {
             panic!("expected a sandbox invocation");
         };
         assert!(args.args.is_empty());
-    }
-
-    #[test]
-    fn every_command_that_resolves_a_function_runs_the_same_discovery_as_list() {
-        // `list` prints addresses that only SLEIGH discovery knows about. A
-        // command that resolves one of them against the loader's own table
-        // instead reports "no function found" -- on a stripped ARM image the
-        // loader has exactly one entry, so that was every address `list` had
-        // just printed. Whatever `list` counts, these must count too.
-        let baseline = parse_canonical(&["fission_cli", "list", "app.exe"])
-            .args
-            .function_discovery_profile;
-        assert!(baseline.is_some(), "list must default a profile");
-
-        for command in [
-            vec!["fission_cli", "disasm", "app.exe", "--addr", "0x1000"],
-            vec!["fission_cli", "pcode-stages", "app.exe", "--addr", "0x1000"],
-            vec!["fission_cli", "nir-stats", "app.exe", "--addr", "0x1000"],
-            vec![
-                "fission_cli",
-                "pcode-topology",
-                "app.exe",
-                "--addr",
-                "0x1000",
-            ],
-        ] {
-            let name = command[1];
-            assert_eq!(
-                parse_canonical(&command).args.function_discovery_profile,
-                baseline,
-                "{name} must discover the same functions `list` does"
-            );
-        }
-    }
-
-    fn parse_legacy(args: &[&str]) -> ParsedOneShotArgs {
-        match parse_oneshot_args_from(args.iter().copied()) {
-            ParsedInvocation::OneShot(p) => p,
-            ParsedInvocation::Script(_) => panic!("legacy parser cannot emit script"),
-            ParsedInvocation::ResourcesStatus { .. } => {
-                panic!("legacy parser cannot emit resources status")
-            }
-            ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
-            ParsedInvocation::Db(_) => panic!("legacy parser cannot emit db"),
-            ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
-            ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
-            ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
-        }
     }
 
     #[test]
@@ -1830,10 +1657,6 @@ mod tests {
         assert!(parsed.args.list);
         assert!(parsed.args.json);
         assert!(parsed.args.include_nonuser_functions);
-        assert_eq!(
-            parsed.args.function_discovery_profile,
-            Some(FunctionDiscoveryProfileArg::Conservative)
-        );
     }
 
     #[test]
@@ -1956,10 +1779,6 @@ mod tests {
         assert!(parsed.args.ghidra_compat);
         assert!(parsed.args.benchmark);
         assert!(parsed.args.json);
-        assert_eq!(
-            parsed.args.function_discovery_profile,
-            Some(FunctionDiscoveryProfileArg::Conservative)
-        );
     }
 
     #[test]
@@ -1972,8 +1791,11 @@ mod tests {
     }
 
     #[test]
-    fn canonical_decomp_can_override_discovery_profile() {
-        let parsed = parse_canonical(&[
+    fn function_discovery_has_no_profile_to_choose() {
+        // One discovery algorithm runs for every command; the profile flag that
+        // used to select among three is gone rather than ignored, so a script
+        // that passes it fails loudly instead of silently getting one profile.
+        let err = CliArgs::try_parse_from([
             "fission_cli",
             "decomp",
             "bin.exe",
@@ -1981,11 +1803,9 @@ mod tests {
             "0x1400",
             "--function-discovery-profile",
             "balanced",
-        ]);
-        assert_eq!(
-            parsed.args.function_discovery_profile,
-            Some(FunctionDiscoveryProfileArg::Balanced)
-        );
+        ])
+        .expect_err("the profile flag was removed");
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]
@@ -2196,7 +2016,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
     #[test]
-    fn string_context_parsing_is_explicit_and_defaults_discovery() {
+    fn string_context_parsing_is_explicit() {
         let parsed = parse_canonical(&[
             "fission_cli",
             "strings",
@@ -2208,25 +2028,8 @@ mod tests {
         ]);
         assert!(parsed.args.strings_context);
         assert_eq!(parsed.args.strings_contains.as_deref(), Some("hello"));
-        assert_eq!(
-            parsed.args.function_discovery_profile,
-            Some(FunctionDiscoveryProfileArg::Conservative)
-        );
         let plain = parse_canonical(&["fission_cli", "strings", "bin.exe"]);
         assert!(!plain.args.strings_context);
-        assert_eq!(plain.args.function_discovery_profile, None);
-        let custom = parse_canonical(&[
-            "fission_cli",
-            "strings",
-            "bin.exe",
-            "--context",
-            "--function-discovery-profile",
-            "aggressive",
-        ]);
-        assert_eq!(
-            custom.args.function_discovery_profile,
-            Some(FunctionDiscoveryProfileArg::Aggressive)
-        );
         let graph = parse_canonical(&[
             "fission_cli",
             "callgraph",

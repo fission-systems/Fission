@@ -237,6 +237,27 @@ impl LoadedBinary {
             .and_then(|&idx| self.functions.get(idx))
     }
 
+    /// The binary as the decompiler should read its function table: every
+    /// function except those discovery inferred from a scan alone.
+    ///
+    /// The decompiler treats a table entry as a function that exists: it ends
+    /// the decode window of the function before it and turns a branch to it
+    /// into a tail call. A start that only a scan names can land inside a
+    /// function, and then both cut that function short (one benchmark
+    /// function went from 10,948 characters to 47). The inventory keeps those
+    /// starts; this view leaves them out. Cloning is cheap -- the binary is
+    /// copy-on-write -- and the table is copied only when there is something
+    /// to remove.
+    #[must_use]
+    pub fn without_scan_inferred_functions(&self) -> LoadedBinary {
+        let mut view = self.clone();
+        if view.functions.iter().any(FunctionInfo::is_scan_inferred) {
+            view.functions.retain(|f| !f.is_scan_inferred());
+            view.rebuild_function_indices();
+        }
+        view
+    }
+
     /// Find function at exact address using O(1) HashMap lookup
     pub fn function_at(&self, address: u64) -> Option<&FunctionInfo> {
         if let Some(&idx) = self.function_addr_index.get(&address) {
