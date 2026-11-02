@@ -328,8 +328,12 @@ fn decode_rust_sleigh_pcode(
     // no context at all, so this path had no way to say so.
     let address_state = lifter.normalize_low_bit_code_address(entry_address);
     let decode_address = address_state.address;
-    let context_override =
-        decode_context_for_address(binary, &lifter, address_state.context_override);
+    let context_override = decode_context_for_address(
+        binary,
+        &lifter,
+        entry_address,
+        address_state.context_override,
+    );
     let bytes = binary
         .view_bytes(decode_address, max_bytes)
         .ok_or_else(|| {

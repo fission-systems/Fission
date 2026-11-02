@@ -356,7 +356,7 @@ fn lift_for_similarity(
     let address_state = frontend.normalize_low_bit_code_address(addr);
     let decode_addr = address_state.address;
     let context_override =
-        decode_context_for_address(binary, frontend, address_state.context_override);
+        decode_context_for_address(binary, frontend, addr, address_state.context_override);
     let max_bytes = binary
         .available_execution_bytes(decode_addr)
         .map(|available| MAX_BYTES.min(available).max(1))

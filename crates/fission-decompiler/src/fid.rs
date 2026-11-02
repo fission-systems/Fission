@@ -135,6 +135,7 @@ impl<'a> FidIdentifier<'a> {
         let context_override = fission_static::analysis::decode_context_for_address(
             self.binary,
             &self.lifter,
+            address,
             address_state.context_override,
         );
         let bytes = self.binary.view_bytes(decode_address, FID_MAX_BYTES)?;

@@ -309,7 +309,10 @@ impl Emulator {
         // and this language, and it does not change during a run.
         let decode_context =
             fission_static::analysis::function_discovery::decode_context_for_address(
-                &binary, &sleigh, None,
+                &binary,
+                &sleigh,
+                binary.entry_point,
+                None,
             );
 
         let sleigh_arc = Arc::new(sleigh);

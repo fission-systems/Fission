@@ -66,9 +66,10 @@ impl From<&InstructionRow> for fission_analysis_protocol::DisasmRow {
 pub fn decode_context_for_address(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
+    address: u64,
     from_address: Option<PackedContextOverride>,
 ) -> Option<PackedContextOverride> {
-    fission_static::analysis::decode_context_for_address(binary, frontend, from_address)
+    fission_static::analysis::decode_context_for_address(binary, frontend, address, from_address)
 }
 
 fn runtime_frontend_for_binary(binary: &LoadedBinary) -> Result<RuntimeSleighFrontend, String> {
@@ -138,8 +139,12 @@ fn lift_function(
     let frontend = runtime_frontend_for_binary(binary)?;
     let address_state = frontend.normalize_low_bit_code_address(func_start);
     let decode_addr = address_state.address;
-    let context_override =
-        decode_context_for_address(binary, &frontend, address_state.context_override);
+    let context_override = decode_context_for_address(
+        binary,
+        &frontend,
+        func_start,
+        address_state.context_override,
+    );
     let bytes = binary
         .view_bytes(decode_addr, max_bytes)
         .ok_or_else(|| format!("unable to read bytes at 0x{decode_addr:x}"))?;

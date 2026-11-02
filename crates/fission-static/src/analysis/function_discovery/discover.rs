@@ -67,7 +67,17 @@ fn image_decode_context(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
 ) -> Option<PackedContextOverride> {
-    super::thumb::decode_context_for_address(binary, frontend, None)
+    super::thumb::decode_context_for_address(binary, frontend, 0, None)
+}
+
+/// The context to decode a function candidate at `address` in: the image-wide
+/// one, or the alternate mode when the candidate is already known to run in it.
+fn candidate_decode_context(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    address: u64,
+) -> Option<PackedContextOverride> {
+    super::thumb::decode_context_for_address(binary, frontend, address, None)
 }
 
 pub fn discover_functions_with_runtime(
@@ -410,7 +420,7 @@ pub fn discover_functions_with_runtime(
         all_known.extend(load_config_hits);
 
         // Ghidra XML static patterns (x86-64win / x86win)
-        let mut xml_hits = scan_ghidra_patterns(
+        let pattern_starts = scan_ghidra_patterns(
             binary,
             &frontend,
             &executable_ranges,
@@ -419,7 +429,19 @@ pub fn discover_functions_with_runtime(
             &mut validation_cache,
             Some(&all_references),
         );
-        xml_hits.retain(|&addr| !tracker.is_overlap(addr));
+        // A start found by a pattern that sets the alternate mode (Thumb) is
+        // recorded as such before it is registered, so the sizing decode below
+        // and every later decode of this function use that mode.
+        let mut xml_hits: Vec<u64> = Vec::with_capacity(pattern_starts.len());
+        for start in pattern_starts {
+            if tracker.is_overlap(start.address) {
+                continue;
+            }
+            if start.low_bit_mode {
+                binary.mark_low_bit_mode_start(start.address);
+            }
+            xml_hits.push(start.address);
+        }
         if discovery_diag_enabled() {
             eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
         }
@@ -969,6 +991,12 @@ pub(crate) fn walk_function_boundaries(
     known_functions: &std::collections::HashSet<u64>,
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
+    // A function known to run in the alternate mode (Thumb) is walked in it;
+    // everything else keeps the decode it always had.
+    let mode_context = binary
+        .runs_in_low_bit_mode(addr)
+        .then(|| frontend.low_bit_code_mode_override())
+        .flatten();
     {
         let exec_ranges = super::ranges::executable_ranges(binary);
         let mut visited = std::collections::HashSet::new();
@@ -997,7 +1025,13 @@ pub(crate) fn walk_function_boundaries(
                 let Some(bytes) = binary.view_bytes(ip, 15) else {
                     break;
                 };
-                let Ok(decoded) = frontend.decode_window_no_pcode(bytes, ip, 1) else {
+                let decoded = match mode_context {
+                    Some(context) => {
+                        frontend.decode_window_no_pcode_in_context(bytes, ip, 1, Some(context))
+                    }
+                    None => frontend.decode_window_no_pcode(bytes, ip, 1),
+                };
+                let Ok(decoded) = decoded else {
                     break;
                 };
                 if decoded.is_empty() {
@@ -1140,7 +1174,26 @@ fn validate_contiguous_instructions(
     min_instructions: usize,
     executable_ranges: &[(u64, u64)],
 ) -> bool {
-    let decode_context = image_decode_context(binary, frontend);
+    let decode_context = candidate_decode_context(binary, frontend, addr);
+    validate_contiguous_instructions_in(
+        binary,
+        frontend,
+        addr,
+        min_instructions,
+        executable_ranges,
+        decode_context,
+    )
+}
+
+/// [`validate_contiguous_instructions`] in an explicit decode context.
+fn validate_contiguous_instructions_in(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    addr: u64,
+    min_instructions: usize,
+    executable_ranges: &[(u64, u64)],
+    decode_context: Option<PackedContextOverride>,
+) -> bool {
     let mut ip = addr;
     for _ in 0..min_instructions {
         if !super::ranges::is_in_executable_ranges(ip, executable_ranges) {
@@ -1176,7 +1229,7 @@ fn scan_ghidra_patterns(
     tracker: &InstructionBoundaryTracker,
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
-) -> Vec<u64> {
+) -> Vec<PatternFunctionStart> {
     let Some(arch_tag) = resolve_pattern_arch_tag(binary) else {
         return Vec::new();
     };
@@ -1202,7 +1255,7 @@ fn scan_ghidra_patterns(
     }
 
     // Phase 1: raw byte scan — collect (addr, (Option<usize>, bool)) where value is (min valid_code_min, requires_contiguous)
-    let mut raw_hits: std::collections::HashMap<u64, (Option<usize>, bool)> =
+    let mut raw_hits: std::collections::HashMap<(u64, bool), (Option<usize>, bool)> =
         std::collections::HashMap::new();
 
     // Build AhoCorasick automaton for the first contiguous block of fixed bytes
@@ -1264,7 +1317,7 @@ fn scan_ghidra_patterns(
         };
         let base = section.virtual_address;
 
-        let section_hits: Vec<(u64, Option<usize>, bool)> = ac
+        let section_hits: Vec<(u64, Option<usize>, bool, bool)> = ac
             .find_overlapping_iter(bytes)
             .map(|mat| {
                 let offset = mat.start();
@@ -1300,7 +1353,12 @@ fn scan_ghidra_patterns(
                             };
 
                             if boundary_ok {
-                                return Some((addr, pat.valid_code_min, pat.contiguous));
+                                return Some((
+                                    addr,
+                                    pat.valid_code_min,
+                                    pat.contiguous,
+                                    pattern_selects_low_bit_mode(pat),
+                                ));
                             }
                         }
                     }
@@ -1310,7 +1368,7 @@ fn scan_ghidra_patterns(
             .collect();
 
         // Sequential fallback for patterns that start with wildcard
-        let wildcard_hits: Vec<(u64, Option<usize>, bool)> = (0..bytes.len())
+        let wildcard_hits: Vec<(u64, Option<usize>, bool, bool)> = (0..bytes.len())
             .into_par_iter()
             .filter_map(|offset| {
                 if wildcard_start.is_empty() {
@@ -1341,7 +1399,12 @@ fn scan_ghidra_patterns(
                         };
 
                         if boundary_ok {
-                            return Some((addr, pat.valid_code_min, pat.contiguous));
+                            return Some((
+                                addr,
+                                pat.valid_code_min,
+                                pat.contiguous,
+                                pattern_selects_low_bit_mode(pat),
+                            ));
                         }
                     }
                 }
@@ -1349,8 +1412,10 @@ fn scan_ghidra_patterns(
             })
             .collect();
 
-        for (addr, min_val, contiguous) in section_hits.into_iter().chain(wildcard_hits) {
-            let entry = raw_hits.entry(addr).or_insert((None, contiguous));
+        for (addr, min_val, contiguous, low_bit) in section_hits.into_iter().chain(wildcard_hits) {
+            let entry = raw_hits
+                .entry((addr, low_bit))
+                .or_insert((None, contiguous));
             if let Some(min) = min_val {
                 entry.0 = Some(entry.0.map_or(min, |v| v.min(min)));
             }
@@ -1365,27 +1430,36 @@ fn scan_ghidra_patterns(
         );
     }
 
-    // Phase 2: SLEIGH validation — once per unique address
-    let mut hits: Vec<u64> = raw_hits
+    // Phase 2: SLEIGH validation -- once per unique (address, mode)
+    let alternate_mode = frontend.low_bit_code_mode_override();
+    let mut hits: Vec<PatternFunctionStart> = raw_hits
         .into_par_iter()
-        .filter_map(|(addr, (valid_code_min, contiguous))| {
+        .filter_map(|((addr, low_bit), (valid_code_min, contiguous))| {
             if tracker.is_offcut(addr) {
                 return None;
             }
+            // A pattern that sets the alternate mode (Thumb `TMode`) is a
+            // function start only in that mode, so validate it there.
+            let decode_context = if low_bit {
+                alternate_mode.clone()?.into()
+            } else {
+                candidate_decode_context(binary, frontend, addr)
+            };
             let min_inst = valid_code_min.unwrap_or(3);
             if contiguous
-                && !validate_contiguous_instructions(
+                && !validate_contiguous_instructions_in(
                     binary,
                     frontend,
                     addr,
                     min_inst,
                     executable_ranges,
+                    decode_context.clone(),
                 )
             {
                 return None;
             }
             let mut local_cache = std::collections::HashMap::new();
-            if validate_subroutine_candidate(
+            if validate_subroutine_candidate_in(
                 binary,
                 frontend,
                 addr,
@@ -1395,10 +1469,14 @@ fn scan_ghidra_patterns(
                 known_functions,
                 &mut local_cache,
                 global_references,
+                decode_context,
             )
             .0
             {
-                Some(addr)
+                Some(PatternFunctionStart {
+                    address: addr,
+                    low_bit_mode: low_bit,
+                })
             } else {
                 None
             }
@@ -1412,8 +1490,27 @@ fn scan_ghidra_patterns(
         );
     }
 
-    hits.sort_unstable();
+    // An address that validates in both modes is reported once, in the default
+    // one: nothing proved it is not ordinary code.
+    hits.sort_unstable_by_key(|hit| (hit.address, hit.low_bit_mode));
+    hits.dedup_by_key(|hit| hit.address);
     hits
+}
+
+/// A function start a Ghidra pattern found, with the mode it was found in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PatternFunctionStart {
+    address: u64,
+    /// The pattern set the architecture's alternate code mode (Thumb).
+    low_bit_mode: bool,
+}
+
+/// Whether `pattern` decodes its match in the alternate code mode: it sets a
+/// low-bit context field (ARM `TMode`, MIPS `ISA_MODE`) to something non-zero.
+fn pattern_selects_low_bit_mode(pattern: &fission_signatures::GhidraFuncPattern) -> bool {
+    pattern.context.iter().any(|setting| {
+        setting.value != 0 && fission_sleigh::runtime::is_low_bit_code_context_field(&setting.name)
+    })
 }
 
 /// Strict boundary gate for XML patterns that have no pre_bytes context.
@@ -2161,7 +2258,34 @@ pub(crate) fn validate_subroutine_candidate(
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
 ) -> (bool, ValidationResult) {
-    let decode_context = image_decode_context(binary, frontend);
+    let decode_context = candidate_decode_context(binary, frontend, addr);
+    validate_subroutine_candidate_in(
+        binary,
+        frontend,
+        addr,
+        min_instructions,
+        max_instructions,
+        must_terminate,
+        known_functions,
+        cache,
+        global_references,
+        decode_context,
+    )
+}
+
+/// [`validate_subroutine_candidate`] in an explicit decode context.
+pub(crate) fn validate_subroutine_candidate_in(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    addr: u64,
+    min_instructions: usize,
+    max_instructions: usize,
+    must_terminate: bool,
+    known_functions: &std::collections::HashSet<u64>,
+    cache: &mut std::collections::HashMap<u64, ValidationResult>,
+    global_references: Option<&std::collections::HashSet<u64>>,
+    decode_context: Option<PackedContextOverride>,
+) -> (bool, ValidationResult) {
     let res = if let Some(&cached) = cache.get(&addr) {
         cached
     } else {

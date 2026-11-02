@@ -208,7 +208,10 @@ fn translate(path: &Path, stats: &mut Stats) {
     // decoding it as ARM produces plausible nonsense rather than an error.
     let context: Option<PackedContextOverride> =
         fission_static::analysis::function_discovery::decode_context_for_address(
-            &binary, &sleigh, None,
+            &binary,
+            &sleigh,
+            binary.entry_point,
+            None,
         );
 
     stats.binaries += 1;

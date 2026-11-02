@@ -139,6 +139,15 @@ fission_cli list app.exe --json
 
 Use `list` to discover candidate addresses before running targeted `disasm` or `decomp`.
 
+In an image that holds code in two instruction sets (ARM and Thumb), a function that runs in the
+alternate mode carries `"isa_mode": "thumb"` in the JSON. The field is absent for every other
+function, so the output of every other binary is unchanged. Addresses never carry the mode bit;
+`disasm`, `raw-pcode`, `decomp` and the other decoding commands read the mode from the function
+itself. The loader takes it from ELF symbols (bit 0 of a function symbol, or a preceding `$t`
+mapping symbol); with `--function-discovery-profile balanced`, a stripped image also gets it from
+the Ghidra function-start patterns that set the Thumb context. A Thumb function that has neither
+a symbol nor a matching pattern is still decoded as ARM.
+
 ### Search for related functions across binaries
 
 Build or refresh an offline index, then query it from another binary:

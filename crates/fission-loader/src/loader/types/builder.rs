@@ -34,6 +34,7 @@ impl LoadedBinaryBuilder {
             symbol_version_names: std::collections::HashMap::new(),
             inferred_types: Vec::new(),
             cfg_label_leaders: Vec::new(),
+            low_bit_mode_starts: Vec::new(),
         }
     }
 
@@ -186,6 +187,13 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    /// Entries of functions that run in the low-bit alternate code mode (Thumb).
+    pub fn low_bit_mode_starts(mut self, starts: impl IntoIterator<Item = u64>) -> Self {
+        self.low_bit_mode_starts
+            .extend(starts.into_iter().map(|a| a & !1));
+        self
+    }
+
     pub fn cfg_label_leaders(mut self, leaders: impl IntoIterator<Item = u64>) -> Self {
         self.cfg_label_leaders.extend(leaders);
         self
@@ -310,6 +318,9 @@ impl LoadedBinaryBuilder {
         let mut cfg_label_leaders = self.cfg_label_leaders;
         cfg_label_leaders.sort_unstable();
         cfg_label_leaders.dedup();
+        let mut low_bit_mode_starts = self.low_bit_mode_starts;
+        low_bit_mode_starts.sort_unstable();
+        low_bit_mode_starts.dedup();
 
         let inner = LoadedBinaryInner {
             path: self.path,
@@ -345,6 +356,7 @@ impl LoadedBinaryBuilder {
             symbol_versions: self.symbol_versions,
             symbol_version_names: self.symbol_version_names,
             cfg_label_leaders,
+            low_bit_mode_starts,
         };
 
         Ok(LoadedBinary::from_inner(inner))

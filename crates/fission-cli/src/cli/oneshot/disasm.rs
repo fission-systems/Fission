@@ -132,6 +132,7 @@ pub(super) fn disassemble(
     let context_override = fission_decompiler::disasm::decode_context_for_address(
         binary,
         &frontend,
+        addr,
         address_state.context_override,
     );
     let instructions = frontend
