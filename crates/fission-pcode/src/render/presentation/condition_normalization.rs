@@ -318,7 +318,13 @@ fn rewrite_presentation_condition_form(expr: &mut HirExpr) -> bool {
                 *expr = HirExpr::Const(const_bool, NirType::Bool);
                 return true;
             }
+            // The unmatched arm must be a *different constant*. `else_matches`
+            // is false for a variable too, and `Select(c, K, x) == K` is
+            // `c || x == K`, not `c`: it is true when `c` is false and `x == K`.
+            let arms_are_constants = matches!(then_expr.as_ref(), HirExpr::Const(..))
+                && matches!(else_expr.as_ref(), HirExpr::Const(..));
             let negate = match (*cmp_op, then_matches, else_matches) {
+                _ if !arms_are_constants => None,
                 (HirBinaryOp::Eq, true, false) => Some(false),
                 (HirBinaryOp::Eq, false, true) => Some(true),
                 (HirBinaryOp::Ne, true, false) => Some(true),
