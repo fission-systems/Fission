@@ -3413,6 +3413,56 @@ mod tests {
         assert_eq!(expr, original);
     }
 
+    fn select_cmp(op: HirBinaryOp, then_expr: HirExpr, else_expr: HirExpr, k: i64) -> HirExpr {
+        HirExpr::Binary {
+            op,
+            lhs: Box::new(HirExpr::Select {
+                cond: Box::new(HirExpr::Var("c".into())),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+                ty: int_ty(32, true),
+            }),
+            rhs: Box::new(HirExpr::Const(k, int_ty(32, true))),
+            ty: NirType::Bool,
+        }
+    }
+
+    #[test]
+    fn condition_rewrite_keeps_select_compare_when_other_arm_is_not_a_constant() {
+        // `(c ? 5 : x) == 5` is true when c is false and x == 5, so it is not `c`.
+        let konst = || HirExpr::Const(5, int_ty(32, true));
+        let var = || HirExpr::Var("x".into());
+        for (op, then_expr, else_expr) in [
+            (HirBinaryOp::Eq, konst(), var()),
+            (HirBinaryOp::Eq, var(), konst()),
+            (HirBinaryOp::Ne, konst(), var()),
+            (HirBinaryOp::Ne, var(), konst()),
+        ] {
+            let mut expr = select_cmp(op, then_expr, else_expr, 5);
+            let original = expr.clone();
+            assert!(!canonicalize_conditions_in_expr(&mut expr));
+            assert_eq!(expr, original);
+        }
+    }
+
+    #[test]
+    fn condition_rewrite_folds_select_compare_against_distinct_constants() {
+        let c = |v: i64| HirExpr::Const(v, int_ty(32, true));
+        let mut eq = select_cmp(HirBinaryOp::Eq, c(5), c(7), 5);
+        assert!(canonicalize_conditions_in_expr(&mut eq));
+        assert_eq!(eq, HirExpr::Var("c".into()));
+
+        let mut ne = select_cmp(HirBinaryOp::Ne, c(5), c(7), 5);
+        assert!(canonicalize_conditions_in_expr(&mut ne));
+        assert!(matches!(
+            ne,
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn hir_presentation_folds_seed_if_overwrite_assign() {
         let mut func = HirFunction {
