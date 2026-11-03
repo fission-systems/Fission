@@ -761,6 +761,21 @@ pub fn run_stage_cleanup(func: &mut PreHirFunction, diag: bool, perf: bool) {
     run_pass_logged(func, "collapse_cdq_signed_mod", perf, |f| {
         crate::arith::collapse_cdq_signed_mod_in_stmts(&mut f.body)
     });
+    // Constant division split across a coalesced straight-line chain:
+    // `t = x*M; t >>= n; t -= x >> 31` -> `t = x / d`.
+    run_pass_logged(func, "recognize_magic_division", perf, |f| {
+        let changed = crate::arith::magic_div::recognize_magic_division_in_function(f);
+        if changed {
+            // The multiply and shift statements it replaced are now written
+            // over by the quotient before anything reads them.
+            for _ in 0..16 {
+                if !eliminate_overwritten_assigns(f) {
+                    break;
+                }
+            }
+        }
+        changed
+    });
     // Drop temps left only by the pre-collapse wide dividend assign.
     run_pass_logged(func, "eliminate_dead_temp_after_cdq", perf, |f| {
         eliminate_dead_temp_assigns(&mut f.body, &crate::HashSet::default())
