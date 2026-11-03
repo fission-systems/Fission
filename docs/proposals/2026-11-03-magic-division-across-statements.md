@@ -136,7 +136,7 @@ machine, same 791 ELFs, output compared before scores.
 
 **What moved (mechanical, text):**
 
-- Functions with a residual magic multiply: **309 -> 148** (-52%). 142..178 binaries
+- Functions with a residual magic multiply: **309 -> 148** (-52%). 178 of 791 binaries
   differ; the other binaries are byte-identical to base. Per-constant remainder is
   mostly shapes this pass does not cover (see below).
 - All four anchors recovered (`(len + 4) / 5 << 3`, `iso_week_days` `/ 7`,
