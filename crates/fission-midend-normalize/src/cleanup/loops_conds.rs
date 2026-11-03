@@ -454,7 +454,88 @@ fn loop_body_exit_alias_source(body: &[PreHirStmt], alias: &str) -> Option<Strin
     {
         return None;
     }
+    // `return source` after the loop only equals `return alias` if the last
+    // iteration always ran the copy. A `break`/`continue`/`goto` before it can
+    // leave (or skip to the condition of) an iteration whose `source` already
+    // changed, with `alias` still holding the previous iteration's value; a
+    // label anywhere in the body is a way into the code after the copy that
+    // skips it.
+    if body[..idx].iter().any(stmt_skips_straight_line) || body.iter().any(stmt_defines_label) {
+        return None;
+    }
     Some(source)
+}
+
+/// Whether `stmt` holds, at any depth, a `break`, `continue` or `goto`.
+/// `return` is not one: it leaves the function, so nothing after the loop runs.
+fn stmt_skips_straight_line(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => body.iter().any(stmt_skips_straight_line),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(stmt_skips_straight_line)
+                || else_body.iter().any(stmt_skips_straight_line)
+        }
+        PreHirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_deref().is_some_and(stmt_skips_straight_line)
+                || update.as_deref().is_some_and(stmt_skips_straight_line)
+                || body.iter().any(stmt_skips_straight_line)
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| case.body.iter().any(stmt_skips_straight_line))
+                || default.iter().any(stmt_skips_straight_line)
+        }
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Return(_) => false,
+    }
+}
+
+/// Whether `stmt` defines a label at any depth.
+fn stmt_defines_label(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => body.iter().any(stmt_defines_label),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => then_body.iter().any(stmt_defines_label) || else_body.iter().any(stmt_defines_label),
+        PreHirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_deref().is_some_and(stmt_defines_label)
+                || update.as_deref().is_some_and(stmt_defines_label)
+                || body.iter().any(stmt_defines_label)
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| case.body.iter().any(stmt_defines_label))
+                || default.iter().any(stmt_defines_label)
+        }
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
+    }
 }
 
 fn remove_loop_exit_alias_assignment(stmt: &mut PreHirStmt, alias: &str, source: &str) -> bool {

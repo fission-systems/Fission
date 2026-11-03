@@ -177,15 +177,11 @@ pub(super) fn expand_goto_shared_returns(stmts: &mut Vec<HirStmt>) -> bool {
             let ret = ret.clone();
             if count_goto_refs(stmts, &label) > 0 {
                 changed |= replace_goto_with_return(stmts, &label, &ret);
-                // Drop the label if nothing targets it anymore; keep the return
-                // for fall-through predecessors.
-                if count_goto_refs(stmts, &label) == 0 {
-                    if matches!(&stmts[i], HirStmt::Label(l) if l == &label) {
-                        stmts.remove(i);
-                        changed = true;
-                        continue;
-                    }
-                }
+                // The label is deliberately left in place. `stmts` may be a
+                // nested block, and a `goto` to a label inside it can sit
+                // outside it; counting only this slice and deleting the label
+                // on zero would leave that goto dangling. `remove_unreferenced_labels`
+                // sees the whole function and drops it if nothing is left.
             }
         }
         i += 1;
